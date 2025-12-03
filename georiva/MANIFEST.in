@@ -1,0 +1,15 @@
+prune .idea/
+
+global-exclude .env
+global-exclude *.py[cod]
+exclude .gitignore
+
+include README.md
+recursive-include src/ *.py
+recursive-include src/**/templates *
+recursive-include src/**/static *
+recursive-include src/**/locale *.po *.mo
+include requirements/*.txt
+
+include pyproject.toml
+include MANIFEST.in

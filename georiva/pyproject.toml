@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "georiva"
+authors = [{ name = "Erick Otenyo", email = "otenyo.erick@gmail.com" }]
+description = """A modular geospatial backend for ingesting, processing, visualization, and analysis"""
+
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dynamic = ["version", "dependencies"]
+classifiers = []
+
+[project.scripts]
+georiva = "georiva.manage:main"
+
+
+[tool.setuptools]
+include-package-data = true
+# https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
+platforms = ["Linux"]
+
+[tool.setuptools.packages.find]
+namespaces = true
+where = ["src/"]
+include = ["georiva", "georiva.*"]
+
+[tool.setuptools.dynamic]
+# version always from the code
+version = { attr = "georiva.version.__version__" }
+dependencies = { file = ["requirements.txt"] }
