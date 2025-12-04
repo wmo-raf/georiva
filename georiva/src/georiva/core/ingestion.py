@@ -1,20 +1,12 @@
 """
 GeoRiva Ingestion Service
 
-Pipeline that handles the complete flow from incoming file to processed output
-using chunked processing to minimize memory footprint.
-
-1. File arrives in incoming/{collection_id}/
-2. Match to Collection, load Format Plugin
-3. For each Dataset in Collection:
-   - Extract variable(s) from source file
-   - Validate data
-   - Clip to bounds (if specified)
-   - Compute statistics
+Processes incoming geospatial files through a pipeline:
+   - Extract data from source files (GRIB, NetCDF, GeoTIFF)
    - Apply unit conversions
    - Encode to PNG (0-255)
    - Save PNG + metadata to storage
-   - Create RasterAsset record
+   - Create Item and Asset records
 """
 
 import gc
@@ -30,6 +22,7 @@ import numpy as np
 from PIL import Image
 
 from georiva.core.models import Collection, Dataset
+from georiva.core.models.item import Item, Asset
 from georiva.formats.registry import format_registry, ExtractedVariable
 
 logger = logging.getLogger(__name__)
@@ -54,7 +47,7 @@ class IngestionResult:
     success: bool
     timestamp: datetime
     datasets_processed: list = field(default_factory=list)
-    assets_created: list = field(default_factory=list)
+    items_created: list = field(default_factory=list)
     errors: list = field(default_factory=list)
 
 
@@ -76,6 +69,7 @@ class ProcessingContext:
     bounds: tuple = None
     width: int = 0
     height: int = 0
+    crs: str = "EPSG:4326"
     
     # Statistics (Global stats passed down to chunks)
     stats_min: float = None
@@ -163,18 +157,21 @@ class IngestionService:
                     result.errors.append(f"No timestamps found in file {file_path}")
                     return result
                 
+                self.logger.info(f"Found {len(timestamps)} timestamps in file {file_path}")
+                
                 # Process each active dataset
                 for dataset in collection.datasets.filter(is_active=True):
                     try:
-                        assets = self._process_dataset(
+                        items = self._process_dataset(
                             dataset=dataset,
                             format_plugin=format_plugin,
                             local_path=local_path,
                             timestamps=timestamps,
+                            source_file=file_path,
                         )
                         
                         result.datasets_processed.append(dataset.id)
-                        result.assets_created.extend([str(a.id) for a in assets])
+                        result.items_created.extend([str(item.pk) for item in items])
                     
                     except Exception as e:
                         error_msg = f"Failed to process dataset '{dataset.id}': {e}"
@@ -203,34 +200,33 @@ class IngestionService:
             format_plugin,
             local_path: Path,
             timestamps: list[datetime],
-    ) -> list:
+            source_file: str,
+    ) -> list[Item]:
         """
         Process a single dataset using chunked reading.
-        """
-        from georiva.core.models import RasterFileAsset
         
-        assets = []
+        Returns list of created Item objects.
+        """
+        items = []
         
         for timestamp in timestamps:
-            self.logger.info(f"Processing {dataset.id} for {timestamp} (Chunked)")
+            self.logger.info(f"Processing {dataset.slug} for {timestamp} (Chunked)")
             
             # 1. Light extraction (Metadata only)
-            # This uses the new get_metadata method we added to plugins
             meta_info = format_plugin.get_metadata(local_path, dataset)
             full_width, full_height = meta_info['width'], meta_info['height']
+            crs = meta_info.get('crs', 'EPSG:4326')
+            bounds = meta_info['bounds']
             
             # 2. Compute Global Stats (Lazy Load)
-            # We must compute global min/max first to ensure consistent coloring across chunks
             global_stats = self._compute_global_stats(
                 format_plugin, local_path, dataset, timestamp
             )
             
             # 3. Pre-allocate the final output image
-            # RGBA (4 bytes) is much smaller than float64 inputs
             final_encoded = np.zeros((full_height, full_width, 4), dtype=np.uint8)
             
             # 4. Process in Chunks
-            # Iterate through the image in manageable blocks
             for x, y, w, h in get_windows(full_width, full_height, block_size=2048):
                 window = (x, y, w, h)
                 
@@ -247,11 +243,12 @@ class IngestionService:
                     dataset=dataset,
                     extracted=chunk_extracted,
                     timestamp=timestamp,
-                    data=chunk_extracted.data,  # Takes ownership (no copy)
+                    data=chunk_extracted.data,
                     companion_data=chunk_extracted.secondary_data,
                     bounds=chunk_extracted.bounds,
                     width=w,
                     height=h,
+                    crs=crs,
                     # Pass down the global stats
                     stats_min=global_stats['min'],
                     stats_max=global_stats['max'],
@@ -268,18 +265,18 @@ class IngestionService:
                 del ctx
                 del chunk_extracted
             
-            # Force GC periodically (good for tight memory)
+            # Force GC periodically
             gc.collect()
             
-            # 5. Save the assembled image and create Asset
-            # Create a context just for saving metadata
+            # 5. Save the assembled image and create Item with Assets
             output_ctx = ProcessingContext(
                 dataset=dataset,
                 timestamp=timestamp,
                 encoded=final_encoded,
                 width=full_width,
                 height=full_height,
-                bounds=meta_info['bounds'],
+                bounds=bounds,
+                crs=crs,
                 stats_min=global_stats['min'],
                 stats_max=global_stats['max'],
                 stats_mean=global_stats['mean'],
@@ -287,44 +284,156 @@ class IngestionService:
                 stats_speed_max=global_stats.get('speed_max')
             )
             
+            # Save files to storage
             output_ctx = self._save(output_ctx)
             
-            # Create RasterAsset record
-            asset = RasterFileAsset.objects.create(
+            # Create Item record
+            item = self._create_item(
                 dataset=dataset,
-                time=timestamp,
-                source_file=str(local_path),
-                processed_file=output_ctx.output_png,
-                bounds=list(output_ctx.bounds),
-                width=output_ctx.width,
-                height=output_ctx.height,
-                resolution_x=(output_ctx.bounds[2] - output_ctx.bounds[0]) / output_ctx.width,
-                resolution_y=(output_ctx.bounds[3] - output_ctx.bounds[1]) / output_ctx.height,
-                crs=meta_info['crs'],
-                status=RasterFileAsset.Status.READY,
-                stats_min=output_ctx.stats_min,
-                stats_max=output_ctx.stats_max,
-                stats_mean=output_ctx.stats_mean,
-                stats_std=output_ctx.stats_std,
-                metadata={
-                    'variable_name': dataset.primary_variable,
-                    'units': dataset.units,
-                    'is_vector': dataset.is_vector,
-                    'metadata_file': output_ctx.output_metadata,
-                },
+                timestamp=timestamp,
+                source_file=source_file,
+                ctx=output_ctx,
             )
             
-            assets.append(asset)
+            items.append(item)
             
             # Cleanup final buffer
             del final_encoded
             gc.collect()
             
-            self.logger.info(f"Created asset {asset.id} for {dataset.id}")
+            self.logger.info(f"Created Item {item.pk} for {dataset.slug} @ {timestamp}")
         
-        return assets
+        return items
     
-    def _compute_global_stats(self, plugin, path, dataset, timestamp):
+    def _create_item(
+            self,
+            dataset: Dataset,
+            timestamp: datetime,
+            source_file: str,
+            ctx: ProcessingContext,
+    ) -> Item:
+        """
+        Create an Item with its associated Assets.
+        """
+        # Calculate resolution
+        bounds = ctx.bounds
+        resolution_x = (bounds[2] - bounds[0]) / ctx.width if ctx.width > 0 else 0
+        resolution_y = (bounds[3] - bounds[1]) / ctx.height if ctx.height > 0 else 0
+        
+        # Create Item (TimescaleDB hypertable)
+        # 'time' field comes from TimescaleModel
+        item = Item(
+            time=timestamp,
+            dataset=dataset,
+            source_file=source_file,
+            bounds=list(bounds),
+            width=ctx.width,
+            height=ctx.height,
+            resolution_x=abs(resolution_x),
+            resolution_y=abs(resolution_y),
+            # crs=ctx.crs,
+            stats_min=ctx.stats_min,
+            stats_max=ctx.stats_max,
+            stats_mean=ctx.stats_mean,
+            stats_std=ctx.stats_std,
+            metadata={
+                'variable_name': dataset.primary_variable,
+                'units': dataset.units,
+                'is_vector': dataset.is_vector,
+            },
+        )
+        
+        # Save Item first to get PK
+        item.save()
+        
+        # Compute file size
+        png_size = self._get_file_size(ctx.output_png)
+        
+        # Create Visual Asset (PNG)
+        visual_asset = Asset(
+            item=item,
+            key='visual',
+            title=f"{dataset.name} - {timestamp.strftime('%Y-%m-%d %H:%M')}",
+            href=ctx.output_png,
+            media_type='image/png',
+            file_size=png_size,
+            roles=[Asset.Role.VISUAL],
+            format=Asset.Format.PNG,
+            data_type=Asset.DataType.UINT8,
+            width=ctx.width,
+            height=ctx.height,
+            bands=4,  # RGBA
+            proj_epsg=self._parse_epsg(ctx.crs),
+            proj_bbox=list(bounds),
+            extra_fields={
+                'imageUnscale': [
+                    float(dataset.value_min) if dataset.value_min is not None else ctx.stats_min,
+                    float(dataset.value_max) if dataset.value_max is not None else ctx.stats_max,
+                ],
+                'scale': dataset.scale_type or 'linear',
+                'palette': dataset.palette.name if dataset.palette else None,
+            },
+        )
+        visual_asset.save()
+        
+        # Create Metadata Asset (JSON)
+        if ctx.output_metadata:
+            json_size = self._get_file_size(ctx.output_metadata)
+            metadata_asset = Asset(
+                item=item,
+                key='metadata',
+                title=f"Metadata for {dataset.name}",
+                href=ctx.output_metadata,
+                media_type='application/json',
+                file_size=json_size,
+                roles=[Asset.Role.METADATA],
+                format=Asset.Format.JSON,
+            )
+            metadata_asset.save()
+        
+        # Update dataset time range
+        self._update_dataset_time_range(dataset, timestamp)
+        
+        return item
+    
+    def _get_file_size(self, storage_path: str) -> Optional[int]:
+        """Get file size from storage, return None if not available."""
+        try:
+            return self.storage.size(storage_path)
+        except Exception:
+            return None
+    
+    def _update_dataset_time_range(self, dataset: Dataset, timestamp: datetime):
+        """Update the dataset's time_start and time_end fields."""
+        update_fields = []
+        
+        if dataset.time_start is None or timestamp < dataset.time_start:
+            dataset.time_start = timestamp
+            update_fields.append('time_start')
+        
+        if dataset.time_end is None or timestamp > dataset.time_end:
+            dataset.time_end = timestamp
+            update_fields.append('time_end')
+        
+        # Increment item count
+        dataset.item_count = Item.objects.filter(dataset=dataset).count()
+        update_fields.append('item_count')
+        
+        if update_fields:
+            dataset.save(update_fields=update_fields)
+    
+    def _parse_epsg(self, crs: str) -> Optional[int]:
+        """Extract EPSG code from CRS string."""
+        if not crs:
+            return None
+        if crs.upper().startswith('EPSG:'):
+            try:
+                return int(crs.split(':')[1])
+            except (IndexError, ValueError):
+                return None
+        return None
+    
+    def _compute_global_stats(self, plugin, path, dataset, timestamp) -> dict:
         """
         Compute stats efficiently without loading full data into RAM.
         Uses the lazy loading capabilities of the format plugins.
@@ -332,9 +441,7 @@ class IngestionService:
         # Get lazy object (dask-backed xarray)
         lazy_var = plugin.get_lazy_dataset(path, dataset, timestamp)
         
-        # Apply unit conversions on the lazy object if possible?
-        # Note: Xarray handles lazy math.
-        # Ideally, we mirror the _apply_unit_conversions logic here lazily.
+        # Apply unit conversions on the lazy object
         if dataset.unit_conversion == 'K_to_C':
             lazy_var = lazy_var - 273.15
         elif dataset.unit_conversion == 'Pa_to_hPa':
@@ -343,7 +450,10 @@ class IngestionService:
             lazy_var = lazy_var * 1000.0
         elif dataset.unit_conversion == 'ms_to_kmh':
             lazy_var = lazy_var * 3.6
+        elif dataset.unit_conversion == 'kgm2s_to_mm':
+            lazy_var = lazy_var * 3600.0
         
+        # Compute stats - ensure Python floats
         stats = {
             'min': float(lazy_var.min().compute()),
             'max': float(lazy_var.max().compute()),
@@ -356,20 +466,24 @@ class IngestionService:
     def _process_chunk_pipeline(self, ctx: ProcessingContext) -> ProcessingContext:
         """Simplified pipeline for a single chunk."""
         
-        # 1. Validation (Lightweight)
+        # 1. Validation
         if ctx.data is None:
             raise ValueError("Chunk has no data")
         
-        # 2. Masking
+        # 2. Ensure data is float32 for processing
+        ctx.data = np.asarray(ctx.data, dtype=np.float32)
+        if ctx.companion_data is not None:
+            ctx.companion_data = np.asarray(ctx.companion_data, dtype=np.float32)
+        
+        # 3. Masking
         ctx.mask = np.isnan(ctx.data)
         if ctx.companion_data is not None:
             ctx.mask |= np.isnan(ctx.companion_data)
         
-        # 3. Unit Conversion (In-Place)
-        # We do this BEFORE encoding so values match the stats
+        # 4. Unit Conversion (In-Place)
         ctx = self._apply_unit_conversions(ctx)
         
-        # 4. Encode (using global stats stored in ctx)
+        # 5. Encode (using global stats stored in ctx)
         ctx = self._encode(ctx)
         
         return ctx
@@ -388,6 +502,8 @@ class IngestionService:
             ctx.data *= 1000.0
         elif unit_conversion == 'ms_to_kmh':
             ctx.data *= 3.6
+        elif unit_conversion == 'kgm2s_to_mm':
+            ctx.data *= 3600.0
         
         return ctx
     
@@ -401,18 +517,41 @@ class IngestionService:
     def _encode_scalar(self, ctx: ProcessingContext) -> ProcessingContext:
         """Encode scalar data to RGBA PNG using in-place operations."""
         dataset = ctx.dataset
-        # Use Global Stats if available (from ctx), else dataset defaults
+        
+        # Get value bounds - prioritize dataset config, fall back to computed stats
         vmin = dataset.value_min
         vmax = dataset.value_max
-        scale_type = dataset.scale_type
         
-        # Work on data reference directly
+        # Fall back to computed stats if dataset bounds not set
+        if vmin is None:
+            vmin = ctx.stats_min
+        if vmax is None:
+            vmax = ctx.stats_max
+        
+        # Final fallback to data range if still None
+        if vmin is None:
+            vmin = np.nanmin(ctx.data)
+        if vmax is None:
+            vmax = np.nanmax(ctx.data)
+        
+        # CRITICAL: Cast to Python float to avoid dtype('O') issues
+        vmin = float(vmin)
+        vmax = float(vmax)
+        
+        scale_type = dataset.scale_type or 'linear'
+        
+        # Work on data - ensure float32
         data = ctx.data
+        if data.dtype != np.float32:
+            data = data.astype(np.float32)
+        
+        # Handle edge case where vmin == vmax
+        if vmax <= vmin:
+            vmax = vmin + 1.0
         
         # Apply scaling
         if scale_type == 'log':
-            shift = 1 - min(0, vmin)
-            # In-place modifications
+            shift = 1.0 - min(0.0, vmin)
             np.clip(data, vmin, vmax, out=data)
             data += shift
             np.log10(data, out=data)
@@ -421,52 +560,76 @@ class IngestionService:
             log_max = np.log10(vmax + shift)
             
             data -= log_min
-            data /= (log_max - log_min)
+            denom = log_max - log_min
+            if denom > 0:
+                data /= denom
         
         elif scale_type == 'sqrt':
-            np.clip(data, max(0, vmin), vmax, out=data)
+            np.clip(data, max(0.0, vmin), vmax, out=data)
             np.sqrt(data, out=data)
             
-            sqrt_min = np.sqrt(max(0, vmin))
+            sqrt_min = np.sqrt(max(0.0, vmin))
             sqrt_max = np.sqrt(vmax)
             
             data -= sqrt_min
-            data /= (sqrt_max - sqrt_min)
+            denom = sqrt_max - sqrt_min
+            if denom > 0:
+                data /= denom
         
         elif scale_type == 'diverging':
             abs_max = max(abs(vmin), abs(vmax))
-            data += abs_max
-            data /= (2 * abs_max)
+            if abs_max > 0:
+                data += abs_max
+                data /= (2.0 * abs_max)
+            else:
+                data[:] = 0.5
         
         else:  # linear
             data -= vmin
-            data /= (vmax - vmin)
+            denom = vmax - vmin
+            if denom > 0:
+                data /= denom
         
         # Convert to 0-255
-        data *= 255
+        data *= 255.0
         np.clip(data, 0, 255, out=data)
         
         # Create RGBA image
         ctx.encoded = np.zeros((ctx.height, ctx.width, 4), dtype=np.uint8)
         ctx.encoded[:, :, 0] = data.astype(np.uint8)
         
+        # Alpha channel: 255 for valid, 0 for masked
+        ctx.encoded[:, :, 3] = np.where(ctx.mask, 0, 255).astype(np.uint8)
+        
         # Clean up heavy float array
         del ctx.data
         ctx.data = None
-        
-        ctx.encoded[:, :, 3] = np.where(ctx.mask, 0, 255).astype(np.uint8)
         
         return ctx
     
     def _encode_vector(self, ctx: ProcessingContext) -> ProcessingContext:
         """
         Encode vector (U/V) data to RGBA PNG.
-        Uses float32 to save memory and deletes inputs early.
+        R = magnitude (normalized)
+        G = direction (normalized 0-360 -> 0-255)
+        A = alpha mask
         """
         dataset = ctx.dataset
-        max_speed = dataset.value_max
         
-        # Cast to float32 to save 50% RAM compared to float64
+        # Get max speed for normalization
+        max_speed = dataset.value_max
+        if max_speed is None:
+            max_speed = ctx.stats_speed_max
+        if max_speed is None:
+            u = ctx.data.astype(np.float32)
+            v = ctx.companion_data.astype(np.float32)
+            max_speed = float(np.nanmax(np.hypot(u, v)))
+        
+        max_speed = float(max_speed)
+        if max_speed <= 0:
+            max_speed = 1.0
+        
+        # Cast to float32
         u = ctx.data.astype(np.float32, copy=False)
         v = ctx.companion_data.astype(np.float32, copy=False)
         
@@ -476,8 +639,8 @@ class IngestionService:
         # Calculate Direction
         direction = np.arctan2(u, v)
         np.degrees(direction, out=direction)
-        direction += 360
-        np.mod(direction, 360, out=direction)
+        direction += 360.0
+        np.mod(direction, 360.0, out=direction)
         
         # Free inputs
         del ctx.data
@@ -485,13 +648,14 @@ class IngestionService:
         ctx.data = None
         ctx.companion_data = None
         
-        # Normalize
+        # Normalize magnitude
         magnitude /= max_speed
-        magnitude *= 255
+        magnitude *= 255.0
         np.clip(magnitude, 0, 255, out=magnitude)
         
-        direction /= 360
-        direction *= 255
+        # Normalize direction
+        direction /= 360.0
+        direction *= 255.0
         
         # Output
         ctx.encoded = np.zeros((ctx.height, ctx.width, 4), dtype=np.uint8)
@@ -506,7 +670,10 @@ class IngestionService:
         # Generate output path
         date_path = ctx.timestamp.strftime('%Y/%m/%d')
         time_str = ctx.timestamp.strftime('%H%M%S')
-        output_path = f"{ctx.dataset.processed_path}{date_path}/{ctx.dataset.id}_{time_str}.png"
+        
+        # Use dataset slug for path
+        output_dir = f"processed/{ctx.dataset.collection.slug}/{ctx.dataset.slug}/{date_path}"
+        output_path = f"{output_dir}/{ctx.dataset.slug}_{time_str}.png"
         
         # Save PNG
         image = Image.fromarray(ctx.encoded, mode='RGBA')
@@ -518,21 +685,25 @@ class IngestionService:
             'display_name': ctx.dataset.name,
             'units': ctx.dataset.units or '',
             'timestamp': ctx.timestamp.isoformat(),
-            'bounds': list(ctx.bounds),
+            'bounds': list(ctx.bounds) if ctx.bounds else None,
             'width': ctx.width,
             'height': ctx.height,
-            'imageUnscale': [ctx.dataset.value_min, ctx.dataset.value_max],
-            'scale': ctx.dataset.scale_type,
+            'crs': ctx.crs,
+            'imageUnscale': [
+                float(ctx.dataset.value_min) if ctx.dataset.value_min is not None else ctx.stats_min,
+                float(ctx.dataset.value_max) if ctx.dataset.value_max is not None else ctx.stats_max,
+            ],
+            'scale': ctx.dataset.scale_type or 'linear',
             'stats': {
-                'min': ctx.stats_min,
-                'max': ctx.stats_max,
-                'mean': ctx.stats_mean,
-                'std': ctx.stats_std,
+                'min': float(ctx.stats_min) if ctx.stats_min is not None else None,
+                'max': float(ctx.stats_max) if ctx.stats_max is not None else None,
+                'mean': float(ctx.stats_mean) if ctx.stats_mean is not None else None,
+                'std': float(ctx.stats_std) if ctx.stats_std is not None else None,
             },
         }
         
         if ctx.dataset.is_vector:
-            metadata['stats']['speed_max'] = ctx.stats_speed_max
+            metadata['stats']['speed_max'] = float(ctx.stats_speed_max) if ctx.stats_speed_max else None
             metadata['direction_range'] = [0, 360]
         
         # Save metadata
@@ -554,7 +725,7 @@ class IngestionService:
     
     def _save_json(self, path: str, data: dict) -> str:
         """Save dict as JSON to storage."""
-        content = json.dumps(data, indent=2).encode('utf-8')
+        content = json.dumps(data, indent=2, default=str).encode('utf-8')
         return self.storage.save_bytes(path, content)
     
     def _infer_collection_from_path(self, file_path: str) -> Optional[str]:
@@ -564,15 +735,15 @@ class IngestionService:
             return parts[1]
         return None
     
-    def _download_to_temp(self, s3_path: str) -> Path:
-        """Download a file from S3 to local temp storage."""
+    def _download_to_temp(self, storage_path: str) -> Path:
+        """Download a file from storage to local temp."""
         import tempfile
         
-        ext = Path(s3_path).suffix
+        ext = Path(storage_path).suffix
         fd, tmp_path = tempfile.mkstemp(suffix=ext)
         
         try:
-            content = self.storage.read_bytes(s3_path)
+            content = self.storage.read_bytes(storage_path)
             with open(tmp_path, 'wb') as f:
                 f.write(content)
         except Exception:

@@ -13,7 +13,7 @@ class Node(models.Model):
     - Filter: Apply mask or filter conditions
     - Output: Save results
     """
-    analysis = models.ForeignKey('analysis.Analysis', on_delete=models.CASCADE, related_name='nodes')
+    analysis = models.ForeignKey('georivaanalysis.Analysis', on_delete=models.CASCADE, related_name='nodes')
     name = models.CharField(max_length=100)
     
     class NodeType(models.TextChoices):
@@ -28,9 +28,6 @@ class Node(models.Model):
     
     # Configuration (interpreted based on node_type)
     config = models.JSONField(default=dict)
-    
-    # For transform nodes: which operator to apply
-    operator = models.ForeignKey('Operator', null=True, blank=True, on_delete=models.PROTECT)
     
     class Meta:
         constraints = [

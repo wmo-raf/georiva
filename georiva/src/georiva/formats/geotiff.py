@@ -11,10 +11,9 @@ from typing import Optional
 
 import numpy as np
 
-from .registry import BaseFormatPlugin, ExtractedVariable, FormatRegistry
+from .registry import BaseFormatPlugin, ExtractedVariable
 
 
-@FormatRegistry.register
 class GeoTIFFFormatPlugin(BaseFormatPlugin):
     """
     Format plugin for GeoTIFF files.

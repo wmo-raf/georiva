@@ -5,6 +5,7 @@ from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel
+from wagtail.snippets.models import register_snippet
 
 
 class ColorPalette(models.Model):
@@ -52,6 +53,7 @@ class ColorPalette(models.Model):
     ]
 
 
+@register_snippet
 class Dataset(ClusterableModel, TimeStampedModel):
     """A Dataset represents a single data product within a Collection."""
     
@@ -84,7 +86,7 @@ class Dataset(ClusterableModel, TimeStampedModel):
         MONTHLY = 'monthly', 'Monthly'
         YEARLY = 'yearly', 'Yearly'
     
-    collection = ParentalKey('core.Collection', on_delete=models.CASCADE, related_name='datasets')
+    collection = ParentalKey('georivacore.Collection', on_delete=models.CASCADE, related_name='datasets')
     name = models.CharField(max_length=200)
     slug = models.SlugField(unique=True, max_length=200)
     description = models.TextField(blank=True)
@@ -115,7 +117,7 @@ class Dataset(ClusterableModel, TimeStampedModel):
     value_min = models.FloatField(null=True, blank=True)
     value_max = models.FloatField(null=True, blank=True)
     scale_type = models.CharField(max_length=20, choices=ScaleType.choices, default=ScaleType.LINEAR)
-    palette = models.ForeignKey('core.ColorPalette', null=True, blank=True, on_delete=models.SET_NULL)
+    palette = models.ForeignKey('georivacore.ColorPalette', null=True, blank=True, on_delete=models.SET_NULL)
     
     # Spatial
     bounds = ArrayField(models.FloatField(), size=4, null=True, blank=True)
@@ -130,6 +132,11 @@ class Dataset(ClusterableModel, TimeStampedModel):
     # Status
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
+    
+    @property
+    def is_vector(self):
+        """Check if this dataset represents vector data."""
+        return self.variable_type == self.VariableType.VECTOR
     
     @property
     def zarr_store(self) -> str:

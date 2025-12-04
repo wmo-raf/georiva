@@ -7,39 +7,30 @@ Each loader type has its own configuration fields and UI.
 The LoaderConfig base class is linked to a Collection via OneToOneField,
 ensuring each collection can have at most one loader.
 """
-
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from polymorphic.models import PolymorphicModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
+from wagtail.snippets.models import register_snippet
 
 
 class LoaderConfig(PolymorphicModel, TimeStampedModel):
     """
     Base configuration for all loader types.
     
-    Each Collection can have one LoaderConfig (or none for manual-only uploads).
     Subclasses define source-specific configuration fields.
     """
-    
-    collection = models.OneToOneField(
-        'core.Collection',
-        on_delete=models.CASCADE,
-        related_name='loader',
-        help_text=_("Collection this loader fetches data for"),
-    )
-    
     # Common fields for all loaders
-    enabled = models.BooleanField(
-        default=True,
-        help_text=_("Enable/disable automated loading"),
-    )
-    schedule = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("Cron expression for scheduled runs (e.g., '0 */6 * * *' for every 6 hours)"),
-    )
+    name = models.CharField(max_length=255, verbose_name=_("Name"))
+    interval = models.PositiveIntegerField(
+        default=15, verbose_name=_("Interval"),
+        help_text=_("How often to run the loader (in minutes)"),
+        validators=[
+            MaxValueValidator(60),
+            MinValueValidator(1)
+        ])
     
     # Run tracking
     last_run_at = models.DateTimeField(null=True, blank=True)
@@ -63,9 +54,8 @@ class LoaderConfig(PolymorphicModel, TimeStampedModel):
     total_files_fetched = models.IntegerField(default=0)
     
     base_panels = [
-        FieldPanel('collection'),
-        FieldPanel('enabled'),
-        FieldPanel('schedule'),
+        FieldPanel('name'),
+        FieldPanel('interval'),
     ]
     
     class Meta:
@@ -73,7 +63,7 @@ class LoaderConfig(PolymorphicModel, TimeStampedModel):
         verbose_name_plural = _("Loader Configurations")
     
     def __str__(self):
-        return f"{self.get_real_instance_class().__name__} for {self.collection}"
+        return f"{self.name} - {self.get_real_instance_class().__name__}"
     
     def get_loader(self):
         """
@@ -105,6 +95,7 @@ class LoaderConfig(PolymorphicModel, TimeStampedModel):
         ])
 
 
+@register_snippet
 class FTPLoaderConfig(LoaderConfig):
     """
     Configuration for loading data from FTP/SFTP servers.

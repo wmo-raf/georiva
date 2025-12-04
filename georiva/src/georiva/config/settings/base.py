@@ -50,6 +50,9 @@ INSTALLED_APPS = [
     
     "georiva.home",
     "georiva.core",
+    "georiva.formats",
+    "georiva.loaders",
+    "georiva.analysis",
 ]
 
 MIDDLEWARE = [
@@ -154,7 +157,7 @@ MEDIA_URL = "/media/"
 GEORIVA_STORAGE_BACKEND = env('GEORIVA_STORAGE_BACKEND', default='local')
 
 # Local storage settings
-GEORIVA_STORAGE_ROOT = env('GEORIVA_STORAGE_ROOT', default='/data/georiva')
+GEORIVA_STORAGE_ROOT = env('GEORIVA_STORAGE_ROOT', default=os.path.join(BASE_DIR, "georiva_data"))
 
 # S3/MinIO settings
 AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID', default=None)
@@ -289,3 +292,34 @@ CACHES = {
 }
 
 CELERY_CACHE_BACKEND = "default"
+
+GEORIVA_LOG_LEVEL = env.str("GEORIVA_LOG_LEVEL", "INFO")
+GEORIVA_DATABASE_LOG_LEVEL = env.str("GEORIVA_DATABASE_LOG_LEVEL", "ERROR")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "console": {
+            "format": "%(levelname)s %(asctime)s %(name)s.%(funcName)s:%(lineno)s- %("
+                      "message)s "
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "console",
+        },
+    },
+    "loggers": {
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": GEORIVA_DATABASE_LOG_LEVEL,
+            "propagate": True,
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": GEORIVA_LOG_LEVEL,
+    },
+}

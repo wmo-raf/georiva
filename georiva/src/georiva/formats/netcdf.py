@@ -13,10 +13,9 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from .registry import BaseFormatPlugin, ExtractedVariable, FormatRegistry
+from .registry import BaseFormatPlugin, ExtractedVariable
 
 
-@FormatRegistry.register
 class NetCDFFormatPlugin(BaseFormatPlugin):
     """
     Format plugin for NetCDF files.

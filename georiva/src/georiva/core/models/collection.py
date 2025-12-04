@@ -6,8 +6,10 @@ from wagtail.admin.panels import (
     InlinePanel,
     MultiFieldPanel
 )
+from wagtail.snippets.models import register_snippet
 
 
+@register_snippet
 class Collection(TimeStampedModel, ClusterableModel):
     """
     A data source that produces multiple datasets.
@@ -16,10 +18,10 @@ class Collection(TimeStampedModel, ClusterableModel):
     
     This is an organizational grouping - it defines how data is ingested
     """
-    slug = models.SlugField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=100, unique=True)
     description = models.TextField(blank=True)
-    
+    loader = models.ForeignKey("georivaloaders.LoaderConfig", on_delete=models.SET_NULL, null=True, blank=True)
     # Provider information
     provider = models.CharField(
         max_length=255,
@@ -60,6 +62,7 @@ class Collection(TimeStampedModel, ClusterableModel):
         MultiFieldPanel([
             FieldPanel('id'),
             FieldPanel('name'),
+            FieldPanel('slug'),
             FieldPanel('description'),
         ], heading="Basic Information"),
         MultiFieldPanel([
@@ -68,6 +71,7 @@ class Collection(TimeStampedModel, ClusterableModel):
             FieldPanel('license'),
         ], heading="Provider"),
         MultiFieldPanel([
+            FieldPanel('loader'),
             FieldPanel('file_format'),
             FieldPanel('archive_source_files'),
         ], heading="Ingestion Configuration"),

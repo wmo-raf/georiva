@@ -13,12 +13,10 @@ import numpy as np
 
 from .registry import (
     BaseFormatPlugin,
-    ExtractedVariable,
-    FormatRegistry
+    ExtractedVariable
 )
 
 
-@FormatRegistry.register
 class GRIBFormatPlugin(BaseFormatPlugin):
     """
     Format plugin for GRIB (GRIdded Binary) files.
