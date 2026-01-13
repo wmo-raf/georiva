@@ -2,274 +2,302 @@
 GeoTIFF Format Plugin
 
 Handles GeoTIFF files using rasterio with memory-optimized windowed reading.
-For vector data (U/V), expects multi-band TIFFs with band 1 = U, band 2 = V.
+
+Conventions:
+- Variables are exposed as "band_1", "band_2", ..., "band_N".
+- Generic dimension selection is supported ONLY for {"band": <int>} via dim_selectors.
+  Other selectors are ignored (GeoTIFF has no labeled non-spatial dims).
 """
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
+import rasterio
+from rasterio.windows import Window
 
+from georiva.utils.path import PathLike
 from .registry import BaseFormatPlugin, ExtractedVariable
 
 
 class GeoTIFFFormatPlugin(BaseFormatPlugin):
-    """
-    Format plugin for GeoTIFF files.
-    Uses rasterio for reading with support for windowed reads.
-    
-    For vector datasets, expects:
-    - Band 1: Primary variable (e.g., U component)
-    - Band 2: Secondary variable (e.g., V component)
-    
-    Note: GeoTIFFs are typically 2D (or 2.5D with bands). Vertical level selection
-    is not natively supported unless encoded as separate bands/variables.
-    """
-    
     name = "geotiff"
     display_name = "GeoTIFF"
-    extensions = ['.tif', '.tiff', '.geotiff']
+    extensions = [".tif", ".tiff", ".geotiff"]
     
-    def can_handle(self, file_path: Path) -> bool:
-        """Check if file is a GeoTIFF."""
+    def can_handle(self, file_path: PathLike) -> bool:
+        file_path = Path(file_path)
         if file_path.suffix.lower() in self.extensions:
             return True
         
-        # Check magic bytes
+        # TIFF magic bytes
         try:
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 magic = f.read(4)
-                # TIFF magic: II (little-endian) or MM (big-endian)
-                if magic[:2] in [b'II', b'MM']:
-                    return True
+                return magic[:2] in [b"II", b"MM"]
         except Exception:
-            pass
-        
-        return False
+            return False
     
-    def list_variables(self, file_path: Path) -> list[dict]:
-        """List available bands in the GeoTIFF."""
-        import rasterio
+    def list_variables(self, file_path: PathLike) -> list[dict]:
+        file_path = Path(file_path)
         
-        variables = []
-        
+        variables: list[dict] = []
         try:
             with rasterio.open(file_path) as src:
+                units = list(getattr(src, "units", []) or [])
+                descriptions = list(getattr(src, "descriptions", []) or [])
+                
                 for i in range(1, src.count + 1):
-                    desc = src.descriptions[i - 1] if src.descriptions else None
-                    variables.append({
-                        'name': f'band_{i}',
-                        'long_name': desc or f'Band {i}',
-                        'units': src.units[i - 1] if src.units else '',
-                        'dimensions': ['y', 'x'],
-                        'shape': (src.height, src.width),
-                        'dtype': str(src.dtypes[i - 1]),
-                    })
+                    desc = descriptions[i - 1] if i - 1 < len(descriptions) else None
+                    unit = units[i - 1] if i - 1 < len(units) else ""
+                    
+                    variables.append(
+                        {
+                            "name": f"band_{i}",
+                            "long_name": desc or f"Band {i}",
+                            "units": unit or "",
+                            "dimensions": ["y", "x"],
+                            "available_dim_selectors": ["band"],  # meaningful selector for GeoTIFF
+                            "shape": (src.height, src.width),
+                            "dtype": str(src.dtypes[i - 1]),
+                            "band_index": i,
+                        }
+                    )
         except Exception as e:
             self.logger.error(f"Failed to list variables in {file_path}: {e}")
         
         return variables
     
-    def get_timestamps(self, file_path: Path) -> list[datetime]:
-        """Get timestamp strictly from the filename."""
-        timestamps = []
+    def get_timestamps(self, file_path: PathLike) -> list[datetime]:
+        """
+        GeoTIFF typically doesn't carry time in a standard place.
+        We try filename parsing
+        """
+        file_path = Path(file_path)
+        timestamps: list[datetime] = []
         
-        try:
-            dt = self._parse_timestamp_from_filename(file_path.name)
-            if dt:
-                timestamps.append(dt)
-        except Exception as e:
-            self.logger.error(f"Failed to parse timestamp from filename {file_path}: {e}")
+        # 1) filename
+        dt = self._parse_timestamp_from_filename(file_path.name)
+        if dt:
+            timestamps.append(dt)
+        else:
+            self.logger.debug(f"No timestamp found in filename {file_path.name}")
         
-        return timestamps
+        # de-dup + sort
+        out = sorted({t.replace(tzinfo=None) for t in timestamps})
+        return out
     
-    def get_metadata(self, file_path: Path, dataset) -> dict:
+    def get_metadata_for_variable(
+            self,
+            file_path: PathLike,
+            variable_name: str,
+            *,
+            timestamp: Optional[datetime] = None,
+            dim_selectors: Optional[dict[str, object]] = None,
+    ) -> dict:
         """
-        Lightweight scan to get dimensions and bounds without reading data.
+        Lightweight scan: width/height/bounds/crs.
+        GeoTIFF ignores timestamp. `dim_selectors` can include {'band': int} to map variable_name.
         """
-        import rasterio
         
-        # Note: GeoTIFF ignores vertical_dimension/vertical_value settings
-        # as it doesn't support labeled dimensions like NetCDF.
+        file_path = Path(file_path)
+        
+        band = self._resolve_band(variable_name, dim_selectors)
         
         with rasterio.open(file_path) as src:
-            bounds = src.bounds
+            if band < 1 or band > src.count:
+                raise ValueError(f"Band {band} not found (file has {src.count} bands)")
+            
+            b = src.bounds
             return {
-                'width': src.width,
-                'height': src.height,
-                'bounds': (bounds.left, bounds.bottom, bounds.right, bounds.top),
-                'crs': str(src.crs) if src.crs else "EPSG:4326"
+                "width": int(src.width),
+                "height": int(src.height),
+                "bounds": (float(b.left), float(b.bottom), float(b.right), float(b.top)),
+                "crs": str(src.crs) if src.crs else "EPSG:4326",
             }
     
-    def get_lazy_dataset(self, file_path: Path, dataset, timestamp=None):
+    def get_lazy_variable(
+            self,
+            file_path: PathLike,
+            variable_name: str,
+            *,
+            timestamp: Optional[datetime] = None,
+            dim_selectors: Optional[dict[str, object]] = None,
+    ) -> tuple[Any, Any]:
         """
-        Return a lazy-loaded object for global stats computation.
-        Uses xarray with rasterio engine (rioxarray) if available to support lazy execution.
+        Optional lazy support via rioxarray/xarray (dask-backed).
+        Returns (lazy_dataarray, close_callable).
         """
-        import xarray as xr
         
-        # This relies on the 'rasterio' engine being available to xarray.
-        # It opens the file lazily (dask-backed)
+        file_path = Path(file_path)
+        band = self._resolve_band(variable_name, dim_selectors)
+        
         try:
-            # We open as a DataArray because GeoTIFFs don't have standard dataset vars
-            da = xr.open_dataarray(file_path, engine='rasterio', chunks={})
+            import xarray as xr
             
-            # Select the band corresponding to the dataset variable
-            band_idx = 1
-            if dataset.primary_variable.startswith('band_'):
+            # Note: xr.open_dataarray(..., engine="rasterio") is supported in many setups,
+            # but chunking requires dask installed.
+            da = xr.open_dataarray(file_path, engine="rasterio", chunks={})
+            
+            # da dims commonly: ("band","y","x") or ("band","latitude","longitude") depending on engine/version
+            if "band" in da.coords:
+                da = da.sel(band=band)
+            
+            # xr objects have .close only for datasets; dataarray shares the underlying file manager
+            # but doesn't always expose .close. We'll return a no-op close_fn.
+            def close_fn():
                 try:
-                    band_idx = int(dataset.primary_variable.split('_')[1])
-                except ValueError:
+                    da.close()  # may exist depending on version
+                except Exception:
                     pass
             
-            # Xarray/rasterio usually puts bands in the 'band' coordinate
-            if 'band' in da.coords and da.sizes['band'] >= band_idx:
-                return da.sel(band=band_idx)
-            return da
+            return da, close_fn
         
         except Exception as e:
-            self.logger.warning(f"Lazy load failed, falling back to eager load for stats: {e}")
-            raise NotImplementedError("Lazy loading requires rioxarray or compatible engine")
+            raise NotImplementedError(
+                f"Lazy loading requires xarray + rasterio engine (and usually dask). Error: {e}"
+            )
     
     def extract_variable(
             self,
-            file_path: Path,
+            file_path: PathLike,
             variable_name: str,
             timestamp: Optional[datetime] = None,
-            secondary_variable: Optional[str] = None,
             window: Optional[tuple[int, int, int, int]] = None,
-            vertical_selection: Optional[dict] = None,  # Argument added for interface compatibility
+            dim_selectors: Optional[dict[str, object]] = None,
     ) -> ExtractedVariable:
         """
         Extract data from GeoTIFF.
-        Supports 'window' argument for memory-efficient chunked reading.
-        window = (x, y, width, height)
+
+        Args:
+            variable_name: usually "band_1" etc.
+            dim_selectors: supports {"band": <int>} as an alternative way to pick band.
+            window: (x_offset, y_offset, width, height)
         """
-        import rasterio
-        from rasterio.windows import Window
         
-        self.logger.info(f"Extracting {variable_name} from {file_path} (Window: {window})")
+        file_path = Path(file_path)
         
-        if vertical_selection:
-            self.logger.warning(
-                f"Vertical selection {vertical_selection} requested but ignored by GeoTIFF plugin."
-            )
+        band = self._resolve_band(variable_name, dim_selectors)
+        
+        self.logger.info(
+            f"Extracting {variable_name} from {file_path} (band={band}, window={window}, dim_selectors={dim_selectors})"
+        )
         
         with rasterio.open(file_path) as src:
-            # Determine which band to read
-            primary_band = 1
-            if variable_name.startswith('band_'):
-                try:
-                    primary_band = int(variable_name.split('_')[1])
-                except ValueError:
-                    pass
+            if band < 1 or band > src.count:
+                raise ValueError(f"Band {band} not found (file has {src.count} bands)")
             
-            if primary_band > src.count:
-                raise ValueError(f"Band {primary_band} not found (file has {src.count} bands)")
-            
-            # Prepare Window object if requested
             rio_window = None
             if window:
                 x_off, y_off, w, h = window
                 rio_window = Window(col_off=x_off, row_off=y_off, width=w, height=h)
             
-            # Read primary data (Chunked or Full)
-            data = src.read(primary_band, window=rio_window)
+            # read primary
+            data = src.read(band, window=rio_window)
             
-            # Handle nodata
+            # nodata -> nan
             nodata = src.nodata
             if nodata is not None:
-                data = np.where(data == nodata, np.nan, data.astype(float))
+                data = data.astype(float, copy=False)
+                data = np.where(data == nodata, np.nan, data)
             
-            # Read secondary band for vector data
-            secondary_data = None
-            if secondary_variable:
-                secondary_band = 2  # Default to band 2
-                if secondary_variable.startswith('band_'):
-                    try:
-                        secondary_band = int(secondary_variable.split('_')[1])
-                    except ValueError:
-                        pass
-                
-                if secondary_band <= src.count:
-                    secondary_data = src.read(secondary_band, window=rio_window)
-                    if nodata is not None:
-                        secondary_data = np.where(
-                            secondary_data == nodata,
-                            np.nan,
-                            secondary_data.astype(float)
-                        )
-                else:
-                    self.logger.warning(
-                        f"Secondary band {secondary_band} not found for vector data"
-                    )
-            
-            # Get spatial info
+            # bounds
             if rio_window:
-                # Get bounds specific to this window
-                window_bounds = src.window_bounds(rio_window)
-                bounds = window_bounds
+                wb = src.window_bounds(rio_window)
+                bounds = (float(wb.left), float(wb.bottom), float(wb.right), float(wb.top))
             else:
-                # Full bounds
                 b = src.bounds
-                bounds = (b.left, b.bottom, b.right, b.top)
+                bounds = (float(b.left), float(b.bottom), float(b.right), float(b.top))
             
-            # Resolution and CRS
+            # resolution & crs
             transform = src.transform
-            crs = str(src.crs) if src.crs else "EPSG:4326"
-            res_x = abs(transform.a)
-            res_y = abs(transform.e)
+            if transform.e > 0:
+                data = np.flipud(data)
             
-            # Get timestamp
+            res_x = float(abs(transform.a))
+            res_y = float(abs(transform.e))
+            crs = str(src.crs) if src.crs else "EPSG:4326"
+            
+            # time
             valid_time = timestamp
             if valid_time is None:
-                timestamps = self.get_timestamps(file_path)
-                valid_time = timestamps[0] if timestamps else datetime.now()
+                ts = self.get_timestamps(file_path)
+                valid_time = ts[0] if ts else datetime.utcnow()
             
-            # Get metadata
-            tags = src.tags()
-            descriptions = src.descriptions
+            # metadata
+            tags = src.tags() or {}
+            descriptions = list(getattr(src, "descriptions", []) or [])
+            units = list(getattr(src, "units", []) or [])
+            
+            desc = descriptions[band - 1] if band - 1 < len(descriptions) else ""
+            unit = units[band - 1] if band - 1 < len(units) else tags.get("units", "")
             
             return ExtractedVariable(
                 data=data,
                 bounds=bounds,
                 crs=crs,
-                width=data.shape[1],  # Shape is (height, width) for numpy
-                height=data.shape[0],
+                width=int(data.shape[1]),
+                height=int(data.shape[0]),
                 resolution=(res_x, res_y),
                 timestamp=valid_time,
                 variable_name=variable_name,
-                units=tags.get('units', ''),
-                secondary_data=secondary_data,
+                units=unit or "",
                 metadata={
-                    'source_file': str(file_path),
-                    'description': descriptions[primary_band - 1] if descriptions else '',
-                    'driver': src.driver,
-                    'dtype': str(src.dtypes[primary_band - 1]),
-                    'full_width': src.width,
-                    'full_height': src.height,
+                    "source_file": str(file_path),
+                    "driver": src.driver,
+                    "dtype": str(src.dtypes[band - 1]),
+                    "description": desc,
+                    "band_index": band,
+                    "full_width": int(src.width),
+                    "full_height": int(src.height),
+                    "dim_selectors": dim_selectors or {},
                     **tags,
                 },
             )
     
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
+    
+    def _resolve_band(self, variable_name: str, dim_selectors: Optional[dict[str, object]]) -> int:
+        """
+        Determine which band to read.
+        Priority:
+          1) dim_selectors["band"] if present
+          2) variable_name "band_<n>"
+          3) default 1
+        """
+        if dim_selectors and "band" in dim_selectors:
+            try:
+                return int(dim_selectors["band"])
+            except Exception:
+                pass
+        
+        if variable_name.startswith("band_"):
+            try:
+                return int(variable_name.split("_", 1)[1])
+            except Exception:
+                return 1
+        
+        return 1
+    
     def _parse_timestamp_from_filename(self, filename: str) -> Optional[datetime]:
-        """Try to extract a timestamp from the filename."""
         import re
         from dateutil.parser import parse
         
         patterns = [
-            r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})',  # ISO format
-            r'(\d{8})_(\d{4})',  # YYYYMMDD_HHMM
-            r'(\d{14})',  # YYYYMMDDHHMMSS
-            r'(\d{8})',  # YYYYMMDD
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})",  # ISO
+            r"(\d{8})_(\d{4})",  # YYYYMMDD_HHMM
+            r"(\d{14})",  # YYYYMMDDHHMMSS
+            r"(\d{8})",  # YYYYMMDD
         ]
         
         for pattern in patterns:
             match = re.search(pattern, filename)
             if match:
                 try:
-                    date_str = ''.join(match.groups())
+                    date_str = "".join(match.groups())
                     return parse(date_str)
                 except Exception:
                     continue

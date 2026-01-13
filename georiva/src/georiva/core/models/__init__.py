@@ -1,10 +1,14 @@
+from .catalog import Catalog
 from .collection import Collection
-from .dataset import ColorPalette, Dataset
 from .item import Item, Asset
+from .variable import Variable, VariableSource
+from .visualization import ColorPalette
 
 __all__ = [
+    "Catalog",
     "Collection",
-    "Dataset",
+    "Variable",
+    "VariableSource",
     "ColorPalette",
     "Item",
     "Asset",

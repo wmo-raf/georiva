@@ -10,9 +10,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Type
+from typing import Optional, Type, Any
 
 import numpy as np
+
+from georiva.utils.path import PathLike
 
 logger = logging.getLogger(__name__)
 
@@ -38,30 +40,17 @@ class ExtractedVariable:
     variable_name: str
     units: Optional[str] = None
     
-    # For vector data - the second component
-    secondary_data: Optional[np.ndarray] = None
-    
     # Additional metadata
-    metadata: dict = None
+    metadata: Optional[dict] = None
     
     def __post_init__(self):
         if self.metadata is None:
             self.metadata = {}
-    
-    @property
-    def is_vector(self) -> bool:
-        """Check if this is vector data (has secondary component)."""
-        return self.secondary_data is not None
 
 
 class BaseFormatPlugin(ABC):
     """
     Base class for file format plugins.
-    
-    A format plugin knows how to:
-    1. Open files of a specific format
-    2. List available variables in the file
-    3. Extract specific variables as numpy arrays with metadata
     """
     
     # Plugin identification
@@ -73,15 +62,15 @@ class BaseFormatPlugin(ABC):
         self.logger = logging.getLogger(f"georiva.formats.{self.name}")
     
     @abstractmethod
-    def can_handle(self, file_path: Path) -> bool:
+    def can_handle(self, file_path: PathLike) -> bool:
         """Check if this plugin can handle the given file."""
-        pass
+        raise NotImplementedError
     
     @abstractmethod
-    def list_variables(self, file_path: Path) -> list[dict]:
+    def list_variables(self, file_path: PathLike) -> list[dict]:
         """
         List available variables in the file.
-        
+
         Returns:
             List of dicts with variable info:
             [
@@ -89,87 +78,95 @@ class BaseFormatPlugin(ABC):
                 ...
             ]
         """
-        pass
+        raise NotImplementedError
     
     @abstractmethod
-    def get_timestamps(self, file_path: Path) -> list[datetime]:
+    def get_timestamps(self, file_path: PathLike) -> list[datetime]:
         """
         Get available timestamps in the file.
-        
+
         Returns:
             List of datetime objects
         """
-        pass
+        raise NotImplementedError
     
     @abstractmethod
     def extract_variable(
             self,
-            file_path: Path,
+            file_path: PathLike,
             variable_name: str,
             timestamp: Optional[datetime] = None,
-            secondary_variable: Optional[str] = None,
             window: Optional[tuple[int, int, int, int]] = None,
-            vertical_selection: Optional[dict] = None,
+            dim_selectors: Optional[dict[str, object]] = None,
     ) -> ExtractedVariable:
         """
         Extract a variable (or a specific window of it) from the file.
-        
+
         Args:
             file_path: Path to the source file
             variable_name: Primary variable name to extract
             timestamp: Specific timestamp to extract (if file has multiple)
-            secondary_variable: For vector data, the V component variable name
-            window: format (x_offset, y_offset, width, height)
-            vertical_selection: dict with 'dim' and 'value' for vertical slicing
-        
-        Returns:
-            ExtractedVariable with the data and metadata
+            window: Spatial subset: (x_offset, y_offset, width, height)
+            dim_selectors: Non-spatial selection mapping: {dim_or_coord_name: value}
+
+                Examples:
+                    {'heightAboveGround': 10}
+                    {'isobaricInhPa': 850}
+                    {'number': 0}  # ensemble member
+                    {'step': np.timedelta64(6, 'h')}  # forecast lead time
         """
-        pass
+        raise NotImplementedError
     
-    def extract_dataset(
+    def get_metadata_for_variable(
             self,
-            file_path: Path,
-            dataset,
+            file_path: PathLike,
+            variable_name: str,
+            *,
             timestamp: Optional[datetime] = None,
-            window: Optional[tuple[int, int, int, int]] = None,
-    ) -> ExtractedVariable:
-        """Extract data for a Dataset definition."""
+            dim_selectors: Optional[dict[str, object]] = None,
+    ) -> dict:
+        """
+        Scan to get dimensions and bounds without reading full data.
+
+        Default fallback implementation (inefficient):
+        extracts a 1x1 window to infer bounds/CRS and uses metadata for full size if present.
+
+        Subclasses SHOULD override for efficiency.
+        """
         
-        # Prepare vertical selection if configured
-        vertical_selection = None
-        if dataset.vertical_dimension and dataset.vertical_value is not None:
-            vertical_selection = {
-                'dim': dataset.vertical_dimension,
-                'value': dataset.vertical_value
-            }
+        file_path = Path(file_path)
         
-        return self.extract_variable(
+        var = self.extract_variable(
             file_path=file_path,
-            variable_name=dataset.primary_variable,
+            variable_name=variable_name,
             timestamp=timestamp,
-            secondary_variable=dataset.secondary_variable if dataset.is_vector else None,
-            window=window,
-            vertical_selection=vertical_selection
+            window=(0, 0, 1, 1),
+            dim_selectors=dim_selectors,
         )
-    
-    def get_metadata(self, file_path: Path, dataset) -> dict:
-        """
-        Scan to get dimensions and bounds without reading data.
-        """
-        # Default implementation (inefficient fallback)
-        # Subclasses should override this!
-        var = self.extract_variable(file_path, dataset.primary_variable, window=(0, 0, 1, 1))
         return {
-            'width': var.metadata.get('full_width', var.width),
-            'height': var.metadata.get('full_height', var.height),
-            'bounds': var.bounds,
-            'crs': var.crs
+            "width": var.metadata.get("full_width", var.width),
+            "height": var.metadata.get("full_height", var.height),
+            "bounds": var.bounds,
+            "crs": var.crs,
         }
     
-    def get_lazy_dataset(self, file_path: Path, dataset, timestamp=None):
+    def get_lazy_variable(
+            self,
+            file_path: Path,
+            variable_name: str,
+            *,
+            timestamp: Optional[datetime] = None,
+            dim_selectors: Optional[dict[str, object]] = None,
+    ) -> Any:
         """
         Return a lazy-loaded object (e.g. xarray DataArray) for global stats computation.
+
+        Default behavior: not supported.
+        Subclasses may override.
+
+        Note:
+        - If you need resource cleanup, plugins may return (lazy_obj, closer_callable).
+          This base signature is "Any" to allow that pattern.
         """
         raise NotImplementedError("Plugin does not support lazy loading")
 
@@ -224,13 +221,16 @@ class FormatRegistry:
         return None
     
     @classmethod
-    def get_for_file(cls, file_path: Path) -> Optional[BaseFormatPlugin]:
+    def get_for_file(cls, file_path: PathLike) -> Optional[BaseFormatPlugin]:
         """
         Get the appropriate plugin for a file.
         
         First tries by extension, then asks each plugin if it can handle the file.
         """
         # Try by extension first
+        
+        file_path = Path(file_path)
+        
         plugin = cls.get_by_extension(file_path.suffix)
         if plugin and plugin.can_handle(file_path):
             return plugin
@@ -257,5 +257,4 @@ class FormatRegistry:
         ]
 
 
-# Convenience alias
-format_registry = FormatRegistry
+format_registry = FormatRegistry()

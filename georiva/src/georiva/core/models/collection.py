@@ -1,80 +1,91 @@
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.models import ClusterableModel
-from wagtail.admin.panels import (
-    FieldPanel,
-    InlinePanel,
-    MultiFieldPanel
-)
+from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
 from wagtail.snippets.models import register_snippet
 
 
 @register_snippet
 class Collection(TimeStampedModel, ClusterableModel):
     """
-    A data source that produces multiple datasets.
+    Groups one or more Variables.
     
-    Examples: GFS Forecast, CHIRPS Rainfall, ERA5 Reanalysis
-    
-    This is an organizational grouping - it defines how data is ingested
+    Examples:
+        - gfs-temperature-2m (single variable)
+        - gfs-wind-10m (wind_speed + wind_direction)
+        - sentinel-vegetation (ndvi + nir + red)
     """
-    name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=100, unique=True)
+    
+    class TimeResolution(models.TextChoices):
+        HOURLY = 'hourly', 'Hourly'
+        THREE_HOURLY = '3hourly', '3-Hourly'
+        SIX_HOURLY = '6hourly', '6-Hourly'
+        DAILY = 'daily', 'Daily'
+        DEKADAL = 'dekadal', 'Dekadal'
+        MONTHLY = 'monthly', 'Monthly'
+        YEARLY = 'yearly', 'Yearly'
+    
+    catalog = models.ForeignKey(
+        'georivacore.Catalog',
+        on_delete=models.CASCADE,
+        related_name='collections'
+    )
+    
+    # Identity
+    slug = models.SlugField(max_length=100)
+    name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    loader = models.ForeignKey("georivaloaders.LoaderConfig", on_delete=models.SET_NULL, null=True, blank=True)
-    # Provider information
-    provider = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Data provider, e.g., NOAA, UCSB, ECMWF"
+    
+    # Spatial extent (auto-updated)
+    bounds = ArrayField(
+        models.FloatField(),
+        size=4,
+        null=True,
+        blank=True
     )
-    provider_url = models.URLField(blank=True)
-    license = models.CharField(max_length=255, blank=True)
+    crs = models.CharField(max_length=50, default="EPSG:4326")
     
-    # Source file format
-    class FileFormat(models.TextChoices):
-        GRIB = 'grib', 'GRIB/GRIB2'
-        NETCDF = 'netcdf', 'NetCDF'
-        GEOTIFF = 'geotiff', 'GeoTIFF'
-        ZARR = 'zarr', 'ZARR'
-    
-    file_format = models.CharField(
+    # Temporal extent (auto-updated)
+    time_resolution = models.CharField(
         max_length=20,
-        choices=FileFormat.choices
+        choices=TimeResolution.choices,
+        blank=True
     )
-    
-    # Archive configuration
-    archive_source_files = models.BooleanField(
-        default=True,
-        help_text="Whether to archive source files after processing"
-    )
+    time_start = models.DateTimeField(null=True, blank=True, editable=False)
+    time_end = models.DateTimeField(null=True, blank=True, editable=False)
+    item_count = models.PositiveIntegerField(default=0, editable=False)
     
     # Status
     is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
     
     class Meta:
-        ordering = ['name']
+        unique_together = ['catalog', 'slug']
+        ordering = ['catalog', 'sort_order', 'name']
     
     def __str__(self):
-        return self.name
+        return f"{self.catalog.slug}/{self.slug}"
+    
+    @property
+    def zarr_store(self) -> str:
+        return f"zarr/{self.catalog.slug}/{self.slug}.zarr"
     
     panels = [
         MultiFieldPanel([
-            FieldPanel('id'),
             FieldPanel('name'),
             FieldPanel('slug'),
+            FieldPanel('catalog'),
             FieldPanel('description'),
-        ], heading="Basic Information"),
+        ], heading="Identity"),
         MultiFieldPanel([
-            FieldPanel('provider'),
-            FieldPanel('provider_url'),
-            FieldPanel('license'),
-        ], heading="Provider"),
+            FieldPanel('bounds'),
+            FieldPanel('crs'),
+            FieldPanel('time_resolution'),
+        ], heading="Extent"),
         MultiFieldPanel([
-            FieldPanel('loader'),
-            FieldPanel('file_format'),
-            FieldPanel('archive_source_files'),
-        ], heading="Ingestion Configuration"),
-        FieldPanel('is_active'),
-        InlinePanel('datasets', label="Datasets"),
+            FieldPanel('is_active'),
+            FieldPanel('sort_order'),
+        ], heading="Status"),
+        InlinePanel('variables', label="Variables"),
     ]

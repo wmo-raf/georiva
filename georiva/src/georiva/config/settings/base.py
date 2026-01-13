@@ -25,7 +25,6 @@ if os.path.isfile(dev_env_path):
 DEBUG = env('DEBUG', False)
 
 INSTALLED_APPS = [
-    
     "wagtail.contrib.forms",
     "wagtail.contrib.redirects",
     "wagtail.embeds",
@@ -53,6 +52,8 @@ INSTALLED_APPS = [
     "georiva.formats",
     "georiva.loaders",
     "georiva.analysis",
+    
+    'django_cleanup.apps.CleanupConfig',
 ]
 
 MIDDLEWARE = [

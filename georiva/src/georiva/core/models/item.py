@@ -2,7 +2,7 @@
 GeoRiva Item and Asset Models
 
 Item: TimescaleDB hypertable for time-series raster data
-Asset: Individual files associated with an Item (PNG, COG, metadata, etc.)
+Asset: Individual files associated with an Item, linked to Variables
 """
 
 from django.contrib.postgres.fields import ArrayField
@@ -19,28 +19,31 @@ from wagtail.snippets.models import register_snippet
 @register_snippet
 class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
     """
-    A single timestep of raster data in the system.
+    A single spatiotemporal entry in a Collection.
     
     Uses TimescaleDB hypertable for efficient time-series queries.
-    The 'time' field is provided by TimescaleModel.
+    The 'time' field from TimescaleModel serves as valid_time.
     """
     
-    dataset = models.ForeignKey(
-        'georivacore.Dataset',
+    collection = models.ForeignKey(
+        'georivacore.Collection',
         on_delete=models.CASCADE,
         related_name='items',
     )
     
-    # For forecast data: when the model was run
-    run_time = models.DateTimeField(
+    # Time dimensions
+    # 'time' from TimescaleModel = valid_time (what time data represents)
+    reference_time = models.DateTimeField(
         null=True,
         blank=True,
-        help_text=_("Model run time for forecast data"),
+        db_index=True,
+        help_text=_("When data was produced (model run time for forecasts)"),
     )
     
     # Source tracking
     source_file = models.CharField(
         max_length=500,
+        blank=True,
         help_text=_("Original source file path"),
     )
     
@@ -48,145 +51,154 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
     bounds = ArrayField(
         models.FloatField(),
         size=4,
-        help_text=_("Bounding box [minx, miny, maxx, maxy]"),
+        null=True,
+        blank=True,
+        help_text=_("Bounding box [west, south, east, north]"),
     )
-    width = models.IntegerField()
-    height = models.IntegerField()
-    resolution_x = models.FloatField(help_text=_("Pixel size in X direction"))
-    resolution_y = models.FloatField(help_text=_("Pixel size in Y direction"))
+    geometry = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=_("GeoJSON geometry for non-rectangular footprints"),
+    )
+    
+    # Raster dimensions
+    width = models.IntegerField(null=True, blank=True)
+    height = models.IntegerField(null=True, blank=True)
+    resolution_x = models.FloatField(null=True, blank=True)
+    resolution_y = models.FloatField(null=True, blank=True)
     crs = models.CharField(max_length=50, default="EPSG:4326")
     
-    # Statistics (computed during processing)
-    stats_min = models.FloatField(null=True, blank=True)
-    stats_max = models.FloatField(null=True, blank=True)
-    stats_mean = models.FloatField(null=True, blank=True)
-    stats_std = models.FloatField(null=True, blank=True)
-    
     # Flexible metadata
-    metadata = models.JSONField(default=dict, blank=True)
+    properties = models.JSONField(default=dict, blank=True)
     
     class Meta:
         ordering = ['-time']
         constraints = [
             models.UniqueConstraint(
-                fields=['time', 'dataset'],
-                name='unique_time_per_dataset'
+                fields=['collection', 'time'],
+                name='unique_time_per_collection',
+                condition=models.Q(reference_time__isnull=True),
             ),
             models.UniqueConstraint(
-                fields=['time', 'dataset', 'run_time'],
-                name='unique_time_dataset_runtime',
-                condition=models.Q(run_time__isnull=False),
+                fields=['collection', 'time', 'reference_time'],
+                name='unique_time_collection_reference',
+                condition=models.Q(reference_time__isnull=False),
             ),
         ]
         indexes = [
-            models.Index(fields=['dataset', 'time']),
-            models.Index(fields=['dataset', '-time']),
-            models.Index(fields=['run_time', 'time']),
+            models.Index(fields=['collection', 'time']),
+            models.Index(fields=['collection', '-time']),
+            models.Index(fields=['collection', 'reference_time', 'time']),
         ]
     
     def __str__(self):
-        return f"{self.dataset.slug} @ {self.time}"
+        return f"{self.collection.slug} @ {self.time}"
+    
+    # =========================================================================
+    # Time Properties
+    # =========================================================================
+    
+    @property
+    def valid_time(self):
+        """Alias for TimescaleModel's time field."""
+        return self.time
+    
+    @property
+    def horizon(self):
+        """Forecast horizon as timedelta."""
+        if self.reference_time:
+            return self.time - self.reference_time
+        return None
+    
+    @property
+    def horizon_hours(self):
+        """Forecast horizon in hours."""
+        if self.horizon:
+            return self.horizon.total_seconds() / 3600
+        return None
+    
+    @property
+    def is_forecast(self):
+        """True if this is forecast data (has reference_time)."""
+        return self.reference_time is not None
     
     # =========================================================================
     # Asset Access Helpers
     # =========================================================================
     
-    def get_asset(self, key: str) -> 'Asset':
-        """Get a specific asset by key."""
-        return self.assets.filter(key=key).first()
+    def get_asset(self, variable_slug: str) -> 'Asset':
+        """Get asset for a specific variable."""
+        return self.assets.filter(variable__slug=variable_slug).first()
+    
+    def get_asset_by_role(self, role: str) -> 'Asset':
+        """Get asset by role."""
+        return self.assets.filter(roles__contains=[role]).first()
     
     @property
-    def visual_asset(self) -> 'Asset':
-        """Get the visual (PNG/WebP) asset."""
-        return self.get_asset('visual')
+    def data_assets(self):
+        """Get all data assets."""
+        return self.assets.filter(roles__contains=['data'])
     
     @property
-    def data_asset(self) -> 'Asset':
-        """Get the data (COG) asset."""
-        return self.get_asset('data')
+    def visual_assets(self):
+        """Get all visual assets."""
+        return self.assets.filter(roles__contains=['visual'])
     
     @property
-    def thumbnail_asset(self) -> 'Asset':
-        """Get the thumbnail asset."""
-        return self.get_asset('thumbnail')
-    
-    @property
-    def metadata_asset(self) -> 'Asset':
-        """Get the metadata (JSON) asset."""
-        return self.get_asset('metadata')
-    
-    def get_visual_url(self) -> str:
-        """Get URL to visual asset."""
-        asset = self.visual_asset
-        return asset.href if asset else None
-    
-    def get_data_url(self) -> str:
-        """Get URL to data asset."""
-        asset = self.data_asset
-        return asset.href if asset else None
+    def thumbnail(self) -> 'Asset':
+        """Get thumbnail asset."""
+        return self.assets.filter(roles__contains=['thumbnail']).first()
 
 
 @register_snippet
-class Asset(Orderable):
+class Asset(TimeStampedModel, Orderable):
     """
-    An individual file associated with an Item.
+    A stored data file for a specific Variable within an Item.
     
-    Uses a flat structure with format enum + extra_fields for flexibility.
-    Format-specific behavior is provided via properties and methods.
+    Links Item (when/where) to Variable (what) with the actual file (href).
     """
     
     class Role(models.TextChoices):
-        DATA = 'data', _('Data')  # Raw/processed data (COG, GeoTIFF)
-        VISUAL = 'visual', _('Visual')  # Rendered visualization (PNG)
-        THUMBNAIL = 'thumbnail', _('Thumbnail')  # Small preview
-        OVERVIEW = 'overview', _('Overview')  # Reduced resolution
-        METADATA = 'metadata', _('Metadata')  # Sidecar metadata (JSON)
+        DATA = 'data', _('Data')
+        VISUAL = 'visual', _('Visual')
+        THUMBNAIL = 'thumbnail', _('Thumbnail')
+        OVERVIEW = 'overview', _('Overview')
+        METADATA = 'metadata', _('Metadata')
     
     class Format(models.TextChoices):
         COG = 'cog', _('Cloud-Optimized GeoTIFF')
+        ZARR = 'zarr', _('Zarr')
         GEOTIFF = 'geotiff', _('GeoTIFF')
         PNG = 'png', _('PNG')
         WEBP = 'webp', _('WebP')
         JPEG = 'jpeg', _('JPEG')
         JSON = 'json', _('JSON')
     
-    class DataType(models.TextChoices):
-        FLOAT32 = 'float32', _('Float32')
-        FLOAT16 = 'float16', _('Float16')
-        UINT16 = 'uint16', _('UInt16')
-        UINT8 = 'uint8', _('UInt8 (0-255)')
-        INT16 = 'int16', _('Int16')
-        RGBA = 'rgba', _('RGBA Color')
-    
-    # Parent relationship
+    # Parent Item
     item = ParentalKey(
-        'Item',
+        Item,
         on_delete=models.CASCADE,
         related_name='assets',
         db_constraint=False,
     )
     
-    # Identity
-    key = models.CharField(
-        max_length=100,
-        help_text=_("Unique key within item: 'visual', 'data', 'thumbnail', etc."),
+    # Link to Variable (carries units, palette, visualization config)
+    variable = models.ForeignKey(
+        'georivacore.Variable',
+        on_delete=models.CASCADE,
+        related_name='assets',
     )
-    title = models.CharField(max_length=255, blank=True)
-    description = models.TextField(blank=True)
     
-    # File info
+    # File location
     href = models.CharField(
         max_length=500,
-        help_text=_("Storage path or URL to the asset"),
+        help_text=_("Storage path or URL"),
     )
+    
     media_type = models.CharField(
         max_length=100,
-        help_text=_("MIME type"),
-    )
-    file_size = models.BigIntegerField(
-        null=True,
         blank=True,
-        help_text=_("File size in bytes"),
+        help_text=_("MIME type"),
     )
     
     # Classification
@@ -194,52 +206,72 @@ class Asset(Orderable):
         models.CharField(max_length=20, choices=Role.choices),
         default=list,
     )
-    format = models.CharField(max_length=20, choices=Format.choices)
-    data_type = models.CharField(
+    format = models.CharField(
         max_length=20,
-        choices=DataType.choices,
-        null=True,
+        choices=Format.choices,
         blank=True,
     )
     
-    # Dimensions (for raster assets)
+    # File metadata
+    file_size = models.BigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=64, blank=True)
+    
+    # Raster info (if different from Item)
     width = models.IntegerField(null=True, blank=True)
     height = models.IntegerField(null=True, blank=True)
     bands = models.IntegerField(null=True, blank=True, default=1)
     
-    # Projection info
-    proj_epsg = models.IntegerField(null=True, blank=True)
-    proj_bbox = ArrayField(
-        models.FloatField(),
-        size=4,
-        null=True,
-        blank=True,
-    )
+    # Statistics (computed during processing)
+    stats_min = models.FloatField(null=True, blank=True)
+    stats_max = models.FloatField(null=True, blank=True)
+    stats_mean = models.FloatField(null=True, blank=True)
+    stats_std = models.FloatField(null=True, blank=True)
     
-    # Format-specific fields stored as JSON
-    # Examples:
-    #   PNG: {"imageUnscale": [0, 100], "palette": "viridis"}
-    #   COG: {"overviews": [2,4,8,16], "blocksize": 512, "compression": "deflate"}
+    # Format-specific fields
     extra_fields = models.JSONField(default=dict, blank=True)
     
     class Meta:
         ordering = ['sort_order']
         constraints = [
             models.UniqueConstraint(
-                fields=['item', 'key'],
-                name='unique_asset_key_per_item'
+                fields=['item', 'variable', 'format'],
+                name='unique_format_per_variable_per_item'
             ),
         ]
         indexes = [
-            models.Index(fields=['item', 'format']),
-            models.Index(fields=['item', 'key']),
+            models.Index(fields=['item']),
+            models.Index(fields=['item', 'variable']),
         ]
     
     def __str__(self):
-        return f"{self.item} / {self.key} ({self.format})"
+        return f"{self.item} / {self.variable.slug}"
     
     # =========================================================================
-    # Format-Specific Properties
+    # Properties from Variable (convenience accessors)
+    # =========================================================================
+    
+    @property
+    def name(self):
+        return self.variable.name
+    
+    @property
+    def units(self):
+        return self.variable.units
+    
+    @property
+    def palette(self):
+        return self.variable.palette
+    
+    @property
+    def value_range(self):
+        """Get value range from variable or computed stats."""
+        return (
+            self.variable.value_min or self.stats_min,
+            self.variable.value_max or self.stats_max,
+        )
+    
+    # =========================================================================
+    # Format checks
     # =========================================================================
     
     @property
@@ -248,53 +280,38 @@ class Asset(Orderable):
     
     @property
     def is_data(self) -> bool:
-        return self.format in (self.Format.COG, self.Format.GEOTIFF)
+        return self.format in (self.Format.COG, self.Format.GEOTIFF, self.Format.ZARR)
     
     @property
     def is_cog(self) -> bool:
         return self.format == self.Format.COG
     
-    # -------------------------------------------------------------------------
-    # PNG-specific
-    # -------------------------------------------------------------------------
+    @property
+    def is_zarr(self) -> bool:
+        return self.format == self.Format.ZARR
+    
+    # =========================================================================
+    # Extra fields accessors
+    # =========================================================================
     
     @property
-    def image_unscale(self) -> tuple:
-        """For PNG: [min, max] values to unscale byte values back to data range."""
+    def image_unscale(self):
+        """For PNG: [min, max] to unscale bytes back to data range."""
         return self.extra_fields.get('imageUnscale')
     
     @property
-    def palette(self) -> str:
-        """For PNG: color palette name."""
-        return self.extra_fields.get('palette')
-    
-    @property
-    def scale_type(self) -> str:
-        """For PNG: scaling type (linear, log, sqrt, diverging)."""
-        return self.extra_fields.get('scale', 'linear')
-    
-    # -------------------------------------------------------------------------
-    # COG-specific
-    # -------------------------------------------------------------------------
-    
-    @property
-    def overviews(self) -> list:
-        """For COG: overview levels [2, 4, 8, 16]."""
+    def overviews(self):
+        """For COG: overview levels."""
         return self.extra_fields.get('overviews', [])
     
     @property
-    def blocksize(self) -> int:
-        """For COG: internal tile size."""
-        return self.extra_fields.get('blocksize', 512)
-    
-    @property
-    def compression(self) -> str:
+    def compression(self):
         """For COG: compression method."""
-        return self.extra_fields.get('compression', 'deflate')
+        return self.extra_fields.get('compression')
     
     @property
     def nodata(self):
-        """For COG/GeoTIFF: nodata value."""
+        """Nodata value."""
         return self.extra_fields.get('nodata')
     
     # =========================================================================
@@ -308,29 +325,56 @@ class Asset(Orderable):
 
 
 # =============================================================================
-# Manager for common queries
+# Custom Manager
 # =============================================================================
 
 class ItemManager(models.Manager):
     """Custom manager for Item with common query patterns."""
     
-    def for_dataset(self, dataset):
-        """Get items for a dataset, ordered by time descending."""
-        return self.filter(dataset=dataset).order_by('-time')
+    def for_collection(self, collection):
+        """Get items for a collection, ordered by time descending."""
+        return self.filter(collection=collection).order_by('-time')
     
-    def latest_for_dataset(self, dataset):
-        """Get the most recent item for a dataset."""
-        return self.for_dataset(dataset).first()
+    def latest(self, collection=None):
+        """Get the most recent item."""
+        qs = self.all()
+        if collection:
+            qs = qs.filter(collection=collection)
+        return qs.order_by('-time').first()
     
-    def in_time_range(self, start, end):
+    def latest_forecast_run(self, collection):
+        """Get items from the latest forecast run."""
+        latest_ref = (
+            self.filter(collection=collection, reference_time__isnull=False)
+            .order_by('-reference_time')
+            .values('reference_time')
+            .first()
+        )
+        if latest_ref:
+            return self.filter(
+                collection=collection,
+                reference_time=latest_ref['reference_time']
+            ).order_by('time')
+        return self.none()
+    
+    def in_time_range(self, start, end, collection=None):
         """Get items within a time range."""
-        return self.filter(time__gte=start, time__lte=end)
+        qs = self.filter(time__gte=start, time__lte=end)
+        if collection:
+            qs = qs.filter(collection=collection)
+        return qs.order_by('time')
+    
+    def valid_at(self, valid_time, collection=None):
+        """Get items valid at a specific time."""
+        qs = self.filter(time=valid_time)
+        if collection:
+            qs = qs.filter(collection=collection)
+        return qs.order_by('-reference_time')
     
     def with_assets(self):
         """Prefetch assets for efficiency."""
-        return self.prefetch_related('assets')
+        return self.prefetch_related('assets', 'assets__variable')
 
 
-# Add manager to Item
 Item.objects = ItemManager()
 Item.objects.contribute_to_class(Item, 'objects')
