@@ -368,7 +368,7 @@ class STACCatalogSerializer(serializers.Serializer):
             {"rel": "search", "href": f"{base_url}search", "type": "application/geo+json", "method": "POST"},
             {
                 "rel": "service-desc",
-                "href": f"{base_url}api",
+                "href": f"{base_url}openapi",
                 "type": "application/vnd.oai.openapi+json;version=3.0",
                 "title": "OpenAPI definition",
             },

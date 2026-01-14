@@ -13,7 +13,7 @@ from rest_framework.response import Response
 def get_openapi_schema(request: Request) -> dict:
     """Generate OpenAPI 3.0 schema for STAC API."""
     
-    base_url = request.build_absolute_uri('/stac/')
+    base_url = request.build_absolute_uri('/api/stac/')
     
     return {
         "openapi": "3.0.3",
@@ -326,7 +326,8 @@ def get_openapi_schema(request: Request) -> dict:
                         "temporal": {
                             "type": "object",
                             "properties": {
-                                "interval": {"type": "array", "items": {"type": "array", "items": {"type": "string", "nullable": True}}},
+                                "interval": {"type": "array",
+                                             "items": {"type": "array", "items": {"type": "string", "nullable": True}}},
                             },
                         },
                     },
