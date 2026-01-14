@@ -7,6 +7,7 @@ Asset: Individual files associated with an Item, linked to Variables
 
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
@@ -317,8 +318,8 @@ class Asset(TimeStampedModel, Orderable):
     # =========================================================================
     # URL Generation
     # =========================================================================
-    
-    def get_url(self) -> str:
+    @cached_property
+    def url(self) -> str:
         """Get public URL to this asset."""
         from georiva.core.storage import storage_manager
         return storage_manager.url(self.href)

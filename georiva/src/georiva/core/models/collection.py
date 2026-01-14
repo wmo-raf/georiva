@@ -67,10 +67,6 @@ class Collection(TimeStampedModel, ClusterableModel):
     def __str__(self):
         return f"{self.catalog.slug}/{self.slug}"
     
-    @property
-    def zarr_store(self) -> str:
-        return f"zarr/{self.catalog.slug}/{self.slug}.zarr"
-    
     panels = [
         MultiFieldPanel([
             FieldPanel('name'),

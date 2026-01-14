@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from georiva.core.models import Collection
+from georiva.core.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,6 @@ def minio_event_webhook(request):
         logger.info(f"Event {key} is in collection {collection_slug}")
         
         # Queue processing task
-        # process_incoming_file.delay(collection.id, str(file_path))
+        process_incoming_file(collection.id, str(file_path))
     
     return JsonResponse({"status": "queued"})

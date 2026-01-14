@@ -14,6 +14,8 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 GDAL_LIBRARY_PATH = env.str('GDAL_LIBRARY_PATH', None)
 GEOS_LIBRARY_PATH = env.str('GEOS_LIBRARY_PATH', None)
 
+CORS_ALLOW_ALL_ORIGINS = True
+
 try:
     from .local import *
 except ImportError:

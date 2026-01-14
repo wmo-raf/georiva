@@ -86,19 +86,11 @@ class IngestionService:
     
     def __init__(self):
         self.logger = logging.getLogger("georiva.ingestion")
-        self._zarr_manager = None
     
     @property
     def storage(self):
         from georiva.core.storage import storage_manager
         return storage_manager
-    
-    @property
-    def zarr_manager(self):
-        if self._zarr_manager is None:
-            from georiva.core.zarr_manager import ZarrPyramidManager
-            self._zarr_manager = ZarrPyramidManager(self.storage)
-        return self._zarr_manager
     
     # =========================================================================
     # Main Entry Point
@@ -472,18 +464,6 @@ class IngestionService:
         
         except Exception as e:
             self.logger.warning(f"Metadata save failed for {variable.slug}: {e}")
-        
-        # Update Zarr store
-        try:
-            self.zarr_manager.append_timestep(
-                collection=item.collection,
-                variable=variable,
-                timestamp=timestamp,
-                data=final_data,
-                bounds=bounds,
-            )
-        except Exception as e:
-            self.logger.warning(f"Zarr update failed for {variable.slug}: {e}")
         
         # Cleanup
         del final_data, final_rgba

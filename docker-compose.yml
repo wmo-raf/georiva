@@ -1,0 +1,26 @@
+services:
+  georiva-minio:
+    image: minio/minio:latest
+    container_name: georiva-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_NOTIFY_WEBHOOK_ENABLE_primary: "on"
+      MINIO_NOTIFY_WEBHOOK_ENDPOINT_primary: "http://host.docker.internal:8000/api/webhook/"
+      MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_primary: ${MINIO_WEBHOOK_BEARER_TOKEN}
+    volumes:
+      - ./data:/data
+
+  georiva-stac-browser:
+    image: ghcr.io/radiantearth/stac-browser:latest
+    container_name: georiva-stac-browser
+    restart: unless-stopped
+    ports:
+      - 8080:8080
+    environment:
+      SB_catalogUrl: "http://127.0.0.1:8000/api/stac/"

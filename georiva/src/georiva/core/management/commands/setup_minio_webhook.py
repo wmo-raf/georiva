@@ -36,8 +36,6 @@ class Command(BaseCommand):
             self.stdout.write(f"Bucket '{bucket_name}' not found. Creating...")
             s3.create_bucket(Bucket=bucket_name)
         
-        print(settings.MINIO_WEBHOOK_ARN)
-        
         # 4. Configure Notification
         # We target the ARN we added to settings.py
         notification_config = {

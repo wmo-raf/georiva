@@ -53,11 +53,15 @@ INSTALLED_APPS = [
     "georiva.loaders",
     "georiva.analysis",
     "georiva.api",
+    "georiva.stac",
     
     'django_cleanup.apps.CleanupConfig',
+    'rest_framework',
+    "corsheaders",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
