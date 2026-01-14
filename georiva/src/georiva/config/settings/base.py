@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "georiva.formats",
     "georiva.loaders",
     "georiva.analysis",
+    "georiva.api",
     
     'django_cleanup.apps.CleanupConfig',
 ]
@@ -172,6 +173,9 @@ AWS_QUERYSTRING_AUTH = env.bool('AWS_QUERYSTRING_AUTH', default=True)
 AWS_S3_FILE_OVERWRITE = env.bool('AWS_S3_FILE_OVERWRITE', default=True)
 AWS_S3_SIGNATURE_VERSION = env('AWS_S3_SIGNATURE_VERSION', default='s3v4')
 AWS_S3_ADDRESSING_STYLE = env('AWS_S3_ADDRESSING_STYLE', default='path')
+
+MINIO_WEBHOOK_ARN = env('MINIO_WEBHOOK_ARN', default='arn:minio:sqs::primary:webhook')
+MINIO_WEBHOOK_BEARER_TOKEN = env('MINIO_WEBHOOK_BEARER_TOKEN', default=None)
 
 # Configure storage backends
 if GEORIVA_STORAGE_BACKEND == 's3':
