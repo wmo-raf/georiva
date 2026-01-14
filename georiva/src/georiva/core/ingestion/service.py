@@ -252,6 +252,13 @@ class IngestionService:
         meta = extractor.get_metadata(first_var, local_path, timestamp)
         width, height = meta['width'], meta['height']
         bounds = tuple(meta['bounds'])
+        
+        # validate bounds
+        if not bounds or len(bounds) < 4:
+            raise ValueError(f"Invalid bounds from metadata: {bounds}")
+        
+        bounds = tuple(bounds)
+        
         crs = meta.get('crs', collection.crs or 'EPSG:4326')
         
         # Ensure UTC
@@ -509,16 +516,16 @@ class IngestionService:
             update_fields.append('time_end')
         
         # Spatial bounds (expand to encompass new data)
-        if collection.bounds is None:
+        current = collection.bounds
+        if not current or len(current) < 4:
             collection.bounds = list(bounds)
             update_fields.append('bounds')
         else:
-            current = collection.bounds
             expanded = [
-                min(current[0], bounds[0]),  # west
-                min(current[1], bounds[1]),  # south
-                max(current[2], bounds[2]),  # east
-                max(current[3], bounds[3]),  # north
+                min(current[0], bounds[0]),
+                min(current[1], bounds[1]),
+                max(current[2], bounds[2]),
+                max(current[3], bounds[3]),
             ]
             if expanded != current:
                 collection.bounds = expanded
