@@ -1,16 +1,10 @@
 """
-GeoRiva Zarr Manager using ndpyramid (FIXED VERSION)
+GeoRiva Zarr Manager using ndpyramid
 
-This module provides Zarr pyramid management for datasets using CarbonPlan's
-ndpyramid library, ensuring full compatibility with @carbonplan/maps.
+Creates multi-resolution Zarr pyramids for Variables using ndpyramid,
 
-FIXES:
-- Properly handles appending timesteps by resampling to existing grid
-- Avoids coordinate alignment issues with xr.concat
-- Uses zarr append mode for efficient updates
-
-Installation requirements:
-    pip install "ndpyramid[complete]"
+Store structure:
+    zarr/{catalog_slug}/{collection_slug}/{variable_slug}.zarr
 """
 
 import logging
@@ -18,18 +12,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
+import ndpyramid  # noqa
 import numpy as np
+import rioxarray  # noqa
 import xarray as xr
 import zarr
+from odc.geo.xr import assign_crs
 
 logger = logging.getLogger(__name__)
 
 
 class ZarrPyramidManager:
     """
-    Manages Zarr pyramids for datasets using ndpyramid.
+    Manages Zarr pyramids for Variables using ndpyramid.
     
-    Creates multi-resolution pyramids compatible with @carbonplan/maps.
+    Creates multi-resolution pyramids and allows appending new timesteps.
     """
     
     DEFAULT_LEVELS = 6
@@ -40,35 +37,34 @@ class ZarrPyramidManager:
     def __init__(self, storage_manager=None):
         """Initialize ZarrPyramidManager."""
         if storage_manager is None:
-            try:
-                from georiva.core.storage import storage_manager
-                self.storage = storage_manager
-            except ImportError:
-                self.storage = None
+            from georiva.core.storage import storage_manager
+            self.storage = storage_manager
         else:
             self.storage = storage_manager
+    
+    def get_zarr_path(
+            self,
+            collection: 'Collection',
+            variable: 'Variable',
+    ) -> str:
+        """
+        Get the Zarr store path for a Variable.
         
-        self._check_dependencies()
+        Returns:
+            Path like: zarr/{catalog_slug}/{collection_slug}/{variable_slug}.zarr
+        """
+        catalog_slug = collection.catalog.slug
+        collection_slug = collection.slug
+        variable_slug = variable.slug
+        return f"zarr/{catalog_slug}/{collection_slug}/{variable_slug}.zarr"
     
-    def _check_dependencies(self):
-        """Check that required dependencies are available."""
-        try:
-            import ndpyramid
-            import rioxarray
-            self._ndpyramid_available = True
-        except ImportError as e:
-            logger.warning(f"ndpyramid or rioxarray not available: {e}")
-            self._ndpyramid_available = False
-    
-    def get_zarr_path(self, dataset) -> str:
-        """Get the Zarr store path for a dataset."""
-        if hasattr(dataset, 'collection'):
-            return f"zarr/{dataset.collection.slug}/{dataset.slug}.zarr"
-        return f"zarr/{dataset.slug}.zarr"
-    
-    def get_store_path(self, dataset) -> str:
+    def get_store_path(
+            self,
+            collection: 'Collection',
+            variable: 'Variable',
+    ) -> str:
         """Get the full filesystem path to the Zarr store."""
-        zarr_path = self.get_zarr_path(dataset)
+        zarr_path = self.get_zarr_path(collection, variable)
         
         if self.storage and hasattr(self.storage, 'storage'):
             base_path = Path(self.storage.storage.location)
@@ -79,28 +75,22 @@ class ZarrPyramidManager:
     
     def create_pyramid(
             self,
-            dataset,
+            collection: 'Collection',
+            variable: 'Variable',
             data: Union[np.ndarray, xr.DataArray, xr.Dataset],
             timestamp: datetime,
             bounds: Tuple[float, float, float, float],
             crs: str = None,
             levels: int = None,
-            variable_name: str = "value",
             reproject_to_mercator: bool = True,
     ) -> bool:
-        """
-        Create a new Zarr pyramid for a dataset.
-        """
-        if not self._ndpyramid_available:
-            logger.error("ndpyramid not available")
-            return False
-        
+        """Create a new Zarr pyramid for a Variable."""
         from ndpyramid import pyramid_reproject, pyramid_coarsen
         
         crs = crs or self.DEFAULT_CRS
         levels = levels or self.DEFAULT_LEVELS
+        variable_name = variable.slug
         
-        # Prepare dataset
         ds = self._prepare_dataset(
             data=data,
             timestamp=timestamp,
@@ -126,19 +116,19 @@ class ZarrPyramidManager:
                     boundary='trim',
                 )
             
-            # Add metadata
             pyramid.attrs.update({
-                'georiva_dataset': dataset.slug if hasattr(dataset, 'slug') else str(dataset),
+                'georiva_catalog': collection.catalog.slug,
+                'georiva_collection': collection.slug,
+                'georiva_variable': variable.slug,
                 'variable': variable_name,
-                'units': getattr(dataset, 'units', '') or '',
+                'units': variable.units or '',
                 'clim': [
-                    float(getattr(dataset, 'value_min', None) or np.nanmin(data)),
-                    float(getattr(dataset, 'value_max', None) or np.nanmax(data)),
+                    float(variable.value_min) if variable.value_min is not None else float(np.nanmin(data)),
+                    float(variable.value_max) if variable.value_max is not None else float(np.nanmax(data)),
                 ],
             })
             
-            # Write to Zarr
-            store_path = self.get_store_path(dataset)
+            store_path = self.get_store_path(collection, variable)
             Path(store_path).parent.mkdir(parents=True, exist_ok=True)
             
             pyramid.to_zarr(store_path, zarr_format=2, consolidated=True, mode='w')
@@ -152,73 +142,56 @@ class ZarrPyramidManager:
     
     def append_timestep(
             self,
-            dataset,
+            collection: 'Collection',
+            variable: 'Variable',
             timestamp: datetime,
             data: Union[np.ndarray, xr.DataArray],
             bounds: Tuple[float, float, float, float],
             crs: str = None,
-            variable_name: str = "value",
     ) -> bool:
-        """
-        Append a new timestep to an existing Zarr pyramid.
-        """
+        """Append a new timestep to an existing Zarr pyramid."""
         crs = crs or self.DEFAULT_CRS
-        store_path = self.get_store_path(dataset)
+        store_path = self.get_store_path(collection, variable)
         
-        # Check if pyramid exists
         if not Path(store_path).exists():
             logger.info(f"Creating new pyramid for {store_path}")
             return self.create_pyramid(
-                dataset=dataset,
+                collection=collection,
+                variable=variable,
                 data=data,
                 timestamp=timestamp,
                 bounds=bounds,
                 crs=crs,
-                variable_name=variable_name,
             )
         
-        # Append to existing
         return self._append_to_existing(
-            dataset=dataset,
+            collection=collection,
+            variable=variable,
             timestamp=timestamp,
             data=data,
             bounds=bounds,
             crs=crs,
-            variable_name=variable_name,
         )
     
     def _append_to_existing(
             self,
-            dataset,
+            collection: 'Collection',
+            variable: 'Variable',
             timestamp: datetime,
             data: np.ndarray,
             bounds: Tuple[float, float, float, float],
             crs: str,
-            variable_name: str,
     ) -> bool:
-        """
-        Append a timestep to an existing pyramid.
-        
-        KEY FIX: Instead of regenerating the pyramid (which creates different
-        coordinates each time), we:
-        1. Read the existing coordinates from each level
-        2. Resample new data to match those exact coordinates
-        3. Append using zarr's native append functionality
-        """
-        import rioxarray  # noqa
-        from odc.geo.xr import assign_crs
-        
-        store_path = self.get_store_path(dataset)
+        """Append a timestep to an existing pyramid."""
+        store_path = self.get_store_path(collection, variable)
+        variable_name = variable.slug
         
         try:
-            # Convert timestamp to numpy datetime64
             ts_np = np.datetime64(timestamp, 'ns')
             
-            # Prepare source data as xarray for reprojection
             height, width = data.shape
             minx, miny, maxx, maxy = bounds
             
-            # Create source coordinates
             src_x = np.linspace(minx, maxx, width, dtype=np.float64)
             src_y = np.linspace(maxy, miny, height, dtype=np.float64)
             
@@ -230,8 +203,6 @@ class ZarrPyramidManager:
             )
             src_da = assign_crs(src_da, crs)
             
-            # Open existing pyramid to get level info
-            # Use decode_times=False to avoid CF convention time decoding issues
             existing_tree = xr.open_datatree(
                 store_path,
                 engine='zarr',
@@ -245,29 +216,22 @@ class ZarrPyramidManager:
                 existing_tree.close()
                 return False
             
-            # Process each level
             for level_name in level_names:
                 level_ds = existing_tree[level_name].to_dataset()
                 
-                # Get target coordinates from existing level
                 target_x = level_ds['x'].values
                 target_y = level_ds['y'].values
                 target_crs = level_ds.rio.crs if hasattr(level_ds, 'rio') else None
                 
-                # Reproject/resample source data to target grid
-                # Use rioxarray's reproject_match for proper CRS handling
                 if target_crs and str(target_crs) != crs:
-                    # Need to reproject
                     resampled = self._reproject_to_target(
                         src_da, target_x, target_y, target_crs
                     )
                 else:
-                    # Same CRS, just resample
                     resampled = self._resample_to_target(
                         data, target_y, target_x
                     )
                 
-                # Append to zarr store using zarr API directly
                 level_path = f"{store_path}/{level_name}"
                 self._zarr_append_timestep(
                     level_path,
@@ -277,8 +241,6 @@ class ZarrPyramidManager:
                 )
             
             existing_tree.close()
-            
-            # Reconsolidate metadata
             zarr.consolidate_metadata(store_path)
             
             logger.info(f"Appended timestep {timestamp} to {store_path}")
@@ -295,20 +257,14 @@ class ZarrPyramidManager:
             target_y: np.ndarray,
             target_crs,
     ) -> np.ndarray:
-        """
-        Reproject source data to target CRS and grid.
-        """
-        import rioxarray  # noqa
-        
-        # Create a template dataset with target coordinates
+        """Reproject source data to target CRS and grid."""
         target_shape = (len(target_y), len(target_x))
         
-        # Use rioxarray reproject
         try:
             reprojected = src_da.rio.reproject(
                 target_crs,
                 shape=target_shape,
-                resampling=1,  # Bilinear
+                resampling=1,
             )
             return reprojected.values.astype(np.float32)
         except Exception as e:
@@ -321,9 +277,7 @@ class ZarrPyramidManager:
             target_y: np.ndarray,
             target_x: np.ndarray,
     ) -> np.ndarray:
-        """
-        Resample data to target grid dimensions using scipy.
-        """
+        """Resample data to target grid dimensions."""
         from scipy.ndimage import zoom as scipy_zoom
         
         target_shape = (len(target_y), len(target_x))
@@ -332,11 +286,9 @@ class ZarrPyramidManager:
         if src_shape == target_shape:
             return data.astype(np.float32)
         
-        # Calculate zoom factors
         zoom_y = target_shape[0] / src_shape[0]
         zoom_x = target_shape[1] / src_shape[1]
         
-        # Use bilinear interpolation (order=1)
         resampled = scipy_zoom(
             data.astype(np.float32),
             (zoom_y, zoom_x),
@@ -344,7 +296,6 @@ class ZarrPyramidManager:
             mode='nearest',
         )
         
-        # Ensure exact target shape (zoom can be off by 1 pixel)
         if resampled.shape != target_shape:
             result = np.full(target_shape, np.nan, dtype=np.float32)
             min_y = min(resampled.shape[0], target_shape[0])
@@ -361,17 +312,10 @@ class ZarrPyramidManager:
             data: np.ndarray,
             timestamp: np.datetime64,
     ):
-        """
-        Append a timestep to a zarr level using zarr's native API.
-        
-        This is more reliable than xarray concat for appending.
-        Compatible with both Zarr 2.x and Zarr 3.x.
-        """
+        """Append a timestep to a zarr level."""
         store = zarr.open_group(level_path, mode='r+')
         
-        # Get or create time array
         if 'time' not in store:
-            # Zarr 3.x requires shape as keyword argument
             time_data = np.array([timestamp], dtype='datetime64[ns]')
             store.create_dataset(
                 name='time',
@@ -386,10 +330,9 @@ class ZarrPyramidManager:
             time_arr.resize((current_len + 1,))
             time_arr[current_len] = timestamp
         
-        # Get or create data array
         if variable_name not in store:
             height, width = data.shape
-            initial_data = data[np.newaxis, :, :].astype(np.float32)  # Add time dimension
+            initial_data = data[np.newaxis, :, :].astype(np.float32)
             store.create_dataset(
                 name=variable_name,
                 shape=initial_data.shape,
@@ -397,13 +340,10 @@ class ZarrPyramidManager:
                 dtype=np.float32,
                 data=initial_data,
             )
-            # Set dimension metadata
             store[variable_name].attrs['_ARRAY_DIMENSIONS'] = ['time', 'y', 'x']
         else:
             var_arr = store[variable_name]
             current_time_len = var_arr.shape[0]
-            
-            # Resize and append - use tuple for new shape
             new_shape = (current_time_len + 1, var_arr.shape[1], var_arr.shape[2])
             var_arr.resize(new_shape)
             var_arr[current_time_len, :, :] = data
@@ -417,8 +357,6 @@ class ZarrPyramidManager:
             variable_name: str,
     ) -> xr.Dataset:
         """Prepare data as an xarray Dataset with proper CRS and coordinates."""
-        from odc.geo.xr import assign_crs
-        
         if isinstance(data, np.ndarray):
             if data.ndim != 2:
                 raise ValueError(f"Expected 2D array, got {data.ndim}D")
@@ -457,9 +395,13 @@ class ZarrPyramidManager:
         
         return ds
     
-    def get_pyramid_info(self, dataset) -> Optional[dict]:
+    def get_pyramid_info(
+            self,
+            collection: 'Collection',
+            variable: 'Variable',
+    ) -> Optional[dict]:
         """Get information about an existing pyramid."""
-        store_path = self.get_store_path(dataset)
+        store_path = self.get_store_path(collection, variable)
         
         try:
             tree = xr.open_datatree(store_path, engine='zarr')
@@ -488,11 +430,15 @@ class ZarrPyramidManager:
             logger.debug(f"Could not get pyramid info: {e}")
             return None
     
-    def delete_pyramid(self, dataset) -> bool:
-        """Delete a dataset's Zarr pyramid."""
+    def delete_pyramid(
+            self,
+            collection: 'Collection',
+            variable: 'Variable',
+    ) -> bool:
+        """Delete a Variable's Zarr pyramid."""
         import shutil
         
-        store_path = self.get_store_path(dataset)
+        store_path = self.get_store_path(collection, variable)
         
         try:
             path = Path(store_path)
@@ -503,178 +449,3 @@ class ZarrPyramidManager:
         except Exception as e:
             logger.error(f"Failed to delete pyramid: {e}")
             return False
-
-
-# =============================================================================
-# FALLBACK FOR WHEN NDPYRAMID IS NOT AVAILABLE
-# =============================================================================
-
-class SimpleZarrManager:
-    """
-    Simple Zarr manager without pyramids.
-    
-    Use as fallback when ndpyramid is not installed.
-    """
-    
-    def __init__(self, storage_manager=None):
-        self.storage = storage_manager
-    
-    def get_zarr_path(self, dataset) -> str:
-        if hasattr(dataset, 'collection'):
-            return f"zarr/{dataset.collection.slug}/{dataset.slug}.zarr"
-        return f"zarr/{dataset.slug}.zarr"
-    
-    def get_store_path(self, dataset) -> str:
-        zarr_path = self.get_zarr_path(dataset)
-        if self.storage and hasattr(self.storage, 'storage'):
-            base_path = Path(self.storage.storage.location)
-        else:
-            base_path = Path("./data")
-        return str(base_path / zarr_path)
-    
-    def append_timestep(
-            self,
-            dataset,
-            timestamp: datetime,
-            data: np.ndarray,
-            bounds: Tuple[float, float, float, float],
-            crs: str = "EPSG:4326",
-            variable_name: str = "value",
-    ) -> bool:
-        """Append a timestep to a simple Zarr store."""
-        from numcodecs import Blosc
-        
-        store_path = self.get_store_path(dataset)
-        Path(store_path).parent.mkdir(parents=True, exist_ok=True)
-        
-        compressor = Blosc(cname='zstd', clevel=3, shuffle=Blosc.BITSHUFFLE)
-        
-        try:
-            store = zarr.open_group(store_path, mode='a')
-            
-            height, width = data.shape
-            minx, miny, maxx, maxy = bounds
-            ts_ns = np.datetime64(timestamp, 'ns')
-            
-            if 'x' not in store:
-                x_coords = np.linspace(minx, maxx, width, dtype=np.float64)
-                store.create_dataset(name='x', shape=x_coords.shape, dtype=x_coords.dtype, data=x_coords)
-            
-            if 'y' not in store:
-                y_coords = np.linspace(maxy, miny, height, dtype=np.float64)
-                store.create_dataset(name='y', shape=y_coords.shape, dtype=y_coords.dtype, data=y_coords)
-            
-            if 'time' not in store:
-                store.create_dataset(name='time', shape=(0,), chunks=(100,), dtype='datetime64[ns]')
-            
-            if variable_name not in store:
-                store.create_dataset(
-                    name=variable_name,
-                    shape=(0, height, width),
-                    chunks=(1, 128, 128),
-                    dtype=np.float32,
-                    compressor=compressor,
-                    fill_value=np.nan,
-                )
-            
-            # Append time
-            time_arr = store['time']
-            current_len = time_arr.shape[0]
-            time_arr.resize((current_len + 1,))
-            time_arr[current_len] = ts_ns
-            
-            # Append data
-            value_arr = store[variable_name]
-            new_shape = (current_len + 1, value_arr.shape[1], value_arr.shape[2])
-            value_arr.resize(new_shape)
-            value_arr[current_len, :, :] = data.astype(np.float32)
-            
-            store.attrs.update({
-                '_ARRAY_DIMENSIONS': ['time', 'y', 'x'],
-                'crs': crs,
-                'bounds': list(bounds),
-            })
-            
-            logger.info(f"Appended to simple Zarr store: {store_path}")
-            return True
-        
-        except Exception as e:
-            logger.exception(f"Failed to append: {e}")
-            return False
-    
-    def get_pyramid_info(self, dataset):
-        return None
-    
-    def delete_pyramid(self, dataset):
-        import shutil
-        store_path = self.get_store_path(dataset)
-        try:
-            if Path(store_path).exists():
-                shutil.rmtree(store_path)
-            return True
-        except:
-            return False
-
-
-# =============================================================================
-# FACTORY AND CONVENIENCE FUNCTIONS
-# =============================================================================
-
-def get_zarr_manager(storage_manager=None):
-    """Get the appropriate Zarr manager based on available dependencies."""
-    try:
-        import ndpyramid
-        import rioxarray
-        return ZarrPyramidManager(storage_manager)
-    except ImportError:
-        logger.warning("ndpyramid not available, using SimpleZarrManager")
-        return SimpleZarrManager(storage_manager)
-
-
-# Global instance
-_zarr_manager = None
-
-
-def get_default_zarr_manager():
-    """Get the default Zarr manager instance."""
-    global _zarr_manager
-    if _zarr_manager is None:
-        _zarr_manager = get_zarr_manager()
-    return _zarr_manager
-
-
-def update_zarr_for_item(item, raw_data: np.ndarray, companion_data: np.ndarray = None):
-    """
-    Update the Zarr store when a new Item is created.
-    
-    Usage in IngestionService:
-        item.save()
-        update_zarr_for_item(item, raw_data)
-    """
-    manager = get_default_zarr_manager()
-    
-    dataset = item.dataset
-    timestamp = item.time
-    bounds = tuple(item.bounds)
-    crs = getattr(item, 'crs', None) or "EPSG:4326"
-    
-    if dataset.is_vector and companion_data is not None:
-        magnitude = np.hypot(raw_data, companion_data)
-        manager.append_timestep(
-            dataset=dataset,
-            timestamp=timestamp,
-            data=magnitude,
-            bounds=bounds,
-            crs=crs,
-            variable_name='speed',
-        )
-    else:
-        var_name = getattr(dataset, 'primary_variable', None) or 'value'
-        manager.append_timestep(
-            dataset=dataset,
-            timestamp=timestamp,
-            data=raw_data,
-            bounds=bounds,
-            crs=crs,
-            variable_name=var_name,
-        )
