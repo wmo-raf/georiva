@@ -53,6 +53,9 @@ class VariableEncoder:
         # Normalize based on scale type
         normalized = self._normalize(data, vmin, vmax, variable.scale_type)
         
+        # Replace NaN with 0 before scaling (these pixels will have alpha=0 anyway)
+        normalized = np.nan_to_num(normalized, nan=0.0)
+        
         # Scale to 0-255
         scaled = np.clip(normalized * 255.0, 0, 255).astype(np.uint8)
         
