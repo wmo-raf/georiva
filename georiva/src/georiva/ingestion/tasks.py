@@ -1,7 +1,7 @@
 from celery import shared_task
 
-from .ingestion import IngestionService
-from .models import Collection
+from georiva.core.models import Collection
+from .service import IngestionService
 
 
 @shared_task(bind=True, max_retries=3)

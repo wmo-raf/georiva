@@ -9,7 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from georiva.core.models import Collection
-from georiva.core.tasks import process_incoming_file
+from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
 

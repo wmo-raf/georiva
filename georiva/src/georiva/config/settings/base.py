@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "georiva.core",
     "georiva.formats",
     "georiva.loaders",
+    "georiva.ingestion",
     "georiva.analysis",
     "georiva.api",
     "georiva.stac",
