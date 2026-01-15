@@ -3,10 +3,8 @@ from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
-from wagtail.snippets.models import register_snippet
 
 
-@register_snippet
 class Collection(TimeStampedModel, ClusterableModel):
     """
     Groups one or more Variables.

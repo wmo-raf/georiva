@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "georiva.analysis",
     "georiva.api",
     "georiva.stac",
+    "georiva.visualization",
     
     'django_cleanup.apps.CleanupConfig',
     'rest_framework',

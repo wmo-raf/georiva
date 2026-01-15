@@ -13,7 +13,6 @@ from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from polymorphic.models import PolymorphicModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
-from wagtail.snippets.models import register_snippet
 
 
 class LoaderConfig(PolymorphicModel, TimeStampedModel):
@@ -95,7 +94,6 @@ class LoaderConfig(PolymorphicModel, TimeStampedModel):
         ])
 
 
-@register_snippet
 class FTPLoaderConfig(LoaderConfig):
     """
     Configuration for loading data from FTP/SFTP servers.
