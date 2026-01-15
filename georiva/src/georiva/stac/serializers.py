@@ -362,8 +362,8 @@ class STACCatalogSerializer(serializers.Serializer):
         links = [
             {"rel": "self", "href": base_url, "type": "application/json", "title": "This catalog"},
             {"rel": "root", "href": base_url, "type": "application/json", "title": "Root catalog"},
-            {"rel": "conformance", "href": f"{base_url}conformance", "type": "application/json"},
-            {"rel": "data", "href": f"{base_url}collections", "type": "application/json", "title": "Collections"},
+            {"rel": "conformance", "href": f"{base_url}conformance/", "type": "application/json"},
+            {"rel": "data", "href": f"{base_url}collections/", "type": "application/json", "title": "Collections"},
             {"rel": "search", "href": f"{base_url}search", "type": "application/geo+json", "method": "GET"},
             {"rel": "search", "href": f"{base_url}search", "type": "application/geo+json", "method": "POST"},
             {
