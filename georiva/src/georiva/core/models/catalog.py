@@ -43,6 +43,8 @@ class Catalog(TimeStampedModel):
     file_format = models.CharField(max_length=20, choices=FileFormat.choices)
     archive_source_files = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
+    boundary = models.ForeignKey("adminboundarymanager.AdminBoundary", on_delete=models.SET_NULL, null=True,
+                                 blank=True, help_text="Optional boundary to clip data to")
     
     class Meta:
         ordering = ['name']
@@ -66,6 +68,7 @@ class Catalog(TimeStampedModel):
             FieldPanel('data_source'),
             FieldPanel('file_format'),
             FieldPanel('archive_source_files'),
+            FieldPanel('boundary'),
         ], heading="Ingestion Configuration"),
         FieldPanel('is_active'),
     ]

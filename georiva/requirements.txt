@@ -34,3 +34,4 @@ google-cloud-storage==3.6.0
 boto3==1.41.5
 dask[complete]
 django-cors-headers==4.9.0
+adm-boundary-manager==0.3.0

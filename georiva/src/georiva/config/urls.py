@@ -12,6 +12,7 @@ urlpatterns = [
     path("admin/", include(wagtailadmin_urls)),
     path("documents/", include(wagtaildocs_urls)),
     path("api/", include(georiva_urls), name="georiva_api"),
+    path("", include("adminboundarymanager.urls")),
 ]
 
 if settings.DEBUG:
