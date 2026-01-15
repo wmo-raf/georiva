@@ -1,3 +1,5 @@
+import json
+
 import boto3
 from botocore.exceptions import ClientError
 from django.conf import settings
@@ -5,7 +7,7 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = 'Configures MinIO bucket notifications'
+    help = 'Configures MinIO bucket notifications and public read access'
     
     def handle(self, *args, **kwargs):
         # 1. Safety Check: Only run if using S3/MinIO backend
@@ -36,8 +38,32 @@ class Command(BaseCommand):
             self.stdout.write(f"Bucket '{bucket_name}' not found. Creating...")
             s3.create_bucket(Bucket=bucket_name)
         
-        # 4. Configure Notification
-        # We target the ARN we added to settings.py
+        # 4. Set Public Read Policy
+        public_read_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "PublicReadGetObject",
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": ["s3:GetObject"],
+                    "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
+                }
+            ]
+        }
+        
+        try:
+            s3.put_bucket_policy(
+                Bucket=bucket_name,
+                Policy=json.dumps(public_read_policy)
+            )
+            self.stdout.write(self.style.SUCCESS(
+                f"Successfully set public read policy on '{bucket_name}'!"
+            ))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"Failed to set bucket policy: {e}"))
+        
+        # 5. Configure Notification
         notification_config = {
             'QueueConfigurations': [
                 {
