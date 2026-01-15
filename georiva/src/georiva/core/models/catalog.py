@@ -40,11 +40,28 @@ class Catalog(TimeStampedModel):
         GEOTIFF = 'geotiff', 'GeoTIFF'
         ZARR = 'zarr', 'ZARR'
     
+    class ClipMode(models.TextChoices):
+        NONE = 'none', 'No clipping'
+        BBOX = 'bbox', 'Bounding box only'
+        MASK = 'mask', 'Precise geometry mask'
+    
     file_format = models.CharField(max_length=20, choices=FileFormat.choices)
     archive_source_files = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
-    boundary = models.ForeignKey("adminboundarymanager.AdminBoundary", on_delete=models.SET_NULL, null=True,
-                                 blank=True, help_text="Optional boundary to clip data to")
+    
+    boundary = models.ForeignKey(
+        "adminboundarymanager.AdminBoundary",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Boundary to clip data to"
+    )
+    clip_mode = models.CharField(
+        max_length=20,
+        choices=ClipMode.choices,
+        default=ClipMode.MASK,
+        help_text="How to apply boundary clipping"
+    )
     
     class Meta:
         ordering = ['name']
@@ -68,7 +85,10 @@ class Catalog(TimeStampedModel):
             FieldPanel('data_source'),
             FieldPanel('file_format'),
             FieldPanel('archive_source_files'),
-            FieldPanel('boundary'),
         ], heading="Ingestion Configuration"),
+        MultiFieldPanel([
+            FieldPanel('boundary'),
+            FieldPanel('clip_mode'),
+        ], heading="Clipping Configuration"),
         FieldPanel('is_active'),
     ]

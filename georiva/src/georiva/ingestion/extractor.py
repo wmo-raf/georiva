@@ -8,6 +8,7 @@ import numpy as np
 
 from georiva.core.models import Variable, VariableSource
 from georiva.formats.registry import BaseFormatPlugin
+from georiva.ingestion.utils import apply_unit_conversion
 
 logger = logging.getLogger(__name__)
 
@@ -351,11 +352,14 @@ class VariableExtractor:
     # Statistics
     # =========================================================================
     
+    # In extractor.py - update compute_stats method
+    
     def compute_stats(
             self,
             variable: 'Variable',
             file_path: Path,
             timestamp: datetime,
+            window: dict = None,  # Add this parameter
     ) -> dict:
         """
         Compute global statistics for a Variable.
@@ -363,14 +367,30 @@ class VariableExtractor:
         For simple transforms (PASSTHROUGH, UNIT_CONVERT), uses lazy loading
         if the format plugin supports it. For complex transforms, falls back
         to full extraction.
+        
+        Args:
+            variable: Variable to compute stats for
+            file_path: Path to source file
+            timestamp: Timestamp to extract
+            window: Optional clip window dict with x_off, y_off, width, height
         """
         try:
             sources = list(variable.sources.order_by('sort_order'))
             if not sources:
                 return {'min': None, 'max': None, 'mean': None, 'std': None}
             
-            # For passthrough, try lazy loading
-            if variable.transform_type in (
+            # Convert window dict to tuple if provided
+            window_tuple = None
+            if window:
+                window_tuple = (
+                    window['x_off'],
+                    window['y_off'],
+                    window['width'],
+                    window['height'],
+                )
+            
+            # For passthrough, try lazy loading (only if no window - lazy doesn't support windowed reads well)
+            if window_tuple is None and variable.transform_type in (
                     variable.TransformType.PASSTHROUGH,
                     variable.TransformType.UNIT_CONVERT,
             ):
@@ -381,8 +401,8 @@ class VariableExtractor:
                 except NotImplementedError:
                     pass  # Fall through to full extraction
             
-            # Full extraction for complex transforms or if lazy not supported
-            data = self.extract(variable, file_path, timestamp)
+            # Full extraction for complex transforms, windowed reads, or if lazy not supported
+            data = self.extract(variable, file_path, timestamp, window=window_tuple)
             data = apply_unit_conversion(data, variable.unit_conversion)
             
             return {

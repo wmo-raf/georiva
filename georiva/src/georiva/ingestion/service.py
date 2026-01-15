@@ -4,47 +4,19 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Generator
+from typing import Optional
 
 import numpy as np
 import pytz
 
 from georiva.core.models import Variable, Collection
 from .asset_writer import AssetWriter
+from .clipper import BoundaryClipper
 from .encoder import VariableEncoder
 from .extractor import VariableExtractor
+from .utils import apply_unit_conversion, iter_windows
 
 logger = logging.getLogger(__name__)
-
-UNIT_CONVERSIONS = {
-    'K_to_C': lambda x: x - 273.15,
-    'Pa_to_hPa': lambda x: x * 0.01,
-    'm_to_mm': lambda x: x * 1000.0,
-    'ms_to_kmh': lambda x: x * 3.6,
-    'kgm2s_to_mm': lambda x: x * 3600.0,
-}
-
-
-def apply_unit_conversion(data: np.ndarray, conversion: str) -> np.ndarray:
-    """Apply unit conversion in-place where possible."""
-    if not conversion or conversion not in UNIT_CONVERSIONS:
-        return data
-    return UNIT_CONVERSIONS[conversion](data)
-
-
-def iter_windows(
-        width: int,
-        height: int,
-        block_size: int = 2048
-) -> Generator[tuple[int, int, int, int], None, None]:
-    """
-    Yield (x_offset, y_offset, width, height) windows for chunked processing.
-    """
-    for y in range(0, height, block_size):
-        h = min(block_size, height - y)
-        for x in range(0, width, block_size):
-            w = min(block_size, width - x)
-            yield x, y, w, h
 
 
 @dataclass
@@ -59,10 +31,29 @@ class IngestionResult:
     assets_created: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     
+    # Clipping info
+    clipped: bool = False
+    clip_boundary: str = ''
+    original_size: tuple = None
+    clipped_size: tuple = None
+    
     def add_error(self, msg: str):
         self.errors.append(msg)
         logger.error(msg)
+    
+    @property
+    def size_reduction_percent(self) -> Optional[float]:
+        """Calculate storage reduction from clipping."""
+        if self.original_size and self.clipped_size:
+            original_pixels = self.original_size[0] * self.original_size[1]
+            clipped_pixels = self.clipped_size[0] * self.clipped_size[1]
+            return 100 * (1 - clipped_pixels / original_pixels)
+        return None
 
+
+# =============================================================================
+# Ingestion Service
+# =============================================================================
 
 class IngestionService:
     """
@@ -71,17 +62,20 @@ class IngestionService:
     Flow:
     1. Resolve Catalog + Collection from file path
     2. Get format plugin based on Catalog.file_format
-    3. Extract timestamps from file
-    4. For each timestamp:
-       a. Create one Item for the Collection
-       b. For each Variable in Collection:
+    3. Initialize boundary clipper if Catalog has boundary
+    4. Extract timestamps from file
+    5. For each timestamp:
+       a. Compute clip window from boundary bbox
+       b. Create one Item for the Collection
+       c. For each Variable in Collection:
           - Extract + transform source data → single 2D array
           - Apply unit conversion
+          - Apply geometry mask (if configured)
           - Encode to PNG (visual asset)
           - Write COG (data asset)
           - Create Asset records
-    5. Update Collection extent
-    6. Archive source file
+    6. Update Collection extent
+    7. Archive source file
     """
     
     def __init__(self):
@@ -141,7 +135,9 @@ class IngestionService:
             
             # 2. Load models
             try:
-                catalog = Catalog.objects.get(slug=catalog_slug, is_active=True)
+                catalog = Catalog.objects.select_related('boundary').get(
+                    slug=catalog_slug, is_active=True
+                )
             except Catalog.DoesNotExist:
                 result.add_error(f"Catalog not found or inactive: {catalog_slug}")
                 return result
@@ -160,7 +156,18 @@ class IngestionService:
                 result.add_error(f"No format plugin for: {catalog.file_format}")
                 return result
             
-            # 4. Download and process
+            # 4. Initialize boundary clipper
+            clipper = BoundaryClipper(
+                boundary=catalog.boundary if catalog.clip_mode != 'none' else None,
+                apply_mask=(catalog.clip_mode == 'mask')
+            )
+            
+            if clipper.is_active:
+                result.clipped = True
+                result.clip_boundary = str(catalog.boundary)
+                self.logger.info(f"Clipping enabled: {catalog.boundary}")
+            
+            # 5. Download and process
             local_path = self._download_to_temp(file_path)
             
             try:
@@ -171,18 +178,24 @@ class IngestionService:
                 
                 self.logger.info(f"Found {len(timestamps)} timestamps")
                 
-                # 5. Process each timestamp
+                # 6. Process each timestamp
                 for ts in timestamps:
                     try:
-                        item, assets = self._process_timestamp(
+                        item, assets, clip_info = self._process_timestamp(
                             collection=collection,
                             plugin=plugin,
                             local_path=local_path,
                             timestamp=ts,
                             source_file=file_path,
+                            clipper=clipper,
                         )
                         result.items_created.append(str(item.pk))
                         result.assets_created.extend([str(a.pk) for a in assets])
+                        
+                        # Store clip info from first timestamp
+                        if clip_info and result.original_size is None:
+                            result.original_size = clip_info.get('original_size')
+                            result.clipped_size = clip_info.get('clipped_size')
                     
                     except Exception as e:
                         result.add_error(f"Failed at {ts}: {e}")
@@ -192,9 +205,15 @@ class IngestionService:
             finally:
                 self._cleanup_temp(local_path)
             
-            # 6. Archive if successful
+            # 7. Archive if successful
             if result.success and catalog.archive_source_files:
                 self._archive_source(file_path, catalog_slug, collection_slug)
+            
+            # Log clipping summary
+            if result.clipped and result.size_reduction_percent:
+                self.logger.info(
+                    f"Clipping reduced size by {result.size_reduction_percent:.1f}%"
+                )
         
         except Exception as e:
             self.logger.exception(f"Ingestion failed: {file_path}")
@@ -213,13 +232,17 @@ class IngestionService:
             local_path: Path,
             timestamp: datetime,
             source_file: str,
+            clipper: BoundaryClipper,
             reference_time: datetime = None,
-    ) -> tuple['Item', list['Asset']]:
+    ) -> tuple['Item', list['Asset'], dict]:
         """
         Process all Variables for a single timestamp.
         
         Creates or retrieves one Item, then creates/updates Assets per Variable.
         Handles re-ingestion gracefully by updating existing records.
+        
+        Returns:
+            Tuple of (Item, list of Assets, clip_info dict)
         """
         from georiva.core.models import Item
         
@@ -239,17 +262,43 @@ class IngestionService:
             raise ValueError(f"Collection '{collection.slug}' has no active variables")
         
         # Get spatial metadata from first variable
-        # (All variables in a collection share the same spatial extent)
         first_var = variables[0]
         meta = extractor.get_metadata(first_var, local_path, timestamp)
-        width, height = meta['width'], meta['height']
-        bounds = tuple(meta['bounds'])
+        src_width, src_height = meta['width'], meta['height']
+        src_bounds = tuple(meta['bounds'])
         
-        # validate bounds
-        if not bounds or len(bounds) < 4:
-            raise ValueError(f"Invalid bounds from metadata: {bounds}")
+        # Validate bounds
+        if not src_bounds or len(src_bounds) < 4:
+            raise ValueError(f"Invalid bounds from metadata: {src_bounds}")
         
-        bounds = tuple(bounds)
+        # Compute clip window if clipper is active
+        clip_info = {
+            'original_size': (src_width, src_height),
+            'clipped_size': None,
+        }
+        clip_window = None
+        
+        if clipper.is_active:
+            try:
+                clip_window = clipper.compute_window(src_bounds, src_width, src_height)
+                if clip_window:
+                    width = clip_window['width']
+                    height = clip_window['height']
+                    bounds = clip_window['bounds']
+                    clip_info['clipped_size'] = (width, height)
+                    
+                    reduction = 100 * (1 - (width * height) / (src_width * src_height))
+                    self.logger.info(
+                        f"Clipping: {src_width}x{src_height} → {width}x{height} "
+                        f"({reduction:.1f}% reduction)"
+                    )
+                else:
+                    width, height, bounds = src_width, src_height, src_bounds
+            except ValueError as e:
+                self.logger.warning(f"Clip window failed: {e}, using full extent")
+                width, height, bounds = src_width, src_height, src_bounds
+        else:
+            width, height, bounds = src_width, src_height, src_bounds
         
         crs = meta.get('crs', collection.crs or 'EPSG:4326')
         
@@ -275,10 +324,18 @@ class IngestionService:
         
         if not created:
             self.logger.info(f"Item already exists for {collection} @ {ts_utc}, updating assets")
-            # Optionally update item metadata if source changed
+            # Update item metadata if changed
+            update_fields = []
             if item.source_file != source_file:
                 item.source_file = source_file
-                item.save(update_fields=['source_file'])
+                update_fields.append('source_file')
+            if list(item.bounds) != list(bounds):
+                item.bounds = list(bounds)
+                item.width = width
+                item.height = height
+                update_fields.extend(['bounds', 'width', 'height'])
+            if update_fields:
+                item.save(update_fields=update_fields)
         
         # Process each Variable
         assets = []
@@ -297,6 +354,8 @@ class IngestionService:
                     crs=crs,
                     width=width,
                     height=height,
+                    clipper=clipper,
+                    clip_window=clip_window,
                 )
                 assets.extend(variable_assets)
             
@@ -309,7 +368,7 @@ class IngestionService:
         
         self.logger.info(f"Created Item {item.pk} with {len(assets)} assets")
         
-        return item, assets
+        return item, assets, clip_info
     
     # =========================================================================
     # Variable Processing
@@ -328,6 +387,8 @@ class IngestionService:
             crs: str,
             width: int,
             height: int,
+            clipper: BoundaryClipper = None,
+            clip_window: dict = None,
     ) -> list['Asset']:
         """
         Process a single Variable: extract, transform, encode, save.
@@ -338,31 +399,42 @@ class IngestionService:
         
         self.logger.debug(f"Processing variable: {variable.slug}")
         
-        # Compute global stats first (needed for consistent encoding)
-        stats = extractor.compute_stats(variable, local_path, timestamp)
+        # Compute global stats (on clipped region if applicable)
+        stats = extractor.compute_stats(variable, local_path, timestamp, window=clip_window)
         
-        # Allocate output arrays
-        final_data = np.zeros((height, width), dtype=np.float32)
-        final_rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        # Determine if we're using chunked processing or single extraction
+        use_chunked = width * height > 4096 * 4096  # Use chunks for large data
         
-        # Process in chunks
-        for x, y, w, h in iter_windows(width, height, block_size=2048):
-            window = (x, y, w, h)
-            
-            # Extract + transform → single 2D array
-            chunk = extractor.extract(variable, local_path, timestamp, window)
-            
-            # Apply unit conversion
-            chunk = apply_unit_conversion(chunk, variable.unit_conversion)
-            
-            # Store raw data
-            final_data[y:y + h, x:x + w] = chunk
-            
-            # Encode for PNG
-            rgba_chunk = encoder.encode_to_rgba(chunk, variable, stats)
-            final_rgba[y:y + h, x:x + w] = rgba_chunk
-            
-            del chunk, rgba_chunk
+        if use_chunked and clip_window is None:
+            # Chunked processing for large unclipped data
+            final_data, final_rgba = self._process_variable_chunked(
+                variable=variable,
+                extractor=extractor,
+                encoder=encoder,
+                local_path=local_path,
+                timestamp=timestamp,
+                width=width,
+                height=height,
+                stats=stats,
+            )
+        else:
+            # Direct extraction (with optional clip window)
+            final_data, final_rgba = self._process_variable_direct(
+                variable=variable,
+                extractor=extractor,
+                encoder=encoder,
+                local_path=local_path,
+                timestamp=timestamp,
+                width=width,
+                height=height,
+                stats=stats,
+                clip_window=clip_window,
+            )
+        
+        # Apply geometry mask if clipper is active
+        if clipper and clipper.is_active:
+            final_data = clipper.apply_geometry_mask(final_data, bounds, nodata=np.nan)
+            final_rgba = clipper.apply_rgba_mask(final_rgba, bounds)
         
         # Generate output paths
         catalog_slug = item.collection.catalog.slug
@@ -432,6 +504,7 @@ class IngestionService:
                     'stats_std': stats.get('std'),
                     'extra_fields': {
                         'compression': 'deflate',
+                        'nodata': None
                     },
                 }
             )
@@ -470,6 +543,78 @@ class IngestionService:
         gc.collect()
         
         return assets
+    
+    def _process_variable_chunked(
+            self,
+            variable: 'Variable',
+            extractor: VariableExtractor,
+            encoder: VariableEncoder,
+            local_path: Path,
+            timestamp: datetime,
+            width: int,
+            height: int,
+            stats: dict,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Process variable in chunks for large datasets."""
+        
+        final_data = np.zeros((height, width), dtype=np.float32)
+        final_rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        
+        for x, y, w, h in iter_windows(width, height, block_size=2048):
+            window = (x, y, w, h)
+            
+            # Extract chunk
+            chunk = extractor.extract(variable, local_path, timestamp, window)
+            
+            # Apply unit conversion
+            chunk = apply_unit_conversion(chunk, variable.unit_conversion)
+            
+            # Store raw data
+            final_data[y:y + h, x:x + w] = chunk
+            
+            # Encode for PNG
+            rgba_chunk = encoder.encode_to_rgba(chunk, variable, stats)
+            final_rgba[y:y + h, x:x + w] = rgba_chunk
+            
+            del chunk, rgba_chunk
+        
+        return final_data, final_rgba
+    
+    def _process_variable_direct(
+            self,
+            variable: 'Variable',
+            extractor: VariableExtractor,
+            encoder: VariableEncoder,
+            local_path: Path,
+            timestamp: datetime,
+            width: int,
+            height: int,
+            stats: dict,
+            clip_window: dict = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Process variable with direct extraction (optionally clipped)."""
+        
+        # Build extraction window
+        if clip_window:
+            window = (
+                clip_window['x_off'],
+                clip_window['y_off'],
+                clip_window['width'],
+                clip_window['height'],
+            )
+        else:
+            window = None
+        
+        # Extract full region at once
+        final_data = extractor.extract(variable, local_path, timestamp, window)
+        
+        # Apply unit conversion
+        final_data = apply_unit_conversion(final_data, variable.unit_conversion)
+        
+        # Encode to RGBA
+        final_rgba = encoder.encode_to_rgba(final_data, variable, stats)
+        
+        return final_data, final_rgba
     
     # =========================================================================
     # Collection Updates
