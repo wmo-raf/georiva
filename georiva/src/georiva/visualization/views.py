@@ -15,11 +15,13 @@ def item_preview(request, item_id):
         {"url": "#", "label": _("Preview")},
     ]
     
+    assets = item.assets.all()
+    
     context = {
         "breadcrumbs_items": breadcrumbs_items,
         "header_title": "Item Preview - {}".format(item),
         'item': item,
-        "assets": item.assets.all()
+        "assets": assets
     }
     
     return render(request, 'visualization/item_preview.html', context)

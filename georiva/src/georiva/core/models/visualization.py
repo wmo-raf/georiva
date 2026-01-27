@@ -31,7 +31,7 @@ class ColorPalette(ClusterableModel):
         FieldPanel('name'),
         FieldPanel('palette_type'),
         FieldPanel('center_value'),
-        InlinePanel('stops', label="Stops"),
+        InlinePanel('stops', heading="Stops", label="Stop"),
     ]
     
     class Meta:
@@ -81,7 +81,7 @@ class ColorPalette(ClusterableModel):
     
     def min_max_from_stops(self):
         """
-        Handy if you want min/max automatically from stop values.
+        Extract min/max automatically from stop values.
         """
         stops = list(self.stops.all().order_by('sort_order', 'pk'))
         if not stops:

@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load static wagtailadmin_tags %}
+{% load static wagtailadmin_tags georiva_tags %}
 
 {% block titletag %}{{ item.collection.name }} - {{ item.time|date:"Y-m-d H:i" }}{% endblock %}
 
@@ -832,6 +832,9 @@
                                  data-asset-max="{{ asset.stats_max|default:'' }}"
                                  data-asset-units="{{ asset.units|default:'' }}"
                                  data-asset-name="{{ asset.variable.name }}"
+                                 data-asset-palette='{{ asset.weather_layers_palette|to_json }}'
+                                 data-asset-palette-min="{{ asset.palette_value_range.0 }}"
+                                 data-asset-palette-max="{{ asset.palette_value_range.1 }}"
                                  data-visualizable="{{ asset.is_visual|yesno:'true,false' }}">
                                 <div class="geo-asset-header">
                                     <div class="geo-asset-info">
@@ -1041,7 +1044,7 @@
     <script src="https://unpkg.com/deck.gl@9.2.5/dist/dist.dev.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
     <script>
-        (function () {
+        (function async() {
             'use strict';
 
             const basemaps = {
@@ -1107,71 +1110,14 @@
                 }
             };
 
-            // Color palettes for different variable types
-            const colorPalettes = {
-                // Temperature (blue to red)
-                temperature: [
-                    [0.0, [41, 10, 216]],
-                    [0.1, [38, 77, 205]],
-                    [0.2, [36, 144, 194]],
-                    [0.3, [33, 211, 183]],
-                    [0.4, [77, 219, 130]],
-                    [0.5, [145, 227, 80]],
-                    [0.6, [213, 235, 29]],
-                    [0.7, [249, 199, 25]],
-                    [0.8, [245, 132, 21]],
-                    [0.9, [241, 65, 17]],
-                    [1.0, [200, 20, 20]]
-                ],
-                // Precipitation (light to dark blue)
-                precipitation: [
-                    [0.0, [255, 255, 255, 0]],
-                    [0.1, [200, 230, 255]],
-                    [0.2, [150, 200, 255]],
-                    [0.3, [100, 170, 255]],
-                    [0.4, [50, 140, 255]],
-                    [0.5, [0, 110, 230]],
-                    [0.6, [0, 80, 200]],
-                    [0.7, [0, 50, 170]],
-                    [0.8, [0, 30, 140]],
-                    [0.9, [50, 0, 100]],
-                    [1.0, [100, 0, 80]]
-                ],
-                // Generic (viridis-like)
-                default: [
-                    [0.0, [68, 1, 84]],
-                    [0.1, [72, 35, 116]],
-                    [0.2, [64, 67, 135]],
-                    [0.3, [52, 94, 141]],
-                    [0.4, [41, 120, 142]],
-                    [0.5, [32, 144, 140]],
-                    [0.6, [34, 167, 132]],
-                    [0.7, [68, 190, 112]],
-                    [0.8, [121, 209, 81]],
-                    [0.9, [189, 222, 38]],
-                    [1.0, [253, 231, 36]]
-                ],
-                // Wind speed
-                wind: [
-                    [0.0, [98, 113, 183]],
-                    [0.1, [60, 150, 200]],
-                    [0.2, [50, 180, 170]],
-                    [0.3, [70, 200, 120]],
-                    [0.4, [130, 215, 80]],
-                    [0.5, [200, 220, 50]],
-                    [0.6, [250, 200, 40]],
-                    [0.7, [250, 150, 30]],
-                    [0.8, [240, 90, 30]],
-                    [0.9, [220, 40, 40]],
-                    [1.0, [180, 20, 60]]
-                ]
-            };
-
             // -----------------------------
             // State
             // -----------------------------
             let currentBasemap = 'osm';
             let currentAsset = null;
+            let currentPalette = null;
+            let tooltipControl = null;
+
 
             let map = null;
 
@@ -1210,20 +1156,59 @@
                 setupLayerInfo();
             }
 
-            function onMapLoad() {
+            function waitForDeck(getDeck) {
+                return new Promise(resolve => {
+                    function wait() {
+                        const deck = getDeck();
+                        if (deck && deck.getCanvas()) {
+                            resolve(deck);
+                        } else {
+                            setTimeout(wait, 100);
+                        }
+                    }
+
+                    wait();
+                });
+            }
+
+            async function onMapLoad() {
                 // Create and add interleaved deck overlay
                 deckOverlay = new deck.MapboxOverlay({
                     interleaved: true,
-                    layers: []
+                    layers: [],
                 });
 
                 map.addControl(deckOverlay);
+
+                const deckgl = window.deckgl = await waitForDeck(() => deckOverlay._deck);
+
+                // Initialize tooltip control
+                initTooltipControl();
 
                 // Auto-view first visual asset
                 const firstVisual = document.querySelector('.geo-asset-card[data-visualizable="true"]');
                 if (firstVisual) {
                     viewAsset(firstVisual);
                 }
+            }
+
+            function initTooltipControl() {
+
+                const unitFormat = {
+                    unit: 'mm',
+                }
+
+                tooltipControl = new WeatherLayers.TooltipControl({followCursor: true, unitFormat});
+
+                deckgl.setProps({
+                    onLoad: () => deckgl.getCanvas() && tooltipControl.addTo(deckgl.getCanvas().parentElement),
+                    onHover: (event) => {
+                        tooltipControl.updatePickingInfo(event)
+                    }
+                });
+
+                deckgl.props.onLoad();
+
             }
 
 
@@ -1234,8 +1219,8 @@
                 // add navigation control. Zoom in,out
                 const navControl = new maplibregl.NavigationControl({
                     showCompass: false
-                })
-                map.addControl(navControl, 'top-right')
+                });
+                map.addControl(navControl, 'top-right');
             }
 
             function fitToBounds() {
@@ -1341,7 +1326,33 @@
             };
 
             // -----------------------------
-            // WeatherLayers RasterLayer only
+            // Palette Functions
+            // -----------------------------
+
+            /**
+             * Get palette from asset data attribute
+             * Falls back to simple grayscale if parsing fails
+             */
+            function getPaletteForAsset(assetElement) {
+                const paletteStr = assetElement.dataset.assetPalette;
+
+                if (paletteStr && paletteStr.trim() !== '') {
+                    try {
+                        const palette = JSON.parse(paletteStr);
+                        if (Array.isArray(palette) && palette.length > 0) {
+                            return palette;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse asset palette:', e);
+                    }
+                }
+
+                // Fallback grayscale
+                return [[0, [0, 0, 0]], [1, [255, 255, 255]]];
+            }
+
+            // -----------------------------
+            // WeatherLayers RasterLayer
             // -----------------------------
             async function addWeatherRasterLayer(assetElement) {
                 if (!deckOverlay) return;
@@ -1349,20 +1360,20 @@
                 const assetUrl = assetElement.dataset.assetUrl;
                 const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
                 const format = (assetElement.dataset.assetFormat || '').toLowerCase();
-                const variableName = assetElement.dataset.assetName || '';
-                const min = safeParseFloat(assetElement.dataset.assetMin);
-                const max = safeParseFloat(assetElement.dataset.assetMax);
 
-                // only handle image formats for now
+                // Get palette range for imageUnscale (from palette or asset stats)
+                const paletteMin = safeParseFloat(assetElement.dataset.assetPaletteMin);
+                const paletteMax = safeParseFloat(assetElement.dataset.assetPaletteMax);
+
+                // Only handle image formats for now
                 const supported = ['png', 'webp', 'jpeg', 'jpg'];
                 if (!supported.includes(format)) {
-                    // Clear deck layer if a non-supported format is clicked
                     clearDeckLayers();
-                    updateLayerInfo(assetElement); // still show metadata
+                    updateLayerInfo(assetElement);
                     return;
                 }
 
-                // show loading
+                // Show loading
                 const loadingEl = document.getElementById('mapLoading');
                 loadingEl.style.display = 'flex';
 
@@ -1370,23 +1381,31 @@
                 clearDeckLayers();
 
                 try {
-                    const palette = getPaletteForVariable(variableName);
+                    // Get palette from asset
+                    const palette = getPaletteForAsset(assetElement);
+                    currentPalette = palette;
+
                     const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
 
-                    // Load as texture data (PNG/WebP/JPEG)
+                    // Load as texture data
                     const image = await WeatherLayers.loadTextureData(assetUrl);
 
-                    // IMPORTANT: WeatherLayers RasterLayer uses `bounds` (not imageBounds) and expects `palette`
+                    const imageUnscale = (Number.isFinite(paletteMin) && Number.isFinite(paletteMax))
+                        ? [paletteMin, paletteMax]
+                        : null
+
+                    console.log(image)
+
+
+                    // Create the raster layer
                     currentRasterLayer = new WeatherLayers.RasterLayer({
                         id: 'weather-raster',
                         image,
-                        bounds, // [west,south,east,north]
+                        bounds, // [west, south, east, north]
                         imageSmoothing: true,
                         imageInterpolation: true,
-
-                        // only set imageUnscale when we have finite min/max
-                        imageUnscale: (Number.isFinite(min) && Number.isFinite(max)) ? [min, max] : null,
-
+                        // Use palette range for unscaling
+                        imageUnscale,
                         palette,
                         opacity,
                         visible: true,
@@ -1396,14 +1415,12 @@
                     deckOverlay.setProps({layers: [currentRasterLayer]});
 
                 } catch (err) {
-                    console.error('WeatherLayers RasterLayer failed, using fallback image layer:', err);
+                    console.error('WeatherLayers RasterLayer failed: ', err);
 
-                    // Fallback to MapLibre image overlay
-                    addFallbackImageLayer(assetUrl, bounds);
                     currentRasterLayer = null;
+                    currentPalette = null;
                     deckOverlay.setProps({layers: []});
                 } finally {
-                    // hide loading when map is idle
                     map.once('idle', () => {
                         loadingEl.style.display = 'none';
                     });
@@ -1413,9 +1430,10 @@
 
             function clearDeckLayers() {
                 currentRasterLayer = null;
+                currentPalette = null;
                 if (deckOverlay) deckOverlay.setProps({layers: []});
 
-                // remove fallback if present
+                // Remove fallback if present
                 try {
                     if (map.getLayer('asset-layer-fallback')) map.removeLayer('asset-layer-fallback');
                     if (map.getSource('asset-source')) map.removeSource('asset-source');
@@ -1423,44 +1441,11 @@
                 }
             }
 
-            function addFallbackImageLayer(assetUrl, bounds) {
-                // MapLibre expects image coordinates in order:
-                // top-left, top-right, bottom-right, bottom-left
-                const coords = [
-                    [bounds[0], bounds[3]],
-                    [bounds[2], bounds[3]],
-                    [bounds[2], bounds[1]],
-                    [bounds[0], bounds[1]]
-                ];
-
-                try {
-                    if (map.getLayer('asset-layer-fallback')) map.removeLayer('asset-layer-fallback');
-                    if (map.getSource('asset-source')) map.removeSource('asset-source');
-                } catch (e) {
-                }
-
-                map.addSource('asset-source', {
-                    type: 'image',
-                    url: assetUrl,
-                    coordinates: coords
-                });
-
-                map.addLayer({
-                    id: 'asset-layer-fallback',
-                    type: 'raster',
-                    source: 'asset-source',
-                    paint: {
-                        'raster-opacity': parseInt(document.getElementById('opacitySlider').value, 10) / 100,
-                        'raster-fade-duration': 0
-                    }
-                });
-            }
 
             // -----------------------------
             // Helpers
             // -----------------------------
             function parseBounds(boundsStr) {
-                // expects "w,s,e,n"
                 return (boundsStr || '').split(',').map(Number);
             }
 
@@ -1469,37 +1454,48 @@
                 return Number.isFinite(n) ? n : NaN;
             }
 
-            function getPaletteForVariable(variableName) {
-                const name = (variableName || '').toLowerCase();
-                if (name.includes('temp') || name.includes('temperature') || name.includes('t2m')) return colorPalettes.temperature;
-                if (name.includes('precip') || name.includes('rain') || name.includes('rainfall')) return colorPalettes.precipitation;
-                if (name.includes('wind') || name.includes('speed') || name.includes('gust')) return colorPalettes.wind;
-                return colorPalettes.default;
-            }
-
+            /**
+             * Generate CSS gradient from palette for legend display
+             */
             function generateGradientCSS(palette) {
+                if (!palette || palette.length === 0) {
+                    return 'linear-gradient(to right, #333, #fff)';
+                }
+
+                // Normalize positions for CSS
+                const positions = palette.map(entry => entry[0]);
+                const minPos = Math.min(...positions);
+                const maxPos = Math.max(...positions);
+                const range = maxPos - minPos || 1;
+
                 const stops = palette.map(([pos, color]) => {
+                    const normalizedPos = (pos - minPos) / range;
                     const rgba = color.length === 4
                         ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`
                         : `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-                    return `${rgba} ${pos * 100}%`;
+                    return `${rgba} ${normalizedPos * 100}%`;
                 });
                 return `linear-gradient(to right, ${stops.join(', ')})`;
             }
 
+            /**
+             * Update the legend panel with layer info
+             */
             function updateLayerInfo(assetElement) {
                 const name = assetElement.dataset.assetName || 'Layer';
-                const min = assetElement.dataset.assetMin;
-                const max = assetElement.dataset.assetMax;
                 const units = assetElement.dataset.assetUnits;
-                const variableName = assetElement.dataset.assetName || '';
+
+                // Use palette value range for legend (from palette stops or asset stats for grayscale)
+                const legendMin = assetElement.dataset.assetPaletteMin;
+                const legendMax = assetElement.dataset.assetPaletteMax;
 
                 document.getElementById('layerTitle').textContent = name;
-                document.getElementById('scaleMin').textContent = min ? parseFloat(min).toFixed(1) : '0';
-                document.getElementById('scaleMax').textContent = max ? parseFloat(max).toFixed(1) : '100';
+                document.getElementById('scaleMin').textContent = legendMin ? parseFloat(legendMin).toFixed(1) : '0';
+                document.getElementById('scaleMax').textContent = legendMax ? parseFloat(legendMax).toFixed(1) : '100';
                 document.getElementById('layerUnits').textContent = units || '';
 
-                const palette = getPaletteForVariable(variableName);
+                // Use current palette for gradient
+                const palette = currentPalette || getPaletteForAsset(assetElement);
                 const colorScale = document.getElementById('colorScale');
                 colorScale.style.background = generateGradientCSS(palette);
 

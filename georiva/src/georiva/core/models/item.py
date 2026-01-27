@@ -263,6 +263,59 @@ class Asset(TimeStampedModel, Orderable):
         return self.variable.palette
     
     @property
+    def weather_layers_palette(self):
+        """Get palette for WeatherLayers, with grayscale fallback."""
+        if self.variable.palette:
+            return self.variable.palette.as_weatherlayers_palette()
+        
+        # Fallback: grayscale using asset stats
+        min_val = self.stats_min if self.stats_min is not None else 0
+        max_val = self.stats_max if self.stats_max is not None else 1
+        return self._generate_grayscale_palette(min_val, max_val)
+    
+    @property
+    def palette_value_range(self) -> tuple:
+        """
+        Get (min, max) for the legend.
+        - Defined palette: from palette stops
+        - Grayscale fallback: from asset stats
+        """
+        if self.variable.palette:
+            min_val, max_val = self.variable.palette.min_max_from_stops()
+            return (
+                min_val if min_val is not None else 0,
+                max_val if max_val is not None else 100
+            )
+        
+        # Grayscale uses asset stats
+        return (
+            self.stats_min if self.stats_min is not None else 0,
+            self.stats_max if self.stats_max is not None else 1
+        )
+    
+    @staticmethod
+    def _generate_grayscale_palette(min_val: float, max_val: float, steps: int = 11, inverted: bool = False) -> list:
+        """
+        Generate grayscale palette with positions matching data value range.
+        
+        Args:
+            min_val: Minimum data value
+            max_val: Maximum data value
+            steps: Number of color stops
+            inverted: If True, goes white→black instead of black→white
+        """
+        palette = []
+        val_range = max_val - min_val
+        
+        for i in range(steps):
+            t = i / (steps - 1)
+            position = min_val + (t * val_range)
+            gray = round((1 - t if inverted else t) * 255)
+            palette.append([position, [gray, gray, gray]])
+        
+        return palette
+    
+    @property
     def value_range(self):
         """Get value range from variable or computed stats."""
         return (

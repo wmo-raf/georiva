@@ -70,8 +70,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     units = models.CharField(max_length=50, blank=True)
     
     # Visualization
-    value_min = models.FloatField(null=True, blank=True)
-    value_max = models.FloatField(null=True, blank=True)
     scale_type = models.CharField(
         max_length=20,
         choices=ScaleType.choices,
@@ -111,8 +109,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             FieldPanel('units'),
         ], heading="Units"),
         MultiFieldPanel([
-            FieldPanel('value_min'),
-            FieldPanel('value_max'),
             FieldPanel('scale_type'),
             FieldPanel('palette'),
         ], heading="Visualization"),
