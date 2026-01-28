@@ -19,11 +19,12 @@ class Catalog(TimeStampedModel):
     description = models.TextField(blank=True)
     
     # Ingestion configuration
-    data_source = models.ForeignKey(
-        "georivaloaders.LoaderConfig",  # or rename to DataSource
-        on_delete=models.SET_NULL,
+    loader_profile = models.ForeignKey(
+        "georivasources.LoaderProfile",
         null=True,
-        blank=True
+        blank=True,
+        on_delete=models.SET_NULL,
+        help_text="Loader profile to use for ingesting data for this catalog"
     )
     
     # Provider information
@@ -80,7 +81,7 @@ class Catalog(TimeStampedModel):
             FieldPanel('license'),
         ], heading="Provider"),
         MultiFieldPanel([
-            FieldPanel('data_source'),
+            FieldPanel('loader_profile'),
             FieldPanel('file_format'),
             FieldPanel('archive_source_files'),
         ], heading="Ingestion Configuration"),

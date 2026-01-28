@@ -5,7 +5,7 @@ from .service import IngestionService
 
 
 @shared_task(bind=True, max_retries=3)
-def process_incoming_file(self, collection_id: str, file_path: str, ):
+def process_incoming_file(self, collection_id: str, file_path: str, metadata: dict = None) -> dict:
     """
     Celery task to process an incoming file.
     """
