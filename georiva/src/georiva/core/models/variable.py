@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
@@ -70,6 +71,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     units = models.CharField(max_length=50, blank=True)
     
     # Visualization
+    value_min = models.FloatField()
+    value_max = models.FloatField()
     scale_type = models.CharField(
         max_length=20,
         choices=ScaleType.choices,
@@ -88,6 +91,26 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     
     def __str__(self):
         return f"{self.collection.slug}:{self.slug}"
+    
+    def clean(self):
+        super().clean()
+        
+        if not (self.palette and self.value_min is not None and self.value_max is not None):
+            return
+        
+        palette_min, palette_max = self.palette.min_max_from_stops()
+        
+        if abs(palette_min - self.value_min) > 0.01 or abs(palette_max - self.value_max) > 0.01:
+            raise ValidationError({
+                'palette': f"Palette range ({palette_min}–{palette_max}) must match value range ({self.value_min}–{self.value_max})"
+            })
+    
+    @property
+    def encoding_range(self) -> tuple[float | None, float | None]:
+        """
+        Get (min, max) for encoding and viewing.
+        """
+        return self.value_min, self.value_max
     
     @property
     def is_derived(self):
@@ -109,7 +132,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             FieldPanel('units'),
         ], heading="Units"),
         MultiFieldPanel([
-            FieldPanel('scale_type'),
+            FieldPanel('value_min'),
+            FieldPanel('value_max'),
             FieldPanel('palette'),
         ], heading="Visualization"),
         MultiFieldPanel([

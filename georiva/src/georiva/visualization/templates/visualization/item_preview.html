@@ -4,778 +4,778 @@
 {% block titletag %}{{ item.collection.name }} - {{ item.time|date:"Y-m-d H:i" }}{% endblock %}
 
 {% block extra_css %}
-    {{ block.super }}
-    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
-    <style>
-        :root {
-            --sidebar-width: 360px;
-            --geo-primary: #007d7e;
-            --geo-primary-hover: #006566;
-            --geo-bg-primary: #ffffff;
-            --geo-bg-secondary: #f6f6f8;
-            --geo-bg-tertiary: #eceef2;
-            --geo-text-primary: #1a1a1a;
-            --geo-text-secondary: #5c5c5c;
-            --geo-text-muted: #8c8c8c;
-            --geo-border-color: #e0e0e0;
-            --geo-success: #0a8238;
-            --geo-warning: #d78800;
-            --geo-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-            --geo-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-            --geo-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-            --geo-radius: 8px;
-            --geo-spacing: 1.5rem;
-        }
+{{ block.super }}
+<link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
+<style>
+    :root {
+        --sidebar-width: 360px;
+        --geo-primary: #007d7e;
+        --geo-primary-hover: #006566;
+        --geo-bg-primary: #ffffff;
+        --geo-bg-secondary: #f6f6f8;
+        --geo-bg-tertiary: #eceef2;
+        --geo-text-primary: #1a1a1a;
+        --geo-text-secondary: #5c5c5c;
+        --geo-text-muted: #8c8c8c;
+        --geo-border-color: #e0e0e0;
+        --geo-success: #0a8238;
+        --geo-warning: #d78800;
+        --geo-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+        --geo-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        --geo-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        --geo-radius: 8px;
+        --geo-spacing: 1.5rem;
+    }
 
-        * {
-            box-sizing: border-box;
-        }
+    * {
+        box-sizing: border-box;
+    }
 
-        /* Page wrapper with padding */
-        .geo-page-wrapper {
-            padding: var(--geo-spacing);
-            height: 100%;
-        }
+    /* Page wrapper with padding */
+    .geo-page-wrapper {
+        padding: var(--geo-spacing);
+        height: 100%;
+    }
 
-        /* Header section */
-        .geo-page-header {
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
+    /* Header section */
+    .geo-page-header {
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
 
-        .geo-page-title {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
+    .geo-page-title {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
 
-        .geo-page-title h1 {
-            margin: 0;
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--geo-text-primary);
-        }
+    .geo-page-title h1 {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--geo-text-primary);
+    }
 
-        .geo-page-title .geo-collection-badge {
-            padding: 0.25rem 0.625rem;
-            background: var(--geo-primary);
-            color: white;
-            border-radius: 4px;
-            font-size: 0.6875rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }
+    .geo-page-title .geo-collection-badge {
+        padding: 0.25rem 0.625rem;
+        background: var(--geo-primary);
+        color: white;
+        border-radius: 4px;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
 
-        .geo-page-actions {
-            display: flex;
-            gap: 0.5rem;
-        }
+    .geo-page-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
 
-        /* Main container with border */
+    /* Main container with border */
+    .preview-container {
+        display: flex;
+        height: 100%;
+        min-height: 500px;
+        overflow: hidden;
+        background: var(--geo-bg-primary);
+        border: 1px solid var(--geo-border-color);
+        border-radius: var(--geo-radius);
+        box-shadow: var(--geo-shadow-md);
+    }
+
+    /* Sidebar */
+    .geo-sidebar {
+        width: var(--sidebar-width);
+        background: var(--geo-bg-primary);
+        border-right: 1px solid var(--geo-border-color);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        z-index: 10;
+    }
+
+    .geo-sidebar-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--geo-border-color);
+        background: var(--geo-bg-secondary);
+    }
+
+    .geo-sidebar-title {
+        font-size: 0.6875rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--geo-text-muted);
+        margin-bottom: 0.625rem;
+    }
+
+    .geo-item-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+    }
+
+    .geo-meta-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.2rem 0.5rem;
+        background: var(--geo-bg-primary);
+        border: 1px solid var(--geo-border-color);
+        border-radius: 4px;
+        font-size: 0.625rem;
+        font-weight: 500;
+        color: var(--geo-text-secondary);
+    }
+
+    .geo-meta-badge svg {
+        width: 10px;
+        height: 10px;
+        opacity: 0.6;
+    }
+
+    .geo-meta-badge--forecast {
+        background: #fff8e6;
+        border-color: #f0d68a;
+        color: #8a6d00;
+    }
+
+    /* Assets List */
+    .geo-assets-section {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.875rem;
+    }
+
+    .geo-section-title {
+        font-size: 0.625rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--geo-text-muted);
+        margin-bottom: 0.625rem;
+        padding: 0 0.375rem;
+    }
+
+    .geo-asset-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .geo-asset-card {
+        background: var(--geo-bg-secondary);
+        border: 2px solid transparent;
+        border-radius: 6px;
+        padding: 0.75rem;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .geo-asset-card:hover {
+        background: var(--geo-bg-tertiary);
+        border-color: var(--geo-border-color);
+    }
+
+    .geo-asset-card.active {
+        background: #e6f4f4;
+        border-color: var(--geo-primary);
+    }
+
+    .geo-asset-card.non-visual {
+        opacity: 0.6;
+        cursor: default;
+    }
+
+    .geo-asset-card.non-visual:hover {
+        background: var(--geo-bg-secondary);
+        border-color: transparent;
+    }
+
+    .geo-asset-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.625rem;
+    }
+
+    .geo-asset-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .geo-asset-name {
+        font-weight: 600;
+        font-size: 0.8125rem;
+        color: var(--geo-text-primary);
+        margin-bottom: 0.125rem;
+    }
+
+    .geo-asset-variable {
+        font-size: 0.6875rem;
+        color: var(--geo-text-secondary);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    .geo-asset-badges {
+        display: flex;
+        gap: 0.25rem;
+        flex-wrap: wrap;
+        margin-top: 0.375rem;
+    }
+
+    .geo-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.1rem 0.375rem;
+        border-radius: 3px;
+        font-size: 0.5625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+
+    .geo-badge--format {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .geo-badge--role {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .geo-badge--size {
+        background: var(--geo-bg-tertiary);
+        color: var(--geo-text-secondary);
+    }
+
+    .geo-asset-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.375rem;
+        margin-top: 0.625rem;
+        padding-top: 0.625rem;
+        border-top: 1px solid var(--geo-border-color);
+    }
+
+    .geo-stat-item {
+        text-align: center;
+    }
+
+    .geo-stat-label {
+        font-size: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--geo-text-muted);
+        display: block;
+        margin-bottom: 0.0625rem;
+    }
+
+    .geo-stat-value {
+        font-size: 0.6875rem;
+        font-weight: 600;
+        color: var(--geo-text-primary);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .geo-view-indicator {
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--geo-bg-tertiary);
+        color: var(--geo-text-muted);
+        flex-shrink: 0;
+        transition: all 0.15s ease;
+    }
+
+    .geo-asset-card.active .geo-view-indicator {
+        background: var(--geo-primary);
+        color: white;
+    }
+
+    .geo-view-indicator svg {
+        width: 14px;
+        height: 14px;
+    }
+
+    /* Asset Actions */
+    .geo-asset-actions {
+        display: flex;
+        gap: 0.375rem;
+        margin-top: 0.625rem;
+    }
+
+    .geo-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        padding: 0.3rem 0.625rem;
+        background: var(--geo-bg-primary);
+        border: 1px solid var(--geo-border-color);
+        border-radius: 4px;
+        font-size: 0.6875rem;
+        font-weight: 500;
+        color: var(--geo-text-secondary);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-decoration: none;
+    }
+
+    .geo-btn:hover {
+        background: var(--geo-bg-tertiary);
+        border-color: var(--geo-primary);
+        color: var(--geo-primary);
+    }
+
+    .geo-btn svg {
+        width: 12px;
+        height: 12px;
+    }
+
+    .geo-btn--primary {
+        background: var(--geo-primary);
+        border-color: var(--geo-primary);
+        color: white;
+    }
+
+    .geo-btn--primary:hover {
+        background: var(--geo-primary-hover);
+        border-color: var(--geo-primary-hover);
+        color: white;
+    }
+
+    .geo-btn--secondary {
+        background: var(--geo-bg-secondary);
+    }
+
+    /* Map Container */
+    .geo-map-container {
+        flex: 1;
+        position: relative;
+        background: var(--geo-bg-tertiary);
+        border-radius: 0 var(--geo-radius) var(--geo-radius) 0;
+        overflow: hidden;
+    }
+
+    #map {
+        width: 100%;
+        height: 100%;
+    }
+
+    /* Map Controls */
+    .geo-map-controls {
+        position: absolute;
+        top: 0.75rem;
+        right: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        z-index: 5;
+    }
+
+    .geo-map-control-btn {
+        width: 28px;
+        height: 28px;
+        background: var(--geo-bg-primary);
+        border: 1px solid var(--geo-border-color);
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        box-shadow: var(--geo-shadow-sm);
+    }
+
+    .geo-map-control-btn:hover {
+        background: var(--geo-bg-secondary);
+        border-color: var(--geo-primary);
+    }
+
+    .geo-map-control-btn svg {
+        width: 14px;
+        height: 14px;
+        color: var(--geo-text-secondary);
+    }
+
+    /* Basemap Selector */
+    .geo-basemap-selector {
+        position: absolute;
+        top: 0.75rem;
+        left: 0.75rem;
+        z-index: 5;
+    }
+
+    .geo-basemap-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.375rem 0.625rem;
+        background: var(--geo-bg-primary);
+        border: 1px solid var(--geo-border-color);
+        border-radius: 4px;
+        font-size: 0.6875rem;
+        font-weight: 500;
+        color: var(--geo-text-primary);
+        cursor: pointer;
+        box-shadow: var(--geo-shadow-sm);
+        transition: all 0.15s ease;
+    }
+
+    .geo-basemap-btn:hover {
+        background: var(--geo-bg-secondary);
+    }
+
+    .geo-basemap-btn svg {
+        width: 12px;
+        height: 12px;
+        color: var(--geo-text-secondary);
+    }
+
+    .geo-basemap-menu {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        background: var(--geo-bg-primary);
+        border: 1px solid var(--geo-border-color);
+        border-radius: 4px;
+        box-shadow: var(--geo-shadow-lg);
+        min-width: 140px;
+        display: none;
+        overflow: hidden;
+        z-index: 100;
+    }
+
+    .geo-basemap-menu.open {
+        display: block;
+    }
+
+    .geo-basemap-option {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.4375rem 0.625rem;
+        font-size: 0.6875rem;
+        color: var(--geo-text-primary);
+        cursor: pointer;
+        transition: background 0.15s ease;
+    }
+
+    .geo-basemap-option:hover {
+        background: var(--geo-bg-secondary);
+    }
+
+    .geo-basemap-option.active {
+        background: #e6f4f4;
+        color: var(--geo-primary);
+        font-weight: 500;
+    }
+
+    .geo-basemap-option .geo-check {
+        width: 12px;
+        height: 12px;
+        opacity: 0;
+        color: var(--geo-primary);
+    }
+
+    .geo-basemap-option.active .geo-check {
+        opacity: 1;
+    }
+
+    /* Layer Info Panel */
+    .geo-layer-info {
+        position: absolute;
+        bottom: 1rem;
+        left: 1rem;
+        background: var(--geo-bg-primary);
+        border-radius: 6px;
+        padding: 0.875rem;
+        box-shadow: var(--geo-shadow-lg);
+        min-width: 180px;
+        max-width: 240px;
+        z-index: 5;
+        display: none;
+        border: 1px solid var(--geo-border-color);
+    }
+
+    .geo-layer-info.visible {
+        display: block;
+    }
+
+    .geo-layer-info-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.625rem;
+    }
+
+    .geo-layer-info-title {
+        font-weight: 600;
+        font-size: 0.75rem;
+        color: var(--geo-text-primary);
+    }
+
+    .geo-layer-info-close {
+        background: none;
+        border: none;
+        padding: 0.1875rem;
+        cursor: pointer;
+        color: var(--geo-text-muted);
+        border-radius: 3px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .geo-layer-info-close:hover {
+        background: var(--geo-bg-tertiary);
+        color: var(--geo-text-secondary);
+    }
+
+    .geo-layer-info-close svg {
+        width: 12px;
+        height: 12px;
+    }
+
+    .geo-color-scale {
+        height: 8px;
+        border-radius: 2px;
+        margin-bottom: 0.3125rem;
+    }
+
+    .geo-scale-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.625rem;
+        color: var(--geo-text-secondary);
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+    }
+
+    .geo-layer-units {
+        text-align: center;
+        font-size: 0.5625rem;
+        color: var(--geo-text-muted);
+        margin-top: 0.1875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+
+    /* Opacity Slider */
+    .geo-opacity-control {
+        margin-top: 0.75rem;
+        padding-top: 0.625rem;
+        border-top: 1px solid var(--geo-border-color);
+    }
+
+    .geo-opacity-label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.625rem;
+        color: var(--geo-text-secondary);
+        margin-bottom: 0.375rem;
+    }
+
+    .geo-opacity-slider {
+        width: 100%;
+        height: 3px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--geo-bg-tertiary);
+        border-radius: 2px;
+        outline: none;
+    }
+
+    .geo-opacity-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        background: var(--geo-primary);
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: var(--geo-shadow-sm);
+    }
+
+    .geo-opacity-slider::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        background: var(--geo-primary);
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+    }
+
+    /* Loading State */
+    .geo-map-loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.625rem;
+        color: var(--geo-text-secondary);
+        font-size: 0.75rem;
+    }
+
+    .geo-spinner {
+        width: 28px;
+        height: 28px;
+        border: 2px solid var(--geo-border-color);
+        border-top-color: var(--geo-primary);
+        border-radius: 50%;
+        animation: geo-spin 0.8s linear infinite;
+    }
+
+    @keyframes geo-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* Empty State */
+    .geo-empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 1.5rem;
+        text-align: center;
+        color: var(--geo-text-muted);
+    }
+
+    .geo-empty-state svg {
+        width: 40px;
+        height: 40px;
+        margin-bottom: 0.75rem;
+        opacity: 0.4;
+    }
+
+    .geo-empty-state h3 {
+        margin: 0 0 0.1875rem 0;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--geo-text-secondary);
+    }
+
+    .geo-empty-state p {
+        margin: 0;
+        font-size: 0.6875rem;
+    }
+
+    /* Coordinate Display */
+    .geo-coords-display {
+        position: absolute;
+        bottom: 1rem;
+        right: 1rem;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 0.3125rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.625rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        color: var(--geo-text-secondary);
+        box-shadow: var(--geo-shadow-sm);
+        border: 1px solid var(--geo-border-color);
+        z-index: 5;
+    }
+
+    /* Hide default MapLibre controls */
+    .maplibregl-ctrl-bottom-right,
+    .maplibregl-ctrl-bottom-left {
+        display: none;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
         .preview-container {
-            display: flex;
-            height: 100%;
-            min-height: 500px;
-            overflow: hidden;
-            background: var(--geo-bg-primary);
-            border: 1px solid var(--geo-border-color);
-            border-radius: var(--geo-radius);
-            box-shadow: var(--geo-shadow-md);
+            flex-direction: column;
+            height: auto;
+            min-height: auto;
         }
 
-        /* Sidebar */
         .geo-sidebar {
-            width: var(--sidebar-width);
-            background: var(--geo-bg-primary);
-            border-right: 1px solid var(--geo-border-color);
-            display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-            z-index: 10;
-        }
-
-        .geo-sidebar-header {
-            padding: 1rem 1.25rem;
+            width: 100%;
+            max-height: 45vh;
+            border-right: none;
             border-bottom: 1px solid var(--geo-border-color);
-            background: var(--geo-bg-secondary);
+            border-radius: var(--geo-radius) var(--geo-radius) 0 0;
         }
 
-        .geo-sidebar-title {
-            font-size: 0.6875rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--geo-text-muted);
-            margin-bottom: 0.625rem;
-        }
-
-        .geo-item-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.375rem;
-        }
-
-        .geo-meta-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
-            padding: 0.2rem 0.5rem;
-            background: var(--geo-bg-primary);
-            border: 1px solid var(--geo-border-color);
-            border-radius: 4px;
-            font-size: 0.625rem;
-            font-weight: 500;
-            color: var(--geo-text-secondary);
-        }
-
-        .geo-meta-badge svg {
-            width: 10px;
-            height: 10px;
-            opacity: 0.6;
-        }
-
-        .geo-meta-badge--forecast {
-            background: #fff8e6;
-            border-color: #f0d68a;
-            color: #8a6d00;
-        }
-
-        /* Assets List */
-        .geo-assets-section {
-            flex: 1;
-            overflow-y: auto;
-            padding: 0.875rem;
-        }
-
-        .geo-section-title {
-            font-size: 0.625rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--geo-text-muted);
-            margin-bottom: 0.625rem;
-            padding: 0 0.375rem;
-        }
-
-        .geo-asset-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .geo-asset-card {
-            background: var(--geo-bg-secondary);
-            border: 2px solid transparent;
-            border-radius: 6px;
-            padding: 0.75rem;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .geo-asset-card:hover {
-            background: var(--geo-bg-tertiary);
-            border-color: var(--geo-border-color);
-        }
-
-        .geo-asset-card.active {
-            background: #e6f4f4;
-            border-color: var(--geo-primary);
-        }
-
-        .geo-asset-card.non-visual {
-            opacity: 0.6;
-            cursor: default;
-        }
-
-        .geo-asset-card.non-visual:hover {
-            background: var(--geo-bg-secondary);
-            border-color: transparent;
-        }
-
-        .geo-asset-header {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 0.625rem;
-        }
-
-        .geo-asset-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .geo-asset-name {
-            font-weight: 600;
-            font-size: 0.8125rem;
-            color: var(--geo-text-primary);
-            margin-bottom: 0.125rem;
-        }
-
-        .geo-asset-variable {
-            font-size: 0.6875rem;
-            color: var(--geo-text-secondary);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        }
-
-        .geo-asset-badges {
-            display: flex;
-            gap: 0.25rem;
-            flex-wrap: wrap;
-            margin-top: 0.375rem;
-        }
-
-        .geo-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.1rem 0.375rem;
-            border-radius: 3px;
-            font-size: 0.5625rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }
-
-        .geo-badge--format {
-            background: #dbeafe;
-            color: #1e40af;
-        }
-
-        .geo-badge--role {
-            background: #d1fae5;
-            color: #065f46;
-        }
-
-        .geo-badge--size {
-            background: var(--geo-bg-tertiary);
-            color: var(--geo-text-secondary);
-        }
-
-        .geo-asset-stats {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 0.375rem;
-            margin-top: 0.625rem;
-            padding-top: 0.625rem;
-            border-top: 1px solid var(--geo-border-color);
-        }
-
-        .geo-stat-item {
-            text-align: center;
-        }
-
-        .geo-stat-label {
-            font-size: 0.5rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--geo-text-muted);
-            display: block;
-            margin-bottom: 0.0625rem;
-        }
-
-        .geo-stat-value {
-            font-size: 0.6875rem;
-            font-weight: 600;
-            color: var(--geo-text-primary);
-            font-variant-numeric: tabular-nums;
-        }
-
-        .geo-view-indicator {
-            width: 28px;
-            height: 28px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--geo-bg-tertiary);
-            color: var(--geo-text-muted);
-            flex-shrink: 0;
-            transition: all 0.15s ease;
-        }
-
-        .geo-asset-card.active .geo-view-indicator {
-            background: var(--geo-primary);
-            color: white;
-        }
-
-        .geo-view-indicator svg {
-            width: 14px;
-            height: 14px;
-        }
-
-        /* Asset Actions */
-        .geo-asset-actions {
-            display: flex;
-            gap: 0.375rem;
-            margin-top: 0.625rem;
-        }
-
-        .geo-btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.3rem;
-            padding: 0.3rem 0.625rem;
-            background: var(--geo-bg-primary);
-            border: 1px solid var(--geo-border-color);
-            border-radius: 4px;
-            font-size: 0.6875rem;
-            font-weight: 500;
-            color: var(--geo-text-secondary);
-            cursor: pointer;
-            transition: all 0.15s ease;
-            text-decoration: none;
-        }
-
-        .geo-btn:hover {
-            background: var(--geo-bg-tertiary);
-            border-color: var(--geo-primary);
-            color: var(--geo-primary);
-        }
-
-        .geo-btn svg {
-            width: 12px;
-            height: 12px;
-        }
-
-        .geo-btn--primary {
-            background: var(--geo-primary);
-            border-color: var(--geo-primary);
-            color: white;
-        }
-
-        .geo-btn--primary:hover {
-            background: var(--geo-primary-hover);
-            border-color: var(--geo-primary-hover);
-            color: white;
-        }
-
-        .geo-btn--secondary {
-            background: var(--geo-bg-secondary);
-        }
-
-        /* Map Container */
         .geo-map-container {
-            flex: 1;
-            position: relative;
-            background: var(--geo-bg-tertiary);
-            border-radius: 0 var(--geo-radius) var(--geo-radius) 0;
-            overflow: hidden;
+            height: 50vh;
+            min-height: 350px;
+            border-radius: 0 0 var(--geo-radius) var(--geo-radius);
+        }
+    }
+
+    @media (max-width: 640px) {
+        .geo-page-wrapper {
+            padding: 1rem;
         }
 
-        #map {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Map Controls */
-        .geo-map-controls {
-            position: absolute;
-            top: 0.75rem;
-            right: 0.75rem;
-            display: flex;
+        .geo-page-header {
             flex-direction: column;
-            gap: 0.25rem;
-            z-index: 5;
+            align-items: flex-start;
         }
 
-        .geo-map-control-btn {
-            width: 28px;
-            height: 28px;
-            background: var(--geo-bg-primary);
-            border: 1px solid var(--geo-border-color);
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            box-shadow: var(--geo-shadow-sm);
+        .preview-container {
+            height: auto;
         }
 
-        .geo-map-control-btn:hover {
-            background: var(--geo-bg-secondary);
-            border-color: var(--geo-primary);
+        .geo-sidebar {
+            max-height: 50vh;
         }
 
-        .geo-map-control-btn svg {
-            width: 14px;
-            height: 14px;
-            color: var(--geo-text-secondary);
+        .geo-map-container {
+            height: 45vh;
+            min-height: 300px;
         }
-
-        /* Basemap Selector */
-        .geo-basemap-selector {
-            position: absolute;
-            top: 0.75rem;
-            left: 0.75rem;
-            z-index: 5;
-        }
-
-        .geo-basemap-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.375rem;
-            padding: 0.375rem 0.625rem;
-            background: var(--geo-bg-primary);
-            border: 1px solid var(--geo-border-color);
-            border-radius: 4px;
-            font-size: 0.6875rem;
-            font-weight: 500;
-            color: var(--geo-text-primary);
-            cursor: pointer;
-            box-shadow: var(--geo-shadow-sm);
-            transition: all 0.15s ease;
-        }
-
-        .geo-basemap-btn:hover {
-            background: var(--geo-bg-secondary);
-        }
-
-        .geo-basemap-btn svg {
-            width: 12px;
-            height: 12px;
-            color: var(--geo-text-secondary);
-        }
-
-        .geo-basemap-menu {
-            position: absolute;
-            top: calc(100% + 0.25rem);
-            left: 0;
-            background: var(--geo-bg-primary);
-            border: 1px solid var(--geo-border-color);
-            border-radius: 4px;
-            box-shadow: var(--geo-shadow-lg);
-            min-width: 140px;
-            display: none;
-            overflow: hidden;
-            z-index: 100;
-        }
-
-        .geo-basemap-menu.open {
-            display: block;
-        }
-
-        .geo-basemap-option {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.4375rem 0.625rem;
-            font-size: 0.6875rem;
-            color: var(--geo-text-primary);
-            cursor: pointer;
-            transition: background 0.15s ease;
-        }
-
-        .geo-basemap-option:hover {
-            background: var(--geo-bg-secondary);
-        }
-
-        .geo-basemap-option.active {
-            background: #e6f4f4;
-            color: var(--geo-primary);
-            font-weight: 500;
-        }
-
-        .geo-basemap-option .geo-check {
-            width: 12px;
-            height: 12px;
-            opacity: 0;
-            color: var(--geo-primary);
-        }
-
-        .geo-basemap-option.active .geo-check {
-            opacity: 1;
-        }
-
-        /* Layer Info Panel */
-        .geo-layer-info {
-            position: absolute;
-            bottom: 1rem;
-            left: 1rem;
-            background: var(--geo-bg-primary);
-            border-radius: 6px;
-            padding: 0.875rem;
-            box-shadow: var(--geo-shadow-lg);
-            min-width: 180px;
-            max-width: 240px;
-            z-index: 5;
-            display: none;
-            border: 1px solid var(--geo-border-color);
-        }
-
-        .geo-layer-info.visible {
-            display: block;
-        }
-
-        .geo-layer-info-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 0.625rem;
-        }
-
-        .geo-layer-info-title {
-            font-weight: 600;
-            font-size: 0.75rem;
-            color: var(--geo-text-primary);
-        }
-
-        .geo-layer-info-close {
-            background: none;
-            border: none;
-            padding: 0.1875rem;
-            cursor: pointer;
-            color: var(--geo-text-muted);
-            border-radius: 3px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .geo-layer-info-close:hover {
-            background: var(--geo-bg-tertiary);
-            color: var(--geo-text-secondary);
-        }
-
-        .geo-layer-info-close svg {
-            width: 12px;
-            height: 12px;
-        }
-
-        .geo-color-scale {
-            height: 8px;
-            border-radius: 2px;
-            margin-bottom: 0.3125rem;
-        }
-
-        .geo-scale-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.625rem;
-            color: var(--geo-text-secondary);
-            font-variant-numeric: tabular-nums;
-            font-weight: 500;
-        }
-
-        .geo-layer-units {
-            text-align: center;
-            font-size: 0.5625rem;
-            color: var(--geo-text-muted);
-            margin-top: 0.1875rem;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }
-
-        /* Opacity Slider */
-        .geo-opacity-control {
-            margin-top: 0.75rem;
-            padding-top: 0.625rem;
-            border-top: 1px solid var(--geo-border-color);
-        }
-
-        .geo-opacity-label {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.625rem;
-            color: var(--geo-text-secondary);
-            margin-bottom: 0.375rem;
-        }
-
-        .geo-opacity-slider {
-            width: 100%;
-            height: 3px;
-            -webkit-appearance: none;
-            appearance: none;
-            background: var(--geo-bg-tertiary);
-            border-radius: 2px;
-            outline: none;
-        }
-
-        .geo-opacity-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 12px;
-            height: 12px;
-            background: var(--geo-primary);
-            border-radius: 50%;
-            cursor: pointer;
-            box-shadow: var(--geo-shadow-sm);
-        }
-
-        .geo-opacity-slider::-moz-range-thumb {
-            width: 12px;
-            height: 12px;
-            background: var(--geo-primary);
-            border-radius: 50%;
-            cursor: pointer;
-            border: none;
-        }
-
-        /* Loading State */
-        .geo-map-loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.625rem;
-            color: var(--geo-text-secondary);
-            font-size: 0.75rem;
-        }
-
-        .geo-spinner {
-            width: 28px;
-            height: 28px;
-            border: 2px solid var(--geo-border-color);
-            border-top-color: var(--geo-primary);
-            border-radius: 50%;
-            animation: geo-spin 0.8s linear infinite;
-        }
-
-        @keyframes geo-spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Empty State */
-        .geo-empty-state {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            padding: 1.5rem;
-            text-align: center;
-            color: var(--geo-text-muted);
-        }
-
-        .geo-empty-state svg {
-            width: 40px;
-            height: 40px;
-            margin-bottom: 0.75rem;
-            opacity: 0.4;
-        }
-
-        .geo-empty-state h3 {
-            margin: 0 0 0.1875rem 0;
-            font-size: 0.8125rem;
-            font-weight: 600;
-            color: var(--geo-text-secondary);
-        }
-
-        .geo-empty-state p {
-            margin: 0;
-            font-size: 0.6875rem;
-        }
-
-        /* Coordinate Display */
-        .geo-coords-display {
-            position: absolute;
-            bottom: 1rem;
-            right: 1rem;
-            background: rgba(255, 255, 255, 0.95);
-            padding: 0.3125rem 0.5rem;
-            border-radius: 3px;
-            font-size: 0.625rem;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            color: var(--geo-text-secondary);
-            box-shadow: var(--geo-shadow-sm);
-            border: 1px solid var(--geo-border-color);
-            z-index: 5;
-        }
-
-        /* Hide default MapLibre controls */
-        .maplibregl-ctrl-bottom-right,
-        .maplibregl-ctrl-bottom-left {
-            display: none;
-        }
-
-        /* Responsive */
-        @media (max-width: 1024px) {
-            .preview-container {
-                flex-direction: column;
-                height: auto;
-                min-height: auto;
-            }
-
-            .geo-sidebar {
-                width: 100%;
-                max-height: 45vh;
-                border-right: none;
-                border-bottom: 1px solid var(--geo-border-color);
-                border-radius: var(--geo-radius) var(--geo-radius) 0 0;
-            }
-
-            .geo-map-container {
-                height: 50vh;
-                min-height: 350px;
-                border-radius: 0 0 var(--geo-radius) var(--geo-radius);
-            }
-        }
-
-        @media (max-width: 640px) {
-            .geo-page-wrapper {
-                padding: 1rem;
-            }
-
-            .geo-page-header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-
-            .preview-container {
-                height: auto;
-            }
-
-            .geo-sidebar {
-                max-height: 50vh;
-            }
-
-            .geo-map-container {
-                height: 45vh;
-                min-height: 300px;
-            }
-        }
-    </style>
+    }
+</style>
 {% endblock %}
 
 {% block main_content %}
-    <div class="geo-page-wrapper">
-        <!-- Page Header -->
-        <div class="geo-page-header">
-            <div class="geo-page-title">
-                <h1>{{ item.collection.name }}</h1>
-                <span class="geo-collection-badge">{{ item.collection.catalog.name }}</span>
-            </div>
-            <div class="geo-page-actions">
-                <a href="#"
-                   class="geo-btn geo-btn--secondary">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="19" y1="12" x2="5" y2="12"></line>
-                        <polyline points="12 19 5 12 12 5"></polyline>
-                    </svg>
-                    Back to Items
-                </a>
-            </div>
+<div class="geo-page-wrapper">
+    <!-- Page Header -->
+    <div class="geo-page-header">
+        <div class="geo-page-title">
+            <h1>{{ item.collection.name }}</h1>
+            <span class="geo-collection-badge">{{ item.collection.catalog.name }}</span>
         </div>
+        <div class="geo-page-actions">
+            <a href="#"
+               class="geo-btn geo-btn--secondary">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="19" y1="12" x2="5" y2="12"></line>
+                    <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+                Back to Items
+            </a>
+        </div>
+    </div>
 
-        <!-- Main Preview Container -->
-        <div class="preview-container">
-            <!-- Sidebar with Assets -->
-            <aside class="geo-sidebar">
-                <div class="geo-sidebar-header">
-                    <div class="geo-sidebar-title">Item Details</div>
-                    <div class="geo-item-meta">
+    <!-- Main Preview Container -->
+    <div class="preview-container">
+        <!-- Sidebar with Assets -->
+        <aside class="geo-sidebar">
+            <div class="geo-sidebar-header">
+                <div class="geo-sidebar-title">Item Details</div>
+                <div class="geo-item-meta">
                         <span class="geo-meta-badge">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                  stroke="currentColor"
@@ -787,8 +787,8 @@
                             </svg>
                             {{ item.time|date:"M d, Y H:i" }} UTC
                         </span>
-                        {% if item.is_forecast %}
-                            <span class="geo-meta-badge geo-meta-badge--forecast">
+                    {% if item.is_forecast %}
+                    <span class="geo-meta-badge geo-meta-badge--forecast">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                      stroke="currentColor"
                                      stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -797,8 +797,8 @@
                                 </svg>
                                 +{{ item.horizon_hours|floatformat:0 }}h
                             </span>
-                        {% endif %}
-                        <span class="geo-meta-badge">
+                    {% endif %}
+                    <span class="geo-meta-badge">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                  stroke="currentColor"
                                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -806,7 +806,7 @@
                             </svg>
                             {{ item.width }}×{{ item.height }}
                         </span>
-                        <span class="geo-meta-badge">
+                    <span class="geo-meta-badge">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                  stroke="currentColor"
                                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -816,692 +816,711 @@
                             </svg>
                             {{ item.crs }}
                         </span>
-                    </div>
                 </div>
+            </div>
 
-                <div class="geo-assets-section">
-                    <div class="geo-section-title">Assets ({{ assets|length }})</div>
-                    <div class="geo-asset-list">
-                        {% for asset in assets %}
-                            <div class="geo-asset-card {% if not asset.is_visual %}non-visual{% endif %}"
-                                 data-asset-id="{{ asset.pk }}"
-                                 data-asset-url="{{ asset.url }}"
-                                 data-asset-format="{{ asset.format }}"
-                                 data-asset-bounds="{{ asset.item.bounds|join:',' }}"
-                                 data-asset-min="{{ asset.stats_min|default:'' }}"
-                                 data-asset-max="{{ asset.stats_max|default:'' }}"
-                                 data-asset-units="{{ asset.units|default:'' }}"
-                                 data-asset-name="{{ asset.variable.name }}"
-                                 data-asset-palette='{{ asset.weather_layers_palette|to_json }}'
-                                 data-asset-palette-min="{{ asset.palette_value_range.0 }}"
-                                 data-asset-palette-max="{{ asset.palette_value_range.1 }}"
-                                 data-visualizable="{{ asset.is_visual|yesno:'true,false' }}">
-                                <div class="geo-asset-header">
-                                    <div class="geo-asset-info">
-                                        <div class="geo-asset-name">{{ asset.variable.name }}</div>
-                                        <div class="geo-asset-variable">{{ asset.variable.slug }}</div>
-                                        <div class="geo-asset-badges">
-                                            <span class="geo-badge geo-badge--format">{{ asset.format|upper }}</span>
-                                            {% for role in asset.roles %}
-                                                <span class="geo-badge geo-badge--role">{{ role }}</span>
-                                            {% endfor %}
-                                            {% if asset.file_size %}
-                                                <span class="geo-badge geo-badge--size">{{ asset.file_size|filesizeformat }}</span>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                    <div class="geo-view-indicator">
-                                        {% if asset.is_visual %}
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                                 stroke-linejoin="round">
-                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                <circle cx="12" cy="12" r="3"></circle>
-                                            </svg>
-                                        {% elif asset.is_data %}
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                                 stroke-linejoin="round">
-                                                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                                                <polyline points="2 17 12 22 22 17"></polyline>
-                                                <polyline points="2 12 12 17 22 12"></polyline>
-                                            </svg>
-                                        {% else %}
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                                 stroke-linejoin="round">
-                                                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
-                                                <polyline points="13 2 13 9 20 9"></polyline>
-                                            </svg>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                {% if asset.stats_min is not None %}
-                                    <div class="geo-asset-stats">
-                                        <div class="geo-stat-item">
-                                            <span class="geo-stat-label">Min</span>
-                                            <span class="geo-stat-value">{{ asset.stats_min|floatformat:2 }}</span>
-                                        </div>
-                                        <div class="geo-stat-item">
-                                            <span class="geo-stat-label">Max</span>
-                                            <span class="geo-stat-value">{{ asset.stats_max|floatformat:2 }}</span>
-                                        </div>
-                                        <div class="geo-stat-item">
-                                            <span class="geo-stat-label">Mean</span>
-                                            <span class="geo-stat-value">{{ asset.stats_mean|floatformat:2 }}</span>
-                                        </div>
-                                        <div class="geo-stat-item">
-                                            <span class="geo-stat-label">Std</span>
-                                            <span class="geo-stat-value">{{ asset.stats_std|floatformat:2 }}</span>
-                                        </div>
-                                    </div>
-                                {% endif %}
-                                <div class="geo-asset-actions">
-                                    <a href="{{ asset.url }}" class="geo-btn" download
-                                       onclick="event.stopPropagation();">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                             stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                             stroke-linejoin="round">
-                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                            <polyline points="7 10 12 15 17 10"></polyline>
-                                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                                        </svg>
-                                        Download
-                                    </a>
-                                    {% if asset.is_visual %}
-                                        <button class="geo-btn geo-btn--primary geo-view-btn" type="button"
-                                                onclick="event.stopPropagation(); viewAsset(this.closest('.geo-asset-card'));">
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                                 stroke-linejoin="round">
-                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                                <circle cx="12" cy="12" r="3"></circle>
-                                            </svg>
-                                            View
-                                        </button>
+            <div class="geo-assets-section">
+                <div class="geo-section-title">Assets ({{ assets|length }})</div>
+                <div class="geo-asset-list">
+                    {% for asset in assets %}
+                    <div class="geo-asset-card {% if not asset.is_visual %}non-visual{% endif %}"
+                         data-asset-id="{{ asset.pk }}"
+                         data-asset-url="{{ asset.url }}"
+                         data-asset-format="{{ asset.format }}"
+                         data-asset-bounds="{{ asset.item.bounds|join:',' }}"
+                         data-asset-min="{{ asset.stats_min|default:'' }}"
+                         data-asset-max="{{ asset.stats_max|default:'' }}"
+                         data-asset-units="{{ asset.units|default:'' }}"
+                         data-asset-name="{{ asset.variable.name }}"
+                         data-asset-palette='{{ asset.weather_layers_palette|to_json }}'
+                         data-asset-palette-min="{{ asset.palette_value_range.0 }}"
+                         data-asset-palette-max="{{ asset.palette_value_range.1 }}"
+                         data-visualizable="{{ asset.is_visual|yesno:'true,false' }}">
+                        <div class="geo-asset-header">
+                            <div class="geo-asset-info">
+                                <div class="geo-asset-name">{{ asset.variable.name }}</div>
+                                <div class="geo-asset-variable">{{ asset.variable.slug }}</div>
+                                <div class="geo-asset-badges">
+                                    <span class="geo-badge geo-badge--format">{{ asset.format|upper }}</span>
+                                    {% for role in asset.roles %}
+                                    <span class="geo-badge geo-badge--role">{{ role }}</span>
+                                    {% endfor %}
+                                    {% if asset.file_size %}
+                                    <span class="geo-badge geo-badge--size">{{ asset.file_size|filesizeformat }}</span>
                                     {% endif %}
                                 </div>
                             </div>
-                            {% empty %}
-                            <div class="geo-empty-state">
+                            <div class="geo-view-indicator">
+                                {% if asset.is_visual %}
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                     stroke-linejoin="round">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                                {% elif asset.is_data %}
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                     stroke-linejoin="round">
+                                    <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                                    <polyline points="2 17 12 22 22 17"></polyline>
+                                    <polyline points="2 12 12 17 22 12"></polyline>
+                                </svg>
+                                {% else %}
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                      stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                      stroke-linejoin="round">
                                     <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
                                     <polyline points="13 2 13 9 20 9"></polyline>
                                 </svg>
-                                <h3>No Assets</h3>
-                                <p>This item has no associated assets.</p>
+                                {% endif %}
                             </div>
-                        {% endfor %}
+                        </div>
+                        {% if asset.stats_min is not None %}
+                        <div class="geo-asset-stats">
+                            <div class="geo-stat-item">
+                                <span class="geo-stat-label">Min</span>
+                                <span class="geo-stat-value">{{ asset.stats_min|floatformat:2 }}</span>
+                            </div>
+                            <div class="geo-stat-item">
+                                <span class="geo-stat-label">Max</span>
+                                <span class="geo-stat-value">{{ asset.stats_max|floatformat:2 }}</span>
+                            </div>
+                            <div class="geo-stat-item">
+                                <span class="geo-stat-label">Mean</span>
+                                <span class="geo-stat-value">{{ asset.stats_mean|floatformat:2 }}</span>
+                            </div>
+                            <div class="geo-stat-item">
+                                <span class="geo-stat-label">Std</span>
+                                <span class="geo-stat-value">{{ asset.stats_std|floatformat:2 }}</span>
+                            </div>
+                        </div>
+                        {% endif %}
+                        <div class="geo-asset-actions">
+                            <a href="{{ asset.url }}" class="geo-btn" download
+                               onclick="event.stopPropagation();">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                     stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                Download
+                            </a>
+                            {% if asset.is_visual %}
+                            <button class="geo-btn geo-btn--primary geo-view-btn" type="button"
+                                    onclick="event.stopPropagation(); viewAsset(this.closest('.geo-asset-card'));">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                     stroke-linejoin="round">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                                View
+                            </button>
+                            {% endif %}
+                        </div>
                     </div>
+                    {% empty %}
+                    <div class="geo-empty-state">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                             stroke-linejoin="round">
+                            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                            <polyline points="13 2 13 9 20 9"></polyline>
+                        </svg>
+                        <h3>No Assets</h3>
+                        <p>This item has no associated assets.</p>
+                    </div>
+                    {% endfor %}
                 </div>
-            </aside>
+            </div>
+        </aside>
 
-            <!-- Map -->
-            <div class="geo-map-container">
-                <div id="map"></div>
+        <!-- Map -->
+        <div class="geo-map-container">
+            <div id="map"></div>
 
-                <!-- Basemap Selector -->
-                <div class="geo-basemap-selector">
-                    <div class="geo-basemap-dropdown">
-                        <button class="geo-basemap-btn" id="basemapBtn" type="button">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                 stroke="currentColor"
-                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
-                                <line x1="8" y1="2" x2="8" y2="18"></line>
-                                <line x1="16" y1="6" x2="16" y2="22"></line>
-                            </svg>
-                            <span id="basemapLabel">OSM</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
+            <!-- Basemap Selector -->
+            <div class="geo-basemap-selector">
+                <div class="geo-basemap-dropdown">
+                    <button class="geo-basemap-btn" id="basemapBtn" type="button">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor"
+                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+                            <line x1="8" y1="2" x2="8" y2="18"></line>
+                            <line x1="16" y1="6" x2="16" y2="22"></line>
+                        </svg>
+                        <span id="basemapLabel">OSM</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div class="geo-basemap-menu" id="basemapMenu">
+                        <div class="geo-basemap-option active" data-basemap="osm">
+                            OpenStreetMap
+                            <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
                                  fill="none"
-                                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="6 9 12 15 18 9"></polyline>
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
                             </svg>
-                        </button>
-                        <div class="geo-basemap-menu" id="basemapMenu">
-                            <div class="geo-basemap-option active" data-basemap="osm">
-                                OpenStreetMap
-                                <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                                     fill="none"
-                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </div>
-                            <div class="geo-basemap-option" data-basemap="satellite">
-                                Satellite
-                                <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                                     fill="none"
-                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </div>
-                            <div class="geo-basemap-option" data-basemap="dark">
-                                Dark
-                                <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                                     fill="none"
-                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </div>
-                            <div class="geo-basemap-option" data-basemap="light">
-                                Light
-                                <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                                     fill="none"
-                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </div>
+                        </div>
+                        <div class="geo-basemap-option" data-basemap="satellite">
+                            Satellite
+                            <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                 fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </div>
+                        <div class="geo-basemap-option" data-basemap="dark">
+                            Dark
+                            <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                 fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                        </div>
+                        <div class="geo-basemap-option" data-basemap="light">
+                            Light
+                            <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                 fill="none"
+                                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                 stroke-linejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
                         </div>
                     </div>
                 </div>
-                <!-- Layer Info Panel -->
-                <div class="geo-layer-info" id="layerInfo">
-                    <div class="geo-layer-info-header">
-                        <span class="geo-layer-info-title" id="layerTitle">Layer</span>
-                        <button class="geo-layer-info-close" id="layerInfoClose" type="button">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
-                                 stroke="currentColor"
-                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="18" y1="6" x2="6" y2="18"></line>
-                                <line x1="6" y1="6" x2="18" y2="18"></line>
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="geo-color-scale" id="colorScale"></div>
-                    <div class="geo-scale-labels">
-                        <span id="scaleMin">0</span>
-                        <span id="scaleMax">100</span>
-                    </div>
-                    <div class="geo-layer-units" id="layerUnits"></div>
-                    <div class="geo-opacity-control">
-                        <div class="geo-opacity-label">
-                            <span>Opacity</span>
-                            <span id="opacityValue">100%</span>
-                        </div>
-                        <input type="range" class="geo-opacity-slider" id="opacitySlider" min="0" max="100" value="100">
-                    </div>
+            </div>
+            <!-- Layer Info Panel -->
+            <div class="geo-layer-info" id="layerInfo">
+                <div class="geo-layer-info-header">
+                    <span class="geo-layer-info-title" id="layerTitle">Layer</span>
+                    <button class="geo-layer-info-close" id="layerInfoClose" type="button">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor"
+                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
                 </div>
+                <div class="geo-color-scale" id="colorScale"></div>
+                <div class="geo-scale-labels">
+                    <span id="scaleMin">0</span>
+                    <span id="scaleMax">100</span>
+                </div>
+                <div class="geo-layer-units" id="layerUnits"></div>
+                <div class="geo-opacity-control">
+                    <div class="geo-opacity-label">
+                        <span>Opacity</span>
+                        <span id="opacityValue">100%</span>
+                    </div>
+                    <input type="range" class="geo-opacity-slider" id="opacitySlider" min="0" max="100" value="100">
+                </div>
+            </div>
 
-                <!-- Loading State -->
-                <div class="geo-map-loading" id="mapLoading" style="display: none;">
-                    <div class="geo-spinner"></div>
-                    <span>Loading layer...</span>
-                </div>
+            <!-- Loading State -->
+            <div class="geo-map-loading" id="mapLoading" style="display: none;">
+                <div class="geo-spinner"></div>
+                <span>Loading layer...</span>
             </div>
         </div>
     </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
-    {{ block.super }}
-    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
-    <script src="https://unpkg.com/deck.gl@9.2.5/dist/dist.dev.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
-    <script>
-        (function async() {
-            'use strict';
+{{ block.super }}
+<script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/deck.gl@9.2.5/dist/dist.dev.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
+<script>
+    (function async() {
+        'use strict';
 
-            const basemaps = {
-                osm: {
-                    name: 'OSM',
-                    style: {
-                        version: 8,
-                        sources: {
-                            osm: {
-                                type: 'raster',
-                                tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© OpenStreetMap contributors'
-                            }
-                        },
-                        layers: [{id: 'osm', type: 'raster', source: 'osm'}]
-                    }
-                },
-                satellite: {
-                    name: 'Satellite',
-                    style: {
-                        version: 8,
-                        sources: {
-                            satellite: {
-                                type: 'raster',
-                                tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-                                tileSize: 256,
-                                attribution: '© Esri'
-                            }
-                        },
-                        layers: [{id: 'satellite', type: 'raster', source: 'satellite'}]
-                    }
-                },
-                dark: {
-                    name: 'Dark',
-                    style: {
-                        version: 8,
-                        sources: {
-                            carto: {
-                                type: 'raster',
-                                tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© CARTO'
-                            }
-                        },
-                        layers: [{id: 'carto', type: 'raster', source: 'carto'}]
-                    }
-                },
-                light: {
-                    name: 'Light',
-                    style: {
-                        version: 8,
-                        sources: {
-                            carto: {
-                                type: 'raster',
-                                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© CARTO'
-                            }
-                        },
-                        layers: [{id: 'carto', type: 'raster', source: 'carto'}]
-                    }
-                }
-            };
-
-            // -----------------------------
-            // State
-            // -----------------------------
-            let currentBasemap = 'osm';
-            let currentAsset = null;
-            let currentPalette = null;
-            let tooltipControl = null;
-
-
-            let map = null;
-
-            // deck overlay (MapLibre control)
-            let deckOverlay = null;
-
-            // layer reference (deck layer)
-            let currentRasterLayer = null;
-
-            const defaultBounds = [
-                {% if item.bounds %}
-                    [{{ item.bounds.0 }}, {{ item.bounds.1 }}],
-                    [{{ item.bounds.2 }}, {{ item.bounds.3 }}]
-                        {% else %}
-                        [-180, -90],
-                    [180, 90]
-                {% endif %}
-            ];
-
-            document.addEventListener('DOMContentLoaded', initializeMap);
-
-            function initializeMap() {
-                map = new maplibregl.Map({
-                    container: 'map',
-                    style: basemaps[currentBasemap].style,
-                    bounds: defaultBounds,
-                    fitBoundsOptions: {padding: 40},
-                    attributionControl: true,
-                });
-
-                map.on('load', onMapLoad);
-
-                setupControls();
-                setupBasemapSelector();
-                setupAssetCards();
-                setupLayerInfo();
-            }
-
-            function waitForDeck(getDeck) {
-                return new Promise(resolve => {
-                    function wait() {
-                        const deck = getDeck();
-                        if (deck && deck.getCanvas()) {
-                            resolve(deck);
-                        } else {
-                            setTimeout(wait, 100);
+        const basemaps = {
+            osm: {
+                name: 'OSM',
+                style: {
+                    version: 8,
+                    sources: {
+                        osm: {
+                            type: 'raster',
+                            tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                            tileSize: 256,
+                            attribution: '© OpenStreetMap contributors'
                         }
+                    },
+                    layers: [{id: 'osm', type: 'raster', source: 'osm'}]
+                }
+            },
+            satellite: {
+                name: 'Satellite',
+                style: {
+                    version: 8,
+                    sources: {
+                        satellite: {
+                            type: 'raster',
+                            tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+                            tileSize: 256,
+                            attribution: '© Esri'
+                        }
+                    },
+                    layers: [{id: 'satellite', type: 'raster', source: 'satellite'}]
+                }
+            },
+            dark: {
+                name: 'Dark',
+                style: {
+                    version: 8,
+                    sources: {
+                        carto: {
+                            type: 'raster',
+                            tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
+                            tileSize: 256,
+                            attribution: '© CARTO'
+                        }
+                    },
+                    layers: [{id: 'carto', type: 'raster', source: 'carto'}]
+                }
+            },
+            light: {
+                name: 'Light',
+                style: {
+                    version: 8,
+                    sources: {
+                        carto: {
+                            type: 'raster',
+                            tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
+                            tileSize: 256,
+                            attribution: '© CARTO'
+                        }
+                    },
+                    layers: [{id: 'carto', type: 'raster', source: 'carto'}]
+                }
+            }
+        };
+
+        // -----------------------------
+        // State
+        // -----------------------------
+        let currentBasemap = 'osm';
+        let currentAsset = null;
+        let currentPalette = null;
+        let tooltipControl = null;
+
+
+        let map = null;
+
+        // deck overlay (MapLibre control)
+        let deckOverlay = null;
+
+        // layer reference (deck layer)
+        let currentRasterLayer = null;
+
+        const defaultBounds = [
+            { %
+        if item.bounds %
+    }
+        [{{item.bounds.0}
+    },
+        {
+            {
+                item.bounds
+                .1
+            }
+        }
+    ],
+        [{{item.bounds.2}
+    },
+        {
+            {
+                item.bounds
+                .3
+            }
+        }
+    ]
+        {% else %
+        }
+        [-180, -90],
+            [180, 90]
+        {%
+            endif %
+        }
+    ]
+        ;
+
+        document.addEventListener('DOMContentLoaded', initializeMap);
+
+        function initializeMap() {
+            map = new maplibregl.Map({
+                container: 'map',
+                style: basemaps[currentBasemap].style,
+                bounds: defaultBounds,
+                fitBoundsOptions: {padding: 40},
+                attributionControl: true,
+            });
+
+            map.on('load', onMapLoad);
+
+            setupControls();
+            setupBasemapSelector();
+            setupAssetCards();
+            setupLayerInfo();
+        }
+
+        function waitForDeck(getDeck) {
+            return new Promise(resolve => {
+                function wait() {
+                    const deck = getDeck();
+                    if (deck && deck.getCanvas()) {
+                        resolve(deck);
+                    } else {
+                        setTimeout(wait, 100);
                     }
-
-                    wait();
-                });
-            }
-
-            async function onMapLoad() {
-                // Create and add interleaved deck overlay
-                deckOverlay = new deck.MapboxOverlay({
-                    interleaved: true,
-                    layers: [],
-                });
-
-                map.addControl(deckOverlay);
-
-                const deckgl = window.deckgl = await waitForDeck(() => deckOverlay._deck);
-
-                // Initialize tooltip control
-                initTooltipControl();
-
-                // Auto-view first visual asset
-                const firstVisual = document.querySelector('.geo-asset-card[data-visualizable="true"]');
-                if (firstVisual) {
-                    viewAsset(firstVisual);
-                }
-            }
-
-            function initTooltipControl() {
-
-                const unitFormat = {
-                    unit: 'mm',
                 }
 
-                tooltipControl = new WeatherLayers.TooltipControl({followCursor: true, unitFormat});
+                wait();
+            });
+        }
 
-                deckgl.setProps({
-                    onLoad: () => deckgl.getCanvas() && tooltipControl.addTo(deckgl.getCanvas().parentElement),
-                    onHover: (event) => {
-                        tooltipControl.updatePickingInfo(event)
-                    }
-                });
+        async function onMapLoad() {
+            // Create and add interleaved deck overlay
+            deckOverlay = new deck.MapboxOverlay({
+                interleaved: true,
+                layers: [],
+            });
 
-                deckgl.props.onLoad();
+            map.addControl(deckOverlay);
 
+            const deckgl = window.deckgl = await waitForDeck(() => deckOverlay._deck);
+
+            // Initialize tooltip control
+            initTooltipControl();
+
+            // Auto-view first visual asset
+            const firstVisual = document.querySelector('.geo-asset-card[data-visualizable="true"]');
+            if (firstVisual) {
+                viewAsset(firstVisual);
+            }
+        }
+
+        function initTooltipControl() {
+
+            const unitFormat = {
+                unit: 'mm',
             }
 
+            tooltipControl = new WeatherLayers.TooltipControl({followCursor: true, unitFormat});
 
-            // -----------------------------
-            // UI Controls
-            // -----------------------------
-            function setupControls() {
-                // add navigation control. Zoom in,out
-                const navControl = new maplibregl.NavigationControl({
-                    showCompass: false
-                });
-                map.addControl(navControl, 'top-right');
-            }
-
-            function fitToBounds() {
-                if (currentAsset) {
-                    const b = parseBounds(currentAsset.dataset.assetBounds);
-                    map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40});
-                } else {
-                    map.fitBounds(defaultBounds, {padding: 40});
+            deckgl.setProps({
+                onLoad: () => deckgl.getCanvas() && tooltipControl.addTo(deckgl.getCanvas().parentElement),
+                onHover: (event) => {
+                    tooltipControl.updatePickingInfo(event)
                 }
+            });
+
+            deckgl.props.onLoad();
+
+        }
+
+
+        // -----------------------------
+        // UI Controls
+        // -----------------------------
+        function setupControls() {
+            // add navigation control. Zoom in,out
+            const navControl = new maplibregl.NavigationControl({
+                showCompass: false
+            });
+            map.addControl(navControl, 'top-right');
+        }
+
+        function fitToBounds() {
+            if (currentAsset) {
+                const b = parseBounds(currentAsset.dataset.assetBounds);
+                map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40});
+            } else {
+                map.fitBounds(defaultBounds, {padding: 40});
             }
+        }
 
-            function setupBasemapSelector() {
-                const basemapBtn = document.getElementById('basemapBtn');
-                const basemapMenu = document.getElementById('basemapMenu');
-                const basemapLabel = document.getElementById('basemapLabel');
+        function setupBasemapSelector() {
+            const basemapBtn = document.getElementById('basemapBtn');
+            const basemapMenu = document.getElementById('basemapMenu');
+            const basemapLabel = document.getElementById('basemapLabel');
 
-                basemapBtn.addEventListener('click', (e) => {
+            basemapBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                basemapMenu.classList.toggle('open');
+            });
+
+            document.addEventListener('click', () => {
+                basemapMenu.classList.remove('open');
+            });
+
+            document.querySelectorAll('.geo-basemap-option').forEach(option => {
+                option.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    basemapMenu.classList.toggle('open');
-                });
+                    const newBasemap = option.dataset.basemap;
+                    if (newBasemap !== currentBasemap) {
+                        document.querySelectorAll('.geo-basemap-option').forEach(o => o.classList.remove('active'));
+                        option.classList.add('active');
+                        basemapLabel.textContent = basemaps[newBasemap].name;
 
-                document.addEventListener('click', () => {
+                        changeBasemap(newBasemap);
+                        currentBasemap = newBasemap;
+                    }
                     basemapMenu.classList.remove('open');
                 });
+            });
+        }
 
-                document.querySelectorAll('.geo-basemap-option').forEach(option => {
-                    option.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const newBasemap = option.dataset.basemap;
-                        if (newBasemap !== currentBasemap) {
-                            document.querySelectorAll('.geo-basemap-option').forEach(o => o.classList.remove('active'));
-                            option.classList.add('active');
-                            basemapLabel.textContent = basemaps[newBasemap].name;
+        function changeBasemap(basemapKey) {
+            const style = basemaps[basemapKey].style;
+            const savedAsset = currentAsset;
 
-                            changeBasemap(newBasemap);
-                            currentBasemap = newBasemap;
-                        }
-                        basemapMenu.classList.remove('open');
-                    });
-                });
-            }
+            // This resets MapLibre style (deck overlay remains as a control)
+            map.setStyle(style);
 
-            function changeBasemap(basemapKey) {
-                const style = basemaps[basemapKey].style;
-                const savedAsset = currentAsset;
-
-                // This resets MapLibre style (deck overlay remains as a control)
-                map.setStyle(style);
-
-                // When style reloads, deck overlay remains, but we can re-add layer props safely.
-                map.once('style.load', () => {
-                    // re-apply deck layers
-                    if (deckOverlay && currentRasterLayer) {
-                        deckOverlay.setProps({layers: [currentRasterLayer]});
-                    }
-
-                    // optional: re-fit to current asset bounds
-                    if (savedAsset) {
-                        const b = parseBounds(savedAsset.dataset.assetBounds);
-                        map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, duration: 0});
-                    }
-                });
-            }
-
-            function setupAssetCards() {
-                document.querySelectorAll('.geo-asset-card').forEach(card => {
-                    card.addEventListener('click', function () {
-                        if (this.dataset.visualizable === 'true') {
-                            viewAsset(this);
-                        }
-                    });
-                });
-            }
-
-            function setupLayerInfo() {
-                const opacitySlider = document.getElementById('opacitySlider');
-                const opacityValue = document.getElementById('opacityValue');
-
-                // IMPORTANT: recreate the layer on change (more reliable in interleaved mode)
-                opacitySlider.addEventListener('input', () => {
-                    opacityValue.textContent = `${opacitySlider.value}%`;
-                    if (currentAsset) addWeatherRasterLayer(currentAsset);
-                });
-
-                document.getElementById('layerInfoClose').addEventListener('click', () => {
-                    document.getElementById('layerInfo').classList.remove('visible');
-                });
-            }
-
-            // Expose to your "View" buttons
-            window.viewAsset = function (assetElement) {
-                if (!assetElement || assetElement.dataset.visualizable !== 'true') return;
-
-                document.querySelectorAll('.geo-asset-card').forEach(c => c.classList.remove('active'));
-                assetElement.classList.add('active');
-
-                currentAsset = assetElement;
-
-                addWeatherRasterLayer(assetElement);
-
-                const b = parseBounds(assetElement.dataset.assetBounds);
-                map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, duration: 500});
-            };
-
-            // -----------------------------
-            // Palette Functions
-            // -----------------------------
-
-            /**
-             * Get palette from asset data attribute
-             * Falls back to simple grayscale if parsing fails
-             */
-            function getPaletteForAsset(assetElement) {
-                const paletteStr = assetElement.dataset.assetPalette;
-
-                if (paletteStr && paletteStr.trim() !== '') {
-                    try {
-                        const palette = JSON.parse(paletteStr);
-                        if (Array.isArray(palette) && palette.length > 0) {
-                            return palette;
-                        }
-                    } catch (e) {
-                        console.warn('Failed to parse asset palette:', e);
-                    }
-                }
-
-                // Fallback grayscale
-                return [[0, [0, 0, 0]], [1, [255, 255, 255]]];
-            }
-
-            // -----------------------------
-            // WeatherLayers RasterLayer
-            // -----------------------------
-            async function addWeatherRasterLayer(assetElement) {
-                if (!deckOverlay) return;
-
-                const assetUrl = assetElement.dataset.assetUrl;
-                const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
-                const format = (assetElement.dataset.assetFormat || '').toLowerCase();
-
-                // Get palette range for imageUnscale (from palette or asset stats)
-                const paletteMin = safeParseFloat(assetElement.dataset.assetPaletteMin);
-                const paletteMax = safeParseFloat(assetElement.dataset.assetPaletteMax);
-
-                // Only handle image formats for now
-                const supported = ['png', 'webp', 'jpeg', 'jpg'];
-                if (!supported.includes(format)) {
-                    clearDeckLayers();
-                    updateLayerInfo(assetElement);
-                    return;
-                }
-
-                // Show loading
-                const loadingEl = document.getElementById('mapLoading');
-                loadingEl.style.display = 'flex';
-
-                // Clear previous layers first
-                clearDeckLayers();
-
-                try {
-                    // Get palette from asset
-                    const palette = getPaletteForAsset(assetElement);
-                    currentPalette = palette;
-
-                    const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
-
-                    // Load as texture data
-                    const image = await WeatherLayers.loadTextureData(assetUrl);
-
-                    const imageUnscale = (Number.isFinite(paletteMin) && Number.isFinite(paletteMax))
-                        ? [paletteMin, paletteMax]
-                        : null
-
-                    console.log(image)
-
-
-                    // Create the raster layer
-                    currentRasterLayer = new WeatherLayers.RasterLayer({
-                        id: 'weather-raster',
-                        image,
-                        bounds, // [west, south, east, north]
-                        imageSmoothing: true,
-                        imageInterpolation: true,
-                        // Use palette range for unscaling
-                        imageUnscale,
-                        palette,
-                        opacity,
-                        visible: true,
-                        pickable: true
-                    });
-
+            // When style reloads, deck overlay remains, but we can re-add layer props safely.
+            map.once('style.load', () => {
+                // re-apply deck layers
+                if (deckOverlay && currentRasterLayer) {
                     deckOverlay.setProps({layers: [currentRasterLayer]});
+                }
 
-                } catch (err) {
-                    console.error('WeatherLayers RasterLayer failed: ', err);
+                // optional: re-fit to current asset bounds
+                if (savedAsset) {
+                    const b = parseBounds(savedAsset.dataset.assetBounds);
+                    map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, duration: 0});
+                }
+            });
+        }
 
-                    currentRasterLayer = null;
-                    currentPalette = null;
-                    deckOverlay.setProps({layers: []});
-                } finally {
-                    map.once('idle', () => {
-                        loadingEl.style.display = 'none';
-                    });
-                    updateLayerInfo(assetElement);
+        function setupAssetCards() {
+            document.querySelectorAll('.geo-asset-card').forEach(card => {
+                card.addEventListener('click', function () {
+                    if (this.dataset.visualizable === 'true') {
+                        viewAsset(this);
+                    }
+                });
+            });
+        }
+
+        function setupLayerInfo() {
+            const opacitySlider = document.getElementById('opacitySlider');
+            const opacityValue = document.getElementById('opacityValue');
+
+            // IMPORTANT: recreate the layer on change (more reliable in interleaved mode)
+            opacitySlider.addEventListener('input', () => {
+                opacityValue.textContent = `${opacitySlider.value}%`;
+                if (currentAsset) addWeatherRasterLayer(currentAsset);
+            });
+
+            document.getElementById('layerInfoClose').addEventListener('click', () => {
+                document.getElementById('layerInfo').classList.remove('visible');
+            });
+        }
+
+        // Expose to your "View" buttons
+        window.viewAsset = function (assetElement) {
+            if (!assetElement || assetElement.dataset.visualizable !== 'true') return;
+
+            document.querySelectorAll('.geo-asset-card').forEach(c => c.classList.remove('active'));
+            assetElement.classList.add('active');
+
+            currentAsset = assetElement;
+
+            addWeatherRasterLayer(assetElement);
+
+            const b = parseBounds(assetElement.dataset.assetBounds);
+            map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, duration: 500});
+        };
+
+        // -----------------------------
+        // Palette Functions
+        // -----------------------------
+
+        /**
+         * Get palette from asset data attribute
+         * Falls back to simple grayscale if parsing fails
+         */
+        function getPaletteForAsset(assetElement) {
+            const paletteStr = assetElement.dataset.assetPalette;
+
+            if (paletteStr && paletteStr.trim() !== '') {
+                try {
+                    const palette = JSON.parse(paletteStr);
+                    if (Array.isArray(palette) && palette.length > 0) {
+                        return palette;
+                    }
+                } catch (e) {
+                    console.warn('Failed to parse asset palette:', e);
                 }
             }
 
-            function clearDeckLayers() {
+            // Fallback grayscale
+            return [[0, [0, 0, 0]], [1, [255, 255, 255]]];
+        }
+
+        // -----------------------------
+        // WeatherLayers RasterLayer
+        // -----------------------------
+        async function addWeatherRasterLayer(assetElement) {
+            if (!deckOverlay) return;
+
+            const assetUrl = assetElement.dataset.assetUrl;
+            const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
+            const format = (assetElement.dataset.assetFormat || '').toLowerCase();
+
+            // Get palette range for imageUnscale (from palette or asset stats)
+            const paletteMin = safeParseFloat(assetElement.dataset.assetPaletteMin);
+            const paletteMax = safeParseFloat(assetElement.dataset.assetPaletteMax);
+
+            // Only handle image formats for now
+            const supported = ['png', 'webp', 'jpeg', 'jpg'];
+            if (!supported.includes(format)) {
+                clearDeckLayers();
+                updateLayerInfo(assetElement);
+                return;
+            }
+
+            // Show loading
+            const loadingEl = document.getElementById('mapLoading');
+            loadingEl.style.display = 'flex';
+
+            // Clear previous layers first
+            clearDeckLayers();
+
+            try {
+                // Get palette from asset
+                const palette = getPaletteForAsset(assetElement);
+                currentPalette = palette;
+
+                const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
+
+                // Load as texture data
+                const image = await WeatherLayers.loadTextureData(assetUrl);
+
+                const imageUnscale = (Number.isFinite(paletteMin) && Number.isFinite(paletteMax))
+                    ? [paletteMin, paletteMax]
+                    : null
+
+                // Create the raster layer
+                currentRasterLayer = new WeatherLayers.RasterLayer({
+                    id: 'weather-raster',
+                    image,
+                    bounds, // [west, south, east, north]
+                    imageSmoothing: true,
+                    imageInterpolation: true,
+                    // Use palette range for unscaling
+                    imageUnscale,
+                    palette,
+                    opacity,
+                    visible: true,
+                    pickable: true
+                });
+
+                deckOverlay.setProps({layers: [currentRasterLayer]});
+
+            } catch (err) {
+                console.error('WeatherLayers RasterLayer failed: ', err);
+
                 currentRasterLayer = null;
                 currentPalette = null;
-                if (deckOverlay) deckOverlay.setProps({layers: []});
-
-                // Remove fallback if present
-                try {
-                    if (map.getLayer('asset-layer-fallback')) map.removeLayer('asset-layer-fallback');
-                    if (map.getSource('asset-source')) map.removeSource('asset-source');
-                } catch (e) {
-                }
-            }
-
-
-            // -----------------------------
-            // Helpers
-            // -----------------------------
-            function parseBounds(boundsStr) {
-                return (boundsStr || '').split(',').map(Number);
-            }
-
-            function safeParseFloat(v) {
-                const n = parseFloat(v);
-                return Number.isFinite(n) ? n : NaN;
-            }
-
-            /**
-             * Generate CSS gradient from palette for legend display
-             */
-            function generateGradientCSS(palette) {
-                if (!palette || palette.length === 0) {
-                    return 'linear-gradient(to right, #333, #fff)';
-                }
-
-                // Normalize positions for CSS
-                const positions = palette.map(entry => entry[0]);
-                const minPos = Math.min(...positions);
-                const maxPos = Math.max(...positions);
-                const range = maxPos - minPos || 1;
-
-                const stops = palette.map(([pos, color]) => {
-                    const normalizedPos = (pos - minPos) / range;
-                    const rgba = color.length === 4
-                        ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`
-                        : `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
-                    return `${rgba} ${normalizedPos * 100}%`;
+                deckOverlay.setProps({layers: []});
+            } finally {
+                map.once('idle', () => {
+                    loadingEl.style.display = 'none';
                 });
-                return `linear-gradient(to right, ${stops.join(', ')})`;
+                updateLayerInfo(assetElement);
+            }
+        }
+
+        function clearDeckLayers() {
+            currentRasterLayer = null;
+            currentPalette = null;
+            if (deckOverlay) deckOverlay.setProps({layers: []});
+
+            // Remove fallback if present
+            try {
+                if (map.getLayer('asset-layer-fallback')) map.removeLayer('asset-layer-fallback');
+                if (map.getSource('asset-source')) map.removeSource('asset-source');
+            } catch (e) {
+            }
+        }
+
+
+        // -----------------------------
+        // Helpers
+        // -----------------------------
+        function parseBounds(boundsStr) {
+            return (boundsStr || '').split(',').map(Number);
+        }
+
+        function safeParseFloat(v) {
+            const n = parseFloat(v);
+            return Number.isFinite(n) ? n : NaN;
+        }
+
+        /**
+         * Generate CSS gradient from palette for legend display
+         */
+        function generateGradientCSS(palette) {
+            if (!palette || palette.length === 0) {
+                return 'linear-gradient(to right, #333, #fff)';
             }
 
-            /**
-             * Update the legend panel with layer info
-             */
-            function updateLayerInfo(assetElement) {
-                const name = assetElement.dataset.assetName || 'Layer';
-                const units = assetElement.dataset.assetUnits;
+            // Normalize positions for CSS
+            const positions = palette.map(entry => entry[0]);
+            const minPos = Math.min(...positions);
+            const maxPos = Math.max(...positions);
+            const range = maxPos - minPos || 1;
 
-                // Use palette value range for legend (from palette stops or asset stats for grayscale)
-                const legendMin = assetElement.dataset.assetPaletteMin;
-                const legendMax = assetElement.dataset.assetPaletteMax;
+            const stops = palette.map(([pos, color]) => {
+                const normalizedPos = (pos - minPos) / range;
+                const rgba = color.length === 4
+                    ? `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`
+                    : `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                return `${rgba} ${normalizedPos * 100}%`;
+            });
+            return `linear-gradient(to right, ${stops.join(', ')})`;
+        }
 
-                document.getElementById('layerTitle').textContent = name;
-                document.getElementById('scaleMin').textContent = legendMin ? parseFloat(legendMin).toFixed(1) : '0';
-                document.getElementById('scaleMax').textContent = legendMax ? parseFloat(legendMax).toFixed(1) : '100';
-                document.getElementById('layerUnits').textContent = units || '';
+        /**
+         * Update the legend panel with layer info
+         */
+        function updateLayerInfo(assetElement) {
+            const name = assetElement.dataset.assetName || 'Layer';
+            const units = assetElement.dataset.assetUnits;
 
-                // Use current palette for gradient
-                const palette = currentPalette || getPaletteForAsset(assetElement);
-                const colorScale = document.getElementById('colorScale');
-                colorScale.style.background = generateGradientCSS(palette);
+            // Use palette value range for legend (from palette stops or asset stats for grayscale)
+            const legendMin = assetElement.dataset.assetPaletteMin;
+            const legendMax = assetElement.dataset.assetPaletteMax;
 
-                document.getElementById('layerInfo').classList.add('visible');
-            }
+            document.getElementById('layerTitle').textContent = name;
+            document.getElementById('scaleMin').textContent = legendMin ? parseFloat(legendMin).toFixed(1) : '0';
+            document.getElementById('scaleMax').textContent = legendMax ? parseFloat(legendMax).toFixed(1) : '100';
+            document.getElementById('layerUnits').textContent = units || '';
 
-        })();
-    </script>
+            // Use current palette for gradient
+            const palette = currentPalette || getPaletteForAsset(assetElement);
+            const colorScale = document.getElementById('colorScale');
+            colorScale.style.background = generateGradientCSS(palette);
+
+            document.getElementById('layerInfo').classList.add('visible');
+        }
+
+    })();
+</script>
 {% endblock %}

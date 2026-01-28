@@ -448,6 +448,7 @@ class IngestionService:
         
         # Save PNG (visual asset)
         png_path = f"{base_dir}/{base_name}.png"
+        
         try:
             stored_png = writer.write_png(final_rgba, png_path)
             
@@ -469,8 +470,8 @@ class IngestionService:
                     'stats_std': stats.get('std'),
                     'extra_fields': {
                         'imageUnscale': [
-                            variable.value_min if variable.value_min is not None else stats.get('min'),
-                            variable.value_max if variable.value_max is not None else stats.get('max'),
+                            variable.value_min,
+                            variable.value_max
                         ],
                         'scale': variable.scale_type or 'linear',
                     },
@@ -527,8 +528,8 @@ class IngestionService:
                 'crs': crs,
                 'transform': variable.transform_type,
                 'imageUnscale': [
-                    variable.value_min if variable.value_min is not None else stats.get('min'),
-                    variable.value_max if variable.value_max is not None else stats.get('max'),
+                    variable.value_min,
+                    variable.value_max
                 ],
                 'scale': variable.scale_type or 'linear',
                 'stats': stats,
@@ -573,7 +574,7 @@ class IngestionService:
             final_data[y:y + h, x:x + w] = chunk
             
             # Encode for PNG
-            rgba_chunk = encoder.encode_to_rgba(chunk, variable, stats)
+            rgba_chunk = encoder.encode_to_rgba(chunk, variable)
             final_rgba[y:y + h, x:x + w] = rgba_chunk
             
             del chunk, rgba_chunk
@@ -612,7 +613,7 @@ class IngestionService:
         final_data = apply_unit_conversion(final_data, variable.unit_conversion)
         
         # Encode to RGBA
-        final_rgba = encoder.encode_to_rgba(final_data, variable, stats)
+        final_rgba = encoder.encode_to_rgba(final_data, variable)
         
         return final_data, final_rgba
     

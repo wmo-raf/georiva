@@ -276,18 +276,13 @@ class Asset(TimeStampedModel, Orderable):
     @property
     def palette_value_range(self) -> tuple:
         """
-        Get (min, max) for the legend.
-        - Defined palette: from palette stops
-        - Grayscale fallback: from asset stats
+        Get (min, max) for legend display.
+        - Variable has range defined: use it (consistent across all assets)
+        - No range defined: use asset stats (grayscale fallback per-asset)
         """
-        if self.variable.palette:
-            min_val, max_val = self.variable.palette.min_max_from_stops()
-            return (
-                min_val if min_val is not None else 0,
-                max_val if max_val is not None else 100
-            )
+        if self.variable.value_min is not None and self.variable.value_max is not None:
+            return (self.variable.value_min, self.variable.value_max)
         
-        # Grayscale uses asset stats
         return (
             self.stats_min if self.stats_min is not None else 0,
             self.stats_max if self.stats_max is not None else 1

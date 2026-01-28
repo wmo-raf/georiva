@@ -18,8 +18,7 @@ class VariableEncoder:
     def encode_to_rgba(
             self,
             data: np.ndarray,
-            variable: 'Variable',
-            stats: dict,
+            variable: 'Variable'
     ) -> np.ndarray:
         """
         Encode data to RGBA format for PNG output.
@@ -37,18 +36,19 @@ class VariableEncoder:
         # Create mask before normalization
         mask = np.isnan(data)
         
+        if variable.value_min is None or variable.value_max is None:
+            raise ValueError(
+                f"Variable '{variable.slug}' must have value_min and value_max defined"
+            )
+        
         # Get value range
-        vmin = variable.value_min if variable.value_min is not None else stats.get('min')
-        vmax = variable.value_max if variable.value_max is not None else stats.get('max')
+        vmin = float(variable.value_min)
+        vmax = float(variable.value_max)
         
-        if vmin is None:
-            vmin = float(np.nanmin(data))
-        if vmax is None:
-            vmax = float(np.nanmax(data))
-        
-        vmin, vmax = float(vmin), float(vmax)
         if vmax <= vmin:
-            vmax = vmin + 1.0
+            raise ValueError(
+                f"Variable '{variable.slug}' value_max ({vmax}) must be greater than value_min ({vmin})"
+            )
         
         # Normalize based on scale type
         normalized = self._normalize(data, vmin, vmax, variable.scale_type)
