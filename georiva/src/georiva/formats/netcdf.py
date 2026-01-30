@@ -13,7 +13,7 @@ import pandas as pd
 import xarray as xr
 
 from georiva.utils.path import PathLike
-from .registry import BaseFormatPlugin, ExtractedVariable
+from .base import BaseFormatPlugin, ExtractedVariable
 
 
 class NetCDFFormatPlugin(BaseFormatPlugin):

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Iterator, Optional, Protocol, runtime_checkable
 
-from georiva.sources.fetch.base import FileRequest
+from georiva.sources.fetch.base import FileRequest, BaseFetchStrategy
 
 
 class DataSourceType(str, Enum):
@@ -85,12 +85,16 @@ class BaseDataSource(ABC):
     type: str = ""  # 'ecmwf-aifs', 'gfs', 'chirps'
     label: str = ""  # 'ECMWF AIFS', 'NOAA GFS', 'CHIRPS'
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, fetch_strategy: BaseFetchStrategy = None):
         if not self.type:
             raise ValueError(f"{self.__class__.__name__} must define 'type'")
         
         if not self.label:
             raise ValueError(f"{self.__class__.__name__} must define 'label'")
+        
+        self.fetch_strategy = fetch_strategy
+        if not self.fetch_strategy:
+            raise ValueError(f"{self.__class__.__name__} must define 'fetch_strategy'")
         
         self.config = config
         self.logger = logging.getLogger(f"georiva.datasource.{self.type}")

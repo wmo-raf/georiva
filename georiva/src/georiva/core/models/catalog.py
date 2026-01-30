@@ -24,7 +24,7 @@ class Catalog(TimeStampedModel):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        help_text="Loader profile to use for ingesting data for this catalog"
+        help_text="Loader profile to use for ingesting data for this catalog",
     )
     
     # Provider information
@@ -34,7 +34,7 @@ class Catalog(TimeStampedModel):
     
     # Source file format
     class FileFormat(models.TextChoices):
-        GRIB = 'grib', 'GRIB/GRIB2'
+        GRIB = 'grib2', 'GRIB/GRIB2'
         NETCDF = 'netcdf', 'NetCDF'
         GEOTIFF = 'geotiff', 'GeoTIFF'
         ZARR = 'zarr', 'ZARR'
@@ -91,3 +91,18 @@ class Catalog(TimeStampedModel):
         ], heading="Clipping Configuration"),
         FieldPanel('is_active'),
     ]
+    
+    def get_loader(self):
+        """Get the loader instance for this catalog."""
+        if not self.loader_profile:
+            return None
+        
+        return self.loader_profile.get_loader(self)
+    
+    def source_variables_list(self):
+        """Get a list of all source variables in all collections in this catalog."""
+        source_vars = []
+        for collection in self.collections.all():
+            variable_sources_params = collection.source_variables_list()
+            source_vars.extend(variable_sources_params)
+        return source_vars

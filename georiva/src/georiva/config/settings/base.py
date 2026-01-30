@@ -58,8 +58,8 @@ INSTALLED_APPS = [
     "georiva.stac",
     "georiva.visualization",
     "georiva.sources",
-    "georiva.loaders",
     "georiva.ecmwf_aifs_source",
+    'django_better_admin_arrayfield',
     
     'django_cleanup.apps.CleanupConfig',
     'rest_framework',

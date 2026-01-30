@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.functional import cached_property
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
@@ -141,6 +142,11 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             FieldPanel('sort_order'),
         ], heading="Status"),
     ]
+    
+    @cached_property
+    def sources_param_list(self):
+        """Return a list of source variable names for this variable."""
+        return [source.source_name for source in self.sources.all()]
 
 
 class VariableSource(Orderable):

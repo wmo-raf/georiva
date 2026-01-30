@@ -12,7 +12,7 @@ from typing import Iterator, Optional
 
 import requests
 
-from georiva.sources.fetch.base import FileRequest
+from georiva.sources.fetch import FileRequest, HTTPFetchStrategy
 from georiva.sources.source import BaseDataSource, DataSourceType
 
 
@@ -56,7 +56,7 @@ class ECMWFAIFSDataSource(BaseDataSource):
     
     PRESSURE_LEVELS = [1000, 925, 850, 700, 500, 300, 250, 200, 50]
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, fetch_strategy=HTTPFetchStrategy):
         """
         Config options:
             variables: list of variable slugs (metadata; extraction is downstream)
@@ -65,16 +65,16 @@ class ECMWFAIFSDataSource(BaseDataSource):
             allow_yesterday_fallback: bool (default True) -> if no run found today, try yesterday
             head_timeout: int seconds (default 20)
         """
-        super().__init__(config)
+        super().__init__(config, fetch_strategy)
         
         self.requested_variables = config.get("variables", list(self.SURFACE_VARIABLES.keys()))
         self.pressure_levels = config.get("pressure_levels", self.PRESSURE_LEVELS)
         
-        fh_config = config.get("forecast_hours", "all")
-        if fh_config == "all":
-            self.forecast_hours = list(range(0, self.MAX_FORECAST_HOUR + 1, self.FORECAST_STEP))
-        else:
-            self.forecast_hours = list(fh_config)
+        fh_config = config.get("forecast_hours", [0, 6, 12, 18])
+        self.forecast_hours = list(fh_config)
+        
+        rt_config = config.get("run_hours", [0, 12])
+        self.run_hours = list(rt_config)
         
         self.allow_yesterday_fallback = bool(config.get("allow_yesterday_fallback", True))
         self.head_timeout = int(config.get("head_timeout", 20))
@@ -141,7 +141,7 @@ class ECMWFAIFSDataSource(BaseDataSource):
         # Latest-first for "latest available" behavior
         return [
             datetime(d.year, d.month, d.day, hh, 0, 0, tzinfo=timezone.utc)
-            for hh in sorted(self.CYCLES, reverse=True)
+            for hh in sorted(self.run_hours, reverse=True)
         ]
     
     def get_latest_available_run(self) -> Optional[datetime]:
@@ -237,30 +237,3 @@ class ECMWFAIFSDataSource(BaseDataSource):
             expected_format="grib",
             variables=variables,  # metadata only
         )
-
-
-def create_aifs_source(
-        variables: Optional[list[str]] = None,
-        forecast_hours: Optional[list[int]] = None,
-        allow_yesterday_fallback: bool = True,
-        head_timeout: int = 20,
-) -> ECMWFAIFSDataSource:
-    """
-    Factory function to create an AIFS data source.
-
-    Example:
-        source = create_aifs_source(
-            variables=["2t", "10u", "10v", "tp"],
-            forecast_hours=list(range(0, 73, 6)),
-            allow_yesterday_fallback=True,
-        )
-    """
-    config = {
-        "variables": variables,
-        "forecast_hours": forecast_hours,
-        "allow_yesterday_fallback": allow_yesterday_fallback,
-        "head_timeout": head_timeout,
-    }
-    # Drop None values
-    config = {k: v for k, v in config.items() if v is not None}
-    return ECMWFAIFSDataSource(config)

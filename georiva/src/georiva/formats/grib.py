@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from georiva.utils.path import PathLike
-from .registry import BaseFormatPlugin, ExtractedVariable
+from .base import BaseFormatPlugin, ExtractedVariable
 
 
 class GRIBFormatPlugin(BaseFormatPlugin):

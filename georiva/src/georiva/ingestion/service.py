@@ -95,6 +95,7 @@ class IngestionService:
             file_path: str,
             catalog_slug: str = None,
             collection_slug: str = None,
+            metadata: dict = None,
     ) -> IngestionResult:
         """
         Process an incoming file.
@@ -103,6 +104,7 @@ class IngestionService:
             file_path: Path to source file in storage
             catalog_slug: Catalog slug (inferred from path if not provided)
             collection_slug: Collection slug (inferred from path if not provided)
+            metadata: Optional metadata dict
         
         Returns:
             IngestionResult with status and created records
@@ -111,6 +113,8 @@ class IngestionService:
         from georiva.formats.registry import format_registry
         
         self.logger.info(f"Processing: {file_path}")
+        
+        reference_time = metadata.get('reference_time', None) if metadata else None
         
         result = IngestionResult(
             source_file=file_path,
@@ -188,6 +192,7 @@ class IngestionService:
                             timestamp=ts,
                             source_file=file_path,
                             clipper=clipper,
+                            reference_time=reference_time,
                         )
                         result.items_created.append(str(item.pk))
                         result.assets_created.extend([str(a.pk) for a in assets])

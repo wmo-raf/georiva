@@ -5,17 +5,16 @@ from django_extensions.db.models import TimeStampedModel
 from polymorphic.models import PolymorphicModel
 from wagtail.admin.panels import FieldPanel
 
-from .registry import data_source_registry, fetch_strategy_registry
-from .widgets import DataSourceClassSelectWidget, FetchStrategyClassSelectWidget
+from .registry import data_source_registry
+from .widgets import DataSourceClassSelectWidget
 
 
 class LoaderProfile(PolymorphicModel, TimeStampedModel):
     """
-    Configuration for a data loader combining DataSource + FetchStrategy.
+    Configuration for a data loader using DataSource .
     
     Each profile defines:
     - What data to fetch (data_source_type + data_source_config)
-    - How to fetch it (fetch_strategy_type + fetch_strategy_config)
     - When to run (interval_minutes)
     """
     
@@ -27,11 +26,6 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     data_source_type = models.CharField(
         max_length=100,
         verbose_name=_("Data Source"),
-    )
-    
-    fetch_strategy_type = models.CharField(
-        max_length=100,
-        verbose_name=_("Fetch Strategy"),
     )
     
     is_active = models.BooleanField(
@@ -71,7 +65,6 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     base_panels = [
         FieldPanel('name'),
         FieldPanel('data_source_type', widget=DataSourceClassSelectWidget),
-        FieldPanel('fetch_strategy_type', widget=FetchStrategyClassSelectWidget),
         FieldPanel('is_active'),
         FieldPanel('interval_minutes'),
     ]
@@ -86,6 +79,10 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     def __str__(self):
         return f"{self.name} - {self.get_real_instance_class().__name__}"
     
+    def get_loader_config(self) -> dict:
+        """Get loader configuration dictionary."""
+        return {}
+    
     # =========================================================================
     # Factory Methods
     # =========================================================================
@@ -98,36 +95,27 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         
         # Merge default config with instance config
         info = data_source_registry.get(self.data_source_type)
-        config = {**info.get('default_config', {}), **self.data_source_config}
+        loader_config = self.get_loader_config()
+        config = {**info.get('default_config', {}), **loader_config}
         
         return source_class(config)
     
-    def get_fetch_strategy(self):
-        """Instantiate configured fetch strategy."""
-        strategy_class = fetch_strategy_registry.get_class(self.fetch_strategy_type)
-        if not strategy_class:
-            raise ValueError(f"Unknown fetch strategy: {self.fetch_strategy_type}")
-        
-        info = fetch_strategy_registry.get(self.fetch_strategy_type)
-        config = {**info.get('default_config', {}), **self.fetch_strategy_config}
-        
-        return strategy_class(config)
-    
-    def get_loader(self, collection=None):
+    def get_loader(self, catalog=None):
         """Create fully configured Loader instance."""
         from .loader import Loader
         
-        # Determine collection
-        if collection is None:
-            if self.catalog and self.catalog.collections.exists():
-                collection = self.catalog.collections.first()
+        # Determine catalog
+        if catalog:
+            if catalog.collections.exists():
+                pass  # Use provided catalog
             else:
-                raise ValueError("No collection available for this profile")
+                raise ValueError(f"Catalog '{catalog}' has no collections.")
+        else:
+            raise ValueError("LoaderProfile is not associated with any Catalog.")
         
         return Loader(
             data_source=self.get_data_source(),
-            fetch_strategy=self.get_fetch_strategy(),
-            collection=collection,
+            catalog=catalog,
         )
     
     # =========================================================================
@@ -168,9 +156,9 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run
     
-    def run_now(self, **kwargs):
+    def run_now(self, catalog, **kwargs):
         """Convenience method to run immediately."""
-        loader = self.get_loader()
+        loader = self.get_loader(catalog)
         result = loader.run(**kwargs)
         self.record_run(result)
         return result

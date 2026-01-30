@@ -13,7 +13,12 @@ def process_incoming_file(self, collection_id: str, file_path: str, metadata: di
     collection = Collection.objects.get(id=collection_id)
     
     service = IngestionService()
-    result = service.process_file(file_path, catalog_slug=collection.catalog.slug, collection_slug=collection.slug)
+    result = service.process_file(
+        file_path,
+        catalog_slug=collection.catalog.slug,
+        collection_slug=collection.slug,
+        metadata=metadata
+    )
     
     if not result.success and self.request.retries < self.max_retries:
         raise self.retry(countdown=60 * (self.request.retries + 1))

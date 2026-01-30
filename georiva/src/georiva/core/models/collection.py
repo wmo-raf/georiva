@@ -83,3 +83,11 @@ class Collection(TimeStampedModel, ClusterableModel):
         ], heading="Status"),
         InlinePanel('variables', label="Variables"),
     ]
+    
+    def source_variables_list(self):
+        """Return a list of source variable names in this collection."""
+        source_vars = []
+        for variable in self.variables.all():
+            variable_sources_params = variable.sources_param_list
+            source_vars.extend(variable_sources_params)
+        return source_vars

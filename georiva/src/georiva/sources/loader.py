@@ -1,7 +1,7 @@
 """
 GeoRiva Loader
 
-Orchestrates data loading by combining DataSource and FetchStrategy.
+Orchestrates data loading by using DataSource.
 """
 
 import logging
@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from django.utils import timezone
+
+from georiva.sources.fetch.base import FetchResult
 
 
 @dataclass
@@ -88,8 +90,7 @@ class Loader:
     Usage:
         loader = Loader(
             data_source=ECMWFAIFSDataSource(config),
-            fetch_strategy=HTTPFetchStrategy(http_config),
-            collection=my_collection,
+            catalog=my_catalog,
         )
         
         result = loader.run()
@@ -98,15 +99,14 @@ class Loader:
     def __init__(
             self,
             data_source,  # DataSource protocol
-            fetch_strategy,  # FetchStrategy protocol
-            collection,  # GeoRiva Collection model
+            catalog,  # GeoRiva catalog model
             *,
             storage_backend=None,  # Optional custom storage
             on_file_fetched: Optional[Callable] = None,  # Callback after each file
     ):
         self.data_source = data_source
-        self.fetch_strategy = fetch_strategy
-        self.collection = collection
+        self.fetch_strategy = self.data_source.fetch_strategy()
+        self.catalog = catalog
         self.storage_backend = storage_backend
         self.on_file_fetched = on_file_fetched
         
@@ -122,7 +122,6 @@ class Loader:
     def run(
             self,
             *,
-            variables: Optional[list[str]] = None,
             dry_run: bool = False,
             max_files: Optional[int] = None,
             skip_existing: bool = True,
@@ -132,7 +131,6 @@ class Loader:
         Execute a loader run.
         
         Args:
-            variables: Specific variables to fetch (default: all configured)
             dry_run: If True, generate requests but don't fetch
             max_files: Maximum files to fetch (useful for testing)
             skip_existing: Skip files already in storage (default: True)
@@ -144,14 +142,16 @@ class Loader:
         result = LoaderRunResult()
         
         try:
-            self.logger.info(f"Starting loader run for {self.collection}")
+            self.logger.info(f"Starting loader run for {self.catalog}")
             
             # Connect fetch strategy
             self.fetch_strategy.connect()
             self.logger.debug("Fetch strategy connected")
             
+            data_variables = self.catalog.source_variables_list()
+            
             # Generate requests from data source
-            requests = list(self.data_source.generate_requests(variables=variables))
+            requests = list(self.data_source.generate_requests(variables=data_variables))
             result.files_requested = len(requests)
             
             if not requests:
@@ -249,7 +249,6 @@ class Loader:
     
     def _fetch_and_store(self, request, trigger_ingestion: bool):
         """Fetch a file and store it."""
-        from .base import FetchResult
         
         start_time = time.time()
         temp_path = self._get_temp_path(request.filename)
@@ -349,15 +348,15 @@ class Loader:
     
     def _get_storage_path(self, request) -> str:
         """Get the storage path for a file."""
-        # Organize by collection and reference time
+        # Organize by catalog and reference time
         if request.reference_time:
             # Forecast: organize by run date
             date_part = request.reference_time.strftime('%Y/%m/%d')
-            return f"incoming/{self.collection.slug}/{date_part}/{request.filename}"
+            return f"sources/{self.catalog.slug}/{date_part}/{request.filename}"
         else:
             # Observation/analysis: organize by valid time
             date_part = request.valid_time.strftime('%Y/%m/%d')
-            return f"incoming/{self.collection.slug}/{date_part}/{request.filename}"
+            return f"sources/{self.catalog.slug}/{date_part}/{request.filename}"
     
     def _storage_exists(self, path: str) -> bool:
         """Check if path exists in storage."""
@@ -396,32 +395,39 @@ class Loader:
     
     def _trigger_ingestion(self, file_path: str, request):
         """Trigger async ingestion of the downloaded file."""
-        try:
-            from georiva.core.tasks import process_incoming_file
-            
-            # Build metadata from request
-            metadata = {
-                'valid_time': request.valid_time.isoformat() if request.valid_time else None,
-                'reference_time': request.reference_time.isoformat() if request.reference_time else None,
-                'variables': request.variables,
-                'source': request.params.get('source'),
-                'model': request.params.get('model'),
-                'forecast_hour': request.params.get('step_hours'),
-            }
-            
-            # Trigger async task
-            process_incoming_file.delay(
-                file_path=file_path,
-                collection_id=self.collection.id,
-                metadata=metadata,
-            )
-            
-            self.logger.debug(f"Ingestion triggered for {file_path}")
         
-        except ImportError:
-            self.logger.warning("Celery tasks not available, skipping async ingestion")
-        except Exception as e:
-            self.logger.error(f"Failed to trigger ingestion: {e}")
+        from georiva.ingestion.tasks import process_incoming_file
+        
+        for collection in self.catalog.collections.all():
+            try:
+                variables = collection.source_variables_list()
+                if not variables:
+                    self.logger.warning(f"No source variables for collection {collection.slug}, skipping ingestion")
+                    continue
+                
+                # Build metadata from request
+                metadata = {
+                    'valid_time': request.valid_time.isoformat() if request.valid_time else None,
+                    'reference_time': request.reference_time.isoformat() if request.reference_time else None,
+                    'variables': variables,
+                    'source': request.params.get('source'),
+                    'model': request.params.get('model'),
+                    'forecast_hour': request.params.get('step_hours'),
+                }
+                
+                # Trigger task
+                process_incoming_file(
+                    file_path=file_path,
+                    collection_id=collection.id,
+                    metadata=metadata,
+                )
+                
+                self.logger.debug(f"Ingestion triggered for {file_path} in collection {collection.slug}")
+            
+            except ImportError:
+                self.logger.warning("Celery tasks not available, skipping async ingestion")
+            except Exception as e:
+                self.logger.error(f"Failed to trigger ingestion for {file_path}: {e} in collection {collection.slug}")
     
     # =========================================================================
     # Temp Directory Management

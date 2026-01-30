@@ -18,7 +18,7 @@ import rasterio
 from rasterio.windows import Window
 
 from georiva.utils.path import PathLike
-from .registry import BaseFormatPlugin, ExtractedVariable
+from .base import BaseFormatPlugin, ExtractedVariable
 
 
 class GeoTIFFFormatPlugin(BaseFormatPlugin):
