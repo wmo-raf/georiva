@@ -48,7 +48,7 @@ valuable as writing code.
 If you work with a geospatial data provider (weather models, satellite products, reanalysis datasets), building a source
 plugin is one of the most impactful contributions. A source plugin is a Wagtail app that implements the source plugin
 contract — see the architecture doc's [Source Plugins section](architecture/README.md#31-path-a-source-plugins) for the
-design, and look at existing plugins in `plugins/` for reference.
+design, and look at an existing plugins in `ecmwf_aifs_source/` for reference.
 
 ### Analysis Modules
 
