@@ -16,11 +16,31 @@ services:
     volumes:
       - ./data:/data
 
+  georiva-titiler-app:
+    container_name: georiva-titiler-app
+    image: georiva-titiler-app:latest
+    build:
+      context: ./titiler-app
+      dockerfile: Dockerfile
+      args:
+        - UID=${UID}
+        - GID=${GID}
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      MINIO_ENDPOINT: "georiva-minio:9000"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION_NAME: "us-east-1"
+      MINIO_USE_HTTPS: "false"
+      CORS_ALLOWED_ORIGINS: "*"
+
   georiva-stac-browser:
     image: ghcr.io/radiantearth/stac-browser:latest
     container_name: georiva-stac-browser
     restart: unless-stopped
     ports:
-      - 8080:8080
+      - "8080:8080"
     environment:
       SB_catalogUrl: "http://127.0.0.1:8000/api/stac/"

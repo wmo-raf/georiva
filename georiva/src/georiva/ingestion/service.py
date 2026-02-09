@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 import pytz
 
 from georiva.core.models import Variable, Collection
@@ -451,6 +452,8 @@ class IngestionService:
         
         assets = []
         
+        visual_asset = None
+        
         # Save PNG (visual asset)
         png_path = f"{base_dir}/{base_name}.png"
         
@@ -527,6 +530,7 @@ class IngestionService:
                 'name': variable.name,
                 'units': variable.units or '',
                 'timestamp': timestamp.isoformat(),
+                'reference_time': item.reference_time.isoformat() if item.reference_time else None,
                 'bounds': list(bounds),
                 'width': width,
                 'height': height,
@@ -539,6 +543,10 @@ class IngestionService:
                 'scale': variable.scale_type or 'linear',
                 'stats': stats,
             }
+            
+            if visual_asset:
+                metadata['color_map'] = visual_asset.weather_layers_palette
+            
             writer.write_metadata(metadata, meta_path)
         
         except Exception as e:
@@ -673,12 +681,26 @@ class IngestionService:
     # Helpers
     # =========================================================================
     
-    def _ensure_utc(self, dt: datetime) -> datetime:
-        """Ensure datetime is UTC."""
+    def _ensure_utc(self, dt) -> Optional[datetime]:
+        """Ensure datetime is UTC, handling strings and naive datetimes."""
         if dt is None:
             return None
+        
+        # Handle string timestamps
+        if isinstance(dt, str):
+            dt = pd.Timestamp(dt).to_pydatetime()
+        
+        # Handle pandas Timestamp
+        if isinstance(dt, pd.Timestamp):
+            dt = dt.to_pydatetime()
+        
+        # Handle numpy datetime64
+        if isinstance(dt, np.datetime64):
+            dt = pd.Timestamp(dt).to_pydatetime()
+        
         if dt.tzinfo is None:
             return pytz.utc.localize(dt)
+        
         return dt.astimezone(pytz.utc)
     
     def _get_file_size(self, path: str) -> Optional[int]:

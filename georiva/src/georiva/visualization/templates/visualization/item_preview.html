@@ -1041,7 +1041,7 @@
 {% block extra_js %}
 {{ block.super }}
 <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
-<script src="https://unpkg.com/deck.gl@9.2.5/dist/dist.dev.js"></script>
+<script src="https://unpkg.com/deck.gl@9.2.6/dist/dist.dev.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
 <script>
     (function async() {
@@ -1128,36 +1128,16 @@
         let currentRasterLayer = null;
 
         const defaultBounds = [
-            { %
-        if item.bounds %
-    }
-        [{{item.bounds.0}
-    },
-        {
-            {
-                item.bounds
-                .1
-            }
-        }
-    ],
-        [{{item.bounds.2}
-    },
-        {
-            {
-                item.bounds
-                .3
-            }
-        }
-    ]
-        {% else %
-        }
-        [-180, -90],
-            [180, 90]
-        {%
-            endif %
-        }
-    ]
-        ;
+            {% if item.bounds %}
+                [{{ item.bounds.0 }}, {{ item.bounds.1 }}],
+                [{{ item.bounds.2 }}, {{ item.bounds.3 }}]
+            {% else %}
+                [-180, -90],
+                [180, 90]
+            {% endif %}
+        ];
+
+
 
         document.addEventListener('DOMContentLoaded', initializeMap);
 
@@ -1422,7 +1402,7 @@
                     image,
                     bounds, // [west, south, east, north]
                     imageSmoothing: true,
-                    imageInterpolation: true,
+                    imageInterpolation: "LINEAR",
                     // Use palette range for unscaling
                     imageUnscale,
                     palette,

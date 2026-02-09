@@ -35,7 +35,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     _TIME_NAMES = {"time", "valid_time", "forecast_time"}
     _IGNORED_COORDS = _SPATIAL_NAMES | _TIME_NAMES | {"step"}
     
-    # Common GRIB "level type" keys used in cfgrib filter_by_keys
     _LEVEL_TYPE_KEYS = {
         "surface",
         "meanSea",
@@ -61,7 +60,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     def list_variables(self, file_path: PathLike) -> list[dict]:
         """
         List available variables in the GRIB file.
-    
+
         IMPORTANT:
         - `available_dim_selectors` reports ONLY real xarray dims/coords you can select with `.sel()`.
         - `grib_view` reports the cfgrib `filter_by_keys` used to open the GRIB messages for this entry.
@@ -90,13 +89,13 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                             cl = c.lower()
                             if cl in self._IGNORED_COORDS:
                                 continue
-                            # Only coords that vary along a dimension are meaningful selectors
                             if getattr(coord, "dims", ()) and len(coord.dims) > 0:
                                 selector_names.add(c)
                         
                         variables.append(
                             {
                                 "name": var_name,
+                                "short_name": var_data.attrs.get("GRIB_shortName", ""),
                                 "long_name": var_data.attrs.get("long_name", var_name),
                                 "units": var_data.attrs.get("units", ""),
                                 "dimensions": list(var_data.dims),
@@ -174,7 +173,8 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             raise ValueError(f"Variable '{variable_name}' not found")
         
         try:
-            var = ds[variable_name]
+            resolved_name = ds.attrs.get("_resolved_variable_name", variable_name)
+            var = ds[resolved_name]
             
             # time selection
             time_dim = self._find_time_dim(var)
@@ -222,7 +222,9 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         if ds is None:
             raise ValueError(f"Variable '{variable_name}' not found")
         
-        var = ds[variable_name]
+        resolved_name = ds.attrs.get("_resolved_variable_name", variable_name)
+        
+        var = ds[resolved_name]
         
         time_dim = self._find_time_dim(var)
         if timestamp is not None and time_dim:
@@ -245,14 +247,14 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     ) -> ExtractedVariable:
         """
         Extract a variable from the GRIB file.
-    
+
         Args:
             dim_selectors: Generic selection dict applied via xarray .sel() / .isel()
             grib_view: cfgrib filter_by_keys dict for deterministic opening (preferred).
                       Example:
                         {"typeOfLevel":"heightAboveGround","level":2}
                         {"typeOfLevel":"surface"}
-        
+
         Returns:
             ExtractedVariable with data in image orientation (row 0 = north)
         """
@@ -269,11 +271,13 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             dim_selectors=dim_selectors,
             grib_view=grib_view,
         )
+        
         if ds is None:
             raise ValueError(f"Variable '{variable_name}' not found in {file_path}")
         
         try:
-            var_data = ds[variable_name]
+            resolved_name = ds.attrs.get("_resolved_variable_name", variable_name)
+            var_data = ds[resolved_name]
             
             # 1) time selection
             time_dim = self._find_time_dim(var_data)
@@ -347,16 +351,25 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         finally:
             ds.close()
     
+    # -------------------------------------------------------------------------
+    # GRIB opening helpers
+    # -------------------------------------------------------------------------
+    
     def _open_grib_multi(
             self, file_path: Path, chunks=None, filter_by_keys: Optional[dict] = None
     ) -> list[tuple[Any, dict]]:
         """
         Returns a list of (dataset, filter_by_keys_used) pairs.
+        
+        If filter_by_keys is provided, opens only that specific view.
+        Otherwise uses cfgrib.open_datasets for automatic discovery.
         """
         import xarray as xr
+        import cfgrib
         
         datasets: list[tuple[Any, dict]] = []
         
+        # Explicit filter provided
         if filter_by_keys is not None:
             try:
                 ds = xr.open_dataset(
@@ -373,36 +386,42 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 pass
             return datasets
         
-        # Discovery mode (avoid {} catch-all)
-        filter_keys_list = [
-            {"typeOfLevel": "surface"},
-            {"typeOfLevel": "meanSea"},
-            {"typeOfLevel": "isobaricInhPa"},
-            {"typeOfLevel": "heightAboveGround", "level": 2},
-            {"typeOfLevel": "heightAboveGround", "level": 10},
-            {"typeOfLevel": "atmosphere"},
-            {"typeOfLevel": "nominalTop"},
-            {"typeOfLevel": "cloudBase"},
-            {"typeOfLevel": "cloudTop"},
-            {"typeOfLevel": "isothermZero"},
-        ]
-        
-        for fk in filter_keys_list:
-            try:
-                ds = xr.open_dataset(
-                    file_path,
-                    engine="cfgrib",
-                    chunks=chunks,
-                    backend_kwargs={"filter_by_keys": fk},
-                )
-                if ds.data_vars:
-                    datasets.append((ds, fk))
-                else:
-                    ds.close()
-            except Exception:
-                continue
+        # Discovery mode: let cfgrib split automatically
+        try:
+            ds_list = cfgrib.open_datasets(str(file_path))
+            for ds in ds_list:
+                fk = self._infer_grib_view_from_dataset(ds)
+                datasets.append((ds, fk))
+        except Exception as e:
+            self.logger.warning(f"cfgrib.open_datasets failed: {e}")
         
         return datasets
+    
+    def _infer_grib_view_from_dataset(self, ds) -> dict:
+        """Infer the grib_view filter from a dataset's GRIB attributes."""
+        fk = {}
+        
+        for var_name in ds.data_vars:
+            var = ds[var_name]
+            attrs = var.attrs
+            
+            # Extract GRIB metadata
+            if "GRIB_typeOfLevel" in attrs:
+                fk["typeOfLevel"] = attrs["GRIB_typeOfLevel"]
+            
+            if "GRIB_shortName" in attrs:
+                fk["shortName"] = attrs["GRIB_shortName"]
+            
+            # Get level value from coordinate matching typeOfLevel
+            type_of_level = attrs.get("GRIB_typeOfLevel", "")
+            if type_of_level in ds.coords:
+                level_val = ds.coords[type_of_level].values
+                if np.isscalar(level_val) or level_val.ndim == 0:
+                    fk["level"] = int(level_val)
+            
+            break  # Only need first var's attrs
+        
+        return fk
     
     def _find_variable_dataset(
             self,
@@ -414,13 +433,8 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     ):
         """
         Find the dataset containing a specific variable.
-
-        Order:
-        1) If grib_view provided, open only that view.
-        2) Else derive best-effort view from dim_selectors.
-        3) Else discovery mode (try known views).
-
-        Returns an xarray.Dataset or None.
+    
+        Supports both xarray names (t2m) and GRIB shortNames (2t).
         """
         # 1) explicit view wins
         if grib_view:
@@ -435,9 +449,20 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 ds_pairs = self._open_grib_multi(file_path, chunks=chunks, filter_by_keys=None)
         
         found_ds = None
+        resolved_name = None
+        
         for ds, _fk in ds_pairs:
+            # Direct match
             if variable_name in ds.data_vars:
                 found_ds = ds
+                resolved_name = variable_name
+                break
+            
+            # Try shortName -> xarray name lookup
+            resolved = self._resolve_variable_name(ds, variable_name)
+            if resolved:
+                found_ds = ds
+                resolved_name = resolved
                 break
         
         # close everything else
@@ -445,33 +470,64 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             if ds is not found_ds:
                 ds.close()
         
+        # Store resolved name for caller to use
+        if found_ds is not None:
+            found_ds.attrs["_resolved_variable_name"] = resolved_name
+        
         return found_ds
+    
+    def _resolve_variable_name(self, ds, variable_name: str) -> Optional[str]:
+        """
+        Resolve a variable name, supporting both xarray names and GRIB shortNames.
+        
+        Returns the actual xarray variable name, or None if not found.
+        """
+        # Direct match
+        if variable_name in ds.data_vars:
+            return variable_name
+        
+        # Search by GRIB_shortName attribute
+        for var_name in ds.data_vars:
+            attrs = ds[var_name].attrs
+            if attrs.get("GRIB_shortName") == variable_name:
+                return var_name
+            # Also check GRIB_cfName and GRIB_cfVarName
+            if attrs.get("GRIB_cfName") == variable_name:
+                return var_name
+            if attrs.get("GRIB_cfVarName") == variable_name:
+                return var_name
+        
+        return None
     
     def _derive_cfgrib_filter(self, dim_selectors: Optional[dict[str, object]]) -> Optional[dict]:
         """
         Best-effort derivation of cfgrib filter_by_keys from dim_selectors.
 
-        Primarily solves the "heightAboveGround 2m vs 10m" conflict.
+        Handles shortName and level type filters.
         """
         if not dim_selectors:
             return None
         
+        # Check for shortName first
+        if "shortName" in dim_selectors:
+            return {"shortName": dim_selectors["shortName"]}
+        
+        # Check for level type keys
         for k, v in dim_selectors.items():
             if k in self._LEVEL_TYPE_KEYS:
                 fbk = {"typeOfLevel": k}
-                if v is None:
-                    return fbk
-                try:
-                    fbk["level"] = float(v)  # cfgrib expects numeric 'level'
-                except Exception:
-                    pass
+                if v is not None:
+                    try:
+                        fbk["level"] = int(v)
+                    except Exception:
+                        pass
                 return fbk
         
         return None
     
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Selection helpers
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     
     def _apply_dim_selectors(self, var_data, dim_selectors: Optional[dict[str, object]]):
         """
@@ -509,9 +565,9 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         
         return var_data
     
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Generic helpers
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     
     def _find_spatial_dims(self, var_data) -> Tuple[Optional[str], Optional[str]]:
         y_dim, x_dim = None, None
@@ -530,8 +586,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         return None
     
     def _get_valid_time(self, var_data, ds) -> datetime:
-        import pandas as pd
-        
         for time_coord in ["valid_time", "time", "forecast_time"]:
             if time_coord in var_data.coords:
                 t = var_data.coords[time_coord].values
@@ -545,7 +599,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         if "valid_time" in var_data.attrs:
             return pd.Timestamp(var_data.attrs["valid_time"]).to_pydatetime()
         
-        # Keep plugin reusable (no Django dependency)
         return datetime.utcnow()
     
     def _get_spatial_info(self, var_data) -> tuple[tuple, tuple, str]:

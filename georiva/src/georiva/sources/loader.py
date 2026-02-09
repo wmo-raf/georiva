@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 from django.utils import timezone
 
+from georiva.core.storage import storage_manager
 from georiva.sources.fetch.base import FetchResult
 
 
@@ -101,13 +102,11 @@ class Loader:
             data_source,  # DataSource protocol
             catalog,  # GeoRiva catalog model
             *,
-            storage_backend=None,  # Optional custom storage
             on_file_fetched: Optional[Callable] = None,  # Callback after each file
     ):
         self.data_source = data_source
         self.fetch_strategy = self.data_source.fetch_strategy()
         self.catalog = catalog
-        self.storage_backend = storage_backend
         self.on_file_fetched = on_file_fetched
         
         self.logger = logging.getLogger(
@@ -245,7 +244,7 @@ class Loader:
     def _already_exists(self, request) -> bool:
         """Check if file already exists in storage."""
         storage_path = self._get_storage_path(request)
-        return self._storage_exists(storage_path)
+        return storage_manager.exists(storage_path)
     
     def _fetch_and_store(self, request, trigger_ingestion: bool):
         """Fetch a file and store it."""
@@ -358,36 +357,10 @@ class Loader:
             date_part = request.valid_time.strftime('%Y/%m/%d')
             return f"sources/{self.catalog.slug}/{date_part}/{request.filename}"
     
-    def _storage_exists(self, path: str) -> bool:
-        """Check if path exists in storage."""
-        if self.storage_backend:
-            return self.storage_backend.exists(path)
-        
-        # Default: use Django storage
-        try:
-            from django.core.files.storage import default_storage
-            return default_storage.exists(path)
-        except Exception:
-            # Fallback to filesystem
-            return Path(path).exists()
-    
     def _store_file(self, local_path: Path, storage_path: str):
-        """Store file in permanent storage."""
-        if self.storage_backend:
-            with open(local_path, 'rb') as f:
-                self.storage_backend.save(storage_path, f)
-            return
-        
-        # Default: use Django storage
-        try:
-            from django.core.files.storage import default_storage
-            with open(local_path, 'rb') as f:
-                default_storage.save(storage_path, f)
-        except Exception:
-            # Fallback: copy to filesystem
-            dest = Path(storage_path)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(local_path, dest)
+        """Store file in permanent storage using storage_manager."""
+        with open(local_path, 'rb') as f:
+            storage_manager.save(storage_path, f)
     
     # =========================================================================
     # Ingestion Trigger
