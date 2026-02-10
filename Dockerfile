@@ -1,14 +1,14 @@
-# syntax = docker/dockerfile:1.5
+# syntax=docker/dockerfile:1.5
+ARG UID=9999
+ARG GID=9999
 
 # =============================================================================
-# Stage 1: Builder — install dependencies and compile everything
+# Builder — install dependencies and compile everything
 # =============================================================================
 FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS builder
 
 ARG UID
-ENV UID=${UID:-9999}
 ARG GID
-ENV GID=${GID:-9999}
 
 # Create group and user
 RUN if getent group $GID > /dev/null; then \
@@ -68,16 +68,16 @@ RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
 
 
 # =============================================================================
-# Stage 2: Runtime — slim image with only what's needed to run
+# Runtime base — shared between prod and dev
+# Sets up OS-level runtime dependencies, user, and tools.
 # =============================================================================
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS runtime
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS runtime-base
 
 ARG UID
-ENV UID=${UID:-9999}
 ARG GID
-ENV GID=${GID:-9999}
 
-ENV POSTGRES_VERSION=18
+ENV POSTGRES_VERSION=18 \
+    DOCKER_USER=georiva
 
 # Create matching group and user
 RUN if getent group $GID > /dev/null; then \
@@ -90,9 +90,7 @@ RUN if getent group $GID > /dev/null; then \
     fi && \
     useradd --shell /bin/bash -u $UID -g $GID -o -c "" -m georiva -l || exit 0
 
-ENV DOCKER_USER=georiva
-
-# Install only runtime dependencies (no compilers, no -dev headers)
+# Install runtime dependencies (no compilers, no -dev headers)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -112,27 +110,30 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y --no-install-recommends postgresql-client-$POSTGRES_VERSION
 
 # Install docker-compose wait
-ARG DOCKER_COMPOSE_WAIT_VERSION
-ENV DOCKER_COMPOSE_WAIT_VERSION=${DOCKER_COMPOSE_WAIT_VERSION:-2.12.1}
-ARG DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX
-ENV DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+ARG DOCKER_COMPOSE_WAIT_VERSION=2.12.1
+ARG DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=""
 
 ADD https://github.com/ufoscout/docker-compose-wait/releases/download/$DOCKER_COMPOSE_WAIT_VERSION/wait${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX} /wait
 RUN chmod +x /wait
 
+ENV PATH="/georiva/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+
+# =============================================================================
+# Production target
+# =============================================================================
+FROM runtime-base AS prod
+
+ARG UID
+ARG GID
+
 USER $UID:$GID
 
-# Copy the fully built venv from the builder stage
+# Copy the fully built venv, app code, and plugin scripts from the builder
 COPY --from=builder --chown=$UID:$GID /georiva/venv /georiva/venv
-
-# Copy the application code
 COPY --from=builder --chown=$UID:$GID /georiva/app /georiva/app
-
-# Copy plugin scripts
 COPY --from=builder --chown=$UID:$GID /georiva/plugins /georiva/plugins
-
-ENV PATH="/georiva/venv/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
 
 WORKDIR /georiva/app/src/georiva
 
@@ -141,5 +142,36 @@ COPY --chown=$UID:$GID ./docker-entrypoint.sh /georiva/docker-entrypoint.sh
 ENV DJANGO_SETTINGS_MODULE='georiva.config.settings.production'
 
 ENTRYPOINT ["/georiva/docker-entrypoint.sh"]
-
 CMD ["gunicorn-wsgi"]
+
+
+# =============================================================================
+# Development target
+# Expects source code to be bind-mounted at /georiva/app.
+# Includes dev tools and auto-reload support.
+# =============================================================================
+FROM runtime-base AS dev
+
+ARG UID
+ARG GID
+
+USER $UID:$GID
+
+COPY --from=builder --chown=$UID:$GID /georiva/venv /georiva/venv
+COPY --from=builder --chown=$UID:$GID /georiva/plugins /georiva/plugins
+
+ENV PIP_CACHE_DIR=/tmp/georiva_pip_cache
+RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
+    /georiva/venv/bin/pip install --no-cache-dir watchfiles
+
+# Source is bind-mounted — add it to PYTHONPATH directly
+ENV PYTHONPATH="/georiva/app/src:$PYTHONPATH"
+
+WORKDIR /georiva/app/src/georiva
+
+COPY --chown=$UID:$GID ./docker-entrypoint.sh /georiva/docker-entrypoint.sh
+
+ENV DJANGO_SETTINGS_MODULE='georiva.config.settings.dev'
+
+ENTRYPOINT ["/georiva/docker-entrypoint.sh"]
+CMD ["django-dev"]

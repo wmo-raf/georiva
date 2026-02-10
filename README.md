@@ -48,15 +48,102 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 
 ### Prerequisites
 
-- Docker and Docker Compose
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
 - Git
 
-### Setup
+### Quick Start (Production)
 
-TODO
+1. **Clone the repository**
 
+   ```bash
+   git clone https://github.com/wmo-raf/georiva.git
+   cd georiva
+   ```
 
----
+2. **Configure environment variables**
+
+   ```bash
+   cp .env.sample .env
+   ```
+
+   Edit `.env` and set the required values. At minimum, you need to set:
+
+    - `SECRET_KEY` — Django secret key
+    - `GEORIVA_DB_USER`, `GEORIVA_DB_NAME`, `GEORIVA_DB_PASSWORD` — database credentials
+    - `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` — MinIO credentials
+    - `MINIO_WEBHOOK_BEARER_TOKEN` — token for MinIO webhook authentication
+    - `ALLOWED_HOSTS` — comma-separated list of allowed hostnames
+    - `CSRF_TRUSTED_ORIGINS` — comma-separated list of trusted origins
+
+3. **Start the stack**
+
+   ```bash
+   docker compose up -d
+   ```
+
+   On first run, the entrypoint automatically handles database migrations and static file collection.
+
+4. **Access GeoRiva**
+
+   Open [http://localhost](http://localhost) in your browser.
+
+   Additional services:
+    - **STAC Browser:** [http://localhost/stac-browser/](http://localhost/stac-browser/)
+
+### Development Setup
+
+The dev setup uses a compose override that mounts your source code for hot reloading.
+
+1. **Follow steps 1–2 from Quick Start above.**
+
+2. **Start with the dev override**
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+   ```
+
+   This gives you:
+
+    - **Django dev server** with auto-reload on code changes
+    - **Celery worker** with auto-reload
+    - **Source code mounted** from `./georiva` into the container
+
+   Optionally, create a shortcut in your shell:
+
+   ```bash
+   alias dc-dev="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+   ```
+
+3. **Useful commands**
+
+   ```bash
+   # View logs
+   docker compose logs -f georiva
+
+   # Run management commands
+   docker compose exec georiva python manage.py createsuperuser
+   docker compose exec georiva python manage.py shell
+
+   # Rebuild after dependency changes
+   docker compose build georiva
+
+   # Restart a single service
+   docker compose restart georiva-celery-worker
+   ```
+
+### Installing Plugins
+
+Plugins can be installed at build time or at runtime.
+
+**Build time** — bake plugins into the image:
+
+```bash
+GEORIVA_PLUGIN_GIT_REPOS=https://github.com/org/plugin1.git,https://github.com/org/plugin2.git \
+  docker compose build georiva
+```
+
+**Runtime** — set `GEORIVA_PLUGIN_GIT_REPOS` in your `.env` file and restart. Ensure
+`GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` is not set to `"true"`.
 
 ## Project Structure
 

@@ -1,0 +1,30 @@
+services:
+  georiva:
+    build:
+      target: dev
+    command: django-dev-no-attach
+    environment:
+      DEBUG: "True"
+      MIGRATE_ON_STARTUP: "true"
+      COLLECT_STATICFILES_ON_STARTUP: "true"
+    volumes:
+      - ./georiva:/georiva/app
+    ports:
+      - "8000:8000"
+
+  georiva-celery-worker:
+    build:
+      target: dev
+    command: celery-worker-dev
+    environment:
+      DEBUG: "True"
+    volumes:
+      - ./georiva:/georiva/app
+
+  georiva-celery-beat:
+    build:
+      target: dev
+    environment:
+      DEBUG: "True"
+    volumes:
+      - ./georiva:/georiva/app

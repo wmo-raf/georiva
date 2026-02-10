@@ -31,6 +31,8 @@ gunicorn            : Start GeoRiva django using a prod ready gunicorn server:
                          * Automatically migrates the database on startup.
                          * Binds to 0.0.0.0
 celery-worker       : Start the celery worker queue which runs important async tasks
+celery-worker-dev : Start the celery worker with auto-reload on code changes
+                    (requires the dev build target).
 celery-beat         : Start the celery beat service used to schedule periodic jobs
 
 DEV COMMANDS:
@@ -145,6 +147,13 @@ shell)
     ;;
 celery-worker)
     start_celery_worker -Q celery -n default-worker@%h "${@:2}"
+    ;;
+celery-worker-dev)
+    startup_plugin_setup
+    exec watchfiles \
+        --filter python \
+        "celery -A georiva worker -Q celery -n default-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
+        /georiva/app/src/
     ;;
 celery-beat)
     exec celery -A georiva beat -l "${GEORIVA_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"

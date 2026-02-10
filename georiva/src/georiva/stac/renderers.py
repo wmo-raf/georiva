@@ -1,6 +1,5 @@
 from rest_framework.renderers import JSONRenderer
 
-
 class GeoJSONRenderer(JSONRenderer):
     """Renderer for application/geo+json content type."""
     media_type = 'application/geo+json'
