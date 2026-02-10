@@ -49,6 +49,14 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.gis",
     
+    'django_cleanup',
+    'rest_framework',
+    "corsheaders",
+    "adminboundarymanager",
+    "django_countries",
+    "django_celery_beat",
+    "django_celery_results",
+    
     "georiva.home",
     "georiva.core",
     "georiva.formats",
@@ -58,14 +66,7 @@ INSTALLED_APPS = [
     "georiva.stac",
     "georiva.visualization",
     "georiva.sources",
-    "georiva.ecmwf_aifs_source",
-    'django_better_admin_arrayfield',
-    
-    'django_cleanup.apps.CleanupConfig',
-    'rest_framework',
-    "corsheaders",
-    "adminboundarymanager",
-    "django_countries",
+    "georiva.sample_plugins.ecmwf_opendata_source",
 ]
 
 MIDDLEWARE = [
@@ -161,10 +162,10 @@ STATICFILES_DIRS = [
     os.path.join(PROJECT_DIR, "static"),
 ]
 
-STATIC_ROOT = os.path.join(BASE_DIR, "static")
+STATIC_ROOT = env.str("STATIC_ROOT", default=os.path.join(BASE_DIR, "static"))
 STATIC_URL = "/static/"
 
-MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+MEDIA_ROOT = env.str("MEDIA_ROOT", default=os.path.join(BASE_DIR, "media"))
 MEDIA_URL = "/media/"
 
 # Storage backend selection
@@ -213,26 +214,6 @@ if GEORIVA_STORAGE_BACKEND == 's3':
             },
         },
     }
-elif GEORIVA_STORAGE_BACKEND == 'gcs':
-    GS_BUCKET_NAME = env('GS_BUCKET_NAME', default='georiva')
-    GS_PROJECT_ID = env('GS_PROJECT_ID', default=None)
-    GS_CREDENTIALS_FILE = env('GS_CREDENTIALS_FILE', default=None)
-    
-    STORAGES = {
-        "default": {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-        },
-        "staticfiles": {
-            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
-        },
-        "georiva": {
-            "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
-            "OPTIONS": {
-                "bucket_name": GS_BUCKET_NAME,
-                "project_id": GS_PROJECT_ID,
-            },
-        },
-    }
 else:
     # Local filesystem storage
     STORAGES = {
@@ -277,7 +258,7 @@ WAGTAILADMIN_BASE_URL = "http://example.com"
 # see https://docs.wagtail.org/en/stable/advanced_topics/deploying.html#user-uploaded-files
 WAGTAILDOCS_EXTENSIONS = ['csv', 'docx', 'key', 'odt', 'pdf', 'pptx', 'rtf', 'txt', 'xlsx', 'zip']
 
-REDIS_HOST = env.str("REDIS_HOST", "adl_redis")
+REDIS_HOST = env.str("REDIS_HOST", "georiva-redis")
 REDIS_PORT = env.str("REDIS_PORT", "6379")
 REDIS_USERNAME = env.str("REDIS_USER", "")
 REDIS_PASSWORD = env.str("REDIS_PASSWORD", "")
@@ -292,7 +273,7 @@ CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 CELERY_SINGLETON_BACKEND_CLASS = (
-    "adl.celery_singleton_backend.RedisBackendForSingleton"
+    "georiva.celery_singleton_backend.RedisBackendForSingleton"
 )
 
 CELERY_RESULT_BACKEND = 'django-db'

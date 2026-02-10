@@ -1,60 +1,145 @@
-# Use an official Python runtime based on Debian 12 "bookworm" as a parent image.
-FROM python:3.12-slim-bookworm
+# syntax = docker/dockerfile:1.5
 
-# Add user that will be used in the container.
-RUN useradd wagtail
+# =============================================================================
+# Stage 1: Builder — install dependencies and compile everything
+# =============================================================================
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS builder
 
-# Port used by this container to serve HTTP.
-EXPOSE 8000
+ARG UID
+ENV UID=${UID:-9999}
+ARG GID
+ENV GID=${GID:-9999}
 
-# Set environment variables.
-# 1. Force Python stdout and stderr streams to be unbuffered.
-# 2. Set PORT variable that is used by Gunicorn. This should match "EXPOSE"
-#    command.
-ENV PYTHONUNBUFFERED=1 \
-    PORT=8000
+# Create group and user
+RUN if getent group $GID > /dev/null; then \
+        existing_group=$(getent group $GID | cut -d: -f1); \
+        if [ "$existing_group" != "georiva_docker_group" ]; then \
+            groupmod -n georiva_docker_group "$existing_group"; \
+        fi; \
+    else \
+        groupadd -g $GID georiva_docker_group; \
+    fi && \
+    useradd --shell /bin/bash -u $UID -g $GID -o -c "" -m georiva -l || exit 0
 
-# Install system packages required by Wagtail and Django.
-RUN apt-get update --yes --quiet && apt-get install --yes --quiet --no-install-recommends \
+# Install build-time dependencies (includes compilers, headers, etc.)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    ca-certificates \
+    curl \
+    git \
+    libgeos-dev \
     libpq-dev \
-    libmariadb-dev \
-    libjpeg62-turbo-dev \
-    zlib1g-dev \
-    libwebp-dev \
- && rm -rf /var/lib/apt/lists/*
+    python3-dev \
+    python3-pip \
+    python3-venv
 
-# Install the application server.
-RUN pip install "gunicorn==20.0.4"
+USER $UID:$GID
 
-# Install the project requirements.
-COPY requirements.txt /
-RUN pip install -r /requirements.txt
+# Create venv and install Python dependencies
+COPY --chown=$UID:$GID ./georiva/requirements.txt /georiva/requirements.txt
+RUN python3 -m venv /georiva/venv \
+    && /georiva/venv/bin/pip install --upgrade pip setuptools wheel
 
-# Use /app folder as a directory where the source code is stored.
-WORKDIR /app
+ENV PIP_CACHE_DIR=/tmp/georiva_pip_cache
+RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
+    /georiva/venv/bin/pip install -r /georiva/requirements.txt
 
-# Set this directory to be owned by the "wagtail" user. This Wagtail project
-# uses SQLite, the folder needs to be owned by the user that
-# will be writing to the database file.
-RUN chown wagtail:wagtail /app
+# Copy app code and install the package
+COPY --chown=$UID:$GID ./georiva /georiva/app
+RUN /georiva/venv/bin/pip install --no-cache-dir /georiva/app/
 
-# Copy the source code of the project into the container.
-COPY --chown=wagtail:wagtail . .
+# Install plugins at build time
+COPY --chown=$UID:$GID ./deploy/plugins/*.sh /georiva/plugins/
 
-# Use user "wagtail" to run the build commands below and the server itself.
-USER wagtail
+ARG GEORIVA_PLUGIN_GIT_REPOS=""
+RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
+    if [ -n "$GEORIVA_PLUGIN_GIT_REPOS" ]; then \
+        echo "Baking in plugins: $GEORIVA_PLUGIN_GIT_REPOS"; \
+        plugin_list=$(echo "$GEORIVA_PLUGIN_GIT_REPOS" | tr ',' ' '); \
+        for repo in $plugin_list; do \
+            echo "Processing: $repo"; \
+            /bin/bash /georiva/plugins/install_plugin.sh --git "$repo" || exit 1; \
+        done \
+    else \
+        echo "No plugins specified for build."; \
+    fi
 
-# Collect static files.
-RUN python manage.py collectstatic --noinput --clear
 
-# Runtime command that executes when "docker run" is called, it does the
-# following:
-#   1. Migrate the database.
-#   2. Start the application server.
-# WARNING:
-#   Migrating database at the same time as starting the server IS NOT THE BEST
-#   PRACTICE. The database should be migrated manually or using the release
-#   phase facilities of your hosting platform. This is used only so the
-#   Wagtail instance can be started with a simple "docker run" command.
-CMD set -xe; python manage.py migrate --noinput; gunicorn georiva.wsgi:application
+# =============================================================================
+# Stage 2: Runtime — slim image with only what's needed to run
+# =============================================================================
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS runtime
+
+ARG UID
+ENV UID=${UID:-9999}
+ARG GID
+ENV GID=${GID:-9999}
+
+ENV POSTGRES_VERSION=18
+
+# Create matching group and user
+RUN if getent group $GID > /dev/null; then \
+        existing_group=$(getent group $GID | cut -d: -f1); \
+        if [ "$existing_group" != "georiva_docker_group" ]; then \
+            groupmod -n georiva_docker_group "$existing_group"; \
+        fi; \
+    else \
+        groupadd -g $GID georiva_docker_group; \
+    fi && \
+    useradd --shell /bin/bash -u $UID -g $GID -o -c "" -m georiva -l || exit 0
+
+ENV DOCKER_USER=georiva
+
+# Install only runtime dependencies (no compilers, no -dev headers)
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    lsb-release \
+    libgeos-c1v5 \
+    libpq5 \
+    gosu \
+    git \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl --silent -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-$POSTGRES_VERSION
+
+# Install docker-compose wait
+ARG DOCKER_COMPOSE_WAIT_VERSION
+ENV DOCKER_COMPOSE_WAIT_VERSION=${DOCKER_COMPOSE_WAIT_VERSION:-2.12.1}
+ARG DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX
+ENV DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+
+ADD https://github.com/ufoscout/docker-compose-wait/releases/download/$DOCKER_COMPOSE_WAIT_VERSION/wait${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX} /wait
+RUN chmod +x /wait
+
+USER $UID:$GID
+
+# Copy the fully built venv from the builder stage
+COPY --from=builder --chown=$UID:$GID /georiva/venv /georiva/venv
+
+# Copy the application code
+COPY --from=builder --chown=$UID:$GID /georiva/app /georiva/app
+
+# Copy plugin scripts
+COPY --from=builder --chown=$UID:$GID /georiva/plugins /georiva/plugins
+
+ENV PATH="/georiva/venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /georiva/app/src/georiva
+
+COPY --chown=$UID:$GID ./docker-entrypoint.sh /georiva/docker-entrypoint.sh
+
+ENV DJANGO_SETTINGS_MODULE='georiva.config.settings.production'
+
+ENTRYPOINT ["/georiva/docker-entrypoint.sh"]
+
+CMD ["gunicorn-wsgi"]

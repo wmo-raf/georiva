@@ -2,10 +2,10 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from django import forms
+from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
-from django_better_admin_arrayfield.models.fields import ArrayField
 from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.snippets.models import register_snippet
@@ -20,6 +20,10 @@ RUN_HOUR_CHOICES = [
 ]
 
 
+def default_run_hours():
+    return [0, 12]
+
+
 @register_snippet
 class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
     """
@@ -32,9 +36,7 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
     # Which runs to fetch from
     run_hours = ArrayField(
         models.IntegerField(choices=RUN_HOUR_CHOICES),
-        default=[0, 12],
-        blank=True,
-        null=True,
+        default=default_run_hours,
         help_text="Which model runs to fetch from (e.g., 00Z and 12Z are most common)",
     )
     

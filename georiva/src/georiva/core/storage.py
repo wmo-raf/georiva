@@ -18,7 +18,7 @@ class StorageManager:
     Unified storage interface for GeoRiva.
     
     Provides consistent methods for file operations across different
-    storage backends (local, S3/MinIO, GCS).
+    storage backends (local, S3/MinIO).
     """
     
     def __init__(self, storage_name: str = 'georiva'):

@@ -1,7 +1,98 @@
+# backend environment variables, their defaults if left blank etc.
+x-backend-variables: &backend-variables
+  WAIT_HOSTS: georiva-db:5432,georiva-pgbouncer:5432,georiva-redis:6379,georiva-minio:9000
+  WAIT_TIMEOUT: 120
+  GEORIVA_GUNICORN_NUM_OF_WORKERS: ${GEORIVA_GUNICORN_NUM_OF_WORKERS:-4}
+  GEORIVA_GUNICORN_TIMEOUT: ${GEORIVA_GUNICORN_TIMEOUT:-300}
+  DEBUG: ${DEBUG:-False}
+  WAGTAIL_SITE_NAME: ${WAGTAIL_SITE_NAME:-GeoRiva}
+  ADMIN_URL_PATH: ${ADMIN_URL_PATH:-georiva-admin}
+  TIME_ZONE: ${TIME_ZONE:-UTC}
+  SECRET_KEY: ${SECRET_KEY:?}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS}
+  DATABASE_URL: timescalegis://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-pgbouncer:5432/${GEORIVA_DB_NAME}
+  EMAIL_HOST: ${SMTP_EMAIL_HOST:-}
+  EMAIL_PORT: ${SMTP_EMAIL_PORT:-}
+  EMAIL_USE_TLS: ${SMTP_EMAIL_USE_TLS:-}
+  EMAIL_HOST_USER: ${SMTP_EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${SMTP_EMAIL_HOST_PASSWORD:-}
+  DJANGO_ADMINS: ${DJANGO_ADMINS:-}
+  WAGTAILADMIN_BASE_URL: ${WAGTAILADMIN_BASE_URL:-}
+  LANGUAGE_CODE: ${LANGUAGE_CODE:-en}
+  GEORIVA_LOG_LEVEL: ${GEORIVA_LOG_LEVEL:-WARN}
+  GEORIVA_DATABASE_LOG_LEVEL: ${GEORIVA_DATABASE_LOG_LEVEL:-ERROR}
+  GEORIVA_CELERY_BEAT_DEBUG_LEVEL: ${GEORIVA_CELERY_BEAT_DEBUG_LEVEL:-INFO}
+  GEORIVA_CELERY_WORKER_LOG_LEVEL: ${GEORIVA_CELERY_WORKER_LOG_LEVEL:-INFO}
+  MIGRATE_ON_STARTUP: ${MIGRATE_ON_STARTUP:-true}
+  COLLECT_STATICFILES_ON_STARTUP: ${COLLECT_STATICFILES_ON_STARTUP:-true}
+  REDIS_URL: redis://georiva-redis:6379/0
+  GEORIVA_PLUGIN_DIR: ${GEORIVA_PLUGIN_DIR:-/georiva/plugins}
+  GEORIVA_PLUGIN_URLS: ${GEORIVA_PLUGIN_URLS:-}
+  GEORIVA_PLUGIN_GIT_REPOS: ${GEORIVA_PLUGIN_GIT_REPOS:-}
+  GEORIVA_PLUGIN_SETUP_ALREADY_RUN: ${GEORIVA_PLUGIN_SETUP_ALREADY_RUN:-}
+  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ${GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP:-}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+  MINIO_WEBHOOK_BEARER_TOKEN: ${MINIO_WEBHOOK_BEARER_TOKEN:?}
+  GEORIVA_STORAGE_BACKEND: ${GEORIVA_STORAGE_BACKEND:-s3}
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+  AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-georiva}
+  AWS_S3_REGION_NAME: ${AWS_S3_REGION_NAME:-us-east-1}
+  AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://georiva-minio:9000}
+  AWS_S3_CUSTOM_DOMAIN: ${AWS_S3_CUSTOM_DOMAIN:-}
+  AWS_DEFAULT_ACL: ${AWS_DEFAULT_ACL:-}
+  AWS_QUERYSTRING_AUTH: ${AWS_QUERYSTRING_AUTH:-True}
+  AWS_S3_FILE_OVERWRITE: ${AWS_S3_FILE_OVERWRITE:-True}
+  AWS_S3_SIGNATURE_VERSION: ${AWS_S3_SIGNATURE_VERSION:-s3v4}
+  AWS_S3_ADDRESSING_STYLE: ${AWS_S3_ADDRESSING_STYLE:-path}
+  STATIC_ROOT: ${STATIC_ROOT:-/georiva/static}
+  MEDIA_ROOT: ${MEDIA_ROOT:-/georiva/media}
+
 services:
+  georiva-db:
+    image: timescale/timescaledb-ha:pg18
+    restart: always
+    command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-300} -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-2GB}
+    environment:
+      - POSTGRES_USER=${GEORIVA_DB_USER:-?}
+      - POSTGRES_DB=${GEORIVA_DB_NAME:-?}
+      - POSTGRES_PASSWORD=${GEORIVA_DB_PASSWORD:-?}
+    ports:
+      - "5432"
+    volumes:
+      - ${GEORIVA_DB_VOLUME:-./docker/db_data/}:/home/postgres/pgdata/data
+
+  georiva-pgbouncer:
+    image: edoburu/pgbouncer:v1.25.1-p0
+    restart: always
+    environment:
+      DB_HOST: georiva-db
+      DB_USER: ${GEORIVA_DB_USER}
+      DB_PASSWORD: ${GEORIVA_DB_PASSWORD}
+      DB_NAME: ${GEORIVA_DB_NAME}
+      DB_PORT: 5432
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 2000
+      DEFAULT_POOL_SIZE: 16
+      RESERVE_POOL_SIZE: 10
+      SERVER_RESET_QUERY: "DISCARD ALL"
+      IGNORE_STARTUP_PARAMETERS: "extra_float_digits"
+      QUERY_WAIT_TIMEOUT: 60000             # 60s
+      SERVER_IDLE_TIMEOUT: 600
+    depends_on:
+      - georiva-db
+    ports:
+      - "5432"
+
+  georiva-redis:
+    image: redis:alpine3.22
+    restart: always
+
   georiva-minio:
     image: minio/minio:latest
-    container_name: georiva-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     ports:
@@ -16,8 +107,82 @@ services:
     volumes:
       - ./data:/data
 
+  georiva:
+    image: georiva
+    build:
+      context: .
+      dockerfile: ${GEORIVA_DOCKERFILE:-Dockerfile}
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+        - GEORIVA_PLUGIN_GIT_REPOS=${GEORIVA_PLUGIN_GIT_REPOS}
+    restart: always
+    command: gunicorn-wsgi
+    environment:
+      <<: *backend-variables
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    expose:
+      - "8000"
+    depends_on:
+      - georiva-db
+      - georiva-redis
+    ports:
+      - "8000"
+    volumes:
+      - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
+      - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
+      - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
+
+  georiva-celery-worker:
+    image: georiva
+    build:
+      context: .
+      dockerfile: ${GEORIVA_DOCKERFILE:-Dockerfile}
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+        - GEORIVA_PLUGIN_GIT_REPOS=${GEORIVA_PLUGIN_GIT_REPOS}
+    restart: always
+    command: celery-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva-db
+      - georiva-redis
+    volumes:
+      - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
+      - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
+      - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
+
+  georiva-celery-beat:
+    image: georiva
+    build:
+      context: .
+      dockerfile: ${GEORIVA_DOCKERFILE:-Dockerfile}
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+        - GEORIVA_PLUGIN_GIT_REPOS=${GEORIVA_PLUGIN_GIT_REPOS}
+    restart: always
+    command: celery-beat
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva-db
+      - georiva-redis
+    volumes:
+      - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
+      - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
+      - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
+
   georiva-titiler-app:
-    container_name: georiva-titiler-app
     image: georiva-titiler-app:latest
     build:
       context: ./titiler-app
@@ -27,7 +192,7 @@ services:
         - GID=${GID}
     restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "8000"
     environment:
       MINIO_ENDPOINT: "georiva-minio:9000"
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
@@ -37,10 +202,22 @@ services:
       CORS_ALLOWED_ORIGINS: "*"
 
   georiva-stac-browser:
-    image: ghcr.io/radiantearth/stac-browser:latest
-    container_name: georiva-stac-browser
+    build:
+      context: https://github.com/radiantearth/stac-browser.git
+      args:
+        pathPrefix: /stac-browser/
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080"
     environment:
-      SB_catalogUrl: "http://127.0.0.1:8000/api/stac/"
+      SB_catalogUrl: ${GEORIVA_STAC_BROWSER_CATALOG_URL:-}
+
+  georiva-web-proxy:
+    image: nginx:1.29.5-alpine
+    restart: always
+    volumes:
+      - ${GEORIVA_STATIC_VOLUME:-./docker/static}:/wagtail_static
+      - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:/wagtail_media
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - ${GEORIVA_WEB_PROXY_PORT:-80}:80

@@ -29,9 +29,9 @@ drf-spectacular
 pydantic==2.12.5
 xarray==2025.11.0
 django-storages==1.14.6
-google-auth==2.43.0
-google-cloud-storage==3.6.0
 boto3==1.41.5
 dask[complete]
 django-cors-headers==4.9.0
 adm-boundary-manager==0.3.0
+rasterio==1.4.3
+pytz==2025.2

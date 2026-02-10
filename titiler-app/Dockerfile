@@ -5,7 +5,7 @@ ENV UID=${UID:-9999}
 ARG GID
 ENV GID=${GID:-9999}
 
-# Create or rename group to adl_docker_group with desired GID
+# Create or rename group to georiva_docker_group with desired GID
 RUN if getent group $GID > /dev/null; then \
         existing_group=$(getent group $GID | cut -d: -f1); \
         if [ "$existing_group" != "ttl_docker_group" ]; then \
