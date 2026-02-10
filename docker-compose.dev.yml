@@ -28,3 +28,8 @@ services:
       DEBUG: "True"
     volumes:
       - ./georiva:/georiva/app
+
+  georiva-minio:
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
