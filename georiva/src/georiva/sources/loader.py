@@ -15,7 +15,7 @@ from typing import Callable, Optional
 
 from django.utils import timezone
 
-from georiva.core.storage import storage_manager
+from georiva.core.storage import storage
 from georiva.sources.fetch.base import FetchResult
 
 
@@ -82,6 +82,23 @@ class LoaderRunResult:
             f"{self.files_failed} failed, {self.bytes_transferred / 1024 / 1024:.1f} MB "
             f"in {self.duration_seconds:.1f}s"
         )
+    
+    def to_dict(self) -> dict:
+        return {
+            'status': self.status,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+            'files_requested': self.files_requested,
+            'files_fetched': self.files_fetched,
+            'files_skipped': self.files_skipped,
+            'files_failed': self.files_failed,
+            'files_queued': self.files_queued,
+            'bytes_transferred': self.bytes_transferred,
+            'duration_seconds': self.duration_seconds,
+            'errors': self.errors,
+            'run_time': self.run_time.isoformat() if self.run_time else None,
+            'summary': self.summary(),
+        }
 
 
 class Loader:
@@ -124,7 +141,6 @@ class Loader:
             dry_run: bool = False,
             max_files: Optional[int] = None,
             skip_existing: bool = True,
-            trigger_ingestion: bool = True,
     ) -> LoaderRunResult:
         """
         Execute a loader run.
@@ -133,7 +149,6 @@ class Loader:
             dry_run: If True, generate requests but don't fetch
             max_files: Maximum files to fetch (useful for testing)
             skip_existing: Skip files already in storage (default: True)
-            trigger_ingestion: Trigger async ingestion after fetch (default: True)
             
         Returns:
             LoaderRunResult with statistics and details
@@ -198,7 +213,7 @@ class Loader:
                     f"[{i}/{len(requests_to_fetch)}] Fetching {request.filename}"
                 )
                 
-                fetch_result = self._fetch_and_store(request, trigger_ingestion)
+                fetch_result = self._fetch_and_store(request)
                 result.fetch_results.append(fetch_result)
                 
                 if fetch_result.success:
@@ -244,9 +259,9 @@ class Loader:
     def _already_exists(self, request) -> bool:
         """Check if file already exists in storage."""
         storage_path = self._get_storage_path(request)
-        return storage_manager.exists(storage_path)
+        return storage.sources.exists(storage_path)
     
-    def _fetch_and_store(self, request, trigger_ingestion: bool):
+    def _fetch_and_store(self, request):
         """Fetch a file and store it."""
         
         start_time = time.time()
@@ -275,10 +290,6 @@ class Loader:
             self._store_file(temp_path, storage_path)
             
             self.logger.debug(f"Stored: {storage_path}")
-            
-            # Trigger ingestion pipeline
-            if trigger_ingestion:
-                self._trigger_ingestion(storage_path, request)
             
             fetch_result.duration_seconds = time.time() - start_time
         
@@ -309,7 +320,7 @@ class Loader:
         
         size = local_path.stat().st_size
         
-        # Check minimum size (GRIB files should be at least a few KB)
+        # Check minimum size (files should be at least a few KB)
         if size < 1000:
             self.logger.error(f"File too small ({size} bytes): {local_path}")
             return False
@@ -321,86 +332,35 @@ class Loader:
             )
             # Don't fail on size mismatch, just warn
         
-        # Format-specific validation
-        if request.expected_format == 'grib':
-            return self._validate_grib(local_path)
-        
         return True
-    
-    def _validate_grib(self, path: Path) -> bool:
-        """Basic GRIB file validation."""
-        try:
-            with open(path, 'rb') as f:
-                magic = f.read(4)
-                # GRIB files start with 'GRIB'
-                if magic != b'GRIB':
-                    self.logger.error(f"Invalid GRIB magic bytes: {magic}")
-                    return False
-            return True
-        except Exception as e:
-            self.logger.error(f"GRIB validation error: {e}")
-            return False
     
     # =========================================================================
     # Storage Operations
     # =========================================================================
-    
     def _get_storage_path(self, request) -> str:
-        """Get the storage path for a file."""
-        # Organize by catalog and reference time
-        if request.reference_time:
-            # Forecast: organize by run date
-            date_part = request.reference_time.strftime('%Y/%m/%d')
-            return f"sources/{self.catalog.slug}/{date_part}/{request.filename}"
-        else:
-            # Observation/analysis: organize by valid time
-            date_part = request.valid_time.strftime('%Y/%m/%d')
-            return f"sources/{self.catalog.slug}/{date_part}/{request.filename}"
+        """
+        Build storage path in georiva-sources bucket.
+    
+        Path: {catalog}/{collection}/{filename}
+        
+        If request has reference_time, filename gets GR-- prefix.
+        """
+        from georiva.core.filename import build_filename
+        
+        filename = build_filename(
+            original_filename=request.filename,
+            reference_time=request.reference_time,
+        )
+        
+        # request.reference_time exists  → GR--20250115T0600--gfs_025.grib2
+        # request.reference_time is None → sentinel2_ndvi.tif
+        
+        return f"{self.catalog.slug}/{filename}"
     
     def _store_file(self, local_path: Path, storage_path: str):
-        """Store file in permanent storage using storage_manager."""
+        """Store file in permanent storage using storage.sources."""
         with open(local_path, 'rb') as f:
-            storage_manager.save(storage_path, f)
-    
-    # =========================================================================
-    # Ingestion Trigger
-    # =========================================================================
-    
-    def _trigger_ingestion(self, file_path: str, request):
-        """Trigger async ingestion of the downloaded file."""
-        
-        from georiva.ingestion.tasks import process_incoming_file
-        
-        for collection in self.catalog.collections.all():
-            try:
-                variables = collection.source_variables_list()
-                if not variables:
-                    self.logger.warning(f"No source variables for collection {collection.slug}, skipping ingestion")
-                    continue
-                
-                # Build metadata from request
-                metadata = {
-                    'valid_time': request.valid_time.isoformat() if request.valid_time else None,
-                    'reference_time': request.reference_time.isoformat() if request.reference_time else None,
-                    'variables': variables,
-                    'source': request.params.get('source'),
-                    'model': request.params.get('model'),
-                    'forecast_hour': request.params.get('step_hours'),
-                }
-                
-                # Trigger task
-                process_incoming_file(
-                    file_path=file_path,
-                    collection_id=collection.id,
-                    metadata=metadata,
-                )
-                
-                self.logger.debug(f"Ingestion triggered for {file_path} in collection {collection.slug}")
-            
-            except ImportError:
-                self.logger.warning("Celery tasks not available, skipping async ingestion")
-            except Exception as e:
-                self.logger.error(f"Failed to trigger ingestion for {file_path}: {e} in collection {collection.slug}")
+            storage.sources.save(storage_path, f)
     
     # =========================================================================
     # Temp Directory Management

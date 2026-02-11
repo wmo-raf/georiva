@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from georiva.core.storage import Bucket
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,8 +17,8 @@ class AssetWriter:
     Writes processed data to storage as various formats.
     """
     
-    def __init__(self, storage):
-        self.storage = storage
+    def __init__(self, bucket: Bucket):
+        self.bucket = bucket
         self.logger = logging.getLogger("georiva.writer")
     
     def write_png(
@@ -31,7 +33,7 @@ class AssetWriter:
         image.save(buffer, format='PNG', optimize=True)
         buffer.seek(0)
         
-        return self.storage.save_bytes(output_path, buffer.read())
+        return self.bucket.storage.save_bytes(output_path, buffer.read())
     
     def write_cog(
             self,
@@ -96,7 +98,7 @@ class AssetWriter:
                     dst.update_tags(ns='rio_overview', resampling='average')
             
             with open(tmp_path, 'rb') as f:
-                return self.storage.save(output_path, f)
+                return self.bucket.save(output_path, f)
         
         finally:
             Path(tmp_path).unlink(missing_ok=True)
@@ -108,4 +110,4 @@ class AssetWriter:
     ) -> str:
         """Write metadata as JSON."""
         content = json.dumps(metadata, indent=2).encode('utf-8')
-        return self.storage.save_bytes(output_path, content)
+        return self.bucket.storage.save_bytes(output_path, content)

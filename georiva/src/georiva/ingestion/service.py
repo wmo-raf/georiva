@@ -11,6 +11,7 @@ import pandas as pd
 import pytz
 
 from georiva.core.models import Variable, Collection
+from georiva.core.storage import storage, BucketType, Bucket
 from .asset_writer import AssetWriter
 from .clipper import BoundaryClipper
 from .encoder import VariableEncoder
@@ -23,7 +24,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class IngestionResult:
     """Result of processing a single incoming file."""
-    source_file: str
+    origin_file: str
+    origin_bucket: str
     catalog_slug: str
     collection_slug: str
     success: bool
@@ -37,6 +39,9 @@ class IngestionResult:
     clip_boundary: str = ''
     original_size: tuple = None
     clipped_size: tuple = None
+    
+    # Archive info
+    archive_path: str = ''
     
     def add_error(self, msg: str):
         self.errors.append(msg)
@@ -59,13 +64,22 @@ class IngestionResult:
 class IngestionService:
     """
     Main service for ingesting geospatial data.
-    
+
+    Operates across GeoRiva's multi-bucket storage:
+
+        georiva-incoming  ──┐
+                            ├──→ process ──→ georiva-assets
+        georiva-sources   ──┘
+                            │
+                            └──→ georiva-archive (raw copy)
+
     Flow:
-    1. Resolve Catalog + Collection from file path
-    2. Get format plugin based on Catalog.file_format
-    3. Initialize boundary clipper if Catalog has boundary
-    4. Extract timestamps from file
-    5. For each timestamp:
+    1. Resolve source bucket (incoming or sources) + file path
+    2. Resolve Catalog + Collection from file path
+    3. Get format plugin based on Catalog.file_format
+    4. Initialize boundary clipper if Catalog has boundary
+    5. Extract timestamps from file
+    6. For each timestamp:
        a. Compute clip window from boundary bbox
        b. Create one Item for the Collection
        c. For each Variable in Collection:
@@ -75,17 +89,13 @@ class IngestionService:
           - Encode to PNG (visual asset)
           - Write COG (data asset)
           - Create Asset records
-    6. Update Collection extent
-    7. Archive source file
+    7. Update Collection extent
+    8. Archive raw file to georiva-archive
+    9. Optionally delete from source bucket
     """
     
     def __init__(self):
         self.logger = logging.getLogger("georiva.ingestion")
-    
-    @property
-    def storage(self):
-        from georiva.core.storage import storage_manager
-        return storage_manager
     
     # =========================================================================
     # Main Entry Point
@@ -94,31 +104,44 @@ class IngestionService:
     def process_file(
             self,
             file_path: str,
+            origin_bucket: str = BucketType.INCOMING,
             catalog_slug: str = None,
             collection_slug: str = None,
             metadata: dict = None,
+            delete_origin: bool = False,
     ) -> IngestionResult:
         """
-        Process an incoming file.
-        
+        Process an incoming file from any source bucket.
+
         Args:
-            file_path: Path to source file in storage
-            catalog_slug: Catalog slug (inferred from path if not provided)
-            collection_slug: Collection slug (inferred from path if not provided)
-            metadata: Optional metadata dict
-        
+            file_path: Path to source file relative to the bucket root.
+                       e.g. "satellite-imagery/ndvi/raw_scene.tif"
+            origin_bucket: Which bucket the file came from.
+                           BucketType.INCOMING for user uploads,
+                           BucketType.SOURCES for plugin-collected data.
+            catalog_slug: Catalog slug (inferred from path if not provided).
+            collection_slug: Collection slug (inferred from path if not provided).
+            metadata: Optional metadata dict.
+            delete_origin: Remove file from origin bucket after archiving.
+
         Returns:
-            IngestionResult with status and created records
+            IngestionResult with status and created records.
         """
         from georiva.core.models import Catalog, Collection
         from georiva.formats.registry import format_registry
         
-        self.logger.info(f"Processing: {file_path}")
+        # Resolve the source bucket handle
+        origin = storage.bucket(origin_bucket)
+        
+        self.logger.info(
+            "Processing: %s/%s", origin.bucket_name, file_path
+        )
         
         reference_time = metadata.get('reference_time', None) if metadata else None
         
         result = IngestionResult(
-            source_file=file_path,
+            origin_file=file_path,
+            origin_bucket=origin_bucket,
             catalog_slug=catalog_slug or '',
             collection_slug=collection_slug or '',
             success=False,
@@ -126,7 +149,7 @@ class IngestionService:
         )
         
         try:
-            # 1. Resolve catalog and collection
+            # 1. Resolve catalog and collection from path
             if not catalog_slug or not collection_slug:
                 inferred = self._infer_from_path(file_path)
                 catalog_slug = catalog_slug or inferred.get('catalog')
@@ -135,7 +158,9 @@ class IngestionService:
                 result.collection_slug = collection_slug or ''
             
             if not catalog_slug or not collection_slug:
-                result.add_error(f"Cannot determine catalog/collection for: {file_path}")
+                result.add_error(
+                    f"Cannot determine catalog/collection for: {file_path}"
+                )
                 return result
             
             # 2. Load models
@@ -148,11 +173,17 @@ class IngestionService:
                 return result
             
             try:
-                collection = Collection.objects.select_related('catalog').prefetch_related(
+                collection = Collection.objects.select_related(
+                    'catalog'
+                ).prefetch_related(
                     'variables', 'variables__sources'
-                ).get(catalog=catalog, slug=collection_slug, is_active=True)
+                ).get(
+                    catalog=catalog, slug=collection_slug, is_active=True
+                )
             except Collection.DoesNotExist:
-                result.add_error(f"Collection not found or inactive: {catalog_slug}/{collection_slug}")
+                result.add_error(
+                    f"Collection not found or inactive: {catalog_slug}/{collection_slug}"
+                )
                 return result
             
             # 3. Get format plugin
@@ -170,10 +201,10 @@ class IngestionService:
             if clipper.is_active:
                 result.clipped = True
                 result.clip_boundary = str(catalog.boundary)
-                self.logger.info(f"Clipping enabled: {catalog.boundary}")
+                self.logger.info("Clipping enabled: %s", catalog.boundary)
             
-            # 5. Download and process
-            local_path = self._download_to_temp(file_path)
+            # 5. Download from origin bucket to local temp
+            local_path = self._download_to_temp(origin, file_path)
             
             try:
                 timestamps = plugin.get_timestamps(local_path)
@@ -181,7 +212,7 @@ class IngestionService:
                     result.add_error(f"No timestamps found in: {file_path}")
                     return result
                 
-                self.logger.info(f"Found {len(timestamps)} timestamps")
+                self.logger.info("Found %d timestamps", len(timestamps))
                 
                 # 6. Process each timestamp
                 for ts in timestamps:
@@ -191,14 +222,15 @@ class IngestionService:
                             plugin=plugin,
                             local_path=local_path,
                             timestamp=ts,
-                            source_file=file_path,
+                            source_file=f"{origin_bucket}:{file_path}",
                             clipper=clipper,
                             reference_time=reference_time,
                         )
                         result.items_created.append(str(item.pk))
-                        result.assets_created.extend([str(a.pk) for a in assets])
+                        result.assets_created.extend(
+                            [str(a.pk) for a in assets]
+                        )
                         
-                        # Store clip info from first timestamp
                         if clip_info and result.original_size is None:
                             result.original_size = clip_info.get('original_size')
                             result.clipped_size = clip_info.get('clipped_size')
@@ -211,18 +243,26 @@ class IngestionService:
             finally:
                 self._cleanup_temp(local_path)
             
-            # 7. Archive if successful
+            # 7. Archive raw file + optionally delete source
             if result.success and catalog.archive_source_files:
-                self._archive_source(file_path, catalog_slug, collection_slug)
+                archived = self._archive_source(origin, file_path)
+                result.archive_path = archived or ''
+                
+                if delete_origin and archived:
+                    origin.delete(file_path)
+                    self.logger.info(
+                        "Deleted source: %s/%s", origin.bucket_name, file_path
+                    )
             
             # Log clipping summary
             if result.clipped and result.size_reduction_percent:
                 self.logger.info(
-                    f"Clipping reduced size by {result.size_reduction_percent:.1f}%"
+                    "Clipping reduced size by %.1f%%",
+                    result.size_reduction_percent,
                 )
         
         except Exception as e:
-            self.logger.exception(f"Ingestion failed: {file_path}")
+            self.logger.exception("Ingestion failed: %s", file_path)
             result.add_error(str(e))
         
         return result
@@ -243,21 +283,20 @@ class IngestionService:
     ) -> tuple['Item', list['Asset'], dict]:
         """
         Process all Variables for a single timestamp.
-        
+
         Creates or retrieves one Item, then creates/updates Assets per Variable.
-        Handles re-ingestion gracefully by updating existing records.
-        
+        Assets are written to the georiva-assets bucket.
+
         Returns:
             Tuple of (Item, list of Assets, clip_info dict)
         """
         from georiva.core.models import Item
         
-        self.logger.info(f"Processing {collection} @ {timestamp}")
+        self.logger.info("Processing %s @ %s", collection, timestamp)
         
-        # Create extractor once for this timestamp
         extractor = VariableExtractor(plugin)
         encoder = VariableEncoder()
-        writer = AssetWriter(self.storage)
+        writer = AssetWriter(storage.assets)
         
         # Get active variables
         variables = list(
@@ -265,7 +304,9 @@ class IngestionService:
         )
         
         if not variables:
-            raise ValueError(f"Collection '{collection.slug}' has no active variables")
+            raise ValueError(
+                f"Collection '{collection.slug}' has no active variables"
+            )
         
         # Get spatial metadata from first variable
         first_var = variables[0]
@@ -273,11 +314,10 @@ class IngestionService:
         src_width, src_height = meta['width'], meta['height']
         src_bounds = tuple(meta['bounds'])
         
-        # Validate bounds
         if not src_bounds or len(src_bounds) < 4:
             raise ValueError(f"Invalid bounds from metadata: {src_bounds}")
         
-        # Compute clip window if clipper is active
+        # Compute clip window
         clip_info = {
             'original_size': (src_width, src_height),
             'clipped_size': None,
@@ -286,33 +326,38 @@ class IngestionService:
         
         if clipper.is_active:
             try:
-                clip_window = clipper.compute_window(src_bounds, src_width, src_height)
+                clip_window = clipper.compute_window(
+                    src_bounds, src_width, src_height
+                )
                 if clip_window:
                     width = clip_window['width']
                     height = clip_window['height']
                     bounds = clip_window['bounds']
                     clip_info['clipped_size'] = (width, height)
                     
-                    reduction = 100 * (1 - (width * height) / (src_width * src_height))
+                    reduction = 100 * (
+                            1 - (width * height) / (src_width * src_height)
+                    )
                     self.logger.info(
-                        f"Clipping: {src_width}x{src_height} → {width}x{height} "
-                        f"({reduction:.1f}% reduction)"
+                        "Clipping: %dx%d → %dx%d (%.1f%% reduction)",
+                        src_width, src_height, width, height, reduction,
                     )
                 else:
                     width, height, bounds = src_width, src_height, src_bounds
             except ValueError as e:
-                self.logger.warning(f"Clip window failed: {e}, using full extent")
+                self.logger.warning(
+                    "Clip window failed: %s, using full extent", e
+                )
                 width, height, bounds = src_width, src_height, src_bounds
         else:
             width, height, bounds = src_width, src_height, src_bounds
         
         crs = meta.get('crs', collection.crs or 'EPSG:4326')
         
-        # Ensure UTC
         ts_utc = self._ensure_utc(timestamp)
         ref_utc = self._ensure_utc(reference_time) if reference_time else None
         
-        # Get or create Item (handles re-ingestion)
+        # Get or create Item
         item, created = Item.objects.get_or_create(
             collection=collection,
             time=ts_utc,
@@ -322,15 +367,21 @@ class IngestionService:
                 'bounds': list(bounds),
                 'width': width,
                 'height': height,
-                'resolution_x': abs((bounds[2] - bounds[0]) / width) if width else 0,
-                'resolution_y': abs((bounds[3] - bounds[1]) / height) if height else 0,
+                'resolution_x': abs(
+                    (bounds[2] - bounds[0]) / width
+                ) if width else 0,
+                'resolution_y': abs(
+                    (bounds[3] - bounds[1]) / height
+                ) if height else 0,
                 'crs': crs,
             }
         )
         
         if not created:
-            self.logger.info(f"Item already exists for {collection} @ {ts_utc}, updating assets")
-            # Update item metadata if changed
+            self.logger.info(
+                "Item already exists for %s @ %s, updating assets",
+                collection, ts_utc,
+            )
             update_fields = []
             if item.source_file != source_file:
                 item.source_file = source_file
@@ -366,13 +417,13 @@ class IngestionService:
                 assets.extend(variable_assets)
             
             except Exception as e:
-                self.logger.error(f"Variable {variable.slug} failed: {e}")
-                # Continue with other variables
+                self.logger.error("Variable %s failed: %s", variable.slug, e)
         
-        # Update collection extent
         self._update_collection_extent(collection, ts_utc, bounds)
         
-        self.logger.info(f"Created Item {item.pk} with {len(assets)} assets")
+        self.logger.info(
+            "Created Item %s with %d assets", item.pk, len(assets)
+        )
         
         return item, assets, clip_info
     
@@ -398,21 +449,21 @@ class IngestionService:
     ) -> list['Asset']:
         """
         Process a single Variable: extract, transform, encode, save.
-        
-        Returns list of created Assets (visual + data).
+
+        Assets are written to georiva-assets bucket following the path:
+            {catalog}/{collection}/{variable}/{year}/{month}/{day}/{variable}_{HHMMSS}.ext
         """
         from georiva.core.models import Asset
         
-        self.logger.debug(f"Processing variable: {variable.slug}")
+        self.logger.debug("Processing variable: %s", variable.slug)
         
-        # Compute global stats (on clipped region if applicable)
-        stats = extractor.compute_stats(variable, local_path, timestamp, window=clip_window)
+        stats = extractor.compute_stats(
+            variable, local_path, timestamp, window=clip_window
+        )
         
-        # Determine if we're using chunked processing or single extraction
-        use_chunked = width * height > 4096 * 4096  # Use chunks for large data
+        use_chunked = width * height > 4096 * 4096
         
         if use_chunked and clip_window is None:
-            # Chunked processing for large unclipped data
             final_data, final_rgba = self._process_variable_chunked(
                 variable=variable,
                 extractor=extractor,
@@ -424,7 +475,6 @@ class IngestionService:
                 stats=stats,
             )
         else:
-            # Direct extraction (with optional clip window)
             final_data, final_rgba = self._process_variable_direct(
                 variable=variable,
                 extractor=extractor,
@@ -437,24 +487,31 @@ class IngestionService:
                 clip_window=clip_window,
             )
         
-        # Apply geometry mask if clipper is active
         if clipper and clipper.is_active:
-            final_data = clipper.apply_geometry_mask(final_data, bounds, nodata=np.nan)
+            final_data = clipper.apply_geometry_mask(
+                final_data, bounds, nodata=np.nan
+            )
             final_rgba = clipper.apply_rgba_mask(final_rgba, bounds)
         
-        # Generate output paths
+        # Build asset paths using the standard GeoRiva layout:
+        # {catalog}/{collection}/{variable}/{year}/{month}/{day}/{file}
         catalog_slug = item.collection.catalog.slug
         collection_slug = item.collection.slug
-        date_path = timestamp.strftime('%Y/%m/%d')
         time_str = timestamp.strftime('%H%M%S')
-        base_dir = f"processed/{catalog_slug}/{collection_slug}/{variable.slug}/{date_path}"
         base_name = f"{variable.slug}_{time_str}"
         
-        assets = []
+        base_dir = storage.build_asset_path(
+            catalog=catalog_slug,
+            collection=collection_slug,
+            variable=variable.slug,
+            timestamp=timestamp,
+            filename='',
+        ).rstrip('/')
         
+        assets = []
         visual_asset = None
         
-        # Save PNG (visual asset)
+        # Save PNG (visual asset) → georiva-assets bucket
         png_path = f"{base_dir}/{base_name}.png"
         
         try:
@@ -468,7 +525,9 @@ class IngestionService:
                     'href': stored_png,
                     'media_type': 'image/png',
                     'roles': ['visual'],
-                    'file_size': self._get_file_size(stored_png),
+                    'file_size': self._get_file_size(
+                        storage.assets, stored_png
+                    ),
                     'width': width,
                     'height': height,
                     'bands': 4,
@@ -488,9 +547,9 @@ class IngestionService:
             assets.append(visual_asset)
         
         except Exception as e:
-            self.logger.error(f"PNG save failed for {variable.slug}: {e}")
+            self.logger.error("PNG save failed for %s: %s", variable.slug, e)
         
-        # Save COG (data asset)
+        # Save COG (data asset) → georiva-assets bucket
         cog_path = f"{base_dir}/{base_name}.tif"
         try:
             stored_cog = writer.write_cog(final_data, cog_path, bounds, crs)
@@ -501,9 +560,14 @@ class IngestionService:
                 format=Asset.Format.COG,
                 defaults={
                     'href': stored_cog,
-                    'media_type': 'image/tiff; application=geotiff; profile=cloud-optimized',
+                    'media_type': (
+                        'image/tiff; application=geotiff; '
+                        'profile=cloud-optimized'
+                    ),
                     'roles': ['data'],
-                    'file_size': self._get_file_size(stored_cog),
+                    'file_size': self._get_file_size(
+                        storage.assets, stored_cog
+                    ),
                     'width': width,
                     'height': height,
                     'bands': 1,
@@ -520,9 +584,9 @@ class IngestionService:
             assets.append(data_asset)
         
         except Exception as e:
-            self.logger.error(f"COG save failed for {variable.slug}: {e}")
+            self.logger.error("COG save failed for %s: %s", variable.slug, e)
         
-        # Save metadata JSON
+        # Save metadata JSON → georiva-assets bucket
         meta_path = f"{base_dir}/{base_name}.json"
         try:
             metadata = {
@@ -530,7 +594,10 @@ class IngestionService:
                 'name': variable.name,
                 'units': variable.units or '',
                 'timestamp': timestamp.isoformat(),
-                'reference_time': item.reference_time.isoformat() if item.reference_time else None,
+                'reference_time': (
+                    item.reference_time.isoformat()
+                    if item.reference_time else None
+                ),
                 'bounds': list(bounds),
                 'width': width,
                 'height': height,
@@ -550,9 +617,10 @@ class IngestionService:
             writer.write_metadata(metadata, meta_path)
         
         except Exception as e:
-            self.logger.warning(f"Metadata save failed for {variable.slug}: {e}")
+            self.logger.warning(
+                "Metadata save failed for %s: %s", variable.slug, e
+            )
         
-        # Cleanup
         del final_data, final_rgba
         gc.collect()
         
@@ -577,16 +645,11 @@ class IngestionService:
         for x, y, w, h in iter_windows(width, height, block_size=2048):
             window = (x, y, w, h)
             
-            # Extract chunk
             chunk = extractor.extract(variable, local_path, timestamp, window)
-            
-            # Apply unit conversion
             chunk = apply_unit_conversion(chunk, variable.unit_conversion)
             
-            # Store raw data
             final_data[y:y + h, x:x + w] = chunk
             
-            # Encode for PNG
             rgba_chunk = encoder.encode_to_rgba(chunk, variable)
             final_rgba[y:y + h, x:x + w] = rgba_chunk
             
@@ -608,7 +671,6 @@ class IngestionService:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process variable with direct extraction (optionally clipped)."""
         
-        # Build extraction window
         if clip_window:
             window = (
                 clip_window['x_off'],
@@ -619,13 +681,8 @@ class IngestionService:
         else:
             window = None
         
-        # Extract full region at once
         final_data = extractor.extract(variable, local_path, timestamp, window)
-        
-        # Apply unit conversion
         final_data = apply_unit_conversion(final_data, variable.unit_conversion)
-        
-        # Encode to RGBA
         final_rgba = encoder.encode_to_rgba(final_data, variable)
         
         return final_data, final_rgba
@@ -645,7 +702,6 @@ class IngestionService:
         
         update_fields = []
         
-        # Time range
         if collection.time_start is None or timestamp < collection.time_start:
             collection.time_start = timestamp
             update_fields.append('time_start')
@@ -654,7 +710,6 @@ class IngestionService:
             collection.time_end = timestamp
             update_fields.append('time_end')
         
-        # Spatial bounds (expand to encompass new data)
         current = collection.bounds
         if not current or len(current) < 4:
             collection.bounds = list(bounds)
@@ -670,8 +725,9 @@ class IngestionService:
                 collection.bounds = expanded
                 update_fields.append('bounds')
         
-        # Item count
-        collection.item_count = Item.objects.filter(collection=collection).count()
+        collection.item_count = Item.objects.filter(
+            collection=collection
+        ).count()
         update_fields.append('item_count')
         
         if update_fields:
@@ -682,19 +738,16 @@ class IngestionService:
     # =========================================================================
     
     def _ensure_utc(self, dt) -> Optional[datetime]:
-        """Ensure datetime is UTC, handling strings and naive datetimes."""
+        """Ensure datetime is UTC."""
         if dt is None:
             return None
         
-        # Handle string timestamps
         if isinstance(dt, str):
             dt = pd.Timestamp(dt).to_pydatetime()
         
-        # Handle pandas Timestamp
         if isinstance(dt, pd.Timestamp):
             dt = dt.to_pydatetime()
         
-        # Handle numpy datetime64
         if isinstance(dt, np.datetime64):
             dt = pd.Timestamp(dt).to_pydatetime()
         
@@ -703,20 +756,20 @@ class IngestionService:
         
         return dt.astimezone(pytz.utc)
     
-    def _get_file_size(self, path: str) -> Optional[int]:
-        """Get file size from storage."""
+    def _get_file_size(self, bucket: Bucket, path: str) -> Optional[int]:
+        """Get file size from a specific bucket."""
         try:
-            return self.storage.size(path)
+            return bucket.size(path)
         except Exception:
             return None
     
-    def _download_to_temp(self, file_path: str) -> Path:
-        """Download file from storage to local temp."""
+    def _download_to_temp(self, source: Bucket, file_path: str) -> Path:
+        """Download file from a source bucket to local temp."""
         suffix = Path(file_path).suffix
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp_path = Path(tmp.name)
         
-        with self.storage.open(file_path, 'rb') as src:
+        with source.open(file_path, 'rb') as src:
             tmp_path.write_bytes(src.read())
         
         return tmp_path
@@ -726,31 +779,49 @@ class IngestionService:
         try:
             path.unlink(missing_ok=True)
         except Exception as e:
-            self.logger.warning(f"Temp cleanup failed: {path} - {e}")
+            self.logger.warning("Temp cleanup failed: %s - %s", path, e)
     
-    def _archive_source(self, file_path: str, catalog: str, collection: str):
-        """Archive processed source file."""
-        name = Path(file_path).name
-        archive_path = f"archive/{catalog}/{collection}/{name}"
+    def _archive_source(
+            self, source: Bucket, file_path: str
+    ) -> Optional[str]:
+        """
+        Archive raw source file before processing.
+
+        Copies to georiva-archive with origin prefix:
+            georiva-archive/{incoming|sources}/{catalog}/{collection}/file.ext
+        """
         try:
-            self.storage.move(file_path, archive_path)
+            archived = storage.archive_raw(source, file_path)
+            self.logger.info(
+                "Archived: %s/%s → archive/%s",
+                source.bucket_name, file_path, archived,
+            )
+            return archived
         except Exception as e:
-            self.logger.warning(f"Archive failed: {file_path} - {e}")
+            self.logger.warning(
+                "Archive failed: %s/%s - %s",
+                source.bucket_name, file_path, e,
+            )
+            return None
     
     def _infer_from_path(self, file_path: str) -> dict:
         """
-        Infer catalog/collection from path.
-        
-        Expected: incoming/{catalog}/{collection}/...
+        Infer catalog/collection from file path.
+
+        Since files are already in a specific bucket (incoming or sources),
+        the path is relative to the bucket root:
+            {catalog}/{collection}/filename.ext
+
+        Example:
+            "satellite-imagery/ndvi/raw_scene.tif"
+            → catalog="satellite-imagery", collection="ndvi"
         """
         parts = Path(file_path).parts
         result = {'catalog': None, 'collection': None}
         
-        if 'incoming' in parts:
-            idx = parts.index('incoming')
-            if idx + 1 < len(parts):
-                result['catalog'] = parts[idx + 1]
-            if idx + 2 < len(parts):
-                result['collection'] = parts[idx + 2]
+        if len(parts) >= 2:
+            result['catalog'] = parts[0]
+        if len(parts) >= 3:
+            result['collection'] = parts[1]
         
         return result

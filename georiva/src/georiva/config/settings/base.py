@@ -190,8 +190,34 @@ AWS_S3_ADDRESSING_STYLE = env('AWS_S3_ADDRESSING_STYLE', default='path')
 MINIO_WEBHOOK_ARN = env('MINIO_WEBHOOK_ARN', default='arn:minio:sqs::primary:webhook')
 MINIO_WEBHOOK_BEARER_TOKEN = env('MINIO_WEBHOOK_BEARER_TOKEN', default=None)
 
-# Configure storage backends
-if GEORIVA_STORAGE_BACKEND == 's3':
+# =============================================================================
+# Bucket Configuration
+# =============================================================================
+
+GEORIVA_BUCKETS = {
+    "incoming": "georiva-incoming",
+    "sources": "georiva-sources",
+    "archive": "georiva-archive",
+    "assets": "georiva-assets",
+}
+
+# =============================================================================
+# Storage Backends
+# =============================================================================
+
+# Common S3/MinIO options (shared across all buckets)
+_S3_OPTIONS = {
+    "region_name": AWS_S3_REGION_NAME,
+    "endpoint_url": AWS_S3_ENDPOINT_URL,
+    "custom_domain": AWS_S3_CUSTOM_DOMAIN,
+    "default_acl": AWS_DEFAULT_ACL,
+    "querystring_auth": AWS_QUERYSTRING_AUTH,
+    "file_overwrite": AWS_S3_FILE_OVERWRITE,
+    "signature_version": AWS_S3_SIGNATURE_VERSION,
+    "addressing_style": AWS_S3_ADDRESSING_STYLE,
+}
+
+if GEORIVA_STORAGE_BACKEND == "s3":
     STORAGES = {
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -199,23 +225,20 @@ if GEORIVA_STORAGE_BACKEND == 's3':
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
-        "georiva": {
+    }
+    
+    # Register one Django storage backend per bucket
+    for _key, _bucket_name in GEORIVA_BUCKETS.items():
+        STORAGES[f"georiva-{_key}"] = {
             "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
             "OPTIONS": {
-                "bucket_name": AWS_STORAGE_BUCKET_NAME,
-                "region_name": AWS_S3_REGION_NAME,
-                "endpoint_url": AWS_S3_ENDPOINT_URL,
-                "custom_domain": AWS_S3_CUSTOM_DOMAIN,
-                "default_acl": AWS_DEFAULT_ACL,
-                "querystring_auth": AWS_QUERYSTRING_AUTH,
-                "file_overwrite": AWS_S3_FILE_OVERWRITE,
-                "signature_version": AWS_S3_SIGNATURE_VERSION,
-                "addressing_style": AWS_S3_ADDRESSING_STYLE,
+                **_S3_OPTIONS,
+                "bucket_name": _bucket_name,
             },
-        },
-    }
+        }
+
 else:
-    # Local filesystem storage
+    # Local filesystem — each bucket maps to a subdirectory
     STORAGES = {
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
@@ -223,14 +246,16 @@ else:
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
-        "georiva": {
+    }
+    
+    for _key, _bucket_name in GEORIVA_BUCKETS.items():
+        STORAGES[f"georiva-{_key}"] = {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
             "OPTIONS": {
-                "location": GEORIVA_STORAGE_ROOT,
-                "base_url": "/tiles/",
+                "location": os.path.join(GEORIVA_STORAGE_ROOT, _bucket_name),
+                "base_url": f"/storage/{_bucket_name}/",
             },
-        },
-    }
+        }
 
 # Django sets a maximum of 1000 fields per form by default, but particularly complex page models
 # can exceed this limit within Wagtail's page editor.
@@ -268,6 +293,16 @@ REDIS_URL = env.str(
     f"{REDIS_PROTOCOL}://{REDIS_USERNAME}:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/0",
 )
 
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        "KEY_PREFIX": "georiva-default-cache",
+        "VERSION": VERSION,
+    },
+}
+
 CELERY_BROKER_URL = REDIS_URL
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
@@ -279,17 +314,25 @@ CELERY_SINGLETON_BACKEND_CLASS = (
 CELERY_RESULT_BACKEND = 'django-db'
 CELERY_RESULT_EXTENDED = True
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
-        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
-        "KEY_PREFIX": "georiva-default-cache",
-        "VERSION": VERSION,
+CELERY_CACHE_BACKEND = "default"
+
+# Late ack — task only acknowledged after completion.
+# If worker crashes mid-task, the message returns to the queue.
+CELERY_TASK_ACKS_LATE = True
+
+# Reject tasks back to queue on worker lost (OOM kill, SIGKILL)
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+
+# Prefetch 1 task at a time per worker slot.
+# Prevents one worker from hoarding tasks while others are idle.
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+
+CELERY_BEAT_SCHEDULE = {
+    'sweep-unprocessed': {
+        'task': 'georiva.ingestion.sweep.sweep_unprocessed',
+        'schedule': 300,  # every 5 minutes (in seconds)
     },
 }
-
-CELERY_CACHE_BACKEND = "default"
 
 GEORIVA_LOG_LEVEL = env.str("GEORIVA_LOG_LEVEL", "INFO")
 GEORIVA_DATABASE_LOG_LEVEL = env.str("GEORIVA_DATABASE_LOG_LEVEL", "ERROR")

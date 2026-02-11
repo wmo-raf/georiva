@@ -368,8 +368,8 @@ class Asset(TimeStampedModel, Orderable):
     @cached_property
     def url(self) -> str:
         """Get public URL to this asset."""
-        from georiva.core.storage import storage_manager
-        return storage_manager.url(self.href)
+        from georiva.core.storage import storage
+        return storage.assets.url(self.href)
 
 
 # =============================================================================

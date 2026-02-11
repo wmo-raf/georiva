@@ -1,119 +1,34 @@
 """
-GeoRiva Ingestion Celery Tasks
+GeoRiva Sweep Task
 
-Tasks are queued by the webhook view or the sweep task.
-Each task acquires a lock via IngestionLog before processing.
+Periodic safety net that:
+1. Resets stale locks (crashed workers)
+2. Finds untracked files in buckets
+3. Retries failed files
+
+Schedule via Celery Beat:
+    CELERY_BEAT_SCHEDULE = {
+        'sweep-unprocessed': {
+            'task': 'georiva.ingestion.sweep.sweep_unprocessed',
+            'schedule': crontab(minute='*/5'),  # every 5 minutes
+        },
+    }
 """
 
 import logging
-from datetime import datetime
 from pathlib import Path
 
 from celery import shared_task
 
 from georiva.core.filename import validate_path
-from georiva.core.storage import BucketType, storage
+from georiva.core.storage import storage, BucketType
+from georiva.ingestion.models import IngestionLog
+from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
 
 
-@shared_task(
-    bind=True,
-    max_retries=0,  # We handle retries via IngestionLog, not Celery
-    acks_late=True,  # Only acknowledge after completion (survives worker crash)
-)
-def process_incoming_file(
-        self,
-        collection_id: int,
-        file_path: str,
-        origin_bucket: str,
-        reference_time: str = None,
-):
-    """
-    Process a single incoming file.
-
-    1. Acquire lock via IngestionLog
-    2. Run ingestion
-    3. Mark completed or failed
-
-    If the lock can't be acquired (another worker has it, or already
-    completed), the task exits silently.
-    """
-    from georiva.ingestion.models import IngestionLog
-    from georiva.ingestion.service import IngestionService
-    
-    worker_id = f"celery-{self.request.id or 'unknown'}"
-    
-    # Acquire lock — atomic, only one worker wins
-    if not IngestionLog.acquire(origin_bucket, file_path, worker_id):
-        logger.info(
-            "Skipping %s/%s — already processing or completed",
-            origin_bucket, file_path,
-        )
-        return
-    
-    logger.info(
-        "Processing: %s/%s (worker=%s)",
-        origin_bucket, file_path, worker_id,
-    )
-    
-    # Parse reference_time if provided as ISO string
-    ref_time = None
-    if reference_time:
-        try:
-            ref_time = datetime.fromisoformat(reference_time)
-        except (ValueError, TypeError):
-            logger.warning("Invalid reference_time: %s", reference_time)
-    
-    # Run ingestion
-    service = IngestionService()
-    
-    try:
-        result = service.process_file(
-            file_path=file_path,
-            origin_bucket=origin_bucket,
-            metadata={'reference_time': ref_time} if ref_time else None,
-            delete_origin=True,
-        )
-        
-        if result and result.success:
-            IngestionLog.mark_completed(
-                bucket=origin_bucket,
-                file_path=file_path,
-                archive_path=result.archive_path,
-                items_created=len(result.items_created),
-                assets_created=len(result.assets_created),
-            )
-            logger.info(
-                "Completed: %s/%s — %d items, %d assets",
-                origin_bucket, file_path,
-                len(result.items_created),
-                len(result.assets_created),
-            )
-        else:
-            error_msg = '; '.join(result.errors) if result else 'No result returned'
-            IngestionLog.mark_failed(
-                bucket=origin_bucket,
-                file_path=file_path,
-                error=error_msg,
-            )
-            logger.warning(
-                "Failed: %s/%s — %s",
-                origin_bucket, file_path, error_msg,
-            )
-    
-    except Exception as e:
-        IngestionLog.mark_failed(
-            bucket=origin_bucket,
-            file_path=file_path,
-            error=str(e),
-        )
-        logger.exception(
-            "Error processing %s/%s", origin_bucket, file_path,
-        )
-
-
-@shared_task()
+@shared_task(queue='ingestion')
 def sweep_unprocessed():
     """
     Safety net — finds files that the webhook missed and retries failures.
@@ -123,7 +38,6 @@ def sweep_unprocessed():
     2. Scan incoming/sources buckets for untracked files
     3. Retry failed files that haven't exceeded max retries
     """
-    from georiva.ingestion.models import IngestionLog
     
     logger.info("Starting sweep...")
     
