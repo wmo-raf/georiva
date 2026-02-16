@@ -285,11 +285,10 @@ class STACItemsView(STACGeoAPIView):
         token = request.query_params.get('token')
         
         # Build query — items that have assets for this variable
+        
         queryset = Item.objects.filter(
-            collection=collection,
-            assets__variable=variable,
-        ).distinct()
-        queryset = queryset.prefetch_related('assets', 'assets__variable')
+            collection=collection
+        ).prefetch_related('assets', 'assets__variable')
         
         # Apply filters
         if datetime_param:
