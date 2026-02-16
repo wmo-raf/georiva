@@ -15,23 +15,23 @@ urlpatterns = [
     # Global queryables
     path('queryables/', views.STACQueryablesView.as_view(), name='queryables'),
     
-    # Collections (Catalogs as top-level)
+    # Catalogs (top-level collections)
     path('collections/', views.STACCatalogListView.as_view(), name='catalog-list'),
     path('collections/<slug:catalog_slug>', views.STACCatalogDetailView.as_view(), name='catalog-detail'),
     path('collections/<slug:catalog_slug>/queryables/', views.STACQueryablesView.as_view(), name='catalog-queryables'),
     
-    # Collections within a Catalog (optional explicit endpoint)
+    # Variable collections within a Catalog
     path('collections/<slug:catalog_slug>/collections/', views.STACCollectionListView.as_view(),
          name='collection-list'),
     
-    # Collection detail
-    path('collections/<slug:catalog_slug>/<slug:collection_slug>', views.STACCollectionDetailView.as_view(),
+    # Variable as Collection
+    path('collections/<slug:catalog_slug>/<slug:variable_slug>', views.STACCollectionDetailView.as_view(),
          name='collection-detail'),
-    path('collections/<slug:catalog_slug>/<slug:collection_slug>/queryables/', views.STACQueryablesView.as_view(),
+    path('collections/<slug:catalog_slug>/<slug:variable_slug>/queryables/', views.STACQueryablesView.as_view(),
          name='collection-queryables'),
     
     # Items
-    path('collections/<slug:catalog_slug>/<slug:collection_slug>/items', views.STACItemsView.as_view(), name='items'),
-    path('collections/<slug:catalog_slug>/<slug:collection_slug>/items/<str:item_id>',
-         views.STACItemDetailView.as_view(), name='item-detail'),
+    path('collections/<slug:catalog_slug>/<slug:variable_slug>/items', views.STACItemsView.as_view(), name='items'),
+    path('collections/<slug:catalog_slug>/<slug:variable_slug>/items/<str:item_id>', views.STACItemDetailView.as_view(),
+         name='item-detail'),
 ]

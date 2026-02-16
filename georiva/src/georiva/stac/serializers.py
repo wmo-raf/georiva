@@ -1,12 +1,19 @@
 """
 GeoRiva STAC API Serializers
 
-Hierarchical structure:
+STAC hierarchy:
 - Root Catalog
-  └── Catalogs (as Collections)
-      └── Collections
-          └── Items
-              └── Assets
+  └── Catalogs (as STAC Collections)
+      └── Variables (as STAC Collections) — one per active variable
+          └── Items (filtered to that variable's assets)
+              └── Assets (for that variable only)
+
+Each GeoRiva Variable becomes a STAC Collection.
+STAC Collection ID = variable.slug
+STAC Collection URL = /collections/{catalog.slug}/{variable.slug}
+
+If a GeoRiva Collection has 4 variables, it appears as 4 STAC Collections.
+If it has 1 variable, it appears as 1 STAC Collection.
 
 Implements STAC Spec v1.0.0
 """
@@ -74,8 +81,17 @@ class STACAssetSerializer(serializers.Serializer):
         return {k: v for k, v in data.items() if v is not None}
 
 
+# =============================================================================
+# Item Serializer
+# =============================================================================
+
 class STACItemSerializer(serializers.Serializer):
-    """Serializes GeoRiva Item to STAC Item format."""
+    """
+    Serializes GeoRiva Item to STAC Item format.
+
+    Expects context to include 'variable' — only assets for that variable
+    are included in the output.
+    """
     
     type = serializers.SerializerMethodField()
     stac_version = serializers.SerializerMethodField()
@@ -91,6 +107,9 @@ class STACItemSerializer(serializers.Serializer):
     def _get_base_url(self):
         request = self.context.get('request')
         return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
+    
+    def _get_variable(self):
+        return self.context.get('variable')
     
     def get_type(self, obj):
         return "Feature"
@@ -174,7 +193,6 @@ class STACItemSerializer(serializers.Serializer):
         return None
     
     def _build_transform(self, obj) -> Optional[list]:
-        """Build affine transform [a, b, c, d, e, f]."""
         if obj.bounds and obj.resolution_x:
             west, south, east, north = obj.bounds
             return [obj.resolution_x, 0, west, 0, -abs(obj.resolution_y), north]
@@ -182,11 +200,12 @@ class STACItemSerializer(serializers.Serializer):
     
     def get_links(self, obj):
         base_url = self._get_base_url()
+        variable = self._get_variable()
         catalog_slug = obj.collection.catalog.slug
-        collection_slug = obj.collection.slug
+        variable_slug = variable.slug if variable else obj.collection.slug
         item_id = self.get_id(obj)
         
-        collection_url = f"{base_url}collections/{catalog_slug}/{collection_slug}"
+        collection_url = f"{base_url}collections/{catalog_slug}/{variable_slug}"
         item_url = f"{collection_url}/items/{item_id}"
         
         return [
@@ -197,36 +216,54 @@ class STACItemSerializer(serializers.Serializer):
         ]
     
     def get_assets(self, obj):
+        """Only include assets for the context variable."""
+        variable = self._get_variable()
         assets = {}
+        
         for asset in obj.assets.all():
+            # Filter to the specific variable if provided
+            if variable and asset.variable_id != variable.id:
+                continue
+            
             key = f"{asset.variable.slug}_{asset.format}" if asset.format else asset.variable.slug
             assets[key] = STACAssetSerializer(asset, context=self.context).data
+        
         return assets
     
     def get_collection(self, obj):
-        return f"{obj.collection.catalog.slug}/{obj.collection.slug}"
+        variable = self._get_variable()
+        catalog_slug = obj.collection.catalog.slug
+        variable_slug = variable.slug if variable else obj.collection.slug
+        return f"{catalog_slug}/{variable_slug}"
 
 
-class STACCollectionSerializer(serializers.Serializer):
+# =============================================================================
+# Variable as STAC Collection
+# =============================================================================
+
+class STACVariableCollectionSerializer(serializers.Serializer):
     """
-    Serializes GeoRiva Collection to STAC Collection format.
-    Parent is the Catalog.
+    Serializes a GeoRiva (Collection, Variable) pair as a STAC Collection.
+
+    This is the core of the virtual collection approach:
+    each Variable becomes its own STAC Collection.
+
+    Expects the object to be a Variable instance with its collection
+    and catalog accessible via variable.collection.catalog.
     """
     
     type = serializers.SerializerMethodField()
     stac_version = serializers.SerializerMethodField()
     stac_extensions = serializers.SerializerMethodField()
     id = serializers.SerializerMethodField()
-    title = serializers.CharField(source='name')
-    description = serializers.CharField()
+    title = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
     license = serializers.SerializerMethodField()
     extent = serializers.SerializerMethodField()
     summaries = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
     providers = serializers.SerializerMethodField()
     keywords = serializers.SerializerMethodField()
-    
-    # Item assets declaration
     item_assets = serializers.SerializerMethodField()
     
     def _get_base_url(self):
@@ -245,20 +282,33 @@ class STACCollectionSerializer(serializers.Serializer):
         ]
     
     def get_id(self, obj):
-        # ID is just the collection slug (catalog is the parent context)
         return obj.slug
     
+    def get_title(self, obj):
+        collection = obj.collection
+        # If the collection has multiple active variables, prefix with collection name
+        variable_count = collection.variables.filter(is_active=True).count()
+        if variable_count > 1:
+            return f"{collection.name} - {obj.name}"
+        return obj.name
+    
+    def get_description(self, obj):
+        if obj.description:
+            return obj.description
+        return f"{obj.name} from {obj.collection.catalog.name}"
+    
     def get_license(self, obj):
-        return obj.catalog.license or "proprietary"
+        return obj.collection.catalog.license or "proprietary"
     
     def get_extent(self, obj):
-        spatial_bbox = obj.bounds or [-180, -90, 180, 90]
+        collection = obj.collection
+        spatial_bbox = collection.bounds or [-180, -90, 180, 90]
         
         temporal_interval = [None, None]
-        if obj.time_start:
-            temporal_interval[0] = obj.time_start.isoformat()
-        if obj.time_end:
-            temporal_interval[1] = obj.time_end.isoformat()
+        if collection.time_start:
+            temporal_interval[0] = collection.time_start.isoformat()
+        if collection.time_end:
+            temporal_interval[1] = collection.time_end.isoformat()
         
         return {
             "spatial": {"bbox": [spatial_bbox]},
@@ -266,18 +316,19 @@ class STACCollectionSerializer(serializers.Serializer):
         }
     
     def get_summaries(self, obj):
-        summaries = {}
+        collection = obj.collection
+        summaries = {
+            "georiva:variable": obj.slug,
+            "georiva:units": obj.units or "",
+            "georiva:value_range": [obj.value_min, obj.value_max],
+            "georiva:transform": obj.transform_type,
+        }
         
-        # Variables summary
-        variables = list(obj.variables.filter(is_active=True))
-        if variables:
-            summaries["georiva:variables"] = [v.slug for v in variables]
+        if collection.time_resolution:
+            summaries["georiva:time_resolution"] = collection.time_resolution
         
-        if obj.time_resolution:
-            summaries["georiva:time_resolution"] = obj.time_resolution
-        
-        if obj.crs:
-            summaries["proj:epsg"] = [self._parse_epsg(obj.crs)]
+        if collection.crs:
+            summaries["proj:epsg"] = [self._parse_epsg(collection.crs)]
         
         return summaries
     
@@ -290,65 +341,85 @@ class STACCollectionSerializer(serializers.Serializer):
         return None
     
     def get_item_assets(self, obj):
-        """Declare expected assets based on Variables."""
+        """Declare expected assets for this variable."""
         item_assets = {}
-        for variable in obj.variables.filter(is_active=True):
-            item_assets[variable.slug] = {
-                "title": variable.name,
-                "description": variable.description or f"{variable.name} data",
-                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
-                "roles": ["data"],
-            }
-            if variable.units:
-                item_assets[variable.slug]["unit"] = variable.units
+        
+        # Data asset (COG)
+        item_assets[f"{obj.slug}_cog"] = {
+            "title": f"{obj.name} (COG)",
+            "description": f"{obj.name} Cloud-Optimized GeoTIFF",
+            "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+            "roles": ["data"],
+        }
+        if obj.units:
+            item_assets[f"{obj.slug}_cog"]["unit"] = obj.units
+        
+        # Visual asset (PNG)
+        item_assets[f"{obj.slug}_png"] = {
+            "title": f"{obj.name} (PNG)",
+            "description": f"{obj.name} visualization",
+            "type": "image/png",
+            "roles": ["visual"],
+        }
+        
         return item_assets
     
     def get_links(self, obj):
         base_url = self._get_base_url()
-        catalog_slug = obj.catalog.slug
+        catalog_slug = obj.collection.catalog.slug
         
         catalog_url = f"{base_url}collections/{catalog_slug}"
         collection_url = f"{catalog_url}/{obj.slug}"
         
         links = [
             {"rel": "self", "href": collection_url, "type": "application/json"},
-            {"rel": "parent", "href": catalog_url, "type": "application/json", "title": obj.catalog.name},
+            {"rel": "parent", "href": catalog_url, "type": "application/json",
+             "title": obj.collection.catalog.name},
             {"rel": "root", "href": base_url, "type": "application/json"},
-            {"rel": "items", "href": f"{collection_url}/items", "type": "application/geo+json"},
+            {"rel": "items", "href": f"{collection_url}/items",
+             "type": "application/geo+json"},
         ]
         
         # License link
-        if obj.catalog.provider_url:
+        if obj.collection.catalog.provider_url:
             links.append({
                 "rel": "license",
-                "href": obj.catalog.provider_url,
+                "href": obj.collection.catalog.provider_url,
                 "title": "Data Provider",
             })
         
         return links
     
     def get_providers(self, obj):
-        if obj.catalog.provider:
+        catalog = obj.collection.catalog
+        if catalog.provider:
             return [{
-                "name": obj.catalog.provider,
-                "url": obj.catalog.provider_url or None,
+                "name": catalog.provider,
+                "url": catalog.provider_url or None,
                 "roles": ["producer"],
             }]
         return []
     
     def get_keywords(self, obj):
-        keywords = [obj.catalog.slug, obj.slug]
-        for variable in obj.variables.filter(is_active=True)[:5]:
-            keywords.append(variable.slug)
+        keywords = [
+            obj.collection.catalog.slug,
+            obj.collection.slug,
+            obj.slug,
+        ]
+        if obj.units:
+            keywords.append(obj.units)
         return keywords
 
+
+# =============================================================================
+# Catalog as STAC Collection (top-level)
+# =============================================================================
 
 class STACCatalogAsCollectionSerializer(serializers.Serializer):
     """
     Serializes GeoRiva Catalog as a STAC Collection.
-    
-    This allows Catalogs to appear as top-level collections
-    that contain child collections.
+
+    Child links point to virtual per-variable collections.
     """
     
     type = serializers.SerializerMethodField()
@@ -380,22 +451,19 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer):
         ]
     
     def get_extent(self, obj):
-        """Aggregate extent from all child collections."""
         collections = obj.collections.filter(is_active=True)
         
-        # Aggregate spatial bounds
         all_bounds = [c.bounds for c in collections if c.bounds]
         if all_bounds:
             spatial_bbox = [
-                min(b[0] for b in all_bounds),  # west
-                min(b[1] for b in all_bounds),  # south
-                max(b[2] for b in all_bounds),  # east
-                max(b[3] for b in all_bounds),  # north
+                min(b[0] for b in all_bounds),
+                min(b[1] for b in all_bounds),
+                max(b[2] for b in all_bounds),
+                max(b[3] for b in all_bounds),
             ]
         else:
             spatial_bbox = [-180, -90, 180, 90]
         
-        # Aggregate temporal extent
         time_starts = [c.time_start for c in collections if c.time_start]
         time_ends = [c.time_end for c in collections if c.time_end]
         
@@ -412,16 +480,14 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer):
     def get_summaries(self, obj):
         collections = obj.collections.filter(is_active=True)
         
-        summaries = {
-            "georiva:collection_count": collections.count(),
-            "georiva:file_format": obj.file_format,
-        }
-        
-        # Aggregate variables across collections
         all_variables = set()
         for collection in collections:
             for var in collection.variables.filter(is_active=True):
                 all_variables.add(var.slug)
+        
+        summaries = {
+            "georiva:file_format": obj.file_format,
+        }
         
         if all_variables:
             summaries["georiva:variables"] = sorted(all_variables)
@@ -434,18 +500,26 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer):
         
         links = [
             {"rel": "self", "href": catalog_url, "type": "application/json"},
-            {"rel": "parent", "href": f"{base_url}collections/", "type": "application/json"},
+            {"rel": "parent", "href": f"{base_url}collections/",
+             "type": "application/json"},
             {"rel": "root", "href": base_url, "type": "application/json"},
         ]
         
-        # Child links to collections
+        # Child links — one per variable across all collections
         for collection in obj.collections.filter(is_active=True):
-            links.append({
-                "rel": "child",
-                "href": f"{catalog_url}/{collection.slug}",
-                "type": "application/json",
-                "title": collection.name,
-            })
+            for variable in collection.variables.filter(is_active=True):
+                variable_count = collection.variables.filter(is_active=True).count()
+                if variable_count > 1:
+                    title = f"{collection.name} - {variable.name}"
+                else:
+                    title = variable.name
+                
+                links.append({
+                    "rel": "child",
+                    "href": f"{catalog_url}/{variable.slug}",
+                    "type": "application/json",
+                    "title": title,
+                })
         
         # Provider/license link
         if obj.provider_url:
@@ -475,11 +549,12 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer):
         return keywords
 
 
+# =============================================================================
+# Root Catalog
+# =============================================================================
+
 class STACRootCatalogSerializer(serializers.Serializer):
-    """
-    Root STAC Catalog - landing page.
-    Links to Catalogs as top-level collections.
-    """
+    """Root STAC Catalog — landing page."""
     
     type = serializers.SerializerMethodField()
     stac_version = serializers.SerializerMethodField()
@@ -526,12 +601,18 @@ class STACRootCatalogSerializer(serializers.Serializer):
         base_url = self._get_base_url()
         
         links = [
-            {"rel": "self", "href": base_url, "type": "application/json", "title": "This catalog"},
-            {"rel": "root", "href": base_url, "type": "application/json", "title": "Root catalog"},
-            {"rel": "conformance", "href": f"{base_url}conformance/", "type": "application/json"},
-            {"rel": "data", "href": f"{base_url}collections/", "type": "application/json", "title": "Collections"},
-            {"rel": "search", "href": f"{base_url}search/", "type": "application/geo+json", "method": "GET"},
-            {"rel": "search", "href": f"{base_url}search/", "type": "application/geo+json", "method": "POST"},
+            {"rel": "self", "href": base_url, "type": "application/json",
+             "title": "This catalog"},
+            {"rel": "root", "href": base_url, "type": "application/json",
+             "title": "Root catalog"},
+            {"rel": "conformance", "href": f"{base_url}conformance/",
+             "type": "application/json"},
+            {"rel": "data", "href": f"{base_url}collections/",
+             "type": "application/json", "title": "Collections"},
+            {"rel": "search", "href": f"{base_url}search/",
+             "type": "application/geo+json", "method": "GET"},
+            {"rel": "search", "href": f"{base_url}search/",
+             "type": "application/geo+json", "method": "POST"},
             {
                 "rel": "service-desc",
                 "href": f"{base_url}openapi/",
@@ -540,7 +621,7 @@ class STACRootCatalogSerializer(serializers.Serializer):
             },
         ]
         
-        # Child links to each Catalog (as top-level collections)
+        # Child links to each Catalog
         for catalog in obj.get('catalogs', []):
             if catalog.is_active:
                 links.append({
@@ -553,9 +634,13 @@ class STACRootCatalogSerializer(serializers.Serializer):
         return links
 
 
+# =============================================================================
+# List serializers
+# =============================================================================
+
 class STACCatalogListSerializer(serializers.Serializer):
     """
-    List of Catalogs (as Collections) - response for /collections/
+    List of Catalogs (as Collections) — response for /collections/.
     """
     collections = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
@@ -574,14 +659,16 @@ class STACCatalogListSerializer(serializers.Serializer):
     def get_links(self, obj):
         base_url = self._get_base_url()
         return [
-            {"rel": "self", "href": f"{base_url}collections/", "type": "application/json"},
+            {"rel": "self", "href": f"{base_url}collections/",
+             "type": "application/json"},
             {"rel": "root", "href": base_url, "type": "application/json"},
         ]
 
 
-class STACCollectionListSerializer(serializers.Serializer):
+class STACVariableCollectionListSerializer(serializers.Serializer):
     """
-    List of Collections within a Catalog - response for /collections/{catalog}/collections/
+    List of variable collections within a Catalog.
+    Response for /collections/{catalog}/collections/.
     """
     collections = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
@@ -591,10 +678,10 @@ class STACCollectionListSerializer(serializers.Serializer):
         return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def get_collections(self, obj):
-        collections = obj.get('collections', [])
+        variables = obj.get('variables', [])
         return [
-            STACCollectionSerializer(c, context=self.context).data
-            for c in collections if c.is_active
+            STACVariableCollectionSerializer(v, context=self.context).data
+            for v in variables
         ]
     
     def get_links(self, obj):
@@ -603,15 +690,23 @@ class STACCollectionListSerializer(serializers.Serializer):
         catalog_url = f"{base_url}collections/{catalog.slug}" if catalog else base_url
         
         return [
-            {"rel": "self", "href": f"{catalog_url}/", "type": "application/json"},
-            {"rel": "parent", "href": catalog_url, "type": "application/json"},
+            {"rel": "self", "href": f"{catalog_url}/",
+             "type": "application/json"},
+            {"rel": "parent", "href": catalog_url,
+             "type": "application/json"},
             {"rel": "root", "href": base_url, "type": "application/json"},
         ]
 
 
+# =============================================================================
+# Item Collection (FeatureCollection)
+# =============================================================================
+
 class STACItemCollectionSerializer(serializers.Serializer):
     """
     Serializes a list of Items to STAC ItemCollection (FeatureCollection).
+
+    Expects context to include 'variable' for asset filtering.
     """
     type = serializers.SerializerMethodField()
     features = serializers.SerializerMethodField()
@@ -625,7 +720,10 @@ class STACItemCollectionSerializer(serializers.Serializer):
     
     def get_features(self, obj):
         items = obj.get('items', [])
-        return [STACItemSerializer(item, context=self.context).data for item in items]
+        return [
+            STACItemSerializer(item, context=self.context).data
+            for item in items
+        ]
     
     def get_links(self, obj):
         request = self.context.get('request')
@@ -633,23 +731,43 @@ class STACItemCollectionSerializer(serializers.Serializer):
         
         if request:
             current_url = request.build_absolute_uri()
-            links.append({"rel": "self", "href": current_url, "type": "application/geo+json"})
+            links.append({
+                "rel": "self", "href": current_url,
+                "type": "application/geo+json",
+            })
             
             # Collection link
+            variable = self.context.get('variable')
             collection = obj.get('collection')
-            if collection:
+            if collection and variable:
                 base_url = request.build_absolute_uri('/api/stac/')
-                collection_url = f"{base_url}collections/{collection.catalog.slug}/{collection.slug}"
-                links.append({"rel": "collection", "href": collection_url, "type": "application/json"})
+                collection_url = (
+                    f"{base_url}collections/"
+                    f"{collection.catalog.slug}/{variable.slug}"
+                )
+                links.append({
+                    "rel": "collection", "href": collection_url,
+                    "type": "application/json",
+                })
             
             # Pagination
             if obj.get('next_token'):
-                next_url = self._build_pagination_url(current_url, obj['next_token'])
-                links.append({"rel": "next", "href": next_url, "type": "application/geo+json"})
+                next_url = self._build_pagination_url(
+                    current_url, obj['next_token']
+                )
+                links.append({
+                    "rel": "next", "href": next_url,
+                    "type": "application/geo+json",
+                })
             
             if obj.get('prev_token'):
-                prev_url = self._build_pagination_url(current_url, obj['prev_token'])
-                links.append({"rel": "prev", "href": prev_url, "type": "application/geo+json"})
+                prev_url = self._build_pagination_url(
+                    current_url, obj['prev_token']
+                )
+                links.append({
+                    "rel": "prev", "href": prev_url,
+                    "type": "application/geo+json",
+                })
         
         return links
     

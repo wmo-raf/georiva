@@ -2,13 +2,17 @@
 GeoRiva STAC API Views
 
 Hierarchical structure:
-- GET /stac/                                           → Root Catalog
-- GET /stac/collections/                               → List Catalogs (as Collections)
-- GET /stac/collections/{catalog}/                     → Catalog detail (as Collection)
-- GET /stac/collections/{catalog}/{collection}         → Collection detail
-- GET /stac/collections/{catalog}/{collection}/items   → List Items
-- GET /stac/collections/{catalog}/{collection}/items/{id} → Item detail
-- GET/POST /stac/search                                → Cross-collection search
+- GET /stac/                                              → Root Catalog
+- GET /stac/collections/                                  → List Catalogs (as Collections)
+- GET /stac/collections/{catalog}/                        → Catalog detail (as Collection)
+- GET /stac/collections/{catalog}/{variable}              → Variable as Collection
+- GET /stac/collections/{catalog}/{variable}/items        → List Items (filtered to variable)
+- GET /stac/collections/{catalog}/{variable}/items/{id}   → Item detail (filtered to variable)
+- GET/POST /stac/search                                   → Cross-collection search
+
+STAC Collection = (Catalog, Variable)
+STAC Collection ID = variable.slug
+URL pattern: /collections/{catalog.slug}/{variable.slug}
 
 Implements STAC API v1.0.0
 """
@@ -25,18 +29,46 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from georiva.core.models import Catalog, Collection, Item
+from georiva.core.models import Catalog, Collection, Item, Variable
 from .renderers import STACJSONRenderer, GeoJSONRenderer
 from .serializers import (
     STACRootCatalogSerializer,
     STACCatalogAsCollectionSerializer,
     STACCatalogListSerializer,
-    STACCollectionSerializer,
-    STACCollectionListSerializer,
+    STACVariableCollectionSerializer,
+    STACVariableCollectionListSerializer,
     STACItemCollectionSerializer,
     STACItemSerializer,
 )
 
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def _resolve_variable(catalog_slug: str, variable_slug: str) -> Variable:
+    """
+    Resolve a Variable from a catalog slug and variable slug.
+
+    Looks up the variable across all active collections in the catalog.
+    Variable slugs must be unique within a catalog.
+    """
+    return get_object_or_404(
+        Variable.objects.select_related(
+            'collection', 'collection__catalog'
+        ).filter(
+            collection__catalog__slug=catalog_slug,
+            collection__catalog__is_active=True,
+            collection__is_active=True,
+            is_active=True,
+        ),
+        slug=variable_slug,
+    )
+
+
+# =============================================================================
+# Base Views
+# =============================================================================
 
 class STACAPIView(APIView):
     """Base view for STAC catalog/collection endpoints."""
@@ -50,13 +82,15 @@ class STACGeoAPIView(APIView):
     parser_classes = [JSONParser]
 
 
+# =============================================================================
+# Root & Conformance
+# =============================================================================
+
 class STACLandingPageView(STACAPIView):
     """
     STAC API Landing Page (Root Catalog)
-    
+
     GET /stac/
-    
-    Returns the root catalog with links to all top-level collections (Catalogs).
     """
     
     def get(self, request: Request) -> Response:
@@ -80,7 +114,7 @@ class STACLandingPageView(STACAPIView):
 class STACConformanceView(STACAPIView):
     """
     STAC API Conformance Declaration
-    
+
     GET /stac/conformance/
     """
     
@@ -98,19 +132,21 @@ class STACConformanceView(STACAPIView):
         })
 
 
+# =============================================================================
+# Catalog Views
+# =============================================================================
+
 class STACCatalogListView(STACAPIView):
     """
-    List all Catalogs as top-level STAC Collections
-    
+    List all Catalogs as top-level STAC Collections.
+
     GET /stac/collections/
-    
-    Returns Catalogs serialized as Collections, each containing child collections.
     """
     
     def get(self, request: Request) -> Response:
         catalogs = Catalog.objects.filter(is_active=True).prefetch_related(
             'collections',
-            'collections__variables'
+            'collections__variables',
         )
         
         data = STACCatalogListSerializer(
@@ -123,18 +159,18 @@ class STACCatalogListView(STACAPIView):
 
 class STACCatalogDetailView(STACAPIView):
     """
-    Get a single Catalog as a STAC Collection
-    
+    Get a single Catalog as a STAC Collection.
+
     GET /stac/collections/{catalog_slug}
-    
-    Returns the Catalog with links to its child Collections.
+
+    Child links point to per-variable collections.
     """
     
     def get(self, request: Request, catalog_slug: str) -> Response:
         catalog = get_object_or_404(
             Catalog.objects.prefetch_related(
                 'collections',
-                'collections__variables'
+                'collections__variables',
             ),
             slug=catalog_slug,
             is_active=True,
@@ -148,14 +184,17 @@ class STACCatalogDetailView(STACAPIView):
         return Response(data)
 
 
+# =============================================================================
+# Variable Collection Views
+# =============================================================================
+
 class STACCollectionListView(STACAPIView):
     """
-    List Collections within a Catalog
-    
+    List variable collections within a Catalog.
+
     GET /stac/collections/{catalog_slug}/collections/
-    
-    Optional - provides explicit list endpoint for collections within a catalog.
-    The catalog detail view already includes child links.
+
+    Returns one STAC Collection per active variable.
     """
     
     def get(self, request: Request, catalog_slug: str) -> Response:
@@ -165,15 +204,18 @@ class STACCollectionListView(STACAPIView):
             is_active=True,
         )
         
-        collections = Collection.objects.filter(
-            catalog=catalog,
-            is_active=True
-        ).prefetch_related('variables')
+        variables = Variable.objects.filter(
+            collection__catalog=catalog,
+            collection__is_active=True,
+            is_active=True,
+        ).select_related(
+            'collection', 'collection__catalog'
+        ).order_by('collection__sort_order', 'sort_order')
         
-        data = STACCollectionListSerializer(
+        data = STACVariableCollectionListSerializer(
             {
                 'catalog': catalog,
-                'collections': collections,
+                'variables': variables,
             },
             context={'request': request}
         ).data
@@ -183,46 +225,45 @@ class STACCollectionListView(STACAPIView):
 
 class STACCollectionDetailView(STACAPIView):
     """
-    Get a specific STAC Collection
-    
-    GET /stac/collections/{catalog_slug}/{collection_slug}
-    
-    Returns the Collection with links to its Items.
+    Get a variable as a STAC Collection.
+
+    GET /stac/collections/{catalog_slug}/{variable_slug}
     """
     
     def get(
             self,
             request: Request,
             catalog_slug: str,
-            collection_slug: str
+            variable_slug: str,
     ) -> Response:
-        collection = get_object_or_404(
-            Collection.objects.select_related('catalog').prefetch_related('variables'),
-            catalog__slug=catalog_slug,
-            slug=collection_slug,
-            is_active=True,
-        )
+        variable = _resolve_variable(catalog_slug, variable_slug)
         
-        data = STACCollectionSerializer(
-            collection,
+        data = STACVariableCollectionSerializer(
+            variable,
             context={'request': request}
         ).data
         
         return Response(data)
 
 
+# =============================================================================
+# Item Views
+# =============================================================================
+
 class STACItemsView(STACGeoAPIView):
     """
-    List Items in a Collection (OGC Features)
-    
-    GET /stac/collections/{catalog_slug}/{collection_slug}/items
-    
+    List Items in a variable collection.
+
+    GET /stac/collections/{catalog_slug}/{variable_slug}/items
+
+    Items are from the variable's parent Collection, with assets
+    filtered to only this variable.
+
     Query Parameters:
         - limit: Max items to return (default 100, max 1000)
         - datetime: Temporal filter (single datetime or range)
         - bbox: Bounding box filter [west,south,east,north]
         - token: Pagination token (datetime of last item)
-        - variable: Filter by variable slug
     """
     
     DEFAULT_LIMIT = 100
@@ -232,24 +273,22 @@ class STACItemsView(STACGeoAPIView):
             self,
             request: Request,
             catalog_slug: str,
-            collection_slug: str
+            variable_slug: str,
     ) -> Response:
-        collection = get_object_or_404(
-            Collection.objects.select_related('catalog'),
-            catalog__slug=catalog_slug,
-            slug=collection_slug,
-            is_active=True,
-        )
+        variable = _resolve_variable(catalog_slug, variable_slug)
+        collection = variable.collection
         
         # Parse query parameters
         limit = self._parse_limit(request)
         datetime_param = request.query_params.get('datetime')
         bbox_param = request.query_params.get('bbox')
         token = request.query_params.get('token')
-        variable = request.query_params.get('variable')
         
-        # Build query
-        queryset = Item.objects.filter(collection=collection)
+        # Build query — items that have assets for this variable
+        queryset = Item.objects.filter(
+            collection=collection,
+            assets__variable=variable,
+        ).distinct()
         queryset = queryset.prefetch_related('assets', 'assets__variable')
         
         # Apply filters
@@ -258,9 +297,6 @@ class STACItemsView(STACGeoAPIView):
         
         if bbox_param:
             queryset = self._apply_bbox_filter(queryset, bbox_param)
-        
-        if variable:
-            queryset = queryset.filter(assets__variable__slug=variable).distinct()
         
         if token:
             queryset = self._apply_pagination_token(queryset, token)
@@ -278,7 +314,7 @@ class STACItemsView(STACGeoAPIView):
         else:
             next_token = None
         
-        # Serialize
+        # Serialize — pass variable in context for asset filtering
         data = STACItemCollectionSerializer(
             {
                 'items': items,
@@ -287,24 +323,31 @@ class STACItemsView(STACGeoAPIView):
                 'limit': limit,
                 'next_token': next_token,
             },
-            context={'request': request}
+            context={
+                'request': request,
+                'variable': variable,
+            }
         ).data
         
         return Response(data)
     
     def _parse_limit(self, request: Request) -> int:
         try:
-            limit = int(request.query_params.get('limit', self.DEFAULT_LIMIT))
+            limit = int(
+                request.query_params.get('limit', self.DEFAULT_LIMIT)
+            )
             return min(max(1, limit), self.MAX_LIMIT)
         except (ValueError, TypeError):
             return self.DEFAULT_LIMIT
     
     def _apply_datetime_filter(self, queryset, datetime_param: str):
-        """Apply datetime filter per OGC API."""
         if '/' in datetime_param:
             parts = datetime_param.split('/')
             start = parts[0] if parts[0] not in ('..', '') else None
-            end = parts[1] if len(parts) > 1 and parts[1] not in ('..', '') else None
+            end = (
+                parts[1] if len(parts) > 1 and parts[1] not in ('..', '')
+                else None
+            )
             
             if start:
                 start_dt = self._parse_datetime(start)
@@ -322,7 +365,6 @@ class STACItemsView(STACGeoAPIView):
         return queryset
     
     def _apply_bbox_filter(self, queryset, bbox_param: str):
-        """Apply bounding box filter."""
         try:
             bbox = [float(x.strip()) for x in bbox_param.split(',')]
             if len(bbox) == 4:
@@ -338,7 +380,6 @@ class STACItemsView(STACGeoAPIView):
         return queryset
     
     def _apply_pagination_token(self, queryset, token: str):
-        """Apply cursor-based pagination."""
         try:
             token_dt = self._parse_datetime(token)
             if token_dt:
@@ -348,7 +389,6 @@ class STACItemsView(STACGeoAPIView):
         return queryset
     
     def _parse_datetime(self, dt_string: str) -> Optional[datetime]:
-        """Parse ISO datetime string."""
         try:
             return datetime.fromisoformat(dt_string.replace('Z', '+00:00'))
         except (ValueError, AttributeError):
@@ -357,10 +397,12 @@ class STACItemsView(STACGeoAPIView):
 
 class STACItemDetailView(STACGeoAPIView):
     """
-    Get a specific STAC Item
-    
-    GET /stac/collections/{catalog_slug}/{collection_slug}/items/{item_id}
-    
+    Get a specific STAC Item.
+
+    GET /stac/collections/{catalog_slug}/{variable_slug}/items/{item_id}
+
+    Assets are filtered to the specified variable only.
+
     Item ID format:
         - Non-forecast: {YYYYMMDDTHHMMSSz}
         - Forecast: {ref_time}_{valid_time}
@@ -370,14 +412,11 @@ class STACItemDetailView(STACGeoAPIView):
             self,
             request: Request,
             catalog_slug: str,
-            collection_slug: str,
-            item_id: str
+            variable_slug: str,
+            item_id: str,
     ) -> Response:
-        collection = get_object_or_404(
-            Collection.objects.select_related('catalog'),
-            catalog__slug=catalog_slug,
-            slug=collection_slug,
-        )
+        variable = _resolve_variable(catalog_slug, variable_slug)
+        collection = variable.collection
         
         item = self._find_item(collection, item_id)
         
@@ -385,37 +424,47 @@ class STACItemDetailView(STACGeoAPIView):
             return Response(
                 {
                     "code": "NotFound",
-                    "description": f"Item '{item_id}' not found in collection '{collection_slug}'"
+                    "description": (
+                        f"Item '{item_id}' not found in "
+                        f"collection '{variable_slug}'"
+                    ),
                 },
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
         
-        data = STACItemSerializer(item, context={'request': request}).data
+        data = STACItemSerializer(
+            item,
+            context={'request': request, 'variable': variable},
+        ).data
+        
         return Response(data)
     
-    def _find_item(self, collection: Collection, item_id: str) -> Optional[Item]:
-        """Parse item_id and find the corresponding Item."""
+    def _find_item(
+            self, collection: Collection, item_id: str
+    ) -> Optional[Item]:
         parts = item_id.split('_')
         
         try:
             if len(parts) == 1:
-                # Single datetime: valid_time only (non-forecast)
                 valid_time = datetime.strptime(parts[0], '%Y%m%dT%H%M%SZ')
                 return Item.objects.filter(
                     collection=collection,
                     time=valid_time,
-                    reference_time__isnull=True
-                ).prefetch_related('assets', 'assets__variable').first()
+                    reference_time__isnull=True,
+                ).prefetch_related(
+                    'assets', 'assets__variable'
+                ).first()
             
             elif len(parts) == 2:
-                # Two datetimes: reference_time + valid_time (forecast)
                 ref_time = datetime.strptime(parts[0], '%Y%m%dT%H%M%SZ')
                 valid_time = datetime.strptime(parts[1], '%Y%m%dT%H%M%SZ')
                 return Item.objects.filter(
                     collection=collection,
                     time=valid_time,
-                    reference_time=ref_time
-                ).prefetch_related('assets', 'assets__variable').first()
+                    reference_time=ref_time,
+                ).prefetch_related(
+                    'assets', 'assets__variable'
+                ).first()
         
         except ValueError:
             pass
@@ -423,20 +472,23 @@ class STACItemDetailView(STACGeoAPIView):
         return None
 
 
+# =============================================================================
+# Search
+# =============================================================================
+
 class STACSearchView(STACGeoAPIView):
     """
     STAC Item Search
-    
+
     GET/POST /stac/search
-    
+
     Cross-collection search with filters:
-        - collections: List of collection IDs (catalog/collection or just collection)
+        - collections: List of collection IDs ({catalog}/{variable} or {variable})
         - ids: List of item IDs
         - bbox: Bounding box [west, south, east, north]
         - datetime: Temporal filter
         - limit: Max results (default 100)
         - intersects: GeoJSON geometry
-        - filter: CQL2 filter expression (future)
     """
     
     DEFAULT_LIMIT = 100
@@ -459,13 +511,19 @@ class STACSearchView(STACGeoAPIView):
     def _search(self, request: Request, params: dict) -> Response:
         queryset = Item.objects.filter(
             collection__is_active=True,
-            collection__catalog__is_active=True
+            collection__catalog__is_active=True,
         )
-        queryset = queryset.select_related('collection', 'collection__catalog')
+        queryset = queryset.select_related(
+            'collection', 'collection__catalog'
+        )
         queryset = queryset.prefetch_related('assets', 'assets__variable')
         
-        # Filter by collections
-        queryset = self._apply_collections_filter(queryset, params.get('collections', []))
+        # Resolve variable context from collections param
+        variable = None
+        collections_param = params.get('collections', [])
+        queryset, variable = self._apply_collections_filter(
+            queryset, collections_param
+        )
         
         # Filter by item IDs
         queryset = self._apply_ids_filter(queryset, params.get('ids', []))
@@ -479,7 +537,9 @@ class STACSearchView(STACGeoAPIView):
         queryset = self._apply_bbox_filter(queryset, params.get('bbox'))
         
         # Filter by intersects geometry
-        queryset = self._apply_intersects_filter(queryset, params.get('intersects'))
+        queryset = self._apply_intersects_filter(
+            queryset, params.get('intersects')
+        )
         
         # Pagination
         limit = self._parse_limit(params.get('limit', self.DEFAULT_LIMIT))
@@ -508,49 +568,91 @@ class STACSearchView(STACGeoAPIView):
                 'limit': limit,
                 'next_token': next_token,
             },
-            context={'request': request}
+            context={
+                'request': request,
+                'variable': variable,
+            },
         ).data
         
         return Response(data)
     
     def _apply_collections_filter(self, queryset, collections: list):
-        """Filter by collection IDs."""
+        """
+        Filter by collection IDs.
+
+        Collection IDs are in the format {catalog}/{variable}.
+        Resolves to the parent GeoRiva Collection and filters
+        assets to the specified variable.
+
+        Returns (queryset, variable) — variable is set when filtering
+        by a single collection (for asset filtering in serializer).
+        """
         if not collections:
-            return queryset
+            return queryset, None
         
         q_filter = Q()
+        resolved_variable = None
+        
         for coll_id in collections:
             if '/' in coll_id:
-                # Full path: catalog/collection
-                catalog_slug, coll_slug = coll_id.split('/', 1)
-                q_filter |= Q(
-                    collection__catalog__slug=catalog_slug,
-                    collection__slug=coll_slug
-                )
+                catalog_slug, variable_slug = coll_id.split('/', 1)
+                try:
+                    var = Variable.objects.select_related(
+                        'collection', 'collection__catalog'
+                    ).get(
+                        collection__catalog__slug=catalog_slug,
+                        slug=variable_slug,
+                        collection__is_active=True,
+                        is_active=True,
+                    )
+                    q_filter |= Q(collection=var.collection)
+                    # Track variable for single-collection queries
+                    if len(collections) == 1:
+                        resolved_variable = var
+                except Variable.DoesNotExist:
+                    continue
             else:
-                # Just collection slug (matches across catalogs)
-                q_filter |= Q(collection__slug=coll_id)
+                # Just variable slug — match across catalogs
+                variables = Variable.objects.filter(
+                    slug=coll_id,
+                    collection__is_active=True,
+                    is_active=True,
+                ).select_related('collection')
+                for var in variables:
+                    q_filter |= Q(collection=var.collection)
+                if len(collections) == 1 and variables.count() == 1:
+                    resolved_variable = variables.first()
         
-        return queryset.filter(q_filter)
+        if q_filter:
+            queryset = queryset.filter(q_filter)
+        
+        return queryset, resolved_variable
     
     def _apply_ids_filter(self, queryset, ids: list):
-        """Filter by item IDs."""
         if not ids:
             return queryset
         
-        # Item IDs are time-based, so we need to parse them
-        # This is a simplified implementation - could be optimized
         time_filters = []
         for item_id in ids:
             parts = item_id.split('_')
             try:
                 if len(parts) == 1:
-                    valid_time = datetime.strptime(parts[0], '%Y%m%dT%H%M%SZ')
-                    time_filters.append(Q(time=valid_time, reference_time__isnull=True))
+                    valid_time = datetime.strptime(
+                        parts[0], '%Y%m%dT%H%M%SZ'
+                    )
+                    time_filters.append(
+                        Q(time=valid_time, reference_time__isnull=True)
+                    )
                 elif len(parts) >= 2:
-                    ref_time = datetime.strptime(parts[-2], '%Y%m%dT%H%M%SZ')
-                    valid_time = datetime.strptime(parts[-1], '%Y%m%dT%H%M%SZ')
-                    time_filters.append(Q(time=valid_time, reference_time=ref_time))
+                    ref_time = datetime.strptime(
+                        parts[-2], '%Y%m%dT%H%M%SZ'
+                    )
+                    valid_time = datetime.strptime(
+                        parts[-1], '%Y%m%dT%H%M%SZ'
+                    )
+                    time_filters.append(
+                        Q(time=valid_time, reference_time=ref_time)
+                    )
             except ValueError:
                 continue
         
@@ -563,11 +665,13 @@ class STACSearchView(STACGeoAPIView):
         return queryset
     
     def _apply_datetime_filter(self, queryset, datetime_param: str):
-        """Apply datetime filter."""
         if '/' in datetime_param:
             parts = datetime_param.split('/')
             start = parts[0] if parts[0] not in ('..', '') else None
-            end = parts[1] if len(parts) > 1 and parts[1] not in ('..', '') else None
+            end = (
+                parts[1] if len(parts) > 1 and parts[1] not in ('..', '')
+                else None
+            )
             
             if start:
                 start_dt = self._parse_datetime(start)
@@ -585,7 +689,6 @@ class STACSearchView(STACGeoAPIView):
         return queryset
     
     def _apply_bbox_filter(self, queryset, bbox):
-        """Apply bounding box filter."""
         if not bbox:
             return queryset
         
@@ -607,12 +710,9 @@ class STACSearchView(STACGeoAPIView):
         return queryset
     
     def _apply_intersects_filter(self, queryset, intersects: dict):
-        """Apply GeoJSON geometry intersection filter."""
         if not intersects:
             return queryset
         
-        # Simplified: extract bbox from geometry
-        # For proper spatial queries, use PostGIS ST_Intersects
         geom_type = intersects.get('type')
         
         if geom_type == 'Polygon':
@@ -640,7 +740,6 @@ class STACSearchView(STACGeoAPIView):
         return queryset
     
     def _apply_pagination_token(self, queryset, token: str):
-        """Apply cursor-based pagination."""
         try:
             token_dt = self._parse_datetime(token)
             if token_dt:
@@ -662,20 +761,24 @@ class STACSearchView(STACGeoAPIView):
             return None
 
 
+# =============================================================================
+# Queryables
+# =============================================================================
+
 class STACQueryablesView(STACAPIView):
     """
     STAC Queryables (for CQL2 filter extension)
-    
+
     GET /stac/queryables
     GET /stac/collections/{catalog_slug}/queryables
-    GET /stac/collections/{catalog_slug}/{collection_slug}/queryables
+    GET /stac/collections/{catalog_slug}/{variable_slug}/queryables
     """
     
     def get(
             self,
             request: Request,
             catalog_slug: str = None,
-            collection_slug: str = None
+            variable_slug: str = None,
     ) -> Response:
         base_url = request.build_absolute_uri()
         
@@ -709,33 +812,39 @@ class STACQueryablesView(STACAPIView):
             "additionalProperties": True,
         }
         
-        # Add catalog-level queryables
-        if catalog_slug and not collection_slug:
-            catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
-            
-            # Add collection choices within this catalog
-            collections = catalog.collections.filter(is_active=True)
+        # Catalog-level: list available variable collections
+        if catalog_slug and not variable_slug:
+            catalog = get_object_or_404(
+                Catalog, slug=catalog_slug, is_active=True
+            )
+            variables = Variable.objects.filter(
+                collection__catalog=catalog,
+                collection__is_active=True,
+                is_active=True,
+            )
             queryables["properties"]["collection"]["enum"] = [
-                c.slug for c in collections
+                v.slug for v in variables
             ]
         
-        # Add collection-specific queryables
-        if catalog_slug and collection_slug:
-            collection = get_object_or_404(
-                Collection,
-                catalog__slug=catalog_slug,
-                slug=collection_slug,
-            )
+        # Variable-level: add forecast queryables if applicable
+        if catalog_slug and variable_slug:
+            variable = _resolve_variable(catalog_slug, variable_slug)
+            collection = variable.collection
             
-            # Add variables as queryables
-            for var in collection.variables.filter(is_active=True):
-                queryables["properties"][f"georiva:variable:{var.slug}"] = {
-                    "title": var.name,
-                    "type": "boolean",
-                    "description": f"Item has {var.name} asset",
+            # Variable info
+            queryables["properties"]["georiva:variable"] = {
+                "title": variable.name,
+                "type": "string",
+                "const": variable.slug,
+            }
+            if variable.units:
+                queryables["properties"]["georiva:units"] = {
+                    "title": "Units",
+                    "type": "string",
+                    "const": variable.units,
                 }
             
-            # Add forecast-specific queryables if applicable
+            # Forecast queryables
             has_forecasts = collection.items.filter(
                 reference_time__isnull=False
             ).exists()
