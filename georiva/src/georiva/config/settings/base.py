@@ -189,16 +189,30 @@ AWS_S3_ADDRESSING_STYLE = env('AWS_S3_ADDRESSING_STYLE', default='path')
 
 MINIO_WEBHOOK_ARN = env('MINIO_WEBHOOK_ARN', default='arn:minio:sqs::primary:webhook')
 MINIO_WEBHOOK_BEARER_TOKEN = env('MINIO_WEBHOOK_BEARER_TOKEN', default=None)
+MINIO_PUBLIC_ENDPOINT = env.str("MINIO_PUBLIC_ENDPOINT", default="localhost:9000")
 
 # =============================================================================
 # Bucket Configuration
 # =============================================================================
 
 GEORIVA_BUCKETS = {
-    "incoming": "georiva-incoming",
-    "sources": "georiva-sources",
-    "archive": "georiva-archive",
-    "assets": "georiva-assets",
+    "incoming": {
+        "name": "georiva-incoming",
+    },
+    "sources": {
+        "name": "georiva-sources",
+    },
+    "archive": {
+        "name": "georiva-archive",
+    },
+    "assets": {
+        "name": "georiva-assets",
+        "overrides": {
+            "custom_domain": f"{MINIO_PUBLIC_ENDPOINT}/georiva-assets",
+            "querystring_auth": False,
+            "url_protocol": "http:",
+        },
+    },
 }
 
 # =============================================================================
@@ -228,13 +242,16 @@ if GEORIVA_STORAGE_BACKEND == "s3":
     }
     
     # Register one Django storage backend per bucket
-    for _key, _bucket_name in GEORIVA_BUCKETS.items():
+    for _key, _bucket_conf in GEORIVA_BUCKETS.items():
+        _options = {
+            **_S3_OPTIONS,
+            "bucket_name": _bucket_conf["name"],
+            **_bucket_conf.get("overrides", {}),
+        }
+        
         STORAGES[f"georiva-{_key}"] = {
             "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-            "OPTIONS": {
-                **_S3_OPTIONS,
-                "bucket_name": _bucket_name,
-            },
+            "OPTIONS": _options,
         }
 
 else:
@@ -248,7 +265,8 @@ else:
         },
     }
     
-    for _key, _bucket_name in GEORIVA_BUCKETS.items():
+    for _key, _bucket_conf in GEORIVA_BUCKETS.items():
+        _bucket_name = _bucket_conf.get("name")
         STORAGES[f"georiva-{_key}"] = {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
             "OPTIONS": {
@@ -329,7 +347,7 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 CELERY_BEAT_SCHEDULE = {
     'sweep-unprocessed': {
-        'task': 'georiva.ingestion.sweep.sweep_unprocessed',
+        'task': 'georiva.ingestion.tasks.sweep_unprocessed',
         'schedule': 300,  # every 5 minutes (in seconds)
     },
 }

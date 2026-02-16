@@ -21,8 +21,10 @@ from datetime import timedelta
 
 from django.db import models
 from django.utils import timezone
+from wagtail.snippets.models import register_snippet
 
 
+@register_snippet
 class IngestionLog(models.Model):
     """Tracks processing state for every file entering GeoRiva storage."""
     
@@ -81,7 +83,7 @@ class IngestionLog(models.Model):
     # =========================================================================
     
     catalog_slug = models.CharField(max_length=100, blank=True, default='')
-    collection_slug = models.CharField(max_length=100, blank=True, default='')
+    collection_slug = models.CharField(max_length=100, blank=True, null=True, default='')
     reference_time = models.DateTimeField(null=True, blank=True)
     file_size = models.BigIntegerField(null=True, blank=True)
     

@@ -33,7 +33,7 @@ class AssetWriter:
         image.save(buffer, format='PNG', optimize=True)
         buffer.seek(0)
         
-        return self.bucket.storage.save_bytes(output_path, buffer.read())
+        return self.bucket.save(output_path, buffer.read())
     
     def write_cog(
             self,
@@ -110,4 +110,4 @@ class AssetWriter:
     ) -> str:
         """Write metadata as JSON."""
         content = json.dumps(metadata, indent=2).encode('utf-8')
-        return self.bucket.storage.save_bytes(output_path, content)
+        return self.bucket.save(output_path, content)

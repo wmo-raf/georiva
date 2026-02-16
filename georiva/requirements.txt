@@ -35,3 +35,4 @@ django-cors-headers==4.9.0
 adm-boundary-manager==0.3.0
 rasterio==1.4.3
 pytz==2025.2
+cfgrib==0.9.15.1

@@ -12,19 +12,19 @@ from pathlib import Path
 from celery import shared_task
 
 from georiva.core.filename import validate_path
-from georiva.core.storage import BucketType, storage
+from georiva.core.storage import storage, BucketType
+from georiva.ingestion.models import IngestionLog
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task(
     bind=True,
-    max_retries=0,  # We handle retries via IngestionLog, not Celery
-    acks_late=True,  # Only acknowledge after completion (survives worker crash)
+    max_retries=0,
+    acks_late=True,
 )
 def process_incoming_file(
         self,
-        collection_id: int,
         file_path: str,
         origin_bucket: str,
         reference_time: str = None,
@@ -33,11 +33,8 @@ def process_incoming_file(
     Process a single incoming file.
 
     1. Acquire lock via IngestionLog
-    2. Run ingestion
+    2. Run ingestion (service resolves catalog/collection from path)
     3. Mark completed or failed
-
-    If the lock can't be acquired (another worker has it, or already
-    completed), the task exits silently.
     """
     from georiva.ingestion.models import IngestionLog
     from georiva.ingestion.service import IngestionService
@@ -72,8 +69,7 @@ def process_incoming_file(
         result = service.process_file(
             file_path=file_path,
             origin_bucket=origin_bucket,
-            metadata={'reference_time': ref_time} if ref_time else None,
-            delete_origin=True,
+            reference_time=ref_time,
         )
         
         if result and result.success:
@@ -113,7 +109,7 @@ def process_incoming_file(
         )
 
 
-@shared_task()
+@shared_task(queue='ingestion')
 def sweep_unprocessed():
     """
     Safety net — finds files that the webhook missed and retries failures.
@@ -123,7 +119,6 @@ def sweep_unprocessed():
     2. Scan incoming/sources buckets for untracked files
     3. Retry failed files that haven't exceeded max retries
     """
-    from georiva.ingestion.models import IngestionLog
     
     logger.info("Starting sweep...")
     
@@ -176,9 +171,7 @@ def sweep_unprocessed():
             )
             
             # Queue for processing
-            
             process_incoming_file.delay(
-                collection_id=None,  # will be resolved by ingestion service
                 file_path=path,
                 origin_bucket=bucket_type,
                 reference_time=(
@@ -207,7 +200,6 @@ def sweep_unprocessed():
         )
         
         process_incoming_file.delay(
-            collection_id=None,
             file_path=log.file_path,
             origin_bucket=log.bucket,
             reference_time=(

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytz
 
+from georiva.core.filename import parse_path
 from georiva.core.models import Variable, Collection
 from georiva.core.storage import storage, BucketType, Bucket
 from .asset_writer import AssetWriter
@@ -74,12 +75,15 @@ class IngestionService:
                             └──→ georiva-archive (raw copy)
 
     Flow:
-    1. Resolve source bucket (incoming or sources) + file path
-    2. Resolve Catalog + Collection from file path
-    3. Get format plugin based on Catalog.file_format
-    4. Initialize boundary clipper if Catalog has boundary
-    5. Extract timestamps from file
-    6. For each timestamp:
+    1. Parse file path for catalog, collection, reference_time
+    2. Resolve Catalog (must exist)
+    3. Resolve Collection(s):
+       - If collection slug in path → use that single collection
+       - If no collection in path → use ALL active collections under catalog
+    4. Get format plugin based on Catalog.file_format
+    5. Initialize boundary clipper if Catalog has boundary
+    6. Download file once, extract timestamps
+    7. For each collection × timestamp:
        a. Compute clip window from boundary bbox
        b. Create one Item for the Collection
        c. For each Variable in Collection:
@@ -89,9 +93,9 @@ class IngestionService:
           - Encode to PNG (visual asset)
           - Write COG (data asset)
           - Create Asset records
-    7. Update Collection extent
-    8. Archive raw file to georiva-archive
-    9. Optionally delete from source bucket
+    8. Update Collection extent
+    9. Archive raw file to georiva-archive
+    10. Optionally delete from origin bucket
     """
     
     def __init__(self):
@@ -105,39 +109,45 @@ class IngestionService:
             self,
             file_path: str,
             origin_bucket: str = BucketType.INCOMING,
-            catalog_slug: str = None,
-            collection_slug: str = None,
-            metadata: dict = None,
-            delete_origin: bool = False,
+            reference_time: datetime = None,
     ) -> IngestionResult:
         """
         Process an incoming file from any source bucket.
 
+        Resolves catalog and collection entirely from the file path.
+        Reference time is extracted from the GR-- filename prefix if present,
+        or can be passed explicitly.
+
+        Archive and cleanup behavior is controlled by the Catalog model:
+            catalog.archive_source_files = True → archive raw + delete from origin
+
         Args:
-            file_path: Path to source file relative to the bucket root.
-                       e.g. "satellite-imagery/ndvi/raw_scene.tif"
+            file_path: Path relative to bucket root.
+                       e.g. "weather-models/gfs/GR--20250115T0600--gfs.grib2"
+                       e.g. "satellite-imagery/ndvi/sentinel2.tif"
+                       e.g. "station-data/synop_hourly.csv"
             origin_bucket: Which bucket the file came from.
-                           BucketType.INCOMING for user uploads,
-                           BucketType.SOURCES for plugin-collected data.
-            catalog_slug: Catalog slug (inferred from path if not provided).
-            collection_slug: Collection slug (inferred from path if not provided).
-            metadata: Optional metadata dict.
-            delete_origin: Remove file from origin bucket after archiving.
+            reference_time: Explicit reference time (overrides GR-- in filename).
 
         Returns:
             IngestionResult with status and created records.
         """
-        from georiva.core.models import Catalog, Collection
+        from georiva.core.models import Catalog
         from georiva.formats.registry import format_registry
         
-        # Resolve the source bucket handle
+        # Resolve the origin bucket handle
         origin = storage.bucket(origin_bucket)
         
-        self.logger.info(
-            "Processing: %s/%s", origin.bucket_name, file_path
-        )
+        self.logger.info("Processing: %s/%s", origin.bucket_name, file_path)
         
-        reference_time = metadata.get('reference_time', None) if metadata else None
+        # Parse path for catalog, collection, reference_time
+        path_meta = parse_path(file_path)
+        catalog_slug = path_meta.get('catalog')
+        collection_slug = path_meta.get('collection')
+        
+        # Reference time priority: explicit param > GR-- filename > None
+        if reference_time is None:
+            reference_time = path_meta.get('reference_time')
         
         result = IngestionResult(
             origin_file=file_path,
@@ -149,21 +159,11 @@ class IngestionService:
         )
         
         try:
-            # 1. Resolve catalog and collection from path
-            if not catalog_slug or not collection_slug:
-                inferred = self._infer_from_path(file_path)
-                catalog_slug = catalog_slug or inferred.get('catalog')
-                collection_slug = collection_slug or inferred.get('collection')
-                result.catalog_slug = catalog_slug or ''
-                result.collection_slug = collection_slug or ''
-            
-            if not catalog_slug or not collection_slug:
-                result.add_error(
-                    f"Cannot determine catalog/collection for: {file_path}"
-                )
+            # 1. Resolve catalog
+            if not catalog_slug:
+                result.add_error(f"Cannot determine catalog from path: {file_path}")
                 return result
             
-            # 2. Load models
             try:
                 catalog = Catalog.objects.select_related('boundary').get(
                     slug=catalog_slug, is_active=True
@@ -172,19 +172,25 @@ class IngestionService:
                 result.add_error(f"Catalog not found or inactive: {catalog_slug}")
                 return result
             
-            try:
-                collection = Collection.objects.select_related(
-                    'catalog'
-                ).prefetch_related(
-                    'variables', 'variables__sources'
-                ).get(
-                    catalog=catalog, slug=collection_slug, is_active=True
-                )
-            except Collection.DoesNotExist:
-                result.add_error(
-                    f"Collection not found or inactive: {catalog_slug}/{collection_slug}"
-                )
+            # 2. Resolve collections
+            collections = self._resolve_collections(catalog, collection_slug)
+            
+            if not collections:
+                if collection_slug:
+                    result.add_error(
+                        f"Collection not found or inactive: {catalog_slug}/{collection_slug}"
+                    )
+                else:
+                    result.add_error(
+                        f"No active collections found for catalog: {catalog_slug}"
+                    )
                 return result
+            
+            self.logger.info(
+                "Processing against %d collection(s): %s",
+                len(collections),
+                ', '.join(c.slug for c in collections),
+            )
             
             # 3. Get format plugin
             plugin = format_registry.get(catalog.file_format)
@@ -203,7 +209,7 @@ class IngestionService:
                 result.clip_boundary = str(catalog.boundary)
                 self.logger.info("Clipping enabled: %s", catalog.boundary)
             
-            # 5. Download from origin bucket to local temp
+            # 5. Download from origin bucket to local temp (once for all collections)
             local_path = self._download_to_temp(origin, file_path)
             
             try:
@@ -214,44 +220,50 @@ class IngestionService:
                 
                 self.logger.info("Found %d timestamps", len(timestamps))
                 
-                # 6. Process each timestamp
-                for ts in timestamps:
-                    try:
-                        item, assets, clip_info = self._process_timestamp(
-                            collection=collection,
-                            plugin=plugin,
-                            local_path=local_path,
-                            timestamp=ts,
-                            source_file=f"{origin_bucket}:{file_path}",
-                            clipper=clipper,
-                            reference_time=reference_time,
-                        )
-                        result.items_created.append(str(item.pk))
-                        result.assets_created.extend(
-                            [str(a.pk) for a in assets]
-                        )
-                        
-                        if clip_info and result.original_size is None:
-                            result.original_size = clip_info.get('original_size')
-                            result.clipped_size = clip_info.get('clipped_size')
+                # 6. Process each collection × timestamp
+                for collection in collections:
+                    result.collection_slug = collection.slug
                     
-                    except Exception as e:
-                        result.add_error(f"Failed at {ts}: {e}")
+                    for ts in timestamps:
+                        try:
+                            item, assets, clip_info = self._process_timestamp(
+                                collection=collection,
+                                plugin=plugin,
+                                local_path=local_path,
+                                timestamp=ts,
+                                source_file=f"{origin_bucket}:{file_path}",
+                                clipper=clipper,
+                                reference_time=reference_time,
+                            )
+                            result.items_created.append(str(item.pk))
+                            result.assets_created.extend(
+                                [str(a.pk) for a in assets]
+                            )
+                            
+                            if clip_info and result.original_size is None:
+                                result.original_size = clip_info.get('original_size')
+                                result.clipped_size = clip_info.get('clipped_size')
+                        
+                        except Exception as e:
+                            result.add_error(
+                                f"Failed {collection.slug} @ {ts}: {e}"
+                            )
                 
                 result.success = len(result.items_created) > 0
             
             finally:
                 self._cleanup_temp(local_path)
             
-            # 7. Archive raw file + optionally delete source
+            # 7. Archive raw file + delete from origin
             if result.success and catalog.archive_source_files:
                 archived = self._archive_source(origin, file_path)
                 result.archive_path = archived or ''
                 
-                if delete_origin and archived:
+                if archived:
                     origin.delete(file_path)
                     self.logger.info(
-                        "Deleted source: %s/%s", origin.bucket_name, file_path
+                        "Archived and deleted source: %s/%s",
+                        origin.bucket_name, file_path,
                     )
             
             # Log clipping summary
@@ -266,6 +278,66 @@ class IngestionService:
             result.add_error(str(e))
         
         return result
+    
+    # =========================================================================
+    # Collection Resolution
+    # =========================================================================
+    
+    def _resolve_collections(
+            self, catalog, collection_slug: str = None
+    ) -> list['Collection']:
+        """
+        Resolve collections to process for a given catalog.
+
+        If collection_slug is provided, return just that one collection.
+        If not, return ALL active collections under the catalog — the file
+        will be processed against each one.
+
+        Returns:
+            List of Collection instances (may be empty).
+        """
+        base_qs = Collection.objects.select_related(
+            'catalog'
+        ).prefetch_related(
+            'variables', 'variables__sources'
+        )
+        
+        if collection_slug:
+            try:
+                return [base_qs.get(
+                    catalog=catalog, slug=collection_slug, is_active=True
+                )]
+            except Collection.DoesNotExist:
+                return []
+        
+        # No collection in path — return all active collections
+        return list(base_qs.filter(catalog=catalog, is_active=True))
+    
+    def _normalize_bounds(self, bounds: list | tuple) -> list:
+        """
+        Normalize bounds to valid WGS84 range.
+        
+        Handles:
+            - 0-360 longitude → -180 to 180
+            - Clamping latitude to -90/90
+        """
+        west, south, east, north = bounds
+        
+        # Convert 0-360 longitude to -180/180
+        if west > 180:
+            west -= 360
+        if east > 180:
+            east -= 360
+        
+        # Clamp latitude
+        south = max(-90.0, min(90.0, south))
+        north = max(-90.0, min(90.0, north))
+        
+        # Clamp longitude
+        west = max(-180.0, min(180.0, west))
+        east = max(-180.0, min(180.0, east))
+        
+        return [west, south, east, north]
     
     # =========================================================================
     # Timestamp Processing
@@ -356,6 +428,8 @@ class IngestionService:
         
         ts_utc = self._ensure_utc(timestamp)
         ref_utc = self._ensure_utc(reference_time) if reference_time else None
+        
+        bounds = self._normalize_bounds(bounds)
         
         # Get or create Item
         item, created = Item.objects.get_or_create(
@@ -493,8 +567,7 @@ class IngestionService:
             )
             final_rgba = clipper.apply_rgba_mask(final_rgba, bounds)
         
-        # Build asset paths using the standard GeoRiva layout:
-        # {catalog}/{collection}/{variable}/{year}/{month}/{day}/{file}
+        # Build asset paths
         catalog_slug = item.collection.catalog.slug
         collection_slug = item.collection.slug
         time_str = timestamp.strftime('%H%M%S')
@@ -511,7 +584,7 @@ class IngestionService:
         assets = []
         visual_asset = None
         
-        # Save PNG (visual asset) → georiva-assets bucket
+        # Save PNG (visual asset)
         png_path = f"{base_dir}/{base_name}.png"
         
         try:
@@ -549,7 +622,7 @@ class IngestionService:
         except Exception as e:
             self.logger.error("PNG save failed for %s: %s", variable.slug, e)
         
-        # Save COG (data asset) → georiva-assets bucket
+        # Save COG (data asset)
         cog_path = f"{base_dir}/{base_name}.tif"
         try:
             stored_cog = writer.write_cog(final_data, cog_path, bounds, crs)
@@ -586,7 +659,7 @@ class IngestionService:
         except Exception as e:
             self.logger.error("COG save failed for %s: %s", variable.slug, e)
         
-        # Save metadata JSON → georiva-assets bucket
+        # Save metadata JSON
         meta_path = f"{base_dir}/{base_name}.json"
         try:
             metadata = {
@@ -722,7 +795,7 @@ class IngestionService:
                 max(current[3], bounds[3]),
             ]
             if expanded != current:
-                collection.bounds = expanded
+                collection.bounds = self._normalize_bounds(expanded)
                 update_fields.append('bounds')
         
         collection.item_count = Item.objects.filter(
@@ -763,13 +836,13 @@ class IngestionService:
         except Exception:
             return None
     
-    def _download_to_temp(self, source: Bucket, file_path: str) -> Path:
-        """Download file from a source bucket to local temp."""
+    def _download_to_temp(self, origin: Bucket, file_path: str) -> Path:
+        """Download file from an origin bucket to local temp."""
         suffix = Path(file_path).suffix
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp_path = Path(tmp.name)
         
-        with source.open(file_path, 'rb') as src:
+        with origin.open(file_path, 'rb') as src:
             tmp_path.write_bytes(src.read())
         
         return tmp_path
@@ -782,7 +855,7 @@ class IngestionService:
             self.logger.warning("Temp cleanup failed: %s - %s", path, e)
     
     def _archive_source(
-            self, source: Bucket, file_path: str
+            self, origin: Bucket, file_path: str
     ) -> Optional[str]:
         """
         Archive raw source file before processing.
@@ -791,37 +864,15 @@ class IngestionService:
             georiva-archive/{incoming|sources}/{catalog}/{collection}/file.ext
         """
         try:
-            archived = storage.archive_raw(source, file_path)
+            archived = storage.archive_raw(origin, file_path)
             self.logger.info(
                 "Archived: %s/%s → archive/%s",
-                source.bucket_name, file_path, archived,
+                origin.bucket_name, file_path, archived,
             )
             return archived
         except Exception as e:
             self.logger.warning(
                 "Archive failed: %s/%s - %s",
-                source.bucket_name, file_path, e,
+                origin.bucket_name, file_path, e,
             )
             return None
-    
-    def _infer_from_path(self, file_path: str) -> dict:
-        """
-        Infer catalog/collection from file path.
-
-        Since files are already in a specific bucket (incoming or sources),
-        the path is relative to the bucket root:
-            {catalog}/{collection}/filename.ext
-
-        Example:
-            "satellite-imagery/ndvi/raw_scene.tif"
-            → catalog="satellite-imagery", collection="ndvi"
-        """
-        parts = Path(file_path).parts
-        result = {'catalog': None, 'collection': None}
-        
-        if len(parts) >= 2:
-            result['catalog'] = parts[0]
-        if len(parts) >= 3:
-            result['collection'] = parts[1]
-        
-        return result
