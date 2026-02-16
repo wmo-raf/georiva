@@ -90,6 +90,40 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
     
+    panels = [
+        MultiFieldPanel([
+            FieldPanel('slug'),
+            FieldPanel('name'),
+            FieldPanel('description'),
+        ], heading="Identity"),
+        MultiFieldPanel([
+            FieldPanel('transform_type'),
+            FieldPanel('transform_expression'),
+        ], heading="Transform"),
+        InlinePanel('sources', label="Source Parameters"),
+        MultiFieldPanel([
+            FieldPanel('unit_conversion'),
+            FieldPanel('units'),
+        ], heading="Units"),
+        MultiFieldPanel([
+            FieldPanel('value_min'),
+            FieldPanel('value_max'),
+            FieldPanel('palette'),
+        ], heading="Visualization"),
+        MultiFieldPanel([
+            FieldPanel('is_active'),
+            FieldPanel('sort_order'),
+        ], heading="Status"),
+    ]
+    
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['slug', 'is_active'],
+                name='variable_slug_active_idx',
+            ),
+        ]
+    
     def __str__(self):
         return f"{self.collection.slug}:{self.slug}"
     
@@ -116,32 +150,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     @property
     def is_derived(self):
         return self.transform_type != self.TransformType.PASSTHROUGH
-    
-    panels = [
-        MultiFieldPanel([
-            FieldPanel('slug'),
-            FieldPanel('name'),
-            FieldPanel('description'),
-        ], heading="Identity"),
-        MultiFieldPanel([
-            FieldPanel('transform_type'),
-            FieldPanel('transform_expression'),
-        ], heading="Transform"),
-        InlinePanel('sources', label="Source Parameters"),
-        MultiFieldPanel([
-            FieldPanel('unit_conversion'),
-            FieldPanel('units'),
-        ], heading="Units"),
-        MultiFieldPanel([
-            FieldPanel('value_min'),
-            FieldPanel('value_max'),
-            FieldPanel('palette'),
-        ], heading="Visualization"),
-        MultiFieldPanel([
-            FieldPanel('is_active'),
-            FieldPanel('sort_order'),
-        ], heading="Status"),
-    ]
     
     @cached_property
     def sources_param_list(self):
