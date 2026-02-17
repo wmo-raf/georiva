@@ -3,57 +3,93 @@ GeoRiva Format Plugin System
 
 Format plugins handle parsing different file formats (GRIB2, NetCDF, GeoTIFF)
 and extracting variables for datasets.
+
+Lazy-first design:
+- open_variable()  is the primary interface — returns a context manager yielding
+  a lazy (dask-backed) xarray DataArray. No data is loaded into RAM until you
+  explicitly compute.
+- extract_variable() is a convenience that materializes data into a numpy array
+  via open_variable(). Use this when you need the pixels.
+- get_metadata_for_variable() reads bounds/size without touching pixel data.
+  Default implementation uses open_variable(); plugins may override for speed.
+
+Plugin contract:
+1. can_handle()       — detect if a file is this format
+2. list_variables()   — list available variables
+3. get_timestamps()   — get available time steps
+4. open_variable()    — lazy access (context manager, primary interface)
+5. extract_variable() — materialize to numpy (calls open_variable)
+6. get_metadata_for_variable() — lightweight bounds/size scan
 """
+
+from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Generator
 
 import numpy as np
+import xarray as xr
 
 from georiva.utils.path import PathLike
 
-logger = logging.getLogger(__name__)
+
+@dataclass
+class VariableInfo:
+    """
+    Metadata returned by open_variable().
+
+    Carries spatial/temporal info alongside the lazy DataArray,
+    so callers can inspect bounds, CRS, etc. without computing.
+    """
+    
+    data: xr.DataArray  # lazy (dask-backed)
+    bounds: tuple[float, float, float, float]  # west, south, east, north
+    crs: str
+    width: int
+    height: int
+    resolution: tuple[float, float]  # x_res, y_res
+    timestamp: datetime
+    variable_name: str
+    units: str = ""
+    needs_flip: bool = False  # True if data is south-to-north and needs flipud on materialize
+    metadata: dict = field(default_factory=dict)
+    
+    def compute(self) -> np.ndarray:
+        """Materialize to numpy with correct image orientation."""
+        data = self.data.values.squeeze()
+        if self.needs_flip:
+            data = np.flipud(data)
+        return data
 
 
 @dataclass
 class ExtractedVariable:
-    """Represents a variable extracted from a source file."""
+    """Materialized variable — numpy array with spatial metadata."""
     
-    # The data array
     data: np.ndarray
-    
-    # Spatial information
     bounds: tuple[float, float, float, float]  # west, south, east, north
     crs: str
     width: int
     height: int
     resolution: tuple[float, float]  # x, y
-    
-    # Temporal information
     timestamp: datetime
-    
-    # Variable metadata
     variable_name: str
     units: Optional[str] = None
-    
-    # Additional metadata
-    metadata: Optional[dict] = None
-    
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
+    metadata: dict = field(default_factory=dict)
 
 
 class BaseFormatPlugin(ABC):
     """
     Base class for file format plugins.
+
+    Subclasses must implement: can_handle, list_variables, get_timestamps, open_variable.
+    extract_variable and get_metadata_for_variable have default implementations.
     """
     
-    # Plugin identification
     name: str = "base"
     display_name: str = "Base Format"
     extensions: list[str] = []
@@ -64,7 +100,7 @@ class BaseFormatPlugin(ABC):
     @abstractmethod
     def can_handle(self, file_path: PathLike) -> bool:
         """Check if this plugin can handle the given file."""
-        raise NotImplementedError
+        ...
     
     @abstractmethod
     def list_variables(self, file_path: PathLike) -> list[dict]:
@@ -72,50 +108,98 @@ class BaseFormatPlugin(ABC):
         List available variables in the file.
 
         Returns:
-            List of dicts with variable info:
-            [
-                {'name': 't2m', 'long_name': '2 metre temperature', 'units': 'K'},
-                ...
-            ]
+            List of dicts with at least: name, long_name, units, dimensions, shape.
+            Format-specific fields (e.g. band_index, key) may also be present.
         """
-        raise NotImplementedError
+        ...
     
     @abstractmethod
-    def get_timestamps(self, file_path: PathLike) -> list[datetime]:
+    def get_timestamps(self, file_path: PathLike, variable_name: str, **kwargs) -> list[datetime]:
         """
-        Get available timestamps in the file.
+        Get available timestamps for a specific variable.
+
+        Args:
+            file_path: Path to the source file.
+            variable_name: Variable to query timestamps for.
+            **kwargs: Format-specific options (e.g. key for GRIB).
 
         Returns:
-            List of datetime objects
+            Sorted list of datetime objects.
         """
-        raise NotImplementedError
+        ...
     
     @abstractmethod
+    @contextmanager
+    def open_variable(
+            self,
+            file_path: PathLike,
+            variable_name: str,
+            *,
+            timestamp: Optional[datetime] = None,
+            window: Optional[tuple[int, int, int, int]] = None,
+            **kwargs,
+    ) -> Generator[VariableInfo, None, None]:
+        """
+        Primary interface. Opens a variable lazily as a context manager.
+
+        Yields a VariableInfo with a dask-backed DataArray — no data is read
+        until you call .compute() or access .data.values.
+
+        Usage:
+            with plugin.open_variable("file.nc", "temperature") as var:
+                # Lazy stats — dask computes in chunks
+                min_val = float(var.data.min())
+                max_val = float(var.data.max())
+
+                # Or materialize when you need pixels
+                array = var.compute()
+
+        Args:
+            file_path: Path to the source file.
+            variable_name: Variable to open.
+            timestamp: Specific timestamp to select (nearest match).
+            window: Spatial subset as (x_offset, y_offset, width, height).
+            **kwargs: Format-specific options (e.g. key for GRIB).
+        """
+        ...
+    
     def extract_variable(
             self,
             file_path: PathLike,
             variable_name: str,
             timestamp: Optional[datetime] = None,
             window: Optional[tuple[int, int, int, int]] = None,
-            dim_selectors: Optional[dict[str, object]] = None,
+            **kwargs,
     ) -> ExtractedVariable:
         """
-        Extract a variable (or a specific window of it) from the file.
+        Convenience method: opens variable and materializes to numpy.
 
-        Args:
-            file_path: Path to the source file
-            variable_name: Primary variable name to extract
-            timestamp: Specific timestamp to extract (if file has multiple)
-            window: Spatial subset: (x_offset, y_offset, width, height)
-            dim_selectors: Non-spatial selection mapping: {dim_or_coord_name: value}
-
-                Examples:
-                    {'heightAboveGround': 10}
-                    {'isobaricInhPa': 850}
-                    {'number': 0}  # ensemble member
-                    {'step': np.timedelta64(6, 'h')}  # forecast lead time
+        For lazy access, use open_variable() instead.
         """
-        raise NotImplementedError
+        with self.open_variable(
+                file_path,
+                variable_name,
+                timestamp=timestamp,
+                window=window,
+                **kwargs,
+        ) as var_info:
+            data = var_info.compute()
+            
+            height = int(data.shape[0]) if data.ndim > 1 else 1
+            width = int(data.shape[1]) if data.ndim > 1 else int(data.shape[0])
+            
+            return ExtractedVariable(
+                data=data,
+                bounds=var_info.bounds,
+                crs=var_info.crs,
+                width=width,
+                height=height,
+                resolution=var_info.resolution,
+                timestamp=var_info.timestamp,
+                variable_name=var_info.variable_name,
+                units=var_info.units,
+                metadata=var_info.metadata,
+            )
     
     def get_metadata_for_variable(
             self,
@@ -123,49 +207,26 @@ class BaseFormatPlugin(ABC):
             variable_name: str,
             *,
             timestamp: Optional[datetime] = None,
-            dim_selectors: Optional[dict[str, object]] = None,
+            **kwargs,
     ) -> dict:
         """
-        Scan to get dimensions and bounds without reading full data.
+        Lightweight scan for dimensions and bounds without reading pixel data.
 
-        Default fallback implementation (inefficient):
-        extracts a 1x1 window to infer bounds/CRS and uses metadata for full size if present.
+        Default implementation opens the variable lazily and reads only metadata.
+        Subclasses may override for efficiency.
 
-        Subclasses SHOULD override for efficiency.
+        Returns:
+            Dict with: width, height, bounds, crs.
         """
-        
-        file_path = Path(file_path)
-        
-        var = self.extract_variable(
-            file_path=file_path,
-            variable_name=variable_name,
-            timestamp=timestamp,
-            window=(0, 0, 1, 1),
-            dim_selectors=dim_selectors,
-        )
-        return {
-            "width": var.metadata.get("full_width", var.width),
-            "height": var.metadata.get("full_height", var.height),
-            "bounds": var.bounds,
-            "crs": var.crs,
-        }
-    
-    def get_lazy_variable(
-            self,
-            file_path: Path,
-            variable_name: str,
-            *,
-            timestamp: Optional[datetime] = None,
-            dim_selectors: Optional[dict[str, object]] = None,
-    ) -> Any:
-        """
-        Return a lazy-loaded object (e.g. xarray DataArray) for global stats computation.
-
-        Default behavior: not supported.
-        Subclasses may override.
-
-        Note:
-        - If you need resource cleanup, plugins may return (lazy_obj, closer_callable).
-          This base signature is "Any" to allow that pattern.
-        """
-        raise NotImplementedError("Plugin does not support lazy loading")
+        with self.open_variable(
+                file_path,
+                variable_name,
+                timestamp=timestamp,
+                **kwargs,
+        ) as var_info:
+            return {
+                "width": var_info.width,
+                "height": var_info.height,
+                "bounds": var_info.bounds,
+                "crs": var_info.crs,
+            }
