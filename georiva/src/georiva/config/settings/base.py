@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "georiva.visualization",
     "georiva.sources",
     "georiva.sample_plugins.ecmwf_opendata_source",
+    "georiva.sample_plugins.chirps",
 ]
 
 MIDDLEWARE = [

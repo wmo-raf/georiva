@@ -8,45 +8,43 @@ from georiva.config.celery import app
 
 @app.on_after_finalize.connect
 def setup_network_plugin_processing_tasks(sender, **kwargs):
-    from georiva.core.models import Catalog
-    catalogs = Catalog.objects.all()
+    from georiva.core.models import Collection
+    collections = Collection.objects.filter(loader_profile__isnull=False, is_loader_active=True)
     
-    for catalog in catalogs:
-        create_or_update_catalog_loader_plugin_periodic_tasks(catalog)
+    for collection in collections:
+        create_or_update_collection_loader_plugin_periodic_tasks(collection)
 
 
-@shared_task(bind=True, name='georiva.core.tasks.run_catalog_loader')
-def run_catalog_loader(self, catalog_id):
-    from georiva.core.models import Catalog
-    catalog = Catalog.objects.get(id=catalog_id)
+@shared_task(bind=True, name='georiva.core.tasks.run_collection_loader')
+def run_collection_loader(self, catalog_id):
+    from georiva.core.models import Collection
+    collection = Collection.objects.get(id=catalog_id)
     
-    loader_profile = catalog.loader_profile
-    
-    if not loader_profile:
+    if not collection.loader_profile or collection.is_loader_active:
         return
     
-    loader = loader_profile.get_loader(catalog)
+    loader_profile = collection.loader_profile
+    loader = loader_profile.get_loader(collection)
     
     result = loader.run()
     
     return result.to_dict()
 
 
-def create_or_update_catalog_loader_plugin_periodic_tasks(catalog):
-    is_active = catalog.is_active
-    
-    sig = run_catalog_loader.s(catalog.id)
+def create_or_update_collection_loader_plugin_periodic_tasks(collection):
+    is_loader_active = collection.is_loader_active
+    sig = run_collection_loader.s(collection.id)
     name = repr(sig)
     
     options = {
         'task': sig.name,
-        'enabled': is_active,
-        'args': json.dumps([catalog.id]),
+        'enabled': is_loader_active,
+        'args': json.dumps([collection.id]),
         'interval': None,
     }
     
-    loader_profile = catalog.loader_profile
-    if loader_profile:
+    loader_profile = collection.loader_profile
+    if loader_profile and is_loader_active:
         schedule, _ = IntervalSchedule.objects.get_or_create(
             every=loader_profile.interval_minutes,
             period=IntervalSchedule.MINUTES,
@@ -59,5 +57,5 @@ def create_or_update_catalog_loader_plugin_periodic_tasks(catalog):
     PeriodicTask.objects.update_or_create(name=name, defaults=options)
 
 
-def update_catalog_loader_plugin_periodic_task(sender, instance, **kwargs):
-    create_or_update_catalog_loader_plugin_periodic_tasks(instance)
+def update_collection_loader_plugin_periodic_task(sender, instance, **kwargs):
+    create_or_update_collection_loader_plugin_periodic_tasks(instance)

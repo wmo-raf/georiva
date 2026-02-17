@@ -108,7 +108,7 @@ class Loader:
     Usage:
         loader = Loader(
             data_source=ECMWFAIFSDataSource(config),
-            catalog=my_catalog,
+            collection=my_collection,
         )
         
         result = loader.run()
@@ -117,13 +117,13 @@ class Loader:
     def __init__(
             self,
             data_source,  # DataSource protocol
-            catalog,  # GeoRiva catalog model
+            collection,  # GeoRiva collection model
             *,
             on_file_fetched: Optional[Callable] = None,  # Callback after each file
     ):
         self.data_source = data_source
         self.fetch_strategy = self.data_source.fetch_strategy()
-        self.catalog = catalog
+        self.collection = collection
         self.on_file_fetched = on_file_fetched
         
         self.logger = logging.getLogger(
@@ -156,16 +156,14 @@ class Loader:
         result = LoaderRunResult()
         
         try:
-            self.logger.info(f"Starting loader run for {self.catalog}")
+            self.logger.info(f"Starting loader run for {self.collection.name}")
             
             # Connect fetch strategy
             self.fetch_strategy.connect()
             self.logger.debug("Fetch strategy connected")
             
-            data_variables = self.catalog.source_variables_list()
-            
             # Generate requests from data source
-            requests = list(self.data_source.generate_requests(variables=data_variables))
+            requests = list(self.data_source.generate_requests_for_collection(self.collection))
             result.files_requested = len(requests)
             
             if not requests:
@@ -285,9 +283,15 @@ class Loader:
                 fetch_result.error = "File validation failed"
                 return fetch_result
             
-            # Store in permanent location
+            # post process file
+            processed_path, new_filename = self.data_source.post_process_fetched_file(request, temp_path)
+            filename_to_store = new_filename or request.filename
+            request.filename = filename_to_store
+            
             storage_path = self._get_storage_path(request)
-            self._store_file(temp_path, storage_path)
+            
+            # Store in permanent location
+            self._store_file(processed_path, storage_path)
             
             self.logger.debug(f"Stored: {storage_path}")
             
@@ -355,7 +359,7 @@ class Loader:
         # request.reference_time exists  → GR--20250115T0600--gfs_025.grib2
         # request.reference_time is None → sentinel2_ndvi.tif
         
-        return f"{self.catalog.slug}/{filename}"
+        return f"{self.collection.catalog.slug}/{self.collection.slug}/{filename}"
     
     def _store_file(self, local_path: Path, storage_path: str):
         """Store file in permanent storage using storage.sources."""

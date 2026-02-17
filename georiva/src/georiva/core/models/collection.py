@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Optional
+
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
@@ -58,6 +61,16 @@ class Collection(TimeStampedModel, ClusterableModel):
     is_active = models.BooleanField(default=True)
     sort_order = models.PositiveIntegerField(default=0)
     
+    # Ingestion configuration
+    loader_profile = models.ForeignKey(
+        "georivasources.LoaderProfile",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        help_text="Loader profile to use for ingesting data for this catalog",
+    )
+    is_loader_active = models.BooleanField(default=True, help_text="Loader active status")
+    
     class Meta:
         unique_together = ['catalog', 'slug']
         ordering = ['catalog', 'sort_order', 'name']
@@ -78,11 +91,22 @@ class Collection(TimeStampedModel, ClusterableModel):
             FieldPanel('time_resolution'),
         ], heading="Extent"),
         MultiFieldPanel([
+            FieldPanel('loader_profile'),
+            FieldPanel('is_loader_active'),
+        ]),
+        MultiFieldPanel([
             FieldPanel('is_active'),
             FieldPanel('sort_order'),
         ], heading="Status"),
         InlinePanel('variables', label="Variables"),
     ]
+    
+    def get_loader(self):
+        """Get the loader instance for this catalog."""
+        if not self.loader_profile:
+            return None
+        
+        return self.loader_profile.get_loader(self)
     
     def source_variables_list(self):
         """Return a list of source variable names in this collection."""
@@ -91,3 +115,10 @@ class Collection(TimeStampedModel, ClusterableModel):
             variable_sources_params = variable.sources_param_list
             source_vars.extend(variable_sources_params)
         return source_vars
+    
+    def get_latest_item_date(self) -> Optional[datetime]:
+        """
+        Latest valid_time in this collection (Item.time).
+        """
+        latest = self.items.order_by("-time").first()  # uses related_name='items'
+        return latest.time if latest else None

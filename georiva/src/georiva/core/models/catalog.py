@@ -18,15 +18,6 @@ class Catalog(TimeStampedModel):
     slug = models.SlugField(max_length=100, unique=True)
     description = models.TextField(blank=True)
     
-    # Ingestion configuration
-    loader_profile = models.ForeignKey(
-        "georivasources.LoaderProfile",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        help_text="Loader profile to use for ingesting data for this catalog",
-    )
-    
     # Provider information
     provider = models.CharField(max_length=255, blank=True)
     provider_url = models.URLField(blank=True)
@@ -81,7 +72,6 @@ class Catalog(TimeStampedModel):
             FieldPanel('license'),
         ], heading="Provider"),
         MultiFieldPanel([
-            FieldPanel('loader_profile'),
             FieldPanel('file_format'),
             FieldPanel('archive_source_files'),
         ], heading="Ingestion Configuration"),
@@ -91,18 +81,3 @@ class Catalog(TimeStampedModel):
         ], heading="Clipping Configuration"),
         FieldPanel('is_active'),
     ]
-    
-    def get_loader(self):
-        """Get the loader instance for this catalog."""
-        if not self.loader_profile:
-            return None
-        
-        return self.loader_profile.get_loader(self)
-    
-    def source_variables_list(self):
-        """Get a list of all source variables in all collections in this catalog."""
-        source_vars = []
-        for collection in self.collections.all():
-            variable_sources_params = collection.source_variables_list()
-            source_vars.extend(variable_sources_params)
-        return source_vars

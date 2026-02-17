@@ -1,8 +1,9 @@
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Iterator, Optional, Protocol, runtime_checkable
+from pathlib import Path
+from typing import Iterator, Optional, Protocol, runtime_checkable, Tuple
 
 from georiva.sources.fetch.base import FileRequest, BaseFetchStrategy
 
@@ -128,6 +129,88 @@ class BaseDataSource(ABC):
         return None
     
     # =========================================================================
+    
+    # Time-window helpers (optional, generic)
+    # =========================================================================
+    
+    def get_default_start_date(self, *, collection=None) -> datetime:
+        """
+        Default backfill start date.
+        Override per-source or pull from profile/config.
+        """
+        now = datetime.now(timezone.utc)
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    def get_default_end_date(self, *, collection=None) -> datetime:
+        """Default end date (usually now)."""
+        return datetime.now(timezone.utc)
+    
+    def get_latest_from_db(self, *, collection=None) -> Optional[datetime]:
+        """
+        Latest stored valid_time for this collection.
+
+        Default implementation delegates to `collection.latest_item_date()`
+        if present. This keeps BaseDataSource free of Django/Item imports.
+        """
+        if collection is None:
+            return None
+        
+        try:
+            return collection.get_latest_item_date()
+        
+        except Exception as e:
+            self.logger.warning(
+                "latest_item_date() failed for collection=%s: %s",
+                getattr(collection, "slug", repr(collection)),
+                e,
+            )
+            return None
+    
+    def advance_start_from_latest(self, latest: datetime, *, collection=None) -> datetime:
+        """
+        By default, start exactly at latest.
+
+        Override in sources where you want "next period" behavior (e.g. CHIRPS monthly/pentad),
+        to avoid refetching the same timestamp again.
+        """
+        return latest
+    
+    def get_time_window(self, *, collection=None) -> Tuple[datetime, datetime]:
+        """
+        Default logic:
+          - end_time = get_default_end_date()
+          - if no latest in db -> start_time = get_default_start_date()
+          - else start_time = advance_start_from_latest(latest)
+        """
+        end_time = self.get_default_end_date(collection=collection)
+        
+        latest = self.get_latest_from_db(collection=collection)
+        
+        if latest is None:
+            start_time = self.get_default_start_date(collection=collection)
+        else:
+            start_time = self.advance_start_from_latest(latest, collection=collection)
+        
+        return start_time, end_time
+    
+    def generate_requests_for_collection(
+            self,
+            collection,
+            **kwargs,
+    ) -> Iterator[FileRequest]:
+        """
+        Convenience wrapper: compute time window automatically then generate requests.
+        """
+        start_time, end_time = self.get_time_window(collection=collection)
+        data_variables = collection.source_variables_list()
+        return self.generate_requests(
+            start_time=start_time,
+            end_time=end_time,
+            variables=data_variables,
+            **kwargs,
+        )
+    
+    # =========================================================================
     # Utility Methods
     # =========================================================================
     
@@ -159,3 +242,11 @@ class BaseDataSource(ABC):
     ) -> list[int]:
         """Generate list of forecast hours."""
         return list(range(start_hour, max_hour + 1, step))
+    
+    def post_process_fetched_file(self, request, local_path: Path) -> Tuple[Path, Optional[str]]:
+        """
+        Optional hook.
+        Return (new_path_to_store, new_filename_override).
+        Default: no-op.
+        """
+        return local_path, None

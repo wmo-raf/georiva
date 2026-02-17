@@ -219,7 +219,7 @@ class IngestionService:
                         )
                         continue
                     
-                    timestamps = plugin.get_timestamps(local_path, first_variable_name)
+                    timestamps = plugin.get_timestamps(file_path, first_variable_name)
                     
                     if not timestamps:
                         result.add_error(f"No timestamps found in: {file_path}")

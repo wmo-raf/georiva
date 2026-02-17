@@ -9,10 +9,7 @@ class CoreConfig(AppConfig):
     verbose_name = "GeoRIVA Core"
     
     def ready(self):
-        from .models import Catalog
-        from .tasks import update_catalog_loader_plugin_periodic_task
+        from .models import Collection
+        from .tasks import update_collection_loader_plugin_periodic_task
         
-        # update plugin periodic task when a network connection plugin is saved
-        catalogs = Catalog.objects.all()
-        for catalog in catalogs:
-            post_save.connect(update_catalog_loader_plugin_periodic_task, sender=Catalog)
+        post_save.connect(update_collection_loader_plugin_periodic_task, sender=Collection)

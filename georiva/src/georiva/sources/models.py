@@ -100,22 +100,13 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         
         return source_class(config)
     
-    def get_loader(self, catalog=None):
+    def get_loader(self, collection=None):
         """Create fully configured Loader instance."""
         from .loader import Loader
         
-        # Determine catalog
-        if catalog:
-            if catalog.collections.exists():
-                pass  # Use provided catalog
-            else:
-                raise ValueError(f"Catalog '{catalog}' has no collections.")
-        else:
-            raise ValueError("LoaderProfile is not associated with any Catalog.")
-        
         return Loader(
             data_source=self.get_data_source(),
-            catalog=catalog,
+            collection=collection,
         )
     
     # =========================================================================
