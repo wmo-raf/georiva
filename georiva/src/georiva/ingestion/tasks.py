@@ -157,6 +157,7 @@ def sweep_unprocessed():
             
             # Skip if already tracked
             if IngestionLog.is_known(bucket_type, path):
+                logger.debug("Skipping known path: %s", path)
                 continue
             
             logger.info("Found untracked file: %s/%s", bucket_type, path)

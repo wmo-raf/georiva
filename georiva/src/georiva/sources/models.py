@@ -107,15 +107,32 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         return Loader(
             data_source=self.get_data_source(),
             collection=collection,
+            loader_profile=self,
         )
     
     # =========================================================================
     # Run Management
     # =========================================================================
     
-    def record_run(self, result):
+    def record_run(self, result, collection):
         """Record loader run result."""
         from django.utils import timezone
+        
+        LoaderRun.objects.create(
+            collection=collection,
+            loader_profile=self,
+            started_at=result.started_at,
+            finished_at=result.finished_at,
+            status=result.status,
+            files_requested=result.files_requested,
+            files_fetched=result.files_fetched,
+            files_skipped=result.files_skipped,
+            files_failed=result.files_failed,
+            files_queued=result.files_queued,
+            bytes_transferred=result.bytes_transferred,
+            run_time=result.run_time,
+            errors=result.errors,
+        )
         
         self.last_run_at = timezone.now()
         self.last_run_status = result.status
@@ -147,9 +164,64 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run
     
-    def run_now(self, catalog, **kwargs):
+    def run_now(self, collection, **kwargs):
         """Convenience method to run immediately."""
-        loader = self.get_loader(catalog)
+        loader = self.get_loader(collection)
         result = loader.run(**kwargs)
-        self.record_run(result)
+        self.record_run(result, collection)
         return result
+
+
+class LoaderRun(TimeStampedModel):
+    """Tracks each execution of the Loader for a Collection."""
+    
+    class Status(models.TextChoices):
+        RUNNING = 'running', 'Running'
+        SUCCESS = 'success', 'Success'
+        PARTIAL = 'partial', 'Partial'
+        FAILED = 'failed', 'Failed'
+        EMPTY = 'empty', 'Empty'
+        QUEUED = 'queued', 'Queued'
+    
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        on_delete=models.CASCADE,
+        related_name='loader_runs',
+    )
+    
+    # Timing
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    
+    # Status
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    
+    # Counts
+    files_requested = models.IntegerField(default=0)
+    files_fetched = models.IntegerField(default=0)
+    files_skipped = models.IntegerField(default=0)
+    files_failed = models.IntegerField(default=0)
+    files_queued = models.IntegerField(default=0)
+    bytes_transferred = models.BigIntegerField(default=0)
+    
+    # Context
+    run_time = models.DateTimeField(null=True, blank=True)  # forecast reference time
+    
+    # Errors (last 50)
+    errors = models.JSONField(default=list, blank=True)
+    
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['collection', '-started_at']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"{self.collection} | {self.started_at:%Y-%m-%d %H:%M} | {self.status}"
+    
+    @property
+    def duration_seconds(self):
+        if self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None

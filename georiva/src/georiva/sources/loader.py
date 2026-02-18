@@ -119,12 +119,14 @@ class Loader:
             data_source,  # DataSource protocol
             collection,  # GeoRiva collection model
             *,
+            loader_profile=None,
             on_file_fetched: Optional[Callable] = None,  # Callback after each file
     ):
         self.data_source = data_source
         self.fetch_strategy = self.data_source.fetch_strategy()
         self.collection = collection
         self.on_file_fetched = on_file_fetched
+        self.loader_profile = loader_profile
         
         self.logger = logging.getLogger(
             f"georiva.loader.{data_source.name.replace(' ', '_').lower()}"
@@ -245,6 +247,10 @@ class Loader:
             
             self._cleanup_temp()
             result.finish()
+            
+            # Record if we have a profile reference
+            if self.loader_profile:
+                self.loader_profile.record_run(result, self.collection)
             
             self.logger.info(result.summary())
         
