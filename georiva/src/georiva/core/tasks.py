@@ -20,7 +20,7 @@ def run_collection_loader(self, catalog_id):
     from georiva.core.models import Collection
     collection = Collection.objects.get(id=catalog_id)
     
-    if not collection.loader_profile or collection.is_loader_active:
+    if not collection.loader_profile or not collection.is_loader_active:
         return
     
     loader_profile = collection.loader_profile
@@ -33,7 +33,7 @@ def run_collection_loader(self, catalog_id):
 
 def create_or_update_collection_loader_plugin_periodic_tasks(collection):
     is_loader_active = collection.is_loader_active
-    sig = run_collection_loader.s(collection.id)
+    sig = run_collection_loader.s(collection.slug)
     name = repr(sig)
     
     options = {
