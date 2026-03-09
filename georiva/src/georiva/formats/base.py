@@ -96,6 +96,7 @@ class BaseFormatPlugin(ABC):
     
     def __init__(self):
         self.logger = logging.getLogger(f"georiva.formats.{self.name}")
+        self._dataset_cache: dict[str, list] = {}
     
     @abstractmethod
     def can_handle(self, file_path: PathLike) -> bool:
@@ -230,3 +231,17 @@ class BaseFormatPlugin(ABC):
                 "bounds": var_info.bounds,
                 "crs": var_info.crs,
             }
+    
+    def clear_cache(self):
+        """
+        Release all cached datasets and close their file handles.
+    
+        Call this after finishing all variable reads for a file.
+        """
+        for datasets in self._dataset_cache.values():
+            for ds in datasets:
+                try:
+                    ds.close()
+                except Exception:
+                    pass
+        self._dataset_cache.clear()

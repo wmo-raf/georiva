@@ -245,9 +245,19 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         return None
     
     def _open_all(self, file_path: Path) -> list[xr.Dataset]:
-        """Discovery mode: let cfgrib split the file into datasets."""
+        """
+        Discovery mode: let cfgrib split the file into datasets.
+    
+        Results are cached by file path for the duration of a processing run.
+        Call clear_cache() after processing each file to release handles.
+        """
+        key = str(file_path)
+        if key in self._dataset_cache:
+            return self._dataset_cache[key]
         try:
-            return cfgrib.open_datasets(str(file_path))
+            datasets = cfgrib.open_datasets(str(file_path))
+            self._dataset_cache[key] = datasets
+            return datasets
         except Exception as e:
             logger.error(f"cfgrib.open_datasets failed for {file_path}: {e}")
             return []

@@ -219,7 +219,7 @@ class IngestionService:
                         )
                         continue
                     
-                    timestamps = plugin.get_timestamps(file_path, first_variable_name)
+                    timestamps = plugin.get_timestamps(local_path, first_variable_name)
                     
                     if not timestamps:
                         result.add_error(f"No timestamps found in: {file_path}")
@@ -262,6 +262,10 @@ class IngestionService:
             
             finally:
                 self._cleanup_temp(local_path)
+                
+                # Release cached datasets now that we're done with this file.
+                if hasattr(plugin, "clear_cache"):
+                    plugin.clear_cache()
             
             # 8. Archive raw file + delete from origin
             if result.success and catalog.archive_source_files:
