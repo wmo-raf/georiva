@@ -4,6 +4,8 @@ from celery import shared_task
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
+from georiva.core.models import Collection
+from georiva.sources.models import LoaderProfile
 
 
 @app.on_after_finalize.connect
@@ -58,4 +60,11 @@ def create_or_update_collection_loader_plugin_periodic_tasks(collection):
 
 
 def update_collection_loader_plugin_periodic_task(sender, instance, **kwargs):
-    create_or_update_collection_loader_plugin_periodic_tasks(instance)
+    if isinstance(instance, Collection):
+        collection = instance
+    elif isinstance(instance, LoaderProfile):
+        collection = instance.collection
+    else:
+        return
+    
+    create_or_update_collection_loader_plugin_periodic_tasks(collection)
