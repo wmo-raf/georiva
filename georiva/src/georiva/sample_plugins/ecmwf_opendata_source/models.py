@@ -8,7 +8,6 @@ from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
-from wagtail.snippets.models import register_snippet
 
 from georiva.sources.models import LoaderProfile
 
@@ -24,7 +23,6 @@ def default_run_hours():
     return [0, 12]
 
 
-@register_snippet
 class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
     """
     ECMWF AIFS Loader profile:

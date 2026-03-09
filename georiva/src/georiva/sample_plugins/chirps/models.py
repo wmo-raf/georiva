@@ -3,7 +3,6 @@ from datetime import date
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
-from wagtail.snippets.models import register_snippet
 
 from georiva.sources.models import LoaderProfile
 
@@ -13,7 +12,6 @@ PERIOD_CHOICES = [
 ]
 
 
-@register_snippet
 class CHIRPSLoaderProfile(LoaderProfile, TimeStampedModel):
     """
     CHIRPS Loader profile:
