@@ -47,6 +47,7 @@ def process_incoming_file(
             "Skipping %s/%s — already processing or completed",
             origin_bucket, file_path,
         )
+        
         return
     
     logger.info(
@@ -109,8 +110,8 @@ def process_incoming_file(
         )
 
 
-@shared_task(queue='ingestion')
-def sweep_unprocessed():
+@shared_task
+def sweep_unprocessed(sync: bool = False):
     """
     Safety net — finds files that the webhook missed and retries failures.
 
@@ -136,9 +137,13 @@ def sweep_unprocessed():
     
     new_files = 0
     
+    dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+    
     for bucket_type in [BucketType.INCOMING, BucketType.SOURCES]:
         bucket = storage.bucket(bucket_type)
         files = bucket.list_files(recursive=True)
+        
+        logger.info("Found %d untracked files", len(files))
         
         for f in files:
             path = f['path']
@@ -172,7 +177,7 @@ def sweep_unprocessed():
             )
             
             # Queue for processing
-            process_incoming_file.delay(
+            dispatch(
                 file_path=path,
                 origin_bucket=bucket_type,
                 reference_time=(
@@ -200,7 +205,7 @@ def sweep_unprocessed():
             log.error[:100] if log.error else 'unknown',
         )
         
-        process_incoming_file.delay(
+        dispatch(
             file_path=log.file_path,
             origin_bucket=log.bucket,
             reference_time=(
