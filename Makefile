@@ -97,6 +97,9 @@ dev-build:
 dev-ps:
 	$(DEV_DC) ps
 
+dev-config:
+	$(DEV_DC) config
+
 dev-logs:
 	$(DEV_DC) logs -f $(LOG_ARGS)
 

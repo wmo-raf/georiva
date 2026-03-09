@@ -7,8 +7,7 @@ from django_extensions.db.models import TimeStampedModel
 from polymorphic.models import PolymorphicModel
 from wagtail.admin.panels import FieldPanel
 
-from .registry import data_source_registry
-from .widgets import DataSourceClassSelectWidget
+from .source import BaseDataSource
 
 
 class LoaderProfile(PolymorphicModel, TimeStampedModel):
@@ -23,11 +22,6 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     name = models.CharField(
         max_length=255,
         verbose_name=_("Name"),
-    )
-    
-    data_source_type = models.CharField(
-        max_length=100,
-        verbose_name=_("Data Source"),
     )
     
     is_active = models.BooleanField(
@@ -66,7 +60,6 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     
     base_panels = [
         FieldPanel('name'),
-        FieldPanel('data_source_type', widget=DataSourceClassSelectWidget),
         FieldPanel('is_active'),
         FieldPanel('interval_minutes'),
     ]
@@ -85,20 +78,26 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         """Get loader configuration dictionary."""
         return {}
     
+    @property
+    def data_source_cls(self):
+        return None
+    
     # =========================================================================
     # Factory Methods
     # =========================================================================
     
     def get_data_source(self):
         """Instantiate configured data source."""
-        source_class = data_source_registry.get_class(self.data_source_type)
+        source_class = self.data_source_cls
         if not source_class:
-            raise ValueError(f"Unknown data source: {self.data_source_type}")
+            raise ValueError("No data source class defined for this loader profile.")
+        
+        if not issubclass(source_class, BaseDataSource):
+            raise ValueError(f"Data source class {source_class} must inherit from BaseDataSource.")
         
         # Merge default config with instance config
-        info = data_source_registry.get(self.data_source_type)
         loader_config = self.get_loader_config()
-        config = {**info.get('default_config', {}), **loader_config}
+        config = {**loader_config}
         
         return source_class(config)
     

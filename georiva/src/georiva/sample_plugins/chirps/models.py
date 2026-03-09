@@ -50,6 +50,11 @@ class CHIRPSLoaderProfile(LoaderProfile, TimeStampedModel):
     class Meta:
         verbose_name = "CHIRPS Loader Profile"
     
+    @property
+    def data_source_cls(self):
+        from .source import CHIRPSDataSource
+        return CHIRPSDataSource
+    
     def get_loader_config(self):
         return {
             "period": self.period,

@@ -146,6 +146,11 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
         runs = ", ".join(f"{h:02d}Z" for h in self.get_run_hours())
         return f"{self.name} ({runs}, Day {self.start_day}–{self.end_day})"
     
+    @property
+    def data_source_cls(self):
+        from .source import ECMWFAIFSDataSource
+        return ECMWFAIFSDataSource
+    
     def get_loader_config(self):
         """Get loader configuration dictionary."""
         return {
