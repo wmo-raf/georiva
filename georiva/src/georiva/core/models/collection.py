@@ -93,7 +93,7 @@ class Collection(TimeStampedModel, ClusterableModel):
         MultiFieldPanel([
             FieldPanel('loader_profile'),
             FieldPanel('is_loader_active'),
-        ]),
+        ], heading="Ingestion"),
         MultiFieldPanel([
             FieldPanel('is_active'),
             FieldPanel('sort_order'),

@@ -150,7 +150,6 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         return self.assets.filter(roles__contains=['thumbnail']).first()
 
 
-@register_snippet
 class Asset(TimeStampedModel, Orderable):
     """
     A stored data file for a specific Variable within an Item.

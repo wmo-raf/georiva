@@ -1,10 +1,11 @@
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.urls import reverse
+from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from polymorphic.models import PolymorphicModel
 from wagtail.admin.panels import FieldPanel
-from wagtail.snippets.models import register_snippet
 
 from .registry import data_source_registry
 from .widgets import DataSourceClassSelectWidget
@@ -171,9 +172,26 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         result = loader.run(**kwargs)
         self.record_run(result, collection)
         return result
+    
+    @cached_property
+    def viewset(self):
+        from .registry import loader_profile_viewset_registry
+        model_name = self.get_real_instance_class().__name__.lower()
+        return loader_profile_viewset_registry.get(model_name)
+    
+    @property
+    def edit_url(self):
+        if self.viewset:
+            return reverse(self.viewset.get_url_name("edit"), kwargs={"pk": self.pk})
+        return None
+    
+    @property
+    def delete_url(self):
+        if self.viewset:
+            return reverse(self.viewset.get_url_name("delete"), kwargs={"pk": self.pk})
+        return None
 
 
-@register_snippet
 class LoaderRun(TimeStampedModel):
     """Tracks each execution of the Loader for a Collection."""
     

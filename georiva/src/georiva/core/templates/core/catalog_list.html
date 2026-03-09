@@ -64,6 +64,20 @@
     </style>
 
     <div class="c-panels-container">
+
+        {% if not catalogs %}
+
+            <div>
+                <p>There are no catalogs to display. Why not
+                    <a href="{{ catalog_add_url }}">add one</a>?
+                </p>
+            </div>
+
+        {% else %}
+
+        {% endif %}
+
+
         {% for catalog_item in catalogs %}
             <div class="plugin-panel">
                 <div class="panel-header">
@@ -88,9 +102,17 @@
                         </a>
                     </div>
                 </div>
-
                 <div class="panel-content">
-                    {% component catalog_item.collections_table %}
+                    {% if not catalog_item.has_collections %}
+                        <div>
+                            <p>There are no collections to display for this catalog. Why not
+                                <a href="{{ catalog_item.add_collection_url }}">add one</a>?
+                            </p>
+                        </div>
+                    {% else %}
+                        {% component catalog_item.collections_table %}
+                    {% endif %}
+
                 </div>
 
             </div>

@@ -9,7 +9,7 @@ from .viewsets import BoundaryChooserViewSet, admin_viewsets
 
 
 @hooks.register('register_admin_urls')
-def urlconf_adl():
+def urlconf_georivacore():
     return [
         path('catalogs/', catalog_index, name="catalog_index"),
     ]
@@ -44,3 +44,24 @@ def construct_homepage_summary_items(request, summary_items):
     summary_items[:] = [item for item in summary_items if item.__class__.__name__ not in hidden_summary_items]
     
     summary_items[:] = []
+
+
+@hooks.register("register_icons")
+def register_icons(icons):
+    return icons + [
+        'wagtailfontawesomesvg/solid/circle-nodes.svg',
+        'wagtailfontawesomesvg/solid/map-pin.svg',
+        'wagtailfontawesomesvg/solid/location-pin.svg',
+        'wagtailfontawesomesvg/solid/location-dot.svg',
+        'wagtailfontawesomesvg/solid/plug.svg',
+        'wagtailfontawesomesvg/solid/hourglass-start.svg',
+        'wagtailfontawesomesvg/solid/hourglass-end.svg',
+        'wagtailfontawesomesvg/solid/hourglass-half.svg',
+        'wagtailfontawesomesvg/solid/paper-plane.svg',
+        'wagtailfontawesomesvg/solid/puzzle-piece.svg',
+        'wagtailfontawesomesvg/solid/up-down.svg',
+        'wagtailfontawesomesvg/solid/plus-minus.svg',
+        'wagtailfontawesomesvg/solid/palette.svg',
+        'wagtailfontawesomesvg/solid/map.svg',
+        'wagtailfontawesomesvg/solid/file-import.svg',
+    ]

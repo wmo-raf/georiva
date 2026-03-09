@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "django_celery_results",
     "django_vue_utilities",
     "wagtailiconchooser",
+    "wagtailfontawesomesvg",
     
     "georiva.home",
     "georiva.core",

@@ -3,10 +3,8 @@ from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, InlinePanel
 from wagtail.models import Orderable
-from wagtail.snippets.models import register_snippet
 
 
-@register_snippet
 class ColorPalette(ClusterableModel):
     """
     Palette definition: numeric stops + hex colors.
@@ -36,6 +34,8 @@ class ColorPalette(ClusterableModel):
     
     class Meta:
         ordering = ['name']
+        verbose_name = "Color Palette"
+        verbose_name_plural = "Color Palettes"
     
     def __str__(self):
         return self.name
