@@ -1,8 +1,8 @@
 from adminboundarymanager.wagtail_hooks import AdminBoundaryViewSetGroup
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.views import generic
-from django.utils.translation import gettext_lazy as _
 from wagtail.admin.viewsets import ViewSetGroup
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 from wagtail.admin.viewsets.model import ModelViewSet
@@ -81,3 +81,12 @@ def register_viewset():
         BoundaryChooserViewSet("boundary_chooser"),
         GeorivaViewSetGroup()
     ]
+
+
+@hooks.register('construct_homepage_summary_items')
+def construct_homepage_summary_items(request, summary_items):
+    hidden_summary_items = ["PagesSummaryItem", "DocumentsSummaryItem", "ImagesSummaryItem"]
+    
+    summary_items[:] = [item for item in summary_items if item.__class__.__name__ not in hidden_summary_items]
+    
+    summary_items[:] = []

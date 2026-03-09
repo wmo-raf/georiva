@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "django_countries",
     "django_celery_beat",
     "django_celery_results",
+    "django_vue_utilities",
     
     "georiva.home",
     "georiva.core",
@@ -383,3 +384,9 @@ LOGGING = {
         "level": GEORIVA_LOG_LEVEL,
     },
 }
+
+VUE_FRONTEND_USE_TYPESCRIPT = False
+VUE_FRONTEND_USE_DEV_SERVER = DEBUG
+VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
+VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
+VUE_FRONTEND_STATIC_PATH = 'vue'

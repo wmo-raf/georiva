@@ -55,8 +55,9 @@ def create_or_update_collection_loader_plugin_periodic_tasks(collection):
     else:
         options['enabled'] = False
     
-    # Create or update the periodic task
-    PeriodicTask.objects.update_or_create(name=name, defaults=options)
+    if options.get("interval"):
+        # Create or update the periodic task
+        PeriodicTask.objects.update_or_create(name=name, defaults=options)
 
 
 def update_collection_loader_plugin_periodic_task(sender, instance, **kwargs):
