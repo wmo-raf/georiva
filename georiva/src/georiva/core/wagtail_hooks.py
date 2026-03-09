@@ -1,86 +1,40 @@
 from adminboundarymanager.wagtail_hooks import AdminBoundaryViewSetGroup
-from django.urls import reverse
+from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
-from wagtail.admin.views import generic
-from wagtail.admin.viewsets import ViewSetGroup
-from wagtail.admin.viewsets.chooser import ChooserViewSet
-from wagtail.admin.viewsets.model import ModelViewSet
-from wagtail.admin.widgets import ListingButton
+from wagtail.admin.menu import MenuItem
 
-from georiva.core.models import Item, Catalog, Collection
+from .views import catalog_index
+from .viewsets import BoundaryChooserViewSet, admin_viewsets
 
 
-class BoundaryChooserViewSet(ChooserViewSet):
-    model = "adminboundarymanager.AdminBoundary"
-    
-    icon = "map"
-    choose_one_text = "Choose a boundary"
-    choose_another_text = "Choose another boundary"
-    edit_item_text = "Edit this boundary"
-
-
-class CatalogViewSet(ModelViewSet):
-    model = Catalog
-    icon = "folder-open-inverse"
-    add_to_admin_menu = False
-    exclude_form_fields = ["created_at", "updated_at"]
-
-
-class CollectionViewSet(ModelViewSet):
-    model = Collection
-    icon = "folder-open-inverse"
-    add_to_admin_menu = False
-    exclude_form_fields = ["created_at", "updated_at"]
-
-
-class ItemIndexView(generic.IndexView):
-    def get_list_more_buttons(self, instance):
-        buttons = super().get_list_more_buttons(instance)
-        
-        label = _("View")
-        url = reverse("item_preview", args=[instance.id])
-        icon_name = "view"
-        attrs = {}
-        if label and url:
-            buttons.append(
-                ListingButton(
-                    label,
-                    url=url,
-                    icon_name=icon_name,
-                    attrs=attrs,
-                )
-            )
-        
-        return buttons
-
-
-class ItemViewSet(ModelViewSet):
-    model = Item
-    icon = "snippet"
-    add_to_admin_menu = False
-    exclude_form_fields = ["created_at", "updated_at"]
-    index_view_class = ItemIndexView
-
-
-class GeorivaViewSetGroup(ViewSetGroup):
-    menu_label = "GeoRIVA"
-    menu_icon = "globe"
-    
-    items = [
-        CatalogViewSet(),
-        CollectionViewSet(),
-        ItemViewSet(),
+@hooks.register('register_admin_urls')
+def urlconf_adl():
+    return [
+        path('catalogs/', catalog_index, name="catalog_index"),
     ]
+
+
+@hooks.register('register_admin_menu_item')
+def register_catalogs_menu():
+    list_url = reverse('catalog_index')
+    label = _("Catalogs")
+    return MenuItem(label, list_url, icon_name='globe', order=100)
 
 
 @hooks.register("register_admin_viewset")
 def register_viewset():
-    return [
+    return admin_viewsets + [
         AdminBoundaryViewSetGroup(),
         BoundaryChooserViewSet("boundary_chooser"),
-        GeorivaViewSetGroup()
     ]
+
+
+@hooks.register('construct_main_menu')
+def hide_some_menus(request, menu_items):
+    hidden_menus = ["explorer", "documents", "images", "help", "snippets", "reports"]
+    
+    menu_items[:] = [item for item in menu_items if item.name not in hidden_menus]
 
 
 @hooks.register('construct_homepage_summary_items')
