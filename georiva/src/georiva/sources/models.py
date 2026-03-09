@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from polymorphic.models import PolymorphicModel
 from wagtail.admin.panels import FieldPanel
+from wagtail.snippets.models import register_snippet
 
 from .registry import data_source_registry
 from .widgets import DataSourceClassSelectWidget
@@ -172,6 +173,7 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         return result
 
 
+@register_snippet
 class LoaderRun(TimeStampedModel):
     """Tracks each execution of the Loader for a Collection."""
     
@@ -189,6 +191,12 @@ class LoaderRun(TimeStampedModel):
         related_name='loader_runs',
     )
     
+    loader_profile = models.ForeignKey(
+        'georivasources.LoaderProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='runs',
+    )
     # Timing
     started_at = models.DateTimeField()
     finished_at = models.DateTimeField(null=True, blank=True)
