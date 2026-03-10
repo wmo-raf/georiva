@@ -216,3 +216,8 @@ services:
       - georiva
       - georiva-titiler-app
       - georiva-stac-browser
+
+networks:
+  default:
+    external: true
+    name: ${GEORIVA_NETWORK_NAME}
