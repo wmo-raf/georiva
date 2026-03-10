@@ -72,17 +72,14 @@ class Command(BaseCommand):
             region_name=settings.AWS_S3_REGION_NAME,
         )
         
-        buckets = getattr(settings, "GEORIVA_BUCKETS", {
-            "incoming": "georiva-incoming",
-            "sources": "georiva-sources",
-            "archive": "georiva-archive",
-            "assets": "georiva-assets",
-        })
+        buckets = getattr(settings, "GEORIVA_BUCKETS", {})
         
         webhook_arn = getattr(settings, "MINIO_WEBHOOK_ARN", None)
         
-        for bucket_type, bucket_name in buckets.items():
+        for bucket_type, bucket_config in buckets.items():
             config = BUCKET_CONFIGS.get(bucket_type, {})
+            
+            bucket_name = bucket_config.get("name")
             
             self.stdout.write(
                 f"\n{'[DRY RUN] ' if dry_run else ''}"
