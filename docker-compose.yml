@@ -3,6 +3,7 @@ x-backend-variables: &backend-variables
   WAIT_HOSTS: georiva-db:5432,georiva-pgbouncer:5432,georiva-redis:6379,georiva-minio:9000
   WAIT_TIMEOUT: 120
   GEORIVA_GUNICORN_NUM_OF_WORKERS: ${GEORIVA_GUNICORN_NUM_OF_WORKERS:-4}
+  GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_WORKER_CONCURRENCY:-2}
   GEORIVA_GUNICORN_TIMEOUT: ${GEORIVA_GUNICORN_TIMEOUT:-300}
   DEBUG: ${DEBUG:-False}
   WAGTAIL_SITE_NAME: ${WAGTAIL_SITE_NAME:-GeoRiva}
@@ -160,6 +161,7 @@ services:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_WORKER_CONCURRENCY:-1}
     depends_on:
       - georiva
 

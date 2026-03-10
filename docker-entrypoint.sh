@@ -60,8 +60,8 @@ start_celery_worker() {
 
     EXTRA_CELERY_ARGS=()
 
-    if [[ -n "$GEORIVA_GUNICORN_NUM_OF_WORKERS" ]]; then
-        EXTRA_CELERY_ARGS+=(--concurrency "$GEORIVA_GUNICORN_NUM_OF_WORKERS")
+    if [[ -n "$GEORIVA_CELERY_WORKER_CONCURRENCY" ]]; then
+        EXTRA_CELERY_ARGS+=(--concurrency "$GEORIVA_CELERY_WORKER_CONCURRENCY")
     fi
     exec celery -A georiva worker "${EXTRA_CELERY_ARGS[@]}" -l "${GEORIVA_CELERY_WORKER_LOG_LEVEL}" "$@"
 }
