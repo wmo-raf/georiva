@@ -22,7 +22,7 @@ def django_settings(value):
 
 
 @register.simple_tag
-def adl_version():
+def georiva_version():
     return __version__
 
 

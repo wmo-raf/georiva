@@ -1,2 +1,31 @@
 {% extends "wagtailadmin/login.html" %}
-{% load static %}
+{% load static georiva_tags %}
+
+{% block branding_login %}
+    {% if 'WAGTAIL_SITE_NAME'|django_settings %}
+        Sign in to {{ 'WAGTAIL_SITE_NAME'|django_settings }}
+    {% else %}
+        Sign in
+    {% endif %}
+{% endblock %}
+
+{% block branding_logo %}
+    <div class="login-logo">
+        <figure style="max-height:70px;max-width:70px;" class="georiva-logo">
+            {% include "georiva/georiva.svg" %}
+        </figure>
+    </div>
+
+    <style>
+
+        .login-logo {
+            display: flex;
+            justify-content: center;
+        }
+
+        .georiva-logo svg {
+            height: 100%;
+            width: 100%;
+        }
+    </style>
+{% endblock %}

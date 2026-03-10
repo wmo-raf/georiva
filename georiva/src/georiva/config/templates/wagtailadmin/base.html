@@ -1,3 +1,33 @@
 {% extends "wagtailadmin/base.html" %}
 {% load static georiva_tags %}
 
+{% block branding_logo %}
+<figure style="max-height:100px;max-width:120px;padding:8px" class="georiva-logo">
+    {% include "georiva/georiva.svg" %}
+</figure>
+
+<div style="color:#ababab; font-size: 12px; padding-top:1em; font-weight:600">
+    <a href="https://github.com/wmo-raf/georiva" target="_blank" style="color:#fff; text-decoration:none">
+        v{% georiva_version %}
+    </a>
+
+</div>
+
+<style>
+
+    .georiva-logo {
+        color: #fff;
+    }
+
+    .georiva-logo svg {
+        height: 100%;
+        width: 100%;
+        color: #fff;
+    }
+
+</style>
+
+
+{% endblock %}
+
+
