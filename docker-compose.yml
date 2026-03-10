@@ -129,6 +129,7 @@ services:
     <<: *backend-volumes
     build:
       context: .
+      target: prod
       dockerfile: ${GEORIVA_DOCKERFILE:-Dockerfile}
       args:
         - UID=${UID}
