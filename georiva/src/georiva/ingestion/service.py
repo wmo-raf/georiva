@@ -8,6 +8,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import pytz
+from django.db.models import F
 
 from georiva.core.filename import parse_path
 from georiva.core.models import Variable, Collection
@@ -514,6 +515,11 @@ class IngestionService:
         
         self._update_collection_extent(collection, ts_utc, bounds)
         
+        if created:
+            Collection.objects.filter(pk=collection.pk).update(
+                item_count=F("item_count") + 1
+            )
+        
         self.logger.info("Created Item %s with %d assets", item.pk, len(assets))
         
         return item, assets, clip_info
@@ -781,8 +787,6 @@ class IngestionService:
             bounds: tuple,
     ):
         """Update collection's temporal and spatial extent."""
-        from georiva.core.models import Item
-        
         update_fields = []
         
         if collection.time_start is None or timestamp < collection.time_start:
@@ -807,9 +811,6 @@ class IngestionService:
             if expanded != current:
                 collection.bounds = self._normalize_bounds(expanded)
                 update_fields.append("bounds")
-        
-        collection.item_count = Item.objects.filter(collection=collection).count()
-        update_fields.append("item_count")
         
         if update_fields:
             collection.save(update_fields=update_fields)
