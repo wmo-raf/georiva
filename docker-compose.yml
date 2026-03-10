@@ -65,6 +65,8 @@ services:
       - POSTGRES_USER=${GEORIVA_DB_USER:?}
       - POSTGRES_DB=${GEORIVA_DB_NAME:?}
       - POSTGRES_PASSWORD=${GEORIVA_DB_PASSWORD:?}
+      - PGUID=${UID:?}
+      - PGID=${GID:?}
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${GEORIVA_DB_USER}" ]
       interval: 10s
