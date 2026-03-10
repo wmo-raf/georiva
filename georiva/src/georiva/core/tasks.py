@@ -17,7 +17,11 @@ def setup_network_plugin_processing_tasks(sender, **kwargs):
         create_or_update_collection_loader_plugin_periodic_tasks(collection)
 
 
-@shared_task(bind=True, name='georiva.core.tasks.run_collection_loader')
+@shared_task(
+    bind=True,
+    name='georiva.core.tasks.run_collection_loader',
+    queue="georiva-ingestion",
+)
 def run_collection_loader(self, catalog_id):
     from georiva.core.models import Collection
     collection = Collection.objects.get(id=catalog_id)

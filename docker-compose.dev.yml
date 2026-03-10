@@ -12,10 +12,19 @@ services:
     ports:
       - "8000:8000"
 
-  georiva-celery-worker:
+  georiva-celery-default-worker:
     build:
       target: dev
-    command: celery-worker-dev
+    command: celery-default-worker-dev
+    environment:
+      DEBUG: "True"
+    volumes:
+      - ./georiva:/georiva/app
+
+  georiva-celery-ingestion-worker:
+    build:
+      target: dev
+    command: celery-ingestion-worker-dev
     environment:
       DEBUG: "True"
     volumes:

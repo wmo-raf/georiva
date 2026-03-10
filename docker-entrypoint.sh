@@ -26,14 +26,17 @@ list-plugins    : Lists currently installed plugins.
 help            : Show this message
 
 SERVICE COMMANDS:
-gunicorn            : Start GeoRiva django using a prod ready gunicorn server:
-                         * Waits for the postgres database to be available first.
-                         * Automatically migrates the database on startup.
-                         * Binds to 0.0.0.0
-celery-worker       : Start the celery worker queue which runs important async tasks
-celery-worker-dev : Start the celery worker with auto-reload on code changes
-                    (requires the dev build target).
-celery-beat         : Start the celery beat service used to schedule periodic jobs
+gunicorn              : Start GeoRiva django using a prod ready gunicorn server:
+                           * Waits for the postgres database to be available first.
+                           * Automatically migrates the database on startup.
+                           * Binds to 0.0.0.0
+celery-default-worker   : Start the default celery worker (Wagtail, cache, etc.)
+celery-ingestion-worker : Start the ingestion celery worker (heavy GRIB/raster processing)
+celery-default-worker-dev       : Start the default celery worker with auto-reload on code changes
+                          (requires the dev build target).
+celery-ingestion-worker-dev     : Start the ingestion celery worker with auto-reload on code changes
+                          (requires the dev build target).
+celery-beat             : Start the celery beat service used to schedule periodic jobs
 
 DEV COMMANDS:
 django-dev      : Start a normal GeoRiva backend django development server, performs
@@ -145,14 +148,24 @@ manage)
 shell)
     exec python3 /georiva/app/src/georiva/manage.py shell
     ;;
-celery-worker)
+celery-default-worker)
     start_celery_worker -Q celery -n default-worker@%h "${@:2}"
     ;;
-celery-worker-dev)
+celery-ingestion-worker)
+    start_celery_worker -Q georiva-ingestion -n ingestion-worker@%h "${@:2}"
+    ;;
+celery-default-worker-dev)
     startup_plugin_setup
     exec watchfiles \
         --filter python \
         "celery -A georiva worker -Q celery -n default-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
+        /georiva/app/src/
+    ;;
+celery-ingestion-worker-dev)
+    startup_plugin_setup
+    exec watchfiles \
+        --filter python \
+        "celery -A georiva worker -Q georiva-ingestion -n ingestion-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=1" \
         /georiva/app/src/
     ;;
 celery-beat)

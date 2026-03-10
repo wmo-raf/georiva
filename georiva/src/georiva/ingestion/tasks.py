@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=0,
     acks_late=True,
+    queue="georiva-ingestion",
 )
 def process_incoming_file(
         self,
