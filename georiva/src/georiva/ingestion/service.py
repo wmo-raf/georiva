@@ -1,4 +1,3 @@
-import gc
 import logging
 import tempfile
 from dataclasses import dataclass, field
@@ -546,10 +545,6 @@ class IngestionService:
         
         self.logger.debug("Processing variable: %s", variable.slug)
         
-        stats = extractor.compute_stats(
-            variable, local_path, timestamp, window=clip_window
-        )
-        
         use_chunked = width * height > 4096 * 4096
         
         if use_chunked and clip_window is None:
@@ -561,7 +556,6 @@ class IngestionService:
                 timestamp=timestamp,
                 width=width,
                 height=height,
-                stats=stats,
             )
         else:
             final_data, final_rgba = self._process_variable_direct(
@@ -572,7 +566,6 @@ class IngestionService:
                 timestamp=timestamp,
                 width=width,
                 height=height,
-                stats=stats,
                 clip_window=clip_window,
             )
         
@@ -581,6 +574,17 @@ class IngestionService:
                 final_data, bounds, nodata=np.nan
             )
             final_rgba = clipper.apply_rgba_mask(final_rgba, bounds)
+        
+        # Compute stats from the array we already have
+        try:
+            stats = {
+                "min": float(np.nanmin(final_data)),
+                "max": float(np.nanmax(final_data)),
+                "mean": float(np.nanmean(final_data)),
+                "std": float(np.nanstd(final_data)),
+            }
+        except Exception:
+            stats = {"min": None, "max": None, "mean": None, "std": None}
         
         # Build asset paths
         catalog_slug = item.collection.catalog.slug
@@ -704,7 +708,6 @@ class IngestionService:
             )
         
         del final_data, final_rgba
-        gc.collect()
         
         return assets
     
@@ -716,8 +719,7 @@ class IngestionService:
             local_path: Path,
             timestamp: datetime,
             width: int,
-            height: int,
-            stats: dict,
+            height: int
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process variable in chunks for large datasets."""
         
@@ -748,7 +750,6 @@ class IngestionService:
             timestamp: datetime,
             width: int,
             height: int,
-            stats: dict,
             clip_window: dict = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process variable with direct extraction (optionally clipped)."""
