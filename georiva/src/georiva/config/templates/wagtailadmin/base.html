@@ -2,7 +2,7 @@
 {% load static georiva_tags %}
 
 {% block branding_logo %}
-<figure style="max-height:100px;max-width:120px;padding:8px" class="georiva-logo">
+<figure class="georiva-logo">
     {% include "georiva/georiva.svg" %}
 </figure>
 
@@ -17,6 +17,9 @@
 
     .georiva-logo {
         color: #fff;
+        max-height: 100px;
+        max-width: 120px;
+        padding: 8px
     }
 
     .georiva-logo svg {
