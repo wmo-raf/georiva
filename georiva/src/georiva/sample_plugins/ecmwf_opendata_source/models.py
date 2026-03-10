@@ -7,6 +7,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
+from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 
 from georiva.sources.models import LoaderProfile
@@ -23,6 +24,19 @@ def default_run_hours():
     return [0, 12]
 
 
+class ECMWFAIFSLoaderProfileForm(WagtailAdminModelForm):
+    run_hours = forms.MultipleChoiceField(
+        choices=RUN_HOUR_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+        required=False,
+        initial=[0, 12],
+    )
+    
+    def clean_run_hours(self):
+        # Convert list of strings → list of ints for the ArrayField
+        return [int(v) for v in self.cleaned_data.get("run_hours", [])]
+
+
 class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
     """
     ECMWF AIFS Loader profile:
@@ -30,6 +44,8 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
       - Select forecast day range
       - Each day includes 4 timesteps: +0h, +6h, +12h, +18h
     """
+    
+    base_form_class = ECMWFAIFSLoaderProfileForm
     
     # Which runs to fetch from
     run_hours = ArrayField(
@@ -60,7 +76,7 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
         *LoaderProfile.base_panels,
         MultiFieldPanel(
             [
-                FieldPanel("run_hours", widget=forms.CheckboxSelectMultiple(choices=RUN_HOUR_CHOICES)),
+                FieldPanel("run_hours"),
             ],
             heading="Model Runs",
         ),
