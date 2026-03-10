@@ -114,8 +114,6 @@ class Bucket:
         """
         if isinstance(content, bytes):
             content = ContentFile(content)
-        elif hasattr(content, "read"):
-            content = ContentFile(content.read())
         
         return self.storage.save(path, content)
     

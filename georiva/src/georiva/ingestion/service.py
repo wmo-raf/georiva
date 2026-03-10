@@ -850,8 +850,9 @@ class IngestionService:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp_path = Path(tmp.name)
         
-        with origin.open(file_path, "rb") as src:
-            tmp_path.write_bytes(src.read())
+        with origin.open(file_path, "rb") as src, open(tmp_path, "wb") as dst:
+            while chunk := src.read(8 * 1024 * 1024):  # 8 MB chunks
+                dst.write(chunk)
         
         return tmp_path
     
