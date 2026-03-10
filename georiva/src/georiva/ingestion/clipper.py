@@ -26,6 +26,7 @@ class BoundaryClipper:
         self.boundary = boundary
         self.apply_mask = apply_mask
         self._shapely_geom = None
+        self._mask_cache: dict = {}
         self._logger = logging.getLogger("georiva.ingestion.clipper")
     
     @property
@@ -141,18 +142,24 @@ class BoundaryClipper:
         if not self.shapely_geom:
             return np.ones((height, width), dtype=bool)
         
-        transform = from_bounds(*bounds, width, height)
+        cache_key = (bounds, width, height)
+        if cache_key not in self._mask_cache:
+            transform = from_bounds(*bounds, width, height)
+            
+            # geometry_mask returns True where geometry is NOT
+            # So we invert to get True where geometry IS
+            self._mask_cache[cache_key] = ~geometry_mask(
+                [self.shapely_geom],
+                out_shape=(height, width),
+                transform=transform,
+                invert=False
+            )
+            
+            self._logger.debug(
+                "Mask computed and cached for bounds=%s size=%dx%d", bounds, width, height
+            )
         
-        # geometry_mask returns True where geometry is NOT
-        # So we invert to get True where geometry IS
-        mask = ~geometry_mask(
-            [self.shapely_geom],
-            out_shape=(height, width),
-            transform=transform,
-            invert=False
-        )
-        
-        return mask
+        return self._mask_cache[cache_key]
     
     def apply_geometry_mask(
             self,
