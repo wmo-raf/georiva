@@ -195,6 +195,7 @@ AWS_S3_ADDRESSING_STYLE = env('AWS_S3_ADDRESSING_STYLE', default='path')
 MINIO_WEBHOOK_ARN = env('MINIO_WEBHOOK_ARN', default='arn:minio:sqs::primary:webhook')
 MINIO_WEBHOOK_BEARER_TOKEN = env('MINIO_WEBHOOK_BEARER_TOKEN', default=None)
 MINIO_PUBLIC_ENDPOINT = env.str("MINIO_PUBLIC_ENDPOINT", default="localhost:9000")
+MINIO_PUBLIC_ENDPOINT_USE_SSL = env.bool("MINIO_PUBLIC_ENDPOINT_USE_SSL", default=False)
 
 # =============================================================================
 # Bucket Configuration
@@ -215,7 +216,7 @@ GEORIVA_BUCKETS = {
         "overrides": {
             "custom_domain": f"{MINIO_PUBLIC_ENDPOINT}/georiva-assets",
             "querystring_auth": False,
-            "url_protocol": "http:",
+            "url_protocol": "https:" if MINIO_PUBLIC_ENDPOINT_USE_SSL else "http:",
         },
     },
 }
