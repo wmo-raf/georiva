@@ -17,6 +17,7 @@ from wagtail.models import Orderable
 from wagtail.snippets.models import register_snippet
 
 
+@register_snippet
 class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
     """
     A single spatiotemporal entry in a Collection.
@@ -150,6 +151,7 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         return self.assets.filter(roles__contains=['thumbnail']).first()
 
 
+@register_snippet
 class Asset(TimeStampedModel, Orderable):
     """
     A stored data file for a specific Variable within an Item.
