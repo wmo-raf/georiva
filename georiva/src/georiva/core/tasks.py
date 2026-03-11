@@ -11,7 +11,7 @@ from georiva.sources.models import LoaderProfile
 @app.on_after_finalize.connect
 def setup_network_plugin_processing_tasks(sender, **kwargs):
     from georiva.core.models import Collection
-    collections = Collection.objects.filter(loader_profile__isnull=False, is_loader_active=True)
+    collections = Collection.objects.filter(loader_profile__isnull=False)
     
     for collection in collections:
         create_or_update_collection_loader_plugin_periodic_tasks(collection)
@@ -26,10 +26,14 @@ def run_collection_loader(self, catalog_id):
     from georiva.core.models import Collection
     collection = Collection.objects.get(id=catalog_id)
     
-    if not collection.loader_profile or not collection.is_loader_active:
+    if not collection.loader_profile:
         return
     
     loader_profile = collection.loader_profile
+    
+    if not loader_profile.is_active:
+        return
+    
     loader = loader_profile.get_loader(collection)
     
     result = loader.run()
@@ -38,26 +42,27 @@ def run_collection_loader(self, catalog_id):
 
 
 def create_or_update_collection_loader_plugin_periodic_tasks(collection):
-    is_loader_active = collection.is_loader_active
     sig = run_collection_loader.s(collection.slug)
     name = repr(sig)
     
     options = {
         'task': sig.name,
-        'enabled': is_loader_active,
+        'enabled': False,
         'args': json.dumps([collection.id]),
         'interval': None,
     }
     
     loader_profile = collection.loader_profile
-    if loader_profile and is_loader_active:
+    
+    if loader_profile:
         schedule, _ = IntervalSchedule.objects.get_or_create(
             every=loader_profile.interval_minutes,
             period=IntervalSchedule.MINUTES,
         )
         options['interval'] = schedule
-    else:
-        options['enabled'] = False
+        
+        if loader_profile.is_active:
+            options['enabled'] = True
     
     if options.get("interval"):
         # Create or update the periodic task
@@ -66,10 +71,11 @@ def create_or_update_collection_loader_plugin_periodic_tasks(collection):
 
 def update_collection_loader_plugin_periodic_task(sender, instance, **kwargs):
     if isinstance(instance, Collection):
-        collection = instance
+        collections = [instance]
     elif isinstance(instance, LoaderProfile):
-        collection = instance.collection
+        collections = instance.collection_set.all()
     else:
         return
     
-    create_or_update_collection_loader_plugin_periodic_tasks(collection)
+    for collection in collections:
+        create_or_update_collection_loader_plugin_periodic_tasks(collection)

@@ -511,7 +511,11 @@ class IngestionService:
                 assets.extend(variable_assets)
             
             except Exception as e:
-                self.logger.error("Variable %s failed: %s", variable.slug, e)
+                import traceback
+                self.logger.error(
+                    "Variable %s failed: %s\n%s",
+                    variable.slug, e, traceback.format_exc(),
+                )
         
         self._update_collection_extent(collection, ts_utc, bounds)
         

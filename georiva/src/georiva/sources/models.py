@@ -189,6 +189,15 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         if self.viewset:
             return reverse(self.viewset.get_url_name("delete"), kwargs={"pk": self.pk})
         return None
+    
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        
+        from georiva.core.tasks import update_collection_loader_plugin_periodic_task
+        
+        update_collection_loader_plugin_periodic_task(
+            sender=self.__class__, instance=self, created=False
+        )
 
 
 class LoaderRun(TimeStampedModel):

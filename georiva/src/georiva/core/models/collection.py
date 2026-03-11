@@ -69,7 +69,6 @@ class Collection(TimeStampedModel, ClusterableModel):
         on_delete=models.SET_NULL,
         help_text="Loader profile to use for ingesting data for this catalog",
     )
-    is_loader_active = models.BooleanField(default=True, help_text="Loader active status")
     
     class Meta:
         unique_together = ['catalog', 'slug']
@@ -92,7 +91,6 @@ class Collection(TimeStampedModel, ClusterableModel):
         ], heading="Extent"),
         MultiFieldPanel([
             FieldPanel('loader_profile'),
-            FieldPanel('is_loader_active'),
         ], heading="Ingestion"),
         MultiFieldPanel([
             FieldPanel('is_active'),
