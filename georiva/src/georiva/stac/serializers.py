@@ -22,6 +22,16 @@ from typing import Optional
 
 from rest_framework import serializers
 
+from georiva.core.utils import get_base_stac_api_url
+
+
+class STACBaseURLMixin:
+    """Mixin to provide base URL from request context."""
+    
+    def _get_base_url(self):
+        request = self.context.get('request')
+        return get_base_stac_api_url(request)
+
 
 class STACLinkSerializer(serializers.Serializer):
     """STAC Link object."""
@@ -85,7 +95,7 @@ class STACAssetSerializer(serializers.Serializer):
 # Item Serializer
 # =============================================================================
 
-class STACItemSerializer(serializers.Serializer):
+class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
     """
     Serializes GeoRiva Item to STAC Item format.
 
@@ -103,10 +113,6 @@ class STACItemSerializer(serializers.Serializer):
     links = serializers.SerializerMethodField()
     assets = serializers.SerializerMethodField()
     collection = serializers.SerializerMethodField()
-    
-    def _get_base_url(self):
-        request = self.context.get('request')
-        return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def _get_variable(self):
         return self.context.get('variable')
@@ -241,7 +247,7 @@ class STACItemSerializer(serializers.Serializer):
 # Variable as STAC Collection
 # =============================================================================
 
-class STACVariableCollectionSerializer(serializers.Serializer):
+class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin):
     """
     Serializes a GeoRiva (Collection, Variable) pair as a STAC Collection.
 
@@ -265,10 +271,6 @@ class STACVariableCollectionSerializer(serializers.Serializer):
     providers = serializers.SerializerMethodField()
     keywords = serializers.SerializerMethodField()
     item_assets = serializers.SerializerMethodField()
-    
-    def _get_base_url(self):
-        request = self.context.get('request')
-        return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def get_type(self, obj):
         return "Collection"
@@ -415,7 +417,7 @@ class STACVariableCollectionSerializer(serializers.Serializer):
 # Catalog as STAC Collection (top-level)
 # =============================================================================
 
-class STACCatalogAsCollectionSerializer(serializers.Serializer):
+class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin):
     """
     Serializes GeoRiva Catalog as a STAC Collection.
 
@@ -434,10 +436,6 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer):
     links = serializers.SerializerMethodField()
     providers = serializers.SerializerMethodField()
     keywords = serializers.SerializerMethodField()
-    
-    def _get_base_url(self):
-        request = self.context.get('request')
-        return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def get_type(self, obj):
         return "Collection"
@@ -553,7 +551,7 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer):
 # Root Catalog
 # =============================================================================
 
-class STACRootCatalogSerializer(serializers.Serializer):
+class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
     """Root STAC Catalog — landing page."""
     
     type = serializers.SerializerMethodField()
@@ -563,10 +561,6 @@ class STACRootCatalogSerializer(serializers.Serializer):
     description = serializers.SerializerMethodField()
     conformsTo = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
-    
-    def _get_base_url(self):
-        request = self.context.get('request')
-        return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def get_type(self, obj):
         return "Catalog"
@@ -638,16 +632,12 @@ class STACRootCatalogSerializer(serializers.Serializer):
 # List serializers
 # =============================================================================
 
-class STACCatalogListSerializer(serializers.Serializer):
+class STACCatalogListSerializer(serializers.Serializer, STACBaseURLMixin):
     """
     List of Catalogs (as Collections) — response for /collections/.
     """
     collections = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
-    
-    def _get_base_url(self):
-        request = self.context.get('request')
-        return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def get_collections(self, obj):
         catalogs = obj.get('catalogs', [])
@@ -665,17 +655,13 @@ class STACCatalogListSerializer(serializers.Serializer):
         ]
 
 
-class STACVariableCollectionListSerializer(serializers.Serializer):
+class STACVariableCollectionListSerializer(serializers.Serializer, STACBaseURLMixin):
     """
     List of variable collections within a Catalog.
     Response for /collections/{catalog}/collections/.
     """
     collections = serializers.SerializerMethodField()
     links = serializers.SerializerMethodField()
-    
-    def _get_base_url(self):
-        request = self.context.get('request')
-        return request.build_absolute_uri('/api/stac/') if request else '/api/stac/'
     
     def get_collections(self, obj):
         variables = obj.get('variables', [])
