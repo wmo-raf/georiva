@@ -142,7 +142,8 @@ class BoundaryClipper:
         if not self.shapely_geom:
             return np.ones((height, width), dtype=bool)
         
-        cache_key = (bounds, width, height)
+        cache_key = (tuple(bounds), width, height)
+        
         if cache_key not in self._mask_cache:
             transform = from_bounds(*bounds, width, height)
             

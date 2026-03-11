@@ -1,5 +1,6 @@
 import logging
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -206,63 +207,63 @@ class IngestionService:
                 self.logger.info("Clipping enabled: %s", catalog.boundary)
             
             # 5. Download from origin bucket to local temp (once for all collections)
-            local_path = self._download_to_temp(origin, file_path)
-            
             try:
-                # 6. Process each collection × timestamp
-                for collection in collections:
-                    # 7. Get timestamps scoped to the first variable of the collection
-                    first_variable_name = self._get_first_variable_name(collection)
-                    if not first_variable_name:
-                        result.add_error(
-                            f"No active variables found in collection for: {collection.slug}"
-                        )
-                        continue
-                    
-                    timestamps = plugin.get_timestamps(local_path, first_variable_name)
-                    
-                    if not timestamps:
-                        result.add_error(f"No timestamps found in: {file_path}")
-                        continue
-                    
-                    self.logger.info("Found %d timestamps", len(timestamps))
-                    
-                    result.collection_slug = collection.slug
-                    
-                    for ts in timestamps:
-                        try:
-                            item, assets, clip_info = self._process_timestamp(
-                                collection=collection,
-                                plugin=plugin,
-                                local_path=local_path,
-                                timestamp=ts,
-                                source_file=f"{origin_bucket}:{file_path}",
-                                clipper=clipper,
-                                reference_time=reference_time,
-                            )
-                            result.items_created.append(str(item.pk))
-                            result.assets_created.extend(
-                                [str(a.pk) for a in assets]
-                            )
-                            
-                            if clip_info and result.original_size is None:
-                                result.original_size = clip_info.get(
-                                    "original_size"
-                                )
-                                result.clipped_size = clip_info.get(
-                                    "clipped_size"
-                                )
-                        
-                        except Exception as e:
+                with self._download_to_temp(origin, file_path) as local_path:
+                    # 6. Process each collection × timestamp
+                    for collection in collections:
+                        # 7. Get timestamps scoped to the first variable of the collection
+                        first_variable_name = self._get_first_variable_name(collection)
+                        if not first_variable_name:
                             result.add_error(
-                                f"Failed {collection.slug} @ {ts}: {e}"
+                                f"No active variables found in collection for: {collection.slug}"
                             )
-                
-                result.success = len(result.items_created) > 0
-            
+                            continue
+                        
+                        timestamps = plugin.get_timestamps(local_path, first_variable_name)
+                        
+                        if not timestamps:
+                            result.add_error(f"No timestamps found in: {file_path}")
+                            continue
+                        
+                        self.logger.info("Found %d timestamps", len(timestamps))
+                        
+                        result.collection_slug = collection.slug
+                        
+                        for ts in timestamps:
+                            try:
+                                item, assets, clip_info = self._process_timestamp(
+                                    collection=collection,
+                                    plugin=plugin,
+                                    local_path=local_path,
+                                    timestamp=ts,
+                                    source_file=f"{origin_bucket}:{file_path}",
+                                    clipper=clipper,
+                                    reference_time=reference_time,
+                                )
+                                
+                                if item is None:
+                                    continue  # no assets, item was deleted, skip
+                                
+                                result.items_created.append(str(item.pk))
+                                result.assets_created.extend(
+                                    [str(a.pk) for a in assets]
+                                )
+                                
+                                if clip_info and result.original_size is None:
+                                    result.original_size = clip_info.get(
+                                        "original_size"
+                                    )
+                                    result.clipped_size = clip_info.get(
+                                        "clipped_size"
+                                    )
+                            
+                            except Exception as e:
+                                result.add_error(
+                                    f"Failed {collection.slug} @ {ts}: {e}"
+                                )
+                    
+                    result.success = len(result.items_created) > 0
             finally:
-                self._cleanup_temp(local_path)
-                
                 # Release cached datasets now that we're done with this file.
                 if hasattr(plugin, "clear_cache"):
                     plugin.clear_cache()
@@ -372,7 +373,7 @@ class IngestionService:
             source_file: str,
             clipper: BoundaryClipper,
             reference_time: datetime = None,
-    ) -> tuple["Item", list["Asset"], dict]:
+    ) -> tuple[Optional["Item"], list["Asset"], dict]:
         """
         Process all Variables for a single timestamp.
 
@@ -409,6 +410,7 @@ class IngestionService:
             "original_size": (src_width, src_height),
             "clipped_size": None,
         }
+        
         clip_window = None
         
         if clipper.is_active:
@@ -416,6 +418,7 @@ class IngestionService:
                 clip_window = clipper.compute_window(
                     src_bounds, src_width, src_height
                 )
+                
                 if clip_window:
                     width = clip_window["width"]
                     height = clip_window["height"]
@@ -518,6 +521,13 @@ class IngestionService:
                 )
         
         self._update_collection_extent(collection, ts_utc, bounds)
+        
+        if not assets:
+            self.logger.warning(
+                "No assets created for Item %s — deleting orphan item", item.pk
+            )
+            item.delete()
+            return None, [], clip_info
         
         if created:
             Collection.objects.filter(pk=collection.pk).update(
@@ -849,24 +859,19 @@ class IngestionService:
         except Exception:
             return None
     
-    def _download_to_temp(self, origin: Bucket, file_path: str) -> Path:
-        """Download file from an origin bucket to local temp."""
-        suffix = Path(file_path).suffix
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp_path = Path(tmp.name)
+    @contextmanager
+    def _download_to_temp(self, origin: Bucket, file_path: str):
+        """Download file from an origin bucket to local temp, auto-cleaned on exit."""
+        original_name = Path(file_path).name
         
-        with origin.open(file_path, "rb") as src, open(tmp_path, "wb") as dst:
-            while chunk := src.read(8 * 1024 * 1024):  # 8 MB chunks
-                dst.write(chunk)
-        
-        return tmp_path
-    
-    def _cleanup_temp(self, path: Path):
-        """Remove temp file."""
-        try:
-            path.unlink(missing_ok=True)
-        except Exception as e:
-            self.logger.warning("Temp cleanup failed: %s - %s", path, e)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / original_name
+            
+            with origin.open(file_path, "rb") as src, open(tmp_path, "wb") as dst:
+                while chunk := src.read(8 * 1024 * 1024):  # 8 MB chunks
+                    dst.write(chunk)
+            
+            yield tmp_path
     
     def _archive_source(self, origin: Bucket, file_path: str) -> Optional[str]:
         """

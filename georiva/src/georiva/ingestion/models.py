@@ -21,8 +21,10 @@ from datetime import timedelta
 
 from django.db import models
 from django.utils import timezone
+from wagtail.snippets.models import register_snippet
 
 
+@register_snippet
 class IngestionLog(models.Model):
     """Tracks processing state for every file entering GeoRiva storage."""
     
