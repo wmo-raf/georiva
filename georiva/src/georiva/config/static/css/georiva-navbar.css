@@ -1,0 +1,144 @@
+/* ==========================================================================
+   Navbar
+   Dark, sticky, glassmorphism blur on scroll.
+   ========================================================================== */
+
+.gr-navbar {
+    position: sticky;
+    top: 0;
+    z-index: 200;
+    height: 58px;
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    padding: 0 2rem;
+    background: rgba(8, 13, 24, 0.94);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-bottom: 1px solid var(--gr-dark-border);
+}
+
+/* Brand */
+.gr-navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.gr-app-logo {
+    height: 30px;
+    width: auto;
+    color: var(--gr-light);
+}
+
+.gr-app-logo svg {
+    height: 100%;
+    width: 100%;
+}
+
+.gr-navbar-logo {
+    height: 30px;
+    width: auto;
+}
+
+.gr-navbar-wordmark {
+    display: flex;
+    flex-direction: column;
+    line-height: 1;
+}
+
+.gr-navbar-site-name {
+    font-family: var(--gr-font-display);
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--gr-dark-text-1);
+    letter-spacing: -0.01em;
+}
+
+.gr-navbar-org {
+    font-family: var(--gr-font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gr-dark-text-3);
+    margin-top: 3px;
+}
+
+/* Menu items */
+.gr-navbar-menu {
+    display: flex;
+    align-items: center;
+    gap: 0.125rem;
+}
+
+.gr-navbar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--gr-radius);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--gr-dark-text-2);
+    text-decoration: none;
+    transition: all var(--gr-dur) var(--gr-ease);
+    white-space: nowrap;
+}
+
+.gr-navbar-item i {
+    font-size: 0.82rem;
+    opacity: 0.65;
+}
+
+.gr-navbar-item:hover {
+    color: var(--gr-dark-text-1);
+    background: var(--gr-dark-2);
+}
+
+.gr-navbar-item.is-active {
+    color: var(--gr-accent);
+    background: var(--gr-accent-dim);
+}
+
+/* API badge link */
+.gr-nav-api {
+    font-family: var(--gr-font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--gr-accent-border);
+    border-radius: 4px;
+    color: var(--gr-accent);
+    transition: all var(--gr-dur) var(--gr-ease);
+}
+
+.gr-nav-api:hover {
+    background: var(--gr-accent-dim);
+    color: var(--gr-accent);
+}
+
+/* Mobile burger */
+.gr-navbar-burger {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 4px;
+}
+
+.gr-navbar-burger span {
+    display: block;
+    width: 20px;
+    height: 1.5px;
+    background: var(--gr-dark-text-2);
+    border-radius: 2px;
+    transition: all var(--gr-dur) var(--gr-ease);
+}

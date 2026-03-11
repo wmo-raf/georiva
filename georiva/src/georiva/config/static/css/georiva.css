@@ -1,0 +1,381 @@
+/* ==========================================================================
+   GeoRiva Design System — Core
+   Loaded only in base.html.
+
+   @import order matters — tokens must come first.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@300;400;500&display=swap');
+
+@import 'georiva-navbar.css';
+@import 'georiva-footer.css';
+
+/* ==========================================================================
+   Design Tokens
+   Overridden per-deployment via GeoRivaSettings accent_color in base.html.
+   ========================================================================== */
+:root {
+    /* Brand */
+    --gr-accent: #00c9b1;
+    --gr-accent-dark: #00a896;
+    --gr-accent-dim: rgba(0, 201, 177, 0.10);
+    --gr-accent-border: rgba(0, 201, 177, 0.28);
+    --gr-accent-glow: 0 0 28px rgba(0, 201, 177, 0.15);
+
+    /* Dark surfaces — navbar, hero, stats bar, footer */
+    --gr-dark: #080d18;
+    --gr-dark-1: #0d1425;
+    --gr-dark-2: #131c32;
+    --gr-dark-3: #1a2540;
+    --gr-dark-border: rgba(255, 255, 255, 0.07);
+    --gr-dark-border-2: rgba(255, 255, 255, 0.11);
+
+    /* Light surfaces — content sections */
+    --gr-light: #ffffff;
+    --gr-light-1: #f7f9fc;
+    --gr-light-2: #eef2f7;
+    --gr-light-border: #e2e8f0;
+    --gr-light-border-2: #cbd5e1;
+
+    /* Text on dark */
+    --gr-dark-text-1: #edf2fa;
+    --gr-dark-text-2: #8a9bbf;
+    --gr-dark-text-3: #45536e;
+
+    /* Text on light */
+    --gr-text-1: #0f172a;
+    --gr-text-2: #475569;
+    --gr-text-3: #94a3b8;
+
+    /* Typography */
+    --gr-font-sans: 'DM Sans', system-ui, sans-serif;
+    --gr-font-mono: 'DM Mono', monospace;
+    --gr-font-display: 'Space Mono', monospace;
+
+    /* Shape */
+    --gr-radius: 6px;
+    --gr-radius-lg: 12px;
+
+    /* Motion */
+    --gr-ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --gr-dur: 180ms;
+}
+
+/* ==========================================================================
+   Reset & Base
+   ========================================================================== */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--gr-font-sans);
+    background: var(--gr-light);
+    color: var(--gr-text-1);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: var(--gr-accent-dark);
+    text-decoration: none;
+    transition: color var(--gr-dur) var(--gr-ease);
+}
+
+a:hover {
+    color: var(--gr-accent);
+}
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+.gr-container {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 2rem;
+}
+
+/* ==========================================================================
+   Typography helpers
+   ========================================================================== */
+.gr-label {
+    font-family: var(--gr-font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.gr-mono {
+    font-family: var(--gr-font-mono);
+}
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+.gr-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.2rem;
+    border-radius: var(--gr-radius);
+    font-family: var(--gr-font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid transparent;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all var(--gr-dur) var(--gr-ease);
+    line-height: 1.2;
+}
+
+/* Filled accent — used on dark surfaces */
+.gr-btn-primary {
+    background: var(--gr-accent);
+    color: var(--gr-dark);
+    border-color: var(--gr-accent);
+}
+
+.gr-btn-primary:hover {
+    background: var(--gr-accent-dark);
+    border-color: var(--gr-accent-dark);
+    color: var(--gr-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(0, 201, 177, 0.25);
+}
+
+/* Ghost — used on dark surfaces (hero, navbar) */
+.gr-btn-ghost-dark {
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--gr-dark-text-2);
+    border-color: var(--gr-dark-border-2);
+}
+
+.gr-btn-ghost-dark:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--gr-dark-text-1);
+    border-color: var(--gr-dark-border-2);
+}
+
+/* Outline — used on light surfaces */
+.gr-btn-outline {
+    background: transparent;
+    color: var(--gr-accent-dark);
+    border-color: var(--gr-accent-border);
+}
+
+.gr-btn-outline:hover {
+    background: var(--gr-accent-dim);
+    color: var(--gr-accent-dark);
+}
+
+/* ==========================================================================
+   Section structure
+   ========================================================================== */
+.gr-section {
+    padding: 5rem 0;
+    background: var(--gr-light);
+}
+
+.gr-section--alt {
+    background: var(--gr-light-1);
+}
+
+.gr-section--dark {
+    background: var(--gr-dark-1);
+}
+
+.gr-section-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 2.75rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--gr-light-border);
+}
+
+.gr-section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--gr-text-1);
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    line-height: 1;
+}
+
+.gr-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 1.2em;
+    background: var(--gr-accent);
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.gr-section-action {
+    font-family: var(--gr-font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    color: var(--gr-text-3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-section-action:hover {
+    color: var(--gr-accent);
+}
+
+/* ==========================================================================
+   Page load animations
+   ========================================================================== */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.gr-animate {
+    animation: fadeInUp 0.5s var(--gr-ease) both;
+}
+
+.gr-animate-1 {
+    animation-delay: 0.04s;
+}
+
+.gr-animate-2 {
+    animation-delay: 0.12s;
+}
+
+.gr-animate-3 {
+    animation-delay: 0.20s;
+}
+
+.gr-animate-4 {
+    animation-delay: 0.28s;
+}
+
+.gr-animate-5 {
+    animation-delay: 0.36s;
+}
+
+/* ==========================================================================
+   Responsive — cross-component breakpoints
+   Component-specific breakpoints live in their own files.
+   ========================================================================== */
+@media (max-width: 900px) {
+    .gr-datasets-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .gr-sidebar {
+        position: static;
+    }
+
+    .gr-footer-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .gr-navbar-menu {
+        display: none;
+    }
+
+    .gr-navbar-menu.is-open {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        width: 100%;
+        padding: 0.75rem 0 0.25rem;
+        border-top: 1px solid var(--gr-dark-border);
+        margin-top: 0.5rem;
+        gap: 0;
+    }
+
+    .gr-navbar-burger {
+        display: flex;
+    }
+
+    .gr-navbar {
+        flex-wrap: wrap;
+        height: auto;
+        padding: 0.75rem 1.25rem;
+    }
+
+    .gr-hero {
+        min-height: auto;
+        padding: 4rem 0 3rem;
+    }
+
+    .gr-hero-radar {
+        display: none;
+    }
+
+    .gr-hero-heading {
+        font-size: 2rem;
+    }
+
+    .gr-stats-grid {
+        gap: 0;
+    }
+
+    .gr-stat-item {
+        padding: 0.4rem 1.25rem;
+    }
+
+    .gr-stat-item + .gr-stat-item::before {
+        display: none;
+    }
+
+    .gr-catalog-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .gr-entry-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .gr-footer-grid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+
+    .gr-dataset-thumb {
+        width: 100px;
+    }
+}
+
+@media (max-width: 480px) {
+    .gr-entry-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .gr-hero-ctas {
+        flex-direction: column;
+    }
+
+    .gr-stats-grid {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .gr-dataset-thumb {
+        display: none;
+    }
+}

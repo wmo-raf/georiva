@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "django_vue_utilities",
     "wagtailiconchooser",
     "wagtailfontawesomesvg",
+    "wagtail_color_panel",
     
     "georiva.home",
     "georiva.core",

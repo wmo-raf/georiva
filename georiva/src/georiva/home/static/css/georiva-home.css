@@ -1,0 +1,768 @@
+/* ==========================================================================
+   Hero
+   ========================================================================== */
+
+/* Hero shell */
+.gr-hero {
+    position: relative;
+    min-height: 580px;
+    display: flex;
+    align-items: center;
+    padding: 6rem 0 5rem;
+    overflow: hidden;
+    isolation: isolate;
+    background-color: #0a1428;
+    background-image: var(--hero-bg, none);
+    background-size: cover;
+    background-position: center 40%;
+}
+
+/* Multi-layer overlay: heavy left (text legibility), fades right (reveals image) */
+.gr-hero-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(
+            100deg,
+            rgba(8, 13, 24, 0.95) 0%,
+            rgba(8, 13, 24, 0.82) 40%,
+            rgba(8, 13, 24, 0.45) 65%,
+            rgba(8, 13, 24, 0.20) 100%
+    ),
+    linear-gradient(to bottom, transparent 60%, rgba(8, 13, 24, 0.75) 100%);
+}
+
+/* CSS gradient fallback — used when no hero image is set */
+.gr-hero--gradient {
+    background-image: radial-gradient(ellipse 110% 90% at 75% 45%, #0d2544 0%, #080d18 65%),
+    radial-gradient(ellipse 50% 60% at 10% 90%, rgba(0, 201, 177, 0.05) 0%, transparent 60%);
+}
+
+.gr-hero--gradient .gr-hero-overlay {
+    background: radial-gradient(ellipse 70% 60% at 75% 40%, rgba(0, 80, 120, 0.3) 0%, transparent 60%),
+    linear-gradient(160deg, rgba(8, 13, 24, 0) 0%, rgba(8, 13, 24, 0.2) 100%);
+}
+
+/* Animated radar SVG — right-side decorative element */
+.gr-hero-radar {
+    position: absolute;
+    right: -4%;
+    top: 50%;
+    transform: translateY(-50%);
+    width: min(580px, 55vw);
+    height: min(580px, 55vw);
+    color: var(--gr-accent);
+    opacity: 0.1;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.gr-radar-sweep,
+.gr-radar-sweep-fade {
+    transform-origin: 350px 350px;
+    animation: radar-sweep 7s linear infinite;
+    transform-box: fill-box;
+}
+
+@keyframes radar-sweep {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Content — LEFT aligned, constrained width */
+.gr-hero .gr-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    position: relative;
+    z-index: 3;
+    width: 100%;
+}
+
+.gr-hero-content {
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    max-width: 580px;
+    margin-left: 0;
+    margin-right: auto;
+    text-align: left;
+}
+
+/* Eyebrow label above heading */
+.gr-hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--gr-font-mono);
+    font-size: 0.67rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gr-accent);
+    margin-bottom: 1.25rem;
+}
+
+.gr-hero-eyebrow::before {
+    content: '';
+    display: block;
+    width: 18px;
+    height: 1px;
+    background: var(--gr-accent);
+    flex-shrink: 0;
+}
+
+/* Heading */
+.gr-hero-heading {
+    font-family: var(--gr-font-display);
+    font-size: clamp(2rem, 4.2vw, 3.4rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    color: var(--gr-dark-text-1);
+    margin-bottom: 1.25rem;
+}
+
+.gr-hero-heading-accent {
+    color: var(--gr-accent);
+    display: block;
+}
+
+/* Subheading */
+.gr-hero-subheading {
+    font-size: 1rem;
+    font-weight: 300;
+    color: var(--gr-dark-text-2);
+    line-height: 1.72;
+    max-width: 480px;
+    margin-bottom: 2.25rem;
+}
+
+/* Search bar — dark glass style */
+.gr-search-bar {
+    display: flex;
+    align-items: center;
+    max-width: 480px;
+    background: rgba(13, 20, 37, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--gr-dark-border-2);
+    border-radius: var(--gr-radius);
+    overflow: hidden;
+    transition: border-color var(--gr-dur) var(--gr-ease), box-shadow var(--gr-dur) var(--gr-ease);
+    margin-bottom: 0.6rem;
+}
+
+.gr-search-bar:focus-within {
+    border-color: var(--gr-accent-border);
+    box-shadow: var(--gr-accent-glow);
+}
+
+.gr-search-icon {
+    padding: 0 0 0 1rem;
+    color: var(--gr-dark-text-3);
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.gr-search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0.8rem 0.75rem;
+    color: var(--gr-dark-text-1);
+    font-family: var(--gr-font-sans);
+    font-size: 0.9rem;
+    min-width: 0;
+}
+
+.gr-search-input::placeholder {
+    color: var(--gr-dark-text-3);
+}
+
+.gr-search-btn {
+    flex-shrink: 0;
+    background: var(--gr-accent);
+    border: none;
+    padding: 0.8rem 1.2rem;
+    color: var(--gr-dark);
+    font-family: var(--gr-font-sans);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--gr-dur) var(--gr-ease);
+}
+
+.gr-search-btn:hover {
+    background: var(--gr-accent-dark);
+}
+
+/* CTA buttons row */
+.gr-hero-ctas {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1.75rem;
+}
+
+/* Bottom fade — dissolves dark hero into the stats bar */
+.gr-hero-fade-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 120px;
+    background: linear-gradient(to bottom, transparent, #080d18);
+    z-index: 2;
+    pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   Stats Bar
+   -------------------------------------------------------------------------- */
+.gr-stats-bar {
+    background: var(--gr-dark-1);
+    border-bottom: 1px solid var(--gr-dark-border);
+    padding: 1.25rem 0;
+}
+
+.gr-stats-grid {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.gr-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.4rem 2.75rem;
+    position: relative;
+}
+
+.gr-stat-item + .gr-stat-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 15%;
+    height: 70%;
+    width: 1px;
+    background: var(--gr-dark-border);
+}
+
+.gr-stat-value {
+    font-family: var(--gr-font-display);
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--gr-accent);
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+
+.gr-stat-label {
+    font-family: var(--gr-font-mono);
+    font-size: 0.61rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gr-dark-text-3);
+    margin-top: 0.3rem;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.35;
+    }
+}
+
+.gr-stat-value.is-loading {
+    color: var(--gr-dark-text-3);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* --------------------------------------------------------------------------
+   Entry Point Cards
+   -------------------------------------------------------------------------- */
+.gr-entry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.25rem;
+}
+
+.gr-entry-card {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    padding: 1.75rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--gr-dur) var(--gr-ease);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.gr-entry-card:hover {
+    border-color: var(--gr-accent-border);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), var(--gr-accent-glow);
+    color: inherit;
+}
+
+.gr-entry-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--gr-radius);
+    background: var(--gr-accent-dim);
+    border: 1px solid var(--gr-accent-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+    color: var(--gr-accent-dark);
+}
+
+.gr-entry-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+}
+
+.gr-entry-desc {
+    font-size: 0.8rem;
+    color: var(--gr-text-2);
+    line-height: 1.55;
+}
+
+/* --------------------------------------------------------------------------
+   Featured Catalog Cards
+   -------------------------------------------------------------------------- */
+.gr-catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+    gap: 1.5rem;
+}
+
+.gr-catalog-card {
+    position: relative;
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--gr-dur) var(--gr-ease);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+/* Accent bar that animates in on hover */
+.gr-catalog-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 1.5rem;
+    right: 1.5rem;
+    height: 2px;
+    background: var(--gr-accent);
+    border-radius: 0 0 2px 2px;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform var(--gr-dur) var(--gr-ease);
+}
+
+.gr-catalog-card:hover {
+    border-color: var(--gr-accent-border);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.09), var(--gr-accent-glow);
+    color: inherit;
+}
+
+.gr-catalog-card:hover::before {
+    transform: scaleX(1);
+}
+
+.gr-catalog-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.gr-catalog-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--gr-radius);
+    background: var(--gr-accent-dim);
+    border: 1px solid var(--gr-accent-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.05rem;
+    color: var(--gr-accent-dark);
+    flex-shrink: 0;
+}
+
+.gr-format-badge {
+    font-family: var(--gr-font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    background: var(--gr-light-1);
+    color: var(--gr-text-3);
+    border: 1px solid var(--gr-light-border);
+}
+
+.gr-catalog-name {
+    font-size: 0.975rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+    line-height: 1.3;
+}
+
+.gr-catalog-provider {
+    font-family: var(--gr-font-mono);
+    font-size: 0.7rem;
+    color: var(--gr-text-3);
+    margin-top: 0.2rem;
+}
+
+.gr-catalog-desc {
+    font-size: 0.83rem;
+    color: var(--gr-text-2);
+    line-height: 1.6;
+    flex: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.gr-catalog-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--gr-light-border);
+    flex-wrap: wrap;
+}
+
+.gr-catalog-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--gr-font-mono);
+    font-size: 0.7rem;
+    color: var(--gr-text-3);
+}
+
+
+/* ==========================================================================
+   Datasets List Section
+   ========================================================================== */
+
+/* Section wrapper */
+.gr-datasets-section {
+    background: var(--gr-light-1);
+    border-top: 1px solid var(--gr-light-border);
+    padding: 5rem 0;
+}
+
+/* Two-column layout: sidebar | results */
+.gr-datasets-layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 2.5rem;
+    align-items: start;
+}
+
+/* --------------------------------------------------------------------------
+   Sidebar
+   -------------------------------------------------------------------------- */
+.gr-sidebar {
+    position: sticky;
+    top: 78px; /* clear the 58px navbar + 20px breathing room */
+}
+
+/* Search input */
+.gr-sidebar-search {
+    display: flex;
+    align-items: center;
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border-2);
+    border-radius: var(--gr-radius);
+    overflow: hidden;
+    margin-bottom: 1rem;
+    transition: border-color var(--gr-dur) var(--gr-ease), box-shadow var(--gr-dur) var(--gr-ease);
+}
+
+.gr-sidebar-search:focus-within {
+    border-color: var(--gr-accent-border);
+    box-shadow: 0 0 0 3px var(--gr-accent-dim);
+}
+
+.gr-sidebar-search-icon {
+    padding: 0 0 0 0.85rem;
+    color: var(--gr-text-3);
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.gr-sidebar-search input {
+    flex: 1;
+    border: none;
+    outline: none;
+    padding: 0.7rem 0.75rem;
+    font-family: var(--gr-font-sans);
+    font-size: 0.88rem;
+    color: var(--gr-text-1);
+    background: transparent;
+}
+
+.gr-sidebar-search input::placeholder {
+    color: var(--gr-text-3);
+}
+
+/* Filter accordion */
+.gr-sidebar-filter {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    overflow: hidden;
+    margin-bottom: 0.75rem;
+}
+
+.gr-sidebar-filter-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+    transition: background var(--gr-dur) var(--gr-ease);
+}
+
+.gr-sidebar-filter-header:hover {
+    background: var(--gr-light-1);
+}
+
+.gr-sidebar-filter-header i {
+    font-size: 0.75rem;
+    color: var(--gr-text-3);
+    transition: transform var(--gr-dur) var(--gr-ease);
+}
+
+.gr-sidebar-filter.is-open .gr-sidebar-filter-header i {
+    transform: rotate(180deg);
+}
+
+.gr-sidebar-filter-body {
+    border-top: 1px solid var(--gr-light-border);
+    padding: 0.5rem;
+    display: none;
+}
+
+.gr-sidebar-filter.is-open .gr-sidebar-filter-body {
+    display: block;
+}
+
+/* Filter option button */
+.gr-filter-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.83rem;
+    color: var(--gr-text-2);
+    transition: all var(--gr-dur) var(--gr-ease);
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.gr-filter-option:hover {
+    background: var(--gr-light-1);
+    color: var(--gr-text-1);
+}
+
+.gr-filter-option.is-active {
+    background: var(--gr-accent-dim);
+    color: var(--gr-accent-dark);
+    font-weight: 500;
+}
+
+.gr-filter-option-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--gr-light-border-2);
+    flex-shrink: 0;
+    transition: background var(--gr-dur) var(--gr-ease);
+}
+
+.gr-filter-option.is-active .gr-filter-option-dot {
+    background: var(--gr-accent);
+}
+
+/* --------------------------------------------------------------------------
+   Dataset result cards
+   -------------------------------------------------------------------------- */
+.gr-dataset-results {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.gr-dataset-card {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    display: flex;
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--gr-dur) var(--gr-ease);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.gr-dataset-card:hover {
+    border-color: var(--gr-accent-border);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08), var(--gr-accent-glow);
+    color: inherit;
+}
+
+/* Thumbnail — TiTiler preview or icon placeholder */
+.gr-dataset-thumb {
+    width: 140px;
+    min-height: 120px;
+    flex-shrink: 0;
+    background: var(--gr-light-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.gr-dataset-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.gr-dataset-thumb-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: var(--gr-text-3);
+    font-size: 1.75rem;
+    background: linear-gradient(135deg, var(--gr-light-2) 0%, var(--gr-light-1) 100%);
+}
+
+/* Card body */
+.gr-dataset-body {
+    flex: 1;
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.gr-dataset-catalog {
+    font-family: var(--gr-font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gr-accent-dark);
+}
+
+.gr-dataset-name {
+    font-size: 0.975rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+    line-height: 1.3;
+}
+
+.gr-dataset-desc {
+    font-size: 0.82rem;
+    color: var(--gr-text-2);
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    flex: 1;
+}
+
+.gr-dataset-tags {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-top: 0.3rem;
+}
+
+.gr-dataset-tag {
+    font-family: var(--gr-font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
+    padding: 0.18rem 0.5rem;
+    border-radius: 20px;
+    border: 1px solid var(--gr-light-border-2);
+    color: var(--gr-text-2);
+    background: var(--gr-light-1);
+}
+
+/* Active/inactive status dot */
+.gr-dataset-active-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--gr-accent);
+    box-shadow: 0 0 5px var(--gr-accent);
+    flex-shrink: 0;
+    display: inline-block;
+}
+
+.gr-dataset-active-dot.inactive {
+    background: var(--gr-text-3);
+    box-shadow: none;
+}
+
+/* Empty state */
+.gr-empty-state {
+    text-align: center;
+    padding: 5rem 2rem;
+    color: var(--gr-text-3);
+}
+
+.gr-empty-state i {
+    font-size: 2.5rem;
+    display: block;
+    margin-bottom: 1rem;
+    opacity: 0.3;
+}
+
+.gr-empty-state p {
+    font-size: 0.875rem;
+    color: var(--gr-text-2);
+}

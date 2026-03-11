@@ -1,0 +1,66 @@
+{% load wagtailsettings_tags static i18n %}
+{% get_settings use_default_site=True %}
+
+{% with s=settings.home.GeoRivaSettings %}
+    <section
+            class="gr-hero {% if hero_has_image %}gr-hero--image{% else %}gr-hero--gradient{% endif %}"
+            style="--hero-bg: url('{% if hero_has_image %}{{ hero_bg_url }}{% endif %}');"
+            aria-label="Hero section"
+    >
+        <div class="gr-hero-overlay"></div>
+
+        {# Radar SVG — decorative, right side #}
+        <svg class="gr-hero-radar" viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="350" cy="350" r="80" fill="none" stroke="currentColor" stroke-width="0.6"/>
+            <circle cx="350" cy="350" r="160" fill="none" stroke="currentColor" stroke-width="0.5"/>
+            <circle cx="350" cy="350" r="240" fill="none" stroke="currentColor" stroke-width="0.4"/>
+            <circle cx="350" cy="350" r="320" fill="none" stroke="currentColor" stroke-width="0.3"/>
+            <circle cx="350" cy="350" r="340" fill="none" stroke="currentColor" stroke-width="0.2"
+                    stroke-dasharray="4 8"/>
+            <line class="gr-radar-sweep" x1="350" y1="350" x2="350" y2="10"
+                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path class="gr-radar-sweep-fade" d="M350,350 L350,10 A340,340 0 0,1 500,130 Z"
+                  fill="currentColor" opacity="0.04"/>
+        </svg>
+
+        {# Left-aligned content #}
+        <div class="gr-container">
+            <div class="gr-hero-content">
+                {# Eyebrow #}
+                <p class="gr-hero-eyebrow gr-animate gr-animate-1">
+                    {% if s.org_name %}{{ s.org_name }}{% else %}Geospatial Data Platform{% endif %}
+                </p>
+
+                {# Heading #}
+                <h1 class="gr-hero-heading gr-animate gr-animate-2">
+                    {{ page.hero_heading|default:"Geospatial Data" }}
+                </h1>
+
+                {# Subheading #}
+                <p class="gr-hero-subheading gr-animate gr-animate-3">
+                    {% if page.hero_subheading %}
+                        {{ page.hero_subheading }}
+                    {% else %}
+                        Ingest, process, and serve gridded meteorological data through
+                        standards-compliant APIs
+                    {% endif %}
+                </p>
+
+                {# CTAs #}
+                <div class="gr-hero-ctas gr-animate gr-animate-4">
+                    <a href="#datasets" class="gr-btn gr-btn-primary">
+                        <i class="bi bi-layers-fill"></i> Browse Datasets
+                    </a>
+                    {% if s.map_viewer_url %}
+                        <a href="{{ s.map_viewer_url }}" class="gr-btn gr-btn-ghost-dark">
+                            <i class="bi bi-map"></i> Map Viewer
+                        </a>
+                    {% endif %}
+                </div>
+
+            </div>
+        </div>
+
+        <div class="gr-hero-fade-bottom"></div>
+    </section>
+{% endwith %}

@@ -1,0 +1,51 @@
+{% load wagtailsettings_tags %}
+{% get_settings use_default_site=True %}
+
+{% with s=settings.home.GeoRivaSettings %}
+    <section class="gr-section">
+        <div class="gr-container">
+            <div class="gr-section-header gr-animate">
+                <h2 class="gr-section-title">
+                    Explore
+                </h2>
+            </div>
+
+            <div class="gr-entry-grid">
+                {% if s.map_viewer_url %}
+                    <a href="{{ s.map_viewer_url }}" class="gr-entry-card gr-animate gr-animate-1">
+                        <div class="gr-entry-icon"><i class="bi bi-map-fill"></i></div>
+                        <div class="gr-entry-title">
+                            Map Viewer
+                        </div>
+                        <div class="gr-entry-desc">
+                            Visualize datasets on an interactive map with time controls and layer switching.
+                        </div>
+                    </a>
+                {% endif %}
+
+                {% if s.stac_browser_url %}
+                    <a href="{{ s.stac_browser_url }}" class="gr-entry-card gr-animate gr-animate-2">
+                        <div class="gr-entry-icon"><i class="bi bi-collection-fill"></i></div>
+                        <div class="gr-entry-title">
+                            STAC Browser
+                        </div>
+                        <div class="gr-entry-desc">
+                            Browse the full catalog tree, preview assets, and download data files.
+                        </div>
+                    </a>
+                {% endif %}
+
+                <a href="/api/stac/" target="_blank" rel="noopener" class="gr-entry-card gr-animate gr-animate-3">
+                    <div class="gr-entry-icon"><i class="bi bi-braces"></i></div>
+                    <div class="gr-entry-title">
+                        STAC API
+                    </div>
+                    <div class="gr-entry-desc">
+                        Machine-readable access to all datasets via a standards-compliant REST API.
+                    </div>
+                </a>
+            </div>
+
+        </div>
+    </section>
+{% endwith %}

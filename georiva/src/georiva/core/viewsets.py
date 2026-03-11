@@ -114,9 +114,11 @@ class ColorPaletteModelViewSet(ModelViewSet):
     exclude_form_fields = ["created_at", "updated_at"]
 
 
+CatalogChooserViewSetObject = CatalogChooserViewSet("catalog_chooser")
+
 admin_viewsets = [
     CatalogViewSet(),
-    CatalogChooserViewSet("catalog_chooser"),
+    CatalogChooserViewSetObject,
     CollectionViewSet(),
     ColorPaletteModelViewSet()
 ]

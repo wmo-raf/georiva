@@ -1,0 +1,65 @@
+{% load wagtailsettings_tags wagtailimages_tags static i18n %}
+{% get_settings use_default_site=True %}
+
+{% with s=settings.home.GeoRivaSettings %}
+    <footer class="gr-footer" role="contentinfo">
+        <div class="gr-container">
+
+            <div class="gr-footer-grid">
+                {# Brand column #}
+                <div>
+                    <div class="gr-footer-brand-name">{{ s.site_name|default:"GeoRiva" }}</div>
+                    {% if s.site_tagline %}
+                        <p class="gr-footer-tagline">{{ s.site_tagline }}</p>
+                    {% else %}
+                        <p class="gr-footer-tagline">
+                            Geospatial data infrastructure for gridded datasets
+                        </p>
+                    {% endif %}
+                </div>
+
+                {# Platform links #}
+                <div>
+                    <p class="gr-footer-col-title">Platform</p>
+                    <ul class="gr-footer-links">
+                        <li><a href="/">Home</a></li>
+                        <li><a href="/#datasets">Datasets</a></li>
+                        {% if s.map_viewer_url %}
+                            <li><a href="{{ s.map_viewer_url }}">Map Viewer</a></li>
+                        {% endif %}
+                        {% if s.stac_browser_url %}
+                            <li><a href="{{ s.stac_browser_url }}">STAC Browser</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+
+                {# Org / Contact column #}
+                <div>
+                    <p class="gr-footer-col-title">
+                        {% if s.org_name %}{{ s.org_name }}{% else %}Contact{% endif %}
+                    </p>
+                    <ul class="gr-footer-links">
+                        {% if s.org_website %}
+                            <li><a href="{{ s.org_website }}" target="_blank" rel="noopener">Official Website</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+
+            </div>
+
+            {# Bottom bar #}
+            <div class="gr-footer-bottom">
+            <span class="gr-footer-copy">
+                © {% now "Y" %}
+                {% if s.org_name %}{{ s.org_name }}{% else %}{{ s.site_name|default:"GeoRiva" }}{% endif %}
+                &nbsp;·&nbsp;
+                Powered by <a href="https://github.com/wmo-raf/georiva" target="_blank" rel="noopener">GeoRiva</a>
+            </span>
+                <span class="gr-api-status" id="gr-api-status">
+                <span class="gr-status-dot"></span>
+                API Online
+            </span>
+            </div>
+        </div>
+    </footer>
+{% endwith %}

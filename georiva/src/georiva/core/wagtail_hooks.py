@@ -19,7 +19,7 @@ def urlconf_georivacore():
 def register_catalogs_menu():
     list_url = reverse('catalog_index')
     label = _("Catalogs")
-    return MenuItem(label, list_url, icon_name='globe', order=100)
+    return MenuItem(label, list_url, icon_name='globe', order=400)
 
 
 @hooks.register("register_admin_viewset")
@@ -32,7 +32,7 @@ def register_viewset():
 
 @hooks.register('construct_main_menu')
 def hide_some_menus(request, menu_items):
-    hidden_menus = ["explorer", "documents", "images", "help", "snippets", "reports"]
+    hidden_menus = ["documents", "help", "snippets", "reports"]
     
     menu_items[:] = [item for item in menu_items if item.name not in hidden_menus]
 

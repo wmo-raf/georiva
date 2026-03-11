@@ -1,0 +1,134 @@
+/* ==========================================================================
+    Footer
+   ========================================================================== */
+
+.gr-footer {
+    background: var(--gr-dark-1);
+    border-top: 1px solid var(--gr-dark-border);
+    padding: 3.5rem 0 1.75rem;
+}
+
+/* Three-column grid: brand | platform links | org/contact */
+.gr-footer-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 3rem;
+    margin-bottom: 2.5rem;
+}
+
+/* Brand column */
+.gr-footer-name {
+    font-family: var(--gr-font-display);
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--gr-dark-text-1);
+    margin-bottom: 0.5rem;
+}
+
+.gr-footer-tagline {
+    font-size: 0.82rem;
+    color: var(--gr-dark-text-3);
+    line-height: 1.6;
+    max-width: 300px;
+    margin-bottom: 1rem;
+}
+
+/* Standards badges */
+.gr-footer-badges {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.gr-badge {
+    font-family: var(--gr-font-mono);
+    font-size: 0.57rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.45rem;
+    border-radius: 3px;
+    border: 1px solid;
+}
+
+
+/* Link columns */
+.gr-footer-col-title {
+    font-family: var(--gr-font-mono);
+    font-size: 0.61rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gr-dark-text-3);
+    margin-bottom: 0.9rem;
+}
+
+.gr-footer-links {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.gr-footer-links a {
+    font-size: 0.83rem;
+    color: var(--gr-dark-text-2);
+    transition: color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-footer-links a:hover {
+    color: var(--gr-accent);
+}
+
+/* Bottom bar */
+.gr-footer-bottom {
+    border-top: 1px solid var(--gr-dark-border);
+    padding-top: 1.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.gr-footer-copy {
+    font-family: var(--gr-font-mono);
+    font-size: 0.68rem;
+    color: var(--gr-dark-text-3);
+}
+
+.gr-footer-copy a {
+    color: var(--gr-dark-text-3);
+}
+
+.gr-footer-copy a:hover {
+    color: var(--gr-accent);
+}
+
+/* API status indicator */
+.gr-api-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--gr-font-mono);
+    font-size: 0.61rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gr-dark-text-3);
+}
+
+.gr-status-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--gr-accent);
+    box-shadow: 0 0 5px var(--gr-accent);
+    animation: status-blink 2.5s ease-in-out infinite;
+}
+
+@keyframes status-blink {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
+    }
+}

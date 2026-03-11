@@ -1,21 +1,28 @@
-{% extends "base.html" %}
-{% load static %}
+{% extends "georiva/base.html" %}
+{% load static wagtailcore_tags i18n %}
 
-{% block body_class %}template-homepage{% endblock %}
+{% block title %}{{ page.seo_title|default:page.title }}{% endblock %}
+{% block meta_description %}{{ page.search_description|default:page.hero_subheading }}{% endblock %}
 
 {% block extra_css %}
-
-{% comment %}
-Delete the line below if you're just getting started and want to remove the welcome screen!
-{% endcomment %}
-<link rel="stylesheet" href="{% static 'css/welcome_page.css' %}">
-{% endblock extra_css %}
+    <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
+{% endblock %}
 
 {% block content %}
 
-{% comment %}
-Delete the line below if you're just getting started and want to remove the welcome screen!
-{% endcomment %}
-{% include 'home/welcome_page.html' %}
+    {# 1. Hero #}
+    {% include "home/sections/hero.html" %}
 
-{% endblock content %}
+    {# 2. Stats Bar #}
+    {% include "home/sections/stats_bar.html" %}
+
+    {# 3. Entry Points #}
+    {% include "home/sections/entry_points.html" %}
+
+    {# 4. Featured Catalogs #}
+    {% include "home/sections/featured_catalogs.html" %}
+
+    {# 5. Datasets List #}
+    {% include "home/sections/datasets_list.html" %}
+
+{% endblock %}

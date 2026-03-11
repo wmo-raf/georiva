@@ -1,0 +1,14 @@
+{% load wagtailimages_tags static i18n %}
+
+{% if page.hero_background_image %}
+    {% image page.hero_background_image width-1920 as hero_img %}
+    {% with hero_bg_url=hero_img.url hero_has_image=True %}
+        {% include "home/sections/_hero_inner.html" %}
+    {% endwith %}
+{% else %}
+    {% with hero_bg_url="" hero_has_image=False %}
+        {% include "home/sections/_hero_inner.html" %}
+    {% endwith %}
+{% endif %}
+
+
