@@ -57,11 +57,16 @@
     z-index: 2;
 }
 
+.gr-hero--image .gr-hero-radar {
+    opacity: 0.18;
+    color: #ffffff;
+    filter: drop-shadow(0 0 8px rgba(0, 201, 177, 0.4));
+}
+
 .gr-radar-sweep,
 .gr-radar-sweep-fade {
     transform-origin: 350px 350px;
     animation: radar-sweep 7s linear infinite;
-    transform-box: fill-box;
 }
 
 @keyframes radar-sweep {
