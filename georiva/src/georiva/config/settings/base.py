@@ -61,7 +61,7 @@ INSTALLED_APPS = [
     "wagtailfontawesomesvg",
     "wagtail_color_panel",
     
-    "georiva.home",
+    # georiva
     "georiva.core",
     "georiva.formats",
     "georiva.ingestion",
@@ -72,6 +72,10 @@ INSTALLED_APPS = [
     "georiva.sources",
     "georiva.sample_plugins.ecmwf_opendata_source",
     "georiva.sample_plugins.chirps",
+    
+    # pages
+    "georiva.pages.home",
+    "georiva.pages.datasets",
 ]
 
 MIDDLEWARE = [

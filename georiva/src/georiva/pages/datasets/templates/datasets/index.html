@@ -1,0 +1,243 @@
+{% extends "georiva/base.html" %}
+{% load static georiva_tags i18n %}
+
+{% block title %}Datasets — {{ page.title }}{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
+{% endblock %}
+
+{% block content %}
+    <section class="gr-datasets-section">
+        <div class="gr-container">
+
+            <div class="gr-section-header gr-animate">
+                <h2 class="gr-section-title">Datasets</h2>
+                <a href="/api/stac/collections/" class="gr-section-action" target="_blank" rel="noopener">
+                    <i class="bi bi-code-slash"></i> STAC API
+                </a>
+            </div>
+
+            {% if page.intro_text %}
+                <p style="color:var(--gr-text-2);margin-bottom:2rem">{{ page.intro_text }}</p>
+            {% endif %}
+
+            <div class="gr-datasets-layout">
+
+                {# ---- LEFT SIDEBAR ---- #}
+                <aside class="gr-sidebar">
+
+                    {# Search #}
+                    <form method="get" action=".">
+                        <div class="gr-sidebar-search">
+                            <i class="bi bi-search gr-sidebar-search-icon"></i>
+                            <input
+                                    type="search"
+                                    name="q"
+                                    value="{{ filters.q }}"
+                                    placeholder="Search datasets"
+                                    aria-label="Search datasets"
+                                    autocomplete="off"
+                            >
+                        </div>
+
+                        {# preserve other active filters as hidden inputs #}
+                        {% if filters.topic %}<input type="hidden" name="topic" value="{{ filters.topic }}">{% endif %}
+                        {% if filters.resolution %}
+                            <input type="hidden" name="resolution" value="{{ filters.resolution }}">{% endif %}
+                        {% if filters.catalog %}
+                            <input type="hidden" name="catalog" value="{{ filters.catalog }}">{% endif %}
+                    </form>
+
+                    {# Filter: Topics #}
+                    <div class="gr-sidebar-filter is-open" id="filter-topic">
+                        <div class="gr-sidebar-filter-header" onclick="toggleFilter('filter-topic')">
+                            <span>Topics</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </div>
+                        <div class="gr-sidebar-filter-body">
+                            <a class="gr-filter-option {% if not filters.topic %}is-active{% endif %}"
+                               href="?{% query_params filters topic='' %}">
+                                <span class="gr-filter-option-dot"></span> All
+                            </a>
+                            {% for topic in topics %}
+                                <a class="gr-filter-option {% if filters.topic == topic.slug %}is-active{% endif %}"
+                                   href="?{% query_params filters topic=topic.slug %}">
+                                    <span class="gr-filter-option-dot"></span>
+                                    {% if topic.icon %}<i class="bi {{ topic.icon }}"></i>{% endif %}
+                                    {{ topic.name }}
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    {# Filter: Time Resolution #}
+                    <div class="gr-sidebar-filter is-open" id="filter-resolution">
+                        <div class="gr-sidebar-filter-header" onclick="toggleFilter('filter-resolution')">
+                            <span>Time Resolution</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </div>
+                        <div class="gr-sidebar-filter-body">
+                            <a class="gr-filter-option {% if not filters.resolution %}is-active{% endif %}"
+                               href="?{% query_params filters resolution='' %}">
+                                <span class="gr-filter-option-dot"></span> All
+                            </a>
+                            {% for value, label in time_resolutions %}
+                                <a class="gr-filter-option {% if filters.resolution == value %}is-active{% endif %}"
+                                   href="?{% query_params filters resolution=value %}">
+                                    <span class="gr-filter-option-dot"></span> {{ label }}
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    {# Filter: Catalog #}
+                    <div class="gr-sidebar-filter is-open" id="filter-catalog">
+                        <div class="gr-sidebar-filter-header" onclick="toggleFilter('filter-catalog')">
+                            <span>Catalog</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </div>
+                        <div class="gr-sidebar-filter-body">
+                            <a class="gr-filter-option {% if not filters.catalog %}is-active{% endif %}"
+                               href="?{% query_params filters catalog='' %}">
+                                <span class="gr-filter-option-dot"></span> All
+                            </a>
+                            {% for catalog in catalogs %}
+                                <a class="gr-filter-option {% if filters.catalog == catalog.slug %}is-active{% endif %}"
+                                   href="?{% query_params filters catalog=catalog.slug %}">
+                                    <span class="gr-filter-option-dot"></span> {{ catalog.name }}
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                </aside>
+
+                {# ---- RIGHT RESULTS ---- #}
+                <div>
+
+                    {# Results count #}
+                    <div style="margin-bottom:1rem;font-size:0.82rem;color:var(--gr-text-3)">
+                        {{ collections.paginator.count }} dataset{{ collections.paginator.count|pluralize }}
+                        {% if filters.q or filters.topic or filters.resolution or filters.catalog %}
+                            <a href="." style="margin-left:0.75rem;color:var(--gr-accent-dark)">
+                                <i class="bi bi-x-circle"></i> Clear filters
+                            </a>
+                        {% endif %}
+                    </div>
+
+                    {% if collections %}
+                        <div class="gr-dataset-results">
+                            {% for collection in collections %}
+                                <a class="gr-dataset-card gr-animate"
+                                   href="{{ page.url }}{{ collection.catalog.slug }}/{{ collection.slug }}/"
+                                   style="animation-delay: {{ forloop.counter0 }}00ms"
+                                >
+                                    {# Thumbnail #}
+                                    <div class="gr-dataset-thumb">
+                                        {% if collection.preview_url %}
+                                            <img src="{{ collection.preview_url }}" alt="{{ collection.name }}"
+                                                 loading="lazy">
+                                        {% else %}
+                                            <div class="gr-dataset-thumb-placeholder">
+                                                {% get_catalog_icon collection.catalog.file_format as icon %}
+                                                <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+
+                                    {# Body #}
+                                    <div class="gr-dataset-body">
+                                        <span class="gr-dataset-catalog">{{ collection.catalog.name }}</span>
+                                        <div style="display:flex;align-items:center;gap:0.5rem">
+                                            <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
+                                            <span class="gr-dataset-name">{{ collection.name }}</span>
+                                        </div>
+                                        <p class="gr-dataset-desc">
+                                            {{ collection.description|default:collection.catalog.description }}
+                                        </p>
+                                        <div class="gr-dataset-tags">
+                                            {% for topic in collection.catalog.topics.all %}
+                                                <span class="gr-dataset-tag">
+                                                {% if topic.icon %}<i class="bi {{ topic.icon }}"></i>{% endif %}
+                                                    {{ topic.name }}
+                                            </span>
+                                            {% endfor %}
+                                            {% if collection.time_resolution %}
+                                                <span class="gr-dataset-tag">{{ collection.get_time_resolution_display }}</span>
+                                            {% endif %}
+                                            {% with var_count=collection.variables.count %}
+                                                {% if var_count %}
+                                                    <span class="gr-dataset-tag">{{ var_count }} variable{{ var_count|pluralize }}</span>
+                                                {% endif %}
+                                            {% endwith %}
+                                            {% if collection.time_start %}
+                                                <span class="gr-dataset-tag">
+                                                {{ collection.time_start|date:"Y" }}{% if collection.time_end %} –
+                                                    {{ collection.time_end|date:"Y" }}{% else %} – present{% endif %}
+                                            </span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </a>
+                            {% endfor %}
+                        </div>
+
+                        {# Pagination #}
+                        {% if collections.has_other_pages %}
+                            <nav class="gr-pagination" aria-label="Dataset pages">
+                                {% if collections.has_previous %}
+                                    <a class="gr-pagination-btn"
+                                       href="?{% query_params filters page=collections.previous_page_number %}">
+                                        <i class="bi bi-chevron-left"></i>
+                                    </a>
+                                {% endif %}
+
+                                {% for num in collections.paginator.page_range %}
+                                    {% if collections.number == num %}
+                                        <span class="gr-pagination-btn is-active">{{ num }}</span>
+                                    {% elif num >= collections.number|add:"-2" and num <= collections.number|add:"2" %}
+                                        <a class="gr-pagination-btn"
+                                           href="?{% query_params filters page=num %}">{{ num }}</a>
+                                    {% endif %}
+                                {% endfor %}
+
+                                {% if collections.has_next %}
+                                    <a class="gr-pagination-btn"
+                                       href="?{% query_params filters page=collections.next_page_number %}">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </a>
+                                {% endif %}
+                            </nav>
+                        {% endif %}
+
+                    {% else %}
+                        <div class="gr-empty-state">
+                            <i class="bi bi-search"></i>
+                            <p style="font-weight:600;margin-bottom:0.35rem">No datasets found</p>
+                            <p>Try adjusting your search or filters.</p>
+                        </div>
+                    {% endif %}
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <script>
+        function toggleFilter(id) {
+            document.getElementById(id).classList.toggle('is-open');
+        }
+
+        // Auto-submit search form on input with debounce
+        (function () {
+            const input = document.querySelector('[name="q"]');
+            if (!input) return;
+            let timer;
+            input.addEventListener('input', () => {
+                clearTimeout(timer);
+                timer = setTimeout(() => input.closest('form').submit(), 400);
+            });
+        })();
+    </script>
+{% endblock %}

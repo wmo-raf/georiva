@@ -1,0 +1,247 @@
+{% extends "georiva/base.html" %}
+{% load static georiva_tags i18n %}
+
+{% block title %}{{ collection.name }} — {{ catalog.name }}{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
+{% endblock %}
+
+{% block content %}
+
+    {# ── Collection Header ── #}
+    <section class="gr-catalog-header">
+        <div class="gr-container">
+
+            {# Breadcrumb #}
+            <nav class="gr-breadcrumb" aria-label="breadcrumb">
+                <a href="{{ page.url }}"><i class="bi bi-layers"></i> Datasets</a>
+                <span class="gr-breadcrumb-sep">/</span>
+                <a href="{{ page.url }}{{ catalog.slug }}/">{{ catalog.name }}</a>
+                <span class="gr-breadcrumb-sep">/</span>
+                <span>{{ collection.name }}</span>
+            </nav>
+
+            <div class="gr-catalog-header-body">
+
+                {# Icon + Title #}
+                <div class="gr-catalog-header-identity">
+                    <div class="gr-catalog-header-icon">
+                        {% get_catalog_icon catalog.file_format as icon %}
+                        <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                    </div>
+                    <div>
+                        <div class="gr-catalog-header-eyebrow">
+                            <a href="{{ page.url }}{{ catalog.slug }}/"
+                               style="color:var(--gr-accent);text-decoration:none">
+                                {{ catalog.name }}
+                            </a>
+                        </div>
+                        <h1 class="gr-catalog-header-title">{{ collection.name }}</h1>
+                        {% if collection.description %}
+                            <p class="gr-catalog-header-desc">{{ collection.description }}</p>
+                        {% elif catalog.description %}
+                            <p class="gr-catalog-header-desc">{{ catalog.description }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {# Meta grid #}
+                <dl class="gr-catalog-meta-grid">
+
+                    {% if collection.time_resolution %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-clock"></i> Time Resolution</dt>
+                            <dd>{{ collection.get_time_resolution_display }}</dd>
+                        </div>
+                    {% endif %}
+
+                    {% if collection.time_start or collection.time_end %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-calendar-range"></i> Time Range</dt>
+                            <dd>
+                                {% if collection.time_start %}{{ collection.time_start|date:"d M Y" }}{% else %}
+                                    —{% endif %}
+                                →
+                                {% if collection.time_end %}{{ collection.time_end|date:"d M Y" }}{% else %}
+                                    present{% endif %}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                    {% if collection.item_count %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-calendar3"></i> Items</dt>
+                            <dd>{{ collection.item_count }}</dd>
+                        </div>
+                    {% endif %}
+
+                    {% if collection.crs %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-globe"></i> CRS</dt>
+                            <dd>{{ collection.crs }}</dd>
+                        </div>
+                    {% endif %}
+
+                    {% if collection.bounds %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-bounding-box"></i> Spatial Extent</dt>
+                            <dd class="gr-mono" style="font-size:0.8rem">
+                                W {{ collection.bounds.0|floatformat:4 }}
+                                S {{ collection.bounds.1|floatformat:4 }}
+                                E {{ collection.bounds.2|floatformat:4 }}
+                                N {{ collection.bounds.3|floatformat:4 }}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-file-earmark"></i> Format</dt>
+                        <dd>{{ catalog.get_file_format_display }}</dd>
+                    </div>
+
+                    {% if catalog.topics.all %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-tag"></i> Topics</dt>
+                            <dd class="gr-catalog-meta-topics">
+                                {% for topic in catalog.topics.all %}
+                                    <a href="{{ page.url }}?topic={{ topic.slug }}" class="gr-dataset-tag">
+                                        {% if topic.icon %}<i class="bi {{ topic.icon }}"></i>{% endif %}
+                                        {{ topic.name }}
+                                    </a>
+                                {% endfor %}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-activity"></i> Status</dt>
+                        <dd style="display:flex;align-items:center;gap:0.4rem">
+                            <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
+                            {% if collection.is_active %}Active{% else %}Inactive{% endif %}
+                        </dd>
+                    </div>
+
+                </dl>
+
+                {# API links #}
+                <div class="gr-collection-api-links">
+                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/"
+                       class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
+                        <i class="bi bi-code-slash"></i> STAC Collection
+                    </a>
+                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/items/"
+                       class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
+                        <i class="bi bi-list-ul"></i> STAC Items
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    {# ── Variables ── #}
+    {% if variables %}
+        <section class="gr-section gr-section--alt">
+            <div class="gr-container">
+
+                <div class="gr-section-header">
+                    <h2 class="gr-section-title">Variables</h2>
+                    <span style="font-family:var(--gr-font-mono);font-size:0.72rem;color:var(--gr-text-3)">
+                {{ variables|length }} variable{{ variables|length|pluralize }}
+            </span>
+                </div>
+
+                <div class="gr-variables-grid">
+                    {% for variable in variables %}
+                        <div class="gr-variable-card">
+                            <div class="gr-variable-header">
+                                <span class="gr-variable-name">{{ variable.name }}</span>
+                                <span class="gr-variable-slug gr-mono">{{ variable.slug }}</span>
+                            </div>
+
+                            {% if variable.description %}
+                                <p class="gr-variable-desc">{{ variable.description }}</p>
+                            {% endif %}
+
+                            <div class="gr-variable-meta">
+                                {% if variable.units %}
+                                    <span class="gr-dataset-tag">
+                                <i class="bi bi-rulers"></i> {{ variable.units }}
+                            </span>
+                                {% endif %}
+                                {% if variable.value_min is not None and variable.value_max is not None %}
+                                    <span class="gr-dataset-tag gr-mono">
+                                {{ variable.value_min }} – {{ variable.value_max }}
+                            </span>
+                                {% endif %}
+                                {% if variable.transform_type != "passthrough" %}
+                                    <span class="gr-dataset-tag">
+                                <i class="bi bi-gear"></i> {{ variable.get_transform_type_display }}
+                            </span>
+                                {% endif %}
+                                {% if variable.palette %}
+                                    <span class="gr-dataset-tag">
+                                <i class="bi bi-palette"></i> {{ variable.palette.name }}
+                            </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+            </div>
+        </section>
+    {% endif %}
+
+    {# ── Latest Items ── #}
+    {% if latest_items %}
+        <section class="gr-section">
+            <div class="gr-container">
+
+                <div class="gr-section-header">
+                    <h2 class="gr-section-title">Latest Items</h2>
+                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/items/"
+                       class="gr-section-action" target="_blank" rel="noopener">
+                        <i class="bi bi-code-slash"></i> All items
+                    </a>
+                </div>
+
+                <div class="gr-items-table">
+                    <div class="gr-items-table-header">
+                        <span>Valid Time</span>
+                        <span>Reference Time</span>
+                        <span>Assets</span>
+                        <span>Source</span>
+                    </div>
+                    {% for item in latest_items %}
+                        <div class="gr-items-table-row">
+                    <span class="gr-mono" style="font-size:0.82rem">
+                        {{ item.time|date:"d M Y H:i" }} UTC
+                    </span>
+                            <span class="gr-mono" style="font-size:0.82rem;color:var(--gr-text-3)">
+                        {% if item.reference_time %}
+                            {{ item.reference_time|date:"d M Y H:i" }} UTC
+                        {% else %}
+                            —
+                        {% endif %}
+                    </span>
+                            <span style="font-size:0.82rem;color:var(--gr-text-2)">
+                        {{ item.assets.count }}
+                    </span>
+                            <span class="gr-mono" style="font-size:0.75rem;color:var(--gr-text-3);
+                          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px"
+                                  title="{{ item.source_file }}">
+                        {{ item.source_file|default:"—" }}
+                    </span>
+                        </div>
+                    {% endfor %}
+                </div>
+
+            </div>
+        </section>
+    {% endif %}
+
+{% endblock %}

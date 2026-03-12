@@ -1,0 +1,180 @@
+{% extends "georiva/base.html" %}
+{% load static georiva_tags i18n %}
+
+{% block title %}{{ catalog.name }} — Datasets{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
+{% endblock %}
+
+{% block content %}
+
+    {# ── Catalog Header ── #}
+    <section class="gr-catalog-header">
+        <div class="gr-container">
+
+            {# Breadcrumb #}
+            <nav class="gr-breadcrumb" aria-label="breadcrumb">
+                <a href="{{ page.url }}"><i class="bi bi-layers"></i> Datasets</a>
+                <span class="gr-breadcrumb-sep">/</span>
+                <span>{{ catalog.name }}</span>
+            </nav>
+
+            <div class="gr-catalog-header-body">
+
+                {# Icon + Title #}
+                <div class="gr-catalog-header-identity">
+                    <div class="gr-catalog-header-icon">
+                        {% get_catalog_icon catalog.file_format as icon %}
+                        <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                    </div>
+                    <div>
+                        <div class="gr-catalog-header-eyebrow">Catalog</div>
+                        <h1 class="gr-catalog-header-title">{{ catalog.name }}</h1>
+                        {% if catalog.description %}
+                            <p class="gr-catalog-header-desc">{{ catalog.description }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {# Meta grid #}
+                <dl class="gr-catalog-meta-grid">
+
+                    {% if catalog.provider %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-building"></i> Provider</dt>
+                            <dd>
+                                {% if catalog.provider_url %}
+                                    <a href="{{ catalog.provider_url }}" target="_blank" rel="noopener">
+                                        {{ catalog.provider }} <i class="bi bi-box-arrow-up-right"></i>
+                                    </a>
+                                {% else %}
+                                    {{ catalog.provider }}
+                                {% endif %}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                    {% if catalog.license %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-shield-check"></i> License</dt>
+                            <dd>{{ catalog.license }}</dd>
+                        </div>
+                    {% endif %}
+
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-file-earmark"></i> Format</dt>
+                        <dd>{{ catalog.get_file_format_display }}</dd>
+                    </div>
+
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-layers"></i> Collections</dt>
+                        <dd>{{ collections|length }}</dd>
+                    </div>
+
+                    {% if catalog.topics.all %}
+                        <div class="gr-catalog-meta-item">
+                            <dt><i class="bi bi-tag"></i> Topics</dt>
+                            <dd class="gr-catalog-meta-topics">
+                                {% for topic in catalog.topics.all %}
+                                    <a href="{{ page.url }}?topic={{ topic.slug }}" class="gr-dataset-tag">
+                                        {% if topic.icon %}<i class="bi {{ topic.icon }}"></i>{% endif %}
+                                        {{ topic.name }}
+                                    </a>
+                                {% endfor %}
+                            </dd>
+                        </div>
+                    {% endif %}
+
+                </dl>
+            </div>
+        </div>
+    </section>
+
+    {# ── Collections List ── #}
+    <section class="gr-datasets-section">
+        <div class="gr-container">
+
+            <div class="gr-section-header">
+                <h2 class="gr-section-title">Collections</h2>
+                <a href="/api/stac/collections/{{ catalog.slug }}/" class="gr-section-action" target="_blank"
+                   rel="noopener">
+                    <i class="bi bi-code-slash"></i> STAC API
+                </a>
+            </div>
+
+            {% if collections %}
+                <div class="gr-dataset-results">
+                    {% for collection in collections %}
+                        <a class="gr-dataset-card gr-animate"
+                           href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/"
+                           style="animation-delay: {{ forloop.counter0 }}00ms"
+                        >
+                            {# Thumbnail #}
+                            <div class="gr-dataset-thumb">
+                                {% if collection.preview_url %}
+                                    <img src="{{ collection.preview_url }}" alt="{{ collection.name }}" loading="lazy">
+                                {% else %}
+                                    <div class="gr-dataset-thumb-placeholder">
+                                        {% get_catalog_icon catalog.file_format as icon %}
+                                        <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            {# Body #}
+                            <div class="gr-dataset-body">
+                                <span class="gr-dataset-catalog">{{ catalog.name }}</span>
+                                <div style="display:flex;align-items:center;gap:0.5rem">
+                                    <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
+                                    <span class="gr-dataset-name">{{ collection.name }}</span>
+                                </div>
+                                <p class="gr-dataset-desc">
+                                    {{ collection.description|default:catalog.description }}
+                                </p>
+                                <div class="gr-dataset-tags">
+                                    {% if collection.time_resolution %}
+                                        <span class="gr-dataset-tag">{{ collection.get_time_resolution_display }}</span>
+                                    {% endif %}
+                                    {% with var_count=collection.variables.count %}
+                                        {% if var_count %}
+                                            <span class="gr-dataset-tag">{{ var_count }} variable{{ var_count|pluralize }}</span>
+                                        {% endif %}
+                                    {% endwith %}
+                                    {% if collection.time_start %}
+                                        <span class="gr-dataset-tag">
+                                        {{ collection.time_start|date:"Y" }}
+                                            {% if collection.time_end %} – {{ collection.time_end|date:"Y" }}{% else %}
+                                                – present{% endif %}
+                                    </span>
+                                    {% endif %}
+                                    {% if collection.item_count %}
+                                        <span class="gr-dataset-tag">
+                                        <i class="bi bi-calendar3"></i> {{ collection.item_count }} item{{ collection.item_count|pluralize }}
+                                    </span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </a>
+                    {% endfor %}
+                </div>
+
+            {% else %}
+                <div class="gr-empty-state">
+                    <i class="bi bi-layers"></i>
+                    <p style="font-weight:600;margin-bottom:0.35rem">No collections yet</p>
+                    <p>This catalog has no active collections.</p>
+                </div>
+            {% endif %}
+
+        </div>
+    </section>
+
+    <script>
+        function toggleFilter(id) {
+            document.getElementById(id).classList.toggle('is-open');
+        }
+    </script>
+
+{% endblock %}

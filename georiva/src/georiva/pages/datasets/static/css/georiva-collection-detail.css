@@ -1,0 +1,123 @@
+/* ==========================================================================
+   Variables Grid
+   ========================================================================== */
+
+.gr-variables-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+
+.gr-variable-card {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    transition: border-color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-variable-card:hover {
+    border-color: var(--gr-accent-border);
+}
+
+.gr-variable-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.gr-variable-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+}
+
+.gr-variable-slug {
+    font-size: 0.72rem;
+    color: var(--gr-text-3);
+    flex-shrink: 0;
+}
+
+.gr-variable-desc {
+    font-size: 0.82rem;
+    color: var(--gr-text-2);
+    line-height: 1.55;
+}
+
+.gr-variable-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.25rem;
+}
+
+/* ==========================================================================
+   Items Table
+   ========================================================================== */
+
+.gr-items-table {
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    overflow: hidden;
+}
+
+.gr-items-table-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr 80px 1fr;
+    padding: 0.6rem 1.25rem;
+    background: var(--gr-light-1);
+    border-bottom: 1px solid var(--gr-light-border);
+    font-family: var(--gr-font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gr-text-3);
+}
+
+.gr-items-table-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 80px 1fr;
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid var(--gr-light-border);
+    align-items: center;
+    transition: background var(--gr-dur) var(--gr-ease);
+}
+
+.gr-items-table-row:last-child {
+    border-bottom: none;
+}
+
+.gr-items-table-row:hover {
+    background: var(--gr-light-1);
+}
+
+/* API links row */
+.gr-collection-api-links {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--gr-dark-border);
+}
+
+@media (max-width: 768px) {
+    .gr-variables-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .gr-items-table-header,
+    .gr-items-table-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .gr-items-table-header span:nth-child(3),
+    .gr-items-table-header span:nth-child(4),
+    .gr-items-table-row span:nth-child(3),
+    .gr-items-table-row span:nth-child(4) {
+        display: none;
+    }
+}

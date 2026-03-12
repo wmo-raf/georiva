@@ -33,6 +33,18 @@ def get_item(dictionary, key):
 
 
 @register.simple_tag
+def get_latest_collections(limit=6):
+    """Latest active collections ordered by most recently updated item."""
+    return (
+        Collection.objects
+        .filter(is_active=True)
+        .select_related('catalog')
+        .prefetch_related('catalog__topics')
+        .order_by('-time_end', '-modified')[:limit]
+    )
+
+
+@register.simple_tag
 def get_active_topics():
     """Topics that have at least one active catalog."""
     from georiva.core.models import Topic
@@ -131,3 +143,20 @@ def get_active_time_resolutions():
         for value in Collection.TimeResolution.values
         if value in active_values
     ]
+
+
+@register.simple_tag(takes_context=False)
+def query_params(filters, **kwargs):
+    """
+    Build a query string from the current filters dict,
+    overriding with any kwargs passed in.
+    Drops empty values and always resets page to 1 when
+    a filter changes (unless page is explicitly passed).
+    """
+    from urllib.parse import urlencode
+    params = {k: v for k, v in filters.items() if v}
+    params.update({k: v for k, v in kwargs.items() if v != ''})
+    # reset to page 1 when any filter other than page changes
+    if 'page' not in kwargs:
+        params.pop('page', None)
+    return urlencode(params)

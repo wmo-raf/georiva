@@ -1,0 +1,91 @@
+{% load georiva_tags i18n %}
+
+{% get_latest_collections as collections %}
+
+<section class="gr-datasets-section" id="datasets">
+    <div class="gr-container">
+
+        <div class="gr-section-header gr-animate">
+            <h2 class="gr-section-title">Latest Datasets</h2>
+            <a href="/api/stac/collections/" class="gr-section-action" target="_blank" rel="noopener">
+                <i class="bi bi-code-slash"></i> STAC API
+            </a>
+        </div>
+
+        {% if collections %}
+            <div class="gr-dataset-results gr-animate">
+                {% for collection in collections %}
+                    <a class="gr-dataset-card"
+                       href="/datasets/{{ collection.catalog.slug }}/{{ collection.slug }}/"
+                       style="animation-delay: {{ forloop.counter0 }}00ms"
+                    >
+                        {# Thumbnail #}
+                        <div class="gr-dataset-thumb">
+                            {% if collection.preview_url %}
+                                <img src="{{ collection.preview_url }}" alt="{{ collection.name }}" loading="lazy">
+                            {% else %}
+                                <div class="gr-dataset-thumb-placeholder">
+                                    {% get_catalog_icon collection.catalog.file_format as icon %}
+                                    <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        {# Body #}
+                        <div class="gr-dataset-body">
+                            <span class="gr-dataset-catalog">{{ collection.catalog.name }}</span>
+                            <div style="display:flex;align-items:center;gap:0.5rem">
+                                <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
+                                <span class="gr-dataset-name">{{ collection.name }}</span>
+                            </div>
+                            <p class="gr-dataset-desc">
+                                {{ collection.description|default:collection.catalog.description }}
+                            </p>
+                            <div class="gr-dataset-tags">
+                                {% for topic in collection.catalog.topics.all %}
+                                    <span class="gr-dataset-tag">
+                                        {% if topic.icon %}<i class="bi {{ topic.icon }}"></i> {% endif %}
+                                        {{ topic.name }}
+                                    </span>
+                                {% endfor %}
+                                {% if collection.time_resolution %}
+                                    <span class="gr-dataset-tag">
+                                        {{ collection.get_time_resolution_display }}
+                                    </span>
+                                {% endif %}
+                                {% with var_count=collection.variables.count %}
+                                    {% if var_count %}
+                                        <span class="gr-dataset-tag">
+                                            {{ var_count }} variable{{ var_count|pluralize }}
+                                        </span>
+                                    {% endif %}
+                                {% endwith %}
+                                {% if collection.time_end %}
+                                    <span class="gr-dataset-tag">
+                                        <i class="bi bi-clock"></i>
+                                        Updated {{ collection.time_end|date:"d M Y" }}
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </a>
+                {% endfor %}
+            </div>
+
+            {# View all CTA #}
+            <div style="text-align:center;margin-top:2.5rem">
+                <a href="/datasets/" class="gr-btn gr-btn-primary">
+                    <i class="bi bi-layers"></i> View all datasets
+                </a>
+            </div>
+
+        {% else %}
+            <div class="gr-empty-state">
+                <i class="bi bi-layers"></i>
+                <p style="font-weight:600;margin-bottom:0.35rem">No datasets ingested yet</p>
+                <p>Configure a data source in the admin to get started.</p>
+            </div>
+        {% endif %}
+
+    </div>
+</section>
