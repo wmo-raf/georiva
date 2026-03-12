@@ -29,23 +29,18 @@
     align-items: center;
     gap: 0.7rem;
     text-decoration: none;
-    flex-shrink: 0;
 }
 
-.gr-app-logo {
-    height: 30px;
-    width: auto;
-    color: var(--gr-light);
-}
-
-.gr-app-logo svg {
-    height: 100%;
-    width: 100%;
-}
 
 .gr-navbar-logo {
     height: 30px;
     width: auto;
+}
+
+.gr-navbar-logo svg {
+    height: 100%;
+    color: var(--gr-light);
+    max-width: 40px;
 }
 
 .gr-navbar-wordmark {
@@ -169,13 +164,12 @@
         align-items: center;
     }
 
-    /* Brand takes all available space, pushing burger to the right */
     .gr-navbar-brand {
         flex: 1;
-        min-width: 0; /* allows text to truncate rather than overflow */
+        flex-shrink: 1;
+        min-width: 0;
     }
 
-    /* Truncate site name instead of overflowing */
     .gr-navbar-site-name {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -186,7 +180,6 @@
         display: flex;
     }
 
-    /* Menu drops below the brand+burger row */
     .gr-navbar-menu {
         display: none;
         width: 100%;

@@ -8,10 +8,10 @@
 
             {# Brand #}
             <a class="gr-navbar-brand" href="/">
-                {% if s.logo %}
-                    {% image s.logo max-120x40 class="gr-navbar-logo" alt=s.site_name %}
+                {% if s.org_logo %}
+                    {% image s.org_logo max-120x40 class="gr-navbar-logo" alt=s.site_name %}
                 {% else %}
-                    <figure class="gr-app-logo">
+                    <figure class="gr-navbar-logo">
                         {% include "georiva/logos/georiva-symbol.svg" %}
                     </figure>
                 {% endif %}
