@@ -6,6 +6,7 @@ from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
 
 from georiva.core.models import Item, Catalog, Collection, ColorPalette
+from georiva.core.models.catalog import Topic
 
 
 class BoundaryChooserViewSet(ChooserViewSet):
@@ -15,6 +16,14 @@ class BoundaryChooserViewSet(ChooserViewSet):
     choose_one_text = "Choose a boundary"
     choose_another_text = "Choose another boundary"
     edit_item_text = "Edit this boundary"
+
+
+class TopicViewSet(ModelViewSet):
+    model = Topic
+    add_to_admin_menu = True
+    menu_order = 300
+    menu_icon = "hashtag"
+    exclude_form_fields = ["created_at", "updated_at"]
 
 
 class CatalogCreateView(generic.CreateView):
@@ -45,7 +54,6 @@ class CatalogViewSet(ModelViewSet):
 
 class CatalogChooserViewSet(ChooserViewSet):
     model = Catalog
-    
     icon = "globe"
     choose_one_text = "Choose a catalog"
     choose_another_text = "Choose another catalog"
@@ -117,6 +125,7 @@ class ColorPaletteModelViewSet(ModelViewSet):
 CatalogChooserViewSetObject = CatalogChooserViewSet("catalog_chooser")
 
 admin_viewsets = [
+    TopicViewSet(),
     CatalogViewSet(),
     CatalogChooserViewSetObject,
     CollectionViewSet(),

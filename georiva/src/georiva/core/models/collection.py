@@ -19,13 +19,19 @@ class Collection(TimeStampedModel, ClusterableModel):
     """
     
     class TimeResolution(models.TextChoices):
+        SUB_HOURLY = 'sub_hourly', 'Sub-Hourly'
         HOURLY = 'hourly', 'Hourly'
         THREE_HOURLY = '3hourly', '3-Hourly'
         SIX_HOURLY = '6hourly', '6-Hourly'
+        TWELVE_HOURLY = '12hourly', '12-Hourly'
         DAILY = 'daily', 'Daily'
+        PENTADAL = 'pentadal', 'Pentadal'
         DEKADAL = 'dekadal', 'Dekadal'
         MONTHLY = 'monthly', 'Monthly'
-        YEARLY = 'yearly', 'Yearly'
+        SUB_SEASONAL = 'sub_seasonal', 'Sub-Seasonal'
+        SEASONAL = 'seasonal', 'Seasonal'
+        ANNUAL = 'annual', 'Annual'
+        CLIMATOLOGY = 'climatology', 'Climatology'
     
     catalog = models.ForeignKey(
         'georivacore.Catalog',

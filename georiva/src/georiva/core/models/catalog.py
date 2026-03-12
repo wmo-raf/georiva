@@ -1,9 +1,41 @@
+from django import forms
 from django.db import models
+from django_extensions.db.fields import AutoSlugField
 from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.panels import (
     FieldPanel,
     MultiFieldPanel
 )
+
+
+class Topic(TimeStampedModel):
+    """
+    Thematic topic for classifying Catalogs
+    """
+    name = models.CharField(max_length=100, unique=True)
+    slug = AutoSlugField(populate_from='name', unique=True, editable=False)
+    description = models.TextField(blank=True)
+    icon = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Bootstrap Icons class e.g. bi-thermometer-half"
+    )
+    sort_order = models.PositiveIntegerField(default=0)
+    
+    class Meta:
+        ordering = ['sort_order', 'name']
+        verbose_name = "Topic"
+        verbose_name_plural = "Topics"
+    
+    def __str__(self):
+        return self.name
+    
+    panels = [
+        FieldPanel('name'),
+        FieldPanel('description'),
+        FieldPanel('icon'),
+        FieldPanel('sort_order'),
+    ]
 
 
 class Catalog(TimeStampedModel):
@@ -22,6 +54,13 @@ class Catalog(TimeStampedModel):
     provider = models.CharField(max_length=255, blank=True)
     provider_url = models.URLField(blank=True)
     license = models.CharField(max_length=255, blank=True)
+    
+    topics = models.ManyToManyField(
+        'georivacore.Topic',
+        blank=True,
+        related_name='catalogs',
+        help_text="Thematic topics for this catalog."
+    )
     
     # Source file format
     class FileFormat(models.TextChoices):
@@ -80,4 +119,7 @@ class Catalog(TimeStampedModel):
             FieldPanel('clip_mode'),
         ], heading="Clipping Configuration"),
         FieldPanel('is_active'),
+        MultiFieldPanel([
+            FieldPanel('topics', widget=forms.CheckboxSelectMultiple),
+        ], heading="Topics"),
     ]

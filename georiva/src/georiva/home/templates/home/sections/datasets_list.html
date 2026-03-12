@@ -1,5 +1,7 @@
 {% load georiva_tags i18n %}
 
+{% get_active_topics as topics %}
+{% get_active_time_resolutions as time_resolutions %}
 {% get_all_collections as collections %}
 
 <section class="gr-datasets-section" id="datasets">
@@ -7,7 +9,7 @@
 
         <div class="gr-section-header gr-animate">
             <h2 class="gr-section-title">Search Datasets</h2>
-            <a href="/stac/collections/" class="gr-section-action" target="_blank" rel="noopener">
+            <a href="/api/stac/collections/" class="gr-section-action" target="_blank" rel="noopener">
                 <i class="bi bi-code-slash"></i> STAC API
             </a>
         </div>
@@ -29,6 +31,26 @@
                     >
                 </div>
 
+                {# Filter: Topics #}
+                <div class="gr-sidebar-filter is-open" id="filter-topic">
+                    <div class="gr-sidebar-filter-header" onclick="toggleFilter('filter-topic')">
+                        <span>Topics</span>
+                        <i class="bi bi-chevron-down"></i>
+                    </div>
+                    <div class="gr-sidebar-filter-body">
+                        <button class="gr-filter-option is-active" data-filter-topic="">
+                            <span class="gr-filter-option-dot"></span> All
+                        </button>
+                        {% for topic in topics %}
+                            <button class="gr-filter-option" data-filter-topic="{{ topic.slug }}">
+                                <span class="gr-filter-option-dot"></span>
+                                {% if topic.icon %}<i class="bi {{ topic.icon }}"></i> {% endif %}
+                                {{ topic.name }}
+                            </button>
+                        {% endfor %}
+                    </div>
+                </div>
+
                 {# Filter: Time Resolution #}
                 <div class="gr-sidebar-filter is-open" id="filter-resolution">
                     <div class="gr-sidebar-filter-header" onclick="toggleFilter('filter-resolution')">
@@ -39,49 +61,11 @@
                         <button class="gr-filter-option is-active" data-filter-resolution="">
                             <span class="gr-filter-option-dot"></span> All
                         </button>
-                        <button class="gr-filter-option" data-filter-resolution="hourly">
-                            <span class="gr-filter-option-dot"></span> Hourly
-                        </button>
-                        <button class="gr-filter-option" data-filter-resolution="3hourly">
-                            <span class="gr-filter-option-dot"></span> 3-Hourly
-                        </button>
-                        <button class="gr-filter-option" data-filter-resolution="6hourly">
-                            <span class="gr-filter-option-dot"></span> 6-Hourly
-                        </button>
-                        <button class="gr-filter-option" data-filter-resolution="daily">
-                            <span class="gr-filter-option-dot"></span> Daily
-                        </button>
-                        <button class="gr-filter-option" data-filter-resolution="dekadal">
-                            <span class="gr-filter-option-dot"></span> Dekadal
-                        </button>
-                        <button class="gr-filter-option" data-filter-resolution="monthly">
-                            <span class="gr-filter-option-dot"></span> Monthly
-                        </button>
-                    </div>
-                </div>
-
-                {# Filter: Format #}
-                <div class="gr-sidebar-filter is-open" id="filter-format">
-                    <div class="gr-sidebar-filter-header" onclick="toggleFilter('filter-format')">
-                        <span>Format</span>
-                        <i class="bi bi-chevron-down"></i>
-                    </div>
-                    <div class="gr-sidebar-filter-body">
-                        <button class="gr-filter-option is-active" data-filter-format="">
-                            <span class="gr-filter-option-dot"></span> All
-                        </button>
-                        <button class="gr-filter-option" data-filter-format="grib2">
-                            <span class="gr-filter-option-dot"></span> GRIB/GRIB2
-                        </button>
-                        <button class="gr-filter-option" data-filter-format="netcdf">
-                            <span class="gr-filter-option-dot"></span> NetCDF
-                        </button>
-                        <button class="gr-filter-option" data-filter-format="geotiff">
-                            <span class="gr-filter-option-dot"></span> GeoTIFF
-                        </button>
-                        <button class="gr-filter-option" data-filter-format="zarr">
-                            <span class="gr-filter-option-dot"></span> ZARR
-                        </button>
+                        {% for value, label in time_resolutions %}
+                            <button class="gr-filter-option" data-filter-resolution="{{ value }}">
+                                <span class="gr-filter-option-dot"></span> {{ label }}
+                            </button>
+                        {% endfor %}
                     </div>
                 </div>
 
@@ -92,19 +76,20 @@
                 {% if collections %}
                     <div class="gr-dataset-results" id="gr-dataset-results">
                         {% for collection in collections %}
-                            <a
-                                    class="gr-dataset-card gr-collection-row gr-animate"
-                                    href="/stac/collections/{{ collection.catalog.slug }}/{{ collection.slug }}/"
-                                    data-name="{{ collection.name|lower }} {{ collection.description|lower }}"
-                                    data-catalog="{{ collection.catalog.name|lower }}"
-                                    data-resolution="{{ collection.time_resolution }}"
-                                    data-format="{{ collection.catalog.file_format }}"
-                                    style="animation-delay: {{ forloop.counter0 }}00ms"
+                            <a class="gr-dataset-card gr-collection-row gr-animate"
+                               href="/stac/collections/{{ collection.catalog.slug }}/{{ collection.slug }}/"
+                               data-name="{{ collection.name|lower }} {{ collection.description|lower }}"
+                               data-catalog="{{ collection.catalog.name|lower }}"
+                               data-resolution="{{ collection.time_resolution }}"
+                               data-topics="
+                                       {% for topic in collection.catalog.topics.all %}{{ topic.slug }} {% endfor %}"
+                               style="animation-delay: {{ forloop.counter0 }}00ms"
                             >
-                                {# Thumbnail — TiTiler preview or placeholder #}
+                                {# Thumbnail #}
                                 <div class="gr-dataset-thumb">
                                     {% if collection.preview_url %}
-                                        <img src="{{ preview_url }}" alt="{{ collection.name }}" loading="lazy">
+                                        <img src="{{ collection.preview_url }}" alt="{{ collection.name }}"
+                                             loading="lazy">
                                     {% else %}
                                         <div class="gr-dataset-thumb-placeholder">
                                             {% get_catalog_icon collection.catalog.file_format as icon %}
@@ -124,27 +109,31 @@
                                         {{ collection.description|default:collection.catalog.description }}
                                     </p>
                                     <div class="gr-dataset-tags">
+                                        {% for topic in collection.catalog.topics.all %}
+                                            <span class="gr-dataset-tag">
+                                                {% if topic.icon %}<i class="bi {{ topic.icon }}"></i> {% endif %}
+                                                {{ topic.name }}
+                                            </span>
+                                        {% endfor %}
                                         {% if collection.time_resolution %}
                                             <span class="gr-dataset-tag">
-                                    {{ collection.get_time_resolution_display }}
-                                </span>
+                                                {{ collection.get_time_resolution_display }}
+                                            </span>
                                         {% endif %}
-                                        <span class="gr-dataset-tag">
-                                    {{ collection.catalog.get_file_format_display }}
-                                </span>
                                         {% with var_count=collection.variables.count %}
                                             {% if var_count %}
                                                 <span class="gr-dataset-tag">
-                                    {{ var_count }} variable{{ var_count|pluralize }}
-                                </span>
+                                                    {{ var_count }} variable{{ var_count|pluralize }}
+                                                </span>
                                             {% endif %}
                                         {% endwith %}
                                         {% if collection.time_start %}
                                             <span class="gr-dataset-tag">
-                                    {{ collection.time_start|date:"Y" }}
+                                                {{ collection.time_start|date:"Y" }}
                                                 {% if collection.time_end %} –
-                                                    {{ collection.time_end|date:"Y" }}{% else %} – present{% endif %}
-                                </span>
+                                                    {{ collection.time_end|date:"Y" }}{% else %}
+                                                    – present{% endif %}
+                                            </span>
                                         {% endif %}
                                     </div>
                                 </div>
@@ -152,7 +141,6 @@
                         {% endfor %}
                     </div>
 
-                    {# No results message — hidden by default, shown by JS #}
                     <div id="gr-no-results" class="gr-empty-state" style="display:none">
                         <i class="bi bi-search"></i>
                         <p style="font-weight:600;margin-bottom:0.35rem">No datasets found</p>
@@ -172,8 +160,8 @@
     </div>
 </section>
 
+
 <script>
-    // Filter accordion toggle
     function toggleFilter(id) {
         document.getElementById(id).classList.toggle('is-open');
     }
@@ -182,11 +170,11 @@
         const searchInput = document.getElementById('gr-dataset-search');
         const rows = document.querySelectorAll('.gr-collection-row');
         const noResults = document.getElementById('gr-no-results');
+        const topicFilters = document.querySelectorAll('[data-filter-topic]');
         const resFilters = document.querySelectorAll('[data-filter-resolution]');
-        const fmtFilters = document.querySelectorAll('[data-filter-format]');
 
+        let activeTopic = '';
         let activeRes = '';
-        let activeFmt = '';
 
         function applyFilters() {
             const q = searchInput ? searchInput.value.toLowerCase().trim() : '';
@@ -195,8 +183,8 @@
             rows.forEach(row => {
                 const nameMatch = !q || row.dataset.name.includes(q) || row.dataset.catalog.includes(q);
                 const resMatch = !activeRes || row.dataset.resolution === activeRes;
-                const fmtMatch = !activeFmt || row.dataset.format === activeFmt;
-                const show = nameMatch && resMatch && fmtMatch;
+                const topicMatch = !activeTopic || row.dataset.topics.includes(activeTopic);
+                const show = nameMatch && resMatch && topicMatch;
                 row.style.display = show ? '' : 'none';
                 if (show) visible++;
             });
@@ -206,20 +194,20 @@
 
         if (searchInput) searchInput.addEventListener('input', applyFilters);
 
+        topicFilters.forEach(btn => {
+            btn.addEventListener('click', () => {
+                topicFilters.forEach(b => b.classList.remove('is-active'));
+                btn.classList.add('is-active');
+                activeTopic = btn.dataset.filterTopic;
+                applyFilters();
+            });
+        });
+
         resFilters.forEach(btn => {
             btn.addEventListener('click', () => {
                 resFilters.forEach(b => b.classList.remove('is-active'));
                 btn.classList.add('is-active');
                 activeRes = btn.dataset.filterResolution;
-                applyFilters();
-            });
-        });
-
-        fmtFilters.forEach(btn => {
-            btn.addEventListener('click', () => {
-                fmtFilters.forEach(b => b.classList.remove('is-active'));
-                btn.classList.add('is-active');
-                activeFmt = btn.dataset.filterFormat;
                 applyFilters();
             });
         });

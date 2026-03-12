@@ -64,4 +64,5 @@ def register_icons(icons):
         'wagtailfontawesomesvg/solid/palette.svg',
         'wagtailfontawesomesvg/solid/map.svg',
         'wagtailfontawesomesvg/solid/file-import.svg',
+        'wagtailfontawesomesvg/solid/hashtag.svg',
     ]
