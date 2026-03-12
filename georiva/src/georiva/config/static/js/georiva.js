@@ -9,7 +9,9 @@
 
     if (burger && menu) {
         burger.addEventListener('click', () => {
-            menu.classList.toggle('is-open');
+            const isOpen = menu.classList.toggle('is-open');
+            burger.classList.toggle('is-open', isOpen);
+            burger.setAttribute('aria-expanded', String(isOpen));
         });
     }
 
