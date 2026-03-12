@@ -132,3 +132,20 @@
         opacity: 0.4;
     }
 }
+
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+@media (max-width: 900px) {
+    .gr-footer-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .gr-footer-grid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+}

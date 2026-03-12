@@ -4,49 +4,51 @@
 {% with s=settings.home.GeoRivaSettings %}
     <nav class="gr-navbar" role="navigation" aria-label="main navigation">
 
-        {# Brand #}
-        <a class="gr-navbar-brand" href="/">
-            {% if s.logo %}
-                {% image s.logo max-120x40 class="gr-navbar-logo" alt=s.site_name %}
-            {% else %}
-                <figure class="gr-app-logo">
-                    {% include "georiva/logos/georiva-symbol.svg" %}
-                </figure>
-            {% endif %}
-            <div>
-                <div class="gr-navbar-site-name">{{ s.site_name|default:"GeoRiva" }}</div>
-                {% if s.org_name %}
-                    <div class="gr-navbar-org">{{ s.org_name }}</div>
+        <div class="gr-navbar-inner">
+
+            {# Brand #}
+            <a class="gr-navbar-brand" href="/">
+                {% if s.logo %}
+                    {% image s.logo max-120x40 class="gr-navbar-logo" alt=s.site_name %}
+                {% else %}
+                    <figure class="gr-app-logo">
+                        {% include "georiva/logos/georiva-symbol.svg" %}
+                    </figure>
+                {% endif %}
+                <div>
+                    <div class="gr-navbar-site-name">{{ s.site_name|default:"GeoRiva" }}</div>
+                    {% if s.org_name %}
+                        <div class="gr-navbar-org">{{ s.org_name }}</div>
+                    {% endif %}
+                </div>
+            </a>
+
+            {# Burger (mobile) #}
+            <button class="gr-navbar-burger" id="gr-navbar-burger" aria-label="menu" aria-expanded="false">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+
+            {# Menu items #}
+            <div class="gr-navbar-menu" id="gr-navbar-menu">
+                <a class="gr-navbar-item" href="/">
+                    <i class="bi bi-house"></i> Home
+                </a>
+                <a class="gr-navbar-item" href="/#datasets">
+                    <i class="bi bi-layers"></i> Datasets
+                </a>
+                {% if s.map_viewer_url %}
+                    <a class="gr-navbar-item" href="{{ s.map_viewer_url }}">
+                        <i class="bi bi-map"></i> Map Viewer
+                    </a>
+                {% endif %}
+                {% if s.stac_browser_url %}
+                    <a class="gr-navbar-item" href="{{ s.stac_browser_url }}">
+                        <i class="bi bi-collection"></i> STAC Browser
+                    </a>
                 {% endif %}
             </div>
-        </a>
-
-        {# Burger (mobile) #}
-        <button class="gr-navbar-burger" id="gr-navbar-burger" aria-label="menu" aria-expanded="false">
-            <span></span>
-            <span></span>
-            <span></span>
-        </button>
-
-        {# Menu items #}
-        <div class="gr-navbar-menu" id="gr-navbar-menu">
-            <a class="gr-navbar-item" href="/">
-                <i class="bi bi-house"></i> Home
-            </a>
-            <a class="gr-navbar-item" href="/#datasets">
-                <i class="bi bi-layers"></i> Datasets
-            </a>
-            {% if s.map_viewer_url %}
-                <a class="gr-navbar-item" href="{{ s.map_viewer_url }}">
-                    <i class="bi bi-map"></i> Map Viewer
-                </a>
-            {% endif %}
-            {% if s.stac_browser_url %}
-                <a class="gr-navbar-item" href="{{ s.stac_browser_url }}">
-                    <i class="bi bi-collection"></i> STAC Browser
-                </a>
-            {% endif %}
         </div>
-
     </nav>
 {% endwith %}
