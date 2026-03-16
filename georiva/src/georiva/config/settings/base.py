@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "georiva.analysis",
     "georiva.api",
     "georiva.stac",
+    "georiva.edr",
     "georiva.visualization",
     "georiva.sources",
     "georiva.sample_plugins.ecmwf_opendata_source",
