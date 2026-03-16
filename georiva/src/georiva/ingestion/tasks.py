@@ -274,13 +274,21 @@ def prune_ingestion_logs(max_age_days: int = 30):
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     try:
+        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
+            every=5, period=IntervalSchedule.MINUTES
+        )
+        schedule_1day, _ = IntervalSchedule.objects.get_or_create(
+            every=1, period=IntervalSchedule.DAYS
+        )
+        schedule_7days, _ = IntervalSchedule.objects.get_or_create(
+            every=7, period=IntervalSchedule.DAYS
+        )
+        
         PeriodicTask.objects.update_or_create(
             name="georiva.ingestion.sweep_unprocessed",
             defaults={
                 "task": "georiva.ingestion.tasks.sweep_unprocessed",
-                "interval": IntervalSchedule.objects.get_or_create(
-                    every=5, period=IntervalSchedule.MINUTES
-                )[0],
+                "interval": schedule_5min,
                 "enabled": True,
             }
         )
@@ -288,9 +296,7 @@ def setup_periodic_tasks(sender, **kwargs):
             name="georiva.ingestion.cleanup_archives",
             defaults={
                 "task": "georiva.ingestion.tasks.cleanup_archives",
-                "interval": IntervalSchedule.objects.get_or_create(
-                    every=1, period=IntervalSchedule.DAYS
-                )[0],
+                "interval": schedule_1day,
                 "enabled": True,
             }
         )
@@ -298,9 +304,7 @@ def setup_periodic_tasks(sender, **kwargs):
             name="georiva.ingestion.prune_ingestion_logs",
             defaults={
                 "task": "georiva.ingestion.tasks.prune_ingestion_logs",
-                "interval": IntervalSchedule.objects.get_or_create(
-                    every=7, period=IntervalSchedule.DAYS
-                )[0],
+                "interval": schedule_7days,
                 "enabled": True,
             }
         )
