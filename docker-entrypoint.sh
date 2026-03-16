@@ -30,7 +30,7 @@ gunicorn              : Start GeoRiva django using a prod ready gunicorn server:
                            * Waits for the postgres database to be available first.
                            * Automatically migrates the database on startup.
                            * Binds to 0.0.0.0
-celery-default-worker   : Start the default celery worker (Wagtail, cache, etc.)
+celery-default-worker   : Start the default celery worker (scheduled tasks, pruning, sweeps
 celery-ingestion-worker : Start the ingestion celery worker (heavy GRIB/raster processing)
 celery-default-worker-dev       : Start the default celery worker with auto-reload on code changes
                           (requires the dev build target).
@@ -149,7 +149,7 @@ shell)
     exec python3 /georiva/app/src/georiva/manage.py shell
     ;;
 celery-default-worker)
-    start_celery_worker -Q celery -n default-worker@%h "${@:2}"
+    start_celery_worker -Q georiva-default -n default-worker@%h "${@:2}"
     ;;
 celery-ingestion-worker)
     start_celery_worker -Q georiva-ingestion -n ingestion-worker@%h "${@:2}"
@@ -158,7 +158,7 @@ celery-default-worker-dev)
     startup_plugin_setup
     exec watchfiles \
         --filter python \
-        "celery -A georiva worker -Q celery -n default-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
+        "celery -A georiva worker -Q georiva-default -n default-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
         /georiva/app/src/
     ;;
 celery-ingestion-worker-dev)
