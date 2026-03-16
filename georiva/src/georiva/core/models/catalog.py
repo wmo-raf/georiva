@@ -75,7 +75,7 @@ class Catalog(TimeStampedModel):
         MASK = 'mask', 'Precise geometry mask'
     
     file_format = models.CharField(max_length=20, choices=FileFormat.choices)
-    archive_source_files = models.BooleanField(default=True)
+    archive_source_files = models.BooleanField(default=False, help_text="Should archive source files")
     is_active = models.BooleanField(default=True)
     
     boundary = models.ForeignKey(

@@ -20,7 +20,7 @@ import os
 from datetime import timedelta
 
 from django.db import models
-from django.utils import timezone
+from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
 
 
@@ -133,7 +133,7 @@ class IngestionLog(models.Model):
             return False
         if not self.locked_at:
             return True
-        return timezone.now() - self.locked_at > self.LOCK_TIMEOUT
+        return dj_timezone.now() - self.locked_at > self.LOCK_TIMEOUT
     
     @property
     def can_retry(self) -> bool:
@@ -186,7 +186,7 @@ class IngestionLog(models.Model):
         if worker_id is None:
             worker_id = f"worker-{os.getpid()}"
         
-        now = timezone.now()
+        now = dj_timezone.now()
         stale_cutoff = now - cls.LOCK_TIMEOUT
         
         # Case 1 & 2: pending or retryable failed
@@ -239,7 +239,7 @@ class IngestionLog(models.Model):
             file_path=file_path,
         ).update(
             status=cls.Status.COMPLETED,
-            completed_at=timezone.now(),
+            completed_at=dj_timezone.now(),
             archive_path=archive_path,
             items_created=items_created,
             assets_created=assets_created,
@@ -284,7 +284,7 @@ class IngestionLog(models.Model):
 
         Returns the number of locks reset.
         """
-        stale_cutoff = timezone.now() - cls.LOCK_TIMEOUT
+        stale_cutoff = dj_timezone.now() - cls.LOCK_TIMEOUT
         
         return cls.objects.filter(
             status=cls.Status.PROCESSING,
@@ -310,3 +310,24 @@ class IngestionLog(models.Model):
             status=cls.Status.FAILED,
             retry_count__gte=cls.MAX_RETRIES,
         ).order_by('created_at')
+    
+    @classmethod
+    def prune_old_records(cls, max_age_days: int = 30) -> dict:
+        cutoff = dj_timezone.now() - timedelta(days=max_age_days)
+        
+        completed = cls.objects.filter(
+            status=cls.Status.COMPLETED,
+            completed_at__lt=cutoff,
+            archive_path='',  # archive already cleaned up
+        ).delete()
+        
+        permanently_failed = cls.objects.filter(
+            status=cls.Status.FAILED,
+            retry_count__gte=cls.MAX_RETRIES,
+            updated_at__lt=cutoff,
+        ).delete()
+        
+        return {
+            "completed_pruned": completed[0],
+            "failed_pruned": permanently_failed[0],
+        }

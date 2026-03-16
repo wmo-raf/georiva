@@ -1,20 +1,28 @@
 import json
+import logging
+from datetime import timedelta
 
 from celery import shared_task
+
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
 from georiva.core.models import Collection
 from georiva.sources.models import LoaderProfile
 
+logger = logging.getLogger(__name__)
+
 
 @app.on_after_finalize.connect
 def setup_network_plugin_processing_tasks(sender, **kwargs):
-    from georiva.core.models import Collection
-    collections = Collection.objects.filter(loader_profile__isnull=False)
-    
-    for collection in collections:
-        create_or_update_collection_loader_plugin_periodic_tasks(collection)
+    try:
+        from georiva.core.models import Collection
+        collections = Collection.objects.filter(loader_profile__isnull=False)
+        
+        for collection in collections:
+            create_or_update_collection_loader_plugin_periodic_tasks(collection)
+    except Exception as e:
+        logger.warning("Could not register collection loader plugin periodic tasks: %s", e)
 
 
 @shared_task(

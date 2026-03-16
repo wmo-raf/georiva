@@ -6,11 +6,13 @@ Each task acquires a lock via IngestionLog before processing.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from celery import shared_task
+from django.utils import timezone as dj_timezone
+from django_celery_beat.models import PeriodicTask, IntervalSchedule
 
+from georiva.config.celery import app
 from georiva.core.filename import validate_path
 from georiva.core.storage import storage, BucketType
 from georiva.ingestion.models import IngestionLog
@@ -18,7 +20,8 @@ from georiva.ingestion.models import IngestionLog
 logger = logging.getLogger(__name__)
 
 
-@shared_task(
+@app.task(
+    name="georiva.ingestion.tasks.process_incoming_file",
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -111,7 +114,7 @@ def process_incoming_file(
         )
 
 
-@shared_task
+@app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")
 def sweep_unprocessed(sync: bool = False):
     """
     Safety net — finds files that the webhook missed and retries failures.
@@ -232,3 +235,78 @@ def sweep_unprocessed(sync: bool = False):
         "Sweep complete: %d stale reset, %d new files, %d retries, %d permanently failed",
         stale_count, new_files, retry_count, permanently_failed,
     )
+
+
+@app.task(name="georiva.ingestion.tasks.cleanup_archives", queue="georiva-default")
+def cleanup_archives(max_age_days: int = 5):
+    from georiva.core.storage import storage, BucketType
+    from georiva.ingestion.models import IngestionLog
+    
+    cutoff = dj_timezone.now() - timedelta(days=max_age_days)
+    archive = storage.bucket(BucketType.ARCHIVE)
+    
+    ingestion_logs = IngestionLog.objects.filter(
+        status=IngestionLog.Status.COMPLETED,
+        completed_at__lt=cutoff,
+    ).exclude(archive_path='')
+    
+    deleted, failed = 0, 0
+    
+    for log in ingestion_logs.iterator():
+        try:
+            archive.delete(log.archive_path)
+            log.archive_path = ''
+            log.save(update_fields=['archive_path'])
+            deleted += 1
+        except Exception as e:
+            logger.warning("Failed to delete archive %s: %s", log.archive_path, e)
+            failed += 1
+    
+    logger.info("Archive cleanup: deleted=%d failed=%d", deleted, failed)
+    return {"deleted": deleted, "failed": failed}
+
+
+@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", queue="georiva-default")
+def prune_ingestion_logs(max_age_days: int = 30):
+    from georiva.ingestion.models import IngestionLog
+    result = IngestionLog.prune_old_records(max_age_days)
+    logger.info("Ingestion log pruned: %s", result)
+    return result
+
+
+# georiva/ingestion/tasks.py — add to setup_periodic_tasks
+@app.on_after_finalize.connect
+def setup_periodic_tasks(sender, **kwargs):
+    try:
+        PeriodicTask.objects.update_or_create(
+            name="georiva.ingestion.sweep_unprocessed",
+            defaults={
+                "task": "georiva.ingestion.tasks.sweep_unprocessed",
+                "interval": IntervalSchedule.objects.get_or_create(
+                    every=5, period=IntervalSchedule.MINUTES
+                )[0],
+                "enabled": True,
+            }
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.ingestion.cleanup_archives",
+            defaults={
+                "task": "georiva.ingestion.tasks.cleanup_archives",
+                "interval": IntervalSchedule.objects.get_or_create(
+                    every=1, period=IntervalSchedule.DAYS
+                )[0],
+                "enabled": True,
+            }
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.ingestion.prune_ingestion_logs",
+            defaults={
+                "task": "georiva.ingestion.tasks.prune_ingestion_logs",
+                "interval": IntervalSchedule.objects.get_or_create(
+                    every=7, period=IntervalSchedule.DAYS
+                )[0],
+                "enabled": True,
+            }
+        )
+    except Exception as e:
+        logger.warning("Could not register periodic tasks: %s", e)

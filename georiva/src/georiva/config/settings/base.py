@@ -355,12 +355,7 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 # Prevents one worker from hoarding tasks while others are idle.
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
-CELERY_BEAT_SCHEDULE = {
-    'sweep-unprocessed': {
-        'task': 'georiva.ingestion.tasks.sweep_unprocessed',
-        'schedule': 300,  # every 5 minutes (in seconds)
-    },
-}
+CELERY_BEAT_SCHEDULE = {}
 
 GEORIVA_LOG_LEVEL = env.str("GEORIVA_LOG_LEVEL", "INFO")
 GEORIVA_DATABASE_LOG_LEVEL = env.str("GEORIVA_DATABASE_LOG_LEVEL", "ERROR")
