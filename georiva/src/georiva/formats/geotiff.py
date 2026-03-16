@@ -331,10 +331,10 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             x_off, y_off, w, h = window
             rio_window = Window(col_off=x_off, row_off=y_off, width=w, height=h)
             wb = src.window_bounds(rio_window)
-            bounds = (float(wb.left), float(wb.bottom), float(wb.right), float(wb.top))
+            bounds = (float(wb[0]), float(wb[1]), float(wb[2]), float(wb[3]))
         else:
             b = src.bounds
-            bounds = (float(b.left), float(b.bottom), float(b.right), float(b.top))
+            bounds = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
         
         transform = src.transform
         resolution = (float(abs(transform.a)), float(abs(transform.e)))
