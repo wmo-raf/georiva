@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
+    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
 {% endblock %}
 
 {% block content %}
@@ -128,13 +129,9 @@
 
                 {# API links #}
                 <div class="gr-collection-api-links">
-                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/"
+                    <a href="/api/stac/collections/{{ catalog.slug }}/"
                        class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
                         <i class="bi bi-code-slash"></i> STAC Collection
-                    </a>
-                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/items/"
-                       class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
-                        <i class="bi bi-list-ul"></i> STAC Items
                     </a>
                 </div>
 
@@ -142,106 +139,407 @@
         </div>
     </section>
 
-    {# ── Variables ── #}
-    {% if variables %}
-        <section class="gr-section gr-section--alt">
-            <div class="gr-container">
-
-                <div class="gr-section-header">
-                    <h2 class="gr-section-title">Variables</h2>
-                    <span style="font-family:var(--gr-font-mono);font-size:0.72rem;color:var(--gr-text-3)">
-                {{ variables|length }} variable{{ variables|length|pluralize }}
-            </span>
-                </div>
-
-                <div class="gr-variables-grid">
-                    {% for variable in variables %}
-                        <div class="gr-variable-card">
-                            <div class="gr-variable-header">
-                                <span class="gr-variable-name">{{ variable.name }}</span>
-                                <span class="gr-variable-slug gr-mono">{{ variable.slug }}</span>
-                            </div>
-
-                            {% if variable.description %}
-                                <p class="gr-variable-desc">{{ variable.description }}</p>
-                            {% endif %}
-
-                            <div class="gr-variable-meta">
-                                {% if variable.units %}
-                                    <span class="gr-dataset-tag">
-                                <i class="bi bi-rulers"></i> {{ variable.units }}
-                            </span>
-                                {% endif %}
-                                {% if variable.value_min is not None and variable.value_max is not None %}
-                                    <span class="gr-dataset-tag gr-mono">
-                                {{ variable.value_min }} – {{ variable.value_max }}
-                            </span>
-                                {% endif %}
-                                {% if variable.transform_type != "passthrough" %}
-                                    <span class="gr-dataset-tag">
-                                <i class="bi bi-gear"></i> {{ variable.get_transform_type_display }}
-                            </span>
-                                {% endif %}
-                                {% if variable.palette %}
-                                    <span class="gr-dataset-tag">
-                                <i class="bi bi-palette"></i> {{ variable.palette.name }}
-                            </span>
-                                {% endif %}
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
-
+    {# ── Tab Switcher ── #}
+    <div class="gr-tab-bar">
+        <div class="gr-container">
+            <div class="gr-tabs">
+                <button class="gr-tab gr-tab--active" data-tab="detail" type="button">
+                    <i class="bi bi-table"></i> Detail
+                </button>
+                <button class="gr-tab" data-tab="map" type="button">
+                    <i class="bi bi-map"></i> Map
+                </button>
             </div>
-        </section>
-    {% endif %}
+        </div>
+    </div>
 
-    {# ── Latest Items ── #}
-    {% if latest_items %}
-        <section class="gr-section">
-            <div class="gr-container">
+    {# ── Detail Tab ── #}
+    <div class="gr-tab-panel gr-tab-panel--active" id="tab-detail">
 
-                <div class="gr-section-header">
-                    <h2 class="gr-section-title">Latest Items</h2>
-                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/items/"
-                       class="gr-section-action" target="_blank" rel="noopener">
-                        <i class="bi bi-code-slash"></i> All items
-                    </a>
-                </div>
+        {# ── Variables ── #}
+        {% if variables %}
+            <section class="gr-section gr-section--alt">
+                <div class="gr-container">
 
-                <div class="gr-items-table">
-                    <div class="gr-items-table-header">
-                        <span>Valid Time</span>
-                        <span>Reference Time</span>
-                        <span>Assets</span>
-                        <span>Source</span>
+                    <div class="gr-section-header">
+                        <h2 class="gr-section-title">Variables</h2>
+                        <span style="font-family:var(--gr-font-mono);font-size:0.72rem;color:var(--gr-text-3)">
+                            {{ variables|length }} variable{{ variables|length|pluralize }}
+                        </span>
                     </div>
-                    {% for item in latest_items %}
-                        <div class="gr-items-table-row">
-                    <span class="gr-mono" style="font-size:0.82rem">
-                        {{ item.time|date:"d M Y H:i" }} UTC
-                    </span>
-                            <span class="gr-mono" style="font-size:0.82rem;color:var(--gr-text-3)">
-                        {% if item.reference_time %}
-                            {{ item.reference_time|date:"d M Y H:i" }} UTC
-                        {% else %}
-                            —
-                        {% endif %}
-                    </span>
-                            <span style="font-size:0.82rem;color:var(--gr-text-2)">
-                        {{ item.assets.count }}
-                    </span>
-                            <span class="gr-mono" style="font-size:0.75rem;color:var(--gr-text-3);
-                          overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px"
-                                  title="{{ item.source_file }}">
-                        {{ item.source_file|default:"—" }}
-                    </span>
+
+                    <div class="gr-variables-grid">
+                        {% for variable in variables %}
+                            <div class="gr-variable-card">
+                                <div class="gr-variable-header">
+                                    <span class="gr-variable-name">{{ variable.name }}</span>
+                                    <span class="gr-variable-slug gr-mono">{{ variable.slug }}</span>
+                                </div>
+
+                                {% if variable.description %}
+                                    <p class="gr-variable-desc">{{ variable.description }}</p>
+                                {% endif %}
+
+                                <div class="gr-variable-meta">
+                                    {% if variable.units %}
+                                        <span class="gr-dataset-tag">
+                                            <i class="bi bi-rulers"></i> {{ variable.units }}
+                                        </span>
+                                    {% endif %}
+                                    {% if variable.value_min is not None and variable.value_max is not None %}
+                                        <span class="gr-dataset-tag gr-mono">
+                                            {{ variable.value_min }} – {{ variable.value_max }}
+                                        </span>
+                                    {% endif %}
+                                    {% if variable.transform_type != "passthrough" %}
+                                        <span class="gr-dataset-tag">
+                                            <i class="bi bi-gear"></i> {{ variable.get_transform_type_display }}
+                                        </span>
+                                    {% endif %}
+                                    {% if variable.palette %}
+                                        <span class="gr-dataset-tag">
+                                            <i class="bi bi-palette"></i> {{ variable.palette.name }}
+                                        </span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                </div>
+            </section>
+        {% endif %}
+
+        {# ── Latest Items ── #}
+        {% if latest_items %}
+            <section class="gr-section">
+                <div class="gr-container">
+
+                    <div class="gr-section-header">
+                        <h2 class="gr-section-title">Latest Items</h2>
+                        <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/items/"
+                           class="gr-section-action" target="_blank" rel="noopener">
+                            <i class="bi bi-code-slash"></i> All items
+                        </a>
+                    </div>
+
+                    <div class="gr-items-table">
+                        <div class="gr-items-table-header">
+                            <span>Valid Time</span>
+                            <span>Reference Time</span>
+                            <span>Assets</span>
+                            <span>Source</span>
                         </div>
-                    {% endfor %}
+                        {% for item in latest_items %}
+                            <div class="gr-items-table-row">
+                                <span class="gr-mono" style="font-size:0.82rem">
+                                    {{ item.time|date:"d M Y H:i" }} UTC
+                                </span>
+                                <span class="gr-mono" style="font-size:0.82rem;color:var(--gr-text-3)">
+                                    {% if item.reference_time %}
+                                        {{ item.reference_time|date:"d M Y H:i" }} UTC
+                                    {% else %}—{% endif %}
+                                </span>
+                                <span style="font-size:0.82rem;color:var(--gr-text-2)">
+                                    {{ item.assets.count }}
+                                </span>
+                                <span class="gr-mono"
+                                      style="font-size:0.75rem;color:var(--gr-text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px"
+                                      title="{{ item.source_file }}">
+                                    {{ item.source_file|default:"—" }}
+                                </span>
+                            </div>
+                        {% endfor %}
+                    </div>
+
+                </div>
+            </section>
+        {% endif %}
+
+    </div>{# /tab-detail #}
+
+    {# ── Map Tab ── #}
+    <div class="gr-tab-panel" id="tab-map">
+        <div class="gr-map-shell">
+            <div class="gr-map-canvas" id="grMapCanvas">
+
+                {# Left variables panel #}
+                <aside class="gr-map-sidebar" id="grMapSidebar">
+                    <div class="gr-map-sidebar-header">
+                        <span class="gr-map-sidebar-label">Layers</span>
+                    </div>
+                    <div class="gr-map-sidebar-body" id="grVariableList">
+                        {% for variable in variables %}
+                            <button class="gr-map-var-btn {% if forloop.first %}gr-map-var-btn--active{% endif %}"
+                                    type="button"
+                                    data-variable-slug="{{ variable.slug }}"
+                                    data-variable-name="{{ variable.name }}"
+                                    data-variable-units="{{ variable.units|default:'' }}">
+                                <span class="gr-map-var-dot"></span>
+                                <span class="gr-map-var-name">{{ variable.name }}</span>
+                                {% if variable.units %}
+                                    <span class="gr-map-var-unit gr-mono">{{ variable.units }}</span>
+                                {% endif %}
+                            </button>
+                            {% empty %}
+                            <p class="gr-map-sidebar-empty">No variables</p>
+                        {% endfor %}
+                    </div>
+                </aside>
+
+                {# Map canvas #}
+
+
+                <div id="grMap"></div>
+
+                {# Basemap selector #}
+                <div class="gr-map-basemap-selector">
+                    <button class="gr-map-basemap-btn" id="grBasemapBtn" type="button">
+                        <i class="bi bi-layers-half"></i>
+                        <span id="grBasemapLabel">Dark</span>
+                        <i class="bi bi-chevron-down" style="font-size:0.6rem;opacity:0.6"></i>
+                    </button>
+                    <div class="gr-map-basemap-menu" id="grBasemapMenu">
+                        <div class="gr-map-basemap-option" data-basemap="dark">
+                            <span>Dark</span><i class="bi bi-check2 gr-bm-check"></i>
+                        </div>
+                        <div class="gr-map-basemap-option" data-basemap="light">
+                            <span>Light</span><i class="bi bi-check2 gr-bm-check"></i>
+                        </div>
+                        <div class="gr-map-basemap-option" data-basemap="satellite">
+                            <span>Satellite</span><i class="bi bi-check2 gr-bm-check"></i>
+                        </div>
+                        <div class="gr-map-basemap-option" data-basemap="osm">
+                            <span>OSM</span><i class="bi bi-check2 gr-bm-check"></i>
+                        </div>
+                    </div>
                 </div>
 
-            </div>
-        </section>
-    {% endif %}
+                {# Legend panel — bottom left #}
+                <div class="gr-map-legend" id="grLegend" style="display:none">
+                    <div class="gr-map-legend-title" id="grLegendTitle">—</div>
+                    <div class="gr-map-legend-scale" id="grLegendScale"></div>
+                    <div class="gr-map-legend-labels">
+                        <span id="grLegendMin">0</span>
+                        <span id="grLegendMax">100</span>
+                    </div>
+                    <div class="gr-map-legend-units" id="grLegendUnits"></div>
+                    <div class="gr-map-legend-opacity">
+                        <span>Opacity</span>
+                        <span id="grOpacityVal">100%</span>
+                    </div>
+                    <input type="range" class="gr-map-opacity-slider" id="grOpacitySlider"
+                           min="0" max="100" value="100">
+                </div>
 
+                {# Loading spinner #}
+                <div class="gr-map-loading" id="grMapLoading" style="display:none">
+                    <div class="gr-map-spinner"></div>
+                    <span>Loading layer…</span>
+                </div>
+
+                {# Time slider bar — bottom #}
+                <div class="gr-timebar" id="grTimebar" style="display:none">
+                    <button class="gr-timebar-btn" id="grTimePlayBtn" type="button" title="Play/Pause">
+                        <i class="bi bi-play-fill" id="grTimePlayIcon"></i>
+                    </button>
+                    <div class="gr-timebar-track-wrap">
+                        <input type="range" class="gr-timebar-slider" id="grTimeSlider"
+                               min="0" max="0" value="0">
+                        <div class="gr-timebar-ticks" id="grTimebarTicks"></div>
+                    </div>
+                    <div class="gr-timebar-display">
+                        <span class="gr-timebar-date" id="grTimeDate">—</span>
+                        <span class="gr-timebar-count" id="grTimeCount"></span>
+                    </div>
+                </div>
+
+
+            </div>
+            {# /gr-map-canvas #}
+        </div>
+        {# /gr-map-shell #}
+    </div>{# /tab-map #}
+
+{% endblock %}
+
+{% block extra_js %}
+    <script>
+    </script>
+
+    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/deck.gl@9.2.6/dist/dist.dev.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
+
+    <script>
+        (function () {
+            'use strict';
+
+            // ── Tab switching ──────────────────────────────────────────────────────
+            let mapInitialized = false;
+
+            document.querySelectorAll('.gr-tab').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.gr-tab').forEach(b => b.classList.remove('gr-tab--active'));
+                    document.querySelectorAll('.gr-tab-panel').forEach(p => p.classList.remove('gr-tab-panel--active'));
+                    btn.classList.add('gr-tab--active');
+                    const panel = document.getElementById('tab-' + btn.dataset.tab);
+                    panel.classList.add('gr-tab-panel--active');
+
+                    if (btn.dataset.tab === 'map' && !mapInitialized) {
+                        mapInitialized = true;
+                        initMap();
+                    }
+                });
+            });
+
+            // ── Basemaps ───────────────────────────────────────────────────────────
+            const BASEMAPS = {
+                dark: {
+                    name: 'Dark',
+                    style: {
+                        version: 8,
+                        sources: {
+                            carto: {
+                                type: 'raster',
+                                tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
+                                tileSize: 256,
+                                attribution: '© CARTO'
+                            }
+                        },
+                        layers: [{id: 'carto', type: 'raster', source: 'carto'}]
+                    }
+                },
+                light: {
+                    name: 'Light',
+                    style: {
+                        version: 8,
+                        sources: {
+                            carto: {
+                                type: 'raster',
+                                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
+                                tileSize: 256,
+                                attribution: '© CARTO'
+                            }
+                        },
+                        layers: [{id: 'carto', type: 'raster', source: 'carto'}]
+                    }
+                },
+                satellite: {
+                    name: 'Satellite',
+                    style: {
+                        version: 8,
+                        sources: {
+                            satellite: {
+                                type: 'raster',
+                                tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+                                tileSize: 256,
+                                attribution: '© Esri'
+                            }
+                        },
+                        layers: [{id: 'satellite', type: 'raster', source: 'satellite'}]
+                    }
+                },
+                osm: {
+                    name: 'OSM',
+                    style: {
+                        version: 8,
+                        sources: {
+                            osm: {
+                                type: 'raster',
+                                tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                                tileSize: 256,
+                                attribution: '© OpenStreetMap contributors'
+                            }
+                        },
+                        layers: [{id: 'osm', type: 'raster', source: 'osm'}]
+                    }
+                }
+            };
+
+            // ── State ──────────────────────────────────────────────────────────────
+            let map = null;
+            let deckOverlay = null;
+            let currentRasterLayer = null;
+            let currentPalette = null;
+            let currentBasemap = 'dark';
+            let currentVariableSlug = null;
+
+            // ── Map Init ───────────────────────────────────────────────────────────
+            function initMap() {
+                map = new maplibregl.Map({
+                    container: 'grMap',
+                    style: BASEMAPS[currentBasemap].style,
+                    fitBoundsOptions: {padding: 60},
+                    attributionControl: false,
+                });
+
+                map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'bottom-right');
+
+                map.on('load', async () => {
+                    deckOverlay = new deck.MapboxOverlay({interleaved: true, layers: []});
+                    map.addControl(deckOverlay);
+
+                    await waitForDeck(() => deckOverlay._deck);
+
+                    // Set first variable as active
+                    const firstVarBtn = document.querySelector('.gr-map-var-btn');
+                    if (firstVarBtn) {
+                        currentVariableSlug = firstVarBtn.dataset.variableSlug;
+                    }
+
+                    setupBasemapSelector();
+                });
+            }
+
+            function waitForDeck(getDeck) {
+                return new Promise(resolve => {
+                    (function wait() {
+                        const d = getDeck();
+                        if (d && d.getCanvas()) resolve(d);
+                        else setTimeout(wait, 100);
+                    })();
+                });
+            }
+
+            // ── Basemap Selector ──────────────────────────────────────────────────
+            function setupBasemapSelector() {
+                const btn = document.getElementById('grBasemapBtn');
+                const menu = document.getElementById('grBasemapMenu');
+
+                btn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    menu.classList.toggle('gr-open');
+                });
+                document.addEventListener('click', () => menu.classList.remove('gr-open'));
+
+                // Mark initial active
+                menu.querySelector(`[data-basemap="${currentBasemap}"]`).classList.add('gr-bm-active');
+
+                menu.querySelectorAll('.gr-map-basemap-option').forEach(opt => {
+                    opt.addEventListener('click', e => {
+                        e.stopPropagation();
+                        const bm = opt.dataset.basemap;
+                        if (bm === currentBasemap) {
+                            menu.classList.remove('gr-open');
+                            return;
+                        }
+
+                        menu.querySelectorAll('.gr-map-basemap-option').forEach(o => o.classList.remove('gr-bm-active'));
+                        opt.classList.add('gr-bm-active');
+                        document.getElementById('grBasemapLabel').textContent = BASEMAPS[bm].name;
+                        currentBasemap = bm;
+                        menu.classList.remove('gr-open');
+
+                        map.setStyle(BASEMAPS[bm].style);
+                        map.once('style.load', () => {
+                            if (deckOverlay && currentRasterLayer) {
+                                deckOverlay.setProps({layers: [currentRasterLayer]});
+                            }
+                        });
+                    });
+                });
+            }
+        })();
+    </script>
 {% endblock %}
