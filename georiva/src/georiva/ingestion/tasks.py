@@ -1,8 +1,5 @@
 """
 GeoRiva Ingestion Celery Tasks
-
-Tasks are queued by the webhook view or the sweep task.
-Each task acquires a lock via IngestionLog before processing.
 """
 
 import logging
@@ -274,7 +271,6 @@ def prune_ingestion_logs(max_age_days: int = 30):
     return result
 
 
-# georiva/ingestion/tasks.py — add to setup_periodic_tasks
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     try:

@@ -279,9 +279,14 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         return "1.0.0"
     
     def get_stac_extensions(self, obj):
-        return [
+        extensions = [
             "https://stac-extensions.github.io/item-assets/v1.0.0/schema.json",
         ]
+        if obj.collection.is_forecast:
+            extensions.append(
+                "https://stac-extensions.github.io/forecast/v0.1.0/schema.json"
+            )
+        return extensions
     
     def get_id(self, obj):
         return obj.slug
@@ -331,6 +336,13 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         
         if collection.crs:
             summaries["proj:epsg"] = [self._parse_epsg(collection.crs)]
+        
+        # Forecast metadata
+        if collection.is_forecast:
+            summaries["forecast:is_forecast"] = True
+            if collection.forecast_horizon_hours:
+                summaries["forecast:horizon_hours"] = collection.forecast_horizon_hours
+            summaries["forecast:retain_past"] = collection.retain_past_forecasts
         
         return summaries
     

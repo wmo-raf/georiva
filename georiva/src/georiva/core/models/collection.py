@@ -65,6 +65,26 @@ class Collection(TimeStampedModel, ClusterableModel):
     
     # Status
     is_active = models.BooleanField(default=True)
+    
+    # --- Forecast config ---
+    is_forecast = models.BooleanField(
+        default=False,
+        help_text="True if items represent forecast (future) data with a reference_time"
+    )
+    forecast_horizon_hours = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text="Max forecast horizon in hours (e.g. 240 for GFS)"
+    )
+    retain_past_forecasts = models.BooleanField(
+        default=False,
+        help_text="If True, keep items whose valid_time is in the past. "
+                  "If False, a cleanup task prunes them."
+    )
+    retain_latest_run_only = models.BooleanField(
+        default=False,
+        help_text="If True, only keep items from the most recent reference_time run."
+    )
+    
     sort_order = models.PositiveIntegerField(default=0)
     
     # Ingestion configuration
@@ -102,6 +122,12 @@ class Collection(TimeStampedModel, ClusterableModel):
             FieldPanel('is_active'),
             FieldPanel('sort_order'),
         ], heading="Status"),
+        MultiFieldPanel([
+            FieldPanel('is_forecast'),
+            FieldPanel('forecast_horizon_hours'),
+            FieldPanel('retain_past_forecasts'),
+            FieldPanel('retain_latest_run_only'),
+        ], heading="Forecast Configuration"),
         InlinePanel('variables', label="Variables"),
     ]
     

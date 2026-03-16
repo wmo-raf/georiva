@@ -290,6 +290,15 @@ class STACItemsView(STACGeoAPIView):
             collection=collection
         ).prefetch_related('assets', 'assets__variable')
         
+        # For forecast collections, exclude past items unless caller opts in
+        if collection.is_forecast and not collection.retain_past_forecasts:
+            include_past = (
+                    request.query_params.get('include_past', 'false').lower() == 'true'
+            )
+            if not include_past:
+                from django.utils import timezone
+                queryset = queryset.filter(time__gte=timezone.now())
+        
         # Apply filters
         if datetime_param:
             queryset = self._apply_datetime_filter(queryset, datetime_param)
@@ -443,11 +452,16 @@ class STACItemDetailView(STACGeoAPIView):
     ) -> Optional[Item]:
         parts = item_id.split('_')
         
+        # Base queryset — respect forecast past-item policy
+        base_qs = Item.objects.filter(collection=collection)
+        if collection.is_forecast and not collection.retain_past_forecasts:
+            from django.utils import timezone
+            base_qs = base_qs.filter(time__gte=timezone.now())
+        
         try:
             if len(parts) == 1:
                 valid_time = datetime.strptime(parts[0], '%Y%m%dT%H%M%SZ')
-                return Item.objects.filter(
-                    collection=collection,
+                return base_qs.filter(
                     time=valid_time,
                     reference_time__isnull=True,
                 ).prefetch_related(
@@ -457,8 +471,7 @@ class STACItemDetailView(STACGeoAPIView):
             elif len(parts) == 2:
                 ref_time = datetime.strptime(parts[0], '%Y%m%dT%H%M%SZ')
                 valid_time = datetime.strptime(parts[1], '%Y%m%dT%H%M%SZ')
-                return Item.objects.filter(
-                    collection=collection,
+                return base_qs.filter(
                     time=valid_time,
                     reference_time=ref_time,
                 ).prefetch_related(
