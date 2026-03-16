@@ -268,18 +268,23 @@ class IngestionService:
                 if hasattr(plugin, "clear_cache"):
                     plugin.clear_cache()
             
-            # 8. Archive raw file + delete from origin
-            if result.success and catalog.archive_source_files:
-                archived = self._archive_source(origin, file_path)
-                result.archive_path = archived or ""
-                
-                if archived:
-                    origin.delete(file_path)
+            # 8. Archive raw file + delete origin
+            if result.success:
+                if catalog.archive_source_files:
+                    archived = self._archive_source(origin, file_path)
+                    result.archive_path = archived or ""
                     self.logger.info(
-                        "Archived and deleted source: %s/%s",
+                        "Archived source: %s/%s",
                         origin.bucket_name,
                         file_path,
                     )
+                
+                origin.delete(file_path)
+                self.logger.info(
+                    "Deleted source: %s/%s",
+                    origin.bucket_name,
+                    file_path,
+                )
             
             # Log clipping summary
             if result.clipped and result.size_reduction_percent:
