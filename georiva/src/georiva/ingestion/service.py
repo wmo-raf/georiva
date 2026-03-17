@@ -231,7 +231,7 @@ class IngestionService:
                         
                         for ts in timestamps:
                             try:
-                                item, assets, clip_info = self._process_timestamp(
+                                item, assets, clip_info, failed_variables = self._process_timestamp(
                                     collection=collection,
                                     plugin=plugin,
                                     local_path=local_path,
@@ -240,6 +240,12 @@ class IngestionService:
                                     clipper=clipper,
                                     reference_time=reference_time,
                                 )
+                                
+                                if failed_variables:
+                                    result.add_error(
+                                        f"Partial failure for {collection.slug} @ {ts}: "
+                                        f"variables failed: {', '.join(failed_variables)}"
+                                    )
                                 
                                 if item is None:
                                     continue  # no assets, item was deleted, skip
@@ -269,20 +275,20 @@ class IngestionService:
                     plugin.clear_cache()
             
             # 8. Archive raw file + delete origin
-            if result.success:
+            # Only delete if ALL variables succeeded — partial failures
+            # mean the file may need to be re-processed.
+            has_partial_failures = any(
+                "Partial failure" in e for e in result.errors
+            )
+            
+            if result.success and not has_partial_failures:
                 if catalog.archive_source_files:
                     archived = self._archive_source(origin, file_path)
                     result.archive_path = archived or ""
-                    self.logger.info(
-                        "Archived source: %s/%s",
-                        origin.bucket_name,
-                        file_path,
-                    )
-                
                 origin.delete(file_path)
-                self.logger.info(
-                    "Deleted source: %s/%s",
-                    origin.bucket_name,
+            elif result.success and has_partial_failures:
+                self.logger.warning(
+                    "Partial variable failures — keeping source file for re-processing: %s",
                     file_path,
                 )
             
@@ -378,7 +384,7 @@ class IngestionService:
             source_file: str,
             clipper: BoundaryClipper,
             reference_time: datetime = None,
-    ) -> tuple[Optional["Item"], list["Asset"], dict]:
+    ) -> tuple[Optional["Item"], list["Asset"], dict, list]:
         """
         Process all Variables for a single timestamp.
 
@@ -499,6 +505,8 @@ class IngestionService:
         # Process each Variable
         assets = []
         
+        failed_variables = []
+        
         for variable in variables:
             try:
                 variable_assets = self._process_variable(
@@ -524,6 +532,7 @@ class IngestionService:
                     "Variable %s failed: %s\n%s",
                     variable.slug, e, traceback.format_exc(),
                 )
+                failed_variables.append(variable.slug)
         
         self._update_collection_extent(collection, ts_utc, bounds)
         
@@ -532,7 +541,7 @@ class IngestionService:
                 "No assets created for Item %s — deleting orphan item", item.pk
             )
             item.delete()
-            return None, [], clip_info
+            return None, [], clip_info, failed_variables
         
         if created:
             Collection.objects.filter(pk=collection.pk).update(
@@ -541,7 +550,7 @@ class IngestionService:
         
         self.logger.info("Created Item %s with %d assets", item.pk, len(assets))
         
-        return item, assets, clip_info
+        return item, assets, clip_info, failed_variables
     
     # =========================================================================
     # Variable Processing
