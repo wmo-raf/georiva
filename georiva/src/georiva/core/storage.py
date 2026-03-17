@@ -430,20 +430,19 @@ class StorageManager:
     ) -> str:
         """
         Build a time-partitioned asset path.
-
-        Returns:
-            "{catalog}/{collection}/{variable}/{year}/{month}/{day}/{filename}"
-
-        Example:
-            >>> StorageManager.build_asset_path(
-            ...     "satellite-imagery", "ndvi", "temperature",
-            ...     datetime(2025, 1, 15, 6, 0, 0), "20250115T060000_temp.tif"
-            ... )
-            "satellite-imagery/ndvi/temperature/2025/01/15/20250115T060000_temp.tif"
+        
+        timestamp must be UTC-aware. Date components are extracted
+        from UTC values to ensure consistent paths across timezones.
         """
+        import pytz
+        if timestamp.tzinfo is None:
+            raise ValueError(
+                f"timestamp must be UTC-aware, got naive datetime: {timestamp}"
+            )
+        ts = timestamp.astimezone(pytz.utc)
         return (
             f"{catalog}/{collection}/{variable}/"
-            f"{timestamp.year}/{timestamp.month:02d}/{timestamp.day:02d}/"
+            f"{ts.year}/{ts.month:02d}/{ts.day:02d}/"
             f"{filename}"
         )
     

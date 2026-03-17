@@ -23,6 +23,7 @@ Future additions:
     GET /api/edr/collections/{slug}/instances/
 """
 
+from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404
 from rest_framework.parsers import JSONParser
 from rest_framework.renderers import JSONRenderer
@@ -30,7 +31,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from georiva.core.models import Collection
+from georiva.core.models import Collection, Item
 from .renderers import EDRJSONRenderer
 from .serializers import (
     EDRCollectionSerializer,
@@ -139,19 +140,14 @@ class EDRConformanceView(EDRAPIView):
 class EDRCollectionListView(EDRAPIView):
     """
     List all EDR Collections.
-
+ 
     GET /api/edr/collections/
-
-    Returns a summary of every active Collection across all Catalogs.
-    One GeoRiva Collection = one EDR Collection.
-
+ 
+    Annotates each Collection with has_reference_time (single subquery)
+    so EDRCollectionSummarySerializer can read it without extra DB hits.
+ 
     Query Parameters:
         catalog (str): Filter by catalog slug. e.g. ?catalog=chirps
-                       Returns only collections belonging to that catalog.
-
-    Response uses the lightweight summary serializer — temporal.values
-    and palette details are omitted for performance. Clients fetch
-    the collection detail endpoint for the full metadata.
     """
     
     def get(self, request: Request) -> Response:
@@ -164,9 +160,16 @@ class EDRCollectionListView(EDRAPIView):
             'catalog',
         ).prefetch_related(
             'variables',
+        ).annotate(
+            # Single EXISTS subquery per collection — no per-row extra queries
+            has_reference_time=Exists(
+                Item.objects.filter(
+                    collection=OuterRef('pk'),
+                    reference_time__isnull=False,
+                )
+            )
         ).order_by('catalog__name', 'sort_order', 'name')
         
-        # Optional catalog filter
         catalog_slug = request.query_params.get('catalog')
         if catalog_slug:
             queryset = queryset.filter(catalog__slug=catalog_slug)

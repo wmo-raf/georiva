@@ -9,7 +9,16 @@ EDR hierarchy:
 
 Implements OGC API - Environmental Data Retrieval 1.1 (19-086r6)
 Phase 1: Collection metadata only (landing page, conformance, collection list, collection detail)
+
+Temporal values strategy:
+  - Collections without reference_time → flat ISO string list (EDR-compliant)
+  - Collections with reference_time    → flat ISO list in extent.temporal.values
+                                          + structured runs in x-georiva.runs
+                                          (keeps spec compliance while enabling
+                                           frontend URL construction)
 """
+
+from itertools import groupby
 
 from rest_framework import serializers
 
@@ -64,16 +73,12 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             },
         }
         
-        # Unit — only include if present
         if variable.units:
             data["unit"] = {"symbol": variable.units}
         
-        # Description
         if variable.description:
             data["description"] = variable.description
         
-        # x-georiva — GeoRiva-specific rendering hints
-        # This is the style information the EDR spec doesn't cover natively
         x_georiva = {
             "value_min": variable.value_min,
             "value_max": variable.value_max,
@@ -81,7 +86,6 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             "transform_type": variable.transform_type,
         }
         
-        # Palette — convert ColorPalette to WeatherLayers format
         if variable.palette:
             try:
                 palette = variable.palette.as_weatherlayers_palette()
@@ -94,7 +98,6 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             except Exception:
                 pass
         else:
-            # No palette — expose value range for grayscale fallback
             x_georiva["palette_min"] = variable.value_min
             x_georiva["palette_max"] = variable.value_max
         
@@ -113,7 +116,11 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
 
     One GeoRiva Collection → one EDR Collection.
     All active Variables → parameter_names entries.
-    Item.time values → temporal.values
+
+    Temporal handling:
+      - No reference_time (CHIRPS): flat values list, no runs in x-georiva
+      - Has reference_time (ECMWF, ERA5): flat values list (EDR-compliant) +
+        x-georiva.runs (structured, for frontend URL construction)
     """
     
     def to_representation(self, collection: Collection):
@@ -121,64 +128,73 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         stac_base_url = self._get_stac_base_url()
         collection_url = f"{base_url}collections/{collection.slug}/"
         
+        # Use annotated value if the view provided it (avoids extra query),
+        # otherwise fall back to a direct DB check.
+        has_reference_time = getattr(
+            collection,
+            'has_reference_time',
+            self._check_has_reference_time(collection),
+        )
+        
         data = {
             "id": collection.slug,
             "title": collection.name,
             "description": collection.description or f"{collection.name} from {collection.catalog.name}",
-            "extent": self._build_extent(collection),
+            "extent": self._build_extent(collection, has_reference_time),
             "parameter_names": self._build_parameter_names(collection),
             "data_queries": self._build_data_queries(collection_url),
             "providers": self._build_providers(collection),
             "links": self._build_links(collection, collection_url, stac_base_url),
-            "x-georiva": self._build_georiva_metadata(collection),
+            "x-georiva": self._build_georiva_metadata(collection, has_reference_time),
         }
         
         return data
     
+    # ── Reference time detection ───────────────────────────────────────────
+    
+    def _check_has_reference_time(self, collection: Collection) -> bool:
+        """
+        Fallback DB check — used only when the view hasn't annotated the queryset.
+
+        Covers is_forecast=True but also reanalysis/hindcast datasets
+        where reference_time is set but is_forecast may be False.
+        """
+        return Item.objects.filter(
+            collection=collection,
+            reference_time__isnull=False,
+        ).exists()
+    
     # ── Extent ────────────────────────────────────────────────────────────
     
-    def _build_extent(self, collection: Collection) -> dict:
-        """
-        Build the EDR extent object.
-
-        spatial.bbox  — from collection.bounds
-        temporal.interval — from collection.time_start / time_end
-        temporal.values   — queried from Item.time (explicit timestep list)
-        """
-        # Spatial
+    def _build_extent(self, collection: Collection, has_reference_time: bool) -> dict:
         bbox = collection.bounds or [-180, -90, 180, 90]
         spatial = {
             "bbox": [bbox],
             "crs": collection.crs or "EPSG:4326",
         }
         
-        # Temporal interval (coarse range from collection metadata)
         interval_start = collection.time_start.isoformat() if collection.time_start else None
         interval_end = collection.time_end.isoformat() if collection.time_end else None
         
-        # Temporal values — explicit list of available timesteps
-        temporal_values = self._get_temporal_values(collection)
-        
         temporal = {
             "interval": [[interval_start, interval_end]],
-            "values": temporal_values,
+            "values": self._get_flat_temporal_values(collection, has_reference_time),
             "trs": "http://www.opengis.net/def/uom/ISO-8601/0/Gregorian",
         }
         
-        return {
-            "spatial": spatial,
-            "temporal": temporal,
-        }
+        return {"spatial": spatial, "temporal": temporal}
     
-    def _get_temporal_values(self, collection: Collection) -> list:
+    def _get_flat_temporal_values(
+            self, collection: Collection, has_reference_time: bool
+    ) -> list[str]:
         """
-        Query all distinct valid times for this collection.
+        Return a flat list of ISO 8601 valid_time strings.
 
-        For non-forecast collections: all item times, oldest → newest.
-        For forecast collections: times from the latest reference_time run only
+        No reference_time → all item times oldest → newest.
+        Has reference_time → valid_times from the latest run only
+                             (keeps the list bounded and current).
         """
-        if collection.is_forecast:
-            # Latest forecast run only
+        if has_reference_time:
             latest_ref = (
                 Item.objects
                 .filter(collection=collection, reference_time__isnull=False)
@@ -186,33 +202,58 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
                 .values_list('reference_time', flat=True)
                 .first()
             )
-            if latest_ref:
-                qs = Item.objects.filter(
-                    collection=collection,
-                    reference_time=latest_ref,
-                )
-            else:
-                qs = Item.objects.none()
+            if not latest_ref:
+                return []
+            qs = Item.objects.filter(
+                collection=collection,
+                reference_time=latest_ref,
+            ).order_by('time')
         else:
             qs = Item.objects.filter(
                 collection=collection,
                 reference_time__isnull=True,
-            )
+            ).order_by('time')
         
         return [
             t.isoformat()
-            for t in qs.values_list('time', flat=True).order_by('time').distinct()
+            for t in qs.values_list('time', flat=True).distinct()
         ]
+    
+    def _get_runs(self, collection: Collection) -> list[dict]:
+        """
+        Build the structured runs list for x-georiva.runs.
+
+        Single query — groups in Python via itertools.groupby.
+        Runs ordered newest → oldest; valid_times oldest → newest within each run.
+
+        Shape:
+        [
+          {
+            "reference_time": "2026-03-22T00:00:00+00:00",
+            "valid_times": ["2026-03-22T06:00:00+00:00", ...]
+          },
+          ...
+        ]
+        """
+        rows = list(
+            Item.objects
+            .filter(collection=collection, reference_time__isnull=False)
+            .order_by('-reference_time', 'time')
+            .values_list('reference_time', 'time')
+        )
+        
+        runs = []
+        for ref_time, group in groupby(rows, key=lambda r: r[0]):
+            runs.append({
+                "reference_time": ref_time.isoformat(),
+                "valid_times": [t.isoformat() for _, t in group],
+            })
+        
+        return runs
     
     # ── Parameter names ───────────────────────────────────────────────────
     
     def _build_parameter_names(self, collection: Collection) -> dict:
-        """
-        Build parameter_names dict — one entry per active Variable.
-
-        Keys are variable slugs. Values are serialized parameter objects
-        including x-georiva style hints.
-        """
         parameter_names = {}
         variables = collection.variables.filter(is_active=True).order_by('sort_order')
         
@@ -227,10 +268,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
     # ── Data queries ──────────────────────────────────────────────────────
     
     def _build_data_queries(self, collection_url: str) -> dict:
-        """
-        Advertise available query types.
-        Phase 1: position only (documented but not yet implemented).
-        """
         return {
             "position": {
                 "link": {
@@ -240,22 +277,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
                     "title": "Position query — retrieve data at one or more points",
                 }
             },
-            # "area": {
-            #     "link": {
-            #         "href": f"{collection_url}area/",
-            #         "rel": "data",
-            #         "type": "application/prs.coverage+json",
-            #         "title": "Area query — retrieve data within a polygon",
-            #     }
-            # },
-            # "locations": {
-            #     "link": {
-            #         "href": f"{collection_url}locations/",
-            #         "rel": "data",
-            #         "type": "application/json",
-            #         "title": "Locations — retrieve data for named locations",
-            #     }
-            # },
         }
     
     # ── Providers ─────────────────────────────────────────────────────────
@@ -264,10 +285,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         catalog = collection.catalog
         providers = []
         if catalog.provider:
-            provider = {
-                "name": catalog.provider,
-                "roles": ["producer"],
-            }
+            provider = {"name": catalog.provider, "roles": ["producer"]}
             if catalog.provider_url:
                 provider["url"] = catalog.provider_url
             providers.append(provider)
@@ -301,7 +319,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
                 "type": "application/json",
                 "title": "All EDR collections",
             },
-            # Cross-link to STAC
             {
                 "rel": "canonical",
                 "href": f"{stac_base_url}collections/{catalog.slug}/{collection.slug}/",
@@ -310,7 +327,6 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             },
         ]
         
-        # License
         if catalog.license and catalog.provider_url:
             links.append({
                 "rel": "license",
@@ -322,10 +338,22 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
     
     # ── GeoRiva metadata ──────────────────────────────────────────────────
     
-    def _build_georiva_metadata(self, collection: Collection) -> dict:
+    def _build_georiva_metadata(
+            self, collection: Collection, has_reference_time: bool
+    ) -> dict:
         """
         GeoRiva-specific metadata that doesn't fit the EDR spec.
-        Prefixed x-georiva to mark as an extension.
+
+        For collections with reference_time, adds:
+          - has_reference_time: true
+          - runs: [{reference_time, valid_times[]}]
+            used by the frontend to construct asset URLs without a DB lookup.
+
+        Asset URL pattern (frontend buildAssetUrl):
+          No reference_time:
+            {catalog}/{collection}/{variable}/{vt_Y}/{vt_m}/{vt_d}/{variable}_{vt_HHMMSS}.png
+          Has reference_time:
+            {catalog}/{collection}/{variable}/{vt_Y}/{vt_m}/{vt_d}/{variable}_{vt_HHMMSS}__ref{ref_YYYYMMDDTHHmmss}.png
         """
         catalog = collection.catalog
         meta = {
@@ -335,6 +363,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             "time_resolution": collection.time_resolution or None,
             "item_count": collection.item_count,
             "is_forecast": collection.is_forecast,
+            "has_reference_time": has_reference_time,
             "crs": collection.crs,
         }
         
@@ -345,6 +374,9 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         
         if catalog.license:
             meta["license"] = catalog.license
+        
+        if has_reference_time:
+            meta["runs"] = self._get_runs(collection)
         
         return {k: v for k, v in meta.items() if v is not None}
 
@@ -357,8 +389,11 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
     """
     Lightweight summary of a Collection for the list endpoint.
 
-    Omits temporal.values and parameter palette details to keep
+    Omits temporal.values, runs, and parameter palette details to keep
     the list response fast — clients fetch the full detail when needed.
+
+    Expects the queryset to be annotated with has_reference_time by the view
+    (see EDRCollectionListView). Falls back to is_forecast if not annotated.
     """
     
     def to_representation(self, collection: Collection):
@@ -369,7 +404,6 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
         interval_start = collection.time_start.isoformat() if collection.time_start else None
         interval_end = collection.time_end.isoformat() if collection.time_end else None
         
-        # Parameter names — slugs and labels only, no palette
         parameter_names = {}
         for variable in collection.variables.filter(is_active=True).order_by('sort_order'):
             parameter_names[variable.slug] = {
@@ -378,6 +412,10 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
                 "observedProperty": {"id": variable.slug, "label": variable.name},
                 **({"unit": {"symbol": variable.units}} if variable.units else {}),
             }
+        
+        # Use annotated value from view — avoids one EXISTS query per collection.
+        # Falls back to is_forecast as a safe approximation if not annotated.
+        has_reference_time = getattr(collection, 'has_reference_time', collection.is_forecast)
         
         return {
             "id": collection.slug,
@@ -402,8 +440,10 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
             "x-georiva": {
                 "catalog_slug": collection.catalog.slug,
                 "catalog_name": collection.catalog.name,
+                "collection_slug": collection.slug,
                 "time_resolution": collection.time_resolution or None,
                 "is_forecast": collection.is_forecast,
+                "has_reference_time": has_reference_time,
                 "item_count": collection.item_count,
             },
         }

@@ -508,7 +508,7 @@ class IngestionService:
                     encoder=encoder,
                     writer=writer,
                     local_path=local_path,
-                    timestamp=timestamp,
+                    timestamp=ts_utc,
                     bounds=bounds,
                     crs=crs,
                     width=width,
@@ -615,7 +615,12 @@ class IngestionService:
         catalog_slug = item.collection.catalog.slug
         collection_slug = item.collection.slug
         time_str = timestamp.strftime("%H%M%S")
-        base_name = f"{variable.slug}_{time_str}"
+        
+        if item.reference_time:
+            ref_str = item.reference_time.strftime("%Y%m%dT%H%M%S")
+            base_name = f"{variable.slug}_{time_str}__ref{ref_str}"
+        else:
+            base_name = f"{variable.slug}_{time_str}"
         
         base_dir = storage.build_asset_path(
             catalog=catalog_slug,

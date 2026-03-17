@@ -160,6 +160,8 @@ def sweep_unprocessed(sync: bool = False):
             except ValueError:
                 logger.debug("Skipping non-conforming path: %s", path)
                 continue
+                
+            
             
             # Skip if already tracked
             if IngestionLog.is_known(bucket_type, path):
