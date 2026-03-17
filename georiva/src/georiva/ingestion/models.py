@@ -94,6 +94,10 @@ class IngestionLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    force_reingest = models.BooleanField(
+        default=False
+    )
+    
     # =========================================================================
     # Configuration
     # =========================================================================
@@ -331,3 +335,43 @@ class IngestionLog(models.Model):
             "completed_pruned": completed[0],
             "failed_pruned": permanently_failed[0],
         }
+    
+    @property
+    def has_live_data(self) -> bool:
+        """
+        True if Item records exist that were produced from this file.
+        A completed log with no live items means data was lost — re-ingest.
+        """
+        from georiva.core.models import Item
+        
+        source_file = f"{self.bucket}:{self.file_path}"
+        
+        qs = Item.objects.filter(
+            collection__catalog__slug=self.catalog_slug,
+            source_file__contains=source_file,
+        )
+        
+        if self.collection_slug:
+            qs = qs.filter(collection__slug=self.collection_slug)
+        
+        return qs.exists()
+    
+    @classmethod
+    def reset_for_reingest(cls, bucket: str, file_path: str) -> bool:
+        updated = cls.objects.filter(
+            bucket=bucket,
+            file_path=file_path,
+            status__in=[cls.Status.COMPLETED, cls.Status.FAILED],
+        ).update(
+            status=cls.Status.PENDING,
+            retry_count=0,
+            locked_at=None,
+            locked_by='',
+            error='',
+            completed_at=None,
+            archive_path='',
+            items_created=0,
+            assets_created=0,
+            force_reingest=False,
+        )
+        return updated > 0

@@ -160,12 +160,29 @@ def sweep_unprocessed(sync: bool = False):
             except ValueError:
                 logger.debug("Skipping non-conforming path: %s", path)
                 continue
-                
-            
             
             # Skip if already tracked
             if IngestionLog.is_known(bucket_type, path):
-                logger.debug("Skipping known path: %s", path)
+                log = IngestionLog.objects.filter(
+                    bucket=bucket_type, file_path=path
+                ).first()
+                if log and (
+                        log.force_reingest or
+                        (log.status == IngestionLog.Status.COMPLETED and not log.has_live_data)
+                ):
+                    logger.warning(
+                        "Re-ingesting %s/%s (force=%s, live_data=%s)",
+                        bucket_type, path, log.force_reingest, log.has_live_data,
+                    )
+                    IngestionLog.reset_for_reingest(bucket_type, path)
+                    dispatch(
+                        file_path=path,
+                        origin_bucket=bucket_type,
+                        reference_time=(
+                            meta['reference_time'].isoformat()
+                            if meta.get('reference_time') else None
+                        ),
+                    )
                 continue
             
             logger.info("Found untracked file: %s/%s", bucket_type, path)

@@ -147,13 +147,23 @@ def minio_event_webhook(request):
             reference_time=meta.get('reference_time'),
         )
         
-        if not created and log.status in (
-                IngestionLog.Status.PROCESSING,
-                IngestionLog.Status.COMPLETED,
-        ):
-            logger.debug("Already %s: %s", log.status, key)
-            skipped += 1
-            continue
+        if not created:
+            if log.status == IngestionLog.Status.PROCESSING:
+                logger.debug("Already processing: %s/%s", origin_bucket, key)
+                skipped += 1
+                continue
+            
+            if log.status == IngestionLog.Status.COMPLETED:
+                if log.has_live_data:
+                    skipped += 1
+                    continue
+                else:
+                    logger.warning(
+                        "Completed log but no live data, re-ingesting: %s/%s",
+                        origin_bucket, key,
+                    )
+                    IngestionLog.reset_for_reingest(origin_bucket, key)
+                # fall through to queue the task
         
         # 5. Queue Celery task — ingestion service resolves collection
         process_incoming_file.delay(
