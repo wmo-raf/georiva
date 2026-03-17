@@ -131,6 +131,22 @@ class Collection(TimeStampedModel, ClusterableModel):
         InlinePanel('variables', label="Variables"),
     ]
     
+    @property
+    def spatial_extent(self) -> list | None:
+        """
+        Authoritative spatial extent for this collection.
+    
+        If the catalog has a boundary configured, use its bbox — it's
+        always correct regardless of what's stored in self.bounds.
+    
+        Falls back to self.bounds for unclipped collections.
+        """
+        boundary = self.catalog.boundary
+        if boundary and self.catalog.clip_mode != 'none':
+            extent = boundary.geom.extent  # (west, south, east, north) from GEOS
+            return list(extent)
+        return self.bounds
+    
     def get_loader(self):
         """Get the loader instance for this catalog."""
         if not self.loader_profile:

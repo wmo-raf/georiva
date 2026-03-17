@@ -167,7 +167,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
     # ── Extent ────────────────────────────────────────────────────────────
     
     def _build_extent(self, collection: Collection, has_reference_time: bool) -> dict:
-        bbox = collection.bounds or [-180, -90, 180, 90]
+        bbox = collection.spatial_extent or [-180, -90, 180, 90]
         spatial = {
             "bbox": [bbox],
             "crs": collection.crs or "EPSG:4326",
@@ -400,7 +400,7 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
         base_url = self._get_base_url()
         collection_url = f"{base_url}collections/{collection.slug}/"
         
-        bbox = collection.bounds or [-180, -90, 180, 90]
+        bbox = collection.spatial_extent or [-180, -90, 180, 90]
         interval_start = collection.time_start.isoformat() if collection.time_start else None
         interval_end = collection.time_end.isoformat() if collection.time_end else None
         

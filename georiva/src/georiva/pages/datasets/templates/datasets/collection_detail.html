@@ -86,14 +86,14 @@
                         </div>
                     {% endif %}
 
-                    {% if collection.bounds %}
+                    {% if collection.spatial_extent %}
                         <div class="gr-catalog-meta-item">
                             <dt><i class="bi bi-bounding-box"></i> Spatial Extent</dt>
                             <dd class="gr-mono" style="font-size:0.8rem">
-                                W {{ collection.bounds.0|floatformat:4 }}
-                                S {{ collection.bounds.1|floatformat:4 }}
-                                E {{ collection.bounds.2|floatformat:4 }}
-                                N {{ collection.bounds.3|floatformat:4 }}
+                                W {{ collection.spatial_extent.0|floatformat:4 }}
+                                S {{ collection.spatial_extent.1|floatformat:4 }}
+                                E {{ collection.spatial_extent.2|floatformat:4 }}
+                                N {{ collection.spatial_extent.3|floatformat:4 }}
                             </dd>
                         </div>
                     {% endif %}
@@ -364,7 +364,13 @@
 {% endblock %}
 
 {% block extra_js %}
-    <script>
+    <script id="grMapConfig" type="application/json">
+        {
+            "collectionSlug": "{{ collection.slug }}",
+            "catalogSlug": "{{ catalog.slug }}",
+            "edrUrl": "/api/edr/collections/{{ collection.slug }}/",
+            "minioBase": "{{ MINIO_ASSETS_BASE_URL }}"
+    }
     </script>
 
     <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
@@ -375,25 +381,10 @@
         (function () {
             'use strict';
 
-            // ── Tab switching ──────────────────────────────────────────────────────
-            let mapInitialized = false;
+            // ── Config (injected by Django template) ───────────────────────────────────
+            const CONFIG = JSON.parse(document.getElementById('grMapConfig').textContent);
 
-            document.querySelectorAll('.gr-tab').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.gr-tab').forEach(b => b.classList.remove('gr-tab--active'));
-                    document.querySelectorAll('.gr-tab-panel').forEach(p => p.classList.remove('gr-tab-panel--active'));
-                    btn.classList.add('gr-tab--active');
-                    const panel = document.getElementById('tab-' + btn.dataset.tab);
-                    panel.classList.add('gr-tab-panel--active');
-
-                    if (btn.dataset.tab === 'map' && !mapInitialized) {
-                        mapInitialized = true;
-                        initMap();
-                    }
-                });
-            });
-
-            // ── Basemaps ───────────────────────────────────────────────────────────
+            // ── Basemaps ───────────────────────────────────────────────────────────────
             const BASEMAPS = {
                 dark: {
                     name: 'Dark',
@@ -401,10 +392,8 @@
                         version: 8,
                         sources: {
                             carto: {
-                                type: 'raster',
-                                tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© CARTO'
+                                type: 'raster', tileSize: 256, attribution: '© CARTO',
+                                tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png']
                             }
                         },
                         layers: [{id: 'carto', type: 'raster', source: 'carto'}]
@@ -416,10 +405,8 @@
                         version: 8,
                         sources: {
                             carto: {
-                                type: 'raster',
-                                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© CARTO'
+                                type: 'raster', tileSize: 256, attribution: '© CARTO',
+                                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png']
                             }
                         },
                         layers: [{id: 'carto', type: 'raster', source: 'carto'}]
@@ -431,10 +418,8 @@
                         version: 8,
                         sources: {
                             satellite: {
-                                type: 'raster',
-                                tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-                                tileSize: 256,
-                                attribution: '© Esri'
+                                type: 'raster', tileSize: 256, attribution: '© Esri',
+                                tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}']
                             }
                         },
                         layers: [{id: 'satellite', type: 'raster', source: 'satellite'}]
@@ -446,10 +431,8 @@
                         version: 8,
                         sources: {
                             osm: {
-                                type: 'raster',
-                                tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© OpenStreetMap contributors'
+                                type: 'raster', tileSize: 256, attribution: '© OpenStreetMap contributors',
+                                tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png']
                             }
                         },
                         layers: [{id: 'osm', type: 'raster', source: 'osm'}]
@@ -457,15 +440,44 @@
                 }
             };
 
-            // ── State ──────────────────────────────────────────────────────────────
+            // ── State ──────────────────────────────────────────────────────────────────
             let map = null;
             let deckOverlay = null;
+            let deckgl = null;
+            let tooltipControl = null;
             let currentRasterLayer = null;
             let currentPalette = null;
             let currentBasemap = 'dark';
-            let currentVariableSlug = null;
+            let currentVarSlug = null;
+            let mapInitialized = false;
 
-            // ── Map Init ───────────────────────────────────────────────────────────
+            // EDR-derived state
+            let edrData = null;   // full EDR collection response
+            let validTimes = [];     // flat ISO string array (latest run for forecasts)
+            let runsMap = {};     // { validTimeISO → referenceTimeISO }
+            let parameterNames = {};     // { slug → parameter_names entry }
+
+            // Time slider / playback state
+            let currentTimeIdx = 0;
+            let playInterval = null;
+            const PLAY_INTERVAL_MS = 800;
+
+            // ── Tab switching ──────────────────────────────────────────────────────────
+            document.querySelectorAll('.gr-tab').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.gr-tab').forEach(b => b.classList.remove('gr-tab--active'));
+                    document.querySelectorAll('.gr-tab-panel').forEach(p => p.classList.remove('gr-tab-panel--active'));
+                    btn.classList.add('gr-tab--active');
+                    document.getElementById('tab-' + btn.dataset.tab).classList.add('gr-tab-panel--active');
+
+                    if (btn.dataset.tab === 'map' && !mapInitialized) {
+                        mapInitialized = true;
+                        initMap();
+                    }
+                });
+            });
+
+            // ── Map init ───────────────────────────────────────────────────────────────
             function initMap() {
                 map = new maplibregl.Map({
                     container: 'grMap',
@@ -480,15 +492,14 @@
                     deckOverlay = new deck.MapboxOverlay({interleaved: true, layers: []});
                     map.addControl(deckOverlay);
 
-                    await waitForDeck(() => deckOverlay._deck);
-
-                    // Set first variable as active
-                    const firstVarBtn = document.querySelector('.gr-map-var-btn');
-                    if (firstVarBtn) {
-                        currentVariableSlug = firstVarBtn.dataset.variableSlug;
-                    }
+                    deckgl = await waitForDeck(() => deckOverlay._deck);
 
                     setupBasemapSelector();
+                    setupOpacitySlider();
+                    setupVariableButtons();
+                    setupPlayButton();
+
+                    await loadCollectionMetadata();
                 });
             }
 
@@ -502,7 +513,317 @@
                 });
             }
 
-            // ── Basemap Selector ──────────────────────────────────────────────────
+            // ── Tooltip control ────────────────────────────────────────────────────────
+            function initTooltipControl(units) {
+                if (tooltipControl) {
+                    // Remove previous tooltip before re-adding
+                    try {
+                        tooltipControl.remove();
+                    } catch (e) {
+                    }
+                    tooltipControl = null;
+                }
+
+                tooltipControl = new WeatherLayers.TooltipControl({
+                    followCursor: true,
+                    unitFormat: {unit: units || ''},
+                });
+
+                deckgl.setProps({
+                    onLoad: () => {
+                        const canvas = deckgl.getCanvas();
+                        if (canvas) tooltipControl.addTo(canvas.parentElement);
+                    },
+                    onHover: (event) => tooltipControl.updatePickingInfo(event),
+                });
+
+                // Trigger onLoad immediately in case deck is already loaded
+                deckgl.props.onLoad();
+            }
+
+            // ── EDR fetch ──────────────────────────────────────────────────────────────
+            async function loadCollectionMetadata() {
+                try {
+                    const res = await fetch(CONFIG.edrUrl);
+                    if (!res.ok) throw new Error(`EDR fetch failed: ${res.status}`);
+                    edrData = await res.json();
+                } catch (e) {
+                    console.error('Failed to load EDR metadata:', e);
+                    return;
+                }
+
+                const geo = edrData['x-georiva'] || {};
+                const temp = edrData.extent?.temporal || {};
+                parameterNames = edrData.parameter_names || {};
+
+                // ── Build validTimes + runsMap ─────────────────────────────────────────
+                if (geo.has_reference_time && geo.runs?.length) {
+                    // Use latest run's valid_times for the slider
+                    const latestRun = geo.runs[0];
+                    validTimes = latestRun.valid_times;
+
+                    // Build lookup: validTimeISO → referenceTimeISO
+                    runsMap = {};
+                    for (const run of geo.runs) {
+                        for (const vt of run.valid_times) {
+                            runsMap[vt] = run.reference_time;
+                        }
+                    }
+                } else {
+                    validTimes = temp.values || [];
+                    runsMap = {};
+                }
+
+                // ── Fit map to collection bbox ─────────────────────────────────────────
+                const bbox = edrData.extent?.spatial?.bbox?.[0];
+                if (bbox?.length === 4) {
+                    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {padding: 60, duration: 500});
+                }
+
+                // ── Populate time slider ───────────────────────────────────────────────
+                if (validTimes.length > 0) {
+                    populateTimeSlider();
+                }
+
+                // ── Set first active variable and load layer ───────────────────────────
+                const firstBtn = document.querySelector('.gr-map-var-btn');
+                if (firstBtn) currentVarSlug = firstBtn.dataset.variableSlug;
+
+                if (currentVarSlug && validTimes.length > 0) {
+                    currentTimeIdx = validTimes.length - 1; // start at latest
+                    document.getElementById('grTimeSlider').value = currentTimeIdx;
+                    updateTimeDisplay();
+                    await loadLayer();
+                }
+            }
+
+            // ── Time slider ────────────────────────────────────────────────────────────
+            function populateTimeSlider() {
+                const slider = document.getElementById('grTimeSlider');
+                const timebar = document.getElementById('grTimebar');
+
+                slider.min = 0;
+                slider.max = validTimes.length - 1;
+                slider.value = validTimes.length - 1;
+
+                timebar.style.display = 'flex';
+                renderTicks();
+
+                slider.addEventListener('input', async () => {
+                    currentTimeIdx = parseInt(slider.value, 10);
+                    updateTimeDisplay();
+                    stopPlay();
+                    await loadLayer();
+                });
+
+                updateTimeDisplay();
+            }
+
+            function renderTicks() {
+                const container = document.getElementById('grTimebarTicks');
+                container.innerHTML = '';
+                if (validTimes.length <= 1) return;
+
+                const maxTicks = 12;
+                const step = Math.max(1, Math.floor(validTimes.length / maxTicks));
+
+                for (let i = 0; i < validTimes.length; i += step) {
+                    const tick = document.createElement('span');
+                    tick.className = 'gr-timebar-tick';
+                    tick.style.left = `${(i / (validTimes.length - 1)) * 100}%`;
+                    tick.title = formatDateTime(new Date(validTimes[i]));
+                    container.appendChild(tick);
+                }
+            }
+
+            function updateTimeDisplay() {
+                const iso = validTimes[currentTimeIdx];
+                if (!iso) return;
+                document.getElementById('grTimeDate').textContent = formatDateTime(new Date(iso));
+                document.getElementById('grTimeCount').textContent =
+                    `${currentTimeIdx + 1} / ${validTimes.length}`;
+            }
+
+            function formatDateTime(dt) {
+                return dt.toUTCString().replace('GMT', 'UTC').replace(/:\d{2} UTC$/, ' UTC');
+            }
+
+            // ── Play / pause ───────────────────────────────────────────────────────────
+            function setupPlayButton() {
+                document.getElementById('grTimePlayBtn').addEventListener('click', () => {
+                    if (playInterval) stopPlay();
+                    else startPlay();
+                });
+            }
+
+            function startPlay() {
+                document.getElementById('grTimePlayIcon').className = 'bi bi-pause-fill';
+                playInterval = setInterval(async () => {
+                    currentTimeIdx = (currentTimeIdx + 1) % validTimes.length;
+                    document.getElementById('grTimeSlider').value = currentTimeIdx;
+                    updateTimeDisplay();
+                    await loadLayer();
+                }, PLAY_INTERVAL_MS);
+            }
+
+            function stopPlay() {
+                if (playInterval) {
+                    clearInterval(playInterval);
+                    playInterval = null;
+                }
+                document.getElementById('grTimePlayIcon').className = 'bi bi-play-fill';
+            }
+
+            // ── Variable buttons ───────────────────────────────────────────────────────
+            function setupVariableButtons() {
+                document.querySelectorAll('.gr-map-var-btn').forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        if (btn.dataset.variableSlug === currentVarSlug) return;
+
+                        document.querySelectorAll('.gr-map-var-btn').forEach(b =>
+                            b.classList.remove('gr-map-var-btn--active')
+                        );
+                        btn.classList.add('gr-map-var-btn--active');
+                        currentVarSlug = btn.dataset.variableSlug;
+
+                        stopPlay();
+                        await loadLayer();
+                    });
+                });
+            }
+
+            // ── Asset URL construction ─────────────────────────────────────────────────
+            function buildAssetUrl(datetime) {
+                const dt = new Date(datetime);
+                const Y = dt.getUTCFullYear();
+                const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+                const d = String(dt.getUTCDate()).padStart(2, '0');
+                const HH = String(dt.getUTCHours()).padStart(2, '0');
+                const MM = String(dt.getUTCMinutes()).padStart(2, '0');
+                const SS = String(dt.getUTCSeconds()).padStart(2, '0');
+
+                const geo = edrData['x-georiva'] || {};
+                const catalog = geo.catalog_slug;
+                const coll = geo.collection_slug;
+                const variable = currentVarSlug;
+                let filename = `${variable}_${HH}${MM}${SS}`;
+
+                const refTime = runsMap[datetime];
+                if (refTime) {
+                    const rt = new Date(refTime);
+                    const refStr = [
+                        rt.getUTCFullYear(),
+                        String(rt.getUTCMonth() + 1).padStart(2, '0'),
+                        String(rt.getUTCDate()).padStart(2, '0'),
+                        'T',
+                        String(rt.getUTCHours()).padStart(2, '0'),
+                        String(rt.getUTCMinutes()).padStart(2, '0'),
+                        String(rt.getUTCSeconds()).padStart(2, '0'),
+                    ].join('');
+                    filename += `__ref${refStr}`;
+                }
+
+                return `${CONFIG.minioBase}/${catalog}/${coll}/${variable}/${Y}/${m}/${d}/${filename}.png`;
+            }
+
+            // ── WeatherLayers render ───────────────────────────────────────────────────
+            async function loadLayer() {
+                if (!deckOverlay || !currentVarSlug || validTimes.length === 0) return;
+
+                const datetime = validTimes[currentTimeIdx];
+                const url = buildAssetUrl(datetime);
+                const param = parameterNames[currentVarSlug];
+                const xg = param?.['x-georiva'] || {};
+                const palette = xg.palette || [[0, [0, 0, 0]], [1, [255, 255, 255]]];
+                const paletteMin = xg.palette_min ?? xg.value_min ?? 0;
+                const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
+                const units = param?.unit?.symbol || '';
+
+                showLoading(true);
+                clearLayer();
+
+                try {
+                    const image = await WeatherLayers.loadTextureData(url);
+                    const opacity = parseInt(document.getElementById('grOpacitySlider').value, 10) / 100;
+                    const bbox = edrData.extent?.spatial?.bbox?.[0] || [-180, -90, 180, 90];
+
+                    currentPalette = palette;
+
+                    currentRasterLayer = new WeatherLayers.RasterLayer({
+                        id: 'georiva-raster',
+                        image,
+                        bounds: [bbox[0], bbox[1], bbox[2], bbox[3]],
+                        imageSmoothing: true,
+                        imageInterpolation: 'LINEAR',
+                        imageUnscale: [paletteMin, paletteMax],
+                        palette,
+                        opacity,
+                        visible: true,
+                        pickable: true,
+                    });
+
+                    deckOverlay.setProps({layers: [currentRasterLayer]});
+
+                    // Initialise / update tooltip with current variable's units
+                    initTooltipControl(units);
+
+                    updateLegend(param, xg, paletteMin, paletteMax);
+
+                } catch (err) {
+                    console.error('WeatherLayers load failed:', url, err);
+                    clearLayer();
+                } finally {
+                    // Match item_preview.html — wait for map idle before hiding spinner
+                    map.once('idle', () => showLoading(false));
+                }
+            }
+
+            function clearLayer() {
+                currentRasterLayer = null;
+                currentPalette = null;
+                if (deckOverlay) deckOverlay.setProps({layers: []});
+                // Clean up any MapLibre fallback layers
+                try {
+                    if (map.getLayer('asset-layer-fallback')) map.removeLayer('asset-layer-fallback');
+                    if (map.getSource('asset-source')) map.removeSource('asset-source');
+                } catch (e) {
+                }
+            }
+
+            // ── Legend ─────────────────────────────────────────────────────────────────
+            function updateLegend(param, xg, paletteMin, paletteMax) {
+                document.getElementById('grLegend').style.display = 'block';
+                document.getElementById('grLegendTitle').textContent = param?.label || currentVarSlug;
+                document.getElementById('grLegendMin').textContent = Number(paletteMin).toFixed(1);
+                document.getElementById('grLegendMax').textContent = Number(paletteMax).toFixed(1);
+                document.getElementById('grLegendUnits').textContent = param?.unit?.symbol || '';
+                document.getElementById('grLegendScale').style.background =
+                    buildGradientCSS(xg.palette || [], paletteMin, paletteMax);
+            }
+
+            function buildGradientCSS(palette, paletteMin, paletteMax) {
+                if (!palette?.length) return 'linear-gradient(to right, #000, #fff)';
+                const range = paletteMax - paletteMin || 1;
+                const stops = palette.map(([val, color]) => {
+                    const pct = ((val - paletteMin) / range) * 100;
+                    const rgba = color.length === 4
+                        ? `rgba(${color[0]},${color[1]},${color[2]},${color[3] / 255})`
+                        : `rgb(${color[0]},${color[1]},${color[2]})`;
+                    return `${rgba} ${pct.toFixed(1)}%`;
+                });
+                return `linear-gradient(to right, ${stops.join(', ')})`;
+            }
+
+            // ── Opacity slider ─────────────────────────────────────────────────────────
+            function setupOpacitySlider() {
+                const slider = document.getElementById('grOpacitySlider');
+                slider.addEventListener('input', async () => {
+                    document.getElementById('grOpacityVal').textContent = `${slider.value}%`;
+                    if (currentVarSlug && validTimes.length > 0) await loadLayer();
+                });
+            }
+
+            // ── Basemap selector ───────────────────────────────────────────────────────
             function setupBasemapSelector() {
                 const btn = document.getElementById('grBasemapBtn');
                 const menu = document.getElementById('grBasemapMenu');
@@ -513,7 +834,6 @@
                 });
                 document.addEventListener('click', () => menu.classList.remove('gr-open'));
 
-                // Mark initial active
                 menu.querySelector(`[data-basemap="${currentBasemap}"]`).classList.add('gr-bm-active');
 
                 menu.querySelectorAll('.gr-map-basemap-option').forEach(opt => {
@@ -525,7 +845,9 @@
                             return;
                         }
 
-                        menu.querySelectorAll('.gr-map-basemap-option').forEach(o => o.classList.remove('gr-bm-active'));
+                        menu.querySelectorAll('.gr-map-basemap-option').forEach(o =>
+                            o.classList.remove('gr-bm-active')
+                        );
                         opt.classList.add('gr-bm-active');
                         document.getElementById('grBasemapLabel').textContent = BASEMAPS[bm].name;
                         currentBasemap = bm;
@@ -540,6 +862,12 @@
                     });
                 });
             }
+
+            // ── Loading spinner ────────────────────────────────────────────────────────
+            function showLoading(visible) {
+                document.getElementById('grMapLoading').style.display = visible ? 'flex' : 'none';
+            }
+
         })();
     </script>
 {% endblock %}

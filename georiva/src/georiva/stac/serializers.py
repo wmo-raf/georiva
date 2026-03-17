@@ -309,7 +309,7 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
     
     def get_extent(self, obj):
         collection = obj.collection
-        spatial_bbox = collection.bounds or [-180, -90, 180, 90]
+        spatial_bbox = collection.spatial_extent or [-180, -90, 180, 90]
         
         temporal_interval = [None, None]
         if collection.time_start:
@@ -463,7 +463,7 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
     def get_extent(self, obj):
         collections = obj.collections.filter(is_active=True)
         
-        all_bounds = [c.bounds for c in collections if c.bounds]
+        all_bounds = [c.spatial_extent for c in collections if c.spatial_extent]
         if all_bounds:
             spatial_bbox = [
                 min(b[0] for b in all_bounds),
