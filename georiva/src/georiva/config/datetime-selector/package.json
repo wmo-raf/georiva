@@ -1,0 +1,30 @@
+{
+  "name": "datetime-selector",
+  "version": "1.0.0",
+  "description": "Hierarchical datetime selector for time-series data",
+  "type": "module",
+  "main": "./dist/umd/datetime-selector.js",
+  "module": "./dist/es/datetime-selector.js",
+  "exports": {
+    ".": {
+      "import": "./dist/es/datetime-selector.js",
+      "require": "./dist/umd/datetime-selector.js"
+    },
+    "./style": "./dist/es/datetime-selector.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build:es": "BUILD_TARGET=es  vite build",
+    "build:umd": "BUILD_TARGET=umd vite build",
+    "build": "npm run build:es && npm run build:umd",
+    "dev": "BUILD_TARGET=es  vite build --watch"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.20"
+  },
+  "devDependencies": {
+    "vite": "^8.0.0"
+  }
+}

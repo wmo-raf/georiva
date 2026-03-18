@@ -8,6 +8,20 @@
     <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
     <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="{% static 'css/datetime-selector.css' %}">
+
+
+    <style>
+        .gr-dts-selector {
+            position: absolute;
+            bottom: 1rem;
+            left: 1rem;
+            width: 280px;
+        }
+    </style>
+
+
+
 {% endblock %}
 
 {% block content %}
@@ -338,22 +352,8 @@
                     <span>Loading layer…</span>
                 </div>
 
-                {# Time slider bar — bottom #}
-                <div class="gr-timebar" id="grTimebar" style="display:none">
-                    <button class="gr-timebar-btn" id="grTimePlayBtn" type="button" title="Play/Pause">
-                        <i class="bi bi-play-fill" id="grTimePlayIcon"></i>
-                    </button>
-                    <div class="gr-timebar-track-wrap">
-                        <input type="range" class="gr-timebar-slider" id="grTimeSlider"
-                               min="0" max="0" value="0">
-                        <div class="gr-timebar-ticks" id="grTimebarTicks"></div>
-                    </div>
-                    <div class="gr-timebar-display">
-                        <span class="gr-timebar-date" id="grTimeDate">—</span>
-                        <span class="gr-timebar-count" id="grTimeCount"></span>
-                    </div>
-                </div>
-
+                {# Time selector #}
+                <div class="gr-dts-selector" id="grDatetimeSelector"></div>
 
             </div>
             {# /gr-map-canvas #}
@@ -376,6 +376,7 @@
     <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/deck.gl@9.2.6/dist/dist.dev.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
+    <script src="{% static 'js/datetime-selector.js' %}"></script>
 
     <script>
         (function () {
@@ -450,6 +451,7 @@
             let currentBasemap = 'dark';
             let currentVarSlug = null;
             let mapInitialized = false;
+            let grTimeSelector = null;
 
             // EDR-derived state
             let edrData = null;   // full EDR collection response
@@ -457,10 +459,6 @@
             let runsMap = {};     // { validTimeISO → referenceTimeISO }
             let parameterNames = {};     // { slug → parameter_names entry }
 
-            // Time slider / playback state
-            let currentTimeIdx = 0;
-            let playInterval = null;
-            const PLAY_INTERVAL_MS = 800;
 
             // ── Tab switching ──────────────────────────────────────────────────────────
             document.querySelectorAll('.gr-tab').forEach(btn => {
@@ -497,7 +495,6 @@
                     setupBasemapSelector();
                     setupOpacitySlider();
                     setupVariableButtons();
-                    setupPlayButton();
 
                     await loadCollectionMetadata();
                 });
@@ -580,9 +577,22 @@
                     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {padding: 60, duration: 500});
                 }
 
+                validTimes = validTimes.map(t => new Date(t).toISOString());
+
+                const normalisedRunsMap = {};
+                for (const [k, v] of Object.entries(runsMap)) {
+                    normalisedRunsMap[new Date(k).toISOString()] = v;
+                }
+                runsMap = normalisedRunsMap;
+
                 // ── Populate time slider ───────────────────────────────────────────────
                 if (validTimes.length > 0) {
-                    populateTimeSlider();
+                    grTimeSelector = new DateTimeSelector('grDatetimeSelector', validTimes, {
+                        openDirection: "top",
+                        onChange: async () => {
+                            await loadLayer();
+                        }
+                    });
                 }
 
                 // ── Set first active variable and load layer ───────────────────────────
@@ -590,88 +600,8 @@
                 if (firstBtn) currentVarSlug = firstBtn.dataset.variableSlug;
 
                 if (currentVarSlug && validTimes.length > 0) {
-                    currentTimeIdx = validTimes.length - 1; // start at latest
-                    document.getElementById('grTimeSlider').value = currentTimeIdx;
-                    updateTimeDisplay();
                     await loadLayer();
                 }
-            }
-
-            // ── Time slider ────────────────────────────────────────────────────────────
-            function populateTimeSlider() {
-                const slider = document.getElementById('grTimeSlider');
-                const timebar = document.getElementById('grTimebar');
-
-                slider.min = 0;
-                slider.max = validTimes.length - 1;
-                slider.value = validTimes.length - 1;
-
-                timebar.style.display = 'flex';
-                renderTicks();
-
-                slider.addEventListener('input', async () => {
-                    currentTimeIdx = parseInt(slider.value, 10);
-                    updateTimeDisplay();
-                    stopPlay();
-                    await loadLayer();
-                });
-
-                updateTimeDisplay();
-            }
-
-            function renderTicks() {
-                const container = document.getElementById('grTimebarTicks');
-                container.innerHTML = '';
-                if (validTimes.length <= 1) return;
-
-                const maxTicks = 12;
-                const step = Math.max(1, Math.floor(validTimes.length / maxTicks));
-
-                for (let i = 0; i < validTimes.length; i += step) {
-                    const tick = document.createElement('span');
-                    tick.className = 'gr-timebar-tick';
-                    tick.style.left = `${(i / (validTimes.length - 1)) * 100}%`;
-                    tick.title = formatDateTime(new Date(validTimes[i]));
-                    container.appendChild(tick);
-                }
-            }
-
-            function updateTimeDisplay() {
-                const iso = validTimes[currentTimeIdx];
-                if (!iso) return;
-                document.getElementById('grTimeDate').textContent = formatDateTime(new Date(iso));
-                document.getElementById('grTimeCount').textContent =
-                    `${currentTimeIdx + 1} / ${validTimes.length}`;
-            }
-
-            function formatDateTime(dt) {
-                return dt.toUTCString().replace('GMT', 'UTC').replace(/:\d{2} UTC$/, ' UTC');
-            }
-
-            // ── Play / pause ───────────────────────────────────────────────────────────
-            function setupPlayButton() {
-                document.getElementById('grTimePlayBtn').addEventListener('click', () => {
-                    if (playInterval) stopPlay();
-                    else startPlay();
-                });
-            }
-
-            function startPlay() {
-                document.getElementById('grTimePlayIcon').className = 'bi bi-pause-fill';
-                playInterval = setInterval(async () => {
-                    currentTimeIdx = (currentTimeIdx + 1) % validTimes.length;
-                    document.getElementById('grTimeSlider').value = currentTimeIdx;
-                    updateTimeDisplay();
-                    await loadLayer();
-                }, PLAY_INTERVAL_MS);
-            }
-
-            function stopPlay() {
-                if (playInterval) {
-                    clearInterval(playInterval);
-                    playInterval = null;
-                }
-                document.getElementById('grTimePlayIcon').className = 'bi bi-play-fill';
             }
 
             // ── Variable buttons ───────────────────────────────────────────────────────
@@ -686,7 +616,6 @@
                         btn.classList.add('gr-map-var-btn--active');
                         currentVarSlug = btn.dataset.variableSlug;
 
-                        stopPlay();
                         await loadLayer();
                     });
                 });
@@ -730,7 +659,8 @@
             async function loadLayer() {
                 if (!deckOverlay || !currentVarSlug || validTimes.length === 0) return;
 
-                const datetime = validTimes[currentTimeIdx];
+                const datetime = grTimeSelector ? grTimeSelector.getDate() : validTimes[validTimes.length - 1];
+
                 const url = buildAssetUrl(datetime);
                 const param = parameterNames[currentVarSlug];
                 const xg = param?.['x-georiva'] || {};
