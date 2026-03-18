@@ -98,6 +98,7 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             except Exception:
                 pass
         else:
+            x_georiva["palette"] = variable.weather_layers_palette
             x_georiva["palette_min"] = variable.value_min
             x_georiva["palette_max"] = variable.value_max
         

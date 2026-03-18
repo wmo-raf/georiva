@@ -155,6 +155,50 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def sources_param_list(self):
         """Return a list of source variable names for this variable."""
         return [source.source_name for source in self.sources.all()]
+    
+    @property
+    def weather_layers_palette(self):
+        """Get palette for WeatherLayers, with grayscale fallback."""
+        if self.palette:
+            return self.palette.as_weatherlayers_palette()
+        
+        # Fallback: grayscale
+        return self._generate_grayscale_palette(self.value_min, self.value_max)
+    
+    @property
+    def palette_value_range(self) -> tuple:
+        """
+        Get (min, max) for legend display.
+        - Variable has range defined: use it (consistent across all assets)
+        - No range defined: use asset stats (grayscale fallback per-asset)
+        """
+        return self.value_min, self.value_max
+    
+    @staticmethod
+    def _generate_grayscale_palette(min_val: float, max_val: float, steps: int = 11, inverted: bool = False) -> list:
+        """
+        Generate grayscale palette with positions matching data value range.
+        
+        Args:
+            min_val: Minimum data value
+            max_val: Maximum data value
+            steps: Number of color stops
+            inverted: If True, goes white→black instead of black→white
+        """
+        palette = []
+        val_range = max_val - min_val
+        
+        for i in range(steps):
+            t = i / (steps - 1)
+            position = min_val + (t * val_range)
+            gray = round((1 - t if inverted else t) * 255)
+            palette.append([position, [gray, gray, gray]])
+        
+        return palette
+    
+    @property
+    def value_range(self):
+        return self.value_min, self.value_max
 
 
 class VariableSource(Orderable):

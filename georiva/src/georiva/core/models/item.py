@@ -263,62 +263,6 @@ class Asset(TimeStampedModel, Orderable):
     def palette(self):
         return self.variable.palette
     
-    @property
-    def weather_layers_palette(self):
-        """Get palette for WeatherLayers, with grayscale fallback."""
-        if self.variable.palette:
-            return self.variable.palette.as_weatherlayers_palette()
-        
-        # Fallback: grayscale using asset stats
-        min_val = self.stats_min if self.stats_min is not None else 0
-        max_val = self.stats_max if self.stats_max is not None else 1
-        return self._generate_grayscale_palette(min_val, max_val)
-    
-    @property
-    def palette_value_range(self) -> tuple:
-        """
-        Get (min, max) for legend display.
-        - Variable has range defined: use it (consistent across all assets)
-        - No range defined: use asset stats (grayscale fallback per-asset)
-        """
-        if self.variable.value_min is not None and self.variable.value_max is not None:
-            return (self.variable.value_min, self.variable.value_max)
-        
-        return (
-            self.stats_min if self.stats_min is not None else 0,
-            self.stats_max if self.stats_max is not None else 1
-        )
-    
-    @staticmethod
-    def _generate_grayscale_palette(min_val: float, max_val: float, steps: int = 11, inverted: bool = False) -> list:
-        """
-        Generate grayscale palette with positions matching data value range.
-        
-        Args:
-            min_val: Minimum data value
-            max_val: Maximum data value
-            steps: Number of color stops
-            inverted: If True, goes white→black instead of black→white
-        """
-        palette = []
-        val_range = max_val - min_val
-        
-        for i in range(steps):
-            t = i / (steps - 1)
-            position = min_val + (t * val_range)
-            gray = round((1 - t if inverted else t) * 255)
-            palette.append([position, [gray, gray, gray]])
-        
-        return palette
-    
-    @property
-    def value_range(self):
-        """Get value range from variable or computed stats."""
-        return (
-            self.variable.value_min or self.stats_min,
-            self.variable.value_max or self.stats_max,
-        )
-    
     # =========================================================================
     # Format checks
     # =========================================================================
