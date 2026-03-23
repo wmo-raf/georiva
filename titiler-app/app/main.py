@@ -14,6 +14,7 @@ from rio_tiler.types import ColorMapType
 from starlette.middleware.cors import CORSMiddleware
 from titiler.core.algorithm.base import BaseAlgorithm
 from titiler.core.factory import TilerFactory
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 app.include_router(
     cog.router,
