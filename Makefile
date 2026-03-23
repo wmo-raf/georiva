@@ -13,6 +13,7 @@ APP ?= georiva
 WORKER_DEFAULT ?= georiva-celery-default-worker
 WORKER_INGESTION ?= georiva-celery-ingestion-worker
 BEAT ?= georiva-celery-beat
+TITILER ?= georiva-titiler-app
 
 LOG_ARGS ?= --tail 100
 
@@ -116,6 +117,9 @@ dev-worker-ingestion-logs:
 dev-beat-logs:
 	$(DEV_DC) logs -f $(BEAT) $(LOG_ARGS)
 
+dev-titiler-logs:
+	$(DEV_DC) logs -f $(TITILER) $(LOG_ARGS)
+
 dev-shell:
 	$(DEV_DC) exec $(APP) bash
 
@@ -127,6 +131,9 @@ dev-worker-ingestion-shell:
 
 dev-beat-shell:
 	$(DEV_DC) exec $(BEAT) bash
+
+dev-titiler-shell:
+	$(DEV_DC) exec $(TITILER) bash
 
 dev-migrate:
 	$(DEV_DC) exec $(APP) georiva migrate
