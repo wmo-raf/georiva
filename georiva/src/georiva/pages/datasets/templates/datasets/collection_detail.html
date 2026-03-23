@@ -9,8 +9,6 @@
     <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
     <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
     <link rel="stylesheet" href="{% static 'css/datetime-selector.css' %}">
-
-
     <style>
         .gr-dts-selector {
             position: absolute;
@@ -19,9 +17,6 @@
             width: 270px;
         }
     </style>
-
-
-
 {% endblock %}
 
 {% block content %}
@@ -143,9 +138,13 @@
 
                 {# API links #}
                 <div class="gr-collection-api-links">
-                    <a href="/api/stac/collections/{{ catalog.slug }}/"
+                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/"
                        class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
                         <i class="bi bi-code-slash"></i> STAC Collection
+                    </a>
+                    <a href="/api/edr/collections/{{ collection.slug }}/"
+                       class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
+                        <i class="bi bi-broadcast"></i> EDR Collection
                     </a>
                 </div>
 
@@ -153,213 +152,199 @@
         </div>
     </section>
 
-    {# ── Tab Switcher ── #}
-    <div class="gr-tab-bar">
+    {# ── Map ── #}
+    <div class="gr-map-section">
         <div class="gr-container">
-            <div class="gr-tabs">
-                <button class="gr-tab gr-tab--active" data-tab="detail" type="button">
-                    <i class="bi bi-table"></i> Detail
-                </button>
-                <button class="gr-tab" data-tab="map" type="button">
-                    <i class="bi bi-map"></i> Map
-                </button>
+            <div class="gr-map-shell">
+                <div class="gr-map-canvas" id="grMapCanvas">
+
+                    {# Left variables panel #}
+                    <aside class="gr-map-sidebar" id="grMapSidebar">
+                        <div class="gr-map-sidebar-header">
+                            <span class="gr-map-sidebar-label">Layers</span>
+                        </div>
+                        <div class="gr-map-sidebar-body" id="grVariableList">
+                            {% for variable in variables %}
+                                <button class="gr-map-var-btn {% if forloop.first %}gr-map-var-btn--active{% endif %}"
+                                        type="button"
+                                        data-variable-slug="{{ variable.slug }}"
+                                        data-variable-name="{{ variable.name }}"
+                                        data-variable-units="{{ variable.units|default:'' }}">
+                                    <span class="gr-map-var-dot"></span>
+                                    <span class="gr-map-var-name">{{ variable.name }}</span>
+                                    {% if variable.units %}
+                                        <span class="gr-map-var-unit gr-mono">{{ variable.units }}</span>
+                                    {% endif %}
+                                </button>
+                                {% empty %}
+                                <p class="gr-map-sidebar-empty">No variables</p>
+                            {% endfor %}
+                        </div>
+                    </aside>
+
+                    <div id="grMap"></div>
+
+                    {# Basemap selector #}
+                    <div class="gr-map-basemap-selector">
+                        <button class="gr-map-basemap-btn" id="grBasemapBtn" type="button">
+                            <i class="bi bi-layers-half"></i>
+                            <span id="grBasemapLabel">Dark</span>
+                            <i class="bi bi-chevron-down" style="font-size:0.6rem;opacity:0.6"></i>
+                        </button>
+                        <div class="gr-map-basemap-menu" id="grBasemapMenu">
+                            <div class="gr-map-basemap-option" data-basemap="dark">
+                                <span>Dark</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                            <div class="gr-map-basemap-option" data-basemap="light">
+                                <span>Light</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                            <div class="gr-map-basemap-option" data-basemap="satellite">
+                                <span>Satellite</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                            <div class="gr-map-basemap-option" data-basemap="osm">
+                                <span>OSM</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    {# Legend panel — bottom left #}
+                    <div class="gr-map-legend" id="grLegend" style="display:none">
+                        <div class="gr-map-legend-title" id="grLegendTitle">—</div>
+                        <div class="gr-map-legend-scale" id="grLegendScale"></div>
+                        <div class="gr-map-legend-labels">
+                            <span id="grLegendMin">0</span>
+                            <span id="grLegendMax">100</span>
+                        </div>
+                        <div class="gr-map-legend-units" id="grLegendUnits"></div>
+                        <div class="gr-map-legend-opacity">
+                            <span>Opacity</span>
+                            <span id="grOpacityVal">100%</span>
+                        </div>
+                        <input type="range" class="gr-map-opacity-slider" id="grOpacitySlider"
+                               min="0" max="100" value="100">
+                    </div>
+
+                    {# Loading spinner #}
+                    <div class="gr-map-loading" id="grMapLoading" style="display:none">
+                        <div class="gr-map-spinner"></div>
+                        <span>Loading layer…</span>
+                    </div>
+
+                    {# Time selector #}
+                    <div class="gr-dts-selector" id="grDatetimeSelector"></div>
+
+                </div>
+                {# /gr-map-canvas #}
             </div>
+            {# /gr-map-shell #}
         </div>
     </div>
 
-    {# ── Detail Tab ── #}
-    <div class="gr-tab-panel gr-tab-panel--active" id="tab-detail">
+    {# ── Items Browser ── #}
+    <section class="gr-section gr-section--alt">
+        <div class="gr-container">
 
-        {# ── Variables ── #}
-        {% if variables %}
-            <section class="gr-section gr-section--alt">
-                <div class="gr-container">
+            <div class="gr-section-header">
+                <h2 class="gr-section-title">Items</h2>
+                <span id="grItemsCount"
+                      style="font-family:var(--gr-font-mono);font-size:0.72rem;color:var(--gr-text-3)"></span>
+            </div>
 
-                    <div class="gr-section-header">
-                        <h2 class="gr-section-title">Variables</h2>
-                        <span style="font-family:var(--gr-font-mono);font-size:0.72rem;color:var(--gr-text-3)">
-                            {{ variables|length }} variable{{ variables|length|pluralize }}
-                        </span>
-                    </div>
+            <div class="gr-datasets-layout gr-items-browser">
 
-                    <div class="gr-variables-grid">
-                        {% for variable in variables %}
-                            <div class="gr-variable-card">
-                                <div class="gr-variable-header">
-                                    <span class="gr-variable-name">{{ variable.name }}</span>
-                                    <span class="gr-variable-slug gr-mono">{{ variable.slug }}</span>
-                                </div>
+                {# ── Sidebar filters ── #}
+                <aside class="gr-sidebar gr-items-sidebar">
 
-                                {% if variable.description %}
-                                    <p class="gr-variable-desc">{{ variable.description }}</p>
-                                {% endif %}
-
-                                <div class="gr-variable-meta">
-                                    {% if variable.units %}
-                                        <span class="gr-dataset-tag">
-                                            <i class="bi bi-rulers"></i> {{ variable.units }}
-                                        </span>
-                                    {% endif %}
-                                    {% if variable.value_min is not None and variable.value_max is not None %}
-                                        <span class="gr-dataset-tag gr-mono">
-                                            {{ variable.value_min }} – {{ variable.value_max }}
-                                        </span>
-                                    {% endif %}
-                                    {% if variable.transform_type != "passthrough" %}
-                                        <span class="gr-dataset-tag">
-                                            <i class="bi bi-gear"></i> {{ variable.get_transform_type_display }}
-                                        </span>
-                                    {% endif %}
-                                    {% if variable.palette %}
-                                        <span class="gr-dataset-tag">
-                                            <i class="bi bi-palette"></i> {{ variable.palette.name }}
-                                        </span>
-                                    {% endif %}
-                                </div>
+                    {# Variables #}
+                    {% if variables %}
+                        <div class="gr-sidebar-filter is-open" id="filter-variables">
+                            <div class="gr-sidebar-filter-header" onclick="toggleItemsFilter('filter-variables')">
+                                <span>Variables</span>
+                                <i class="bi bi-chevron-down"></i>
                             </div>
-                        {% endfor %}
-                    </div>
-
-                </div>
-            </section>
-        {% endif %}
-
-        {# ── Latest Items ── #}
-        {% if latest_items %}
-            <section class="gr-section">
-                <div class="gr-container">
-
-                    <div class="gr-section-header">
-                        <h2 class="gr-section-title">Latest Items</h2>
-                        <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/items/"
-                           class="gr-section-action" target="_blank" rel="noopener">
-                            <i class="bi bi-code-slash"></i> All items
-                        </a>
-                    </div>
-
-                    <div class="gr-items-table">
-                        <div class="gr-items-table-header">
-                            <span>Valid Time</span>
-                            <span>Reference Time</span>
-                            <span>Assets</span>
-                            <span>Source</span>
+                            <div class="gr-sidebar-filter-body">
+                                {% for variable in variables %}
+                                    <label class="gr-items-var-checkbox">
+                                        <input type="checkbox" name="variable"
+                                               value="{{ variable.slug }}"
+                                               data-sort="{{ forloop.counter0 }}"
+                                               data-name="{{ variable.name }}"
+                                               checked>
+                                        <span class="gr-items-var-label">{{ variable.name }}</span>
+                                        {% if variable.units %}
+                                            <small class="gr-mono gr-items-var-unit">{{ variable.units }}</small>
+                                        {% endif %}
+                                    </label>
+                                {% endfor %}
+                            </div>
                         </div>
-                        {% for item in latest_items %}
-                            <div class="gr-items-table-row">
-                                <span class="gr-mono" style="font-size:0.82rem">
-                                    {{ item.time|date:"d M Y H:i" }} UTC
-                                </span>
-                                <span class="gr-mono" style="font-size:0.82rem;color:var(--gr-text-3)">
-                                    {% if item.reference_time %}
-                                        {{ item.reference_time|date:"d M Y H:i" }} UTC
-                                    {% else %}—{% endif %}
-                                </span>
-                                <span style="font-size:0.82rem;color:var(--gr-text-2)">
-                                    {{ item.assets.count }}
-                                </span>
-                                <span class="gr-mono"
-                                      style="font-size:0.75rem;color:var(--gr-text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px"
-                                      title="{{ item.source_file }}">
-                                    {{ item.source_file|default:"—" }}
-                                </span>
-                            </div>
-                        {% endfor %}
-                    </div>
+                    {% endif %}
 
-                </div>
-            </section>
-        {% endif %}
-
-    </div>{# /tab-detail #}
-
-    {# ── Map Tab ── #}
-    <div class="gr-tab-panel" id="tab-map">
-        <div class="gr-map-shell">
-            <div class="gr-map-canvas" id="grMapCanvas">
-
-                {# Left variables panel #}
-                <aside class="gr-map-sidebar" id="grMapSidebar">
-                    <div class="gr-map-sidebar-header">
-                        <span class="gr-map-sidebar-label">Layers</span>
-                    </div>
-                    <div class="gr-map-sidebar-body" id="grVariableList">
-                        {% for variable in variables %}
-                            <button class="gr-map-var-btn {% if forloop.first %}gr-map-var-btn--active{% endif %}"
-                                    type="button"
-                                    data-variable-slug="{{ variable.slug }}"
-                                    data-variable-name="{{ variable.name }}"
-                                    data-variable-units="{{ variable.units|default:'' }}">
-                                <span class="gr-map-var-dot"></span>
-                                <span class="gr-map-var-name">{{ variable.name }}</span>
-                                {% if variable.units %}
-                                    <span class="gr-map-var-unit gr-mono">{{ variable.units }}</span>
-                                {% endif %}
+                    {# Valid Date #}
+                    <div class="gr-sidebar-filter is-open" id="filter-date">
+                        <div class="gr-sidebar-filter-header" onclick="toggleItemsFilter('filter-date')">
+                            <span>Date</span>
+                            <i class="bi bi-chevron-down"></i>
+                        </div>
+                        <div class="gr-sidebar-filter-body">
+                            <input type="date" id="grItemsDateFilter" class="gr-items-date-input"
+                                   aria-label="Filter by valid date">
+                            <button id="grItemsDateClear" class="gr-items-date-clear" style="display:none"
+                                    type="button">
+                                <i class="bi bi-x"></i> Clear date
                             </button>
-                            {% empty %}
-                            <p class="gr-map-sidebar-empty">No variables</p>
-                        {% endfor %}
+                        </div>
                     </div>
+
+                    {# Forecast Run (only for forecast collections) #}
+                    {% if collection.is_forecast %}
+                        <div class="gr-sidebar-filter is-open" id="filter-reftime">
+                            <div class="gr-sidebar-filter-header" onclick="toggleItemsFilter('filter-reftime')">
+                                <span>Forecast Run</span>
+                                <i class="bi bi-chevron-down"></i>
+                            </div>
+                            <div class="gr-sidebar-filter-body">
+                                <select id="grRefTimeFilter" class="gr-items-ref-select"
+                                        aria-label="Filter by forecast run">
+                                    <option value="">All runs</option>
+                                </select>
+                            </div>
+                        </div>
+                    {% endif %}
+
                 </aside>
 
-                {# Map canvas #}
+                {# ── Items grid ── #}
+                <div class="gr-items-main">
 
-
-                <div id="grMap"></div>
-
-                {# Basemap selector #}
-                <div class="gr-map-basemap-selector">
-                    <button class="gr-map-basemap-btn" id="grBasemapBtn" type="button">
-                        <i class="bi bi-layers-half"></i>
-                        <span id="grBasemapLabel">Dark</span>
-                        <i class="bi bi-chevron-down" style="font-size:0.6rem;opacity:0.6"></i>
-                    </button>
-                    <div class="gr-map-basemap-menu" id="grBasemapMenu">
-                        <div class="gr-map-basemap-option" data-basemap="dark">
-                            <span>Dark</span><i class="bi bi-check2 gr-bm-check"></i>
-                        </div>
-                        <div class="gr-map-basemap-option" data-basemap="light">
-                            <span>Light</span><i class="bi bi-check2 gr-bm-check"></i>
-                        </div>
-                        <div class="gr-map-basemap-option" data-basemap="satellite">
-                            <span>Satellite</span><i class="bi bi-check2 gr-bm-check"></i>
-                        </div>
-                        <div class="gr-map-basemap-option" data-basemap="osm">
-                            <span>OSM</span><i class="bi bi-check2 gr-bm-check"></i>
-                        </div>
+                    {# Loading state #}
+                    <div id="grItemsLoading" class="gr-items-loading" style="display:none">
+                        <div class="gr-map-spinner"></div>
+                        <span>Loading items…</span>
                     </div>
-                </div>
 
-                {# Legend panel — bottom left #}
-                <div class="gr-map-legend" id="grLegend" style="display:none">
-                    <div class="gr-map-legend-title" id="grLegendTitle">—</div>
-                    <div class="gr-map-legend-scale" id="grLegendScale"></div>
-                    <div class="gr-map-legend-labels">
-                        <span id="grLegendMin">0</span>
-                        <span id="grLegendMax">100</span>
+                    {# Empty state #}
+                    <div id="grItemsEmpty" class="gr-empty-state" style="display:none">
+                        <i class="bi bi-inbox"></i>
+                        <p style="font-weight:600;margin-bottom:0.35rem">No items found</p>
+                        <p>Try adjusting the filters.</p>
                     </div>
-                    <div class="gr-map-legend-units" id="grLegendUnits"></div>
-                    <div class="gr-map-legend-opacity">
-                        <span>Opacity</span>
-                        <span id="grOpacityVal">100%</span>
+
+                    {# Cards grid #}
+                    <div id="grItemsGrid" class="gr-item-cards-grid"></div>
+
+                    {# Load more #}
+                    <div id="grItemsLoadMore" style="display:none;justify-content:center;padding-top:1.5rem">
+                        <button id="grLoadMoreBtn" class="gr-btn gr-btn-ghost-dark" type="button">
+                            <i class="bi bi-arrow-down"></i> Load more
+                        </button>
                     </div>
-                    <input type="range" class="gr-map-opacity-slider" id="grOpacitySlider"
-                           min="0" max="100" value="100">
-                </div>
 
-                {# Loading spinner #}
-                <div class="gr-map-loading" id="grMapLoading" style="display:none">
-                    <div class="gr-map-spinner"></div>
-                    <span>Loading layer…</span>
                 </div>
-
-                {# Time selector #}
-                <div class="gr-dts-selector" id="grDatetimeSelector"></div>
 
             </div>
-            {# /gr-map-canvas #}
         </div>
-        {# /gr-map-shell #}
-    </div>{# /tab-map #}
+    </section>
 
 {% endblock %}
 
@@ -369,8 +354,14 @@
             "collectionSlug": "{{ collection.slug }}",
             "catalogSlug": "{{ catalog.slug }}",
             "edrUrl": "/api/edr/collections/{{ collection.slug }}/",
-            "minioBase": "{{ MINIO_ASSETS_BASE_URL }}"
-    }
+            "minioBase": "{{ MINIO_ASSETS_BASE_URL }}",
+            "isForecast": {% if collection.is_forecast %}true{% else %}false{% endif %},
+            "titilerBase": "/titiler",
+            "pageBase": "{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/",
+            "variables": [{% for variable in variables %}{"slug":"{{ variable.slug }}","name":"
+        {{ variable.name|escapejs }}","sortOrder":{{ forloop.counter0 }}}{% if not forloop.last %}
+        {% endif %}{% endfor %}]
+        }
     </script>
 
     <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
@@ -382,10 +373,10 @@
         (function () {
             'use strict';
 
-            // ── Config (injected by Django template) ───────────────────────────────────
+            // ── Config ────────────────────────────────────────────────────────────────
             const CONFIG = JSON.parse(document.getElementById('grMapConfig').textContent);
 
-            // ── Basemaps ───────────────────────────────────────────────────────────────
+            // ── Basemaps ──────────────────────────────────────────────────────────────
             const BASEMAPS = {
                 dark: {
                     name: 'Dark',
@@ -393,7 +384,9 @@
                         version: 8,
                         sources: {
                             carto: {
-                                type: 'raster', tileSize: 256, attribution: '© CARTO',
+                                type: 'raster',
+                                tileSize: 256,
+                                attribution: '© CARTO',
                                 tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png']
                             }
                         },
@@ -406,7 +399,9 @@
                         version: 8,
                         sources: {
                             carto: {
-                                type: 'raster', tileSize: 256, attribution: '© CARTO',
+                                type: 'raster',
+                                tileSize: 256,
+                                attribution: '© CARTO',
                                 tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png']
                             }
                         },
@@ -419,7 +414,9 @@
                         version: 8,
                         sources: {
                             satellite: {
-                                type: 'raster', tileSize: 256, attribution: '© Esri',
+                                type: 'raster',
+                                tileSize: 256,
+                                attribution: '© Esri',
                                 tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}']
                             }
                         },
@@ -432,7 +429,9 @@
                         version: 8,
                         sources: {
                             osm: {
-                                type: 'raster', tileSize: 256, attribution: '© OpenStreetMap contributors',
+                                type: 'raster',
+                                tileSize: 256,
+                                attribution: '© OpenStreetMap contributors',
                                 tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png']
                             }
                         },
@@ -441,7 +440,7 @@
                 }
             };
 
-            // ── State ──────────────────────────────────────────────────────────────────
+            // ── Map State ─────────────────────────────────────────────────────────────
             let map = null;
             let deckOverlay = null;
             let deckgl = null;
@@ -450,32 +449,13 @@
             let currentPalette = null;
             let currentBasemap = 'dark';
             let currentVarSlug = null;
-            let mapInitialized = false;
             let grTimeSelector = null;
+            let edrData = null;
+            let validTimes = [];
+            let runsMap = {};
+            let parameterNames = {};
 
-            // EDR-derived state
-            let edrData = null;   // full EDR collection response
-            let validTimes = [];     // flat ISO string array (latest run for forecasts)
-            let runsMap = {};     // { validTimeISO → referenceTimeISO }
-            let parameterNames = {};     // { slug → parameter_names entry }
-
-
-            // ── Tab switching ──────────────────────────────────────────────────────────
-            document.querySelectorAll('.gr-tab').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.gr-tab').forEach(b => b.classList.remove('gr-tab--active'));
-                    document.querySelectorAll('.gr-tab-panel').forEach(p => p.classList.remove('gr-tab-panel--active'));
-                    btn.classList.add('gr-tab--active');
-                    document.getElementById('tab-' + btn.dataset.tab).classList.add('gr-tab-panel--active');
-
-                    if (btn.dataset.tab === 'map' && !mapInitialized) {
-                        mapInitialized = true;
-                        initMap();
-                    }
-                });
-            });
-
-            // ── Map init ───────────────────────────────────────────────────────────────
+            // ── Map Init (on page load) ───────────────────────────────────────────────
             function initMap() {
                 map = new maplibregl.Map({
                     container: 'grMap',
@@ -510,22 +490,19 @@
                 });
             }
 
-            // ── Tooltip control ────────────────────────────────────────────────────────
+            // ── Tooltip ───────────────────────────────────────────────────────────────
             function initTooltipControl(units) {
                 if (tooltipControl) {
-                    // Remove previous tooltip before re-adding
                     try {
                         tooltipControl.remove();
                     } catch (e) {
                     }
                     tooltipControl = null;
                 }
-
                 tooltipControl = new WeatherLayers.TooltipControl({
                     followCursor: true,
                     unitFormat: {unit: units || ''},
                 });
-
                 deckgl.setProps({
                     onLoad: () => {
                         const canvas = deckgl.getCanvas();
@@ -533,12 +510,10 @@
                     },
                     onHover: (event) => tooltipControl.updatePickingInfo(event),
                 });
-
-                // Trigger onLoad immediately in case deck is already loaded
                 deckgl.props.onLoad();
             }
 
-            // ── EDR fetch ──────────────────────────────────────────────────────────────
+            // ── EDR metadata ──────────────────────────────────────────────────────────
             async function loadCollectionMetadata() {
                 try {
                     const res = await fetch(CONFIG.edrUrl);
@@ -553,13 +528,9 @@
                 const temp = edrData.extent?.temporal || {};
                 parameterNames = edrData.parameter_names || {};
 
-                // ── Build validTimes + runsMap ─────────────────────────────────────────
                 if (geo.has_reference_time && geo.runs?.length) {
-                    // Use latest run's valid_times for the slider
                     const latestRun = geo.runs[0];
                     validTimes = latestRun.valid_times;
-
-                    // Build lookup: validTimeISO → referenceTimeISO
                     runsMap = {};
                     for (const run of geo.runs) {
                         for (const vt of run.valid_times) {
@@ -571,21 +542,18 @@
                     runsMap = {};
                 }
 
-                // ── Fit map to collection bbox ─────────────────────────────────────────
                 const bbox = edrData.extent?.spatial?.bbox?.[0];
                 if (bbox?.length === 4) {
                     map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {padding: 60, duration: 500});
                 }
 
                 validTimes = validTimes.map(t => new Date(t).toISOString());
-
                 const normalisedRunsMap = {};
                 for (const [k, v] of Object.entries(runsMap)) {
                     normalisedRunsMap[new Date(k).toISOString()] = v;
                 }
                 runsMap = normalisedRunsMap;
 
-                // ── Populate time slider ───────────────────────────────────────────────
                 if (validTimes.length > 0) {
                     grTimeSelector = new DateTimeSelector('grDatetimeSelector', validTimes, {
                         openDirection: "top",
@@ -595,33 +563,36 @@
                     });
                 }
 
-                // ── Set first active variable and load layer ───────────────────────────
                 const firstBtn = document.querySelector('.gr-map-var-btn');
                 if (firstBtn) currentVarSlug = firstBtn.dataset.variableSlug;
 
                 if (currentVarSlug && validTimes.length > 0) {
                     await loadLayer();
                 }
+
+                // Populate forecast run dropdown from EDR runs data
+                if (CONFIG.isForecast && geo.runs?.length) {
+                    populateRefTimeDropdown(geo.runs);
+                }
+
+                // Initial items load
+                await ItemsBrowser.fetch(true);
             }
 
-            // ── Variable buttons ───────────────────────────────────────────────────────
+            // ── Variable buttons ──────────────────────────────────────────────────────
             function setupVariableButtons() {
                 document.querySelectorAll('.gr-map-var-btn').forEach(btn => {
                     btn.addEventListener('click', async () => {
                         if (btn.dataset.variableSlug === currentVarSlug) return;
-
-                        document.querySelectorAll('.gr-map-var-btn').forEach(b =>
-                            b.classList.remove('gr-map-var-btn--active')
-                        );
+                        document.querySelectorAll('.gr-map-var-btn').forEach(b => b.classList.remove('gr-map-var-btn--active'));
                         btn.classList.add('gr-map-var-btn--active');
                         currentVarSlug = btn.dataset.variableSlug;
-
                         await loadLayer();
                     });
                 });
             }
 
-            // ── Asset URL construction ─────────────────────────────────────────────────
+            // ── Asset URL ─────────────────────────────────────────────────────────────
             function buildAssetUrl(datetime) {
                 const dt = new Date(datetime);
                 const Y = dt.getUTCFullYear();
@@ -655,12 +626,11 @@
                 return `${CONFIG.minioBase}/${catalog}/${coll}/${variable}/${Y}/${m}/${d}/${filename}.png`;
             }
 
-            // ── WeatherLayers render ───────────────────────────────────────────────────
+            // ── WeatherLayers render ──────────────────────────────────────────────────
             async function loadLayer() {
                 if (!deckOverlay || !currentVarSlug || validTimes.length === 0) return;
 
                 const datetime = grTimeSelector ? grTimeSelector.getDate() : validTimes[validTimes.length - 1];
-
                 const url = buildAssetUrl(datetime);
                 const param = parameterNames[currentVarSlug];
                 const xg = param?.['x-georiva'] || {};
@@ -669,7 +639,7 @@
                 const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
                 const units = param?.unit?.symbol || '';
 
-                showLoading(true);
+                showMapLoading(true);
                 clearLayer();
 
                 try {
@@ -678,7 +648,6 @@
                     const bbox = edrData.extent?.spatial?.bbox?.[0] || [-180, -90, 180, 90];
 
                     currentPalette = palette;
-
                     currentRasterLayer = new WeatherLayers.RasterLayer({
                         id: 'georiva-raster',
                         image,
@@ -693,18 +662,13 @@
                     });
 
                     deckOverlay.setProps({layers: [currentRasterLayer]});
-
-                    // Initialise / update tooltip with current variable's units
                     initTooltipControl(units);
-
                     updateLegend(param, xg, paletteMin, paletteMax);
-
                 } catch (err) {
                     console.error('WeatherLayers load failed:', url, err);
                     clearLayer();
                 } finally {
-                    // Match item_preview.html — wait for map idle before hiding spinner
-                    map.once('idle', () => showLoading(false));
+                    map.once('idle', () => showMapLoading(false));
                 }
             }
 
@@ -712,7 +676,6 @@
                 currentRasterLayer = null;
                 currentPalette = null;
                 if (deckOverlay) deckOverlay.setProps({layers: []});
-                // Clean up any MapLibre fallback layers
                 try {
                     if (map.getLayer('asset-layer-fallback')) map.removeLayer('asset-layer-fallback');
                     if (map.getSource('asset-source')) map.removeSource('asset-source');
@@ -720,15 +683,14 @@
                 }
             }
 
-            // ── Legend ─────────────────────────────────────────────────────────────────
+            // ── Legend ────────────────────────────────────────────────────────────────
             function updateLegend(param, xg, paletteMin, paletteMax) {
                 document.getElementById('grLegend').style.display = 'block';
                 document.getElementById('grLegendTitle').textContent = param?.label || currentVarSlug;
                 document.getElementById('grLegendMin').textContent = Number(paletteMin).toFixed(1);
                 document.getElementById('grLegendMax').textContent = Number(paletteMax).toFixed(1);
                 document.getElementById('grLegendUnits').textContent = param?.unit?.symbol || '';
-                document.getElementById('grLegendScale').style.background =
-                    buildGradientCSS(xg.palette || [], paletteMin, paletteMax);
+                document.getElementById('grLegendScale').style.background = buildGradientCSS(xg.palette || [], paletteMin, paletteMax);
             }
 
             function buildGradientCSS(palette, paletteMin, paletteMax) {
@@ -744,7 +706,7 @@
                 return `linear-gradient(to right, ${stops.join(', ')})`;
             }
 
-            // ── Opacity slider ─────────────────────────────────────────────────────────
+            // ── Opacity slider ────────────────────────────────────────────────────────
             function setupOpacitySlider() {
                 const slider = document.getElementById('grOpacitySlider');
                 slider.addEventListener('input', async () => {
@@ -753,7 +715,7 @@
                 });
             }
 
-            // ── Basemap selector ───────────────────────────────────────────────────────
+            // ── Basemap selector ──────────────────────────────────────────────────────
             function setupBasemapSelector() {
                 const btn = document.getElementById('grBasemapBtn');
                 const menu = document.getElementById('grBasemapMenu');
@@ -763,7 +725,6 @@
                     menu.classList.toggle('gr-open');
                 });
                 document.addEventListener('click', () => menu.classList.remove('gr-open'));
-
                 menu.querySelector(`[data-basemap="${currentBasemap}"]`).classList.add('gr-bm-active');
 
                 menu.querySelectorAll('.gr-map-basemap-option').forEach(opt => {
@@ -774,29 +735,263 @@
                             menu.classList.remove('gr-open');
                             return;
                         }
-
-                        menu.querySelectorAll('.gr-map-basemap-option').forEach(o =>
-                            o.classList.remove('gr-bm-active')
-                        );
+                        menu.querySelectorAll('.gr-map-basemap-option').forEach(o => o.classList.remove('gr-bm-active'));
                         opt.classList.add('gr-bm-active');
                         document.getElementById('grBasemapLabel').textContent = BASEMAPS[bm].name;
                         currentBasemap = bm;
                         menu.classList.remove('gr-open');
-
                         map.setStyle(BASEMAPS[bm].style);
                         map.once('style.load', () => {
-                            if (deckOverlay && currentRasterLayer) {
-                                deckOverlay.setProps({layers: [currentRasterLayer]});
-                            }
+                            if (deckOverlay && currentRasterLayer) deckOverlay.setProps({layers: [currentRasterLayer]});
                         });
                     });
                 });
             }
 
-            // ── Loading spinner ────────────────────────────────────────────────────────
-            function showLoading(visible) {
+            function showMapLoading(visible) {
                 document.getElementById('grMapLoading').style.display = visible ? 'flex' : 'none';
             }
+
+            // =========================================================================
+            // Items Browser
+            // =========================================================================
+
+            const ItemsBrowser = {
+                nextTokens: {},   // { varSlug: token | null }
+                allItems: [],
+
+                getFilters() {
+                    const checkedVars = [...document.querySelectorAll('[name="variable"]:checked')]
+                        .map(cb => ({
+                            slug: cb.value,
+                            sortOrder: parseInt(cb.dataset.sort, 10),
+                            name: cb.dataset.name,
+                        }));
+                    const dateInput = document.getElementById('grItemsDateFilter');
+                    const refSelect = document.getElementById('grRefTimeFilter');
+                    return {
+                        vars: checkedVars,
+                        date: dateInput?.value || null,
+                        refTime: refSelect?.value || null,
+                    };
+                },
+
+                async fetch(replace) {
+                    const {vars, date, refTime} = this.getFilters();
+
+                    if (!vars.length) {
+                        this.allItems = [];
+                        this.render();
+                        return;
+                    }
+
+                    if (replace) {
+                        this.nextTokens = {};
+                        this.allItems = [];
+                    }
+
+                    this.showLoading(true);
+
+                    // Use larger limit when client-side ref time filtering is needed
+                    const limit = refTime ? 100 : 24;
+                    const fetches = vars.map(v => this.fetchVar(v, date, limit, replace));
+                    const results = await Promise.allSettled(fetches);
+
+                    let newItems = results
+                        .filter(r => r.status === 'fulfilled')
+                        .flatMap(r => r.value);
+
+                    if (refTime) {
+                        const refISO = new Date(refTime).toISOString();
+                        newItems = newItems.filter(item => {
+                            const itemRef = item.properties?.['forecast:reference_datetime'];
+                            return itemRef && new Date(itemRef).toISOString() === refISO;
+                        });
+                    }
+
+                    if (replace) {
+                        this.allItems = newItems;
+                    } else {
+                        // Deduplicate by id+var before appending
+                        const existingKeys = new Set(this.allItems.map(i => `${i.id}::${i._varSlug}`));
+                        this.allItems = [
+                            ...this.allItems,
+                            ...newItems.filter(i => !existingKeys.has(`${i.id}::${i._varSlug}`)),
+                        ];
+                    }
+
+                    // Sort: time DESC, then variable sort order ASC
+                    this.allItems.sort((a, b) => {
+                        const tDiff = new Date(b.properties.datetime) - new Date(a.properties.datetime);
+                        if (tDiff !== 0) return tDiff;
+                        return a._sortOrder - b._sortOrder;
+                    });
+
+                    this.render();
+                    this.showLoading(false);
+                },
+
+                async fetchVar(varObj, date, limit, replace) {
+                    const token = replace ? null : (this.nextTokens[varObj.slug] ?? null);
+                    // If we already know there's no next page, skip
+                    if (!replace && token === null && varObj.slug in this.nextTokens) return [];
+
+                    const params = new URLSearchParams();
+                    params.set('limit', limit);
+                    if (CONFIG.isForecast) params.set('include_past', 'true');
+                    if (date) params.set('datetime', `${date}T00:00:00Z/${date}T23:59:59Z`);
+                    if (token) params.set('token', token);
+
+                    const url = `/api/stac/collections/${CONFIG.catalogSlug}/${varObj.slug}/items?${params}`;
+
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error(`STAC fetch failed: ${res.status}`);
+                    const data = await res.json();
+
+                    // Extract next token from links
+                    const nextLink = (data.links || []).find(l => l.rel === 'next');
+                    if (nextLink) {
+                        try {
+                            this.nextTokens[varObj.slug] = new URL(nextLink.href).searchParams.get('token');
+                        } catch {
+                            this.nextTokens[varObj.slug] = null;
+                        }
+                    } else {
+                        this.nextTokens[varObj.slug] = null;
+                    }
+
+                    return (data.features || []).map(item => ({
+                        ...item,
+                        _varSlug: varObj.slug,
+                        _sortOrder: varObj.sortOrder,
+                        _varName: varObj.name,
+                    }));
+                },
+
+                buildThumbUrl(item) {
+                    const time = item.properties.datetime;
+                    const refTime = item.properties['forecast:reference_datetime'];
+                    let url = `${CONFIG.titilerBase}/${CONFIG.catalogSlug}/${CONFIG.collectionSlug}/${item._varSlug}/preview.png?time=${encodeURIComponent(time)}`;
+                    if (refTime) url += `&reftime=${encodeURIComponent(refTime)}`;
+                    return url;
+                },
+
+                formatDate(isoStr) {
+                    return new Date(isoStr).toLocaleString('en', {
+                        year: 'numeric', month: 'short', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                        timeZone: 'UTC', timeZoneName: 'short',
+                    });
+                },
+
+                render() {
+                    const grid = document.getElementById('grItemsGrid');
+                    const empty = document.getElementById('grItemsEmpty');
+                    const loadMore = document.getElementById('grItemsLoadMore');
+                    const countEl = document.getElementById('grItemsCount');
+
+                    if (!this.allItems.length) {
+                        grid.innerHTML = '';
+                        empty.style.display = 'flex';
+                        loadMore.style.display = 'none';
+                        countEl.textContent = '0 items';
+                        return;
+                    }
+
+                    empty.style.display = 'none';
+                    countEl.textContent = `${this.allItems.length} item${this.allItems.length !== 1 ? 's' : ''}`;
+
+                    grid.innerHTML = this.allItems.map(item => {
+                        const thumbUrl = this.buildThumbUrl(item);
+                        const date = this.formatDate(item.properties.datetime);
+                        const refTime = item.properties['forecast:reference_datetime'];
+                        const horizon = item.properties['forecast:horizon'];
+                        const href = `${CONFIG.pageBase}items/${encodeURIComponent(item.id)}/`;
+
+                        const metaLines = [];
+                        if (refTime) metaLines.push(`<span class="gr-item-card-meta"><i class="bi bi-arrow-repeat"></i> Run: ${this.formatDate(refTime)}</span>`);
+                        if (horizon) metaLines.push(`<span class="gr-item-card-meta"><i class="bi bi-clock"></i> ${horizon.replace('PT', '+').replace('H', 'h')}</span>`);
+
+                        return `<a href="${href}" class="gr-item-card">
+                            <div class="gr-item-card-thumb">
+                                <img src="${thumbUrl}" alt="${item._varName}" loading="lazy"
+                                     onerror="this.closest('.gr-item-card-thumb').classList.add('gr-item-card-thumb--error');this.remove()">
+                                <div class="gr-item-card-thumb-placeholder"><i class="bi bi-image"></i></div>
+                            </div>
+                            <div class="gr-item-card-body">
+                                <div class="gr-item-card-date">${date}</div>
+                                <div class="gr-item-card-variable">${item._varName}</div>
+                                ${metaLines.join('')}
+                            </div>
+                        </a>`;
+                    }).join('');
+
+                    // Show "Load more" if any variable still has a next page
+                    const hasMore = Object.values(this.nextTokens).some(t => t !== null);
+                    loadMore.style.display = hasMore ? 'flex' : 'none';
+                },
+
+                showLoading(visible) {
+                    document.getElementById('grItemsLoading').style.display = visible ? 'flex' : 'none';
+                },
+            };
+
+            // ── Items filter event bindings ───────────────────────────────────────────
+
+            document.querySelectorAll('[name="variable"]').forEach(cb => {
+                cb.addEventListener('change', () => ItemsBrowser.fetch(true));
+            });
+
+            const dateInput = document.getElementById('grItemsDateFilter');
+            const dateClear = document.getElementById('grItemsDateClear');
+
+            if (dateInput) {
+                dateInput.addEventListener('change', () => {
+                    dateClear.style.display = dateInput.value ? 'flex' : 'none';
+                    ItemsBrowser.fetch(true);
+                });
+            }
+
+            if (dateClear) {
+                dateClear.addEventListener('click', () => {
+                    dateInput.value = '';
+                    dateClear.style.display = 'none';
+                    ItemsBrowser.fetch(true);
+                });
+            }
+
+            const refTimeSelect = document.getElementById('grRefTimeFilter');
+            if (refTimeSelect) {
+                refTimeSelect.addEventListener('change', () => ItemsBrowser.fetch(true));
+            }
+
+            document.getElementById('grLoadMoreBtn')?.addEventListener('click', () => ItemsBrowser.fetch(false));
+
+            // ── Forecast run dropdown population ──────────────────────────────────────
+            function populateRefTimeDropdown(runs) {
+                const sel = document.getElementById('grRefTimeFilter');
+                if (!sel) return;
+                runs.forEach(run => {
+                    const dt = new Date(run.reference_time);
+                    const label = dt.toLocaleString('en', {
+                        year: 'numeric', month: 'short', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                        timeZone: 'UTC', timeZoneName: 'short',
+                    });
+                    const opt = document.createElement('option');
+                    opt.value = run.reference_time;
+                    opt.textContent = label;
+                    sel.appendChild(opt);
+                });
+            }
+
+            // ── Sidebar filter accordion ──────────────────────────────────────────────
+            window.toggleItemsFilter = function (id) {
+                document.getElementById(id)?.classList.toggle('is-open');
+            };
+
+            // ── Start map ─────────────────────────────────────────────────────────────
+            initMap();
 
         })();
     </script>

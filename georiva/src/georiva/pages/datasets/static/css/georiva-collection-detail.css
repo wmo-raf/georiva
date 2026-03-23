@@ -105,63 +105,10 @@
 }
 
 /* ==========================================================================
-   Tab Bar
+   Map Section
    ========================================================================== */
 
-.gr-tab-bar {
-    background: var(--gr-dark-1);
-    border-bottom: 1px solid var(--gr-dark-border);
-    position: sticky;
-    top: 0;
-    z-index: 50;
-}
-
-.gr-tabs {
-    display: flex;
-    gap: 0;
-}
-
-.gr-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.85rem 1.5rem;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    font-family: var(--gr-font-sans);
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--gr-dark-text-2);
-    cursor: pointer;
-    transition: color var(--gr-dur) var(--gr-ease),
-    border-color var(--gr-dur) var(--gr-ease);
-    margin-bottom: -1px;
-}
-
-.gr-tab:hover {
-    color: var(--gr-dark-text-1);
-}
-
-.gr-tab--active {
-    color: var(--gr-accent);
-    border-bottom-color: var(--gr-accent);
-}
-
-/* ==========================================================================
-   Tab Panels
-   ========================================================================== */
-
-.gr-tab-panel {
-    display: none;
-}
-
-.gr-tab-panel--active {
-    display: block;
-}
-
-/* Map tab */
-#tab-map {
+.gr-map-section {
     padding: 2rem 0 2.5rem;
     background: var(--gr-light-1);
 }
@@ -679,7 +626,7 @@
         display: none;
     }
 
-    #tab-map {
+    .gr-map-section {
         padding: 1rem 0 1.5rem;
     }
 
@@ -775,5 +722,232 @@
 
     .gr-timebar-count {
         display: none;
+    }
+}
+
+/* ==========================================================================
+   Items Browser
+   ========================================================================== */
+
+.gr-items-browser {
+    align-items: start;
+}
+
+.gr-items-sidebar {
+    top: 80px;
+}
+
+/* Variable checkbox row */
+.gr-items-var-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    border-radius: var(--gr-radius);
+    cursor: pointer;
+    transition: background var(--gr-dur) var(--gr-ease);
+    font-size: 0.82rem;
+    color: var(--gr-text-2);
+}
+
+.gr-items-var-checkbox:hover {
+    background: var(--gr-light-1);
+}
+
+.gr-items-var-checkbox input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--gr-accent);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.gr-items-var-label {
+    flex: 1;
+    color: var(--gr-text-1);
+}
+
+.gr-items-var-unit {
+    font-size: 0.68rem;
+    color: var(--gr-text-3);
+}
+
+/* Date input */
+.gr-items-date-input {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    font-family: var(--gr-font-sans);
+    font-size: 0.82rem;
+    color: var(--gr-text-1);
+    outline: none;
+    transition: border-color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-items-date-input:focus {
+    border-color: var(--gr-accent-border);
+    box-shadow: 0 0 0 3px var(--gr-accent-dim);
+}
+
+.gr-items-date-clear {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    padding: 0.3rem 0.6rem;
+    background: transparent;
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    font-size: 0.75rem;
+    color: var(--gr-text-3);
+    cursor: pointer;
+    transition: all var(--gr-dur) var(--gr-ease);
+    width: 100%;
+    justify-content: center;
+}
+
+.gr-items-date-clear:hover {
+    border-color: var(--gr-accent-border);
+    color: var(--gr-accent);
+}
+
+/* Reference time select */
+.gr-items-ref-select {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    font-family: var(--gr-font-sans);
+    font-size: 0.82rem;
+    color: var(--gr-text-1);
+    outline: none;
+    cursor: pointer;
+    transition: border-color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-items-ref-select:focus {
+    border-color: var(--gr-accent-border);
+    box-shadow: 0 0 0 3px var(--gr-accent-dim);
+}
+
+/* Items grid */
+.gr-items-main {
+    min-width: 0;
+}
+
+.gr-item-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+/* Item card */
+.gr-item-card {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    overflow: hidden;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    transition: border-color var(--gr-dur) var(--gr-ease),
+    transform var(--gr-dur) var(--gr-ease),
+    box-shadow var(--gr-dur) var(--gr-ease);
+}
+
+.gr-item-card:hover {
+    border-color: var(--gr-accent-border);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+/* Thumbnail */
+.gr-item-card-thumb {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: var(--gr-light-1);
+    overflow: hidden;
+}
+
+.gr-item-card-thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Placeholder icon shown when image errors */
+.gr-item-card-thumb-placeholder {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--gr-text-3);
+}
+
+.gr-item-card-thumb--error .gr-item-card-thumb-placeholder {
+    display: flex;
+}
+
+/* Card body */
+.gr-item-card-body {
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1;
+}
+
+.gr-item-card-date {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+    line-height: 1.3;
+}
+
+.gr-item-card-variable {
+    font-size: 0.78rem;
+    color: var(--gr-accent);
+    font-weight: 500;
+}
+
+.gr-item-card-meta {
+    font-size: 0.72rem;
+    color: var(--gr-text-3);
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.1rem;
+}
+
+/* Loading state for items */
+.gr-items-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 3rem;
+    color: var(--gr-text-3);
+    font-size: 0.85rem;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .gr-item-cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .gr-item-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }

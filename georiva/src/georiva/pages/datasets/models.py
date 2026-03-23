@@ -85,7 +85,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     @path('<slug:catalog_slug>/<slug:collection_slug>/')
     def collection_detail(self, request, catalog_slug, collection_slug):
         from django.shortcuts import get_object_or_404, render
-        
+
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collection = get_object_or_404(
             Collection,
@@ -93,19 +93,31 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             slug=collection_slug,
             is_active=True,
         )
-        
-        latest_items = (
-            collection.items
-            .order_by('-time')
-            .prefetch_related('assets')[:10]
-        )
-        
+
         return render(request, 'datasets/collection_detail.html', {
             'page': self,
             'catalog': catalog,
             'collection': collection,
             'variables': collection.variables.filter(is_active=True).order_by('sort_order'),
-            'latest_items': latest_items,
+        })
+
+    @path('<slug:catalog_slug>/<slug:collection_slug>/items/<str:item_id>/')
+    def item_detail(self, request, catalog_slug, collection_slug, item_id):
+        from django.shortcuts import get_object_or_404, render
+
+        catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
+        collection = get_object_or_404(
+            Collection,
+            catalog=catalog,
+            slug=collection_slug,
+            is_active=True,
+        )
+
+        return render(request, 'datasets/item_detail.html', {
+            'page': self,
+            'catalog': catalog,
+            'collection': collection,
+            'item_id': item_id,
         })
     
     # -------------------------------------------------------------------------
