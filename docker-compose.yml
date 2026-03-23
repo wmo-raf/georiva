@@ -212,6 +212,15 @@ services:
       MINIO_BUCKET_NAME: "georiva-assets"
       REDIS_URL: "redis://georiva-redis:6379/0"
       DJANGO_BASE_URL: "http://georiva:8000"
+      TTL_PORT: ${TTL_PORT:-8000}
+      TTL_WORKERS: ${TTL_WORKERS:-4}
+      TTL_LOG_LEVEL: ${TTL_LOG_LEVEL:-info}
+      TTL_MAX_REQUESTS: ${TTL_MAX_REQUESTS:-2000}
+      TTL_MAX_REQUESTS_JITTER: ${TTL_MAX_REQUESTS_JITTER:-200}
+      TTL_TIMEOUT: ${TTL_TIMEOUT:-120}
+      TTL_ROOT_PATH: ${TTL_ROOT_PATH:-/titiler}
+      GDAL_CACHEMAX: ${GDAL_CACHEMAX:-512}
+      CPL_VSIL_CURL_CACHE_SIZE: ${CPL_VSIL_CURL_CACHE_SIZE:-67108864}
 
   georiva-stac-browser:
     build:

@@ -5,7 +5,7 @@ ENV UID=${UID:-9999}
 ARG GID
 ENV GID=${GID:-9999}
 
-# Create or rename group to georiva_docker_group with desired GID
+# Create or rename group to ttl_docker_group with desired GID
 RUN if getent group $GID > /dev/null; then \
         existing_group=$(getent group $GID | cut -d: -f1); \
         if [ "$existing_group" != "ttl_docker_group" ]; then \
@@ -41,12 +41,14 @@ RUN python3 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
 ENV PIP_CACHE_DIR=/tmp/ttl_pip_cache
-RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID . /app/venv/bin/activate && pip3 install  -r /app/requirements.txt
+RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID . /app/venv/bin/activate && pip3 install -r /app/requirements.txt
 
 COPY --chown=$UID:$GID ./app ./app
+COPY --chown=$UID:$GID ./docker-entrypoint.sh /app/docker-entrypoint.sh
 
 ENV PYTHONUNBUFFERED 1
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["gunicorn"]
