@@ -209,6 +209,9 @@ services:
       MINIO_REGION_NAME: "us-east-1"
       MINIO_USE_HTTPS: "false"
       CORS_ALLOWED_ORIGINS: "*"
+      MINIO_BUCKET_NAME: "georiva-assets"
+      REDIS_URL: "redis://georiva-redis:6379/0"
+      DJANGO_BASE_URL: "http://georiva:8000"
 
   georiva-stac-browser:
     build:

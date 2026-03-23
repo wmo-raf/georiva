@@ -6,6 +6,22 @@ from django.db.models.signals import post_save
 logger = logging.getLogger(__name__)
 
 
+def on_variable_save(sender, instance, **kwargs):
+    from georiva.core.palette_cache import warm_variable
+    warm_variable(instance)
+
+
+def on_palette_save(sender, instance, **kwargs):
+    from georiva.core.palette_cache import warm_variable
+    for variable in (
+        instance.variable_set
+        .filter(is_active=True)
+        .select_related('collection__catalog', 'palette')
+        .prefetch_related('palette__stops')
+    ):
+        warm_variable(variable)
+
+
 def _put_keep(bucket, path):
     try:
         bucket.save(path, b"")
@@ -41,10 +57,22 @@ class CoreConfig(AppConfig):
     verbose_name = "GeoRIVA Core"
     
     def ready(self):
-        from .models import Collection
+        from .models import Collection, Variable
         from .tasks import update_collection_loader_plugin_periodic_task
-        
+        from .models.visualization import ColorPalette
+
         post_save.connect(update_collection_loader_plugin_periodic_task, sender=Collection)
-        
+
         # Create .keep file in incoming bucket when a new collection is created
         post_save.connect(collection_post_save, sender=Collection)
+
+        # Re-warm palette cache when a variable or palette changes
+        post_save.connect(on_variable_save, sender=Variable)
+        post_save.connect(on_palette_save, sender=ColorPalette)
+
+        # Warm palette cache on startup (guard against pre-migration state)
+        try:
+            from georiva.core.palette_cache import warm_all
+            warm_all()
+        except Exception as e:
+            logger.warning("Palette cache warm failed on startup: %s", e)
