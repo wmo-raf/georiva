@@ -1,0 +1,63 @@
+{% extends "georiva/base.html" %}
+{% load static georiva_tags i18n %}
+
+{% block title %}Item {{ item_id }} — {{ collection.name }}{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
+{% endblock %}
+
+{% block content %}
+
+    <section class="gr-catalog-header">
+        <div class="gr-container">
+
+            <nav class="gr-breadcrumb" aria-label="breadcrumb">
+                <a href="{{ page.url }}"><i class="bi bi-layers"></i> Datasets</a>
+                <span class="gr-breadcrumb-sep">/</span>
+                <a href="{{ page.url }}{{ catalog.slug }}/">{{ catalog.name }}</a>
+                <span class="gr-breadcrumb-sep">/</span>
+                <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/">{{ collection.name }}</a>
+                <span class="gr-breadcrumb-sep">/</span>
+                <span class="gr-mono" style="font-size:0.82rem">{{ item_id }}</span>
+            </nav>
+
+            <div class="gr-catalog-header-body">
+                <div class="gr-catalog-header-identity">
+                    <div class="gr-catalog-header-icon">
+                        {% get_catalog_icon catalog.file_format as icon %}
+                        <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                    </div>
+                    <div>
+                        <div class="gr-catalog-header-eyebrow">
+                            <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/"
+                               style="color:var(--gr-accent);text-decoration:none">
+                                {{ collection.name }}
+                            </a>
+                        </div>
+                        <h1 class="gr-catalog-header-title gr-mono" style="font-size:1.1rem">{{ item_id }}</h1>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <section class="gr-section">
+        <div class="gr-container">
+            <div class="gr-empty-state" style="padding:4rem 0">
+                <i class="bi bi-tools" style="font-size:2rem;color:var(--gr-text-3)"></i>
+                <p style="font-weight:600;margin-bottom:0.35rem;margin-top:1rem">Item detail coming soon</p>
+                <p style="color:var(--gr-text-3)">
+                    This page is under construction. Assets and detailed metadata will appear here.
+                </p>
+                <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/"
+                   class="gr-btn gr-btn-ghost-dark" style="margin-top:1.5rem">
+                    <i class="bi bi-arrow-left"></i> Back to {{ collection.name }}
+                </a>
+            </div>
+        </div>
+    </section>
+
+{% endblock %}
