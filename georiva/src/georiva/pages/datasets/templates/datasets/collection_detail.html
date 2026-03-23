@@ -358,8 +358,7 @@
             "isForecast": {% if collection.is_forecast %}true{% else %}false{% endif %},
             "titilerBase": "/titiler",
             "pageBase": "{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/",
-            "variables": [{% for variable in variables %}{"slug":"{{ variable.slug }}","name":"{{ variable.name|escapejs }}","sortOrder":{{ forloop.counter0 }}}{% if not forloop.last %}
-        {% endif %}{% endfor %}]
+            "variables": [{% for variable in variables %}{"slug":"{{ variable.slug }}","name":"{{ variable.name|escapejs }}","sortOrder":{{ forloop.counter0 }}}{% if not forloop.last %}{% endif %}{% endfor %}]
         }
     </script>
 
