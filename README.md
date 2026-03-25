@@ -22,7 +22,7 @@ serving it through modern standards-compliant APIs, and enabling analytical work
 
 ## Architecture at a Glance
 
-![High-Level Architecture Diagram](docs/images/architecture-overview.png)
+![High-Level Architecture Diagram](docs/images/georiva-architecture.png)
 
 For the detailed architecture with diagrams, data model, and design decisions,
 see [docs/architecture/README.md](docs/architecture/README.md).
