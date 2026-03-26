@@ -869,7 +869,7 @@
                 buildThumbUrl(item) {
                     const time = item.properties.datetime;
                     const refTime = item.properties['forecast:reference_datetime'];
-                    let url = `${CONFIG.titilerBase}/${CONFIG.catalogSlug}/${CONFIG.collectionSlug}/${item._varSlug}/preview.png?time=${encodeURIComponent(time)}`;
+                    let url = `${CONFIG.titilerBase}/${CONFIG.catalogSlug}/${CONFIG.collectionSlug}/${item._varSlug}/preview.webp?time=${encodeURIComponent(time)}`;
                     if (refTime) url += `&reftime=${encodeURIComponent(refTime)}`;
                     return url;
                 },
