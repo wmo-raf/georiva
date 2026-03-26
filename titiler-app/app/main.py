@@ -3,12 +3,14 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from functools import lru_cache
 from typing import Annotated, Optional
 
 import httpx
 import redis
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from rasterio.errors import RasterioIOError
 from rio_tiler.models import ImageData
 from rio_tiler.types import ColorMapType
 from starlette.middleware.cors import CORSMiddleware
@@ -39,13 +41,11 @@ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 
 # ---------------------------------------------------------------------------
-# Django fallback (lru_cache — only used on Redis cache miss)
+# Django fallback
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=512)
 def _fetch_config_from_django(catalog: str, collection: str, variable: str) -> Optional[dict]:
-    """Fetch rendering config from Django internal API on Redis miss.
-    Result is cached in-process for the process lifetime."""
+    """Fetch rendering config from Django internal API on Redis miss."""
     url = f"{DJANGO_BASE_URL}/api/tile-config/{catalog}/{collection}/{variable}/"
     try:
         resp = httpx.get(url, timeout=5.0)
@@ -146,7 +146,9 @@ def SemanticPathParams(
     time_dt = parse_iso_datetime(time, "time")
     
     reftime_dt = parse_iso_datetime(reftime, "reftime") if reftime else None
-    return build_cog_url(catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
+    url = build_cog_url(catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
+    logger.debug("Resolved COG URL: %s", url)
+    return url
 
 
 def SemanticColorMap(
@@ -205,7 +207,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
+@app.exception_handler(RasterioIOError)
+async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> JSONResponse:
+    msg = str(exc)
+    if "404" in msg or "HTTP response code: 404" in msg:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": "File not found in storage — check that the time/reftime parameters are correct."},
+        )
+    # Surface other rasterio IO errors (e.g. 403, corrupt file) as 502
+    logger.error("RasterioIOError: %s | path: %s", msg, request.url)
+    return JSONResponse(
+        status_code=502,
+        content={"detail": f"Storage read error: {msg}"},
+    )
+
 
 app.include_router(
     cog.router,
