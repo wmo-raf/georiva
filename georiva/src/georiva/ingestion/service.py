@@ -790,8 +790,7 @@ class IngestionService:
         visual_asset = None
         
         # nodata value applied consistently across COG and metadata records.
-        # NaN is the standard for float32 meteorological data.
-        _nodata = float("nan")
+        _nodata = None
         
         # --- PNG (visual asset) ---------------------------------------------
         png_path = f"{base_dir}/{base_name}.png"
@@ -889,7 +888,7 @@ class IngestionService:
             # Include the colour palette reference if the visual asset was
             # created successfully — used by the frontend legend renderer.
             if visual_asset:
-                metadata["color_map"] = visual_asset.weather_layers_palette
+                metadata["color_map"] = visual_asset.variable.weather_layers_palette
             
             writer.write_metadata(metadata, meta_path)
         

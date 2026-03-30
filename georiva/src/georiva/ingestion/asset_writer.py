@@ -100,11 +100,9 @@ class AssetWriter:
         _nodata = nodata if nodata is not None else self._default_nodata(dtype)
         _predictor = self._predictor(dtype)
         
-        # Copy the shared profile object before mutating — cog_profiles.get()
-        # returns a reference to a module-level dict. Mutating it directly
-        # would affect all subsequent calls within the same worker process.
-        output_profile = cog_profiles.get("deflate").copy()
-        output_profile.update({
+        # Convert to plain dict before mutating
+        cog_profile = dict(cog_profiles.get("deflate"))
+        cog_profile.update({
             "blockxsize": blocksize,
             "blockysize": blocksize,
             "predictor": _predictor,
@@ -145,7 +143,7 @@ class AssetWriter:
             cog_translate(
                 tmp_path,
                 cog_path,
-                output_profile,
+                cog_profile,
                 overview_level=overview_levels,
                 overview_resampling="average",
                 nodata=_nodata,
