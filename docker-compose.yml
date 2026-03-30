@@ -51,12 +51,15 @@ x-backend-variables: &backend-variables
   AWS_S3_ADDRESSING_STYLE: ${AWS_S3_ADDRESSING_STYLE:-path}
   STATIC_ROOT: ${STATIC_ROOT:-/georiva/static}
   MEDIA_ROOT: ${MEDIA_ROOT:-/georiva/media}
+  GEORIVA_CHUNK_THRESHOLD_PIXELS: ${GEORIVA_CHUNK_THRESHOLD_PIXELS:-16777216}
+  GEORIVA_TEMP_DIR: ${GEORIVA_TEMP_DIR:-/var/tmp/georiva}
 
 x-backend-volumes: &backend-volumes
   volumes:
     - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
     - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
     - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
+    - ${GEORIVA_TEMP_VOLUME:-./docker/temp}:/var/tmp/georiva
 
 services:
   georiva-db:

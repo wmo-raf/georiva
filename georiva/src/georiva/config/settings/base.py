@@ -395,3 +395,14 @@ VUE_FRONTEND_USE_DEV_SERVER = DEBUG
 VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
 VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
 VUE_FRONTEND_STATIC_PATH = 'vue'
+
+# Temp directory for intermediate files processing.
+GEORIVA_TEMP_DIR = env("GEORIVA_TEMP_DIR", default="/var/tmp/georiva")
+
+# Pixel threshold above which variable processing switches to chunked mode.
+# 4096×4096 = 16M pixels ≈ 64MB float32 per array.
+# Increase for machines with more RAM, decrease for constrained workers.
+GEORIVA_CHUNK_THRESHOLD_PIXELS = env.int(
+    "GEORIVA_CHUNK_THRESHOLD_PIXELS",
+    default=4096 * 4096
+)
