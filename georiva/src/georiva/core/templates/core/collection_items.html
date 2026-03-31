@@ -1,0 +1,19 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags static wagtailiconchooser_tags %}
+
+{% block main_content %}
+    <div>
+        {% if page_obj.object_list %}
+            {% component table %}
+        {% else %}
+            <p>No items found for this collection</p>
+        {% endif %}
+
+        {% if paginator.num_pages > 1 %}
+            <div style="margin-top:40px;">
+                {% include "wagtailadmin/shared/pagination_nav.html" with items=page_obj %}
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

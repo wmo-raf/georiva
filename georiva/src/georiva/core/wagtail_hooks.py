@@ -4,7 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.menu import MenuItem
 
-from .views import catalog_index
+from .views import catalog_index, collection_items_list
 from .viewsets import BoundaryChooserViewSet, admin_viewsets
 
 
@@ -12,6 +12,7 @@ from .viewsets import BoundaryChooserViewSet, admin_viewsets
 def urlconf_georivacore():
     return [
         path('catalogs/', catalog_index, name="catalog_index"),
+        path('collection/<int:collection_pk>/items/', collection_items_list, name="collection_items_list"),
     ]
 
 

@@ -1,16 +1,18 @@
-from django.shortcuts import render
+from django.core.paginator import InvalidPage
+from django.shortcuts import render, get_object_or_404
 from django.urls import reverse_lazy, reverse
 from django.utils.translation import gettext as _
+from wagtail.admin.paginator import WagtailPaginator
 from wagtail.admin.ui.tables import ButtonsColumnMixin, TitleColumn, Table, BooleanColumn
 from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdown
 
-from georiva.core.models import Catalog
+from georiva.core.models import Catalog, Collection, Item
 from .table import LinkColumnWithIcon
 from .viewsets import CatalogViewSet, CollectionViewSet
 
 
 def get_collection_items_url(collection):
-    return "#"
+    return reverse("collection_items_list", args=[collection.pk])
 
 
 def catalog_index(request):
@@ -119,3 +121,40 @@ def catalog_index(request):
     }
     
     return render(request, 'core/catalog_list.html', context)
+
+
+def collection_items_list(request, collection_pk):
+    collection = get_object_or_404(Collection, pk=collection_pk)
+    items = Item.objects.filter(collection=collection)
+    
+    # Get search parameters from the query string.
+    try:
+        page_num = int(request.GET.get("p", 0))
+    except ValueError:
+        page_num = 0
+    
+    paginator = WagtailPaginator(items, 2)
+    
+    try:
+        page_obj = paginator.page(page_num + 1)
+    except InvalidPage:
+        page_obj = paginator.page(1)
+    
+    columns = [
+        TitleColumn("__str__", label=_("Item")),
+    ]
+    
+    elided_page_range = paginator.get_elided_page_range(page_num)
+    
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": "", "label": _("Catalogs")},
+        ],
+        "paginator": paginator,
+        "elided_page_range": elided_page_range,
+        "page_obj": page_obj,
+        "table": Table(columns, page_obj.object_list),
+    }
+    
+    return render(request, 'core/collection_items.html', context)
