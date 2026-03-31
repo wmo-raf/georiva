@@ -758,15 +758,13 @@ class IngestionService:
         Write processed data to storage and create Asset records in the DB.
 
         Writes three asset types per variable per timestamp:
-          PNG  — RGBA visual, used by map clients and preview thumbnails
-          COG  — Cloud-Optimized GeoTIFF, used by TiTiler and analysis layer
+          COG  — Cloud-Optimized GeoTIFF, used by TiTiler and analysis layer (primary)
+          PNG  — Encoded RGBA visual, used by GL web map clients for browser-side rendering
           JSON — metadata sidecar, used by the frontend and API responses
 
-        Each write is wrapped independently so that a failure in one format
-        does not prevent the others from being saved.
-
-        COG dtype and predictor are derived automatically from data.dtype
-        inside AssetWriter.write_cog — no explicit dtype argument needed here.
+        The COG is the primary deliverable and is written first. If the COG
+        write fails the exception is re-raised immediately, preventing PNG and
+        JSON from being written. PNG and JSON failures are non-fatal.
         """
         catalog_slug = item.collection.catalog.slug
         collection_slug = item.collection.slug
@@ -793,42 +791,8 @@ class IngestionService:
         # nodata value applied consistently across COG and metadata records.
         _nodata = None
         
-        # --- PNG (visual asset) ---------------------------------------------
-        png_path = f"{base_dir}/{base_name}.png"
-        try:
-            stored_png = writer.write_png(final_rgba, png_path)
-            visual_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.PNG,
-                defaults={
-                    "href": stored_png,
-                    "media_type": "image/png",
-                    "roles": ["visual"],
-                    "file_size": self._get_file_size(storage.assets, stored_png),
-                    "width": width,
-                    "height": height,
-                    "bands": 4,
-                    "stats_min": stats.get("min"),
-                    "stats_max": stats.get("max"),
-                    "stats_mean": stats.get("mean"),
-                    "stats_std": stats.get("std"),
-                    "extra_fields": {
-                        # imageUnscale maps the 0-255 PNG range back to real
-                        # physical units for rendering in WeatherLayers GL
-                        "imageUnscale": [variable.value_min, variable.value_max],
-                        "scale": variable.scale_type or "linear",
-                    },
-                },
-            )
-            assets.append(visual_asset)
-        
-        except Exception as e:
-            self.logger.error("PNG save failed for %s: %s", variable.slug, e)
-        
         # --- COG (data asset) -----------------------------------------------
-        # dtype and predictor are derived from data.dtype inside write_cog.
-        # blocksize and overview levels are derived from raster dimensions.
+        # Written first. Failure raises immediately — PNG and JSON are skipped.
         cog_path = f"{base_dir}/{base_name}.tif"
         try:
             stored_cog = writer.write_cog(final_data, cog_path, bounds, crs)
@@ -869,6 +833,40 @@ class IngestionService:
         
         except Exception as e:
             self.logger.error("COG save failed for %s: %s", variable.slug, e)
+            raise
+        
+        # --- Encoded PNG (visual asset) ---------------------------------------------
+        png_path = f"{base_dir}/{base_name}.png"
+        try:
+            stored_png = writer.write_png(final_rgba, png_path)
+            visual_asset, _ = Asset.objects.update_or_create(
+                item=item,
+                variable=variable,
+                format=Asset.Format.PNG,
+                defaults={
+                    "href": stored_png,
+                    "media_type": "image/png",
+                    "roles": ["visual"],
+                    "file_size": self._get_file_size(storage.assets, stored_png),
+                    "width": width,
+                    "height": height,
+                    "bands": 4,
+                    "stats_min": stats.get("min"),
+                    "stats_max": stats.get("max"),
+                    "stats_mean": stats.get("mean"),
+                    "stats_std": stats.get("std"),
+                    "extra_fields": {
+                        # imageUnscale maps the 0-255 PNG range back to real
+                        # physical units for rendering in WeatherLayers GL
+                        "imageUnscale": [variable.value_min, variable.value_max],
+                        "scale": variable.scale_type or "linear",
+                    },
+                },
+            )
+            assets.append(visual_asset)
+        
+        except Exception as e:
+            self.logger.error("PNG save failed for %s: %s", variable.slug, e)
         
         # --- JSON (metadata sidecar) ----------------------------------------
         # Consumed by the frontend detail pages and the analysis layer
