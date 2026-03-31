@@ -28,6 +28,9 @@ django-deep-translator==1.5.2
 drf-spectacular
 pydantic==2.12.5
 xarray==2025.11.0
+zarr>=3.0.3,<4.0
+s3fs>=2024.6.0
+fsspec>=2024.6.0
 django-storages==1.14.6
 boto3==1.41.5
 dask[complete]

@@ -40,6 +40,11 @@ BUCKET_CONFIGS = {
         "notify_on_create": False,
         "description": "Processed datasets (public)",
     },
+    "zarr": {
+        "public_read": False,
+        "notify_on_create": False,
+        "description": "Zarr stores for ingestion output (private)",
+    }
 }
 
 

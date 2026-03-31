@@ -28,6 +28,7 @@ def catalog_index(request):
             
             edit_url = reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
             delete_url = reverse(collection_viewset.get_url_name("delete"), kwargs={"pk": instance.pk})
+            zarr_store_url = reverse("zarr_collection_detail", args=[instance.pk])
             
             more_buttons.append(
                 ListingButton(
@@ -48,6 +49,18 @@ def catalog_index(request):
                     icon_name="bin",
                     attrs={
                         "aria-label": _("Delete '%(title)s'") % {"title": str(instance)}
+                    },
+                    priority=20,
+                )
+            )
+            
+            more_buttons.append(
+                ListingButton(
+                    _("Zarr Store"),
+                    url=zarr_store_url,
+                    icon_name="resubmit",
+                    attrs={
+                        "title": _("Queue Zarr sync for all COG assets in this collection")
                     },
                     priority=30,
                 )
@@ -106,6 +119,3 @@ def catalog_index(request):
     }
     
     return render(request, 'core/catalog_list.html', context)
-
-
-

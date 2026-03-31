@@ -36,8 +36,9 @@ class BucketType:
     SOURCES = "sources"
     ARCHIVE = "archive"
     ASSETS = "assets"
-    
-    ALL = [INCOMING, SOURCES, ARCHIVE, ASSETS]
+    ZARR = "zarr"
+
+    ALL = [INCOMING, SOURCES, ARCHIVE, ASSETS, ZARR]
 
 
 def get_bucket_config() -> dict[str, str]:
@@ -288,7 +289,31 @@ class StorageManager:
     def assets(self) -> Bucket:
         """Final processed datasets."""
         return self._get_bucket(BucketType.ASSETS)
-    
+
+    @property
+    def zarr(self) -> Bucket:
+        """Zarr analysis-ready store bucket (derived cache of COG assets)."""
+        return self._get_bucket(BucketType.ZARR)
+
+    def get_zarr_fs(self):
+        """
+        Return a configured fsspec filesystem for direct Zarr I/O.
+
+        ZarrWriter uses this to build a zarr.storage.FsspecStore that
+        bypasses Django's storage layer (required for zarr v3 chunked writes).
+        """
+        if settings.GEORIVA_STORAGE_BACKEND == 'local':
+            import fsspec
+            return fsspec.filesystem('file')
+        import s3fs
+        return s3fs.S3FileSystem(
+            key=settings.AWS_ACCESS_KEY_ID,
+            secret=settings.AWS_SECRET_ACCESS_KEY,
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            use_ssl=getattr(settings, 'MINIO_PUBLIC_ENDPOINT_USE_SSL', False),
+            client_kwargs={'endpoint_url': settings.AWS_S3_ENDPOINT_URL},
+        )
+
     def bucket(self, bucket_type: str) -> Bucket:
         """Get a bucket by type string."""
         if bucket_type not in BucketType.ALL:

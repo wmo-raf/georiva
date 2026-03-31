@@ -16,6 +16,7 @@ from georiva.core.filename import parse_path
 from georiva.core.models import Catalog, Collection, Item, Asset
 from georiva.core.storage import storage, BucketType, Bucket
 from georiva.formats.registry import format_registry
+from georiva.zarr_store.tasks import zarr_sync_store
 from .asset_writer import AssetWriter
 from .clipper import BoundaryClipper
 from .encoder import VariableEncoder
@@ -856,6 +857,15 @@ class IngestionService:
                 },
             )
             assets.append(data_asset)
+            
+            # Zarr sync: enqueue low-priority append task after COG is confirmed written.
+            # Wrapped independently so a Zarr enqueue failure never blocks the COG record.
+            try:
+                self._enqueue_zarr_sync(item, variable)
+            except Exception as zarr_exc:
+                self.logger.warning(
+                    "Zarr sync enqueue failed for %s: %s", variable.slug, zarr_exc
+                )
         
         except Exception as e:
             self.logger.error("COG save failed for %s: %s", variable.slug, e)
@@ -900,6 +910,41 @@ class IngestionService:
             )
         
         return assets
+    
+    def _enqueue_zarr_sync(self, item: "Item", variable: "Variable") -> None:
+        """
+        Register a pending Zarr sync record and dispatch the sync task.
+
+        Called after a COG asset has been successfully written. Skipped for
+        forecast items (reference_time is not None) and when Zarr sync is
+        disabled via settings.GEORIVA_ZARR_ENABLED.
+        """
+        from django.conf import settings as dj_settings
+        from georiva.zarr_store.models import ZarrSyncLog
+        
+        if item.reference_time is not None:
+            return  # Forecasts excluded from Zarr v1
+        
+        if not getattr(dj_settings, 'GEORIVA_ZARR_ENABLED', True):
+            return
+        
+        store_path = (
+            f"{item.collection.catalog.slug}"
+            f"/{item.collection.slug}"
+            f"/{variable.slug}.zarr"
+        )
+        
+        ZarrSyncLog.objects.update_or_create(
+            item=item,
+            variable=variable,
+            defaults={
+                'store_path': store_path,
+                'status': ZarrSyncLog.Status.PENDING,
+                'error': '',
+            },
+        )
+        
+        zarr_sync_store.apply_async(args=[store_path], queue='georiva-ingestion')
     
     def _process_variable_chunked(
             self,
