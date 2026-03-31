@@ -97,6 +97,14 @@ class IngestionLog(models.Model):
     force_reingest = models.BooleanField(
         default=False
     )
+
+    loader_run = models.ForeignKey(
+        'georivasources.LoaderRun',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='ingestion_logs',
+    )
     
     # =========================================================================
     # Configuration
