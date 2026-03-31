@@ -36,7 +36,8 @@ class LoaderRunResult:
     # Details
     errors: list[str] = field(default_factory=list)
     fetch_results: list = field(default_factory=list)
-    
+    stored_paths: list[str] = field(default_factory=list)  # storage paths of successfully fetched files
+
     # Context
     run_time: Optional[datetime] = None  # For forecasts: which model run
     
@@ -219,7 +220,8 @@ class Loader:
                 if fetch_result.success:
                     result.files_fetched += 1
                     result.bytes_transferred += fetch_result.bytes_transferred
-                    
+                    result.stored_paths.append(self._get_storage_path(request))
+
                     # Callback
                     if self.on_file_fetched:
                         try:

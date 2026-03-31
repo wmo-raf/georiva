@@ -6,3 +6,6 @@ class IngestionConfig(AppConfig):
     name = 'georiva.ingestion'
     label = 'georivaingestion'
     verbose_name = "GeoRIVA Ingestion"
+
+    def ready(self):
+        import georiva.ingestion.signals  # noqa: F401

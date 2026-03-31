@@ -21,6 +21,7 @@ from .asset_writer import AssetWriter
 from .clipper import BoundaryClipper
 from .encoder import VariableEncoder
 from .extractor import VariableExtractor
+from .models import IngestionLog
 from .result import IngestionResult
 from .utils import apply_unit_conversion, iter_windows
 
@@ -190,6 +191,13 @@ class IngestionService:
                 result.clip_boundary = str(catalog.boundary)
                 self.logger.info("Clipping enabled: %s", catalog.boundary)
             
+            # --- IngestionLog reference ------------------------------------
+            # Retrieved once so Items created from this file are linked back
+            # to the log that triggered their ingestion.
+            ingestion_log = IngestionLog.objects.filter(
+                bucket=origin_bucket, file_path=file_path
+            ).first()
+
             # --- Shared processing objects ----------------------------------
             # Instantiated once per file and passed through the call stack.
             writer = AssetWriter(storage.assets)
@@ -241,6 +249,7 @@ class IngestionService:
                                         source_file=f"{origin_bucket}:{file_path}",
                                         clipper=clipper,
                                         reference_time=reference_time,
+                                        ingestion_log=ingestion_log,
                                     )
                                 )
                                 
@@ -411,6 +420,7 @@ class IngestionService:
             source_file: str,
             clipper: BoundaryClipper,
             reference_time: datetime = None,
+            ingestion_log: "IngestionLog" = None,
     ) -> tuple[Optional[Item], list[Asset], dict, list]:
         """
         Process all Variables for a single timestamp within a collection.
@@ -499,6 +509,7 @@ class IngestionService:
             reference_time=ref_utc,
             defaults={
                 "source_file": source_file,
+                "ingestion_log": ingestion_log,
                 "bounds": list(bounds),
                 "width": width,
                 "height": height,
@@ -525,6 +536,9 @@ class IngestionService:
                 item.width = width
                 item.height = height
                 update_fields.extend(["bounds", "width", "height"])
+            if ingestion_log and item.ingestion_log_id != ingestion_log.pk:
+                item.ingestion_log = ingestion_log
+                update_fields.append("ingestion_log")
             if update_fields:
                 item.save(update_fields=update_fields)
         

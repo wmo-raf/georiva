@@ -118,8 +118,10 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     def record_run(self, result, collection):
         """Record loader run result."""
         from django.utils import timezone
-        
-        LoaderRun.objects.create(
+        from georiva.core.storage import BucketType
+        from georiva.ingestion.models import IngestionLog
+
+        loader_run = LoaderRun.objects.create(
             collection=collection,
             loader_profile=self,
             started_at=result.started_at,
@@ -134,6 +136,15 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
             run_time=result.run_time,
             errors=result.errors,
         )
+
+        # Link IngestionLog entries for files stored in this run so that
+        # deleting those Items later can cascade back to the LoaderRun.
+        if result.stored_paths:
+            IngestionLog.objects.filter(
+                file_path__in=result.stored_paths,
+                bucket=BucketType.SOURCES,
+                loader_run__isnull=True,
+            ).update(loader_run=loader_run)
         
         self.last_run_at = timezone.now()
         self.last_run_status = result.status
