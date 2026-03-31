@@ -1,0 +1,256 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags zarr_tags %}
+
+{% block titletag %}Zarr — {{ collection.catalog.slug }}/{{ collection.slug }}{% endblock %}
+
+{% block main_content %}
+    <header class="w-flex w-justify-between w-items-center" style="margin-bottom: 0.75rem;">
+        <h2 class="w-label-1">{% trans "Stores" %}</h2>
+    </header>
+
+    {% if store_summary %}
+        <table class="listing">
+            <thead>
+            <tr>
+                <th>{% trans "Store" %}</th>
+                <th>{% trans "Total" %}</th>
+                <th>{% trans "Completed" %}</th>
+                <th>{% trans "Pending" %}</th>
+                <th>{% trans "Processing" %}</th>
+                <th>{% trans "Failed" %}</th>
+                <th>{% trans "Time range (completed)" %}</th>
+                <th>{% trans "Last sync" %}</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for store in store_summary %}
+                <tr>
+                    <td><code class="w-font-mono w-text-14">{{ store.store_path }}</code></td>
+                    <td>{{ store.total }}</td>
+                    <td class="w-text-positive-100">{{ store.completed }}</td>
+                    <td>{{ store.pending }}</td>
+                    <td>{{ store.processing }}</td>
+                    <td>
+                        {% if store.failed %}
+                            <span class="w-text-critical-100">{{ store.failed }}</span>
+                        {% else %}0{% endif %}
+                    </td>
+                    <td class="w-text-14">
+                        {% if store.time_start %}
+                            {{ store.time_start|date:"Y-m-d" }} → {{ store.time_end|date:"Y-m-d" }}
+                        {% else %}
+                            <span class="w-text-grey-400">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="w-text-14">
+                        {% if store.last_completed %}
+                            {{ store.last_completed|date:"Y-m-d H:i" }}
+                        {% else %}
+                            <span class="w-text-grey-400">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="help-text">{% trans "No Zarr sync records found for this collection." %}</p>
+    {% endif %}
+
+    <header class="w-flex w-justify-between w-items-center" style="margin: 2rem 0 0.75rem;">
+        <h2 class="w-label-1" style="margin:0;">{% trans "Actions" %}</h2>
+    </header>
+
+    <div class="w-flex w-gap-4" style="flex-wrap: wrap; align-items: flex-start;">
+        <div>
+            <form method="post" class="w-flex w-gap-2">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="rebuild">
+                <button type="submit" class="button bicolor button--icon">
+                        <span class="icon-wrapper">
+                            <svg class="icon icon-resubmit icon" aria-hidden="true">
+                                <use href="#icon-resubmit"></use>
+                            </svg>
+                        </span>
+                    {% trans "Rebuild Zarr Store" %}
+                </button>
+                <button class="button bicolor button--icon button-secondary" type="submit" name="dry_run" value="1">
+                        <span class="icon-wrapper">
+                            <svg class="icon icon-cog icon" aria-hidden="true">
+                                <use href="#icon-cog"></use>
+                            </svg>
+                        </span>
+                    {% trans "Dry run" %}
+                </button>
+            </form>
+            <p class="help-text w-mt-3">
+                {% trans "Queues sync records for COG assets that have no corresponding Zarr asset." %}
+            </p>
+        </div>
+
+        {% if has_permanently_failed %}
+            <div>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="reset_failed">
+                    <button type="submit" class="button warning">
+                        <svg class="icon icon-warning" aria-hidden="true">
+                            <use href="#icon-warning"></use>
+                        </svg>
+                        {% trans "Reset permanently failed" %}
+                    </button>
+                </form>
+                <p class="help-text w-mt-2">
+                    {% trans "Resets exhausted records back to PENDING for another attempt." %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
+
+    <header class="w-flex w-justify-between w-items-center" style="margin: 2rem 0 0.75rem;">
+        <h2 class="w-label-1" style="margin:0;">{% trans "Records" %}</h2>
+        <a href="?{{ filter_params }}export=csv"
+           class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-plus icon" aria-hidden="true">
+                        <use href="#icon-download"></use>
+                    </svg>
+                </span>
+            {% trans "Export CSV" %}
+        </a>
+    </header>
+    <div class="w-tabs">
+        <div class="w-tabs__list" role="tablist">
+            <a id="tab-label-status-all"
+               href="?"
+               class="w-tabs__tab {% if not status_filter %}w-tabs__tab--active{% endif %}"
+               role="tab"
+               aria-selected="{% if not status_filter %}true{% else %}false{% endif %}">
+                {% trans "All" %}
+                <span class="w-status w-status--label w-ml-3">{{ status_counts.all }}</span>
+            </a>
+
+            {% for value, label in status_choices %}
+                <a id="tab-label-status-{{ value }}"
+                   href="?status={{ value }}"
+                   class="w-tabs__tab {% if status_filter == value %}w-tabs__tab--active{% endif %}"
+                   role="tab"
+                   aria-selected="{% if status_filter == value %}true{% else %}false{% endif %}">
+                    {{ label }}
+                    <span class="w-status w-status--label w-ml-3">{{ status_counts|dictlookup:value }}</span>
+                </a>
+            {% endfor %}
+
+        </div>
+    </div>
+
+    <div style="margin-top: 2rem;">
+        {% if page.object_list %}
+            <table class="listing">
+                <thead>
+                <tr>
+                    <th>{% trans "Store" %}</th>
+                    <th>{% trans "Time" %}</th>
+                    <th>{% trans "Variable" %}</th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Retries" %}</th>
+                    <th>{% trans "Completed at" %}</th>
+                    <th>{% trans "Error" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for record in page.object_list %}
+                    <tr>
+                        <td><code class="w-font-mono w-text-12">{{ record.store_path }}</code></td>
+                        <td class="w-text-14">{{ record.item.time|date:"Y-m-d H:i" }}</td>
+                        <td class="w-text-14">{{ record.variable.slug }}</td>
+                        <td>
+                            {% if record.status == 'completed' %}
+                                <span class="w-status-tag w-status-tag--primary">{{ record.get_status_display }}</span>
+                            {% elif record.status == 'failed' %}
+                                <span class="w-status-tag w-status-tag--critical">{{ record.get_status_display }}</span>
+                            {% elif record.status == 'processing' %}
+                                <span class="w-status-tag w-status-tag--secondary">{{ record.get_status_display }}</span>
+                            {% else %}
+                                <span class="w-status-tag">{{ record.get_status_display }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="w-text-14">
+                            {{ record.retry_count }}/{{ record.MAX_RETRIES }}
+                            {% if record.retry_count >= record.MAX_RETRIES and record.status == 'failed' %}
+                                <span class="w-text-critical-100"
+                                      title="{% trans 'Permanently failed — will not be retried' %}">●</span>
+                            {% endif %}
+                        </td>
+                        <td class="w-text-14">{{ record.completed_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                        <td class="w-text-14">
+                            {% if record.error %}
+                                <span title="{{ record.error }}" style="cursor:help;" class="w-text-critical-100">
+                                    {{ record.error|truncatechars:80 }}
+                                </span>
+                            {% else %}—{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% if paginator.num_pages > 1 %}
+                <div class="w-flex w-items-center w-justify-between w-mt-4" style="gap: 1rem;">
+
+                    <p class="help-text" style="margin:0;">
+                        {% blocktrans with start=page.start_index end=page.end_index total=paginator.count %}
+                            Showing {{ start }}–{{ end }} of {{ total }} records
+                        {% endblocktrans %}
+                    </p>
+
+                    <nav aria-label="{% trans 'Pagination' %}" class="w-flex w-items-center" style="gap: 0.25rem;">
+
+                        {% if page.has_previous %}
+                            <a href="?{{ filter_params }}p={{ page.previous_page_number }}"
+                               class="button button-secondary button-small"
+                               aria-label="{% trans 'Previous page' %}">
+                                ‹
+                            </a>
+                        {% else %}
+                            <span class="button button-secondary button-small"
+                                  style="opacity:0.4; cursor:default;"
+                                  aria-disabled="true">‹</span>
+                        {% endif %}
+
+                        {% for p in page_range %}
+                            {% if p is None %}
+                                <span class="help-text" style="padding: 0 0.25rem;">…</span>
+                            {% elif p == page.number %}
+                                <span class="button button-small"
+                                      style="font-weight:600;"
+                                      aria-current="page">{{ p }}</span>
+                            {% else %}
+                                <a href="?{{ filter_params }}p={{ p }}"
+                                   class="button button-secondary button-small">{{ p }}</a>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if page.has_next %}
+                            <a href="?{{ filter_params }}p={{ page.next_page_number }}"
+                               class="button button-secondary button-small"
+                               aria-label="{% trans 'Next page' %}">
+                                ›
+                            </a>
+                        {% else %}
+                            <span class="button button-secondary button-small"
+                                  style="opacity:0.4; cursor:default;"
+                                  aria-disabled="true">›</span>
+                        {% endif %}
+
+                    </nav>
+                </div>
+            {% endif %}
+        {% else %}
+            <p class="help-text">{% trans "No records match the current filter." %}</p>
+        {% endif %}
+
+
+    </div>
+
+{% endblock %}
