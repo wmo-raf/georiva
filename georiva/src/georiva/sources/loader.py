@@ -18,6 +18,8 @@ from django.utils import timezone
 from georiva.core.storage import storage
 from georiva.sources.fetch.base import FetchResult
 
+from django.conf import settings
+
 
 @dataclass
 class LoaderRunResult:
@@ -37,7 +39,7 @@ class LoaderRunResult:
     errors: list[str] = field(default_factory=list)
     fetch_results: list = field(default_factory=list)
     stored_paths: list[str] = field(default_factory=list)  # storage paths of successfully fetched files
-
+    
     # Context
     run_time: Optional[datetime] = None  # For forecasts: which model run
     
@@ -221,7 +223,7 @@ class Loader:
                     result.files_fetched += 1
                     result.bytes_transferred += fetch_result.bytes_transferred
                     result.stored_paths.append(self._get_storage_path(request))
-
+                    
                     # Callback
                     if self.on_file_fetched:
                         try:
@@ -381,7 +383,7 @@ class Loader:
     def _get_temp_path(self, filename: str) -> Path:
         """Get a temporary file path."""
         if self._temp_dir is None:
-            self._temp_dir = tempfile.mkdtemp(prefix="georiva_loader_")
+            self._temp_dir = tempfile.mkdtemp(prefix="georiva_loader_", dir=settings.GEORIVA_TEMP_DIR)
         return Path(self._temp_dir) / filename
     
     def _cleanup_temp(self):

@@ -59,7 +59,7 @@ x-backend-volumes: &backend-volumes
     - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
     - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
     - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
-    - ${GEORIVA_TEMP_VOLUME:-./docker/temp}:/var/tmp/georiva
+    - georiva_temp:/var/tmp/georiva
 
 services:
   georiva-db:
@@ -249,6 +249,9 @@ services:
       - georiva
       - georiva-titiler-app
       - georiva-stac-browser
+
+volumes:
+  georiva_temp:
 
 networks:
   default:
