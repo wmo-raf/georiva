@@ -90,6 +90,8 @@ RUN if getent group $GID > /dev/null; then \
     fi && \
     useradd --shell /bin/bash -u $UID -g $GID -o -c "" -m georiva -l || exit 0
 
+RUN mkdir -p /var/tmp/georiva && chown $UID:$GID /var/tmp/georiva
+
 # Install runtime dependencies (no compilers, no -dev headers)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
