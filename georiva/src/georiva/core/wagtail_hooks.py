@@ -3,9 +3,11 @@ from django.urls import path, reverse
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.menu import MenuItem
+from wagtail.snippets.models import register_snippet
 
 from .views import catalog_index, collection_items_list
 from .viewsets import BoundaryChooserViewSet, admin_viewsets
+from .viewsets import ItemViewSet
 
 
 @hooks.register('register_admin_urls')
@@ -29,6 +31,9 @@ def register_viewset():
         AdminBoundaryViewSetGroup(),
         BoundaryChooserViewSet("boundary_chooser"),
     ]
+
+
+register_snippet(ItemViewSet)
 
 
 @hooks.register('construct_main_menu')

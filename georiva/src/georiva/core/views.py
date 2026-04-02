@@ -1,12 +1,20 @@
+from django.contrib import messages
 from django.core.paginator import InvalidPage
-from django.shortcuts import render, get_object_or_404
-from django.urls import reverse_lazy, reverse
+from django.db.models import Count, OuterRef, Q, Subquery, Sum
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy as _
+from wagtail.admin import messages
 from wagtail.admin.paginator import WagtailPaginator
 from wagtail.admin.ui.tables import ButtonsColumnMixin, TitleColumn, Table, BooleanColumn
 from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdown
 
-from georiva.core.models import Catalog, Collection, Item
+from georiva.core.models import Catalog
+from georiva.core.models import Collection, Item
+from georiva.ingestion.models import IngestionLog
+from georiva.sources.models import LoaderRun
 from .table import LinkColumnWithIcon
 from .viewsets import CatalogViewSet, CollectionViewSet
 
@@ -124,37 +132,138 @@ def catalog_index(request):
 
 
 def collection_items_list(request, collection_pk):
-    collection = get_object_or_404(Collection, pk=collection_pk)
-    items = Item.objects.filter(collection=collection)
+    collection = get_object_or_404(
+        Collection.objects.select_related("catalog", "catalog__boundary"),
+        pk=collection_pk,
+    )
     
-    # Get search parameters from the query string.
+    # ------------------------------------------------------------------
+    # POST actions
+    # ------------------------------------------------------------------
+    if request.method == "POST":
+        action = request.POST.get("action")
+        
+        if action == "trigger_ingestion":
+            # TODO: wire up real Celery task, e.g.:
+            # from georiva.ingestion.tasks import run_loader_for_collection
+            # run_loader_for_collection.delay(collection.pk)
+            messages.success(request, _("Ingestion queued (placeholder)."))
+            return redirect(request.path)
+    
+    # ------------------------------------------------------------------
+    # Variables
+    # ------------------------------------------------------------------
+    variable_list = list(
+        collection.variables.filter(is_active=True).select_related("palette")
+    )
+    
+    # ------------------------------------------------------------------
+    # Active variable tab
+    # ------------------------------------------------------------------
+    active_var_slug = request.GET.get("var", "")
+    active_variable = None
+    if active_var_slug:
+        active_variable = next(
+            (v for v in variable_list if v.slug == active_var_slug), None
+        )
+        # Unrecognised slug — fall back to "All"
+        if not active_variable:
+            active_var_slug = ""
+    
+    # ------------------------------------------------------------------
+    # Items queryset
+    # Use a Subquery for asset_count rather than annotate(Count(...)).
+    # annotate + COUNT triggers GROUP BY which conflicts with TimescaleModel's
+    # extra fields (created, modified) on PostgreSQL.
+    # ------------------------------------------------------------------
+    from georiva.core.models import Asset
+    
+    asset_count_sq = (
+        Asset.objects.filter(item=OuterRef("pk"))
+        .order_by()
+        .values("item")
+        .annotate(c=Count("pk"))
+        .values("c")
+    )
+    
+    items = (
+        Item.objects.filter(collection=collection)
+        .annotate(asset_count=Subquery(asset_count_sq))
+        .select_related("ingestion_log")
+        .order_by("-time")
+    )
+    
+    if active_variable:
+        # Only items that have at least one asset for this variable
+        items = items.filter(assets__variable=active_variable).distinct()
+    
+    # ------------------------------------------------------------------
+    # Pagination
+    # ------------------------------------------------------------------
     try:
         page_num = int(request.GET.get("p", 0))
     except ValueError:
         page_num = 0
     
-    paginator = WagtailPaginator(items, 2)
+    paginator = WagtailPaginator(items, 25)
     
     try:
         page_obj = paginator.page(page_num + 1)
     except InvalidPage:
         page_obj = paginator.page(1)
     
-    columns = [
-        TitleColumn("__str__", label=_("Item")),
-    ]
+    elided_page_range = paginator.get_elided_page_range(page_obj.number)
     
-    elided_page_range = paginator.get_elided_page_range(page_num)
+    # ------------------------------------------------------------------
+    # Automation section (only rendered if loader_profile is set)
+    # ------------------------------------------------------------------
+    loader_profile = None
+    recent_runs = []
+    ingestion_summary = {}
     
+    if collection.loader_profile_id:
+        loader_profile = collection.loader_profile
+        
+        recent_runs = list(
+            LoaderRun.objects.filter(collection=collection)
+            .order_by("-started_at")[:5]
+        )
+        
+        logs_qs = IngestionLog.objects.filter(
+            collection_slug=collection.slug,
+            catalog_slug=collection.catalog.slug,
+        )
+        ingestion_summary = logs_qs.aggregate(
+            total=Count("id"),
+            completed=Count("id", filter=Q(status=IngestionLog.Status.COMPLETED)),
+            failed=Count("id", filter=Q(status=IngestionLog.Status.FAILED)),
+            pending=Count("id", filter=Q(status=IngestionLog.Status.PENDING)),
+            processing=Count("id", filter=Q(status=IngestionLog.Status.PROCESSING)),
+            total_items_created=Sum("items_created"),
+            total_assets_created=Sum("assets_created"),
+        )
+    
+    # ------------------------------------------------------------------
+    # Context
+    # ------------------------------------------------------------------
     context = {
         "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": "", "label": _("Catalogs")},
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse("catalog_index"), "label": _("Catalogs")},
+            {"url": "", "label": collection.name},
         ],
+        "collection": collection,
+        "catalog": collection.catalog,
+        "variable_list": variable_list,
+        "variable_count": len(variable_list),
+        "active_var_slug": active_var_slug,
+        "active_variable": active_variable,
+        "page_obj": page_obj,
         "paginator": paginator,
         "elided_page_range": elided_page_range,
-        "page_obj": page_obj,
-        "table": Table(columns, page_obj.object_list),
+        "loader_profile": loader_profile,
+        "recent_runs": recent_runs,
+        "ingestion_summary": ingestion_summary,
     }
     
-    return render(request, 'core/collection_items.html', context)
+    return render(request, "core/collection_items.html", context)

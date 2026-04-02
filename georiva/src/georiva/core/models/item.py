@@ -17,7 +17,6 @@ from wagtail.models import Orderable
 from wagtail.snippets.models import register_snippet
 
 
-@register_snippet
 class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
     """
     A single spatiotemporal entry in a Collection.
