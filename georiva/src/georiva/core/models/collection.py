@@ -5,7 +5,7 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.models import ClusterableModel
-from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
+from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel, TitleFieldPanel, TabbedInterface, ObjectList
 
 
 class Collection(TimeStampedModel, ClusterableModel):
@@ -105,8 +105,7 @@ class Collection(TimeStampedModel, ClusterableModel):
     
     panels = [
         MultiFieldPanel([
-            FieldPanel('name'),
-            FieldPanel('slug'),
+            TitleFieldPanel('name', placeholder=False),
             FieldPanel('catalog'),
             FieldPanel('description'),
         ], heading="Identity"),
@@ -131,40 +130,53 @@ class Collection(TimeStampedModel, ClusterableModel):
         InlinePanel('variables', label="Variables"),
     ]
     
-    @property
-    def spatial_extent(self) -> list | None:
-        """
-        Authoritative spatial extent for this collection.
+    slug_panels = [
+        FieldPanel('slug'),
+    ]
     
-        If the catalog has a boundary configured, use its bbox — it's
-        always correct regardless of what's stored in self.bounds.
+    edit_handler = TabbedInterface([
+        ObjectList(panels, heading='Details'),
+        ObjectList(slug_panels, heading='Slug'),
+    ])
+
+
+@property
+def spatial_extent(self) -> list | None:
+    """
+    Authoritative spatial extent for this collection.
+
+    If the catalog has a boundary configured, use its bbox — it's
+    always correct regardless of what's stored in self.bounds.
+
+    Falls back to self.bounds for unclipped collections.
+    """
+    boundary = self.catalog.boundary
+    if boundary and self.catalog.clip_mode != 'none':
+        extent = boundary.geom.extent  # (west, south, east, north) from GEOS
+        return list(extent)
+    return self.bounds
+
+
+def get_loader(self):
+    """Get the loader instance for this catalog."""
+    if not self.loader_profile:
+        return None
     
-        Falls back to self.bounds for unclipped collections.
-        """
-        boundary = self.catalog.boundary
-        if boundary and self.catalog.clip_mode != 'none':
-            extent = boundary.geom.extent  # (west, south, east, north) from GEOS
-            return list(extent)
-        return self.bounds
-    
-    def get_loader(self):
-        """Get the loader instance for this catalog."""
-        if not self.loader_profile:
-            return None
-        
-        return self.loader_profile.get_loader(self)
-    
-    def source_variables_list(self):
-        """Return a list of source variable names in this collection."""
-        source_vars = []
-        for variable in self.variables.all():
-            variable_sources_params = variable.sources_param_list
-            source_vars.extend(variable_sources_params)
-        return source_vars
-    
-    def get_latest_item_date(self) -> Optional[datetime]:
-        """
-        Latest valid_time in this collection (Item.time).
-        """
-        latest = self.items.order_by("-time").first()  # uses related_name='items'
-        return latest.time if latest else None
+    return self.loader_profile.get_loader(self)
+
+
+def source_variables_list(self):
+    """Return a list of source variable names in this collection."""
+    source_vars = []
+    for variable in self.variables.all():
+        variable_sources_params = variable.sources_param_list
+        source_vars.extend(variable_sources_params)
+    return source_vars
+
+
+def get_latest_item_date(self) -> Optional[datetime]:
+    """
+    Latest valid_time in this collection (Item.time).
+    """
+    latest = self.items.order_by("-time").first()  # uses related_name='items'
+    return latest.time if latest else None

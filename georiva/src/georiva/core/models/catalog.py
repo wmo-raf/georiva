@@ -4,7 +4,7 @@ from django_extensions.db.fields import AutoSlugField
 from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.panels import (
     FieldPanel,
-    MultiFieldPanel
+    MultiFieldPanel, TitleFieldPanel, TabbedInterface, ObjectList
 )
 
 
@@ -101,8 +101,7 @@ class Catalog(TimeStampedModel):
     
     panels = [
         MultiFieldPanel([
-            FieldPanel('name'),
-            FieldPanel('slug'),
+            TitleFieldPanel('name', placeholder=False),
             FieldPanel('description'),
         ], heading="Basic Information"),
         MultiFieldPanel([
@@ -123,3 +122,12 @@ class Catalog(TimeStampedModel):
             FieldPanel('topics', widget=forms.CheckboxSelectMultiple),
         ], heading="Topics"),
     ]
+    
+    slug_panels = [
+        FieldPanel('slug'),
+    ]
+    
+    edit_handler = TabbedInterface([
+        ObjectList(panels, heading='Details'),
+        ObjectList(slug_panels, heading='Slug'),
+    ])

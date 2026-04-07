@@ -4,7 +4,7 @@ from django.utils.functional import cached_property
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
-from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
+from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel, TitleFieldPanel
 from wagtail.models import Orderable
 
 
@@ -92,8 +92,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     
     panels = [
         MultiFieldPanel([
+            TitleFieldPanel('name', placeholder=False),
             FieldPanel('slug'),
-            FieldPanel('name'),
             FieldPanel('description'),
         ], heading="Identity"),
         MultiFieldPanel([
