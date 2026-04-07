@@ -201,14 +201,14 @@ def collection_items_list(request, collection_pk):
     # Pagination
     # ------------------------------------------------------------------
     try:
-        page_num = int(request.GET.get("p", 0))
+        page_num = int(request.GET.get("p", 1))
     except ValueError:
         page_num = 0
     
     paginator = WagtailPaginator(items, 25)
     
     try:
-        page_obj = paginator.page(page_num + 1)
+        page_obj = paginator.page(page_num)
     except InvalidPage:
         page_obj = paginator.page(1)
     
