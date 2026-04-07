@@ -1,9 +1,11 @@
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
+from wagtail.admin.filters import WagtailFilterSet
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
+from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 
 from georiva.core.models import Item, Catalog, Collection, ColorPalette
 from georiva.core.models.catalog import Topic
@@ -100,7 +102,7 @@ class CollectionViewSet(ModelViewSet):
     index_view_class = CollectionIndexView
 
 
-class ItemIndexView(generic.IndexView):
+class ItemIndexView(IndexView):
     def get_list_more_buttons(self, instance):
         buttons = super().get_list_more_buttons(instance)
         
@@ -121,12 +123,18 @@ class ItemIndexView(generic.IndexView):
         return buttons
 
 
-class ItemViewSet(ModelViewSet):
+class ItemFilterSet(WagtailFilterSet):
+    class Meta:
+        model = Item
+        fields = ["collection"]
+
+
+class ItemViewSet(SnippetViewSet):
     model = Item
     icon = "snippet"
-    add_to_admin_menu = True
     exclude_form_fields = ["created_at", "updated_at"]
     index_view_class = ItemIndexView
+    list_filter = ["collection"]
 
 
 class ColorPaletteModelViewSet(ModelViewSet):
