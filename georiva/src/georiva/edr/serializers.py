@@ -73,8 +73,8 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             },
         }
         
-        if variable.units:
-            data["unit"] = {"symbol": variable.units}
+        if variable.unit:
+            data["unit"] = {"symbol": variable.unit.symbol}
         
         if variable.description:
             data["description"] = variable.description
@@ -253,10 +253,14 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         return runs
     
     # ── Parameter names ───────────────────────────────────────────────────
-    
     def _build_parameter_names(self, collection: Collection) -> dict:
         parameter_names = {}
-        variables = collection.variables.filter(is_active=True).order_by('sort_order')
+        variables = (
+            collection.variables
+            .filter(is_active=True)
+            .select_related('unit', 'palette')
+            .order_by('sort_order')
+        )
         
         for variable in variables:
             parameter_names[variable.slug] = EDRParameterSerializer(
@@ -406,12 +410,19 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
         interval_end = collection.time_end.isoformat() if collection.time_end else None
         
         parameter_names = {}
-        for variable in collection.variables.filter(is_active=True).order_by('sort_order'):
+        
+        variables = (
+            collection.variables
+            .filter(is_active=True)
+            .select_related('unit', 'palette')
+            .order_by('sort_order')
+        )
+        for variable in variables:
             parameter_names[variable.slug] = {
                 "type": "Parameter",
                 "label": variable.name,
                 "observedProperty": {"id": variable.slug, "label": variable.name},
-                **({"unit": {"symbol": variable.units}} if variable.units else {}),
+                **({"unit": {"symbol": variable.unit.symbol}} if variable.unit else {}),
             }
         
         # Use annotated value from view — avoids one EXISTS query per collection.

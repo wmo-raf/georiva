@@ -5,7 +5,16 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.models import ClusterableModel
-from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel, TitleFieldPanel, TabbedInterface, ObjectList
+from wagtail.admin.panels import (
+    FieldPanel,
+    MultiFieldPanel,
+    InlinePanel,
+    TitleFieldPanel,
+    TabbedInterface,
+    ObjectList
+)
+
+from georiva.core.widget import ConditionalCheckbox
 
 
 class Collection(TimeStampedModel, ClusterableModel):
@@ -69,7 +78,7 @@ class Collection(TimeStampedModel, ClusterableModel):
     # --- Forecast config ---
     is_forecast = models.BooleanField(
         default=False,
-        help_text="True if items represent forecast (future) data with a reference_time"
+        help_text="Check if items represent forecast (future) data with a reference_time"
     )
     forecast_horizon_hours = models.PositiveIntegerField(
         null=True, blank=True,
@@ -77,12 +86,12 @@ class Collection(TimeStampedModel, ClusterableModel):
     )
     retain_past_forecasts = models.BooleanField(
         default=False,
-        help_text="If True, keep items whose valid_time is in the past. "
+        help_text="If checked, keep items whose valid_time is in the past. "
                   "If False, a cleanup task prunes them."
     )
     retain_latest_run_only = models.BooleanField(
         default=False,
-        help_text="If True, only keep items from the most recent reference_time run."
+        help_text="If checked, only keep items from the most recent reference_time run."
     )
     
     sort_order = models.PositiveIntegerField(default=0)
@@ -121,8 +130,12 @@ class Collection(TimeStampedModel, ClusterableModel):
             FieldPanel('is_active'),
             FieldPanel('sort_order'),
         ], heading="Status"),
+        FieldPanel(
+            'is_forecast',
+            widget=ConditionalCheckbox(
+                target_panel_id='panel-child-details-forecast_configuration-section'
+            )),
         MultiFieldPanel([
-            FieldPanel('is_forecast'),
             FieldPanel('forecast_horizon_hours'),
             FieldPanel('retain_past_forecasts'),
             FieldPanel('retain_latest_run_only'),
@@ -138,45 +151,41 @@ class Collection(TimeStampedModel, ClusterableModel):
         ObjectList(panels, heading='Details'),
         ObjectList(slug_panels, heading='Slug'),
     ])
-
-
-@property
-def spatial_extent(self) -> list | None:
-    """
-    Authoritative spatial extent for this collection.
-
-    If the catalog has a boundary configured, use its bbox — it's
-    always correct regardless of what's stored in self.bounds.
-
-    Falls back to self.bounds for unclipped collections.
-    """
-    boundary = self.catalog.boundary
-    if boundary and self.catalog.clip_mode != 'none':
-        extent = boundary.geom.extent  # (west, south, east, north) from GEOS
-        return list(extent)
-    return self.bounds
-
-
-def get_loader(self):
-    """Get the loader instance for this catalog."""
-    if not self.loader_profile:
-        return None
     
-    return self.loader_profile.get_loader(self)
-
-
-def source_variables_list(self):
-    """Return a list of source variable names in this collection."""
-    source_vars = []
-    for variable in self.variables.all():
-        variable_sources_params = variable.sources_param_list
-        source_vars.extend(variable_sources_params)
-    return source_vars
-
-
-def get_latest_item_date(self) -> Optional[datetime]:
-    """
-    Latest valid_time in this collection (Item.time).
-    """
-    latest = self.items.order_by("-time").first()  # uses related_name='items'
-    return latest.time if latest else None
+    @property
+    def spatial_extent(self) -> list | None:
+        """
+        Authoritative spatial extent for this collection.
+    
+        If the catalog has a boundary configured, use its bbox — it's
+        always correct regardless of what's stored in self.bounds.
+    
+        Falls back to self.bounds for unclipped collections.
+        """
+        boundary = self.catalog.boundary
+        if boundary and self.catalog.clip_mode != 'none':
+            extent = boundary.geom.extent  # (west, south, east, north) from GEOS
+            return list(extent)
+        return self.bounds
+    
+    def get_loader(self):
+        """Get the loader instance for this catalog."""
+        if not self.loader_profile:
+            return None
+        
+        return self.loader_profile.get_loader(self)
+    
+    def source_variables_list(self):
+        """Return a list of source variable names in this collection."""
+        source_vars = []
+        for variable in self.variables.all():
+            variable_sources_params = variable.sources_param_list
+            source_vars.extend(variable_sources_params)
+        return source_vars
+    
+    def get_latest_item_date(self) -> Optional[datetime]:
+        """
+        Latest valid_time in this collection (Item.time).
+        """
+        latest = self.items.order_by("-time").first()  # uses related_name='items'
+        return latest.time if latest else None

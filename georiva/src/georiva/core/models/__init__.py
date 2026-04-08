@@ -1,15 +1,16 @@
 from .catalog import Topic, Catalog
 from .collection import Collection
 from .item import Item, Asset
-from .variable import Variable, VariableSource
+from .units import Unit
+from .variable import Variable
 from .visualization import ColorPalette
 
 __all__ = [
     "Topic",
     "Catalog",
     "Collection",
+    "Unit",
     "Variable",
-    "VariableSource",
     "ColorPalette",
     "Item",
     "Asset",

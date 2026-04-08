@@ -71,7 +71,7 @@ class STACAssetSerializer(serializers.Serializer):
         if instance.is_data:
             raster_bands = [{
                 'nodata': instance.nodata,
-                'unit': instance.units,
+                'unit': instance.variable.unit.symbol if instance.variable.unit else None,
             }]
             if instance.stats_min is not None:
                 raster_bands[0]['statistics'] = {
@@ -326,7 +326,7 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         collection = obj.collection
         summaries = {
             "georiva:variable": obj.slug,
-            "georiva:units": obj.units or "",
+            "georiva:units": obj.unit.symbol if obj.unit else "",
             "georiva:value_range": [obj.value_min, obj.value_max],
             "georiva:transform": obj.transform_type,
         }
@@ -365,8 +365,9 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
             "type": "image/tiff; application=geotiff; profile=cloud-optimized",
             "roles": ["data"],
         }
-        if obj.units:
-            item_assets[f"{obj.slug}_cog"]["unit"] = obj.units
+        
+        if obj.unit:
+            item_assets[f"{obj.slug}_cog"]["unit"] = obj.unit.symbol
         
         # Visual asset (PNG)
         item_assets[f"{obj.slug}_png"] = {
@@ -420,8 +421,8 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
             obj.collection.slug,
             obj.slug,
         ]
-        if obj.units:
-            keywords.append(obj.units)
+        if obj.unit:
+            keywords.append(obj.unit.symbol)
         return keywords
 
 
@@ -517,13 +518,10 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
         
         # Child links — one per variable across all collections
         for collection in obj.collections.filter(is_active=True):
-            for variable in collection.variables.filter(is_active=True):
-                variable_count = collection.variables.filter(is_active=True).count()
-                if variable_count > 1:
-                    title = f"{collection.name} - {variable.name}"
-                else:
-                    title = variable.name
-                
+            active_variables = list(collection.variables.filter(is_active=True))
+            variable_count = len(active_variables)
+            for variable in active_variables:
+                title = f"{collection.name} - {variable.name}" if variable_count > 1 else variable.name
                 links.append({
                     "rel": "child",
                     "href": f"{catalog_url}/{variable.slug}",

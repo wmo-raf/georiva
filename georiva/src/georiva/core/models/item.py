@@ -262,8 +262,8 @@ class Asset(TimeStampedModel, Orderable):
         return self.variable.name
     
     @property
-    def units(self):
-        return self.variable.units
+    def unit(self):
+        return self.variable.unit.symbol if self.variable.unit else ""
     
     @property
     def palette(self):

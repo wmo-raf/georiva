@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 import pytz
 from django.conf import settings
-from django.db.models import F
+from django.db.models import F, Prefetch
 
 from georiva.core.filename import parse_path
-from georiva.core.models import Catalog, Collection, Item, Asset
+from georiva.core.models import Catalog, Collection, Item, Asset, Variable
 from georiva.core.storage import storage, BucketType, Bucket
 from georiva.formats.registry import format_registry
 from georiva.zarr_store.tasks import zarr_sync_store
@@ -23,7 +23,7 @@ from .encoder import VariableEncoder
 from .extractor import VariableExtractor
 from .models import IngestionLog
 from .result import IngestionResult
-from .utils import apply_unit_conversion, iter_windows
+from .utils import iter_windows
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,6 @@ class IngestionService:
           b. Get or create one Item for the collection + timestamp
           c. For each Variable in the collection:
                - Extract + transform source data → 2D array
-               - Apply unit conversion
                - Apply geometry mask (if clip_mode = "mask")
                - Encode to RGBA PNG  (visual asset)
                - Write COG GeoTIFF   (data asset)
@@ -197,7 +196,7 @@ class IngestionService:
             ingestion_log = IngestionLog.objects.filter(
                 bucket=origin_bucket, file_path=file_path
             ).first()
-
+            
             # --- Shared processing objects ----------------------------------
             # Instantiated once per file and passed through the call stack.
             writer = AssetWriter(storage.assets)
@@ -340,8 +339,14 @@ class IngestionService:
         or all active collections if not.
         """
         base_qs = Collection.objects.select_related("catalog").prefetch_related(
-            "variables",
-            "variables__sources",
+            Prefetch(
+                "variables",
+                queryset=Variable.objects.select_related(
+                    "source_unit",
+                    "unit",
+                    "palette",
+                ).order_by("sort_order"),
+            )
         )
         
         if collection_slug:
@@ -359,23 +364,11 @@ class IngestionService:
         return list(base_qs.filter(catalog=catalog, is_active=True))
     
     def _get_first_variable_name(self, collection: Collection) -> Optional[str]:
-        """
-        Return the source_name of the first active variable in the collection.
-
-        Uses the prefetched variables and sources from _resolve_collections —
-        no additional database queries are issued here.
-
-        Used to scope get_timestamps() to a specific variable name,
-        since some formats (GRIB, NetCDF) require a variable name to
-        enumerate time steps.
-        """
         for variable in collection.variables.all():
             if not variable.is_active:
                 continue
-            # Sort by sort_order to respect user-defined variable ordering
-            sources = sorted(variable.sources.all(), key=lambda s: s.sort_order)
-            if sources:
-                return sources[0].source_name
+            if variable.sources:
+                return variable.sources[0].value['source_name']
         return None
     
     # =========================================================================
@@ -890,7 +883,7 @@ class IngestionService:
             metadata = {
                 "variable": variable.slug,
                 "name": variable.name,
-                "units": variable.units or "",
+                "units": variable.unit.symbol if variable.unit else "",
                 "timestamp": timestamp.isoformat(),
                 "reference_time": (
                     item.reference_time.isoformat()
@@ -986,7 +979,6 @@ class IngestionService:
             window = (x, y, w, h)
             
             chunk = extractor.extract(variable, local_path, timestamp, window)
-            chunk = apply_unit_conversion(chunk, variable.unit_conversion)
             
             final_data[y:y + h, x:x + w] = chunk
             final_rgba[y:y + h, x:x + w] = encoder.encode_to_rgba(chunk, variable)
@@ -1025,7 +1017,6 @@ class IngestionService:
             window = None
         
         final_data = extractor.extract(variable, local_path, timestamp, window)
-        final_data = apply_unit_conversion(final_data, variable.unit_conversion)
         final_rgba = encoder.encode_to_rgba(final_data, variable)
         
         return final_data, final_rgba

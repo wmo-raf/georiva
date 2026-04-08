@@ -2,20 +2,14 @@ from typing import Generator
 
 import numpy as np
 
-UNIT_CONVERSIONS = {
-    'K_to_C': lambda x: x - 273.15,
-    'Pa_to_hPa': lambda x: x * 0.01,
-    'm_to_mm': lambda x: x * 1000.0,
-    'ms_to_kmh': lambda x: x * 3.6,
-    'kgm2s_to_mm': lambda x: x * 3600.0,
-}
+from georiva.core.unit_utils import ureg
 
 
-def apply_unit_conversion(data: np.ndarray, conversion: str) -> np.ndarray:
-    """Apply unit conversion in-place where possible."""
-    if not conversion or conversion not in UNIT_CONVERSIONS:
+def apply_unit_conversion(data: np.ndarray, source_unit=None, output_unit=None) -> np.ndarray:
+    if not source_unit or not output_unit or source_unit == output_unit:
         return data
-    return UNIT_CONVERSIONS[conversion](data)
+    quantity = ureg.Quantity(data, source_unit.pint_unit)
+    return np.asarray(quantity.to(output_unit.pint_unit).magnitude, dtype=np.float32)
 
 
 def iter_windows(

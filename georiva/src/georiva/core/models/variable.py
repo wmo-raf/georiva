@@ -4,8 +4,70 @@ from django.utils.functional import cached_property
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
-from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel, TitleFieldPanel
+from wagtail.admin.panels import (
+    FieldPanel,
+    TitleFieldPanel
+)
+from wagtail.blocks import (
+    StructBlock,
+    CharBlock,
+    FloatBlock,
+    StreamBlock
+)
+from wagtail.fields import StreamField
 from wagtail.models import Orderable
+
+
+class SourceBlock(StructBlock):
+    source_name = CharBlock(
+        help_text=(
+            "Exact variable name as it appears in the source file. "
+            "For GRIB: use the shortName (e.g. '2t', 'u10', 'tp'). "
+            "For NetCDF: use the variable name (e.g. 'air_temperature'). "
+            "For GeoTIFF: use 'band_1', 'band_2', etc."
+        )
+    )
+    vertical_dimension = CharBlock(
+        required=False,
+        help_text=(
+            "Vertical coordinate name, e.g. 'heightAboveGround', 'isobaricInhPa'. "
+            "Leave blank for surface or single-level data."
+        )
+    )
+    vertical_value = FloatBlock(
+        required=False,
+        help_text=(
+            "Value along the vertical dimension, e.g. 2 for 2m, 850 for 850 hPa. "
+            "U and V components must be at the same level."
+        )
+    )
+    
+    class Meta:
+        icon = 'pick'
+        label = 'Source'
+
+
+class VariableSourceStreamBlock(StreamBlock):
+    primary = SourceBlock(
+        label='Primary Source',
+        help_text="Direct source for PASSTHROUGH variables. Exactly one allowed."
+    )
+    u_component = SourceBlock(
+        label='U Component',
+        help_text="East-west wind component (positive = eastward). Required for VECTOR transforms."
+    )
+    v_component = SourceBlock(
+        label='V Component',
+        help_text="North-south wind component (positive = northward). Required for VECTOR transforms."
+    )
+    
+    class Meta:
+        min_num = 1
+        block_counts = {
+            'primary': {'max_num': 1},
+            'u_component': {'max_num': 1},
+            'v_component': {'max_num': 1},
+        }
 
 
 class Variable(TimeStampedModel, ClusterableModel, Orderable):
@@ -20,26 +82,14 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     
     class TransformType(models.TextChoices):
         PASSTHROUGH = 'passthrough', 'Passthrough (direct read)'
-        UNIT_CONVERT = 'unit_convert', 'Unit Conversion'
         VECTOR_MAGNITUDE = 'vector_magnitude', 'Vector Magnitude (√(u² + v²))'
         VECTOR_DIRECTION = 'vector_direction', 'Vector Direction (atan2)'
-        BAND_MATH = 'band_math', 'Band Math (expression)'
-        RGB_COMPOSITE = 'rgb_composite', 'RGB Composite'
-        THRESHOLD = 'threshold', 'Threshold (mask)'
     
     class ScaleType(models.TextChoices):
         LINEAR = 'linear', 'Linear'
         LOG = 'log', 'Logarithmic'
         SQRT = 'sqrt', 'Square Root'
         DIVERGING = 'diverging', 'Diverging'
-    
-    class UnitConversion(models.TextChoices):
-        NONE = '', 'None'
-        K_TO_C = 'K_to_C', 'Kelvin to Celsius'
-        PA_TO_HPA = 'Pa_to_hPa', 'Pascal to hectoPascal'
-        M_TO_MM = 'm_to_mm', 'Meters to Millimeters'
-        MS_TO_KMH = 'ms_to_kmh', 'm/s to km/h'
-        KGM2S_TO_MM = 'kgm2s_to_mm', 'kg/m²/s to mm'
     
     collection = ParentalKey(
         'georivacore.Collection',
@@ -48,72 +98,128 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     )
     
     # Identity
-    slug = models.SlugField(max_length=100)
+    slug = models.SlugField(
+        max_length=100,
+        help_text=(
+            "URL-safe identifier for this variable, used in API endpoints and file paths. "
+            "Use lowercase with hyphens, e.g. 'temperature-2m', 'wind-speed-10m'. "
+            "Cannot be changed after data has been ingested against this variable."
+        )
+    )
     name = models.CharField(max_length=200)
-    description = models.TextField(blank=True)
+    description = models.TextField(
+        blank=True,
+        help_text=(
+            "Human-readable description shown in the data catalog and API responses. "
+            "Include the physical quantity, level, and any relevant processing notes, "
+            "e.g. 'Air temperature at 2 metres above ground, converted from Kelvin to Celsius.'"
+        )
+    )
     
     # Transform
     transform_type = models.CharField(
         max_length=30,
         choices=TransformType.choices,
-        default=TransformType.PASSTHROUGH
-    )
-    transform_expression = models.TextField(
-        blank=True,
-        help_text="For band_math: e.g., '(nir - red) / (nir + red)'"
+        default=TransformType.PASSTHROUGH,
+        help_text=(
+            "How source data is transformed into this variable's output array. "
+            "PASSTHROUGH: reads one source band directly with no computation. "
+            "VECTOR MAGNITUDE: computes wind speed as √(u² + v²) from U and V components. "
+            "VECTOR DIRECTION: computes meteorological wind direction (where wind comes FROM) "
+            "as atan2(u, v) + 180°, ranging 0–360° clockwise from North. "
+            "Changing this after ingestion will not reprocess existing assets."
+        )
     )
     
-    # Units
-    unit_conversion = models.CharField(
-        max_length=50,
-        choices=UnitConversion.choices,
-        blank=True
+    source_unit = models.ForeignKey(
+        'georivacore.Unit',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        help_text="Units of the raw data as it comes from the source file, e.g. Kelvin, Pa, m/s."
     )
-    units = models.CharField(max_length=50, blank=True)
+    
+    unit = models.ForeignKey(
+        'georivacore.Unit',
+        on_delete=models.PROTECT,
+        related_name='+',
+        help_text="Units of this variable's output after any conversion."
+    )
     
     # Visualization
-    value_min = models.FloatField()
-    value_max = models.FloatField()
+    value_min = models.FloatField(
+        help_text=(
+            "Minimum expected data value in the variable's output units. "
+            "Used for palette mapping, COG encoding range, and legend display. "
+            "Values below this will be clipped to the palette minimum. "
+            "Must match the minimum stop value in the selected palette."
+        )
+    )
+    value_max = models.FloatField(
+        help_text=(
+            "Maximum expected data value in the variable's output units. "
+            "Used for palette mapping, COG encoding range, and legend display. "
+            "Values above this will be clipped to the palette maximum. "
+            "Must match the maximum stop value in the selected palette."
+        )
+    )
     scale_type = models.CharField(
         max_length=20,
         choices=ScaleType.choices,
-        default=ScaleType.LINEAR
+        default=ScaleType.LINEAR,
+        help_text=(
+            "Scale used for mapping data values to palette colors. "
+            "LINEAR: uniform spacing — suitable for most variables. "
+            "LOG: useful for variables with large dynamic range like precipitation. "
+            "SQRT: moderate compression for skewed distributions. "
+            "DIVERGING: for variables with a meaningful midpoint, e.g. temperature anomaly."
+        )
     )
+    
     palette = models.ForeignKey(
         'georivacore.ColorPalette',
         null=True,
         blank=True,
-        on_delete=models.SET_NULL
+        on_delete=models.SET_NULL,
+        help_text=(
+            "Color palette used for rendering PNG tiles and legend display. "
+            "The palette's min/max stop values must exactly match this variable's "
+            "value_min and value_max. If no palette is selected, a grayscale "
+            "fallback is used."
+        )
     )
     
     # Status
-    is_active = models.BooleanField(default=True)
-    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Inactive variables are skipped during ingestion. "
+            "Use this to temporarily disable a variable without deleting it. "
+            "Existing assets for this variable are retained."
+        )
+    )
+    
+    sources = StreamField(
+        VariableSourceStreamBlock(),
+        use_json_field=True,
+        null=True,
+        blank=True,
+        verbose_name='Sources',
+    )
     
     panels = [
-        MultiFieldPanel([
-            TitleFieldPanel('name', placeholder=False),
-            FieldPanel('slug'),
-            FieldPanel('description'),
-        ], heading="Identity"),
-        MultiFieldPanel([
-            FieldPanel('transform_type'),
-            FieldPanel('transform_expression'),
-        ], heading="Transform"),
-        InlinePanel('sources', label="Source Parameters"),
-        MultiFieldPanel([
-            FieldPanel('unit_conversion'),
-            FieldPanel('units'),
-        ], heading="Units"),
-        MultiFieldPanel([
-            FieldPanel('value_min'),
-            FieldPanel('value_max'),
-            FieldPanel('palette'),
-        ], heading="Visualization"),
-        MultiFieldPanel([
-            FieldPanel('is_active'),
-            FieldPanel('sort_order'),
-        ], heading="Status"),
+        TitleFieldPanel('name', placeholder=False),
+        FieldPanel('slug'),
+        FieldPanel('is_active'),
+        FieldPanel('description'),
+        FieldPanel('source_unit'),
+        FieldPanel('unit'),
+        FieldPanel('value_min'),
+        FieldPanel('value_max'),
+        FieldPanel('palette'),
+        FieldPanel('transform_type'),
+        FieldPanel('sources'),
     ]
     
     class Meta:
@@ -127,18 +233,59 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def __str__(self):
         return f"{self.collection.slug}:{self.slug}"
     
+    @property
+    def output_unit(self):
+        return self.unit
+    
     def clean(self):
         super().clean()
+        errors = {}
         
-        if not (self.palette and self.value_min is not None and self.value_max is not None):
-            return
+        # Unit conversion compatibility
+        if self.source_unit and self.unit and self.source_unit != self.unit:
+            try:
+                self.source_unit.pint_unit.to(self.unit.pint_unit)
+            except Exception:
+                errors['unit'] = (
+                    f"Cannot convert from {self.source_unit} to {self.unit} — "
+                    f"incompatible dimensions."
+                )
         
-        palette_min, palette_max = self.palette.min_max_from_stops()
+        # Sources / transform consistency
+        if self.sources:
+            block_types = [block.block_type for block in self.sources]
+        else:
+            block_types = []
         
-        if abs(palette_min - self.value_min) > 0.01 or abs(palette_max - self.value_max) > 0.01:
-            raise ValidationError({
-                'palette': f"Palette range ({palette_min}–{palette_max}) must match value range ({self.value_min}–{self.value_max})"
-            })
+        if not block_types:
+            errors['sources'] = "At least one source must be defined."
+        else:
+            if self.transform_type == self.TransformType.PASSTHROUGH:
+                if set(block_types) != {'primary'}:
+                    errors['sources'] = "Passthrough requires exactly one primary source."
+            
+            elif self.transform_type in (
+                    self.TransformType.VECTOR_MAGNITUDE,
+                    self.TransformType.VECTOR_DIRECTION,
+            ):
+                missing = {'u_component', 'v_component'} - set(block_types)
+                if missing:
+                    errors['sources'] = (
+                        f"{self.get_transform_type_display()} requires "
+                        f"{', '.join(sorted(missing))} source(s)."
+                    )
+        
+        # Palette range
+        if self.palette and self.value_min is not None and self.value_max is not None:
+            palette_min, palette_max = self.palette.min_max_from_stops()
+            if abs(palette_min - self.value_min) > 0.01 or abs(palette_max - self.value_max) > 0.01:
+                errors['palette'] = (
+                    f"Palette range ({palette_min}–{palette_max}) must match "
+                    f"value range ({self.value_min}–{self.value_max})"
+                )
+        
+        if errors:
+            raise ValidationError(errors)
     
     @property
     def encoding_range(self) -> tuple[float | None, float | None]:
@@ -154,7 +301,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     @cached_property
     def sources_param_list(self):
         """Return a list of source variable names for this variable."""
-        return [source.source_name for source in self.sources.all()]
+        return [block.value['source_name'] for block in self.sources]
     
     @property
     def weather_layers_palette(self):
@@ -199,58 +346,3 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     @property
     def value_range(self):
         return self.value_min, self.value_max
-
-
-class VariableSource(Orderable):
-    """
-    Links a Variable to its source
-    
-    Examples:
-        - wind_speed: UGRD (role=u_component), VGRD (role=v_component)
-        - ndvi: B04 (role=red), B08 (role=nir)
-        - temperature: TMP_2m (role=primary)
-    """
-    
-    variable = ParentalKey(
-        Variable,
-        on_delete=models.CASCADE,
-        related_name='sources'
-    )
-    
-    source_name = models.CharField(
-        max_length=100,
-        help_text="Name in source file, e.g., 'TMP_2maboveground', 'B04'"
-    )
-    
-    # Dimensions
-    vertical_dimension = models.CharField(max_length=50, blank=True)
-    vertical_value = models.FloatField(null=True, blank=True)
-    band_index = models.PositiveIntegerField(null=True, blank=True)
-    
-    # Source metadata
-    source_units = models.CharField(max_length=50, blank=True)
-    source_dtype = models.CharField(max_length=20, blank=True)
-    source_nodata = models.FloatField(null=True, blank=True)
-    
-    role = models.CharField(
-        max_length=20,
-        default='primary'
-    )
-    
-    def __str__(self):
-        return f"{self.variable.slug} ← {self.source_name} ({self.role})"
-    
-    panels = [
-        FieldPanel('role'),
-        MultiFieldPanel([
-            FieldPanel('source_name'),
-            FieldPanel('vertical_dimension'),
-            FieldPanel('vertical_value'),
-            FieldPanel('band_index'),
-        ], heading="Source Extraction"),
-        MultiFieldPanel([
-            FieldPanel('source_units'),
-            FieldPanel('source_dtype'),
-            FieldPanel('source_nodata'),
-        ], heading="Source Metadata"),
-    ]

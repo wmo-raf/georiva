@@ -14,10 +14,10 @@ def on_variable_save(sender, instance, **kwargs):
 def on_palette_save(sender, instance, **kwargs):
     from georiva.core.palette_cache import warm_variable
     for variable in (
-        instance.variable_set
-        .filter(is_active=True)
-        .select_related('collection__catalog', 'palette')
-        .prefetch_related('palette__stops')
+            instance.variable_set
+                    .filter(is_active=True)
+                    .select_related('collection__catalog', 'palette')
+                    .prefetch_related('palette__stops')
     ):
         warm_variable(variable)
 
@@ -60,19 +60,12 @@ class CoreConfig(AppConfig):
         from .models import Collection, Variable
         from .tasks import update_collection_loader_plugin_periodic_task
         from .models.visualization import ColorPalette
-
+        
         post_save.connect(update_collection_loader_plugin_periodic_task, sender=Collection)
-
+        
         # Create .keep file in incoming bucket when a new collection is created
         post_save.connect(collection_post_save, sender=Collection)
-
+        
         # Re-warm palette cache when a variable or palette changes
         post_save.connect(on_variable_save, sender=Variable)
         post_save.connect(on_palette_save, sender=ColorPalette)
-
-        # Warm palette cache on startup (guard against pre-migration state)
-        try:
-            from georiva.core.palette_cache import warm_all
-            warm_all()
-        except Exception as e:
-            logger.warning("Palette cache warm failed on startup: %s", e)
