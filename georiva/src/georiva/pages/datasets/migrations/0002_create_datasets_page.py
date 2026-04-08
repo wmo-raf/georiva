@@ -34,8 +34,8 @@ def remove_datasets_index_page(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
+        ("home", "0003_homepage_featured_heading_and_more"),
         ("datasets", "0001_initial"),
-        ("home", "0001_initial"),
     ]
     
     operations = [
