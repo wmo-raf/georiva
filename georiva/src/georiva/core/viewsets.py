@@ -7,7 +7,7 @@ from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
 from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 
-from georiva.core.models import Item, Catalog, Collection, ColorPalette
+from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
 from georiva.core.models.catalog import Topic
 
 
@@ -135,6 +135,12 @@ class ItemViewSet(SnippetViewSet):
     exclude_form_fields = ["created_at", "updated_at"]
     index_view_class = ItemIndexView
     list_filter = ["collection"]
+
+
+class AssetViewSet(SnippetViewSet):
+    model = Asset
+    exclude_form_fields = ["created_at", "updated_at"]
+    list_filter = ["format", "variable"]
 
 
 class ColorPaletteModelViewSet(ModelViewSet):
