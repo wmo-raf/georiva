@@ -2,8 +2,8 @@
 Management command to configure GeoRiva's MinIO/S3 buckets.
 
 Sets up:
-    georiva-incoming   → webhook notifications (triggers ingestion)
-    georiva-sources    → webhook notifications (triggers ingestion)
+    georiva-incoming   → Redis notifications (triggers ingestion)
+    georiva-sources    → Redis notifications (triggers ingestion)
     georiva-archive    → no notifications, private
     georiva-assets     → public read access (serves processed data)
 
@@ -79,7 +79,10 @@ class Command(BaseCommand):
         
         buckets = getattr(settings, "GEORIVA_BUCKETS", {})
         
-        webhook_arn = getattr(settings, "MINIO_WEBHOOK_ARN", None)
+        # ARN format MinIO prints on startup when Redis target is configured:
+        # arn:minio:sqs::<IDENTIFIER>:redis
+        # IDENTIFIER must match MINIO_NOTIFY_REDIS_ENABLE_<IDENTIFIER> in docker-compose.
+        redis_arn = getattr(settings, "MINIO_REDIS_ARN", "arn:minio:sqs::primary:redis")
         
         for bucket_type, bucket_config in buckets.items():
             config = BUCKET_CONFIGS.get(bucket_type, {})
@@ -101,14 +104,8 @@ class Command(BaseCommand):
                 self._set_private_policy(s3, bucket_name, dry_run)
             
             # 3. Configure notifications
-            if config.get("notify_on_create") and webhook_arn:
-                self._set_webhook_notification(
-                    s3, bucket_name, webhook_arn, dry_run
-                )
-            elif config.get("notify_on_create") and not webhook_arn:
-                self.stdout.write(self.style.WARNING(
-                    f"  ⚠ Notifications requested but MINIO_WEBHOOK_ARN not set"
-                ))
+            if config.get("notify_on_create"):
+                self._set_redis_notification(s3, bucket_name, redis_arn, dry_run)
         
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
     
@@ -138,9 +135,7 @@ class Command(BaseCommand):
     # Bucket policies
     # =========================================================================
     
-    def _set_public_read_policy(
-            self, s3, bucket_name: str, dry_run: bool
-    ):
+    def _set_public_read_policy(self, s3, bucket_name: str, dry_run: bool):
         """Allow public read access (for assets bucket)."""
         policy = {
             "Version": "2012-10-17",
@@ -192,14 +187,18 @@ class Command(BaseCommand):
                 ))
     
     # =========================================================================
-    # Webhook notifications
+    # Redis notifications
     # =========================================================================
     
-    def _set_webhook_notification(
-            self, s3, bucket_name: str, webhook_arn: str, dry_run: bool
+    def _set_redis_notification(
+            self, s3, bucket_name: str, redis_arn: str, dry_run: bool
     ):
         """
-        Configure S3 event notifications for file uploads.
+        Configure S3 event notifications to publish to a MinIO Redis target.
+
+        MinIO maps QueueConfigurations to its internal SQS-style ARNs.
+        The redis_arn must match the identifier used in
+        MINIO_NOTIFY_REDIS_ENABLE_<IDENTIFIER> (e.g. arn:minio:sqs::primary:redis).
 
         Triggers on s3:ObjectCreated:* so the ingestion pipeline
         picks up new files in incoming/sources buckets.
@@ -207,8 +206,8 @@ class Command(BaseCommand):
         notification_config = {
             "QueueConfigurations": [
                 {
-                    "Id": f"GeoRiva-{bucket_name}",
-                    "QueueArn": webhook_arn,
+                    "Id": f"GeoRiva-{bucket_name}-redis",
+                    "QueueArn": redis_arn,
                     "Events": ["s3:ObjectCreated:*"],
                     "Filter": {
                         "Key": {
@@ -226,7 +225,7 @@ class Command(BaseCommand):
         
         if dry_run:
             self.stdout.write(
-                f"  → Would set webhook notification → {webhook_arn}"
+                f"  → Would set Redis notification → {redis_arn}"
             )
             return
         
@@ -236,7 +235,7 @@ class Command(BaseCommand):
                 NotificationConfiguration=notification_config,
             )
             self.stdout.write(self.style.SUCCESS(
-                f"  ✓ Webhook notification set → {webhook_arn}"
+                f"  ✓ Redis notification set → {redis_arn}"
             ))
         except Exception as e:
             self.stdout.write(self.style.ERROR(
