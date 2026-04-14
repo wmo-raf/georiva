@@ -34,7 +34,6 @@ x-backend-variables: &backend-variables
   GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ${GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP:-}
   MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
   MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
-  MINIO_WEBHOOK_BEARER_TOKEN: ${MINIO_WEBHOOK_BEARER_TOKEN:?}
   MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
   MINIO_PUBLIC_ENDPOINT_USE_SSL: ${MINIO_PUBLIC_ENDPOINT_USE_SSL:-false}
   GEORIVA_STORAGE_BACKEND: ${GEORIVA_STORAGE_BACKEND:-s3}
@@ -125,9 +124,10 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_NOTIFY_WEBHOOK_ENABLE_primary: "on"
-      MINIO_NOTIFY_WEBHOOK_ENDPOINT_primary: "http://georiva:8000/api/webhook/"
-      MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_primary: ${MINIO_WEBHOOK_BEARER_TOKEN}
+      MINIO_NOTIFY_REDIS_ENABLE_primary: "on"
+      MINIO_NOTIFY_REDIS_ADDRESS_primary: "georiva-redis:6379"
+      MINIO_NOTIFY_REDIS_KEY_primary: "georiva:minio:events"
+      MINIO_NOTIFY_REDIS_FORMAT_primary: "access"
     volumes:
       - ${MINIO_VOLUME:-./docker/minio}:/data
 
@@ -187,6 +187,18 @@ services:
     <<: *backend-volumes
     restart: always
     command: celery-beat
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva
+
+  georiva-minio-consumer:
+    image: georiva
+    <<: *backend-volumes
+    restart: always
+    command: minio-consumer
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
