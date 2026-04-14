@@ -42,11 +42,11 @@
                             <span class="gr-filter-option-dot"></span> All
                         </button>
                         {% for topic in topics %}
-                            <button class="gr-filter-option" data-filter-topic="{{ topic.slug }}">
-                                <span class="gr-filter-option-dot"></span>
-                                {% if topic.icon %}<i class="bi {{ topic.icon }}"></i> {% endif %}
-                                {{ topic.name }}
-                            </button>
+                        <button class="gr-filter-option" data-filter-topic="{{ topic.slug }}">
+                            <span class="gr-filter-option-dot"></span>
+                            {% if topic.icon %}<i class="bi {{ topic.icon }}"></i> {% endif %}
+                            {{ topic.name }}
+                        </button>
                         {% endfor %}
                     </div>
                 </div>
@@ -62,9 +62,9 @@
                             <span class="gr-filter-option-dot"></span> All
                         </button>
                         {% for value, label in time_resolutions %}
-                            <button class="gr-filter-option" data-filter-resolution="{{ value }}">
-                                <span class="gr-filter-option-dot"></span> {{ label }}
-                            </button>
+                        <button class="gr-filter-option" data-filter-resolution="{{ value }}">
+                            <span class="gr-filter-option-dot"></span> {{ label }}
+                        </button>
                         {% endfor %}
                     </div>
                 </div>
@@ -74,85 +74,84 @@
             {# ---- RIGHT RESULTS ---- #}
             <div>
                 {% if collections %}
-                    <div class="gr-dataset-results" id="gr-dataset-results">
-                        {% for collection in collections %}
-                            <a class="gr-dataset-card gr-collection-row gr-animate"
-                               href="/stac/collections/{{ collection.catalog.slug }}/{{ collection.slug }}/"
-                               data-name="{{ collection.name|lower }} {{ collection.description|lower }}"
-                               data-catalog="{{ collection.catalog.name|lower }}"
-                               data-resolution="{{ collection.time_resolution }}"
-                               data-topics="
+                <div class="gr-dataset-results" id="gr-dataset-results">
+                    {% for collection in collections %}
+                    <a class="gr-dataset-card gr-collection-row gr-animate"
+                       href="/stac/collections/{{ collection.catalog.slug }}/{{ collection.slug }}/"
+                       data-name="{{ collection.name|lower }} {{ collection.description|lower }}"
+                       data-catalog="{{ collection.catalog.name|lower }}"
+                       data-resolution="{{ collection.time_resolution }}"
+                       data-topics="
                                        {% for topic in collection.catalog.topics.all %}{{ topic.slug }} {% endfor %}"
-                               style="animation-delay: {{ forloop.counter0 }}00ms"
-                            >
-                                {# Thumbnail #}
-                                <div class="gr-dataset-thumb">
-                                    {% if collection.preview_url %}
-                                        <img src="{{ collection.preview_url }}" alt="{{ collection.name }}"
-                                             loading="lazy">
-                                    {% else %}
-                                        <div class="gr-dataset-thumb-placeholder">
-                                            {% get_catalog_icon collection.catalog.file_format as icon %}
-                                            <i class="bi {{ icon|default:'bi-layers' }}"></i>
-                                        </div>
-                                    {% endif %}
-                                </div>
+                       style="animation-delay: {{ forloop.counter0 }}00ms"
+                    >
+                        {# Thumbnail #}
+                        <div class="gr-dataset-thumb">
+                            {% if collection.preview_url %}
+                            <img src="{{ collection.preview_url }}" alt="{{ collection.name }}"
+                                 loading="lazy">
+                            {% else %}
+                            <div class="gr-dataset-thumb-placeholder">
+                                {% get_catalog_icon collection.catalog.file_format as icon %}
+                                <i class="bi {{ icon|default:'bi-layers' }}"></i>
+                            </div>
+                            {% endif %}
+                        </div>
 
-                                {# Body #}
-                                <div class="gr-dataset-body">
-                                    <span class="gr-dataset-catalog">{{ collection.catalog.name }}</span>
-                                    <div style="display:flex;align-items:center;gap:0.5rem">
-                                        <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
-                                        <span class="gr-dataset-name">{{ collection.name }}</span>
-                                    </div>
-                                    <p class="gr-dataset-desc">
-                                        {{ collection.description|default:collection.catalog.description }}
-                                    </p>
-                                    <div class="gr-dataset-tags">
-                                        {% for topic in collection.catalog.topics.all %}
-                                            <span class="gr-dataset-tag">
+                        {# Body #}
+                        <div class="gr-dataset-body">
+                            <span class="gr-dataset-catalog">{{ collection.catalog.name }}</span>
+                            <div style="display:flex;align-items:center;gap:0.5rem">
+                                <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
+                                <span class="gr-dataset-name">{{ collection.name }}</span>
+                            </div>
+                            <p class="gr-dataset-desc">
+                                {{ collection.description|default:collection.catalog.description }}
+                            </p>
+                            <div class="gr-dataset-tags">
+                                {% for topic in collection.catalog.topics.all %}
+                                <span class="gr-dataset-tag">
                                                 {% if topic.icon %}<i class="bi {{ topic.icon }}"></i> {% endif %}
                                                 {{ topic.name }}
                                             </span>
-                                        {% endfor %}
-                                        {% if collection.time_resolution %}
-                                            <span class="gr-dataset-tag">
+                                {% endfor %}
+                                {% if collection.time_resolution %}
+                                <span class="gr-dataset-tag">
                                                 {{ collection.get_time_resolution_display }}
                                             </span>
-                                        {% endif %}
-                                        {% with var_count=collection.variables.count %}
-                                            {% if var_count %}
-                                                <span class="gr-dataset-tag">
+                                {% endif %}
+                                {% with var_count=collection.variables.count %}
+                                {% if var_count %}
+                                <span class="gr-dataset-tag">
                                                     {{ var_count }} variable{{ var_count|pluralize }}
                                                 </span>
-                                            {% endif %}
-                                        {% endwith %}
-                                        {% if collection.time_start %}
-                                            <span class="gr-dataset-tag">
+                                {% endif %}
+                                {% endwith %}
+                                {% if collection.time_start %}
+                                <span class="gr-dataset-tag">
                                                 {{ collection.time_start|date:"Y" }}
                                                 {% if collection.time_end %} –
                                                     {{ collection.time_end|date:"Y" }}{% else %}
                                                     – present{% endif %}
                                             </span>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                            </a>
-                        {% endfor %}
-                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
 
-                    <div id="gr-no-results" class="gr-empty-state" style="display:none">
-                        <i class="bi bi-search"></i>
-                        <p style="font-weight:600;margin-bottom:0.35rem">No datasets found</p>
-                        <p>Try adjusting your search or filters.</p>
-                    </div>
+                <div id="gr-no-results" class="gr-empty-state" style="display:none">
+                    <i class="bi bi-search"></i>
+                    <p style="font-weight:600;margin-bottom:0.35rem">No datasets found</p>
+                    <p>Try adjusting your search or filters.</p>
+                </div>
 
                 {% else %}
-                    <div class="gr-empty-state">
-                        <i class="bi bi-layers"></i>
-                        <p style="font-weight:600;margin-bottom:0.35rem">No datasets ingested yet</p>
-                        <p>Configure a data source in the admin to get started.</p>
-                    </div>
+                <div class="gr-empty-state">
+                    <i class="bi bi-layers"></i>
+                    <p style="font-weight:600;margin-bottom:0.35rem">No datasets available yet</p>
+                </div>
                 {% endif %}
             </div>
 

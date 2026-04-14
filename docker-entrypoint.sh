@@ -56,6 +56,14 @@ run_setup_commands_if_configured(){
     echo "python /georiva/app/src/georiva/manage.py collectstatic --noinput"
     /georiva/app/src/georiva/manage.py collectstatic --noinput
   fi
+
+  # setup minio
+  echo "Setting up MinIO..."
+  /georiva/app/src/georiva/manage.py setup_minio
+
+  # warm the palette cache
+  echo "Warming palette cache..."
+  /georiva/app/src/georiva/manage.py warm_palette
 }
 
 start_celery_worker() {

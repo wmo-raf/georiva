@@ -157,7 +157,6 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         return self.assets.filter(roles__contains=['thumbnail']).first()
 
 
-@register_snippet
 class Asset(TimeStampedModel, Orderable):
     """
     A stored data file for a specific Variable within an Item.
@@ -251,7 +250,7 @@ class Asset(TimeStampedModel, Orderable):
         ]
     
     def __str__(self):
-        return f"{self.item} / {self.variable.slug}"
+        return f"{self.item} / {self.variable.slug} - {self.format}"
     
     # =========================================================================
     # Properties from Variable (convenience accessors)
@@ -262,8 +261,8 @@ class Asset(TimeStampedModel, Orderable):
         return self.variable.name
     
     @property
-    def units(self):
-        return self.variable.units
+    def unit(self):
+        return self.variable.unit.symbol if self.variable.unit else ""
     
     @property
     def palette(self):

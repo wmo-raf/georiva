@@ -7,7 +7,7 @@ from wagtail.snippets.models import register_snippet
 
 from .views import catalog_index, collection_items_list
 from .viewsets import BoundaryChooserViewSet, admin_viewsets
-from .viewsets import ItemViewSet
+from .viewsets import ItemViewSet, AssetViewSet
 
 
 @hooks.register('register_admin_urls')
@@ -34,6 +34,7 @@ def register_viewset():
 
 
 register_snippet(ItemViewSet)
+register_snippet(AssetViewSet)
 
 
 @hooks.register('construct_main_menu')
