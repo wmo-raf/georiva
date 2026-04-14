@@ -62,7 +62,7 @@
         <h2 class="w-label-1" style="margin:0;">{% trans "Actions" %}</h2>
     </header>
 
-    <div class="w-flex w-gap-4" style="flex-wrap: wrap; align-items: flex-start;">
+    <div class="w-flex w-gap-4 w-flex-col">
         <div>
             <form method="post" class="w-flex w-gap-2">
                 {% csrf_token %}
@@ -88,16 +88,17 @@
                 {% trans "Queues sync records for COG assets that have no corresponding Zarr asset." %}
             </p>
         </div>
-
         {% if has_permanently_failed %}
             <div>
                 <form method="post">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="reset_failed">
-                    <button type="submit" class="button warning">
+                    <button type="submit" class="button bicolor button--icon warning">
+                    <span class="icon-wrapper">
                         <svg class="icon icon-warning" aria-hidden="true">
                             <use href="#icon-warning"></use>
                         </svg>
+                    </span>
                         {% trans "Reset permanently failed" %}
                     </button>
                 </form>
