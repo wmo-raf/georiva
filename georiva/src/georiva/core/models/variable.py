@@ -17,6 +17,8 @@ from wagtail.blocks import (
 from wagtail.fields import StreamField
 from wagtail.models import Orderable
 
+from georiva.core.models import Unit
+
 
 class SourceBlock(StructBlock):
     source_name = CharBlock(
@@ -234,8 +236,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         return f"{self.collection.slug}:{self.slug}"
     
     @property
-    def output_unit(self):
-        return self.unit
+    def units(self):
+        return self.unit.symbol
     
     def clean(self):
         super().clean()
