@@ -1,9 +1,12 @@
 listen_addresses: "0.0.0.0:3000"
 
-web_ui: enable-for-all
-
 route_prefix: /martin
 
 postgres:
   connection_string: "${DATABASE_URL}"
-  auto_publish: true
+  auto_publish: false  # disable auto-publish — only expose explicitly listed sources
+
+  functions:
+    boundary_stats:
+      schema: public
+      function: georiva_boundary_stats
