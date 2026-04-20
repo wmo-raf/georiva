@@ -42,3 +42,5 @@ cfgrib==0.9.15.1
 wagtail-color-panel==1.7.1
 rio-cogeo==7.0.2
 pint==0.25.3
+virtual_tiff==0.4.0
+virtualizarr==2.6.0

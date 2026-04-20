@@ -43,6 +43,14 @@ services:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Web Console
 
+  georiva-minio-consumer:
+    build:
+      target: dev
+    environment:
+      DEBUG: "True"
+    volumes:
+      - ./georiva:/georiva/app
+
   georiva-titiler-app:
     command: uvicorn-dev
     volumes:

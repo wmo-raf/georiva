@@ -82,6 +82,9 @@ makemigrations:
 # ======================
 
 dev-up:
+	$(DEV_DC) up
+
+dev-up-d:
 	$(DEV_DC) up -d
 
 dev-down:
