@@ -65,7 +65,7 @@ INSTALLED_APPS = [
     "georiva.core",
     "georiva.formats",
     "georiva.ingestion",
-    "georiva.zarr_store",
+    "georiva.virtual_zarr",
     "georiva.analysis",
     "georiva.api",
     "georiva.stac",
@@ -230,11 +230,13 @@ GEORIVA_BUCKETS = {
     },
 }
 
+GEORIVA_ASSETS_BUCKET = GEORIVA_BUCKETS.get("assets", {}).get("name")
+
 # =============================================================================
 # Zarr Analysis-Ready Store
 # =============================================================================
 
-GEORIVA_ZARR_BUCKET = env("GEORIVA_ZARR_BUCKET", default="georiva-zarr")
+GEORIVA_ZARR_BUCKET = GEORIVA_BUCKETS.get("zarr", {}).get("name")
 GEORIVA_ZARR_TIME_CHUNK = env.int("GEORIVA_ZARR_TIME_CHUNK", default=1)
 GEORIVA_ZARR_ENABLED = env.bool("GEORIVA_ZARR_ENABLED", default=True)
 

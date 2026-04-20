@@ -11,14 +11,15 @@ import pandas as pd
 import pytz
 from django.conf import settings
 from django.db.models import F, Prefetch
+from wagtail import hooks
 
 from georiva.core.filename import parse_path
 from georiva.core.models import Catalog, Collection, Item, Asset, Variable
 from georiva.core.storage import storage, BucketType, Bucket
 from georiva.formats.registry import format_registry
-from georiva.zarr_store.tasks import zarr_sync_store
 from .asset_writer import AssetWriter
 from .clipper import BoundaryClipper
+from .constants import GEORIVA_AFTER_SAVE_ASSET
 from .encoder import VariableEncoder
 from .extractor import VariableExtractor
 from .models import IngestionLog
@@ -747,6 +748,17 @@ class IngestionService:
         except Exception:
             return {"min": None, "max": None, "mean": None, "std": None}
     
+    def _after_save_asset(self, asset: Asset):
+        try:
+            for fn in hooks.get_hooks(GEORIVA_AFTER_SAVE_ASSET):
+                return fn(asset)
+        except Exception as e:
+            self.logger.warning(
+                "Post-save hook failed for asset %s: %s",
+                asset.pk,
+                str(e),
+            )
+    
     def _save_assets(
             self,
             item: Item,
@@ -829,14 +841,7 @@ class IngestionService:
             )
             assets.append(data_asset)
             
-            # Zarr sync: enqueue low-priority append task after COG is confirmed written.
-            # Wrapped independently so a Zarr enqueue failure never blocks the COG record.
-            try:
-                self._enqueue_zarr_sync(item, variable)
-            except Exception as zarr_exc:
-                self.logger.warning(
-                    "Zarr sync enqueue failed for %s: %s", variable.slug, zarr_exc
-                )
+            self._after_save_asset(data_asset)
         
         except Exception as e:
             self.logger.error("COG save failed for %s: %s", variable.slug, e)
@@ -871,6 +876,7 @@ class IngestionService:
                 },
             )
             assets.append(visual_asset)
+            self._after_save_asset(visual_asset)
         
         except Exception as e:
             self.logger.error("PNG save failed for %s: %s", variable.slug, e)
@@ -915,41 +921,6 @@ class IngestionService:
             )
         
         return assets
-    
-    def _enqueue_zarr_sync(self, item: "Item", variable: "Variable") -> None:
-        """
-        Register a pending Zarr sync record and dispatch the sync task.
-
-        Called after a COG asset has been successfully written. Skipped for
-        forecast items (reference_time is not None) and when Zarr sync is
-        disabled via settings.GEORIVA_ZARR_ENABLED.
-        """
-        from django.conf import settings as dj_settings
-        from georiva.zarr_store.models import ZarrSyncLog
-        
-        if item.reference_time is not None:
-            return  # Forecasts excluded from Zarr v1
-        
-        if not getattr(dj_settings, 'GEORIVA_ZARR_ENABLED', True):
-            return
-        
-        store_path = (
-            f"{item.collection.catalog.slug}"
-            f"/{item.collection.slug}"
-            f"/{variable.slug}.zarr"
-        )
-        
-        ZarrSyncLog.objects.update_or_create(
-            item=item,
-            variable=variable,
-            defaults={
-                'store_path': store_path,
-                'status': ZarrSyncLog.Status.PENDING,
-                'error': '',
-            },
-        )
-        
-        zarr_sync_store.apply_async(args=[store_path], queue='georiva-ingestion')
     
     def _process_variable_chunked(
             self,

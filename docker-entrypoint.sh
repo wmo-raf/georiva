@@ -151,10 +151,10 @@ gunicorn-wsgi)
     run_server wsgi "${@:2}"
     ;;
 manage)
-    exec python3 /georiva/app/src/georiva/manage.py "${@:2}"
+    exec python /georiva/app/src/georiva/manage.py "${@:2}"
     ;;
 shell)
-    exec python3 /georiva/app/src/georiva/manage.py shell
+    exec python /georiva/app/src/georiva/manage.py shell
     ;;
 celery-default-worker)
     start_celery_worker -Q georiva-default -n default-worker@%h "${@:2}"
@@ -180,7 +180,7 @@ celery-beat)
     exec celery -A georiva beat -l "${GEORIVA_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"
     ;;
 minio-consumer)
-      exec python3 /georiva/app/src/georiva/manage.py minio_event_consumer "${@:2}"
+      exec python /georiva/app/src/georiva/manage.py minio_event_consumer "${@:2}"
     ;;
 install-plugin)
     exec /georiva/plugins/install_plugin.sh --runtime "${@:2}"
