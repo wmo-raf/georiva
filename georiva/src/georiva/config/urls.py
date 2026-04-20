@@ -6,12 +6,14 @@ from wagtail.admin import urls as wagtailadmin_urls
 from wagtail.documents import urls as wagtaildocs_urls
 
 from georiva.api import urls as georiva_urls
+from .views import health
 
 urlpatterns = [
     path("django-admin/", admin.site.urls),
     path("admin/", include(wagtailadmin_urls)),
     path("documents/", include(wagtaildocs_urls)),
     path("api/", include(georiva_urls), name="georiva_api"),
+    path("health/", health),
     path("", include("adminboundarymanager.urls")),
 ]
 
