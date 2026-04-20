@@ -12,4 +12,5 @@ urlpatterns = [
         TileConfigView.as_view(),
         name='tile_config',
     ),
+    path("analysis/", include("georiva.analysis.urls")),
 ]

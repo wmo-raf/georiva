@@ -44,3 +44,4 @@ rio-cogeo==7.0.2
 pint==0.25.3
 virtual_tiff==0.4.0
 virtualizarr==2.6.0
+kerchunk==0.2.10
