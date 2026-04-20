@@ -64,6 +64,9 @@ run_setup_commands_if_configured(){
   # warm the palette cache
   echo "Warming palette cache..."
   /georiva/app/src/georiva/manage.py warm_palette
+
+  echo "Creating martin boundary stats function..."
+  /georiva/app/src/georiva/manage.py create_martin_function
 }
 
 start_celery_worker() {
