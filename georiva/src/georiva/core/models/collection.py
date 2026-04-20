@@ -1,10 +1,12 @@
 from datetime import datetime
 from typing import Optional
 
+from django import forms
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.models import ClusterableModel
+from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import (
     FieldPanel,
     MultiFieldPanel,
@@ -16,6 +18,29 @@ from wagtail.admin.panels import (
 
 from georiva.core.widget import ConditionalCheckbox
 
+ADM_LEVEL_CHOICES = [
+    (1, 'Level 1'),
+    (2, 'Level 2'),
+    (3, 'Level 3'),
+]
+
+
+def default_adm_levels():
+    return [1, 2]
+
+
+class CollectionForm(WagtailAdminModelForm):
+    boundary_stats_levels = forms.MultipleChoiceField(
+        choices=ADM_LEVEL_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+        required=False,
+        initial=[1, 2],
+    )
+    
+    def clean_boundary_stats_levels(self):
+        # Convert list of strings → list of ints for the ArrayField
+        return [int(v) for v in self.cleaned_data.get("boundary_stats_levels", [])]
+
 
 class Collection(TimeStampedModel, ClusterableModel):
     """
@@ -26,6 +51,8 @@ class Collection(TimeStampedModel, ClusterableModel):
         - gfs-wind-10m (wind_speed + wind_direction)
         - sentinel-vegetation (ndvi + nir + red)
     """
+    
+    base_form_class = CollectionForm
     
     class TimeResolution(models.TextChoices):
         SUB_HOURLY = 'sub_hourly', 'Sub-Hourly'
@@ -105,6 +132,18 @@ class Collection(TimeStampedModel, ClusterableModel):
         help_text="Loader profile to use for ingesting data for this catalog",
     )
     
+    boundary_stats_levels = ArrayField(
+        models.IntegerField(choices=ADM_LEVEL_CHOICES),
+        blank=True,
+        null=True,
+        default=default_adm_levels,
+        help_text=(
+            "Administrative boundary levels for zonal statistics. "
+            "1 = region, 2 = district, 3 = sub-district. "
+            "Leave blank to disable. Stats are computed for all selected levels."
+        ),
+    )
+    
     class Meta:
         unique_together = ['catalog', 'slug']
         ordering = ['catalog', 'sort_order', 'name']
@@ -140,6 +179,7 @@ class Collection(TimeStampedModel, ClusterableModel):
             FieldPanel('retain_past_forecasts'),
             FieldPanel('retain_latest_run_only'),
         ], heading="Forecast Configuration"),
+        FieldPanel('boundary_stats_levels', ),
         InlinePanel('variables', label="Variables"),
     ]
     

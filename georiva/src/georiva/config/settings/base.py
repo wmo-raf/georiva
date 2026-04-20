@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "georiva.ingestion",
     "georiva.virtual_zarr",
     "georiva.analysis.timeseries",
+    "georiva.analysis.zonal_stats",
     "georiva.api",
     "georiva.stac",
     "georiva.edr",
