@@ -29,6 +29,7 @@ import time
 from datetime import datetime
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 
 class Command(BaseCommand):
@@ -101,7 +102,6 @@ class Command(BaseCommand):
                 f"at level(s) {collection.boundary_stats_levels}"
             )
             
-            # Build asset queryset
             assets_qs = (
                 Asset.objects
                 .filter(
@@ -113,9 +113,7 @@ class Command(BaseCommand):
             )
             
             if options.get("variable"):
-                assets_qs = assets_qs.filter(
-                    variable__slug=options["variable"]
-                )
+                assets_qs = assets_qs.filter(variable__slug=options["variable"])
             
             if time_start:
                 assets_qs = assets_qs.filter(item__time__gte=time_start)
@@ -125,51 +123,50 @@ class Command(BaseCommand):
             total = assets_qs.count()
             self.stdout.write(f"  {total} COG asset(s) to process")
             
-            for i, asset in enumerate(assets_qs.iterator(chunk_size=100), 1):
-
-                if options["sync"]:
-                    t0 = time.perf_counter()
-                    try:
-                        cog_bytes = storage.assets.read_bytes(asset.href)
-                        total_written_asset = 0
-                        for level, boundaries in boundaries_by_level.items():
-                            stats_rows = compute_stats_from_cog_bytes(
-                                cog_bytes, boundaries
+            with transaction.atomic():
+                for i, asset in enumerate(assets_qs.iterator(chunk_size=100), 1):
+                    if options["sync"]:
+                        t0 = time.perf_counter()
+                        try:
+                            with transaction.atomic():
+                                cog_bytes = storage.assets.read_bytes(asset.href)
+                                total_written_asset = 0
+                                for level, boundaries in boundaries_by_level.items():
+                                    stats_rows = compute_stats_from_cog_bytes(
+                                        cog_bytes, boundaries
+                                    )
+                                    written = persist_stats(
+                                        item=asset.item,
+                                        variable=asset.variable,
+                                        stats_rows=stats_rows,
+                                    )
+                                    total_written += written
+                                    total_written_asset += written
+                            elapsed = time.perf_counter() - t0
+                            self.stdout.write(
+                                f"  [{i}/{total}] {asset.variable.slug} "
+                                f"@ {asset.item.time.date()} "
+                                f"→ {total_written_asset} row(s) ({elapsed:.2f}s)"
                             )
-                            written = persist_stats(
-                                item=asset.item,
-                                variable=asset.variable,
-                                stats_rows=stats_rows,
+                        except Exception as exc:
+                            self.stdout.write(
+                                self.style.ERROR(
+                                    f"  [{i}/{total}] FAILED {asset.variable.slug} "
+                                    f"@ {asset.item.time}: {exc}"
+                                )
                             )
-                            total_written += written
-                            total_written_asset += written
-                        elapsed = time.perf_counter() - t0
-                        self.stdout.write(
-                            f"  [{i}/{total}] {asset.variable.slug} "
-                            f"@ {asset.item.time.date()} "
-                            f"→ {total_written_asset} row(s) ({elapsed:.2f}s)"
+                    else:
+                        compute_boundary_zonal_stats.apply_async(
+                            args=[asset.pk],
+                            queue="georiva-ingestion",
                         )
-                    except Exception as exc:
-                        self.stdout.write(
-                            self.style.ERROR(
-                                f"  [{i}/{total}] FAILED {asset.variable.slug} "
-                                f"@ {asset.item.time}: {exc}"
-                            )
-                        )
-                else:
-                    compute_boundary_zonal_stats.apply_async(
-                        args=[asset.pk],
-                        queue="georiva-ingestion",
-                    )
-                    total_written += 1  # count dispatched tasks
-                    if i % 50 == 0:
-                        self.stdout.write(f"  Dispatched {i}/{total}…")
+                        total_written += 1
+                        if i % 50 == 0:
+                            self.stdout.write(f"  Dispatched {i}/{total}…")
         
         action = "written" if options["sync"] else "dispatched"
         self.stdout.write(
-            self.style.SUCCESS(
-                f"\nDone. {total_written} row(s) {action}."
-            )
+            self.style.SUCCESS(f"\nDone. {total_written} row(s) {action}.")
         )
     
     # -------------------------------------------------------------------------
