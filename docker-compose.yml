@@ -63,7 +63,7 @@ x-backend-volumes: &backend-volumes
 services:
   georiva-db:
     image: timescale/timescaledb-ha:pg18
-    restart: always
+    restart: unless-stopped
     command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-200} -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
     environment:
       - POSTGRES_USER=${GEORIVA_DB_USER:?}
@@ -83,7 +83,7 @@ services:
 
   georiva-pgbouncer:
     image: edoburu/pgbouncer:v1.25.1-p0
-    restart: always
+    restart: unless-stopped
     environment:
       DB_HOST: georiva-db
       DB_USER: ${GEORIVA_DB_USER}
@@ -107,7 +107,7 @@ services:
 
   georiva-redis:
     image: redis:alpine3.22
-    restart: always
+    restart: unless-stopped
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
@@ -143,7 +143,7 @@ services:
         - GID=${GID}
         - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
         - GEORIVA_PLUGIN_GIT_REPOS=${GEORIVA_PLUGIN_GIT_REPOS}
-    restart: always
+    restart: unless-stopped
     command: gunicorn-wsgi
     environment:
       <<: *backend-variables
@@ -155,11 +155,17 @@ services:
         condition: service_healthy
     ports:
       - "8000"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1" ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   georiva-celery-default-worker:
     image: georiva
     <<: *backend-volumes
-    restart: always
+    restart: unless-stopped
     command: celery-default-worker
     environment:
       <<: *backend-variables
@@ -172,7 +178,7 @@ services:
   georiva-celery-ingestion-worker:
     image: georiva
     <<: *backend-volumes
-    restart: always
+    restart: unless-stopped
     command: celery-ingestion-worker
     environment:
       <<: *backend-variables
@@ -185,7 +191,7 @@ services:
   georiva-celery-beat:
     image: georiva
     <<: *backend-volumes
-    restart: always
+    restart: unless-stopped
     command: celery-beat
     environment:
       <<: *backend-variables
@@ -197,7 +203,7 @@ services:
   georiva-minio-consumer:
     image: georiva
     <<: *backend-volumes
-    restart: always
+    restart: unless-stopped
     command: minio-consumer
     environment:
       <<: *backend-variables
@@ -250,7 +256,7 @@ services:
 
   georiva-web-proxy:
     image: nginx:1.29.5-alpine
-    restart: always
+    restart: unless-stopped
     volumes:
       - ${GEORIVA_STATIC_VOLUME:-./docker/static}:/wagtail_static
       - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:/wagtail_media
@@ -261,6 +267,25 @@ services:
       - georiva
       - georiva-titiler-app
       - georiva-stac-browser
+      - georiva-martin
+
+  georiva-martin:
+    image: ghcr.io/maplibre/martin:1.5.0
+    restart: unless-stopped
+    command: --config /config/config.yaml
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgres://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-pgbouncer:5432/${GEORIVA_DB_NAME}
+    volumes:
+      - ./deploy/martin/config.yaml:/config/config.yaml
+    depends_on:
+      georiva-db:
+        condition: service_healthy
+      georiva-pgbouncer:
+        condition: service_started
+      georiva:
+        condition: service_healthy
 
 volumes:
   georiva_temp:
