@@ -1,10 +1,15 @@
 from django.core.paginator import Paginator
 from django.db import models
+from django.shortcuts import get_object_or_404, render
+from django.utils.dateparse import parse_date, parse_datetime
+from wagtail.admin.paginator import WagtailPaginator
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.contrib.routable_page.models import RoutablePageMixin, path
 from wagtail.models import Page
 
-from georiva.core.models import Catalog, Collection, Topic
+from georiva.core.models import Catalog, Collection, Topic, Item
+
+ITEMS_PER_PAGE = 24
 
 
 class DatasetsIndexPage(RoutablePageMixin, Page):
@@ -49,7 +54,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     @path('')
     def index(self, request):
         """All collections — filterable by topic, resolution, catalog. Paginated."""
-        from django.shortcuts import render
         
         collections = self._base_collections_qs()
         collections, filters = self._apply_filters(request, collections)
@@ -68,7 +72,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     @path('<slug:catalog_slug>/')
     def catalog_detail(self, request, catalog_slug):
         """Catalog landing page — shows catalog metadata + all its collections."""
-        from django.shortcuts import get_object_or_404, render
         
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collections = (
@@ -84,8 +87,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     
     @path('<slug:catalog_slug>/<slug:collection_slug>/')
     def collection_detail(self, request, catalog_slug, collection_slug):
-        from django.shortcuts import get_object_or_404, render
-
+        
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collection = get_object_or_404(
             Collection,
@@ -93,18 +95,76 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             slug=collection_slug,
             is_active=True,
         )
-
+        
+        variables = collection.variables.filter(is_active=True).order_by('sort_order')
+        
+        # --- Filters from GET params ---
+        selected_vars = request.GET.getlist('variable')
+        date_str = request.GET.get('date', '').strip()
+        run_str = request.GET.get('run', '').strip()
+        
+        filters = {
+            'variables': selected_vars,  # list of slugs; empty means "all"
+            'date': date_str,
+            'run': run_str,
+        }
+        
+        # --- Asset queryset ---
+        # Paginate Asset objects directly so that one page = exactly N cards.
+        # Each Asset is one (item, variable) pair — the natural unit for a card.
+        from georiva.core.models import Asset
+        assets_qs = (
+            Asset.objects
+            .filter(
+                item__collection=collection,
+                variable__is_active=True,
+            )
+            .select_related('item', 'item__collection__catalog', 'variable')
+            .order_by('-item__time', 'variable__sort_order')
+        )
+        
+        if selected_vars:
+            assets_qs = assets_qs.filter(variable__slug__in=selected_vars)
+        
+        if date_str:
+            parsed_date = parse_date(date_str)
+            if parsed_date:
+                assets_qs = assets_qs.filter(item__time__date=parsed_date)
+        
+        if run_str:
+            parsed_run = parse_datetime(run_str)
+            if parsed_run:
+                assets_qs = assets_qs.filter(item__reference_time=parsed_run)
+        
+        page_number = request.GET.get("p", 1)
+        paginator = WagtailPaginator(assets_qs, ITEMS_PER_PAGE)
+        items_page = paginator.get_page(page_number)
+        page_range = paginator.get_elided_page_range(items_page.number)
+        
+        # Forecast runs for the dropdown (only needed for forecast collections)
+        forecast_runs = []
+        if collection.is_forecast:
+            forecast_runs = (
+                Item.objects
+                .filter(collection=collection, reference_time__isnull=False)
+                .values_list('reference_time', flat=True)
+                .distinct()
+                .order_by('-reference_time')[:50]
+            )
         return render(request, 'datasets/collection_detail.html', {
             'page': self,
             'catalog': catalog,
             'collection': collection,
-            'variables': collection.variables.filter(is_active=True).order_by('sort_order'),
+            'variables': variables,
+            'items': items_page,
+            "page_range": page_range,
+            'filters': filters,
+            'forecast_runs': forecast_runs,
         })
-
+    
     @path('<slug:catalog_slug>/<slug:collection_slug>/items/<str:item_id>/')
     def item_detail(self, request, catalog_slug, collection_slug, item_id):
-        from django.shortcuts import get_object_or_404, render
-
+        
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collection = get_object_or_404(
             Collection,
@@ -112,7 +172,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             slug=collection_slug,
             is_active=True,
         )
-
+        
         return render(request, 'datasets/item_detail.html', {
             'page': self,
             'catalog': catalog,

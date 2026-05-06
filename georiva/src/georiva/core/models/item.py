@@ -155,6 +155,18 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
     def thumbnail(self) -> 'Asset':
         """Get thumbnail asset."""
         return self.assets.filter(roles__contains=['thumbnail']).first()
+    
+    @property
+    def time_iso(self) -> str:
+        """ISO 8601 UTC string with Z suffix, for use in API URLs and templates."""
+        return self.time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    
+    @property
+    def reference_time_iso(self) -> str | None:
+        """ISO 8601 UTC string with Z suffix for reference_time, or None."""
+        if self.reference_time:
+            return self.reference_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+        return None
 
 
 class Asset(TimeStampedModel, Orderable):
@@ -320,6 +332,16 @@ class Asset(TimeStampedModel, Orderable):
         """Get public URL to this asset."""
         from georiva.core.storage import storage
         return storage.assets.url(self.href)
+    
+    @property
+    def preview_url(self) -> str:
+        """TiTiler preview URL for this asset."""
+        from urllib.parse import urlencode
+        params = {'time': self.item.time_iso}
+        if self.item.reference_time:
+            params['reftime'] = self.item.reference_time_iso
+        qs = urlencode(params)
+        return f"/titiler/{self.item.collection.catalog.slug}/{self.item.collection.slug}/{self.variable.slug}/preview.webp?{qs}"
 
 
 # =============================================================================
