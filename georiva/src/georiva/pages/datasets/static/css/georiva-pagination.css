@@ -1,0 +1,153 @@
+/* georiva-pagination.css
+   Matches the Wagtail admin pagination_nav.html markup structure,
+   using GeoRiva design tokens instead of --w-color-* variables.
+*/
+
+.pagination {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin-top: 2rem;
+    text-align: center;
+}
+
+@media screen and (min-width: 50em) {
+    .pagination {
+        flex-wrap: nowrap;
+    }
+}
+
+.pagination__start,
+.pagination__end {
+    display: flex;
+    flex: 1;
+}
+
+@media screen and (max-width: 74.9375em) {
+    .pagination__start,
+    .pagination__end {
+        flex-basis: auto;
+    }
+}
+
+.pagination__end {
+    justify-content: end;
+}
+
+.pagination p {
+    color: var(--gr-text-3);
+    font-family: var(--gr-font-mono);
+    font-size: 0.8rem;
+    margin: 0;
+}
+
+/* ── List ── */
+
+.pagination ul {
+    display: flex;
+    flex-grow: 1;
+    flex-wrap: wrap;
+    justify-content: center;
+    list-style-type: none;
+    margin: 0;
+    padding-inline-start: 0;
+}
+
+.pagination ul li {
+    align-items: center;
+    display: flex;
+    font-style: normal;
+    line-height: 1em;
+    list-style-type: none;
+}
+
+.pagination li a,
+.pagination li span {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+}
+
+/* ── Page number buttons ── */
+
+.pagination li.pagination__page-number a,
+.pagination li.pagination__page-number span {
+    font-family: var(--gr-font-mono);
+    font-size: 0.8rem;
+    font-weight: 500;
+    height: 2rem;
+    margin: 0.25rem;
+    min-width: 2rem;
+}
+
+.pagination li.pagination__page-number a {
+    border: 1px solid var(--gr-border);
+    border-radius: 0.25rem;
+    color: var(--gr-text-2);
+    padding: 0.25rem 0.5rem;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.pagination li.pagination__page-number a:hover {
+    background-color: var(--gr-surface-2);
+    border-color: var(--gr-accent);
+    color: var(--gr-accent);
+}
+
+/* Current page */
+.pagination li.pagination__page-number--current a {
+    background-color: var(--gr-accent);
+    border-color: transparent;
+    color: #fff;
+}
+
+.pagination li.pagination__page-number--current a:hover {
+    background-color: var(--gr-accent);
+    color: #fff;
+}
+
+/* Ellipsis */
+.pagination li.pagination__page-number span {
+    color: var(--gr-text-3);
+    font-family: var(--gr-font-mono);
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* ── Prev / Next ── */
+
+.pagination li.prev,
+.pagination li.next {
+    margin: 0 0.5rem;
+}
+
+.pagination li.prev a,
+.pagination li.next a {
+    align-items: center;
+    border: 1px solid var(--gr-border);
+    border-radius: 0.25rem;
+    color: var(--gr-text-2);
+    display: flex;
+    font-size: 0.8rem;
+    gap: 0.35rem;
+    padding: 0.25rem 0.75rem;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.pagination li.prev a:hover,
+.pagination li.next a:hover {
+    background-color: var(--gr-surface-2);
+    border-color: var(--gr-accent);
+    color: var(--gr-accent);
+}
+
+/* Disabled — when the <a> has no href (matching Wagtail's pattern) */
+.pagination li.prev a:not([href]),
+.pagination li.next a:not([href]) {
+    cursor: default;
+    opacity: 0.35;
+    pointer-events: none;
+}

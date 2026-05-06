@@ -160,3 +160,34 @@ def query_params(filters, **kwargs):
     if 'page' not in kwargs:
         params.pop('page', None)
     return urlencode(params)
+
+
+@register.simple_tag(takes_context=True)
+def query_string_replace(context, key, value):
+    """
+    Return the current query string with `key` set to `value`.
+    All other parameters are preserved.
+ 
+    Usage:
+        <a href="?{% query_string_replace 'page' 3 %}">Page 3</a>
+    """
+    request = context.get('request')
+    params = request.GET.copy() if request else {}
+    params[key] = value
+    return params.urlencode()
+
+
+@register.simple_tag(takes_context=True)
+def query_string_drop(context, *keys):
+    """
+    Return the current query string with the given keys removed.
+    All other parameters are preserved.
+ 
+    Usage:
+        <a href="?{% query_string_drop 'date' 'page' %}">Clear date</a>
+    """
+    request = context.get('request')
+    params = request.GET.copy() if request else {}
+    for key in keys:
+        params.pop(key, None)
+    return params.urlencode()
