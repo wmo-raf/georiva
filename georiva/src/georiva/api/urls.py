@@ -13,4 +13,5 @@ urlpatterns = [
         name='tile_config',
     ),
     path("analysis/", include("georiva.analysis.urls")),
+    path('datasets/', include('georiva.pages.datasets.urls', namespace='datasets')),
 ]

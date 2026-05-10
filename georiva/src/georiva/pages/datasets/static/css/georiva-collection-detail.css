@@ -82,6 +82,70 @@
     font-size: 0.68rem;
 }
 
+/* ── Date picker ── */
+
+.gr-date-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.gr-date-picker-selects {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.gr-date-picker-select {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    color: var(--gr-text-1);
+    cursor: pointer;
+    font-family: var(--gr-font-sans);
+    font-size: 0.82rem;
+    outline: none;
+    padding: 0.45rem 0.6rem;
+    transition: border-color var(--gr-dur) var(--gr-ease);
+    width: 100%;
+}
+
+.gr-date-picker-select:focus {
+    border-color: var(--gr-accent-border);
+    box-shadow: 0 0 0 3px var(--gr-accent-dim);
+}
+
+.gr-date-picker-select:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.gr-date-picker-apply {
+    align-items: center;
+    background: var(--gr-accent);
+    border: none;
+    border-radius: var(--gr-radius);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    font-size: 0.82rem;
+    font-weight: 500;
+    gap: 0.35rem;
+    justify-content: center;
+    padding: 0.45rem 0.75rem;
+    transition: opacity var(--gr-dur) var(--gr-ease);
+    width: 100%;
+}
+
+.gr-date-picker-apply:hover:not(:disabled) {
+    opacity: 0.88;
+}
+
+.gr-date-picker-apply:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+}
+
 /* ── Date filter ── */
 
 .gr-items-date-input {

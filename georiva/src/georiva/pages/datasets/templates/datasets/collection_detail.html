@@ -183,26 +183,74 @@
                             </div>
                         {% endif %}
 
-                        {# Valid Date #}
+                        {# ── Date picker ── #}
+                        {# Cascading selects — year → month → day → hour        #}
+                        {# Levels shown depend on collection.date_picker_type.  #}
+                        {# JS fetches available values per level via the         #}
+                        {# /dates/ endpoint and populates each select in turn.   #}
                         <div class="gr-sidebar-filter is-open" id="filter-date">
                             <div class="gr-sidebar-filter-header" data-filter-toggle="filter-date">
                                 <span>Date</span>
                                 <i class="bi bi-chevron-down"></i>
                             </div>
                             <div class="gr-sidebar-filter-body">
-                                <input type="{{ collection.date_picker_type }}"
-                                       name="date"
-                                       id="grItemsDateFilter"
-                                       class="gr-items-date-input"
-                                       value="{{ filters.date }}"
-                                       {% if collection.date_picker_min %}min="{{ collection.date_picker_min }}"{% endif %}
-                                       {% if collection.date_picker_max %}max="{{ collection.date_picker_max }}"{% endif %}
-                                       aria-label="Filter by date">
-                                {% if filters.date %}
-                                    <a href="?{% query_string_drop 'date' 'p' %}" class="gr-items-date-clear">
-                                        <i class="bi bi-x"></i> Clear date
-                                    </a>
-                                {% endif %}
+                                <div class="gr-date-picker"
+                                     id="grDatePicker"
+                                     data-endpoint="{% url 'datasets:collection-available-dates' catalog_slug collection_slug %}"
+                                     data-picker-type="{{ collection.date_picker_type }}"
+                                     data-variable="{{ active_var_slug }}"
+                                     data-current="{{ filters.date }}"
+                                     data-default-year="{{ collection.time_end|date:'Y' }}"
+                                     data-default-month="{{ collection.time_end|date:'n' }}"
+                                     data-default-day="{{ collection.time_end|date:'j' }}">
+
+                                    <div class="gr-date-picker-selects">
+
+                                        {# Year — always shown #}
+                                        <select id="grPickerYear" class="gr-date-picker-select"
+                                                aria-label="Year" disabled>
+                                            <option value="">Year</option>
+                                        </select>
+
+                                        {# Month — hidden for annual #}
+                                        {% if collection.date_picker_type != 'number' %}
+                                            <select id="grPickerMonth" class="gr-date-picker-select"
+                                                    aria-label="Month" disabled>
+                                                <option value="">Month</option>
+                                            </select>
+                                        {% endif %}
+
+                                        {# Day — only for date/hourly resolutions #}
+                                        {% if collection.date_picker_type == 'date' %}
+                                            <select id="grPickerDay" class="gr-date-picker-select"
+                                                    aria-label="Day" disabled>
+                                                <option value="">Day</option>
+                                            </select>
+                                        {% endif %}
+
+                                        {# Hour — only for sub-daily resolutions #}
+                                        {% if collection.time_resolution in "sub_hourly,hourly,3hourly,6hourly,12hourly" %}
+                                            <select id="grPickerHour" class="gr-date-picker-select"
+                                                    aria-label="Hour" disabled>
+                                                <option value="">Hour</option>
+                                            </select>
+                                        {% endif %}
+
+                                    </div>
+
+                                    <button type="button" id="grPickerApply"
+                                            class="gr-date-picker-apply" disabled>
+                                        <i class="bi bi-check-lg"></i> Apply
+                                    </button>
+
+                                    {% if filters.date %}
+                                        <a href="?{% query_string_drop 'date' 'p' %}"
+                                           class="gr-items-date-clear">
+                                            <i class="bi bi-x"></i> Clear date
+                                        </a>
+                                    {% endif %}
+
+                                </div>
                             </div>
                         </div>
 
@@ -299,23 +347,5 @@
 {% endblock %}
 
 {% block extra_js %}
-    <script>
-        document.querySelectorAll('[data-filter-toggle]').forEach(function (header) {
-            header.addEventListener('click', function () {
-                const panel = document.getElementById(header.dataset.filterToggle);
-                if (panel) panel.classList.toggle('is-open');
-            });
-        });
-
-        // ── Auto-submit filter form ───────────────────────────────────────────────
-        // Date and forecast run filters submit on change (page reload).
-        // Variable selection is handled by plain <a> links — no JS needed.
-
-        const form = document.getElementById('grItemsFilterForm');
-        if (form) {
-            form.addEventListener('change', function () {
-                form.submit();
-            });
-        }
-    </script>
+    <script src="{% static 'js/collection-detail.js' %}"></script>
 {% endblock %}
