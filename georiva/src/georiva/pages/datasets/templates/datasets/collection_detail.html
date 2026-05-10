@@ -16,7 +16,6 @@
     <section class="gr-catalog-header">
         <div class="gr-container">
 
-            {# Breadcrumb #}
             <nav class="gr-breadcrumb" aria-label="breadcrumb">
                 <a href="{{ page.url }}"><i class="bi bi-layers"></i> Datasets</a>
                 <span class="gr-breadcrumb-sep">/</span>
@@ -27,7 +26,6 @@
 
             <div class="gr-catalog-header-body">
 
-                {# Icon + Title #}
                 <div class="gr-catalog-header-identity">
                     <div class="gr-catalog-header-icon">
                         {% get_catalog_icon catalog.file_format as icon %}
@@ -49,7 +47,6 @@
                     </div>
                 </div>
 
-                {# Meta grid #}
                 <dl class="gr-catalog-meta-grid">
 
                     {% if collection.time_resolution %}
@@ -127,7 +124,6 @@
 
                 </dl>
 
-                {# API links #}
                 <div class="gr-collection-api-links">
                     <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/"
                        class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
@@ -150,7 +146,7 @@
             <div class="gr-section-header">
                 <h2 class="gr-section-title">Items</h2>
                 {% if items.paginator.count %}
-                    <span style="font-family:var(--gr-font-mono);font-size:0.72rem;color:var(--gr-text-3)">
+                    <span class="gr-section-count">
                         {{ items.paginator.count }} item{{ items.paginator.count|pluralize }}
                     </span>
                 {% endif %}
@@ -158,23 +154,25 @@
 
             <div class="gr-datasets-layout gr-items-browser">
 
-                {# ── Sidebar filters ── #}
+                {# ── Sidebar: variable selector + date/run filters ── #}
                 <aside class="gr-sidebar gr-items-sidebar">
                     <form method="get" id="grItemsFilterForm">
 
-                        {# Variables #}
+                        {# Variable selector — radio group, drives item queryset + thumbnails #}
                         {% if variables %}
                             <div class="gr-sidebar-filter is-open" id="filter-variables">
                                 <div class="gr-sidebar-filter-header" data-filter-toggle="filter-variables">
-                                    <span>Variables</span>
+                                    <span>Variable</span>
                                     <i class="bi bi-chevron-down"></i>
                                 </div>
                                 <div class="gr-sidebar-filter-body">
                                     {% for variable in variables %}
-                                        <label class="gr-items-var-checkbox">
-                                            <input type="checkbox" name="variable"
+                                        <label class="gr-items-var-radio {% if not variable.has_coverage %}gr-items-var-radio--empty{% endif %}">
+                                            <input type="radio"
+                                                   name="variable"
                                                    value="{{ variable.slug }}"
-                                                   {% if variable.slug in filters.variables or not filters.variables %}checked{% endif %}>
+                                                   {% if variable.slug == active_var_slug %}checked{% endif %}
+                                                   {% if not variable.has_coverage %}disabled{% endif %}>
                                             <span class="gr-items-var-label">{{ variable.name }}</span>
                                             {% if variable.units %}
                                                 <small class="gr-mono gr-items-var-unit">{{ variable.units }}</small>
@@ -197,7 +195,7 @@
                                        value="{{ filters.date }}"
                                        aria-label="Filter by valid date">
                                 {% if filters.date %}
-                                    <a href="?{% query_string_drop 'date' 'page' %}" class="gr-items-date-clear">
+                                    <a href="?{% query_string_drop 'date' 'p' %}" class="gr-items-date-clear">
                                         <i class="bi bi-x"></i> Clear date
                                     </a>
                                 {% endif %}
@@ -234,25 +232,33 @@
                 <div class="gr-items-main">
                     {% if items %}
                         <div class="gr-item-cards-grid">
-                            {% for asset in items %}
-                                <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/items/{{ asset.item.pk}}/"
+                            {% for item in items %}
+                                <a href="{{ page.url }}{{ catalog_slug }}/{{ collection_slug }}/items/{{ item.pk }}/"
                                    class="gr-item-card">
                                     <div class="gr-item-card-thumb">
-                                        <img src="{{ asset.preview_url }}"
-                                             alt="{{ asset.variable.name }}" loading="lazy">
-                                        <div class="gr-item-card-thumb-placeholder"><i class="bi bi-image"></i></div>
+                                        {% titiler_preview_url item catalog_slug collection_slug active_var_slug as thumb_url %}
+                                        <img src="{{ thumb_url }}"
+                                             alt="{{ item.time|date:"d M Y H:i" }} UTC"
+                                             loading="lazy"
+                                             onerror="this.closest('.gr-item-card-thumb').classList.add('gr-item-card-thumb--error');this.remove()">
+                                        <div class="gr-item-card-thumb-placeholder">
+                                            <i class="bi bi-image"></i>
+                                        </div>
                                     </div>
                                     <div class="gr-item-card-body">
-                                        <div class="gr-item-card-date">{{ asset.item.time|date:"d M Y H:i" }} UTC</div>
-                                        <div class="gr-item-card-variable">{{ asset.variable.name }}</div>
-                                        {% if asset.item.reference_time %}
+                                        <div class="gr-item-card-date">
+                                            {{ item.time|date:"d M Y H:i" }} UTC
+                                        </div>
+                                        {% if item.reference_time %}
                                             <span class="gr-item-card-meta">
-                                                <i class="bi bi-arrow-repeat"></i> Run: {{ asset.item.reference_time|date:"d M Y H:i" }} UTC
+                                                <i class="bi bi-arrow-repeat"></i>
+                                                Run: {{ item.reference_time|date:"d M Y H:i" }} UTC
                                             </span>
                                         {% endif %}
-                                        {% if asset.item.horizon_hours %}
+                                        {% if item.horizon_hours %}
                                             <span class="gr-item-card-meta">
-                                                <i class="bi bi-clock"></i> +{{ asset.item.horizon_hours|floatformat:0 }}h
+                                                <i class="bi bi-clock"></i>
+                                                +{{ item.horizon_hours|floatformat:0 }}h
                                             </span>
                                         {% endif %}
                                     </div>
@@ -260,7 +266,6 @@
                             {% endfor %}
                         </div>
 
-                        {# ── Pagination ── #}
                         {% if items.paginator.num_pages > 1 %}
                             <div style="margin-top:40px;">
                                 {% include "datasets/includes/pagination.html" with items=items page_range=page_range %}
@@ -271,7 +276,13 @@
                         <div class="gr-empty-state">
                             <i class="bi bi-inbox"></i>
                             <p style="font-weight:600;margin-bottom:0.35rem">No items found</p>
-                            <p>Try adjusting the filters.</p>
+                            <p>
+                                {% if filters.date %}
+                                    No data for this variable on {{ filters.date }}.
+                                {% else %}
+                                    No data ingested yet for this variable.
+                                {% endif %}
+                            </p>
                         </div>
                     {% endif %}
 
@@ -285,10 +296,6 @@
 
 {% block extra_js %}
     <script>
-        // ── Filter accordion ──────────────────────────────────────────────────────
-        // Toggles .is-open on the parent .gr-sidebar-filter when a header is clicked.
-        // Driven by [data-filter-toggle] on the header element.
-
         document.querySelectorAll('[data-filter-toggle]').forEach(function (header) {
             header.addEventListener('click', function () {
                 const panel = document.getElementById(header.dataset.filterToggle);
@@ -297,8 +304,8 @@
         });
 
         // ── Auto-submit filter form ───────────────────────────────────────────────
-        // Submits #grItemsFilterForm whenever any input inside it changes.
-        // Covers checkboxes, the date input, and the forecast run select.
+        // Date and forecast run filters submit on change (page reload).
+        // Variable selection is handled by plain <a> links — no JS needed.
 
         const form = document.getElementById('grItemsFilterForm');
         if (form) {

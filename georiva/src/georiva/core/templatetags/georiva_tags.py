@@ -1,4 +1,5 @@
 import json
+from urllib.parse import urlencode
 
 from django import template
 from django.conf import settings
@@ -191,3 +192,19 @@ def query_string_drop(context, *keys):
     for key in keys:
         params.pop(key, None)
     return params.urlencode()
+
+
+@register.simple_tag
+def titiler_preview_url(item, catalog_slug, collection_slug, variable_slug):
+    """
+    Build a TiTiler preview.webp URL for a given item and variable.
+ 
+    Usage:
+        {% titiler_preview_url item catalog_slug collection_slug active_var_slug as thumb_url %}
+        <img src="{{ thumb_url }}">
+    """
+    params = {'time': item.time_iso}
+    if item.reference_time:
+        params['reftime'] = item.reference_time_iso
+    qs = urlencode(params)
+    return f"/titiler/{catalog_slug}/{collection_slug}/{variable_slug}/preview.webp?{qs}"
