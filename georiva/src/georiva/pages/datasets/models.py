@@ -153,7 +153,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 assets__variable__is_active=True,
             )
             .distinct()
-            .order_by('-time')
+            .order_by('time' if collection.is_forecast else '-time')
         )
 
         page_number = request.GET.get('p', 1)
