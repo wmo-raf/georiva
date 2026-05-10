@@ -14,7 +14,6 @@ from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from timescale.db.models.models import TimescaleModel
 from wagtail.models import Orderable
-from wagtail.snippets.models import register_snippet
 
 
 class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
@@ -167,6 +166,28 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         if self.reference_time:
             return self.reference_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         return None
+    
+    def display_time(self, time_resolution: str = '') -> str:
+        """
+        Format valid_time according to the collection's time resolution.
+        """
+        formats = {
+            'sub_hourly': '%d %b %Y %H:%M',
+            'hourly': '%d %b %Y %H:%M',
+            '3hourly': '%d %b %Y %H:%M',
+            '6hourly': '%d %b %Y %H:%M',
+            '12hourly': '%d %b %Y %H:%M',
+            'daily': '%d %b %Y',
+            'pentadal': '%d %b %Y',
+            'dekadal': '%d %b %Y',
+            'monthly': '%b %Y',
+            'sub_seasonal': '%d %b %Y',
+            'seasonal': '%b %Y',
+            'annual': '%Y',
+            'climatology': '%b %Y',
+        }
+        fmt = formats.get(time_resolution, '%d %b %Y %H:%M')
+        return self.time.strftime(fmt)
 
 
 class Asset(TimeStampedModel, Orderable):

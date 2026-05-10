@@ -208,6 +208,46 @@ class Collection(TimeStampedModel, ClusterableModel):
             return list(extent)
         return self.bounds
     
+    @property
+    def date_picker_type(self) -> str:
+        """
+        HTML input type for the date filter, based on time resolution.
+        'number'  → year only   (annual)
+        'month'   → year+month  (monthly, seasonal, climatology)
+        'date'    → full date   (everything else)
+        """
+        if self.time_resolution == self.TimeResolution.ANNUAL:
+            return 'number'
+        if self.time_resolution in (
+                self.TimeResolution.MONTHLY,
+                self.TimeResolution.SEASONAL,
+                self.TimeResolution.CLIMATOLOGY,
+        ):
+            return 'month'
+        return 'date'
+    
+    @property
+    def date_picker_min(self) -> str:
+        """Formatted time_start for use as the date input min attribute."""
+        if not self.time_start:
+            return ''
+        if self.date_picker_type == 'number':
+            return str(self.time_start.year)
+        if self.date_picker_type == 'month':
+            return self.time_start.strftime('%Y-%m')
+        return self.time_start.strftime('%Y-%m-%d')
+    
+    @property
+    def date_picker_max(self) -> str:
+        """Formatted time_end for use as the date input max attribute."""
+        if not self.time_end:
+            return ''
+        if self.date_picker_type == 'number':
+            return str(self.time_end.year)
+        if self.date_picker_type == 'month':
+            return self.time_end.strftime('%Y-%m')
+        return self.time_end.strftime('%Y-%m-%d')
+    
     def get_loader(self):
         """Get the loader instance for this catalog."""
         if not self.loader_profile:

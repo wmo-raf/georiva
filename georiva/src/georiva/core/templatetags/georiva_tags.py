@@ -208,3 +208,8 @@ def titiler_preview_url(item, catalog_slug, collection_slug, variable_slug):
         params['reftime'] = item.reference_time_iso
     qs = urlencode(params)
     return f"/titiler/{catalog_slug}/{collection_slug}/{variable_slug}/preview.webp?{qs}"
+
+
+@register.filter
+def item_display_time(item, time_resolution):
+    return item.display_time(time_resolution)

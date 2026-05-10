@@ -190,10 +190,14 @@
                                 <i class="bi bi-chevron-down"></i>
                             </div>
                             <div class="gr-sidebar-filter-body">
-                                <input type="date" name="date" id="grItemsDateFilter"
+                                <input type="{{ collection.date_picker_type }}"
+                                       name="date"
+                                       id="grItemsDateFilter"
                                        class="gr-items-date-input"
                                        value="{{ filters.date }}"
-                                       aria-label="Filter by valid date">
+                                       {% if collection.date_picker_min %}min="{{ collection.date_picker_min }}"{% endif %}
+                                       {% if collection.date_picker_max %}max="{{ collection.date_picker_max }}"{% endif %}
+                                       aria-label="Filter by date">
                                 {% if filters.date %}
                                     <a href="?{% query_string_drop 'date' 'p' %}" class="gr-items-date-clear">
                                         <i class="bi bi-x"></i> Clear date
@@ -247,7 +251,7 @@
                                     </div>
                                     <div class="gr-item-card-body">
                                         <div class="gr-item-card-date">
-                                            {{ item.time|date:"d M Y H:i" }} UTC
+                                            {{ item|item_display_time:collection.time_resolution }}
                                         </div>
                                         {% if item.reference_time %}
                                             <span class="gr-item-card-meta">

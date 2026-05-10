@@ -117,9 +117,9 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         # fall back the active variable if it has no coverage.
         base_items_qs = Item.objects.filter(collection=collection)
         if date_str:
-            parsed_date = parse_date(date_str)
-            if parsed_date:
-                base_items_qs = base_items_qs.filter(time__date=parsed_date)
+            base_items_qs = self._apply_date_filter(
+                base_items_qs, date_str, collection.date_picker_type
+            )
         if run_str:
             parsed_run = parse_datetime(run_str)
             if parsed_run:
@@ -217,6 +217,30 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
+
+    def _apply_date_filter(self, qs, date_str: str, picker_type: str):
+        """
+        Apply a date filter to an Item queryset, interpreting date_str
+        according to the collection's picker type.
+
+        picker_type 'date'   → date_str is YYYY-MM-DD → filter by exact date
+        picker_type 'month'  → date_str is YYYY-MM    → filter by year + month
+        picker_type 'number' → date_str is YYYY       → filter by year
+        """
+        from datetime import date as date_cls
+        try:
+            if picker_type == 'number':
+                return qs.filter(time__year=int(date_str))
+            if picker_type == 'month':
+                year, month = date_str.split('-')
+                return qs.filter(time__year=int(year), time__month=int(month))
+            # default: full date
+            parsed = parse_date(date_str)
+            if parsed:
+                return qs.filter(time__date=parsed)
+        except (ValueError, AttributeError):
+            pass
+        return qs
 
     def _base_collections_qs(self):
         return (
