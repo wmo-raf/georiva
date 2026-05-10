@@ -1,6 +1,5 @@
 from django.core.paginator import Paginator
 from django.db import models
-from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, render
 from django.utils.dateparse import parse_date, parse_datetime
 from wagtail.admin.paginator import WagtailPaginator
@@ -117,9 +116,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         # fall back the active variable if it has no coverage.
         base_items_qs = Item.objects.filter(collection=collection)
         if date_str:
-            base_items_qs = self._apply_date_filter(
-                base_items_qs, date_str, collection.date_picker_type
-            )
+            base_items_qs = self._apply_date_filter(base_items_qs, date_str)
         if run_str:
             parsed_run = parse_datetime(run_str)
             if parsed_run:
@@ -197,28 +194,19 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
     @path('<slug:catalog_slug>/<slug:collection_slug>/items/<int:item_id>/')
     def item_detail(self, request, catalog_slug, collection_slug, item_id):
-
+        from georiva.datasets.views import collection_item_detail
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collection = get_object_or_404(
-            Collection,
-            catalog=catalog,
-            slug=collection_slug,
-            is_active=True,
+            Collection, catalog=catalog, slug=collection_slug, is_active=True,
         )
         item = get_object_or_404(Item, pk=item_id, collection=collection)
-
-        return render(request, 'datasets/item_detail.html', {
-            'page': self,
-            'catalog': catalog,
-            'collection': collection,
-            'item': item,
-        })
+        return collection_item_detail(request, self, catalog, collection, item)
 
     # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
 
-    def _apply_date_filter(self, qs, date_str: str, picker_type: str):
+    def _apply_date_filter(self, qs, date_str: str):
         """
         Apply a date filter to an Item queryset, interpreting date_str
         according to the collection's picker type.
@@ -229,16 +217,22 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         """
         from datetime import date as date_cls
         try:
-            if picker_type == 'number':
-                return qs.filter(time__year=int(date_str))
-            if picker_type == 'month':
-                year, month = date_str.split('-')
-                return qs.filter(time__year=int(year), time__month=int(month))
-            # default: full date
-            parsed = parse_date(date_str)
+            parts = date_str.split('T')[0].split('-')  # strip time component first
+            if len(parts) == 1:
+                # Year only — e.g. "2025"
+                return qs.filter(time__year=int(parts[0]))
+            if len(parts) == 2:
+                # Year + month — e.g. "2025-03"
+                return qs.filter(time__year=int(parts[0]), time__month=int(parts[1]))
+            # Full date or datetime — e.g. "2025-03-15" or "2025-03-15T06:00:00Z"
+            parsed = parse_date(parts[0] + '-' + parts[1] + '-' + parts[2])
             if parsed:
+                if 'T' in date_str:
+                    # Has hour component
+                    hour = int(date_str.split('T')[1].split(':')[0])
+                    return qs.filter(time__date=parsed, time__hour=hour)
                 return qs.filter(time__date=parsed)
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, IndexError):
             pass
         return qs
 
