@@ -28,7 +28,7 @@ django-deep-translator==1.5.2
 drf-spectacular
 pydantic==2.12.5
 xarray==2025.11.0
-zarr>=3.0.3,<4.0
+zarr>=3.2.1
 s3fs>=2024.6.0
 fsspec>=2024.6.0
 django-storages==1.14.6
@@ -43,5 +43,5 @@ wagtail-color-panel==1.7.1
 rio-cogeo==7.0.2
 pint==0.25.3
 virtual_tiff==0.4.0
-virtualizarr==2.6.0
+virtualizarr==2.6.1
 kerchunk==0.2.10
