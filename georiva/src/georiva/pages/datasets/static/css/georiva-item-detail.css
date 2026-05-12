@@ -1,0 +1,141 @@
+/* ==========================================================================
+   Item Header
+   ========================================================================== */
+
+.gr-item-header-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+
+.gr-item-meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    background: var(--gr-dark-2);
+    border: 1px solid var(--gr-dark-border);
+    border-radius: var(--gr-radius);
+    font-family: var(--gr-font-mono);
+    font-size: 0.72rem;
+    color: var(--gr-dark-text-2);
+}
+
+.gr-item-nav {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.gr-item-nav .is-disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   Downloads
+   ========================================================================== */
+
+.gr-downloads-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.gr-download-group {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius-lg);
+    padding: 1rem 1.25rem;
+}
+
+.gr-download-group-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.gr-download-group-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--gr-text-1);
+}
+
+.gr-download-group-unit {
+    font-size: 0.72rem;
+    color: var(--gr-text-3);
+}
+
+.gr-download-assets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.gr-download-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--gr-light-1);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    font-size: 0.78rem;
+    color: var(--gr-text-2);
+    text-decoration: none;
+    transition: border-color var(--gr-dur) var(--gr-ease),
+                color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-download-btn:hover {
+    border-color: var(--gr-accent-border);
+    color: var(--gr-accent);
+}
+
+.gr-download-size {
+    font-size: 0.68rem;
+    color: var(--gr-text-3);
+}
+
+/* ==========================================================================
+   Map — reuses georiva-collection-detail.css map classes
+   (gr-map-section, gr-map-shell, gr-map-canvas, gr-map-sidebar, etc.)
+   No extra map styles needed here.
+   ========================================================================== */
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 768px) {
+    .gr-item-nav {
+        margin-left: 0;
+        margin-top: 1rem;
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .gr-download-assets {
+        flex-direction: column;
+    }
+
+    .gr-map-section .gr-container {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+    }
+
+    .gr-map-shell {
+        border-radius: var(--gr-radius-lg);
+    }
+
+    .gr-map-canvas {
+        border-radius: var(--gr-radius-lg);
+        border-left: 1px solid var(--gr-light-border);
+        border-right: 1px solid var(--gr-light-border);
+    }
+}

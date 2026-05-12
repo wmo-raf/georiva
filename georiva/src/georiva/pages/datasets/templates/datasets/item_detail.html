@@ -1,15 +1,20 @@
 {% extends "georiva/base.html" %}
 {% load static georiva_tags i18n %}
 
-{% block title %}Item {{ item_id }} — {{ collection.name }}{% endblock %}
+{% block title %}{{ item|item_display_time:collection.time_resolution }} — {{ collection.name }}{% endblock %}
 
 {% block extra_css %}
     <link rel="stylesheet" href="{% static 'css/georiva-home.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-map.css' %}">
+    <link rel="stylesheet" href="{% static 'css/georiva-item-detail.css' %}">
+    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
 {% endblock %}
 
 {% block content %}
 
+    {# ── Header ── #}
     <section class="gr-catalog-header">
         <div class="gr-container">
 
@@ -18,9 +23,9 @@
                 <span class="gr-breadcrumb-sep">/</span>
                 <a href="{{ page.url }}{{ catalog.slug }}/">{{ catalog.name }}</a>
                 <span class="gr-breadcrumb-sep">/</span>
-                <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/">{{ collection.name }}</a>
+                <a href="{{ collection_url }}">{{ collection.name }}</a>
                 <span class="gr-breadcrumb-sep">/</span>
-                <span class="gr-mono" style="font-size:0.82rem">{{ item_id }}</span>
+                <span>{{ item|item_display_time:collection.time_resolution }}</span>
             </nav>
 
             <div class="gr-catalog-header-body">
@@ -31,33 +36,264 @@
                     </div>
                     <div>
                         <div class="gr-catalog-header-eyebrow">
-                            <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/"
+                            <a href="{{ collection_url }}"
                                style="color:var(--gr-accent);text-decoration:none">
                                 {{ collection.name }}
                             </a>
                         </div>
-                        <h1 class="gr-catalog-header-title gr-mono" style="font-size:1.1rem">{{ item_id }}</h1>
+                        <h1 class="gr-catalog-header-title">
+                            {{ item|item_display_time:collection.time_resolution }}
+                        </h1>
+                        <div class="gr-item-header-meta">
+                            {% if item.reference_time %}
+                                <span class="gr-item-meta-chip">
+                                    <i class="bi bi-arrow-repeat"></i>
+                                    Run: {{ item.reference_time|date:"d M Y H:i" }} UTC
+                                </span>
+                                <span class="gr-item-meta-chip">
+                                    <i class="bi bi-clock"></i>
+                                    +{{ item.horizon_hours|floatformat:0 }}h
+                                </span>
+                            {% endif %}
+                            {% if collection.time_resolution %}
+                                <span class="gr-item-meta-chip">
+                                    <i class="bi bi-calendar3"></i>
+                                    {{ collection.get_time_resolution_display }}
+                                </span>
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
-            </div>
 
+                {# Prev / Next navigation #}
+                <div class="gr-item-nav">
+                    {% if prev_item %}
+                        <a href="{{ collection_url }}items/{{ prev_item.pk }}/?variable={{ active_var_slug }}"
+                           class="gr-btn gr-btn-ghost-dark">
+                            <i class="bi bi-chevron-left"></i> Previous
+                        </a>
+                    {% else %}
+                        <span class="gr-btn gr-btn-ghost-dark is-disabled">
+                            <i class="bi bi-chevron-left"></i> Previous
+                        </span>
+                    {% endif %}
+                    {% if next_item %}
+                        <a href="{{ collection_url }}items/{{ next_item.pk }}/?variable={{ active_var_slug }}"
+                           class="gr-btn gr-btn-ghost-dark">
+                            Next <i class="bi bi-chevron-right"></i>
+                        </a>
+                    {% else %}
+                        <span class="gr-btn gr-btn-ghost-dark is-disabled">
+                            Next <i class="bi bi-chevron-right"></i>
+                        </span>
+                    {% endif %}
+                </div>
+
+            </div>
         </div>
     </section>
 
-    <section class="gr-section">
+    {# ── Map ── #}
+    <div class="gr-map-section">
         <div class="gr-container">
-            <div class="gr-empty-state" style="padding:4rem 0">
-                <i class="bi bi-tools" style="font-size:2rem;color:var(--gr-text-3)"></i>
-                <p style="font-weight:600;margin-bottom:0.35rem;margin-top:1rem">Item detail coming soon</p>
-                <p style="color:var(--gr-text-3)">
-                    This page is under construction. Assets and detailed metadata will appear here.
-                </p>
-                <a href="{{ page.url }}{{ catalog.slug }}/{{ collection.slug }}/"
-                   class="gr-btn gr-btn-ghost-dark" style="margin-top:1.5rem">
-                    <i class="bi bi-arrow-left"></i> Back to {{ collection.name }}
-                </a>
+            <div class="gr-map-shell">
+                <div class="gr-map-canvas" id="grMapCanvas">
+
+                    {# Variable sidebar #}
+                    {% if cog_assets %}
+                        <aside class="gr-map-sidebar" id="grMapSidebar">
+                            <div class="gr-map-sidebar-header">
+                                <span class="gr-map-sidebar-label">Variables</span>
+                            </div>
+                            <div class="gr-map-sidebar-body">
+                                {% for asset in cog_assets %}
+                                    <button type="button"
+                                            class="gr-map-var-btn {% if asset.variable.slug == active_var_slug %}gr-map-var-btn--active{% endif %}"
+                                            data-variable-slug="{{ asset.variable.slug }}"
+                                            data-variable-name="{{ asset.variable.name }}"
+                                            data-variable-units="{{ asset.variable.units|default:'' }}">
+                                        <span class="gr-map-var-dot"></span>
+                                        <span class="gr-map-var-name">{{ asset.variable.name }}</span>
+                                        {% if asset.variable.units %}
+                                            <span class="gr-map-var-unit gr-mono">{{ asset.variable.units }}</span>
+                                        {% endif %}
+                                    </button>
+                                {% endfor %}
+                            </div>
+                        </aside>
+                    {% endif %}
+
+                    <div id="grMap"></div>
+
+                    {# Basemap selector #}
+                    <div class="gr-map-basemap-selector">
+                        <button class="gr-map-basemap-btn" id="grBasemapBtn" type="button">
+                            <i class="bi bi-layers-half"></i>
+                            <span id="grBasemapLabel">Dark</span>
+                            <i class="bi bi-chevron-down" style="font-size:0.6rem;opacity:0.6"></i>
+                        </button>
+                        <div class="gr-map-basemap-menu" id="grBasemapMenu">
+                            <div class="gr-map-basemap-option gr-bm-active" data-basemap="dark">
+                                <span>Dark</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                            <div class="gr-map-basemap-option" data-basemap="light">
+                                <span>Light</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                            <div class="gr-map-basemap-option" data-basemap="satellite">
+                                <span>Satellite</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                            <div class="gr-map-basemap-option" data-basemap="osm">
+                                <span>OSM</span><i class="bi bi-check2 gr-bm-check"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    {# Legend #}
+                    <div class="gr-map-legend" id="grLegend" style="display:none">
+                        <div class="gr-map-legend-title" id="grLegendTitle">—</div>
+                        <div class="gr-map-legend-scale" id="grLegendScale"></div>
+                        <div class="gr-map-legend-labels">
+                            <span id="grLegendMin">0</span>
+                            <span id="grLegendMax">100</span>
+                        </div>
+                        <div class="gr-map-legend-units" id="grLegendUnits"></div>
+                        <div class="gr-map-legend-opacity">
+                            <span>Opacity</span>
+                            <span id="grOpacityVal">100%</span>
+                        </div>
+                        <input type="range" class="gr-map-opacity-slider" id="grOpacitySlider"
+                               min="0" max="100" value="100">
+                    </div>
+
+                    {# Loading #}
+                    <div class="gr-map-loading" id="grMapLoading" style="display:none">
+                        <div class="gr-map-spinner"></div>
+                        <span>Loading layer…</span>
+                    </div>
+
+                    {# Coords #}
+                    <div class="gr-map-coords" id="grMapCoords">—</div>
+
+                </div>
             </div>
+        </div>
+    </div>
+
+    {# ── Metadata ── #}
+    <section class="gr-section gr-section--alt">
+        <div class="gr-container">
+
+            <div class="gr-section-header">
+                <h2 class="gr-section-title">Metadata</h2>
+            </div>
+
+            <dl class="gr-catalog-meta-grid">
+
+                {% if item.bounds %}
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-bounding-box"></i> Bounding Box</dt>
+                        <dd class="gr-mono" style="font-size:0.8rem">
+                            W {{ item.bounds.0|floatformat:4 }}
+                            S {{ item.bounds.1|floatformat:4 }}
+                            E {{ item.bounds.2|floatformat:4 }}
+                            N {{ item.bounds.3|floatformat:4 }}
+                        </dd>
+                    </div>
+                {% endif %}
+
+                <div class="gr-catalog-meta-item">
+                    <dt><i class="bi bi-globe"></i> CRS</dt>
+                    <dd>{{ item.crs }}</dd>
+                </div>
+
+                {% if item.width and item.height %}
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-grid-3x3"></i> Dimensions</dt>
+                        <dd class="gr-mono">{{ item.width }} × {{ item.height }} px</dd>
+                    </div>
+                {% endif %}
+
+                {% if item.resolution_x and item.resolution_y %}
+                    <div class="gr-catalog-meta-item">
+                        <dt><i class="bi bi-arrows-angle-expand"></i> Resolution</dt>
+                        <dd class="gr-mono">
+                            {{ item.resolution_x|floatformat:4 }} × {{ item.resolution_y|floatformat:4 }}
+                        </dd>
+                    </div>
+                {% endif %}
+
+                <div class="gr-catalog-meta-item">
+                    <dt><i class="bi bi-code-slash"></i> STAC Item</dt>
+                    <dd>
+                        <a href="/api/stac/collections/{{ catalog_slug }}/{{ collection_slug }}/items/{{ item.pk }}/"
+                           target="_blank" rel="noopener" class="gr-link">
+                            View JSON <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                    </dd>
+                </div>
+
+            </dl>
+
         </div>
     </section>
 
+    {# ── Downloads ── #}
+    {% if downloads_by_variable %}
+        <section class="gr-section">
+            <div class="gr-container">
+
+                <div class="gr-section-header">
+                    <h2 class="gr-section-title">Downloads</h2>
+                </div>
+
+                <div class="gr-downloads-grid">
+                    {% for slug, group in downloads_by_variable.items %}
+                        <div class="gr-download-group">
+                            <div class="gr-download-group-header">
+                                <span class="gr-download-group-name">{{ group.variable.name }}</span>
+                                <span class="gr-mono gr-download-group-unit">{{ group.variable.units }}</span>
+                            </div>
+                            <div class="gr-download-assets">
+                                {% for asset in group.assets %}
+                                    <a href="{{ asset.url }}" class="gr-download-btn"
+                                       download target="_blank" rel="noopener">
+                                        <i class="bi bi-download"></i>
+                                        {{ asset.get_format_display }}
+                                        {% if asset.file_size %}
+                                            <span class="gr-download-size gr-mono">
+                                                {{ asset.file_size|filesizeformat }}
+                                            </span>
+                                        {% endif %}
+                                    </a>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+            </div>
+        </section>
+    {% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+    {# Item config injected for JS — time is fixed, no time selector needed #}
+    <script id="grItemConfig" type="application/json">
+        {
+            "catalogSlug":    "{{ catalog_slug }}",
+            "collectionSlug": "{{ collection_slug }}",
+            "activeVarSlug":  "{{ active_var_slug }}",
+            "itemTime":       "{{ item.time_iso }}",
+            "referenceTime":  "{{ item.reference_time_iso|default:'' }}",
+            "edrUrl":         "/api/edr/collections/{{ collection_slug }}/",
+            "minioBase":      "{{ MINIO_ASSETS_BASE_URL }}",
+            "titilerBase":    "/titiler"
+        }
+    </script>
+
+    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/deck.gl@9.2.6/dist/dist.dev.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
+    <script src="{% static 'js/item-detail.js' %}"></script>
 {% endblock %}

@@ -22,7 +22,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         /datasets/<catalog_slug>/<collection_slug>/  → collection detail
         /datasets/<catalog_slug>/<collection_slug>/items/<item_id>/  → item detail
     """
-
+    
     # Operator-configurable fields
     intro_text = models.TextField(
         blank=True,
@@ -33,35 +33,35 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         default=20,
         help_text="Number of collections to show per page."
     )
-
+    
     max_count = 1
     parent_page_types = ['home.HomePage']
     subpage_types = []
-
+    
     content_panels = Page.content_panels + [
         MultiFieldPanel([
             FieldPanel('intro_text'),
             FieldPanel('collections_per_page'),
         ], heading="Configuration"),
     ]
-
+    
     class Meta:
         verbose_name = "Datasets Index Page"
-
+    
     # -------------------------------------------------------------------------
     # Routes
     # -------------------------------------------------------------------------
-
+    
     @path('')
     def index(self, request):
         """All collections — filterable by topic, resolution, catalog. Paginated."""
-
+        
         collections = self._base_collections_qs()
         collections, filters = self._apply_filters(request, collections)
-
+        
         paginator = Paginator(collections, self.collections_per_page)
         page = paginator.get_page(request.GET.get('page'))
-
+        
         return render(request, 'datasets/index.html', {
             'page': self,
             'collections': page,
@@ -69,26 +69,26 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'filters': filters,
             **self._filter_context(),
         })
-
+    
     @path('<slug:catalog_slug>/')
     def catalog_detail(self, request, catalog_slug):
         """Catalog landing page — shows catalog metadata + all its collections."""
-
+        
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collections = (
             self._base_collections_qs()
             .filter(catalog=catalog)
         )
-
+        
         return render(request, 'datasets/catalog_detail.html', {
             'page': self,
             'catalog': catalog,
             'collections': collections,
         })
-
+    
     @path('<slug:catalog_slug>/<slug:collection_slug>/')
     def collection_detail(self, request, catalog_slug, collection_slug):
-
+        
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collection = get_object_or_404(
             Collection,
@@ -96,20 +96,20 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             slug=collection_slug,
             is_active=True,
         )
-
+        
         variables = list(
             collection.variables.filter(is_active=True).order_by('sort_order')
         )
-
+        
         # --- Filters ---
         active_var_slug = request.GET.get('variable', '').strip()
         date_str = request.GET.get('date', '').strip()
         run_str = request.GET.get('run', '').strip()
-
+        
         # Validate active variable — must belong to this collection
         if active_var_slug not in {v.slug for v in variables}:
             active_var_slug = variables[0].slug if variables else ''
-
+        
         # --- Variable coverage ---
         # Check which variables have at least one COG asset in the current
         # filtered item set. Used to disable variables with no data and to
@@ -121,7 +121,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             parsed_run = parse_datetime(run_str)
             if parsed_run:
                 base_items_qs = base_items_qs.filter(reference_time=parsed_run)
-
+        
         coverage_qs = (
             Asset.objects
             .filter(
@@ -133,16 +133,16 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .distinct()
         )
         coverage = set(coverage_qs)
-
+        
         # Annotate variables with COG coverage flag
         for variable in variables:
             variable.has_coverage = variable.slug in coverage
-
+        
         # Fall back active variable to first one with COG coverage
         if not active_var_slug or active_var_slug not in coverage:
             fallback = next((v for v in variables if v.has_coverage), None)
             active_var_slug = fallback.slug if fallback else active_var_slug
-
+        
         # --- Item queryset ---
         # Only items that have a COG asset for the active variable.
         items_qs = (
@@ -155,12 +155,12 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .distinct()
             .order_by('time' if collection.is_forecast else '-time')
         )
-
+        
         page_number = request.GET.get('p', 1)
         paginator = WagtailPaginator(items_qs, ITEMS_PER_PAGE)
         items_page = paginator.get_page(page_number)
         page_range = paginator.get_elided_page_range(items_page.number)
-
+        
         # --- Forecast runs ---
         forecast_runs = []
         if collection.is_forecast:
@@ -171,13 +171,13 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 .distinct()
                 .order_by('-reference_time')[:50]
             )
-
+        
         filters = {
             'variable': active_var_slug,
             'date': date_str,
             'run': run_str,
         }
-
+        
         return render(request, 'datasets/collection_detail.html', {
             'page': self,
             'catalog': catalog,
@@ -191,21 +191,108 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'catalog_slug': catalog.slug,
             'collection_slug': collection.slug,
         })
-
+    
     @path('<slug:catalog_slug>/<slug:collection_slug>/items/<int:item_id>/')
-    def item_detail(self, request, catalog_slug, collection_slug, item_id):
-        from georiva.datasets.views import collection_item_detail
+    def collection_item_detail(self, request, catalog_slug, collection_slug, item_id):
+        
         catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
         collection = get_object_or_404(
-            Collection, catalog=catalog, slug=collection_slug, is_active=True,
+            Collection,
+            catalog=catalog,
+            slug=collection_slug,
+            is_active=True,
         )
         item = get_object_or_404(Item, pk=item_id, collection=collection)
-        return collection_item_detail(request, self, catalog, collection, item)
-
+        
+        # COG assets for the map — one per variable
+        cog_assets = list(
+            item.assets
+            .filter(format=Asset.Format.COG, variable__is_active=True)
+            .select_related('variable', 'variable__unit', 'variable__palette')
+            .order_by('variable__sort_order')
+        )
+        
+        # All downloadable assets for the downloads section
+        downloadable_assets = (
+            item.assets
+            .filter(
+                format__in=[
+                    Asset.Format.COG,
+                    Asset.Format.GEOTIFF,
+                ],
+                variable__is_active=True,
+            )
+            .select_related('variable')
+            .order_by('variable__sort_order', 'format')
+        )
+        
+        # Resolve active variable from ?variable= param
+        active_var_slug = request.GET.get('variable', '').strip()
+        cog_slugs = [a.variable.slug for a in cog_assets]
+        if active_var_slug not in cog_slugs:
+            active_var_slug = cog_slugs[0] if cog_slugs else ''
+        
+        # Previous / next item by time
+        prev_item = (
+            Item.objects
+            .filter(collection=collection, time__lt=item.time)
+            .order_by('-time')
+            .values('pk')
+            .first()
+        )
+        next_item = (
+            Item.objects
+            .filter(collection=collection, time__gt=item.time)
+            .order_by('time')
+            .values('pk')
+            .first()
+        )
+        
+        # Map layer config for WeatherLayers — serialised as JSON in the template
+        map_layers = [
+            {
+                'slug': a.variable.slug,
+                'name': a.variable.name,
+                'units': a.variable.units,
+                'url': a.url,
+                'palette': a.variable.weather_layers_palette,
+                'value_min': a.variable.value_min,
+                'value_max': a.variable.value_max,
+            }
+            for a in cog_assets
+        ]
+        
+        # Group downloadable assets by variable for the template
+        downloads_by_variable = {}
+        for asset in downloadable_assets:
+            slug = asset.variable.slug
+            if slug not in downloads_by_variable:
+                downloads_by_variable[slug] = {
+                    'variable': asset.variable,
+                    'assets': [],
+                }
+            downloads_by_variable[slug]['assets'].append(asset)
+        
+        return render(request, 'datasets/item_detail.html', {
+            'page': self,
+            'catalog': catalog,
+            'collection': collection,
+            'item': item,
+            'active_var_slug': active_var_slug,
+            'cog_assets': cog_assets,
+            'map_layers': map_layers,
+            'downloads_by_variable': downloads_by_variable,
+            'prev_item': prev_item,
+            'next_item': next_item,
+            'collection_url': f"{self.url}{catalog.slug}/{collection.slug}/",
+            'catalog_slug': catalog.slug,
+            'collection_slug': collection.slug,
+        })
+    
     # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
-
+    
     def _apply_date_filter(self, qs, date_str: str):
         """
         Apply a date filter to an Item queryset, interpreting date_str
@@ -215,7 +302,6 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         picker_type 'month'  → date_str is YYYY-MM    → filter by year + month
         picker_type 'number' → date_str is YYYY       → filter by year
         """
-        from datetime import date as date_cls
         try:
             parts = date_str.split('T')[0].split('-')  # strip time component first
             if len(parts) == 1:
@@ -235,7 +321,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         except (ValueError, AttributeError, IndexError):
             pass
         return qs
-
+    
     def _base_collections_qs(self):
         return (
             Collection.objects
@@ -244,7 +330,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .prefetch_related('catalog__topics', 'variables')
             .order_by('catalog__name', 'sort_order', 'name')
         )
-
+    
     def _apply_filters(self, request, qs):
         """
         Apply GET param filters to a collections queryset.
@@ -256,7 +342,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'catalog': request.GET.get('catalog', ''),
             'q': request.GET.get('q', ''),
         }
-
+        
         if filters['q']:
             from django.db.models import Q
             qs = qs.filter(
@@ -264,18 +350,18 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 Q(description__icontains=filters['q']) |
                 Q(catalog__name__icontains=filters['q'])
             )
-
+        
         if filters['topic']:
             qs = qs.filter(catalog__topics__slug=filters['topic'])
-
+        
         if filters['resolution']:
             qs = qs.filter(time_resolution=filters['resolution'])
-
+        
         if filters['catalog']:
             qs = qs.filter(catalog__slug=filters['catalog'])
-
+        
         return qs, filters
-
+    
     def _filter_context(self):
         """Context data needed to render the sidebar filters."""
         active_resolutions = (
@@ -286,7 +372,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .distinct()
         )
         choices = dict(Collection.TimeResolution.choices)
-
+        
         return {
             'topics': Topic.objects.filter(catalogs__is_active=True).distinct().order_by('sort_order', 'name'),
             'catalogs': Catalog.objects.filter(is_active=True).order_by('name'),
