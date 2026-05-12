@@ -5,7 +5,7 @@
 
 {% block extra_css %}
     {{ block.super }}
-    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="{% static 'css/vendor/maplibre-gl.css' %}">
     <style>
         :root {
             --sidebar-width: 360px;
@@ -1040,9 +1040,9 @@
 
 {% block extra_js %}
     {{ block.super }}
-    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
-    <script src="https://unpkg.com/deck.gl@9.2.6/dist/dist.dev.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
+    <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
+    <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
+    <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
     <script>
         (function async() {
             'use strict';

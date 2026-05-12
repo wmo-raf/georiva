@@ -339,9 +339,7 @@
 }
 
 @keyframes gr-spin {
-    to {
-        transform: rotate(360deg);
-    }
+    to { transform: rotate(360deg); }
 }
 
 /* ==========================================================================
@@ -350,8 +348,8 @@
 
 .gr-map-coords {
     position: absolute;
-    bottom: 1rem;
-    right: 3rem;
+    bottom: 2rem;
+    right: 0.75rem;
     font-family: var(--gr-font-mono);
     font-size: 0.62rem;
     color: rgba(255, 255, 255, 0.5);
@@ -472,6 +470,179 @@
     background: rgba(255, 255, 255, 0.82);
     border-color: rgba(0, 0, 0, 0.08);
     color: var(--gr-text-2);
+}
+
+/* ==========================================================================
+   Sidebar extras — divider, section, layer switcher, level pills
+   ========================================================================== */
+
+.gr-map-sidebar-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+    margin: 0.25rem 0;
+}
+
+.gr-map-sidebar-section {
+    padding: 0.6rem 0.8rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.gr-map-layer-switcher {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.gr-map-layer-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.7rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    font-family: var(--gr-font-sans);
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    text-align: left;
+    transition: all var(--gr-dur) var(--gr-ease);
+}
+
+.gr-map-layer-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+}
+
+.gr-map-layer-btn.is-active {
+    background: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.gr-map-level-pills {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.gr-map-level-pill {
+    padding: 0.25rem 0.6rem;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    font-family: var(--gr-font-mono);
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    transition: all var(--gr-dur) var(--gr-ease);
+}
+
+.gr-map-level-pill:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #ffffff;
+}
+
+.gr-map-level-pill.is-active {
+    background: var(--gr-accent);
+    border-color: var(--gr-accent);
+    color: #ffffff;
+}
+
+/* Light theme overrides */
+.gr-map-canvas--light .gr-map-sidebar-divider {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+.gr-map-canvas--light .gr-map-layer-btn {
+    color: var(--gr-text-2);
+}
+
+.gr-map-canvas--light .gr-map-layer-btn:hover {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--gr-text-1);
+}
+
+.gr-map-canvas--light .gr-map-layer-btn.is-active {
+    background: rgba(0, 0, 0, 0.06);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: var(--gr-text-1);
+}
+
+.gr-map-canvas--light .gr-map-level-pill {
+    border-color: rgba(0, 0, 0, 0.15);
+    color: var(--gr-text-2);
+}
+
+.gr-map-canvas--light .gr-map-level-pill:hover {
+    border-color: rgba(0, 0, 0, 0.35);
+    color: var(--gr-text-1);
+}
+
+/* ==========================================================================
+   Boundary tooltip
+   ========================================================================== */
+
+.gr-boundary-tooltip {
+    position: absolute;
+    z-index: 50;
+    pointer-events: none;
+    background: rgba(8, 13, 24, 0.90);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--gr-radius);
+    padding: 0.5rem 0.75rem;
+    min-width: 140px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.gr-boundary-tooltip-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 0.35rem;
+    white-space: nowrap;
+}
+
+.gr-boundary-tooltip-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.gr-boundary-tooltip-label {
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--gr-font-mono);
+}
+
+.gr-boundary-tooltip-value {
+    font-size: 0.78rem;
+    font-family: var(--gr-font-mono);
+    color: var(--gr-accent);
+    font-weight: 500;
+}
+
+/* Light theme */
+.gr-map-canvas--light .gr-boundary-tooltip {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.gr-map-canvas--light .gr-boundary-tooltip-name {
+    color: var(--gr-text-1);
+}
+
+.gr-map-canvas--light .gr-boundary-tooltip-label {
+    color: var(--gr-text-3);
 }
 
 /* ==========================================================================

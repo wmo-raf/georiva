@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-map.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-item-detail.css' %}">
-    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="{% static 'css/vendor/maplibre-gl.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -120,6 +120,37 @@
                                     </button>
                                 {% endfor %}
                             </div>
+
+                            {# Layer mode switcher — only shown if boundary stats are configured #}
+                            {% if boundary_stats_levels %}
+                                <div class="gr-map-sidebar-divider"></div>
+                                <div class="gr-map-sidebar-section">
+                                    <span class="gr-map-sidebar-label">Layers</span>
+                                    <div class="gr-map-layer-switcher" id="grLayerSwitcher">
+                                        <button type="button" class="gr-map-layer-btn is-active" data-mode="raster">
+                                            <i class="bi bi-image"></i> Raster
+                                        </button>
+                                        <button type="button" class="gr-map-layer-btn" data-mode="boundaries">
+                                            <i class="bi bi-hexagon"></i> Boundaries
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {# Admin level selector — shown when boundaries are visible #}
+                                <div class="gr-map-sidebar-section" id="grLevelSelector" style="display:none">
+                                    <span class="gr-map-sidebar-label">Admin Level</span>
+                                    <div class="gr-map-level-pills">
+                                        {% for level in boundary_stats_levels %}
+                                            <button type="button"
+                                                    class="gr-map-level-pill {% if forloop.first %}is-active{% endif %}"
+                                                    data-level="{{ level }}">
+                                                Level {{ level }}
+                                            </button>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            {% endif %}
+
                         </aside>
                     {% endif %}
 
@@ -281,19 +312,21 @@
     {# Item config injected for JS — time is fixed, no time selector needed #}
     <script id="grItemConfig" type="application/json">
         {
-            "catalogSlug":    "{{ catalog_slug }}",
-            "collectionSlug": "{{ collection_slug }}",
-            "activeVarSlug":  "{{ active_var_slug }}",
-            "itemTime":       "{{ item.time_iso }}",
-            "referenceTime":  "{{ item.reference_time_iso|default:'' }}",
-            "edrUrl":         "/api/edr/collections/{{ collection_slug }}/",
-            "minioBase":      "{{ MINIO_ASSETS_BASE_URL }}",
-            "titilerBase":    "/titiler"
+            "catalogSlug":          "{{ catalog_slug }}",
+            "collectionSlug":       "{{ collection_slug }}",
+            "activeVarSlug":        "{{ active_var_slug }}",
+            "itemTime":             "{{ item.time_iso }}",
+            "referenceTime":        "{{ item.reference_time_iso|default:'' }}",
+            "edrUrl":               "/api/edr/collections/{{ collection_slug }}/",
+            "minioBase":            "{{ MINIO_ASSETS_BASE_URL }}",
+            "titilerBase":          "/titiler",
+            "martinBase":           "{{ martin_base_url }}",
+            "boundaryStatsLevels":  {{ boundary_stats_levels|to_json }}
         }
     </script>
 
-    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
-    <script src="https://unpkg.com/deck.gl@9.2.6/dist/dist.dev.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/weatherlayers-gl/dist/weatherlayers-deck.umd.min.js"></script>
+    <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
+    <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
+    <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
     <script src="{% static 'js/item-detail.js' %}"></script>
 {% endblock %}

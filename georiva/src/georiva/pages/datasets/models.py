@@ -8,6 +8,7 @@ from wagtail.contrib.routable_page.models import RoutablePageMixin, path
 from wagtail.models import Page
 
 from georiva.core.models import Catalog, Collection, Topic, Item, Asset
+from georiva.core.utils import get_full_url_by_request
 
 ITEMS_PER_PAGE = 24
 
@@ -287,6 +288,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'collection_url': f"{self.url}{catalog.slug}/{collection.slug}/",
             'catalog_slug': catalog.slug,
             'collection_slug': collection.slug,
+            'boundary_stats_levels': collection.boundary_stats_levels or [],
+            "martin_base_url": get_full_url_by_request(request, '/martin'),
         })
     
     # -------------------------------------------------------------------------
