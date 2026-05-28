@@ -9,3 +9,8 @@ class IngestionConfig(AppConfig):
 
     def ready(self):
         import georiva.ingestion.signals  # noqa: F401
+
+        from task_ferry.registry import job_type_registry
+        from .job_types import IngestionJobType
+
+        job_type_registry.register(IngestionJobType())

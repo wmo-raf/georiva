@@ -61,6 +61,9 @@ INSTALLED_APPS = [
     "wagtailfontawesomesvg",
     "wagtail_color_panel",
     
+    # third-party utilities
+    "task_ferry",
+    
     # georiva
     "georiva.core",
     "georiva.formats",
@@ -372,6 +375,16 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 CELERY_BEAT_SCHEDULE = {}
+
+# ---------------------------------------------------------------------------
+# django-task-ferry
+# ---------------------------------------------------------------------------
+TASK_FERRY = {
+    "EXECUTOR": "task_ferry.executors.celery.CeleryExecutor",
+    "CELERY_QUEUE": "georiva-default",
+    "PROGRESS_CACHE_TIMEOUT": 7200,  # 2 hours
+    "JOB_EXPIRY_DAYS": 14,
+}
 
 GEORIVA_LOG_LEVEL = env.str("GEORIVA_LOG_LEVEL", "INFO")
 GEORIVA_DATABASE_LOG_LEVEL = env.str("GEORIVA_DATABASE_LOG_LEVEL", "ERROR")

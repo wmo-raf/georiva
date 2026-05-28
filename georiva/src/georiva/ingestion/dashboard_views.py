@@ -142,6 +142,66 @@ def collection_loader_runs_api(request, collection_id):
     return JsonResponse({"runs": result})
 
 
+def collection_ingestion_jobs_api(request, collection_id):
+    """
+    Returns IngestionJob history for one collection with live progress from Redis cache.
+
+    All ingestion jobs are system-triggered (user=None) so the task_ferry user-scoped
+    API cannot be used. Active jobs are sorted first; the response includes has_active
+    so the frontend knows whether to keep polling.
+    """
+    from django.db.models import Case, IntegerField, When
+
+    from georiva.core.models import Collection
+    from georiva.ingestion.models import IngestionJob
+
+    try:
+        collection = Collection.objects.select_related("catalog").get(pk=collection_id)
+    except Collection.DoesNotExist:
+        raise Http404
+
+    active_states = ("pending", "started")
+
+    jobs = (
+        IngestionJob.objects
+        .filter(
+            ingestion_log__catalog_slug=collection.catalog.slug,
+            ingestion_log__collection_slug=collection.slug,
+        )
+        .annotate(
+            _active=Case(
+                When(state__in=active_states, then=0),
+                default=1,
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("_active", "-created_at")
+        .select_related("ingestion_log")[:50]
+    )
+
+    result = []
+    has_active = False
+    for job in jobs:
+        state = job.get_cached_state()
+        if state in active_states:
+            has_active = True
+        result.append({
+            "id": job.pk,
+            "state": state,
+            "progress_percentage": job.get_cached_progress_percentage(),
+            "progress_state": job.get_cached_progress_state(),
+            "file_path": job.file_path,
+            "bucket": job.bucket,
+            "items_created": job.items_created,
+            "assets_created": job.assets_created,
+            "error": job.error or "",
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        })
+
+    return JsonResponse({"jobs": result, "has_active": has_active})
+
+
 def collection_ingestion_logs_api(request, collection_id):
     """
     Returns IngestionLog entries for one collection.

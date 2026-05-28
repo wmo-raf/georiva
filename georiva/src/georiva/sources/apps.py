@@ -6,3 +6,9 @@ class SourcesConfig(AppConfig):
     name = 'georiva.sources'
     label = 'georivasources'
     verbose_name = "GeoRIVA Sources"
+
+    def ready(self):
+        from task_ferry.registry import job_type_registry
+        from .job_types import LoaderJobType
+
+        job_type_registry.register(LoaderJobType())

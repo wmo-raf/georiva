@@ -2,7 +2,7 @@ import logging
 
 from wagtail import hooks
 
-from georiva.ingestion.service import GEORIVA_AFTER_SAVE_ASSET
+from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 
 logger = logging.getLogger(__name__)
 
