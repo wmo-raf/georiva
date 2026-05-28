@@ -28,87 +28,45 @@ def process_incoming_file(
         self,
         file_path: str,
         origin_bucket: str,
-        reference_time: str = None,
+        reference_time: str = None,  # kept for backwards compat; IngestionService resolves it
 ):
     """
     Process a single incoming file.
 
-    1. Acquire lock via IngestionLog
-    2. Run ingestion (service resolves catalog/collection from path)
-    3. Mark completed or failed
+    Creates an IngestionJob for operator visibility and real-time progress
+    tracking, then runs it synchronously inside this worker (no re-enqueue).
+
+    The IngestionJobType handles:
+      - Acquiring the IngestionLog distributed lock
+      - Running IngestionService.process_file()
+      - Marking the IngestionLog completed or failed
     """
-    from georiva.ingestion.models import IngestionLog
-    from georiva.ingestion.service import IngestionService
+    from django.contrib.contenttypes.models import ContentType
     
-    worker_id = f"celery-{self.request.id or 'unknown'}"
+    from task_ferry.handler import JobHandler
     
-    # Acquire lock — atomic, only one worker wins
-    if not IngestionLog.acquire(origin_bucket, file_path, worker_id):
-        logger.info(
-            "Skipping %s/%s — already processing or completed",
-            origin_bucket, file_path,
-        )
-        
-        return
+    from georiva.ingestion.models import IngestionJob
     
-    logger.info(
-        "Processing: %s/%s (worker=%s)",
-        origin_bucket, file_path, worker_id,
+    logger.info("process_incoming_file: %s/%s", origin_bucket, file_path)
+    
+    ct = ContentType.objects.get_for_model(IngestionJob, for_concrete_model=False)
+    job = IngestionJob.objects.create(
+        user=None,
+        content_type=ct,
+        file_path=file_path,
+        bucket=origin_bucket,
     )
     
-    # Parse reference_time if provided as ISO string
-    ref_time = None
-    if reference_time:
-        try:
-            ref_time = datetime.fromisoformat(reference_time)
-        except (ValueError, TypeError):
-            logger.warning("Invalid reference_time: %s", reference_time)
-    
-    # Run ingestion
-    service = IngestionService()
-    
+    # Run in-place — we are already inside a Celery worker, so bypass the
+    # executor and call JobHandler.run() directly.  This gives us the full
+    # state machine (pending → started → finished/failed) and Redis progress
+    # without spawning a second task.
     try:
-        result = service.process_file(
-            file_path=file_path,
-            origin_bucket=origin_bucket,
-            reference_time=ref_time,
-        )
-        
-        if result and result.success:
-            IngestionLog.mark_completed(
-                bucket=origin_bucket,
-                file_path=file_path,
-                archive_path=result.archive_path,
-                items_created=len(result.items_created),
-                assets_created=len(result.assets_created),
-            )
-            logger.info(
-                "Completed: %s/%s — %d items, %d assets",
-                origin_bucket, file_path,
-                len(result.items_created),
-                len(result.assets_created),
-            )
-        else:
-            error_msg = '; '.join(result.errors) if result else 'No result returned'
-            IngestionLog.mark_failed(
-                bucket=origin_bucket,
-                file_path=file_path,
-                error=error_msg,
-            )
-            logger.warning(
-                "Failed: %s/%s — %s",
-                origin_bucket, file_path, error_msg,
-            )
-    
-    except Exception as e:
-        IngestionLog.mark_failed(
-            bucket=origin_bucket,
-            file_path=file_path,
-            error=str(e),
-        )
-        logger.exception(
-            "Error processing %s/%s", origin_bucket, file_path,
-        )
+        JobHandler.run(job)
+    except Exception:
+        # JobHandler.run() already marked the job failed and re-raised.
+        # Let the exception propagate so Celery records task failure too.
+        raise
 
 
 @app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")

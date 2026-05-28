@@ -97,7 +97,7 @@ class IngestionLog(models.Model):
     force_reingest = models.BooleanField(
         default=False
     )
-
+    
     loader_run = models.ForeignKey(
         'georivasources.LoaderRun',
         null=True,
@@ -383,3 +383,46 @@ class IngestionLog(models.Model):
             force_reingest=False,
         )
         return updated > 0
+
+
+# ---------------------------------------------------------------------------
+# Task-ferry Job models
+# ---------------------------------------------------------------------------
+
+from task_ferry.models import Job  # noqa: E402
+
+
+@register_snippet
+class IngestionJob(Job):
+    """
+    Operator-visible record for a single file ingestion run.
+
+    Lifecycle: pending → started → finished / failed / cancelled
+    Progress and state are readable in real-time via GET /api/jobs/<id>/
+
+    The companion IngestionLog handles distributed locking and retry logic
+    independently.  One IngestionJob is created per process_incoming_file
+    invocation; when the run succeeds the IngestionLog FK is populated.
+    """
+    
+    file_path = models.CharField(
+        max_length=500,
+        help_text="Path relative to bucket root.",
+    )
+    bucket = models.CharField(
+        max_length=50,
+        help_text="Origin bucket: 'incoming' or 'sources'.",
+    )
+    ingestion_log = models.OneToOneField(
+        IngestionLog,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="job",
+        help_text="Lock record for this file; set after the lock is acquired.",
+    )
+    items_created = models.IntegerField(default=0)
+    assets_created = models.IntegerField(default=0)
+    
+    class Meta:
+        app_label = "georivaingestion"

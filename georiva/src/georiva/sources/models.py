@@ -176,10 +176,31 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run
     
-    def run_now(self, collection, **kwargs):
-        """Convenience method to run immediately."""
+    def run_now(self, collection, *, user=None, async_run: bool = True):
+        """
+        Dispatch a loader run for *collection*.
+
+        async_run=True  (default) — creates a LoaderJob and dispatches via
+                         JobHandler / CeleryExecutor.  Returns the Job instance
+                         immediately; callers can poll GET /api/jobs/<id>/.
+
+        async_run=False — runs synchronously in the current process (useful
+                          for management commands and tests).  Returns a
+                          LoaderRunResult.
+        """
+        if async_run:
+            from task_ferry.handler import JobHandler
+
+            return JobHandler.create_and_start(
+                user=user,
+                job_type_name="data_source_load",
+                loader_profile_id=self.pk,
+                collection_id=collection.pk,
+            )
+
+        # Synchronous fallback — original behaviour preserved.
         loader = self.get_loader(collection)
-        result = loader.run(**kwargs)
+        result = loader.run()
         self.record_run(result, collection)
         return result
     
@@ -270,3 +291,46 @@ class LoaderRun(TimeStampedModel):
         if self.finished_at:
             return (self.finished_at - self.started_at).total_seconds()
         return None
+
+
+# ---------------------------------------------------------------------------
+# Task-ferry Job model
+# ---------------------------------------------------------------------------
+
+from task_ferry.models import Job  # noqa: E402
+
+
+class LoaderJob(Job):
+    """
+    Operator-visible record for a single Loader.run() execution.
+
+    Progress is available in real-time via GET /api/jobs/<id>/
+    A companion LoaderRun is created by LoaderProfile.record_run() at the
+    end of the run — it holds the aggregate statistics.
+    """
+
+    loader_profile = models.ForeignKey(
+        LoaderProfile,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="jobs",
+    )
+    collection = models.ForeignKey(
+        "georivacore.Collection",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="loader_jobs",
+    )
+
+    # Live counters updated as each file completes — readable from the API
+    # before the LoaderRun aggregate is written.
+    files_total = models.IntegerField(default=0)
+    files_fetched = models.IntegerField(default=0)
+    files_skipped = models.IntegerField(default=0)
+    files_failed = models.IntegerField(default=0)
+    bytes_transferred = models.BigIntegerField(default=0)
+
+    class Meta:
+        app_label = "georivasources"

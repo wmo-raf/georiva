@@ -27,7 +27,7 @@
 
     <div v-if="collection" class="drawer-body">
 
-      <!-- Tabs: automated gets two, manual gets one -->
+      <!-- Tabs: automated gets loader tab; all get ingestion logs + jobs -->
       <div class="tab-bar">
         <button
             v-if="collection.type === 'automated'"
@@ -43,6 +43,14 @@
         >
           <i class="pi pi-inbox"/> Ingestion Logs
           <span v-if="logs.length" class="tab-count">{{ logs.length }}</span>
+        </button>
+        <button
+            :class="['tab-btn', {active: activeTab === 'jobs'}]"
+            @click="activeTab = 'jobs'"
+        >
+          <i class="pi pi-cog"/> Ingestion Jobs
+          <span v-if="activeJobCount" :class="['tab-count', 'tab-count--active']">{{ activeJobCount }}</span>
+          <span v-else-if="jobs.length" class="tab-count">{{ jobs.length }}</span>
         </button>
       </div>
 
@@ -108,6 +116,63 @@
               <div v-for="(err, i) in run.errors" :key="i" class="error-item">
                 {{ err }}
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ingestion Jobs tab -->
+      <div v-else-if="activeTab === 'jobs'" class="tab-content">
+        <div v-if="!jobs.length" class="empty-state">No ingestion jobs found.</div>
+
+        <div v-for="job in jobs" :key="job.id" class="log-row">
+          <div class="log-row__top">
+            <span :class="['status-pill', jobStatusClass(job.state)]">
+              <i :class="jobStatusIcon(job.state)"/>
+              {{ job.state }}
+            </span>
+            <span class="run-time" :title="formatDateTime(job.created_at)">
+              {{ timeAgo(job.created_at) }}
+            </span>
+            <span class="run-date">{{ formatShortDate(job.created_at) }}</span>
+          </div>
+
+          <!-- File path -->
+          <div class="log-filepath">
+            <i class="pi pi-file"/> {{ fileName(job.file_path) }}
+            <span class="log-filepath__dir">{{ fileDir(job.file_path) }}</span>
+          </div>
+
+          <!-- Progress bar (active jobs only) -->
+          <div v-if="job.state === 'started'" class="job-progress">
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" :style="{width: job.progress_percentage + '%'}"/>
+            </div>
+            <div class="progress-label">
+              {{ job.progress_percentage }}%
+              <span v-if="job.progress_state" class="progress-state">— {{ job.progress_state }}</span>
+            </div>
+          </div>
+
+          <!-- Stats chips (finished jobs) -->
+          <div v-if="job.state === 'finished'" class="log-row__stats">
+            <span class="count-chip fetched">
+              <i class="pi pi-box"/> {{ job.items_created }} items
+            </span>
+            <span class="count-chip fetched">
+              <i class="pi pi-images"/> {{ job.assets_created }} assets
+            </span>
+          </div>
+
+          <!-- Error (collapsible) -->
+          <div v-if="job.error" class="run-errors">
+            <button class="error-toggle" @click="toggleJobError(job.id)">
+              <i class="pi pi-exclamation-triangle"/>
+              Error
+              <i :class="expandedJobErrors.has(job.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"/>
+            </button>
+            <div v-if="expandedJobErrors.has(job.id)" class="error-list">
+              <div class="error-item">{{ job.error }}</div>
             </div>
           </div>
         </div>
@@ -188,10 +253,17 @@ const visibleProxy = computed({
 const activeTab = ref("loader");
 const runs = ref([]);
 const logs = ref([]);
+const jobs = ref([]);
 const loading = ref(false);
 const error = ref(null);
 const expandedRunErrors = ref(new Set());
 const expandedLogErrors = ref(new Set());
+const expandedJobErrors = ref(new Set());
+const pollTimer = ref(null);
+
+const activeJobCount = computed(() =>
+    jobs.value.filter(j => j.state === "pending" || j.state === "started").length
+);
 
 function closeDrawer() {
   emit("update:modelValue", false);
@@ -201,13 +273,19 @@ function closeDrawer() {
 watch(
     () => [props.modelValue, props.collection?.id],
     async ([visible, collectionId]) => {
-      if (!visible || !collectionId || !props.collection) return;
+      stopJobPolling();
+      if (!visible || !collectionId || !props.collection) {
+        jobs.value = [];
+        return;
+      }
 
       activeTab.value = props.collection.type === "automated" ? "loader" : "ingestion";
       runs.value = [];
       logs.value = [];
+      jobs.value = [];
       expandedRunErrors.value = new Set();
       expandedLogErrors.value = new Set();
+      expandedJobErrors.value = new Set();
 
       await fetchAll(props.collection);
     }
@@ -218,6 +296,12 @@ watch(activeTab, async (tab) => {
   if (!props.collection) return;
   if (tab === "loader" && !runs.value.length) await fetchRuns(props.collection.id);
   if (tab === "ingestion" && !logs.value.length) await fetchLogs(props.collection.id);
+  if (tab === "jobs") {
+    await fetchJobs(props.collection.id);
+    startJobPolling(props.collection.id);
+  } else {
+    stopJobPolling();
+  }
 });
 
 async function fetchAll(collection) {
@@ -248,6 +332,29 @@ async function fetchLogs(id) {
   logs.value = data.logs;
 }
 
+async function fetchJobs(id) {
+  const res = await fetch(`/admin/api/ingestion/collections/${id}/ingestion-jobs/`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  jobs.value = data.jobs;
+  return data.has_active;
+}
+
+function startJobPolling(id) {
+  stopJobPolling();
+  pollTimer.value = setInterval(async () => {
+    const hasActive = await fetchJobs(id);
+    if (!hasActive) stopJobPolling();
+  }, 3000);
+}
+
+function stopJobPolling() {
+  if (pollTimer.value) {
+    clearInterval(pollTimer.value);
+    pollTimer.value = null;
+  }
+}
+
 function toggleRunErrors(id) {
   const s = new Set(expandedRunErrors.value);
   s.has(id) ? s.delete(id) : s.add(id);
@@ -258,6 +365,12 @@ function toggleLogError(id) {
   const s = new Set(expandedLogErrors.value);
   s.has(id) ? s.delete(id) : s.add(id);
   expandedLogErrors.value = s;
+}
+
+function toggleJobError(id) {
+  const s = new Set(expandedJobErrors.value);
+  s.has(id) ? s.delete(id) : s.add(id);
+  expandedJobErrors.value = s;
 }
 
 // --- Status helpers ---
@@ -293,6 +406,20 @@ function ingestionStatusIcon(s) {
     failed: "pi pi-times-circle",
     processing: "pi pi-spin pi-spinner",
     pending: "pi pi-clock"
+  }[s] ?? "pi pi-circle";
+}
+
+function jobStatusClass(s) {
+  return {pending: "neutral", started: "info", finished: "success", failed: "danger", cancelled: "neutral"}[s] ?? "neutral";
+}
+
+function jobStatusIcon(s) {
+  return {
+    pending: "pi pi-clock",
+    started: "pi pi-spin pi-spinner",
+    finished: "pi pi-check-circle",
+    failed: "pi pi-times-circle",
+    cancelled: "pi pi-ban",
   }[s] ?? "pi pi-circle";
 }
 
@@ -653,5 +780,45 @@ function fileDir(path) {
   color: #7f1d1d;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Active tab count badge (blue for live jobs) */
+.tab-count--active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* Progress bar */
+.job-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.progress-label {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress-state {
+  color: #94a3b8;
 }
 </style>
