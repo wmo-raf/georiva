@@ -1,5 +1,10 @@
 # GeoRiva
 
+> WARNING: This project is in active development and breaking changes may occur without backwards compatibility. Until
+> we reach a stable release, we recommend treating the codebase as not production-ready. We welcome contributions and
+> feedback on the architecture, but please be aware that APIs, data models, and plugin interfaces may change as we
+> iterate.
+
 **Geospatial Raster Ingestion, Visualization & Analysis**
 
 GeoRiva is a geospatial backend platform for automated ingestion, processing, visualization, and analysis of gridded
@@ -32,17 +37,17 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 
 ## Tech Stack
 
-| Component        | Technology                                          |
-|------------------|-----------------------------------------------------|
-| Core Framework   | Django 5.x + Wagtail 7.x                            |
-| Database         | PostgreSQL 18 + TimescaleDB + PostGIS (via PgBouncer)|
-| Object Storage   | MinIO (S3-compatible), multi-bucket                 |
-| Task Queue       | Celery + Redis (two queues)                         |
-| Tile Servers     | Titiler (raster COGs) + Martin (vector/MVT)         |
-| Discovery APIs   | STAC API + OGC API – EDR                            |
-| Data Formats     | COG, virtual Zarr (kerchunk), Encoded PNG          |
-| Event Bus        | MinIO → Redis list → `minio-consumer` (no MQTT)     |
-| Containerization | Docker Compose                                      |
+| Component        | Technology                                            |
+|------------------|-------------------------------------------------------|
+| Core Framework   | Django 5.x + Wagtail 7.x                              |
+| Database         | PostgreSQL 18 + TimescaleDB + PostGIS (via PgBouncer) |
+| Object Storage   | MinIO (S3-compatible), multi-bucket                   |
+| Task Queue       | Celery + Redis (two queues)                           |
+| Tile Servers     | Titiler (raster COGs) + Martin (vector/MVT)           |
+| Discovery APIs   | STAC API + OGC API – EDR                              |
+| Data Formats     | COG, virtual Zarr (kerchunk), Encoded PNG             |
+| Event Bus        | MinIO → Redis list → `minio-consumer` (no MQTT)       |
+| Containerization | Docker Compose                                        |
 
 ---
 
