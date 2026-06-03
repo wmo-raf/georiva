@@ -46,7 +46,7 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 | Tile Servers     | Titiler (raster COGs) + Martin (vector/MVT)           |
 | Discovery APIs   | STAC API + OGC API – EDR                              |
 | Data Formats     | COG, virtual Zarr (kerchunk), Encoded PNG             |
-| Event Bus        | MinIO → Redis list → `minio-consumer` (no MQTT)       |
+| Event Bus        | MinIO → Redis list → `minio-consumer`                 |
 | Containerization | Docker Compose                                        |
 
 ---
