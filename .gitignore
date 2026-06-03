@@ -182,3 +182,4 @@ georiva_data/
 .vscode
 data/
 node_modules/
+.claude/settings.local.json
