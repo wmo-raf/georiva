@@ -1,11 +1,16 @@
 # GeoRiva Storage Architecture
 
 > Internal reference for plugin developers and contributors.
+>
+> **See also:** [`georiva-storage-architecture.md`](./georiva-storage-architecture.md) for the full
+> ingestion-pipeline reference, and the [Architecture Design Document](../architecture/README.md)
+> (§3 Data Ingestion) for the system-level view. This page is the short, plugin-author-focused version.
 
 ## Overview
 
 GeoRiva uses a multi-bucket storage architecture built on MinIO (S3-compatible). Data flows through dedicated buckets
-based on its lifecycle stage, with automated ingestion triggered by bucket notifications.
+based on its lifecycle stage, with automated ingestion triggered by MinIO bucket notifications that are delivered
+through a **Redis list** (not an HTTP webhook — see [Event delivery](#event-delivery) below).
 
 ```
 georiva-incoming ──┐
@@ -19,12 +24,16 @@ georiva-sources  ──┘
 
 ## Buckets
 
-| Bucket             | Purpose                  | Who writes                 | Access      | Notifications            |
-|--------------------|--------------------------|----------------------------|-------------|--------------------------|
-| `georiva-incoming` | User-uploaded raw data   | Humans (MinIO Console)     | Private     | Yes — triggers ingestion |
-| `georiva-sources`  | Plugin-collected data    | Automated source plugins   | Private     | Yes — triggers ingestion |
-| `georiva-archive`  | Raw data preservation    | System (before processing) | Private     | No                       |
-| `georiva-assets`   | Final processed datasets | Ingestion pipeline         | Public read | No                       |
+| Bucket             | Purpose                           | Who writes                 | Access      | Notifications            |
+|--------------------|-----------------------------------|----------------------------|-------------|--------------------------|
+| `georiva-incoming` | User-uploaded raw data            | Humans (MinIO Console)     | Private     | Yes — triggers ingestion |
+| `georiva-sources`  | Plugin-collected data             | Automated source plugins   | Private     | Yes — triggers ingestion |
+| `georiva-archive`  | Raw data preservation             | System (before processing) | Private     | No                       |
+| `georiva-assets`   | Final processed datasets          | Ingestion pipeline         | Public read | No                       |
+| `georiva-zarr`     | Virtual-Zarr (kerchunk) manifests | `virtual_zarr` app         | Private     | No                       |
+
+Only `georiva-incoming` and `georiva-sources` carry `s3:ObjectCreated:*` notifications. Source plugins write to
+`georiva-sources` only; `georiva-zarr` is managed by the `virtual_zarr` app and is not something plugins write to.
 
 **Why separate buckets instead of directories?**
 
@@ -198,24 +207,37 @@ ref = datetime(2025, 1, 15, 6, 0, tzinfo=pytz.utc)
 ref = datetime(2025, 1, 15, 6, 0)
 ```
 
+### Event delivery
+
+GeoRiva does **not** use an HTTP webhook. MinIO is configured (by the `setup_minio` management command) to publish
+bucket notifications to its native **Redis list** target (`arn:minio:sqs::primary:redis`, list key
+`georiva:minio:events`, overridable via `MINIO_REDIS_KEY`). A dedicated long-running consumer process —
+`georiva-minio-consumer`, started by the `minio_event_consumer` management command — blocks on that list (`BLPOP`),
+validates the object key, registers an `IngestionLog`, and enqueues the `process_incoming_file` Celery task on the
+`georiva-ingestion` queue. The periodic `sweep_unprocessed` task is a safety net for any events the consumer misses.
+
 ### What happens after you save
 
-1. MinIO fires a webhook notification (`s3:ObjectCreated:*`).
-2. The ingestion pipeline receives the event.
-3. It parses the file path to determine `catalog`, `collection`, and `reference_time`.
-4. The format plugin processes the file.
+1. MinIO publishes an `s3:ObjectCreated:*` event to the Redis list `georiva:minio:events`.
+2. The `georiva-minio-consumer` process drains the list (`BLPOP`), validates the path, and registers an `IngestionLog`.
+3. It enqueues `process_incoming_file` on the `georiva-ingestion` Celery queue.
+4. A worker parses the file path to determine `catalog`, `collection`, and `reference_time`, and the format plugin
+   processes the file.
 5. Processed assets are written to `georiva-assets`.
 6. Optionally, the source file, after successful processing, is copied to `georiva-archive` and deleted from
-   `georiva-sources`
+   `georiva-sources`.
 
 ```
 Plugin saves file
     ↓
 georiva-sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
     ↓
-MinIO webhook fires
+MinIO publishes event → Redis list (georiva:minio:events)
     ↓
-Ingestion pipeline:
+georiva-minio-consumer (BLPOP):
+    register IngestionLog → enqueue process_incoming_file (georiva-ingestion queue)
+    ↓
+Ingestion worker:
     1. parse_path → catalog="weather-models", collection="gfs",
                     reference_time=2025-01-15T06:00Z
     2. Process → extract variables, clip, encode

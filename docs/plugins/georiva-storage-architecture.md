@@ -6,7 +6,9 @@
 
 GeoRiva is a geospatial data platform that ingests raw Earth observation and meteorological files, processes them into standardized assets (PNGs, COGs, metadata JSON), and serves them via STAC-compliant APIs and visualization layers.
 
-The system is built around a multi-bucket MinIO storage architecture. Data flows through dedicated buckets based on its lifecycle stage. Ingestion is event-driven — files landing in a bucket automatically trigger processing via webhook notifications and a Celery task queue.
+The system is built around a multi-bucket MinIO storage architecture. Data flows through dedicated buckets based on its lifecycle stage. Ingestion is event-driven — files landing in a bucket automatically trigger processing. MinIO publishes bucket notifications to a **Redis list**, a dedicated consumer process (`georiva-minio-consumer`) drains that list, and processing runs on a **Celery task queue** (`georiva-ingestion`).
+
+> **Architecture note:** Earlier revisions of GeoRiva used an HTTP webhook (and, before that, an MQTT/Mosquitto broker) to deliver MinIO events. The current implementation uses MinIO's native **Redis** notification target consumed by `georiva-minio-consumer`. There is no webhook endpoint and no MQTT broker in the stack. This document reflects the as-built Redis-based design.
 
 ```
                     ┌─────────────────┐
@@ -45,14 +47,18 @@ Before diving into storage, it helps to understand GeoRiva's data hierarchy:
 
 ## Buckets
 
-GeoRiva uses four dedicated MinIO buckets. Each bucket has a specific role, access policy, and notification configuration.
+GeoRiva uses five dedicated MinIO buckets. Each bucket has a specific role, access policy, and notification configuration.
 
-| Bucket | Purpose | Who writes | Access | Webhook |
+| Bucket | Purpose | Who writes | Access | Notifications |
 |---|---|---|---|---|
 | `georiva-incoming` | User-uploaded raw data | Humans via MinIO Console | Private | Yes |
 | `georiva-sources` | Plugin-collected data | Automated source plugins | Private | Yes |
 | `georiva-archive` | Raw data preservation | Ingestion pipeline | Private | No |
 | `georiva-assets` | Processed datasets for serving | Ingestion pipeline | Public read | No |
+| `georiva-zarr` | Virtual-Zarr (kerchunk) manifests | `virtual_zarr` app | Private | No |
+
+The bucket set is defined by `GEORIVA_BUCKETS` in `config/settings/base.py` and the `BucketType` enum in
+`core/storage.py`. Only `georiva-incoming` and `georiva-sources` carry `s3:ObjectCreated:*` notifications.
 
 **Why separate buckets instead of directories?**
 
@@ -180,13 +186,13 @@ The pipeline is event-driven and runs asynchronously:
 ```
 1. File lands in bucket
        ↓
-2. MinIO fires webhook (s3:ObjectCreated:*)
+2. MinIO publishes event (s3:ObjectCreated:*) to Redis list (georiva:minio:events)
        ↓
-3. Django webhook view receives event
+3. georiva-minio-consumer drains the list (BLPOP) and validates the path
        ↓
 4. File registered in IngestionLog (status: pending)
        ↓
-5. Celery task queued
+5. process_incoming_file Celery task queued (georiva-ingestion queue)
        ↓
 6. Worker acquires lock (status: processing)
        ↓
@@ -218,18 +224,22 @@ The pipeline is event-driven and runs asynchronously:
 8. IngestionLog updated (status: completed or failed)
 ```
 
-### Webhook view
+### MinIO event consumer
 
-The webhook view is the entry point for all MinIO events. It is intentionally lightweight — validate, register, queue:
+The entry point for all MinIO events is the `georiva-minio-consumer` process (the `minio_event_consumer` management
+command, implemented in `ingestion/consumer.py`). It is intentionally lightweight — drain, validate, register, queue:
 
 ```
-MinIO event → authenticate → parse path → validate catalog exists
-           → register in IngestionLog → queue Celery task → respond 200
+Redis list (georiva:minio:events) → BLPOP → parse path → validate catalog exists
+           → register in IngestionLog → enqueue process_incoming_file (georiva-ingestion) → loop
 ```
 
-The view only accepts events from `georiva-incoming` and `georiva-sources`. Events from `georiva-archive` and `georiva-assets` are ignored. Catalog validation uses an `lru_cache` to avoid database hits on every event.
+The consumer only acts on events from `georiva-incoming` and `georiva-sources` (it resolves the origin bucket from the
+event payload). Events from other buckets are ignored. Catalog validation uses an `lru_cache` to avoid database hits on
+every event.
 
-The webhook does **not** resolve collections. That responsibility belongs to the ingestion service, which has the full context to handle both explicit collection paths and catalog-wide processing.
+The consumer does **not** resolve collections. That responsibility belongs to the ingestion service, which has the full
+context to handle both explicit collection paths and catalog-wide processing.
 
 ### Celery task
 
@@ -342,35 +352,49 @@ A stale lock can also be reclaimed directly by the next worker that tries to pro
 
 ## Sweep Task
 
-The sweep task is a periodic safety net that runs every 5 minutes via Celery Beat. It catches anything the webhook might have missed and handles error recovery.
+The sweep task is a periodic safety net that runs every 5 minutes via Celery Beat. It catches anything the event consumer might have missed and handles error recovery.
 
 ### Three phases
 
 **Phase 1: Reset stale locks.** Find any file stuck in `processing` for longer than `LOCK_TIMEOUT`. Reset to `pending`. This handles crashed workers.
 
-**Phase 2: Scan for untracked files.** List all files in `georiva-incoming` and `georiva-sources`. For each file not found in the `IngestionLog`, register it and queue a task. This catches files that landed while the webhook was down, or events that MinIO failed to deliver.
+**Phase 2: Scan for untracked files.** List all files in `georiva-incoming` and `georiva-sources`. For each file not found in the `IngestionLog`, register it and queue a task. This catches files that landed while the consumer was down, or events that MinIO failed to deliver.
 
 **Phase 3: Retry failed files.** Find files in `failed` status with `retry_count < MAX_RETRIES`. Queue them for reprocessing.
 
 ### Configuration
 
+The periodic schedule is **not** declared in `settings.py`. It is registered programmatically at worker startup by the
+`@app.on_after_finalize.connect` handler `setup_periodic_tasks` in `ingestion/tasks.py`, which creates
+`django_celery_beat` `IntervalSchedule` + `PeriodicTask` records. `sweep_unprocessed` runs every 5 minutes;
+`cleanup_archives` daily; `prune_ingestion_logs` weekly. Conceptually equivalent to:
+
 ```python
-# settings.py
-CELERY_BEAT_SCHEDULE = {
+# Registered as django_celery_beat PeriodicTask records (not CELERY_BEAT_SCHEDULE)
+{
     'sweep-unprocessed': {
-        'task': 'georiva.ingestion.tasks.sweep_unprocessed',
+        'task': 'georiva.ingestion.tasks.sweep_unprocessed',  # georiva-default queue
         'schedule': 300,  # every 5 minutes
     },
 }
 ```
 
-The sweep interval is a balance between responsiveness and MinIO listing costs. At 5 minutes, a missed file waits at most 5 minutes before being picked up. For most deployments this is acceptable since the webhook handles the vast majority of files instantly.
+The sweep interval is a balance between responsiveness and MinIO listing costs. At 5 minutes, a missed file waits at most 5 minutes before being picked up. For most deployments this is acceptable since the event consumer handles the vast majority of files instantly.
 
 ---
 
 ## Celery Configuration
 
-GeoRiva uses a single Celery queue for all tasks. The worker is configured for reliability:
+GeoRiva uses **two Celery queues**, each served by its own worker service, so that heavy ingestion jobs cannot starve
+lightweight routine tasks:
+
+| Queue | Worker service | Workload |
+|---|---|---|
+| `georiva-ingestion` | `georiva-celery-ingestion-worker` | Heavy data processing (`process_incoming_file`, zonal stats, virtual-Zarr builds) |
+| `georiva-default` | `georiva-celery-default-worker` | Lightweight tasks (`sweep_unprocessed`, `cleanup_archives`, `prune_ingestion_logs`, scheduling) |
+
+A separate `georiva-celery-beat` service schedules the periodic tasks. Each task declares its queue explicitly via the
+`queue=` argument (see `ingestion/tasks.py`). The workers are configured for reliability:
 
 ```python
 # settings.py
@@ -385,16 +409,14 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 ```
 
-Worker concurrency controls how many files process simultaneously. Since ingestion is memory-intensive (large raster arrays), keep concurrency low:
+Note that `process_incoming_file` is defined with `max_retries=0` — it does **not** retry at the Celery level. Recovery
+is handled instead by the `IngestionLog` retry counter (up to `MAX_RETRIES`, see below) and the `sweep_unprocessed`
+periodic task. Newer idempotent tasks (e.g. `compute_boundary_zonal_stats`) do use bounded Celery retries.
 
-```bash
-# 2 concurrent tasks per worker — good for most deployments
-celery -A georiva worker --concurrency=2
-
-# Scale by adding more workers, not more concurrency
-```
-
-The queue acts as a backpressure mechanism. If 1000 files land at once, they all queue instantly (the webhook is fast), but only 2 process at a time. As each completes, the next starts.
+Worker concurrency controls how many files process simultaneously. Since ingestion is memory-intensive (large raster
+arrays), keep concurrency on the ingestion worker low and scale out with more worker replicas rather than higher
+concurrency. The queue acts as a backpressure mechanism: if 1000 files land at once they all queue instantly (the
+consumer is fast), but only a few process at a time. As each completes, the next starts.
 
 ---
 
@@ -430,6 +452,9 @@ GEORIVA_BUCKETS = {
             "custom_domain": f"{MINIO_PUBLIC_ENDPOINT}/georiva-assets",
             "querystring_auth": False,
         },
+    },
+    "zarr": {
+        "name": "georiva-zarr",
     },
 }
 ```
@@ -470,7 +495,7 @@ A GeoRiva plugin is responsible for two things:
 1. Fetching data from an external source (API, FTP, HTTP, etc.)
 2. Saving the raw data to the `georiva-sources` bucket with the correct path and filename.
 
-That is all. Plugins do **not** trigger ingestion, resolve collections, or process data. The MinIO webhook handles everything downstream automatically when a file lands in the bucket.
+That is all. Plugins do **not** trigger ingestion, resolve collections, or process data. The MinIO → Redis event consumer handles everything downstream automatically when a file lands in the bucket.
 
 ### How to save files
 
@@ -548,12 +573,12 @@ if storage.sources.exists(path):
 ```
 Plugin saves file to georiva-sources
     ↓
-MinIO webhook fires (s3:ObjectCreated:*)
+MinIO publishes event (s3:ObjectCreated:*) → Redis list (georiva:minio:events)
     ↓
-Webhook view:
+georiva-minio-consumer (BLPOP):
     1. Validates catalog exists
     2. Registers file in IngestionLog (pending)
-    3. Queues Celery task
+    3. Enqueues process_incoming_file (georiva-ingestion queue)
     ↓
 Celery worker:
     4. Acquires IngestionLog lock (processing)
@@ -690,20 +715,31 @@ IngestionLog.get_permanently_failed()           # Exceeded max retries
 ```yaml
 services:
   georiva:
-    command: gunicorn
+    command: gunicorn-wsgi
     depends_on:
       - georiva-minio
       - georiva-redis
 
-  celery-worker:
-    command: celery-worker
+  georiva-celery-ingestion-worker:   # georiva-ingestion queue (heavy processing)
+    command: celery-ingestion-worker
     depends_on:
       - georiva-minio
       - georiva-redis
 
-  celery-beat:
+  georiva-celery-default-worker:     # georiva-default queue (sweeps, cleanup)
+    command: celery-default-worker
+    depends_on:
+      - georiva-redis
+
+  georiva-celery-beat:
     command: celery-beat
     depends_on:
+      - georiva-redis
+
+  georiva-minio-consumer:            # drains MinIO events from the Redis list
+    command: minio-consumer
+    depends_on:
+      - georiva-minio
       - georiva-redis
 
   georiva-minio:
@@ -735,8 +771,11 @@ python manage.py collectstatic --noinput
 # MinIO
 AWS_S3_ENDPOINT_URL=http://georiva-minio:9000
 MINIO_PUBLIC_ENDPOINT=localhost:9000
-MINIO_WEBHOOK_BEARER_TOKEN=your-secret-token
 
-# Celery
+# MinIO → Redis event delivery (consumed by georiva-minio-consumer)
+# Redis list key MinIO publishes bucket notifications to (default shown)
+MINIO_REDIS_KEY=georiva:minio:events
+
+# Celery broker (also the cache and MinIO event bus)
 CELERY_BROKER_URL=redis://georiva-redis:6379/0
 ```

@@ -1,6 +1,11 @@
 # GeoRiva Data Model Guide
 
 > How to organize your data into Catalogs, Collections, and Variables.
+>
+> Part of the [GeoRiva documentation](README.md). See also
+> the [Architecture Design Document §4](architecture/README.md#4-data-model)
+> for the data model's place in the system, the [Format Plugin System](format-plugins.md) for how raw files are read
+> into Variables, and [Download Deduplication](architecture/download-dedup.md) for organizing plugin collections.
 
 ## The Hierarchy
 
@@ -23,8 +28,31 @@ temporal resolution, and source file. Think of it as "what file am I processing?
 palette, value range, scale type), units, and how to extract the data from the source file. Think of it as "what do I
 want to show on the map?"
 
-**VariableSource** links a Variable to its raw parameter in the source file. Simple variables have one source; derived
-variables (like wind speed from U and V components) have multiple sources combined with an expression.
+**Sources** link a Variable to its raw parameter(s) in the source file. A Variable's `sources` is a Wagtail
+**StreamField** (not a separate model): each entry is a *Source* block of one of three kinds — `primary`,
+`u_component`, or `v_component`. A passthrough variable has exactly one `primary` source; a derived vector variable has
+one `u_component` and one `v_component`. Each Source block carries a `source_name` (the exact name in the file) plus
+optional `vertical_dimension` / `vertical_value` for level selection.
+
+---
+
+> ## Implementation status — read this first
+>
+> The transforms available today are defined by `Variable.TransformType` in
+> [`core/models/variable.py`](../georiva/src/georiva/core/models/variable.py):
+>
+> | `transform_type`   | Sources required             | Output                                  |
+> |--------------------|------------------------------|-----------------------------------------|
+> | `passthrough`      | one `primary`                | the source band, read directly          |
+> | `vector_magnitude` | `u_component` + `v_component`| wind speed √(u² + v²)                    |
+> | `vector_direction` | `u_component` + `v_component`| meteorological wind direction (atan2)   |
+>
+> **Arbitrary band math is not implemented yet.** There is no `band_math` transform and no
+> `transform_expression` field, so the NDVI/EVI and other band-arithmetic examples below are included to
+> illustrate *how you would structure* such data — they describe a planned capability, not current behavior.
+> Likewise, unit handling is done with two `Unit` foreign keys, **`source_unit`** (units in the file) and
+> **`unit`** (output units); there is no `unit_conversion` string field. Wherever an example shows
+> `transform: band_math` or `unit_conversion: …`, read it as illustrative.
 
 ---
 
@@ -321,17 +349,18 @@ One source parameter, read directly. Optionally with unit conversion.
 Variable:
 slug: temperature
 transform_type: passthrough
-unit_conversion: K_to_C
+source_unit: K  # units in the source file (Unit FK)
+unit: °C  # output units (Unit FK)
 value_min: -40
 value_max: 50
-units: °C
 
-VariableSource:
+sources:  # StreamField
+- primary:
 source_name: TMP_2maboveground
-role: primary
 ```
 
-The pipeline reads `TMP_2maboveground` from the file, converts Kelvin to Celsius, and encodes it.
+The pipeline reads `TMP_2maboveground` from the file, converts Kelvin to Celsius (derived from `source_unit` → `unit`),
+and encodes it.
 
 ### Derived variable (vector magnitude)
 
@@ -341,46 +370,45 @@ Two source parameters combined with a mathematical operation.
 Variable:
 slug: wind_speed
 transform_type: vector_magnitude
-unit_conversion: ms_to_kmh
+source_unit: m / s
+unit: km / h
 value_min: 0
 value_max: 150
-units: km / h
 
-VariableSource:
+sources:  # StreamField
+- u_component:
 source_name: UGRD_10maboveground
-role: u_component
-
-VariableSource:
+- v_component:
 source_name: VGRD_10maboveground
-role: v_component
 ```
 
 The pipeline reads both U and V components, computes √(u² + v²), converts m/s to km/h, and encodes.
 
-### Derived variable (band math)
+### Derived variable (band math) — *planned, not yet implemented*
+
+> **Not available today.** There is no `band_math` transform or `transform_expression` field in the current model
+> (`transform_type` is limited to `passthrough`, `vector_magnitude`, `vector_direction`). The block below shows the
+> *intended* shape of arbitrary band arithmetic for planning purposes only.
 
 Multiple source parameters combined with a custom expression.
 
 ```python
+# PLANNED — does not work yet
 Variable:
 slug: ndvi
 transform_type: band_math
 transform_expression: (nir - red) / (nir + red)
 value_min: -1.0
 value_max: 1.0
-units: ""
 
-VariableSource:
-source_name: B04
-role: red
-
-VariableSource:
-source_name: B08
-role: nir
+sources:
+- red: {source_name: B04}
+- nir: {source_name: B08}
 ```
 
-The pipeline reads both bands, evaluates the expression using the role names as variable identifiers, and encodes the
-result.
+In the planned design the pipeline would read both bands and evaluate the expression using the role names as variable
+identifiers. (Note that today only the `primary`/`u_component`/`v_component` source kinds exist, so generic role names
+like `red`/`nir` are part of the proposed extension, not the current StreamField.)
 
 ### Pressure level extraction
 
@@ -390,20 +418,20 @@ Same source parameter extracted at a specific vertical level.
 Variable:
 slug: temperature_850hpa
 transform_type: passthrough
-unit_conversion: K_to_C
+source_unit: K
+unit: °C
 value_min: -60
 value_max: 40
-units: °C
 
-VariableSource:
+sources:
+- primary:
 source_name: T
-role: primary
 vertical_dimension: isobaricInhPa
 vertical_value: 850
 ```
 
-The pipeline reads parameter `T` at the 850 hPa level. The `vertical_dimension` and `vertical_value` fields on
-VariableSource tell the format plugin exactly which slice to extract.
+The pipeline reads parameter `T` at the 850 hPa level. The `vertical_dimension` and `vertical_value` fields on the
+Source block tell the format plugin exactly which slice to extract.
 
 ---
 
@@ -438,7 +466,7 @@ georiva-sources/ecmwf-aifs/GR--20250115T0600--aifs.grib2
    6. For each timestamp:
       7. For each variable:
          8. Read source(s) from file using VariableSource config
-         9. Apply transform (passthrough, vector_magnitude, band_math, etc.)
+         9. Apply transform (passthrough, vector_magnitude, or vector_direction)
          10. Apply unit conversion
          11. Clip to boundary
          12. Encode PNG + COG + JSON

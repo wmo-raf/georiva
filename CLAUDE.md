@@ -10,14 +10,15 @@ Meteorological Services.
 ## Tech Stack
 
 - **Framework**: Django 5.x + Wagtail 7.x (CMS/admin)
-- **Database**: PostgreSQL 16 + TimescaleDB + PostGIS
-- **Object Storage**: MinIO (S3-compatible), multi-bucket (incoming, sources, archive, assets)
+- **Database**: PostgreSQL 18 + TimescaleDB + PostGIS (TimescaleDB HA image), fronted by PgBouncer
+- **Object Storage**: MinIO (S3-compatible), multi-bucket (incoming, sources, archive, assets, zarr)
 - **Task Queue**: Celery + Redis (two queues: `georiva-default`, `georiva-ingestion`)
-- **Tile Server**: Titiler (FastAPI, separate container in `titiler-app/`)
-- **Data Libraries**: xarray, rasterio, cfgrib, dask, geopandas
+- **Event Bus**: MinIO bucket notifications → Redis list → `minio-consumer` (no MQTT/Mosquitto)
+- **Tile Servers**: Titiler (raster, FastAPI, `titiler-app/`); Martin (vector/MVT from PostGIS)
+- **Data Libraries**: xarray, rasterio, cfgrib, dask, geopandas; virtualizarr + virtual-tiff (kerchunk)
 - **API**: Django REST Framework + drf-spectacular (OpenAPI)
 - **Frontend**: STAC Browser (Radiant Earth), Vue.js for dashboards
-- **Container**: Docker Compose (11 services), Nginx reverse proxy
+- **Container**: Docker Compose (13 services), Nginx reverse proxy (`georiva-web-proxy`)
 - **Python**: 3.10+
 
 ## Project Structure
@@ -45,9 +46,10 @@ georiva/src/georiva/          # Main Django application
 │   ├── loader.py             # Loader orchestrates fetch → store
 │   └── registry.py           # LoaderProfileViewSetRegistry
 ├── stac/                     # STAC API (views, serializers, URLs)
-├── edr/                      # EDR API (views, serializers, URLs)
-├── analysis/                 # Analysis engine with operator registry
-├── visualization/            # Map visualization layer
+├── edr/                      # EDR API — metadata plane only (data queries not yet implemented)
+├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry)
+├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk) manifests over COG assets
+├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)
 ├── pages/                    # Wagtail CMS pages (home, datasets)
 ├── sample_plugins/           # Example plugins (CHIRPS, ECMWF)
 └── utils/                    # Shared utilities
@@ -104,12 +106,18 @@ Settings split: `config/settings/base.py` (shared) → `dev.py` / `production.py
 
 ## API Endpoints
 
-Defined in `api/urls.py:7-11`:
+Defined in `api/urls.py`:
 
 - `/api/stac/` — STAC API (collections, items, search, queryables)
-- `/api/edr/` — Environmental Data Retrieval API
-- `/api/webhook/` — MinIO event webhook
-- `/admin/` — Wagtail CMS admin
+- `/api/edr/` — Environmental Data Retrieval API (metadata plane only so far)
+- `/api/jobs/` — Async job status (task_ferry)
+- `/api/analysis/` — Analysis API (e.g. `timeseries/point`, `timeseries/area`)
+- `/api/tile-config/<catalog>/<collection>/<variable>/` — Tile/render config
+- `/api/datasets/` — Dataset pages API
+- `/admin/` — Wagtail CMS admin (mounted in `config/urls.py`)
+
+> MinIO events arrive via a Redis list consumed by `minio-consumer`, **not** an HTTP webhook
+> endpoint. Vector tiles for zonal stats are served by Martin at `/martin/boundary_stats/{z}/{x}/{y}`.
 
 ## Key Conventions
 
@@ -118,7 +126,8 @@ Defined in `api/urls.py:7-11`:
 - **Singletons**: `storage`, `format_registry`, `loader_profile_viewset_registry` — import from their modules
 - **Celery tasks**: Late imports inside task body to avoid circular imports; `bind=True` + `acks_late=True`
 - **Celery queues**: Heavy processing on `georiva-ingestion`, lightweight on `georiva-default`
-- **No Celery retries**: `max_retries=0`; retries handled by `sweep_unprocessed` periodic task
+- **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
+  newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
 - **Storage paths**: Time-partitioned: `{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
 
