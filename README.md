@@ -6,8 +6,9 @@ GeoRiva is a geospatial backend platform for automated ingestion, processing, vi
 raster data. Built on Django/Wagtail, it provides a plugin-driven architecture for pulling data from diverse sources,
 serving it through modern standards-compliant APIs, and enabling analytical workflows on top of it.
 
-> **Status:** Early development — architecture phase. See
-> the [Architecture Design Document](docs/architecture/README.md) for the full system design and open discussion points.
+> **Status:** Active development — core ingestion, data model, STAC API, tile serving, and analysis modules are built;
+> some areas (EDR data-retrieval plane, generic analysis-plugin framework) are still in progress. See
+> the [Architecture Design Document](docs/architecture/README.md) for the as-built design and open discussion points.
 
 ---
 
@@ -31,16 +32,17 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 
 ## Tech Stack
 
-| Component        | Technology                            |
-|------------------|---------------------------------------|
-| Core Framework   | Django 5.x + Wagtail                  |
-| Database         | PostgreSQL 16 + TimescaleDB + PostGIS |
-| Object Storage   | MinIO (S3-compatible)                 |
-| Task Queue       | Celery + Redis                        |
-| Tile Server      | Titiler                               |
-| Data Formats     | COG, Zarr, Encoded PNG                |
-| Messaging        | Mosquitto (MQTT)                      |
-| Containerization | Docker Compose                        |
+| Component        | Technology                                          |
+|------------------|-----------------------------------------------------|
+| Core Framework   | Django 5.x + Wagtail 7.x                            |
+| Database         | PostgreSQL 18 + TimescaleDB + PostGIS (via PgBouncer)|
+| Object Storage   | MinIO (S3-compatible), multi-bucket                 |
+| Task Queue       | Celery + Redis (two queues)                         |
+| Tile Servers     | Titiler (raster COGs) + Martin (vector/MVT)         |
+| Discovery APIs   | STAC API + OGC API – EDR                            |
+| Data Formats     | COG, virtual Zarr (kerchunk), Encoded PNG          |
+| Event Bus        | MinIO → Redis list → `minio-consumer` (no MQTT)     |
+| Containerization | Docker Compose                                      |
 
 ---
 
@@ -71,9 +73,11 @@ see [docs/architecture/README.md](docs/architecture/README.md).
     - `SECRET_KEY` — Django secret key
     - `GEORIVA_DB_USER`, `GEORIVA_DB_NAME`, `GEORIVA_DB_PASSWORD` — database credentials
     - `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` — MinIO credentials
-    - `MINIO_WEBHOOK_BEARER_TOKEN` — token for MinIO webhook authentication
     - `ALLOWED_HOSTS` — comma-separated list of allowed hostnames
     - `CSRF_TRUSTED_ORIGINS` — comma-separated list of trusted origins
+
+   See `.env.sample` for the full list of options. (MinIO events are delivered to a Redis list and drained by the
+   `minio-consumer` service — there is no webhook endpoint or token to configure.)
 
 3. **Start the stack**
 
@@ -147,7 +151,28 @@ GEORIVA_PLUGIN_GIT_REPOS=https://github.com/org/plugin1.git,https://github.com/o
 
 ## Project Structure
 
-TODO
+```
+georiva/src/georiva/      # Main Django/Wagtail application
+├── config/               # Settings (base/dev/production), URLs, Celery, WSGI/ASGI
+├── core/                 # STAC-aligned data models, multi-bucket storage, filename conventions
+├── ingestion/            # Async ingestion pipeline, IngestionLog, MinIO event consumer
+├── formats/              # Format handler plugins (GRIB, NetCDF, GeoTIFF) + registry
+├── sources/              # Source-plugin framework (DataSource, LoaderProfile, fetch strategies)
+├── stac/                 # STAC API
+├── edr/                  # OGC API – EDR (metadata plane)
+├── analysis/             # Time-series + zonal-statistics modules
+├── virtual_zarr/         # Per-Variable virtual Zarr (kerchunk) manifests
+├── visualization/        # Wagtail admin hooks for map/tile config
+├── pages/                # Wagtail CMS pages
+└── sample_plugins/       # Example source plugins (CHIRPS, ECMWF Open Data)
+
+titiler-app/              # Custom Titiler tile server (FastAPI)
+source-plugin-boilerplate/# Cookiecutter template for new source plugins
+deploy/                   # Nginx, Martin, plugin install scripts
+docs/                     # Architecture, data model, plugin, and storage docs
+```
+
+For a deeper map of conventions and patterns, see [`docs/`](docs/README.md).
 
 ---
 
@@ -174,10 +199,18 @@ GeoRiva is in its early stages and contributions are welcome — especially feed
 
 ## Documentation
 
-| Document                                                    | Description                                                |
-|-------------------------------------------------------------|------------------------------------------------------------|
-| [Architecture Design Document](docs/architecture/README.md) | Full system architecture, data model, and design decisions |
-| [Contributing Guide](docs/contributing.md)                  | How to set up a dev environment and contribute             |
+Start at the [documentation index](docs/README.md), which ties everything together. Key documents:
+
+| Document                                                                         | Description                                                |
+|----------------------------------------------------------------------------------|------------------------------------------------------------|
+| [Documentation Index](docs/README.md)                                            | Map of all docs and a suggested reading order              |
+| [Architecture Design Document](docs/architecture/README.md)                      | Full system architecture, data model, and design decisions |
+| [Data Model Guide](docs/georiva-data-model-guide.md)                             | How to organize data into Catalogs, Collections, Variables |
+| [Format Plugin System](docs/format-plugins.md)                                   | Reading GRIB/NetCDF/GeoTIFF; writing a new format plugin   |
+| [Storage & Ingestion Architecture](docs/plugins/georiva-storage-architecture.md) | Buckets, event-driven ingestion, IngestionLog              |
+| [Download Deduplication](docs/architecture/download-dedup.md)                    | Multi-collection feeds and download dedup                  |
+| [Plugin Parameter Contract](docs/architecture/plugin-parameter-contract.md)      | Proposed declarative parameter manifest (RFC)              |
+| [Contributing Guide](docs/contributing.md)                                       | How to set up a dev environment and contribute             |
 
 ---
 

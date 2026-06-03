@@ -2,17 +2,18 @@
 
 **Geospatial Raster Ingestion, Visualization & Analysis**
 
-|             |                                          |
-|-------------|------------------------------------------|
-| **Status**  | Living document — partially implemented  |
-| **Version** | 0.2                                      |
-| **Date**    | 2026-05-29                               |
-| **Author**  | Erick                                    |
+|             |                                         |
+|-------------|-----------------------------------------|
+| **Status**  | Living document — partially implemented |
+| **Version** | 0.2                                     |
+| **Date**    | 2026-05-29                              |
+| **Author**  | Erick Otenyo, WMO Africa                |
 
 > **Note (v0.2):** This document began life as a pre-implementation RFC (v0.1, 2025-02-09). Much of
 > the system is now built. Sections have been updated to reflect the as-built architecture; remaining
 > aspirational items are called out inline. Related design: see
-> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md).
+> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md) and
+> [`download-dedup.md`](./download-dedup.md).
 
 ---
 
@@ -79,8 +80,10 @@ monitoring, etc.) should be able to build on GeoRiva.
   internal data model with the SpatioTemporal Asset Catalog (STAC) specification.
 - **Plugin-driven extensibility:** Data sources and analysis modules are implemented as plugins (Wagtail apps) that
   conform to defined contracts, enabling community contributions without modifying the core engine.
-- **Modern visualization:** Move away from legacy WMS tile serving toward browser-side rendering with encoded data
-  tiles, enabling smooth animations, interactive layer picking, and interpolation.
+- **Modern, client-first visualization:** Prefer browser-side rendering of encoded data tiles — enabling smooth temporal
+  animation, interactive value picking, client-side color ramps, and interpolation — over legacy server-styled WMS.
+  Dynamically served tiles (Titiler for raster COGs, Martin for vector) remain available where server-side rendering is
+  the better fit.
 - **Cloud-optimized storage:** Cloud Optimized GeoTIFF (COG) as the canonical storage format, with MinIO (S3-compatible)
   as the object store.
 - **Async-first processing:** All long-running operations (ingestion, processing, analysis) run as Celery tasks, keeping
@@ -163,15 +166,19 @@ directory. The directory hierarchy encodes the target metadata:
 incoming/{catalog_slug}/{collection_slug}/{variable_slug}/filename.tif
 ```
 
-When a file is uploaded to this path, MinIO fires a **webhook notification** to GeoRiva's
-`/api/webhook/` endpoint. A dedicated consumer process (`georiva-minio-consumer`) handles these
-events and enqueues a Celery task that picks up the file and routes it through the ingestion pipeline.
+When a file is uploaded to this path, MinIO publishes an `s3:ObjectCreated:*` event to a **Redis
+list** using its built-in Redis notification target (`arn:minio:sqs::primary:redis`, list key
+`georiva:minio:events`). Notifications are configured per-bucket on `incoming` and `sources` by the
+`setup_minio` management command. A dedicated consumer process (`georiva-minio-consumer`, the
+`minio_event_consumer` command) blocks on that list (`BLPOP`), validates the object key, registers an
+`IngestionLog`, and enqueues the `process_incoming_file` Celery task on the `georiva-ingestion` queue.
 File naming conventions are defined per-variable to encode temporal information (e.g., timestamps,
 forecast hours).
 
 > **As-built note:** The original design called for an MQTT broker (Mosquitto) to carry MinIO
-> notifications. This was simplified to direct HTTP webhooks consumed by `georiva-minio-consumer`;
-> Mosquitto is no longer part of the stack.
+> notifications. This was replaced by MinIO's native **Redis** event target consumed by
+> `georiva-minio-consumer`; Mosquitto is no longer part of the stack. The `sweep_unprocessed`
+> periodic task acts as a safety net for any events the consumer misses.
 
 ### 3.3 Common Ingestion Pipeline
 
@@ -259,10 +266,22 @@ internal data model with minimal translation since the models are STAC-aligned b
 
 ### 5.1a EDR API
 
-Alongside STAC, GeoRiva exposes an **Environmental Data Retrieval (EDR) API** (`/api/edr/`, OGC API – EDR). EDR is
-purpose-built for spatio-temporal environmental data and provides query patterns — position, area, and cube queries —
-that suit point/time-series extraction from gridded fields far better than STAC item search. An async **Jobs API**
-(`/api/jobs/`) exposes the status of long-running loader and processing jobs.
+Alongside STAC, GeoRiva exposes an **Environmental Data Retrieval (EDR) API** (`/api/edr/`, OGC API – EDR 1.1). EDR is
+purpose-built for spatio-temporal environmental data and provides query patterns — position, area, cube — that suit
+point/time-series extraction from gridded fields far better than STAC item search. An async **Jobs API** (`/api/jobs/`)
+exposes the status of long-running loader and processing jobs.
+
+> **As-built status (v0.2):** The EDR **metadata plane** is implemented: landing page, conformance
+> (core, collections, oas30, html, geojson), collection list, and collection detail. The detail
+> document is the GetCapabilities equivalent — it advertises spatial/temporal extents, the explicit
+> timestep list, `parameter_names` with units and WeatherLayers palette hints (under an `x-georiva`
+> extension), the advertised `data_queries`, and a canonical cross-link to the matching STAC
+> collection. Collection ID = `Collection.slug`.
+>
+> **Gaps:** The EDR **data-retrieval plane is not yet implemented** — `position`, `area`, `locations`,
+> `instances`, and `cube` endpoints are stubbed/commented out. CoverageJSON output is not yet offered
+> (only JSON/GeoJSON). In the interim, equivalent point/area extraction is available through the
+> Analysis API (§6.1), which is not yet wired under the EDR query paths.
 
 ### 5.2 Tile Serving with Titiler
 
@@ -320,6 +339,25 @@ At its foundation, the system will support:
 
 These are the building blocks that all higher-level analysis modules can rely on.
 
+> **As-built status (v0.2):** The analysis layer is implemented as two concrete, purpose-built modules
+> under `analysis/` rather than the generic operator framework originally envisioned in §6.2.
+>
+> **Time-series (`analysis/timeseries/`)** — extracts series from the per-variable **virtual Zarr
+> manifests** (§6.4) via xarray. Two endpoints:
+> - `GET /api/analysis/timeseries/point/` — nearest-grid-cell series for a lat/lon (synchronous).
+> - `POST /api/analysis/timeseries/area/` — zonal series over an arbitrary GeoJSON polygon: bbox
+    > subset → `regionmask` polygon mask → `mean`/`sum`/`min`/`max`/`std` aggregation (synchronous;
+    > designed to move to Celery for large areas).
+>
+> **Zonal statistics (`analysis/zonal_stats/`)** — *precomputed* admin-boundary statistics. A Celery
+> task (`compute_boundary_zonal_stats`, `georiva-ingestion` queue) runs per COG asset using
+> `rasterio.mask`, writing `mean/min/max/sum/std/count` per (Item × Variable × AdminBoundary) into the
+> `BoundaryZonalStats` TimescaleDB hypertable. Levels come from `Collection.boundary_stats_levels` and
+> the `adminboundarymanager` package; a `compute_boundary_stats` command backfills history. These
+> stats are served to the frontend as **vector tiles via Martin** (a generated PostgreSQL function,
+> `create_martin_function`, exposed at `/martin/boundary_stats/{z}/{x}/{y}`). There is no DRF endpoint
+> for zonal stats yet — they are consumed through Martin/DB.
+
 ### 6.2 Pluggable Analysis Modules
 
 Analysis modules follow the same plugin pattern as data sources. Each module implements a base contract that defines:
@@ -334,6 +372,16 @@ citizens in the system, indistinguishable from raw ingested data.
 
 This plugin architecture is intentionally open-ended. Contributors can build modules for any domain: climatological
 analysis, agricultural indices, hydrological modeling, forecast verification — whatever the use case demands.
+
+> **As-built gaps (v0.2):** This generic, pluggable framework is **not yet implemented**. There is no
+> analysis operator registry or plugin contract today (an earlier `analysis/registry.py` /
+> `OperatorRegistry` no longer exists); the two shipped modules (§6.1) are wired directly. Crucially,
+> analysis output does **not** yet flow back as new derived Items — time-series are computed on demand
+> and zonal stats live in their own hypertable. Integration with external libraries (Xclim, Verde,
+> scikit-learn, §6.3) is also not yet present; current analysis uses xarray, `regionmask`, and
+> rasterio only. Formalizing the analysis-plugin contract — ideally sharing the parameter-manifest
+> vocabulary from [`plugin-parameter-contract.md`](./plugin-parameter-contract.md) — remains future
+> work.
 
 ### 6.3 Integration with Existing Analysis Libraries
 
@@ -364,11 +412,37 @@ analysis-ready data cubes. Zarr archives can be generated at the Catalog, Collec
 many Items into a single chunked, cloud-optimized array suitable for large-scale computation with tools like Xarray and
 Dask.
 
+> **As-built status (v0.2):** Implemented as **virtual Zarr** rather than materialized Zarr archives.
+> Using `virtualizarr` + `virtual-tiff` (kerchunk), GeoRiva builds a manifest that references the
+> existing COG assets *in place* — no data is copied or re-chunked. This is realized in the
+> `virtual_zarr/` app:
+> - One `VirtualZarrManifest` per **Variable** (a Wagtail snippet), tracking build state via a
+    > `pending → building → ready → stale → failed` state machine with distributed locking and crash
+    > recovery (same pattern as `IngestionLog`).
+> - Manifests are kerchunk JSON stored in a dedicated `georiva-zarr` bucket; `open_dataset()` returns
+    > a lazy, dask-backed `xarray.Dataset`.
+> - Built by the `build_virtual_zarr` command and Celery tasks; a signal marks a manifest **stale**
+    > when new COG assets land, and a sweep debounces rebuilds.
+> - This is what the time-series analysis service reads from (§6.1).
+>
+> **Resolved design question:** This answers §9.2 — virtual Zarr is generated at the **Variable** level
+> and maintained automatically (stale-on-write + sweep), with no data duplication.
+>
+> **Gaps:** Only Variable-level virtual cubes exist; Collection/Catalog-level aggregation and
+> materialized Zarr (for heavy Dask workloads or external sharing) are not implemented. Manifests
+> cover COG assets only.
+
 ### 6.5 Mini-Dashboards
 
 Analysis results and key data summaries will be presentable as mini-dashboards embedded throughout the system. These are
 lightweight, auto-updating views that surface insights from the analysis layer without requiring users to build custom
 visualizations.
+
+> **As-built status (v0.2):** Not yet a general capability. An operational **ingestion dashboard**
+> frontend exists (`ingestion/ingestion-dashboard/`), and the `visualization/` app currently provides
+> Wagtail admin hooks only (its DRF views are a stub). Map visualization is delivered via the
+> `tile-config` endpoint, encoded PNGs + WeatherLayers GL, Titiler raster tiles, and Martin vector
+> tiles rather than embedded analysis mini-dashboards.
 
 ---
 
@@ -380,21 +454,21 @@ visualizations.
 
 ### 7.1 Service Inventory
 
-| Service (compose name)               | Technology              | Purpose                                                           |
-|--------------------------------------|-------------------------|------------------------------------------------------------------|
-| Web Application (`georiva`)          | Django / Wagtail        | Core engine, admin, STAC API, EDR API, Jobs API, plugin host     |
-| Default Worker (`...-default-worker`)| Celery                  | Lightweight tasks (sweeps, cleanup, scheduling) — `georiva-default` queue |
-| Ingestion Worker (`...-ingestion-worker`) | Celery             | Heavy data processing — `georiva-ingestion` queue                |
-| Scheduler (`...-celery-beat`)        | Celery Beat             | Schedules periodic tasks (source polling, sweeps, maintenance)   |
-| MinIO Consumer (`...-minio-consumer`)| Celery / app process    | Consumes MinIO webhook events and enqueues drop-zone ingestion   |
-| Tile Server (`...-titiler-app`)      | Titiler (FastAPI)       | Serves raster map tiles from COGs in MinIO                       |
-| Vector Tiles (`...-martin`)          | Martin                  | Serves boundary/vector MVT tiles from PostGIS                    |
-| STAC Browser (`...-stac-browser`)    | stac-browser            | Standalone STAC catalog browsing UI                              |
-| Web Proxy (`...-web-proxy`)          | Nginx                   | Reverse proxy / static & media serving, routes to all services   |
-| Database (`...-db`)                  | PostgreSQL 18 + TimescaleDB + PostGIS | Models, time-series hypertables, spatial data       |
-| Connection Pooler (`...-pgbouncer`)  | PgBouncer               | Pools DB connections for the app and Martin                      |
-| Cache / Broker (`...-redis`)         | Redis                   | Celery task broker and application cache                         |
-| Object Storage (`...-minio`)         | MinIO                   | S3-compatible storage for all binary assets                      |
+| Service (compose name)                    | Technology                            | Purpose                                                                   |
+|-------------------------------------------|---------------------------------------|---------------------------------------------------------------------------|
+| Web Application (`georiva`)               | Django / Wagtail                      | Core engine, admin, STAC API, EDR API, Jobs API, plugin host              |
+| Default Worker (`...-default-worker`)     | Celery                                | Lightweight tasks (sweeps, cleanup, scheduling) — `georiva-default` queue |
+| Ingestion Worker (`...-ingestion-worker`) | Celery                                | Heavy data processing — `georiva-ingestion` queue                         |
+| Scheduler (`...-celery-beat`)             | Celery Beat                           | Schedules periodic tasks (source polling, sweeps, maintenance)            |
+| MinIO Consumer (`...-minio-consumer`)     | App process (BLPOP)                   | Consumes MinIO events from a Redis list and enqueues drop-zone ingestion  |
+| Tile Server (`...-titiler-app`)           | Titiler (FastAPI)                     | Serves raster map tiles from COGs in MinIO                                |
+| Vector Tiles (`...-martin`)               | Martin                                | Serves boundary/vector MVT tiles from PostGIS                             |
+| STAC Browser (`...-stac-browser`)         | stac-browser                          | Standalone STAC catalog browsing UI                                       |
+| Web Proxy (`...-web-proxy`)               | Nginx                                 | Reverse proxy / static & media serving, routes to all services            |
+| Database (`...-db`)                       | PostgreSQL 18 + TimescaleDB + PostGIS | Models, time-series hypertables, spatial data                             |
+| Connection Pooler (`...-pgbouncer`)       | PgBouncer                             | Pools DB connections for the app and Martin                               |
+| Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and MinIO event bus                     |
+| Object Storage (`...-minio`)              | MinIO                                 | S3-compatible storage for all binary assets                               |
 
 ### 7.2 Key Infrastructure Decisions
 
@@ -402,38 +476,38 @@ visualizations.
   on-premises deployment, which is critical for many National Meteorological Services.
 - **TimescaleDB over raw PostgreSQL:** The Item model's time-series nature makes TimescaleDB's hypertables and
   compression essential for performance at scale.
-- **Webhook-based event ingestion:** MinIO notifications are delivered as HTTP webhooks to a dedicated consumer
-  (`georiva-minio-consumer`), which enqueues Celery tasks for the drop-zone path. This replaced the originally-planned
-  MQTT/Mosquitto broker, removing an infrastructure component.
+- **Redis-based event ingestion:** MinIO publishes bucket notifications to a Redis list via its native Redis target; a
+  dedicated consumer (`georiva-minio-consumer`) drains the list and enqueues Celery tasks for the drop-zone path. This
+  replaced the originally-planned MQTT/Mosquitto broker, removing an infrastructure component and reusing Redis.
 - **Split Celery workers:** Two queues and two worker services separate lightweight orchestration (`georiva-default`)
   from heavy data processing (`georiva-ingestion`) so large ingest jobs cannot starve routine tasks.
 - **PgBouncer connection pooling:** A pooler fronts PostgreSQL so the app workers and Martin can share a bounded set of
   database connections.
-- **Redis as dual-purpose:** Redis serves as both the Celery broker and the application cache, reducing the number of
-  infrastructure components.
+- **Redis as triple-purpose:** Redis serves as the Celery broker, the application cache, *and* the MinIO event bus,
+  reducing the number of infrastructure components.
 
 ---
 
 ## 8. Technology Stack Summary
 
-| Category          | Technology                            | Notes                                   |
-|-------------------|---------------------------------------|-----------------------------------------|
-| Web Framework     | Django 5.x + Wagtail 7.x              | Core engine, admin, plugin host         |
-| Database          | PostgreSQL 18 + TimescaleDB + PostGIS | Primary data store (TimescaleDB HA image)|
-| Connection Pool   | PgBouncer                             | DB connection pooling                   |
-| Object Storage    | MinIO                                 | S3-compatible, self-hosted              |
-| Task Queue        | Celery + Redis                        | Async processing, two queues            |
-| Raster Tiles      | Titiler                               | COG-native tile serving                 |
-| Vector Tiles      | Martin                                | MVT tiles from PostGIS (boundaries)     |
-| Discovery APIs    | STAC API + OGC API – EDR              | Catalog search + environmental retrieval|
-| STAC Browser      | Radiant Earth stac-browser            | Data discovery UI                       |
-| Analysis          | Xarray-compatible ecosystem           | Pluggable, domain-agnostic              |
-| Data Formats      | COG, Zarr, Encoded PNG                | Storage and serving formats             |
-| Frontend Viz      | WeatherLayers GL                      | Browser-side rendering                  |
-| Event Ingestion   | MinIO webhooks → consumer             | Drop-zone notifications (Mosquitto dropped) |
-| Reverse Proxy     | Nginx                                 | Routing, static/media serving           |
-| Containerization  | Docker + Docker Compose               | Full stack orchestration                |
-| Language          | Python 3.10+                          | Primary development language            |
+| Category         | Technology                            | Notes                                       |
+|------------------|---------------------------------------|---------------------------------------------|
+| Web Framework    | Django 5.x + Wagtail 7.x              | Core engine, admin, plugin host             |
+| Database         | PostgreSQL 18 + TimescaleDB + PostGIS | Primary data store (TimescaleDB HA image)   |
+| Connection Pool  | PgBouncer                             | DB connection pooling                       |
+| Object Storage   | MinIO                                 | S3-compatible, self-hosted                  |
+| Task Queue       | Celery + Redis                        | Async processing, two queues                |
+| Raster Tiles     | Titiler                               | COG-native tile serving                     |
+| Vector Tiles     | Martin                                | MVT tiles from PostGIS (boundaries)         |
+| Discovery APIs   | STAC API + OGC API – EDR              | Catalog search + environmental retrieval    |
+| STAC Browser     | Radiant Earth stac-browser            | Data discovery UI                           |
+| Analysis         | Xarray-compatible ecosystem           | Pluggable, domain-agnostic                  |
+| Data Formats     | COG, Zarr, Encoded PNG                | Storage and serving formats                 |
+| Frontend Viz     | WeatherLayers GL                      | Browser-side rendering                      |
+| Event Ingestion  | MinIO → Redis list → consumer         | Drop-zone notifications (Mosquitto dropped) |
+| Reverse Proxy    | Nginx                                 | Routing, static/media serving               |
+| Containerization | Docker + Docker Compose               | Full stack orchestration                    |
+| Language         | Python 3.10+                          | Primary development language                |
 
 ---
 
@@ -454,6 +528,11 @@ with either approach would be valuable.
 
 At which level should Zarr archives be generated — Catalog, Collection, or Variable? Should Zarr generation be triggered
 automatically as Items accumulate, or on-demand? What chunking strategies make sense for the expected access patterns?
+
+> **Update (v0.2):** Resolved for the common case — see §6.4. GeoRiva uses **virtual Zarr (kerchunk)**
+> manifests at the **Variable** level, built automatically (stale-on-write + debounced sweep) and
+> referencing COGs in place (no re-chunking). Collection/Catalog-level and materialized Zarr remain
+> open.
 
 ### 9.3 Plugin Distribution
 
@@ -489,8 +568,9 @@ The following are the proposed immediate next steps for moving GeoRiva from desi
 1. **Review this document:** Contributors should read, comment on, and challenge the architecture. File issues or open
    discussions for any section.
 2. **Define plugin contracts:** Formalize the base class interfaces for Source Plugins and Analysis Plugins.
-3. **Set up the Docker Compose stack:** Get the core infrastructure (PostgreSQL, TimescaleDB, MinIO, Redis, Mosquitto)
-   running.
+3. **Set up the Docker Compose stack:** Get the core infrastructure (PostgreSQL/TimescaleDB, MinIO, Redis) running.
+   (Note: the originally-planned Mosquitto/MQTT broker was dropped — MinIO events are delivered via a Redis list; see
+   §3.2.)
 4. **Implement core models:** Build the Catalog, Collection, Variable, Item, and Asset models with TimescaleDB
    integration.
 5. **Build the ingestion pipeline:** Implement the Celery-based pipeline from file input to STAC Item creation.

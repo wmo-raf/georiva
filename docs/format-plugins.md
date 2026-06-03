@@ -1,5 +1,10 @@
 # GeoRiva Format Plugin System
 
+> Part of the [GeoRiva documentation](README.md). Format plugins are the component the ingestion pipeline uses to read
+> raw files; for where they sit in the wider flow see the
+> [Storage & Ingestion Architecture](plugins/georiva-storage-architecture.md), and for how the data they read maps to
+> Variables see the [Data Model Guide](georiva-data-model-guide.md).
+
 ## Overview
 
 The format plugin system handles reading geospatial data files (GRIB, NetCDF, GeoTIFF) in GeoRiva. Each plugin knows how to open a specific file format, list its variables, and provide access to the data — either lazily for streaming computation or materialized as numpy arrays.

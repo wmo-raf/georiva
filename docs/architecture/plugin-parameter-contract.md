@@ -101,40 +101,40 @@ from typing import Optional
 @dataclass(frozen=True)
 class Level:
     """A point on a vertical dimension."""
-    type: str                          # 'surface' | 'pressure' | 'heightAboveGround'
-    value: Optional[float] = None      # 850, 2, 10
-    dimension: Optional[str] = None    # GRIB key: 'isobaricInhPa', 'heightAboveGround'
-    unit: Optional[str] = None         # 'hPa', 'm'
+    type: str  # 'surface' | 'pressure' | 'heightAboveGround'
+    value: Optional[float] = None  # 850, 2, 10
+    dimension: Optional[str] = None  # GRIB key: 'isobaricInhPa', 'heightAboveGround'
+    unit: Optional[str] = None  # 'hPa', 'm'
 
 
 @dataclass(frozen=True)
 class SourceKey:
     """How to locate the raw band inside a source file."""
-    name: str                          # GRIB shortName / NetCDF var / 'band_1'
+    name: str  # GRIB shortName / NetCDF var / 'band_1'
     level: Optional[Level] = None
 
 
 @dataclass(frozen=True)
 class Parameter:
     """An atomic, directly-readable quantity -> PASSTHROUGH Variable."""
-    key: str                           # '2t', 'u'
-    name: str                          # 'Temperature'
+    key: str  # '2t', 'u'
+    name: str  # 'Temperature'
     units: str
     source: SourceKey
     description: str = ''
-    standard_name: Optional[str] = None             # CF standard name
+    standard_name: Optional[str] = None  # CF standard name
     value_range: Optional[tuple[float, float]] = None
-    palette: Optional[str] = None                   # palette slug
+    palette: Optional[str] = None  # palette slug
 
 
 @dataclass(frozen=True)
 class DerivedParameter:
     """A composite -> VECTOR_MAGNITUDE / VECTOR_DIRECTION Variable."""
-    key: str                           # 'wind_speed_10m'
-    name: str                          # '10m Wind Speed'
+    key: str  # 'wind_speed_10m'
+    name: str  # '10m Wind Speed'
     units: str
-    transform: str                     # must match Variable.TransformType values
-    components: dict[str, SourceKey]   # {'u': SourceKey(...), 'v': SourceKey(...)}
+    transform: str  # must match Variable.TransformType values
+    components: dict[str, SourceKey]  # {'u': SourceKey(...), 'v': SourceKey(...)}
     description: str = ''
     value_range: Optional[tuple[float, float]] = None
     palette: Optional[str] = None
@@ -144,8 +144,8 @@ class DerivedParameter:
 class ParameterGroup:
     """A recommended bundle the wizard can turn into one Collection."""
     key: str
-    name: str                          # '10m Wind'
-    member_keys: list[str]             # keys of Parameter / DerivedParameter
+    name: str  # '10m Wind'
+    member_keys: list[str]  # keys of Parameter / DerivedParameter
 
 
 @dataclass(frozen=True)
@@ -153,7 +153,7 @@ class ParameterManifest:
     parameters: list[Parameter] = field(default_factory=list)
     derived: list[DerivedParameter] = field(default_factory=list)
     groups: list[ParameterGroup] = field(default_factory=list)
-
+    
     def by_key(self, key: str):
         """Resolve a key to a Parameter or DerivedParameter."""
         for p in (*self.parameters, *self.derived):
@@ -166,12 +166,12 @@ A small helper keeps the level cartesian product out of plugin code:
 
 ```python
 def expand_levels(
-    base_key: str,
-    base_name: str,
-    units: str,
-    source_name: str,
-    levels: list[Level],
-    **kwargs,
+        base_key: str,
+        base_name: str,
+        units: str,
+        source_name: str,
+        levels: list[Level],
+        **kwargs,
 ) -> list[Parameter]:
     """Produce one Parameter per level, e.g. t_850, t_700, ..."""
     out = []
@@ -197,9 +197,6 @@ class BaseDataSource(ABC):
         raise NotImplementedError
 ```
 
-`get_available_variables()` is retained as a thin, derived adapter (see §7) so nothing downstream
-breaks during the transition.
-
 ### 4.3 Reference Declaration (ECMWF AIFS)
 
 ```python
@@ -208,9 +205,10 @@ from georiva.sources.parameters import (
     Level, SourceKey, expand_levels,
 )
 
+
 def describe_parameters(self) -> ParameterManifest:
     pl = [Level('pressure', lv, 'isobaricInhPa', 'hPa') for lv in self.PRESSURE_LEVELS]
-
+    
     parameters = [
         Parameter('2t', '2m Temperature', 'K',
                   SourceKey('2t', Level('heightAboveGround', 2, 'heightAboveGround', 'm')),
@@ -221,7 +219,7 @@ def describe_parameters(self) -> ParameterManifest:
         *expand_levels('z', 'Geopotential', 'm2/s2', 'z', pl),
         *expand_levels('q', 'Specific Humidity', 'kg/kg', 'q', pl),
     ]
-
+    
     derived = [
         DerivedParameter('wind_speed_10m', '10m Wind Speed', 'm/s',
                          transform='vector_magnitude',
@@ -230,12 +228,12 @@ def describe_parameters(self) -> ParameterManifest:
                          transform='vector_direction',
                          components={'u': SourceKey('10u'), 'v': SourceKey('10v')}),
     ]
-
+    
     groups = [
         ParameterGroup('wind_10m', '10m Wind', ['wind_speed_10m', 'wind_dir_10m']),
         ParameterGroup('surface', 'Surface', ['2t', 'msl', 'tp']),
     ]
-
+    
     return ParameterManifest(parameters, derived, groups)
 ```
 
@@ -243,14 +241,14 @@ def describe_parameters(self) -> ParameterManifest:
 
 The manifest maps cleanly onto the existing models with **no schema changes required**:
 
-| Manifest entity                         | Core model result                                                      |
-|-----------------------------------------|-----------------------------------------------------------------------|
-| `Parameter`                             | `Variable(transform_type=PASSTHROUGH)` with one `primary` source block |
+| Manifest entity                         | Core model result                                                                     |
+|-----------------------------------------|---------------------------------------------------------------------------------------|
+| `Parameter`                             | `Variable(transform_type=PASSTHROUGH)` with one `primary` source block                |
 | `DerivedParameter` (`vector_magnitude`) | `Variable(transform_type=VECTOR_MAGNITUDE)` with `u_component` + `v_component` blocks |
 | `DerivedParameter` (`vector_direction`) | `Variable(transform_type=VECTOR_DIRECTION)` with `u_component` + `v_component` blocks |
-| `SourceKey`                             | A `SourceBlock` (`source_name`, `vertical_dimension`, `vertical_value`) |
-| `ParameterGroup`                        | One `Collection` containing the member `Variable`s                     |
-| (manifest as a whole)                   | One `Catalog` for the source                                           |
+| `SourceKey`                             | A `SourceBlock` (`source_name`, `vertical_dimension`, `vertical_value`)               |
+| `ParameterGroup`                        | One `Collection` containing the member `Variable`s                                    |
+| (manifest as a whole)                   | One `Catalog` for the source                                                          |
 
 The `SourceKey → SourceBlock` translation is direct: `SourceKey.name → source_name`,
 `Level.dimension → vertical_dimension`, `Level.value → vertical_value`.
@@ -262,12 +260,12 @@ A stateless service turns a manifest (plus operator selections) into persisted r
 ```python
 class SourceSetupService:
     def provision(
-        self,
-        manifest: ParameterManifest,
-        *,
-        catalog: Catalog,
-        selected_keys: list[str],
-        group_into_collections: bool = True,
+            self,
+            manifest: ParameterManifest,
+            *,
+            catalog: Catalog,
+            selected_keys: list[str],
+            group_into_collections: bool = True,
     ) -> list[Collection]:
         """
         Materialize Collections + Variables for the selected parameter keys.
@@ -291,16 +289,7 @@ The Wagtail-facing wizard is a multi-step view registered via `sources/wagtail_h
 Because provisioning is idempotent (keyed on slug), re-running the wizard after a plugin adds new
 parameters (e.g. the AIFS v2 wave fields) simply tops up the catalog.
 
-## 7. Backwards Compatibility & Migration
-
-- `get_available_variables()` becomes a thin adapter that flattens `describe_parameters()` into the
-  legacy dict shape, so existing callers keep working unchanged.
-- `describe_parameters()` raises `NotImplementedError` by default; plugins adopt it incrementally.
-  The wizard only offers sources that implement it.
-- The ECMWF AIFS plugin is migrated first as the reference implementation; CHIRPS follows.
-- No migrations are needed for the core models — `Variable`, `Collection`, and `Catalog` are unchanged.
-
-## 8. Open Questions
+## 7. Open Questions
 
 1. **Value ranges & palettes** — should sensible defaults live in the plugin manifest, in a shared
    parameter dictionary (keyed by CF standard name), or be left blank for the operator? A shared

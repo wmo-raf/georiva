@@ -17,22 +17,53 @@ good starting point if you're looking for areas where input is especially valuab
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- Python 3.12+
+- Docker and Docker Compose (v2+)
+- Python 3.10+ (the package declares `requires-python = ">=3.10"`; the app normally runs inside Docker)
 - Node.js 20+ (for frontend tooling, if applicable)
 - Git
 
 ### Running the Stack
 
-TODO
+The whole stack runs in Docker, driven by the `Makefile`. For development (hot-reload, source mounted):
 
-### Running Outside Docker (for faster iteration)
+```bash
+make dev-build       # build dev images
+make dev-up          # start the stack with auto-reload
+make dev-logs        # tail all service logs
+make dev-app-logs    # tail just the Django app
+make dev-down        # stop
+```
 
-TODO
+Equivalently, without the Makefile:
+
+```bash
+cp .env.sample .env  # then edit required values
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+Once up, the app is at http://localhost and the STAC Browser at http://localhost/stac-browser/. See the project
+[README](../README.md#development-setup) for the full quick-start.
+
+### Common management commands
+
+`georiva` inside the container is an alias for `python manage.py`. Useful commands:
+
+```bash
+make dev-shell                                   # shell into the app container
+make dev-migrate                                 # apply migrations
+make dev-makemigrations                          # create migrations
+docker compose exec georiva python manage.py createsuperuser
+docker compose exec georiva python manage.py setup_minio       # buckets, policies, Redis notifications
+```
 
 ### Running Tests
 
-TODO
+Tests run inside the app container with Django's test runner:
+
+```bash
+make dev-shell
+georiva test            # or: python manage.py test
+```
 
 ---
 
@@ -48,7 +79,11 @@ valuable as writing code.
 If you work with a geospatial data provider (weather models, satellite products, reanalysis datasets), building a source
 plugin is one of the most impactful contributions. A source plugin is a Wagtail app that implements the source plugin
 contract — see the architecture doc's [Source Plugins section](architecture/README.md#31-path-a-source-plugins) for the
-design, and look at an existing plugins in `ecmwf_aifs_source/` for reference.
+design. For reference implementations, look at the in-tree examples under
+`georiva/src/georiva/sample_plugins/` (`chirps/` and `ecmwf_opendata_source/`), and use the cookiecutter template in
+`source-plugin-boilerplate/` to scaffold a new one. The
+[Parameter Contract & Setup Wizard](architecture/plugin-parameter-contract.md) and
+[Download Deduplication](architecture/download-dedup.md) docs cover the plugin contract in depth.
 
 ### Analysis Modules
 
