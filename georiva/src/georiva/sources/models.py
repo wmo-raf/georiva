@@ -10,13 +10,12 @@ from wagtail.admin.panels import FieldPanel
 from .source import BaseDataSource
 
 
-class LoaderProfile(PolymorphicModel, TimeStampedModel):
+class DataFeed(PolymorphicModel, TimeStampedModel):
     """
-    Configuration for a data loader using DataSource .
-    
-    Each profile defines:
-    - What data to fetch (data_source_type + data_source_config)
-    - When to run (interval_minutes)
+    A configured data source: what to fetch, how often, and with what settings.
+
+    Each subclass pairs with one BaseDataSource implementation and holds the
+    operator-supplied configuration (schedule, credentials, variable selection).
     """
     
     name = models.CharField(
@@ -58,17 +57,32 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     total_files_fetched = models.PositiveIntegerField(default=0)
     total_bytes_transferred = models.BigIntegerField(default=0)
     
+    # Collections this feed populates (owned by DataFeed, not Collection)
+    collections = models.ManyToManyField(
+        "georivacore.Collection",
+        blank=True,
+        related_name="data_feeds",
+        verbose_name=_("Collections"),
+        help_text=_("Collections this feed populates"),
+    )
+    
+    setup_via_wizard = models.BooleanField(
+        default=False,
+        verbose_name=_("Set up via wizard"),
+    )
+    
     base_panels = [
         FieldPanel('name'),
         FieldPanel('is_active'),
         FieldPanel('interval_minutes'),
+        FieldPanel('collections'),
     ]
     
     panels = base_panels
     
     class Meta:
-        verbose_name = _("Loader Profile")
-        verbose_name_plural = _("Loader Profiles")
+        verbose_name = _("Data Feed")
+        verbose_name_plural = _("Data Feeds")
         ordering = ['name']
     
     def __str__(self):
@@ -82,6 +96,27 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     def data_source_cls(self):
         return None
     
+    @classmethod
+    def get_wizard_defaults(cls) -> dict:
+        """
+        Field values applied when the setup wizard creates a new instance.
+
+        Override in subclasses to supply required fields or sensible starting
+        values. Only needs to cover fields that have no model-level default.
+        """
+        return {}
+    
+    @classmethod
+    def get_catalog_defaults(cls) -> dict:
+        """
+        Suggested Catalog field values pre-filled on the wizard catalog step.
+
+        Keys correspond to Catalog model fields: file_format, description, etc.
+        Override in subclasses so the wizard pre-selects the right format and
+        provides a meaningful description without the operator having to know it.
+        """
+        return {}
+    
     # =========================================================================
     # Factory Methods
     # =========================================================================
@@ -90,15 +125,12 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         """Instantiate configured data source."""
         source_class = self.data_source_cls
         if not source_class:
-            raise ValueError("No data source class defined for this loader profile.")
+            raise ValueError("No data source class defined for this data feed.")
         
         if not issubclass(source_class, BaseDataSource):
             raise ValueError(f"Data source class {source_class} must inherit from BaseDataSource.")
         
-        # Merge default config with instance config
-        loader_config = self.get_loader_config()
-        config = {**loader_config}
-        
+        config = {**self.get_loader_config()}
         return source_class(config)
     
     def get_loader(self, collection=None):
@@ -108,7 +140,7 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         return Loader(
             data_source=self.get_data_source(),
             collection=collection,
-            loader_profile=self,
+            data_feed=self,
         )
     
     # =========================================================================
@@ -116,14 +148,14 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     # =========================================================================
     
     def record_run(self, result, collection):
-        """Record loader run result."""
+        """Record data feed run result."""
         from django.utils import timezone
         from georiva.core.storage import BucketType
         from georiva.ingestion.models import IngestionLog
-
-        loader_run = LoaderRun.objects.create(
+        
+        data_feed_run = DataFeedRun.objects.create(
             collection=collection,
-            loader_profile=self,
+            data_feed=self,
             started_at=result.started_at,
             finished_at=result.finished_at,
             status=result.status,
@@ -136,15 +168,13 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
             run_time=result.run_time,
             errors=result.errors,
         )
-
-        # Link IngestionLog entries for files stored in this run so that
-        # deleting those Items later can cascade back to the LoaderRun.
+        
         if result.stored_paths:
             IngestionLog.objects.filter(
                 file_path__in=result.stored_paths,
                 bucket=BucketType.SOURCES,
-                loader_run__isnull=True,
-            ).update(loader_run=loader_run)
+                data_feed_run__isnull=True,
+            ).update(data_feed_run=data_feed_run)
         
         self.last_run_at = timezone.now()
         self.last_run_status = result.status
@@ -163,7 +193,7 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         ])
     
     def is_due(self) -> bool:
-        """Check if loader is due to run."""
+        """Check if data feed is due to run."""
         if not self.is_active:
             return False
         
@@ -176,17 +206,18 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run
     
-    def run_now(self, collection, *, user=None, async_run: bool = True):
+    def run_now(self, collection=None, *, user=None, async_run: bool = True):
         """
-        Dispatch a loader run for *collection*.
+        Dispatch a loader run.
 
-        async_run=True  (default) — creates a LoaderJob and dispatches via
-                         JobHandler / CeleryExecutor.  Returns the Job instance
-                         immediately; callers can poll GET /api/jobs/<id>/.
+        collection — if given, run only for that collection; if None, run for
+                     all collections linked to this feed.
 
-        async_run=False — runs synchronously in the current process (useful
-                          for management commands and tests).  Returns a
-                          LoaderRunResult.
+        async_run=True  (default) — creates a DataFeedJob with real-time
+                         progress tracking.  Returns the Job instance.
+
+        async_run=False — runs synchronously; useful for management commands
+                          and tests.  Returns a list of LoaderRunResults.
         """
         if async_run:
             from task_ferry.handler import JobHandler
@@ -194,21 +225,24 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
             return JobHandler.create_and_start(
                 user=user,
                 job_type_name="data_source_load",
-                loader_profile_id=self.pk,
-                collection_id=collection.pk,
+                data_feed_id=self.pk,
+                collection_id=collection.pk if collection else None,
             )
 
-        # Synchronous fallback — original behaviour preserved.
-        loader = self.get_loader(collection)
-        result = loader.run()
-        self.record_run(result, collection)
-        return result
+        collections = [collection] if collection else list(self.collections.all())
+        results = []
+        for coll in collections:
+            loader = self.get_loader(coll)
+            result = loader.run()
+            self.record_run(result, coll)
+            results.append(result)
+        return results
     
     @cached_property
     def viewset(self):
-        from .registry import loader_profile_viewset_registry
+        from .registry import data_feed_viewset_registry
         model_name = self.get_real_instance_class().__name__.lower()
-        return loader_profile_viewset_registry.get(model_name)
+        return data_feed_viewset_registry.get(model_name)
     
     @property
     def edit_url(self):
@@ -225,15 +259,15 @@ class LoaderProfile(PolymorphicModel, TimeStampedModel):
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         
-        from georiva.core.tasks import update_collection_loader_plugin_periodic_task
+        from georiva.core.tasks import update_collection_data_feed_periodic_task
         
-        update_collection_loader_plugin_periodic_task(
+        update_collection_data_feed_periodic_task(
             sender=self.__class__, instance=self, created=False
         )
 
 
-class LoaderRun(TimeStampedModel):
-    """Tracks each execution of the Loader for a Collection."""
+class DataFeedRun(TimeStampedModel):
+    """Tracks each execution of the DataFeed for a Collection."""
     
     class Status(models.TextChoices):
         RUNNING = 'running', 'Running'
@@ -246,11 +280,11 @@ class LoaderRun(TimeStampedModel):
     collection = models.ForeignKey(
         'georivacore.Collection',
         on_delete=models.CASCADE,
-        related_name='loader_runs',
+        related_name='data_feed_runs',
     )
     
-    loader_profile = models.ForeignKey(
-        'georivasources.LoaderProfile',
+    data_feed = models.ForeignKey(
+        'georivasources.DataFeed',
         on_delete=models.SET_NULL,
         null=True,
         related_name='runs',
@@ -300,17 +334,17 @@ class LoaderRun(TimeStampedModel):
 from task_ferry.models import Job  # noqa: E402
 
 
-class LoaderJob(Job):
+class DataFeedJob(Job):
     """
     Operator-visible record for a single Loader.run() execution.
 
     Progress is available in real-time via GET /api/jobs/<id>/
-    A companion LoaderRun is created by LoaderProfile.record_run() at the
+    A companion DataFeedRun is created by DataFeed.record_run() at the
     end of the run — it holds the aggregate statistics.
     """
-
-    loader_profile = models.ForeignKey(
-        LoaderProfile,
+    
+    data_feed = models.ForeignKey(
+        DataFeed,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
@@ -321,16 +355,16 @@ class LoaderJob(Job):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="loader_jobs",
+        related_name="data_feed_jobs",
     )
-
+    
     # Live counters updated as each file completes — readable from the API
-    # before the LoaderRun aggregate is written.
+    # before the DataFeedRun aggregate is written.
     files_total = models.IntegerField(default=0)
     files_fetched = models.IntegerField(default=0)
     files_skipped = models.IntegerField(default=0)
     files_failed = models.IntegerField(default=0)
     bytes_transferred = models.BigIntegerField(default=0)
-
+    
     class Meta:
         app_label = "georivasources"

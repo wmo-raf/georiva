@@ -2,12 +2,17 @@
 
 **Geospatial Raster Ingestion, Visualization & Analysis**
 
-|             |                              |
-|-------------|------------------------------|
-| **Status**  | Draft — Request for Comments |
-| **Version** | 0.1                          |
-| **Date**    | 2025-02-09                   |
-| **Author**  | Erick                        |
+|             |                                          |
+|-------------|------------------------------------------|
+| **Status**  | Living document — partially implemented  |
+| **Version** | 0.2                                      |
+| **Date**    | 2026-05-29                               |
+| **Author**  | Erick                                    |
+
+> **Note (v0.2):** This document began life as a pre-implementation RFC (v0.1, 2025-02-09). Much of
+> the system is now built. Sections have been updated to reflect the as-built architecture; remaining
+> aspirational items are called out inline. Related design: see
+> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md).
 
 ---
 
@@ -140,9 +145,14 @@ logic for a specific data source:
 The plugin architecture means new data sources can be developed and distributed independently of the core engine. A
 plugin registers itself with the system and provides its admin UI through Wagtail's admin framework.
 
-> **Plugin Contract (Conceptual):** A source plugin must implement: a schedule definition, a download method that
-> returns a local file path, an optional pre-process method for source-specific transformations, and metadata mapping to
-> the Catalog/Collection/Variable hierarchy.
+> **Plugin Contract (As-built):** A source plugin implements a `BaseDataSource`
+> (`sources/source.py`) subclass — setting `type`/`label` and implementing `get_available_variables()`
+> and `generate_requests()` — paired with a polymorphic `LoaderProfile` (`sources/models.py`) that
+> holds operator configuration and scheduling. A pluggable `FetchStrategy` performs the actual
+> download. A proposed extension, the **parameter manifest contract**, lets a plugin declaratively
+> describe every parameter (and combined products such as wind U/V) so the Catalog/Collection/Variable
+> hierarchy can be provisioned by a setup wizard — see
+> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md).
 
 ### 3.2 Path B: MinIO Drop Zone
 
@@ -153,9 +163,15 @@ directory. The directory hierarchy encodes the target metadata:
 incoming/{catalog_slug}/{collection_slug}/{variable_slug}/filename.tif
 ```
 
-When a file is uploaded to this path, MinIO fires a webhook or MQTT notification that the system listens for. The
-notification triggers a Celery task that picks up the file and routes it through the ingestion pipeline. File naming
-conventions will be defined per-variable to encode temporal information (e.g., timestamps, forecast hours).
+When a file is uploaded to this path, MinIO fires a **webhook notification** to GeoRiva's
+`/api/webhook/` endpoint. A dedicated consumer process (`georiva-minio-consumer`) handles these
+events and enqueues a Celery task that picks up the file and routes it through the ingestion pipeline.
+File naming conventions are defined per-variable to encode temporal information (e.g., timestamps,
+forecast hours).
+
+> **As-built note:** The original design called for an MQTT broker (Mosquitto) to carry MinIO
+> notifications. This was simplified to direct HTTP webhooks consumed by `georiva-minio-consumer`;
+> Mosquitto is no longer part of the stack.
 
 ### 3.3 Common Ingestion Pipeline
 
@@ -181,27 +197,42 @@ from the start, and that exposing a STAC API requires minimal translation.
 
 *Figure 3: STAC-Aligned Data Model*
 
+The implemented hierarchy is:
+
+```
+Topic ──M2M──→ Catalog ──1:N──→ Collection ──1:N──→ Variable ──1:N──→ Item ──1:N──→ Asset
+```
+
 ### 4.1 Entity Descriptions
 
+**Topic** is a thematic tag (many-to-many with Catalog) used to group catalogs across domains for
+discovery and navigation.
+
 **Catalog** represents the top-level organizational container. A Catalog groups related Collections — for example by
-thematic domain (weather forecasts, satellite observations, reanalysis products).
+thematic domain (weather forecasts, satellite observations, reanalysis products). It also owns
+file-format, boundary, and clip-mode configuration.
 
 **Collection** represents a coherent dataset within a Catalog. Collections share common spatial/temporal extents and
 data characteristics. A Collection might represent "GFS Forecast Data" or "CHIRPS Rainfall Estimates."
 
 **Variable** is a GeoRiva-specific extension to the STAC hierarchy. It represents a measured or computed quantity within
 a Collection (e.g., temperature, precipitation, wind speed). The Variable model holds per-variable processing
-configuration (how to generate COGs), visualization configuration (color maps, value ranges), and PNG encoding schemes.
+configuration, visualization configuration (palette, value ranges, scale type), and the mapping to raw source bands. It
+supports both **passthrough** variables (one source band, read directly) and **derived** variables — notably vector
+products computed from U/V components (`VECTOR_MAGNITUDE` for wind speed, `VECTOR_DIRECTION` for wind direction) via the
+`sources` StreamField and `transform_type`.
 
 **Item** represents a single spatiotemporal data granule — one snapshot of one variable at one point in time. The Item
-model is backed by a TimescaleDB hypertable partitioned on the `datetime` column, as this will be the most heavily
-queried model in the system.
+model is backed by a TimescaleDB hypertable keyed on the `time` column (the valid time), with an additional
+`reference_time` column for forecast data (the model run time). Time-range queries are the dominant access pattern.
 
 **Asset** represents a physical data object associated with an Item (following STAC conventions). An Item may have
 multiple Assets: a COG for analysis, an encoded PNG for visualization, a thumbnail, metadata sidecar files, etc.
 
-**Source Plugin** tracks registered data source plugins and their configuration, including scheduling, connection
-parameters, and which Collection they feed into.
+**LoaderProfile** (implemented as a polymorphic model) tracks a configured data source: its scheduling
+(`interval_minutes`), source-specific configuration, and run statistics. Each Collection links to a LoaderProfile that
+feeds it. Individual executions are recorded as **LoaderRun** (aggregate stats) and surfaced live as **LoaderJob**
+records via the async job system. *(This is the as-built realization of the original "Source Plugin" entity.)*
 
 ### 4.2 Key Design Decisions
 
@@ -222,9 +253,16 @@ enable modern, interactive visualization experiences comparable to applications 
 
 ### 5.1 STAC API
 
-GeoRiva exposes a standards-compliant STAC API for data discovery. This allows any STAC-compatible client (including the
-bundled STAC Browser) to search, filter, and browse the data catalog. The API is generated from the internal data model
-with minimal translation since the models are STAC-aligned by design.
+GeoRiva exposes a standards-compliant STAC API (`/api/stac/`) for data discovery. This allows any STAC-compatible client
+(including the bundled STAC Browser) to search, filter, and browse the data catalog. The API is generated from the
+internal data model with minimal translation since the models are STAC-aligned by design.
+
+### 5.1a EDR API
+
+Alongside STAC, GeoRiva exposes an **Environmental Data Retrieval (EDR) API** (`/api/edr/`, OGC API – EDR). EDR is
+purpose-built for spatio-temporal environmental data and provides query patterns — position, area, and cube queries —
+that suit point/time-series extraction from gridded fields far better than STAC item search. An async **Jobs API**
+(`/api/jobs/`) exposes the status of long-running loader and processing jobs.
 
 ### 5.2 Tile Serving with Titiler
 
@@ -257,6 +295,12 @@ interpolation, and animation in the browser. This approach enables:
 
 A standalone STAC Browser service is included in the Docker stack, connected to GeoRiva's STAC API. This provides an
 out-of-the-box discovery and preview interface without requiring custom frontend development.
+
+### 5.5 Vector Tiles with Martin
+
+For vector overlays — primarily administrative boundaries used in clipping and zonal statistics — the stack includes a
+**Martin** vector tile server (`georiva-martin`) reading directly from PostGIS. This serves boundary geometries as
+MVT/PBF tiles to the frontend, complementing Titiler's raster tiles.
 
 ---
 
@@ -336,17 +380,21 @@ visualizations.
 
 ### 7.1 Service Inventory
 
-| Service         | Technology       | Purpose                                                     |
-|-----------------|------------------|-------------------------------------------------------------|
-| Web Application | Django / Wagtail | Core engine, admin interface, STAC API, plugin host         |
-| Tile Server     | Titiler          | Serves map tiles from COGs in MinIO                         |
-| STAC Browser    | stac-browser     | Standalone STAC catalog browsing UI                         |
-| Celery Worker   | Celery           | Executes async ingestion, processing, and analysis tasks    |
-| Celery Beat     | Celery Beat      | Schedules periodic tasks (source polling, maintenance)      |
-| Database        | PostgreSQL       | TimescaleDB + PostGIS for models, time-series, spatial data |
-| Cache / Broker  | Redis            | Celery task broker and application cache                    |
-| Object Storage  | MinIO            | S3-compatible storage for all binary assets                 |
-| Message Broker  | Mosquitto        | MQTT broker for MinIO event notifications                   |
+| Service (compose name)               | Technology              | Purpose                                                           |
+|--------------------------------------|-------------------------|------------------------------------------------------------------|
+| Web Application (`georiva`)          | Django / Wagtail        | Core engine, admin, STAC API, EDR API, Jobs API, plugin host     |
+| Default Worker (`...-default-worker`)| Celery                  | Lightweight tasks (sweeps, cleanup, scheduling) — `georiva-default` queue |
+| Ingestion Worker (`...-ingestion-worker`) | Celery             | Heavy data processing — `georiva-ingestion` queue                |
+| Scheduler (`...-celery-beat`)        | Celery Beat             | Schedules periodic tasks (source polling, sweeps, maintenance)   |
+| MinIO Consumer (`...-minio-consumer`)| Celery / app process    | Consumes MinIO webhook events and enqueues drop-zone ingestion   |
+| Tile Server (`...-titiler-app`)      | Titiler (FastAPI)       | Serves raster map tiles from COGs in MinIO                       |
+| Vector Tiles (`...-martin`)          | Martin                  | Serves boundary/vector MVT tiles from PostGIS                    |
+| STAC Browser (`...-stac-browser`)    | stac-browser            | Standalone STAC catalog browsing UI                              |
+| Web Proxy (`...-web-proxy`)          | Nginx                   | Reverse proxy / static & media serving, routes to all services   |
+| Database (`...-db`)                  | PostgreSQL 18 + TimescaleDB + PostGIS | Models, time-series hypertables, spatial data       |
+| Connection Pooler (`...-pgbouncer`)  | PgBouncer               | Pools DB connections for the app and Martin                      |
+| Cache / Broker (`...-redis`)         | Redis                   | Celery task broker and application cache                         |
+| Object Storage (`...-minio`)         | MinIO                   | S3-compatible storage for all binary assets                      |
 
 ### 7.2 Key Infrastructure Decisions
 
@@ -354,8 +402,13 @@ visualizations.
   on-premises deployment, which is critical for many National Meteorological Services.
 - **TimescaleDB over raw PostgreSQL:** The Item model's time-series nature makes TimescaleDB's hypertables and
   compression essential for performance at scale.
-- **MQTT for event-driven ingestion:** Using MQTT (via Mosquitto) for MinIO notifications enables a lightweight,
-  reliable event-driven architecture for the drop zone ingestion path.
+- **Webhook-based event ingestion:** MinIO notifications are delivered as HTTP webhooks to a dedicated consumer
+  (`georiva-minio-consumer`), which enqueues Celery tasks for the drop-zone path. This replaced the originally-planned
+  MQTT/Mosquitto broker, removing an infrastructure component.
+- **Split Celery workers:** Two queues and two worker services separate lightweight orchestration (`georiva-default`)
+  from heavy data processing (`georiva-ingestion`) so large ingest jobs cannot starve routine tasks.
+- **PgBouncer connection pooling:** A pooler fronts PostgreSQL so the app workers and Martin can share a bounded set of
+  database connections.
 - **Redis as dual-purpose:** Redis serves as both the Celery broker and the application cache, reducing the number of
   infrastructure components.
 
@@ -363,20 +416,24 @@ visualizations.
 
 ## 8. Technology Stack Summary
 
-| Category         | Technology                            | Notes                           |
-|------------------|---------------------------------------|---------------------------------|
-| Web Framework    | Django 5.x + Wagtail                  | Core engine, admin, plugin host |
-| Database         | PostgreSQL 16 + TimescaleDB + PostGIS | Primary data store              |
-| Object Storage   | MinIO                                 | S3-compatible, self-hosted      |
-| Task Queue       | Celery + Redis                        | Async processing                |
-| Tile Server      | Titiler                               | COG-native tile serving         |
-| STAC Browser     | Radiant Earth stac-browser            | Data discovery UI               |
-| Analysis         | Xarray-compatible ecosystem           | Pluggable, domain-agnostic      |
-| Data Formats     | COG, Zarr, Encoded PNG                | Storage and serving formats     |
-| Frontend Viz     | WeatherLayers GL                      | Browser-side rendering          |
-| Messaging        | Mosquitto (MQTT)                      | Event notifications             |
-| Containerization | Docker + Docker Compose               | Full stack orchestration        |
-| Language         | Python 3.12+                          | Primary development language    |
+| Category          | Technology                            | Notes                                   |
+|-------------------|---------------------------------------|-----------------------------------------|
+| Web Framework     | Django 5.x + Wagtail 7.x              | Core engine, admin, plugin host         |
+| Database          | PostgreSQL 18 + TimescaleDB + PostGIS | Primary data store (TimescaleDB HA image)|
+| Connection Pool   | PgBouncer                             | DB connection pooling                   |
+| Object Storage    | MinIO                                 | S3-compatible, self-hosted              |
+| Task Queue        | Celery + Redis                        | Async processing, two queues            |
+| Raster Tiles      | Titiler                               | COG-native tile serving                 |
+| Vector Tiles      | Martin                                | MVT tiles from PostGIS (boundaries)     |
+| Discovery APIs    | STAC API + OGC API – EDR              | Catalog search + environmental retrieval|
+| STAC Browser      | Radiant Earth stac-browser            | Data discovery UI                       |
+| Analysis          | Xarray-compatible ecosystem           | Pluggable, domain-agnostic              |
+| Data Formats      | COG, Zarr, Encoded PNG                | Storage and serving formats             |
+| Frontend Viz      | WeatherLayers GL                      | Browser-side rendering                  |
+| Event Ingestion   | MinIO webhooks → consumer             | Drop-zone notifications (Mosquitto dropped) |
+| Reverse Proxy     | Nginx                                 | Routing, static/media serving           |
+| Containerization  | Docker + Docker Compose               | Full stack orchestration                |
+| Language          | Python 3.10+                          | Primary development language            |
 
 ---
 
@@ -390,6 +447,9 @@ Should Titiler serve encoded tiles or pre-styled tiles? The current leaning is t
 flexibility, but this adds complexity to the frontend rendering pipeline. Contributor feedback on real-world experience
 with either approach would be valuable.
 
+> **Update (v0.2):** Largely resolved — the encoded-data approach is implemented via encoded PNGs consumed by
+> WeatherLayers GL for client-side styling/animation, with Titiler available for COG-native raster tiles.
+
 ### 9.2 Zarr Generation Strategy
 
 At which level should Zarr archives be generated — Catalog, Collection, or Variable? Should Zarr generation be triggered
@@ -399,6 +459,10 @@ automatically as Items accumulate, or on-demand? What chunking strategies make s
 
 How should source plugins and analysis plugins be distributed? Options include: bundled with the core repository, as
 separate Python packages installable via pip, or as Docker sidecar containers.
+
+> **Update (v0.2):** Partially resolved — external plugins are pulled from Git repositories listed in
+> `GEORIVA_PLUGIN_GIT_REPOS` and installed at startup (see `deploy/` install scripts). In-tree examples live in
+> `sample_plugins/`, and a cookiecutter template is provided in `source-plugin-boilerplate/`.
 
 ### 9.4 Analysis Scheduling
 

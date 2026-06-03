@@ -1,0 +1,32 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Source Setup Wizard" %}{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Source Setup Wizard") subtitle=_("Provision a Catalog, Collections, and Variables from a plugin manifest") icon="magic" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        {% if source_types %}
+            <p class="help-text">
+                {% trans "Choose a source type to begin. Only sources that implement the parameter manifest contract are listed." %}
+            </p>
+            <ul class="listing">
+                {% for item in source_types %}
+                    <li>
+                        <div class="title">
+                            <a href="{% url 'wizard_step1_catalog' item.model_name %}">
+                                {{ item.verbose_name }}
+                            </a>
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="help-block help-block--default">
+                <p>{% trans "No source types support the parameter manifest contract yet." %}</p>
+                <p>{% trans "Implement describe_parameters() on a BaseDataSource subclass to enable the wizard for that source." %}</p>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}

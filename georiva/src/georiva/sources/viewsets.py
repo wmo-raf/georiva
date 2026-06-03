@@ -2,35 +2,35 @@ from django.urls import reverse
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 
-from .models import LoaderProfile
+from .models import DataFeed
 
 
-class LoaderProfileSuccesUrlMixin:
+class DataFeedSuccessUrlMixin:
     def get_success_url(self):
-        return reverse("loader_profile_list")
+        return reverse("data_feed_list")
 
 
-class LoaderProfileCreateView(LoaderProfileSuccesUrlMixin, generic.CreateView):
+class DataFeedCreateView(DataFeedSuccessUrlMixin, generic.CreateView):
     pass
 
 
-class LoaderProfileEditView(LoaderProfileSuccesUrlMixin, generic.EditView, ):
+class DataFeedEditView(DataFeedSuccessUrlMixin, generic.EditView):
     pass
 
 
-class LoaderProfileDeleteView(LoaderProfileSuccesUrlMixin, generic.DeleteView):
+class DataFeedDeleteView(DataFeedSuccessUrlMixin, generic.DeleteView):
     pass
 
 
-class LoaderProfileChooserViewSet(ChooserViewSet):
-    model = LoaderProfile
-    
+class DataFeedChooserViewSet(ChooserViewSet):
+    model = DataFeed
+
     icon = "file-import"
-    choose_one_text = "Choose a Loader Profile"
-    choose_another_text = "Choose another Loader Profile"
-    edit_item_text = "Edit this Loader Profile"
+    choose_one_text = "Choose a Data Feed"
+    choose_another_text = "Choose another Data Feed"
+    edit_item_text = "Edit this Data Feed"
 
 
 admin_viewsets = [
-    LoaderProfileChooserViewSet("loader_profile_chooser"),
+    DataFeedChooserViewSet("data_feed_chooser"),
 ]

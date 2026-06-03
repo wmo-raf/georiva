@@ -1,0 +1,95 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Select Parameters" %} — {{ source_verbose_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.gwiz-card {
+    background: var(--color-white);
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+    overflow: hidden;
+    margin-bottom: 1.25em;
+}
+.gwiz-card legend {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    width: 100%;
+    padding: 0.8em 1.1em;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-menus);
+    font-size: 0.9em;
+}
+.gwiz-card__body { padding: 0.85em 1.1em; }
+.gwiz-param-meta { color: var(--color-text-meta); }
+.gwiz-param-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5em;
+    margin-bottom: 0.4em;
+}
+.gwiz-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=_("Select Parameters") subtitle=source_verbose_name icon="list-ul" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <p class="help-text">
+        {% trans "Choose which parameters to provision. Checked items will become Variables inside their group's Collection." %}
+    </p>
+
+    <form method="post" action="">
+        {% csrf_token %}
+
+        {% for item in grouped %}
+        <fieldset class="gwiz-card">
+            <legend>
+                <strong>{{ item.group.name }}</strong>
+                <span class="gwiz-param-meta"> → {% trans "Collection" %}: <em>{{ item.group.key }}</em></span>
+            </legend>
+            <div class="gwiz-card__body">
+                {% for param in item.members %}
+                <label class="gwiz-param-row">
+                    <input type="checkbox" name="parameters" value="{{ param.key }}" checked>
+                    <span>
+                        <strong>{{ param.name }}</strong>
+                        <small class="gwiz-param-meta">({{ param.units }})</small>
+                        {% if param.description %}— <em class="gwiz-param-meta">{{ param.description }}</em>{% endif %}
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        {% endfor %}
+
+        {% if ungrouped %}
+        <fieldset class="gwiz-card">
+            <legend>
+                <strong>{% trans "Other Parameters" %}</strong>
+                <span class="gwiz-param-meta"> → {% trans "Default Collection" %}</span>
+            </legend>
+            <div class="gwiz-card__body">
+                {% for param in ungrouped %}
+                <label class="gwiz-param-row">
+                    <input type="checkbox" name="parameters" value="{{ param.key }}">
+                    <span>
+                        <strong>{{ param.name }}</strong>
+                        <small class="gwiz-param-meta">({{ param.units }})</small>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+        </fieldset>
+        {% endif %}
+
+        <div class="gwiz-actions">
+            <button type="submit" class="button button-primary">{% trans "Continue" %} →</button>
+            <a href="{% url 'setup_wizard_select' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
