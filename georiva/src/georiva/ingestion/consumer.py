@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import unquote
 
 import redis
@@ -48,6 +49,11 @@ def _handle_event(ev: dict):
         return
     
     key = unquote(key_raw)
+
+    # Skip placeholder and hidden files (.keep, .gitkeep, etc.)
+    if Path(key).name.startswith('.'):
+        return
+
     origin_bucket = _resolve_origin(bucket_name)
     if not origin_bucket:
         return

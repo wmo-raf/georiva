@@ -1,0 +1,153 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Step 4: Review" %} — {{ source_verbose_name }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .gwiz-card {
+            background: var(--color-white);
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .08), 0 4px 16px rgba(0, 0, 0, .06);
+            overflow: hidden;
+            margin-bottom: 1.25em;
+        }
+
+        .gwiz-card__header {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.8em 1.1em;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--color-surface-menus);
+            font-size: 0.9em;
+        }
+
+        .gwiz-card__body {
+            padding: 0.85em 1.1em;
+        }
+
+        .gwiz-review-edit {
+            font-size: 0.85em;
+        }
+
+        .gwiz-review-meta {
+            color: var(--color-text-meta);
+        }
+
+        .gwiz-review-tag-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+        }
+
+        .gwiz-collection-item {
+            margin-bottom: 0.75em;
+        }
+
+        .gwiz-var-list {
+            margin: 0.25em 0 0 1em;
+            columns: 2;
+            column-gap: 2em;
+        }
+
+        .gwiz-var-item {
+            font-size: 0.9em;
+        }
+
+        .gwiz-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Step 4 of 4 — Review") subtitle=source_verbose_name icon="pick" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <p class="help-text">
+            {% if is_edit %}
+            {% trans "Review the updated configuration, then click Update to apply." %}
+        {% else %}
+            {% trans "Review what will be created, then click Provision to apply." %}
+        {% endif %}
+        </p>
+
+        <div class="gwiz-card">
+            <div class="gwiz-card__header">
+                <strong>{% trans "Catalog" %}</strong>
+                <small><a class="gwiz-review-edit"
+                          href="{% url 'wizard_step1_catalog' model_name %}">{% trans "edit" %}</a></small>
+            </div>
+            <div class="gwiz-card__body">
+                <div class="gwiz-review-tag-row">
+                    {% if catalog_mode == "create" %}
+                        <span class="status-tag primary">{% trans "New" %}</span>
+                    {% else %}
+                        <span class="status-tag secondary">{% trans "Existing" %}</span>
+                    {% endif %}
+                    <strong>{{ catalog_label }}</strong>
+                    {% if catalog_format %}<code class="gwiz-review-meta">{{ catalog_format }}</code>{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="gwiz-card">
+            <div class="gwiz-card__header">
+                <strong>{% trans "Data Feed" %}</strong>
+                <small><a class="gwiz-review-edit"
+                          href="{% url 'wizard_step2_feed' model_name %}">{% trans "edit" %}</a></small>
+            </div>
+            <div class="gwiz-card__body">
+                <div class="gwiz-review-tag-row">
+                    {% if feed_mode == "create" %}
+                        <span class="status-tag primary">{% trans "New" %}</span>
+                        {% elif feed_mode == "link" %}
+                        <span class="status-tag secondary">{% trans "Existing" %}</span>
+                    {% else %}
+                        <span class="status-tag">{% trans "Skipped" %}</span>
+                    {% endif %}
+                    <strong>{{ feed_label }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="gwiz-card">
+            <div class="gwiz-card__header">
+                <strong>{% trans "Collections" %}</strong>
+                <small>
+                    {{ selected_count }} {% trans "parameter(s)" %} →
+                    {{ collection_preview|length }} {% trans "collection(s)" %} —
+                    <a class="gwiz-review-edit"
+                       href="{% url 'wizard_step3_parameters' model_name %}">{% trans "edit" %}</a>
+                </small>
+            </div>
+            <div class="gwiz-card__body">
+                {% for col in collection_preview %}
+                    <div class="gwiz-collection-item">
+                        <strong>{{ col.name }}</strong>
+                        <code class="gwiz-review-meta">{{ col.slug }}</code>
+                        <ul class="gwiz-var-list">
+                            {% for var in col.variables %}
+                                <li class="gwiz-var-item">{{ var }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <form method="post" action="">
+            {% csrf_token %}
+            <div class="gwiz-actions">
+                <button type="submit" class="button button-primary">
+                    {% if is_edit %}{% trans "Update" %}{% else %}{% trans "Provision" %}{% endif %}
+                </button>
+                <a href="{% url 'wizard_step3_parameters' model_name %}"
+                   class="button button-secondary">{% trans "Back" %}</a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

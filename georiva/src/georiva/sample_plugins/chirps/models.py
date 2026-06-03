@@ -4,7 +4,7 @@ from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 
-from georiva.sources.models import LoaderProfile
+from georiva.sources.models import DataFeed
 
 PERIOD_CHOICES = [
     ("monthly", "Monthly"),
@@ -12,7 +12,7 @@ PERIOD_CHOICES = [
 ]
 
 
-class CHIRPSLoaderProfile(LoaderProfile, TimeStampedModel):
+class CHIRPSDataFeed(DataFeed, TimeStampedModel):
     """
     CHIRPS Loader profile:
       - Select monthly and/or pentadal
@@ -36,7 +36,7 @@ class CHIRPSLoaderProfile(LoaderProfile, TimeStampedModel):
     )
     
     panels = [
-        *LoaderProfile.base_panels,
+        *DataFeed.base_panels,
         FieldPanel("period"),
         MultiFieldPanel(
             [
@@ -48,8 +48,20 @@ class CHIRPSLoaderProfile(LoaderProfile, TimeStampedModel):
     ]
     
     class Meta:
-        verbose_name = "CHIRPS Loader Profile"
+        verbose_name = "CHIRPS Data Feed"
     
+    @classmethod
+    def get_wizard_defaults(cls) -> dict:
+        return {"period": "monthly"}
+
+    @classmethod
+    def get_catalog_defaults(cls) -> dict:
+        return {
+            "name": "CHIRPS",
+            "file_format": "geotiff",
+            "description": "CHIRPS rainfall estimates — 0.05° resolution.",
+        }
+
     @property
     def data_source_cls(self):
         from .source import CHIRPSDataSource

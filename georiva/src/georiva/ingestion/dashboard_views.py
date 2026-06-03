@@ -18,48 +18,56 @@ def ingestion_dashboard_api(request):
     """
     from georiva.core.models import Collection
     from georiva.ingestion.models import IngestionLog
-    from georiva.sources.models import LoaderRun
+    from georiva.sources.models import DataFeedRun
     
+    from georiva.sources.models import DataFeed as DataFeedModel
+
     collections = (
         Collection.objects
-        .select_related("catalog", "loader_profile")
+        .select_related("catalog")
         .filter(is_active=True)
         .order_by("catalog__slug", "sort_order", "name")
     )
-    
+
+    automated_collection_ids = set(
+        DataFeedModel.objects
+        .filter(collections__isnull=False)
+        .values_list('collections', flat=True)
+    )
+
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=29)
-    
+
     recent_logs = (
         IngestionLog.objects
         .filter(created_at__date__gte=thirty_days_ago)
         .values("collection_slug", "catalog_slug", "status", "created_at")
         .order_by("created_at")
     )
-    
+
     logs_by_collection = defaultdict(list)
     for log in recent_logs:
         key = (log["catalog_slug"], log["collection_slug"])
         logs_by_collection[key].append(log)
-    
-    latest_loader_runs = {}
-    loader_run_qs = (
-        LoaderRun.objects
+
+    latest_data_feed_runs = {}
+    data_feed_run_qs = (
+        DataFeedRun.objects
         .filter(
             collection__in=collections,
-            collection__loader_profile__isnull=False,
+            collection_id__in=automated_collection_ids,
         )
         .order_by("collection_id", "-started_at")
         .distinct("collection_id")
         .select_related("collection")
     )
-    for run in loader_run_qs:
-        latest_loader_runs[run.collection_id] = run
-    
+    for run in data_feed_run_qs:
+        latest_data_feed_runs[run.collection_id] = run
+
     result = []
-    
+
     for collection in collections:
-        is_automated = collection.loader_profile_id is not None
+        is_automated = collection.pk in automated_collection_ids
         key = (collection.catalog.slug, collection.slug)
         logs = logs_by_collection.get(key, [])
         
@@ -69,7 +77,7 @@ def ingestion_dashboard_api(request):
         last_run_status = None
         
         if is_automated:
-            run = latest_loader_runs.get(collection.pk)
+            run = latest_data_feed_runs.get(collection.pk)
             if run:
                 last_run_at = run.started_at.isoformat()
                 last_run_status = run.status
@@ -103,12 +111,12 @@ def ingestion_dashboard_api(request):
 # Drawer detail APIs
 # =============================================================================
 
-def collection_loader_runs_api(request, collection_id):
+def collection_data_feed_runs_api(request, collection_id):
     """
-    Returns LoaderRun history for one collection (automated only).
+    Returns DataFeedRun history for one collection (automated only).
     """
     from georiva.core.models import Collection
-    from georiva.sources.models import LoaderRun
+    from georiva.sources.models import DataFeedRun
     
     try:
         collection = Collection.objects.get(pk=collection_id)
@@ -116,7 +124,7 @@ def collection_loader_runs_api(request, collection_id):
         raise Http404
     
     runs = (
-        LoaderRun.objects
+        DataFeedRun.objects
         .filter(collection=collection)
         .order_by("-started_at")[:100]
     )

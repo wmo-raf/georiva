@@ -543,7 +543,7 @@
         </p>
     {% endif %}
 
-    {% if loader_profile %}
+    {% if data_feed %}
         <div class="ci-automation-card">
 
             <div class="ci-automation-header">
@@ -553,9 +553,9 @@
                     </svg>
                     <h2 class="w-label-2 ci-automation-header__title">{% trans "Automation" %}</h2>
                     <span class="w-font-mono w-text-14 ci-automation-header__profile-name">
-                    {{ loader_profile.name }}
+                    {{ data_feed.name }}
                 </span>
-                    {% if loader_profile.is_active %}
+                    {% if data_feed.is_active %}
                         <span class="w-status-tag w-status-tag--primary ci-var-chip__tag">{% trans "Active" %}</span>
                     {% else %}
                         <span class="w-status-tag ci-var-chip__tag">{% trans "Paused" %}</span>
@@ -563,9 +563,9 @@
                 </div>
 
                 <div class="ci-automation-header__right">
-                    <span>{% trans "Every" %} {{ loader_profile.interval_minutes }}{% trans "min" %}</span>
-                    {% if loader_profile.last_run_at %}
-                        <span>{% trans "Last run:" %} {{ loader_profile.last_run_at|timesince }} {% trans "ago" %}</span>
+                    <span>{% trans "Every" %} {{ data_feed.interval_minutes }}{% trans "min" %}</span>
+                    {% if data_feed.last_run_at %}
+                        <span>{% trans "Last run:" %} {{ data_feed.last_run_at|timesince }} {% trans "ago" %}</span>
                     {% endif %}
                     <form method="post">
                         {% csrf_token %}

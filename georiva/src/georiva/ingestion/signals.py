@@ -26,20 +26,20 @@ def cleanup_orphan_ingestion_log(sender, instance, **kwargs):
 
 
 @receiver(post_delete, sender='georivaingestion.IngestionLog')
-def cleanup_orphan_loader_run(sender, instance, **kwargs):
+def cleanup_orphan_data_feed_run(sender, instance, **kwargs):
     """
-    Delete the LoaderRun that produced this IngestionLog if no other
+    Delete the DataFeedRun that produced this IngestionLog if no other
     IngestionLog entries still reference it.
     """
-    run_id = instance.loader_run_id
+    run_id = instance.data_feed_run_id
     if run_id is None:
         return
 
-    from georiva.sources.models import LoaderRun
+    from georiva.sources.models import DataFeedRun
 
     try:
-        run = LoaderRun.objects.get(pk=run_id)
-    except LoaderRun.DoesNotExist:
+        run = DataFeedRun.objects.get(pk=run_id)
+    except DataFeedRun.DoesNotExist:
         return
 
     if not run.ingestion_logs.exists():

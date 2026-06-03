@@ -3,9 +3,12 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, Optional, Protocol, runtime_checkable, Tuple
+from typing import TYPE_CHECKING, Iterator, Optional, Protocol, runtime_checkable, Tuple
 
 from georiva.sources.fetch.base import FileRequest, BaseFetchStrategy
+
+if TYPE_CHECKING:
+    from georiva.sources.parameters import ParameterManifest
 
 
 class DataSourceType(str, Enum):
@@ -69,9 +72,21 @@ class DataSource(Protocol):
     def get_latest_available(self) -> Optional[datetime]:
         """
         Get the timestamp of the latest available data.
-        
+
         For forecasts, this is typically the latest model run time.
         For observations, it's the latest observation time.
+        """
+        ...
+    
+    def describe_parameters(self) -> 'ParameterManifest':
+        """
+        Declare every parameter (and combination) this source provides.
+
+        Returns a ParameterManifest describing all Parameters, DerivedParameters,
+        and ParameterGroups. Used by the setup wizard to provision Catalog →
+        Collection → Variable records automatically.
+
+        Sources that do not implement this are silently excluded from the wizard.
         """
         ...
 
@@ -128,8 +143,18 @@ class BaseDataSource(ABC):
         """Default implementation - subclasses should override for accuracy."""
         return None
     
-    # =========================================================================
+    def describe_parameters(self) -> 'ParameterManifest':
+        """
+        Declare every parameter this source provides.
+
+        Raises NotImplementedError by default. Override to participate in the
+        setup wizard. get_available_variables() delegates to this when overridden.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement describe_parameters()"
+        )
     
+    # =========================================================================
     # Time-window helpers (optional, generic)
     # =========================================================================
     

@@ -7,71 +7,81 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
 from georiva.core.models import Collection, Item
-from georiva.sources.models import LoaderProfile
+from georiva.sources.models import DataFeed
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task(
     bind=True,
-    name='georiva.core.tasks.run_collection_loader',
+    name='georiva.core.tasks.run_data_feed_loader',
     queue="georiva-ingestion",
 )
-def run_collection_loader(self, collection_id):
-    from georiva.core.models import Collection
-    collection = Collection.objects.get(id=collection_id)
-    
-    if not collection.loader_profile:
+def run_data_feed_loader(self, data_feed_id):
+    """
+    Run the Loader for all collections linked to a DataFeed in one task.
+
+    Running all collections sequentially in the same task means each file is
+    still in PENDING state when the next collection's Loader runs — enabling
+    the cross-collection copy dedup in Loader._find_existing_catalog_path().
+    """
+    data_feed = DataFeed.objects.get(pk=data_feed_id)
+
+    if not data_feed.is_active:
         return
-    
-    loader_profile = collection.loader_profile
-    
-    if not loader_profile.is_active:
-        return
-    
-    loader = loader_profile.get_loader(collection)
-    
-    result = loader.run()
-    
-    return result.to_dict()
+
+    collections = list(data_feed.collections.all())
+    results = []
+
+    for collection in collections:
+        loader = data_feed.get_loader(collection)
+        result = loader.run()
+        data_feed.record_run(result, collection)
+        results.append(result.to_dict())
+
+    return results
 
 
-def create_or_update_collection_loader_plugin_periodic_tasks(collection):
-    name = f"georiva.core.tasks.run_collection_loader:{collection.slug}"
-    
+
+def create_or_update_data_feed_periodic_task(data_feed):
+    """Create/update one PeriodicTask per DataFeed (not per collection)."""
+    name = f"georiva.core.tasks.run_data_feed_loader:{data_feed.pk}"
+
     options = {
-        'task': run_collection_loader.name,
+        'task': run_data_feed_loader.name,
         'enabled': False,
-        'args': json.dumps([collection.id]),
+        'args': json.dumps([data_feed.pk]),
         'interval': None,
     }
-    
-    loader_profile = collection.loader_profile
-    
-    if loader_profile:
-        schedule, _ = IntervalSchedule.objects.get_or_create(
-            every=loader_profile.interval_minutes,
-            period=IntervalSchedule.MINUTES,
+
+    if data_feed.collections.exists():
+        schedule = (
+            IntervalSchedule.objects
+            .filter(every=data_feed.interval_minutes, period=IntervalSchedule.MINUTES)
+            .first()
         )
+        if schedule is None:
+            schedule = IntervalSchedule.objects.create(
+                every=data_feed.interval_minutes,
+                period=IntervalSchedule.MINUTES,
+            )
         options['interval'] = schedule
-        
-        if loader_profile.is_active:
+
+        if data_feed.is_active:
             options['enabled'] = True
-    
+
     if options.get("interval"):
         PeriodicTask.objects.update_or_create(name=name, defaults=options)
 
 
-def update_collection_loader_plugin_periodic_task(sender, instance, **kwargs):
+def update_collection_data_feed_periodic_task(sender, instance, **kwargs):
     if isinstance(instance, Collection):
-        collections = [instance]
-    elif isinstance(instance, LoaderProfile):
-        collections = instance.collection_set.all()
+        for feed in instance.data_feeds.all():
+            create_or_update_data_feed_periodic_task(feed)
+    elif isinstance(instance, DataFeed):
+        create_or_update_data_feed_periodic_task(instance)
     else:
         return
-    
-    for collection in collections:
-        create_or_update_collection_loader_plugin_periodic_tasks(collection)
 
 
 @shared_task(
@@ -123,10 +133,8 @@ def prune_forecast_items():
 def setup_periodic_tasks(sender, **kwargs):
     try:
         from georiva.core.models import Collection
-        collections = Collection.objects.filter(loader_profile__isnull=False)
-        
-        for collection in collections:
-            create_or_update_collection_loader_plugin_periodic_tasks(collection)
+        for feed in DataFeed.objects.filter(is_active=True, collections__isnull=False).distinct():
+            create_or_update_data_feed_periodic_task(feed)
     except Exception as e:
         logger.warning("Could not register collection loader plugin periodic tasks: %s", e)
     

@@ -381,7 +381,7 @@ CELERY_BEAT_SCHEDULE = {}
 # ---------------------------------------------------------------------------
 TASK_FERRY = {
     "EXECUTOR": "task_ferry.executors.celery.CeleryExecutor",
-    "CELERY_QUEUE": "georiva-default",
+    "CELERY_QUEUE": "georiva-ingestion",
     "PROGRESS_CACHE_TIMEOUT": 7200,  # 2 hours
     "JOB_EXPIRY_DAYS": 14,
 }

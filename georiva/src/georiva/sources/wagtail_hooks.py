@@ -4,67 +4,86 @@ from wagtail import hooks
 from wagtail.admin.menu import MenuItem
 from wagtail.admin.viewsets.model import ModelViewSet
 
-from .models import LoaderProfile
-from .registry import loader_profile_viewset_registry
+from .models import DataFeed
+from .registry import data_feed_viewset_registry
 from .utils import get_all_child_models
 from .views import (
-    loader_profile_list,
-    loader_profile_add_select
+    data_feed_list,
+    data_feed_add_select,
+    data_feed_detail,
+    setup_wizard_select,
+    wizard_step1_catalog,
+    wizard_step2_feed,
+    wizard_step3_parameters,
+    wizard_step4_review,
+    wizard_provision,
+    wizard_resume,
 )
 from .viewsets import (
     admin_viewsets,
-    LoaderProfileCreateView,
-    LoaderProfileEditView,
-    LoaderProfileDeleteView
+    DataFeedCreateView,
+    DataFeedEditView,
+    DataFeedDeleteView,
 )
 
 
 @hooks.register('register_admin_urls')
 def urlconf_georivasources():
     return [
-        path('loader-profiles/', loader_profile_list, name="loader_profile_list"),
-        path('loader-profiles/select/', loader_profile_add_select, name="loader_profile_add_select"),
+        path('data-feeds/', data_feed_list, name="data_feed_list"),
+        path('data-feeds/select/', data_feed_add_select, name="data_feed_add_select"),
+        path('data-feeds/<int:pk>/', data_feed_detail, name="data_feed_detail"),
+        path('data-feeds/setup-wizard/', setup_wizard_select, name="setup_wizard_select"),
+        path('data-feeds/setup-wizard/<str:model_name>/catalog/', wizard_step1_catalog, name="wizard_step1_catalog"),
+        path('data-feeds/setup-wizard/<str:model_name>/feed/', wizard_step2_feed, name="wizard_step2_feed"),
+        path('data-feeds/setup-wizard/<str:model_name>/parameters/', wizard_step3_parameters, name="wizard_step3_parameters"),
+        path('data-feeds/setup-wizard/<str:model_name>/review/', wizard_step4_review, name="wizard_step4_review"),
+        path('data-feeds/setup-wizard/<str:model_name>/provision/', wizard_provision, name="wizard_provision"),
+        path('data-feeds/<int:pk>/wizard-resume/<str:step>/', wizard_resume, name="wizard_resume"),
     ]
 
 
 @hooks.register('register_admin_menu_item')
-def register_catalogs_menu():
-    list_url = reverse('loader_profile_list')
-    label = _("Loader Profiles")
-    return MenuItem(label, list_url, icon_name='file-import', order=800)
+def register_sources_menu():
+    return MenuItem(
+        _("Data Feeds"),
+        reverse('data_feed_list'),
+        icon_name='file-import',
+        order=800,
+    )
 
 
-def get_loader_profile_viewsets():
-    loader_profile_model_cls = get_all_child_models(LoaderProfile)
-    
-    loader_profile_viewsets = []
-    
-    for model_cls in loader_profile_model_cls:
+def get_data_feed_viewsets():
+    data_feed_model_cls = get_all_child_models(DataFeed)
+
+    data_feed_viewsets = []
+
+    for model_cls in data_feed_model_cls:
         model_name = model_cls._meta.model_name
-        
+
         attrs = {
             "model": model_cls,
             "type": model_name,
-            "add_view_class": LoaderProfileCreateView,
-            "edit_view_class": LoaderProfileEditView,
-            "delete_view_class": LoaderProfileDeleteView,
+            "add_view_class": DataFeedCreateView,
+            "edit_view_class": DataFeedEditView,
+            "delete_view_class": DataFeedDeleteView,
         }
-        
+
         viewset = type(
             f"{model_cls.__name__}ViewSet",
             (ModelViewSet,),
             attrs
         )
-        
+
         viewset_cls = viewset()
-        
-        loader_profile_viewsets.append(viewset_cls)
-        loader_profile_viewset_registry.register(viewset_cls)
-    
-    return loader_profile_viewsets
+
+        data_feed_viewsets.append(viewset_cls)
+        data_feed_viewset_registry.register(viewset_cls)
+
+    return data_feed_viewsets
 
 
 @hooks.register("register_admin_viewset")
 def register_viewset():
-    loader_profile_viewsets = get_loader_profile_viewsets()
-    return admin_viewsets + loader_profile_viewsets
+    data_feed_viewsets = get_data_feed_viewsets()
+    return admin_viewsets + data_feed_viewsets

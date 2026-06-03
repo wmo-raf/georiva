@@ -98,8 +98,8 @@ class IngestionLog(models.Model):
         default=False
     )
     
-    loader_run = models.ForeignKey(
-        'georivasources.LoaderRun',
+    data_feed_run = models.ForeignKey(
+        'georivasources.DataFeedRun',
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

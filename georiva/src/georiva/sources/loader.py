@@ -80,7 +80,7 @@ class LoaderRunResult:
     
     def summary(self) -> str:
         return (
-            f"LoaderRun[{self.status}]: "
+            f"DataFeedRun[{self.status}]: "
             f"{self.files_fetched} fetched, {self.files_skipped} skipped, "
             f"{self.files_failed} failed, {self.bytes_transferred / 1024 / 1024:.1f} MB "
             f"in {self.duration_seconds:.1f}s"
@@ -122,14 +122,14 @@ class Loader:
             data_source,  # DataSource protocol
             collection,  # GeoRiva collection model
             *,
-            loader_profile=None,
+            data_feed=None,
             on_file_fetched: Optional[Callable] = None,  # Callback after each file
     ):
         self.data_source = data_source
         self.fetch_strategy = self.data_source.fetch_strategy()
         self.collection = collection
         self.on_file_fetched = on_file_fetched
-        self.loader_profile = loader_profile
+        self.data_feed = data_feed
         
         self.logger = logging.getLogger(
             f"georiva.loader.{data_source.name.replace(' ', '_').lower()}"
@@ -192,13 +192,31 @@ class Loader:
                 result.finish()
                 return result
             
-            # Filter already-fetched files
+            # Filter already-fetched files; copy from another collection if available
             requests_to_fetch = []
             for request in requests:
                 if skip_existing and self._already_exists(request):
                     result.files_skipped += 1
                     self.logger.debug(f"Skipping (exists): {request.filename}")
                     continue
+                
+                if skip_existing:
+                    existing_path = self._find_existing_catalog_path(request)
+                    if existing_path:
+                        dest_path = self._get_storage_path(request)
+                        try:
+                            storage.sources.copy(existing_path, dest_path)
+                            result.files_fetched += 1
+                            result.stored_paths.append(dest_path)
+                            self.logger.info(
+                                f"Copied (no re-download): {existing_path} → {dest_path}"
+                            )
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Copy failed, will re-download: {e}"
+                            )
+                            requests_to_fetch.append(request)
+                        continue
                 
                 requests_to_fetch.append(request)
                 
@@ -253,8 +271,8 @@ class Loader:
             result.finish()
             
             # Record if we have a profile reference
-            if self.loader_profile:
-                self.loader_profile.record_run(result, self.collection)
+            if self.data_feed:
+                self.data_feed.record_run(result, self.collection)
             
             self.logger.info(result.summary())
         
@@ -265,9 +283,63 @@ class Loader:
     # =========================================================================
     
     def _already_exists(self, request) -> bool:
-        """Check if file already exists in storage."""
+        """Check if file already exists in storage for this collection."""
         storage_path = self._get_storage_path(request)
         return storage.sources.exists(storage_path)
+    
+    def _find_existing_catalog_path(self, request) -> str | None:
+        """
+        Return the storage path of this file if it was already downloaded
+        for another collection in the same DataFeed.
+
+        Strategy:
+        1. IngestionLog query (fast, no storage I/O) — only PENDING/PROCESSING
+           because COMPLETED means the source file was already deleted by
+           SourceFileManager.cleanup().
+        2. Direct storage check on sibling collection paths — catches the case
+           where the file exists in MinIO but has no IngestionLog entry
+           (dropped event, manual upload, consumer restart, etc.).
+        """
+        from georiva.core.filename import build_filename
+        from georiva.core.storage import BucketType
+        from georiva.ingestion.models import IngestionLog
+
+        filename = build_filename(
+            original_filename=request.filename,
+            reference_time=request.reference_time,
+        )
+        catalog_slug = self.collection.catalog.slug
+        collection_slug = self.collection.slug
+
+        # ── 1. IngestionLog check ─────────────────────────────────────────────
+        log_path = (
+            IngestionLog.objects
+            .filter(
+                bucket=BucketType.SOURCES,
+                catalog_slug=catalog_slug,
+                file_path__endswith=f"/{filename}",
+                status__in=[
+                    IngestionLog.Status.PENDING,
+                    IngestionLog.Status.PROCESSING,
+                ],
+            )
+            .exclude(collection_slug=collection_slug)
+            .values_list("file_path", flat=True)
+            .first()
+        )
+        if log_path:
+            return log_path
+
+        # ── 2. Direct storage check on sibling collections ────────────────────
+        # Handles files that exist in MinIO but have no IngestionLog entry
+        # (dropped event, manual upload, consumer restart, etc.).
+        if self.data_feed:
+            for sibling in self.data_feed.collections.exclude(pk=self.collection.pk):
+                candidate = f"{sibling.catalog.slug}/{sibling.slug}/{filename}"
+                if storage.sources.exists(candidate):
+                    return candidate
+
+        return None
     
     def _fetch_and_store(self, request):
         """Fetch a file and store it."""

@@ -123,15 +123,6 @@ class Collection(TimeStampedModel, ClusterableModel):
     
     sort_order = models.PositiveIntegerField(default=0)
     
-    # Ingestion configuration
-    loader_profile = models.ForeignKey(
-        "georivasources.LoaderProfile",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        help_text="Loader profile to use for ingesting data for this catalog",
-    )
-    
     boundary_stats_levels = ArrayField(
         models.IntegerField(choices=ADM_LEVEL_CHOICES),
         blank=True,
@@ -162,9 +153,6 @@ class Collection(TimeStampedModel, ClusterableModel):
             FieldPanel('crs'),
             FieldPanel('time_resolution'),
         ], heading="Extent"),
-        MultiFieldPanel([
-            FieldPanel('loader_profile'),
-        ], heading="Ingestion"),
         MultiFieldPanel([
             FieldPanel('is_active'),
             FieldPanel('sort_order'),
@@ -249,11 +237,11 @@ class Collection(TimeStampedModel, ClusterableModel):
         return self.time_end.strftime('%Y-%m-%d')
     
     def get_loader(self):
-        """Get the loader instance for this catalog."""
-        if not self.loader_profile:
+        """Get the loader instance for this collection."""
+        feed = self.data_feeds.first()
+        if not feed:
             return None
-        
-        return self.loader_profile.get_loader(self)
+        return feed.get_loader(self)
     
     def source_variables_list(self):
         """Return a list of source variable names in this collection."""

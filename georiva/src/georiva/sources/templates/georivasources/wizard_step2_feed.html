@@ -1,0 +1,147 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Step 2: Data Feed" %} — {{ source_verbose_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.gwiz-card {
+    background: var(--color-white);
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+    overflow: hidden;
+    margin-bottom: 1.25em;
+}
+.gwiz-card__header {
+    padding: 0.8em 1.1em;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-menus);
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-grey-400);
+}
+.gwiz-card__body { padding: 1em 1.1em; }
+.gwiz-info-row { display: flex; gap: 2em; flex-wrap: wrap; }
+.gwiz-info-item__label {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-grey-400);
+    margin-bottom: 0.2em;
+}
+.gwiz-info-item__value { font-size: 0.95em; font-weight: 600; }
+.gwiz-field { margin-bottom: 0.75em; }
+.gwiz-field--spaced { margin-bottom: 1.5em; }
+.gwiz-hidden { display: none; }
+.gwiz-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+.gwiz-interval-input { max-width: 10em; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=_("Step 2 of 4 — Data Feed") subtitle=source_verbose_name icon="file-import" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <form method="post" action="">
+        {% csrf_token %}
+
+        {% if is_edit and edit_feed %}
+            {# ── Edit mode: show feed from DB, no create/skip options ────── #}
+            <input type="hidden" name="feed_mode" value="link">
+            <input type="hidden" name="data_feed_id" value="{{ edit_feed.pk }}">
+
+            <div class="gwiz-card">
+                <div class="gwiz-card__header">{% trans "Current Data Feed" %}</div>
+                <div class="gwiz-card__body">
+                    <div class="gwiz-info-row">
+                        <div>
+                            <div class="gwiz-info-item__label">{% trans "Name" %}</div>
+                            <div class="gwiz-info-item__value">{{ edit_feed.name }}</div>
+                        </div>
+                        <div>
+                            <div class="gwiz-info-item__label">{% trans "Type" %}</div>
+                            <div class="gwiz-info-item__value">{{ edit_feed.get_real_instance_class.Meta.verbose_name|default:source_verbose_name }}</div>
+                        </div>
+                        <div>
+                            <div class="gwiz-info-item__label">{% trans "Run interval" %}</div>
+                            <div class="gwiz-info-item__value">{{ edit_feed.interval_minutes }} {% trans "min" %}</div>
+                        </div>
+                        <div>
+                            <div class="gwiz-info-item__label">{% trans "Status" %}</div>
+                            <div class="gwiz-info-item__value">
+                                {% if edit_feed.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% if edit_feed.edit_url %}
+                    <p style="margin-top:0.75em; font-size:0.85em; color:var(--color-grey-400);">
+                        {% trans "To change feed settings (interval, credentials, etc.) use" %}
+                        <a href="{{ edit_feed.edit_url }}">{% trans "Edit Feed" %}</a>.
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# Carry interval through session (read from existing feed) #}
+            <input type="hidden" name="new_feed_interval" value="{{ edit_feed.interval_minutes }}">
+
+        {% else %}
+            {# ── Create mode: standard create/link/skip UI ───────────────── #}
+            <div class="w-field__wrapper gwiz-field--spaced">
+                <label class="w-field__label" for="feed_mode">{% trans "Data Feed" %}</label>
+                <div class="w-field">
+                    <select name="feed_mode" id="feed_mode" class="w-field__input"
+                            onchange="
+                                var v=this.value;
+                                document.getElementById('section-create-feed').classList.toggle('gwiz-hidden', v!=='create');
+                                document.getElementById('section-link-feed').classList.toggle('gwiz-hidden', v!=='link');
+                            ">
+                        <option value="create" {% if prefill_feed_mode != "link" and prefill_feed_mode != "skip" %}selected{% endif %}>{% trans "Create New" %}</option>
+                        {% if existing_feeds %}
+                        <option value="link" {% if prefill_feed_mode == "link" %}selected{% endif %}>{% trans "Select Existing Data Feed" %}</option>
+                        {% endif %}
+                        <option value="skip" {% if prefill_feed_mode == "skip" %}selected{% endif %}>{% trans "Skip — no Data Feed" %}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="section-create-feed" {% if prefill_feed_mode == "link" or prefill_feed_mode == "skip" %}class="gwiz-hidden"{% endif %}>
+                <div class="w-field__wrapper gwiz-field">
+                    <label class="w-field__label" for="new_feed_name">{% trans "Name" %} <sup>*</sup></label>
+                    <input type="text" name="new_feed_name" id="new_feed_name"
+                           class="w-field__input" value="{{ default_feed_name }}">
+                    <p class="w-field__help-text">{% trans "Source-specific settings (run hours, forecast range, etc.) can be configured after provisioning." %}</p>
+                </div>
+                <div class="w-field__wrapper gwiz-field">
+                    <label class="w-field__label" for="new_feed_interval">{% trans "Run interval (minutes)" %}</label>
+                    <input type="number" name="new_feed_interval" id="new_feed_interval"
+                           class="w-field__input gwiz-interval-input" value="360" min="5" max="1440">
+                </div>
+            </div>
+
+            {% if existing_feeds %}
+            <div id="section-link-feed" {% if prefill_feed_mode != "link" %}class="gwiz-hidden"{% endif %}>
+                <div class="w-field__wrapper gwiz-field">
+                    <label class="w-field__label" for="data_feed_id">{% trans "Data Feed" %}</label>
+                    <select name="data_feed_id" id="data_feed_id" class="w-field__input">
+                        <option value="">— {% trans "Choose" %} —</option>
+                        {% for feed in existing_feeds %}
+                        <option value="{{ feed.pk }}" {% if prefill_feed_id == feed.pk %}selected{% endif %}>
+                            {{ feed.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            {% endif %}
+        {% endif %}
+
+        <div class="gwiz-actions">
+            <button type="submit" class="button button-primary">{% trans "Next: Parameters" %} →</button>
+            <a href="{% url 'wizard_step1_catalog' model_name %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

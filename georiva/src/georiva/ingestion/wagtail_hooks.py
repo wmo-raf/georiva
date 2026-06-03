@@ -8,14 +8,14 @@ from .panels import IngestionActivityPanel
 def register_ingestion_dashboard_urls():
     from .dashboard_views import (
         ingestion_dashboard_api,
-        collection_loader_runs_api,
+        collection_data_feed_runs_api,
         collection_ingestion_logs_api,
         collection_ingestion_jobs_api,
     )
 
     return [
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),
-        path("api/ingestion/collections/<int:collection_id>/loader-runs/", collection_loader_runs_api,
+        path("api/ingestion/collections/<int:collection_id>/loader-runs/", collection_data_feed_runs_api,
              name="collection_loader_runs_api"),
         path("api/ingestion/collections/<int:collection_id>/ingestion-logs/", collection_ingestion_logs_api,
              name="collection_ingestion_logs_api"),
