@@ -14,7 +14,7 @@ from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdow
 from georiva.core.models import Catalog
 from georiva.core.models import Collection, Item
 from georiva.ingestion.models import IngestionLog
-from georiva.sources.models import LoaderRun
+from georiva.sources.models import DataFeedRun
 from .table import LinkColumnWithIcon
 from .viewsets import CatalogViewSet, CollectionViewSet
 
@@ -215,17 +215,16 @@ def collection_items_list(request, collection_pk):
     elided_page_range = paginator.get_elided_page_range(page_obj.number)
     
     # ------------------------------------------------------------------
-    # Automation section (only rendered if loader_profile is set)
+    # Automation section (only rendered if data_feed is set)
     # ------------------------------------------------------------------
-    loader_profile = None
+    data_feed = None
     recent_runs = []
     ingestion_summary = {}
     
-    if collection.loader_profile_id:
-        loader_profile = collection.loader_profile
-        
+    data_feed = collection.data_feeds.first()
+    if data_feed:
         recent_runs = list(
-            LoaderRun.objects.filter(collection=collection)
+            DataFeedRun.objects.filter(collection=collection)
             .order_by("-started_at")[:5]
         )
         
@@ -261,7 +260,7 @@ def collection_items_list(request, collection_pk):
         "page_obj": page_obj,
         "paginator": paginator,
         "elided_page_range": elided_page_range,
-        "loader_profile": loader_profile,
+        "data_feed": data_feed,
         "recent_runs": recent_runs,
         "ingestion_summary": ingestion_summary,
     }
