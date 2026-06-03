@@ -1,12 +1,12 @@
 from django.core.management.base import BaseCommand
 
 from georiva.ingestion.models import IngestionLog
-from georiva.sources.models import LoaderRun
+from georiva.sources.models import DataFeedRun
 
 
 class Command(BaseCommand):
     help = (
-        "Delete IngestionLog and LoaderRun records no longer referenced by any Item. "
+        "Delete IngestionLog and DataFeedRun records no longer referenced by any Item. "
         "Use --dry-run to preview counts without deleting."
     )
 
@@ -36,8 +36,8 @@ class Command(BaseCommand):
         if not dry_run:
             orphan_logs.delete()
 
-        # Pass 2: LoaderRuns with no IngestionLogs
-        orphan_runs = LoaderRun.objects.filter(ingestion_logs__isnull=True)
+        # Pass 2: DataFeedRuns with no IngestionLogs
+        orphan_runs = DataFeedRun.objects.filter(ingestion_logs__isnull=True)
         if collection_slug:
             orphan_runs = orphan_runs.filter(collection__slug=collection_slug)
         run_count = orphan_runs.count()
@@ -47,5 +47,5 @@ class Command(BaseCommand):
         prefix = "[DRY RUN] " if dry_run else ""
         self.stdout.write(
             f"{prefix}Deleted {log_count} orphan IngestionLog(s), "
-            f"{run_count} orphan LoaderRun(s)."
+            f"{run_count} orphan DataFeedRun(s)."
         )
