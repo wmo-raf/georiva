@@ -10,7 +10,7 @@ from django_extensions.db.models import TimeStampedModel
 from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 
-from georiva.sources.models import LoaderProfile
+from georiva.sources.models import DataFeed
 
 RUN_HOUR_CHOICES = [
     (0, "00Z"),
@@ -24,7 +24,7 @@ def default_run_hours():
     return [0, 12]
 
 
-class ECMWFAIFSLoaderProfileForm(WagtailAdminModelForm):
+class ECMWFAIFSDataFeedForm(WagtailAdminModelForm):
     run_hours = forms.MultipleChoiceField(
         choices=RUN_HOUR_CHOICES,
         widget=forms.CheckboxSelectMultiple,
@@ -37,7 +37,7 @@ class ECMWFAIFSLoaderProfileForm(WagtailAdminModelForm):
         return [int(v) for v in self.cleaned_data.get("run_hours", [])]
 
 
-class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
+class ECMWFAIFSDataFeed(DataFeed, TimeStampedModel):
     """
     ECMWF AIFS Loader profile:
       - Select which model runs to fetch from (00Z, 06Z, 12Z, 18Z)
@@ -45,7 +45,7 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
       - Each day includes 4 timesteps: +0h, +6h, +12h, +18h
     """
     
-    base_form_class = ECMWFAIFSLoaderProfileForm
+    base_form_class = ECMWFAIFSDataFeedForm
     
     # Which runs to fetch from
     run_hours = ArrayField(
@@ -73,7 +73,7 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
     )
     
     panels = [
-        *LoaderProfile.base_panels,
+        *DataFeed.base_panels,
         MultiFieldPanel(
             [
                 FieldPanel("run_hours"),
@@ -91,7 +91,7 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
     ]
     
     class Meta:
-        verbose_name = "ECMWF AIFS Loader Profile"
+        verbose_name = "ECMWF AIFS Data Feed"
     
     def clean(self):
         super().clean()
@@ -162,6 +162,22 @@ class ECMWFAIFSLoaderProfile(LoaderProfile, TimeStampedModel):
         runs = ", ".join(f"{h:02d}Z" for h in self.get_run_hours())
         return f"{self.name} ({runs}, Day {self.start_day}–{self.end_day})"
     
+    @classmethod
+    def get_wizard_defaults(cls) -> dict:
+        return {
+            "run_hours": [0, 12],
+            "start_day": 0,
+            "end_day": 5,
+        }
+
+    @classmethod
+    def get_catalog_defaults(cls) -> dict:
+        return {
+            "name": "ECMWF AIFS",
+            "file_format": "grib2",
+            "description": "ECMWF AIFS global forecast — 0.25° resolution, 6-hourly steps.",
+        }
+
     @property
     def data_source_cls(self):
         from .source import ECMWFAIFSDataSource
