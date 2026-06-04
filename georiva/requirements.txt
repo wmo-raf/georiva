@@ -1,5 +1,5 @@
 wagtail==7.2.1
-django-task-ferry @ git+https://github.com/wmo-raf/django-task-ferry.git@main
+django-task-ferry==0.1.1
 dj-database-url==3.0.1
 django-timescaledb==0.2.13
 django-environ==0.12.0
