@@ -1,22 +1,40 @@
-from django.core.validators import MaxValueValidator, MinValueValidator
+from datetime import timedelta
+from typing import TYPE_CHECKING
+
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.urls import reverse
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
+from modelcluster.fields import ParentalKey
+from modelcluster.models import ClusterableModel
 from polymorphic.models import PolymorphicModel
+from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import FieldPanel
 
 from .source import BaseDataSource
 
+if TYPE_CHECKING:
+    from georiva.sources.collection_definitions import CollectionDefinition
 
-class DataFeed(PolymorphicModel, TimeStampedModel):
+
+class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     """
     A configured data source: what to fetch, how often, and with what settings.
 
     Each subclass pairs with one BaseDataSource implementation and holds the
     operator-supplied configuration (schedule, credentials, variable selection).
     """
+    
+    catalog = models.OneToOneField(
+        'georivacore.Catalog',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='data_feed',
+        verbose_name=_("Catalog"),
+    )
     
     name = models.CharField(
         max_length=255,
@@ -30,9 +48,9 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
     
     interval_minutes = models.PositiveIntegerField(
         default=360,  # 6 hours
-        validators=[MinValueValidator(5), MaxValueValidator(1440)],
+        validators=[MinValueValidator(5)],
         verbose_name=_("Run Interval"),
-        help_text=_("Minutes between runs"),
+        help_text=_("Minutes between runs (global default for all collections)"),
     )
     
     # Run tracking
@@ -57,25 +75,10 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
     total_files_fetched = models.PositiveIntegerField(default=0)
     total_bytes_transferred = models.BigIntegerField(default=0)
     
-    # Collections this feed populates (owned by DataFeed, not Collection)
-    collections = models.ManyToManyField(
-        "georivacore.Collection",
-        blank=True,
-        related_name="data_feeds",
-        verbose_name=_("Collections"),
-        help_text=_("Collections this feed populates"),
-    )
-    
-    setup_via_wizard = models.BooleanField(
-        default=False,
-        verbose_name=_("Set up via wizard"),
-    )
-    
     base_panels = [
         FieldPanel('name'),
         FieldPanel('is_active'),
-        FieldPanel('interval_minutes'),
-        FieldPanel('collections'),
+        FieldPanel('interval_minutes')
     ]
     
     panels = base_panels
@@ -117,12 +120,45 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
         """
         return {}
     
+    @classmethod
+    def get_collection_definitions(cls) -> list['CollectionDefinition']:
+        """
+        Return the finite list of collections this plugin can create.
+
+        Override in subclasses to declare every CollectionDefinition the plugin
+        supports. The wizard presents these as a checklist in step 3; the setup
+        service provisions Collection + Variable + DataFeedCollectionLink for each
+        selected definition.
+        """
+        return []
+    
+    # =========================================================================
+    # Collection link helpers
+    # =========================================================================
+    
+    @classmethod
+    def get_collection_link_model(cls):
+        """Return the DataFeedCollectionLink subclass for this feed type. Default: base class."""
+        return DataFeedCollectionLink
+    
+    @classmethod
+    def get_link_config_for_definition(cls, definition) -> dict:
+        """
+        Return extra link model fields derived from the definition (not user-configurable).
+
+        Override in subclasses to supply per-link fields that are baked into the
+        definition rather than collected from the operator.  For example, CHIRPS
+        overrides this to set `period` from the definition key so operators never
+        see it as an editable field.
+        """
+        return {}
+    
     # =========================================================================
     # Factory Methods
     # =========================================================================
     
-    def get_data_source(self):
-        """Instantiate configured data source."""
+    def get_data_source(self, collection=None):
+        """Instantiate configured data source, merging per-collection link config."""
         source_class = self.data_source_cls
         if not source_class:
             raise ValueError("No data source class defined for this data feed.")
@@ -131,6 +167,12 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
             raise ValueError(f"Data source class {source_class} must inherit from BaseDataSource.")
         
         config = {**self.get_loader_config()}
+        if collection is not None:
+            try:
+                link = self.collection_links.get(collection=collection).get_real_instance()
+                config.update(link.config)
+            except DataFeedCollectionLink.DoesNotExist:
+                pass
         return source_class(config)
     
     def get_loader(self, collection=None):
@@ -138,7 +180,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
         from .loader import Loader
         
         return Loader(
-            data_source=self.get_data_source(),
+            data_source=self.get_data_source(collection=collection),
             collection=collection,
             data_feed=self,
         )
@@ -176,7 +218,12 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
                 data_feed_run__isnull=True,
             ).update(data_feed_run=data_feed_run)
         
-        self.last_run_at = timezone.now()
+        now = timezone.now()
+        
+        # Update per-collection link's last_run_at for independent scheduling
+        self.collection_links.filter(collection=collection).update(last_run_at=now)
+        
+        self.last_run_at = now
         self.last_run_status = result.status
         self.last_run_message = '; '.join(result.errors[:3]) if result.errors else ''
         self.total_runs += 1
@@ -221,15 +268,18 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
         """
         if async_run:
             from task_ferry.handler import JobHandler
-
+            
             return JobHandler.create_and_start(
                 user=user,
                 job_type_name="data_source_load",
                 data_feed_id=self.pk,
                 collection_id=collection.pk if collection else None,
             )
-
-        collections = [collection] if collection else list(self.collections.all())
+        
+        collections = [collection] if collection else [
+            link.collection
+            for link in self.collection_links.select_related('collection')
+        ]
         results = []
         for coll in collections:
             loader = self.get_loader(coll)
@@ -256,14 +306,123 @@ class DataFeed(PolymorphicModel, TimeStampedModel):
             return reverse(self.viewset.get_url_name("delete"), kwargs={"pk": self.pk})
         return None
     
+    def delete(self, *args, **kwargs):
+        """Delete this feed and its linked Catalog (which cascades to Collections/Variables/Items)."""
+        catalog_id = self.catalog_id
+        result = super().delete(*args, **kwargs)
+        if catalog_id:
+            from georiva.core.models import Catalog
+            Catalog.objects.filter(pk=catalog_id).delete()
+        return result
+    
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         
-        from georiva.core.tasks import update_collection_data_feed_periodic_task
+        from georiva.sources.tasks import update_collection_data_feed_periodic_task
         
         update_collection_data_feed_periodic_task(
             sender=self.__class__, instance=self, created=False
         )
+
+
+class DataFeedCollectionLink(PolymorphicModel):
+    """
+    Through model for the DataFeed ↔ Collection M2M.
+
+    Subclasses (e.g. CHIRPSDataFeedCollectionLink) add plugin-specific fields
+    (e.g. period) that the Loader merges into the DataSource config at runtime
+    via the `config` property.
+
+    Scheduling:
+      - interval_minutes: per-collection override; null means use DataFeed.interval_minutes
+      - last_run_at: updated after each successful collection run for is_due() checks
+    """
+    data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name='collection_links')
+    collection = models.ForeignKey('georivacore.Collection', on_delete=models.CASCADE, related_name='feed_links')
+    
+    definition_key = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="The CollectionDefinition.key used to provision this link.",
+    )
+    
+    # Per-collection scheduling (overrides DataFeed.interval_minutes when set)
+    interval_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(5)],
+        verbose_name=_("Collection Run Interval"),
+        help_text=_("Minutes between runs for this collection. Leave blank to use the feed's global interval."),
+    )
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        unique_together = ['data_feed', 'collection']
+        ordering = ['id']
+    
+    @property
+    def effective_interval(self) -> int:
+        """Per-collection interval if set, else the feed's global interval."""
+        return self.interval_minutes or self.data_feed.interval_minutes
+    
+    def is_due(self) -> bool:
+        """Return True if this collection is due to run."""
+        if not self.data_feed.is_active:
+            return False
+        if not self.last_run_at:
+            return True
+        from django.utils import timezone
+        next_run = self.last_run_at + timedelta(minutes=self.effective_interval)
+        return timezone.now() >= next_run
+    
+    @property
+    def config(self) -> dict:
+        """Per-collection config dict merged into the DataSource config at runtime."""
+        return {}
+    
+    def __str__(self):
+        return f"{self.data_feed_id} → {self.collection_id}"
+    
+    # -------------------------------------------------------------------------
+    # UI / form discovery
+    # -------------------------------------------------------------------------
+    
+    @classmethod
+    def get_panels(cls) -> list:
+        """
+        Wagtail panels for the per-collection config fields of this link type.
+        Override in subclasses to expose typed fields in the admin form.
+        """
+        return []
+    
+    def has_configurable_fields(self) -> bool:
+        """Return True if there are any operator-editable config fields on this link."""
+        return bool(self.get_panels())
+    
+    @classmethod
+    def get_form_class(cls):
+        """
+        Return a ModelForm for editing this link's configurable fields.
+
+        Always includes interval_minutes (the per-collection schedule override) plus
+        any subclass-specific fields declared in get_panels().
+        Returns None only when get_panels() is empty (no plugin-specific config).
+        """
+        from django.forms import modelform_factory
+        from wagtail.admin.panels import FieldPanel
+        
+        panel_fields = [
+            p.field_name for p in cls.get_panels()
+            if isinstance(p, FieldPanel)
+        ]
+        
+        if not panel_fields:
+            return None
+        
+        base_form_class = getattr(cls, 'base_form_class', WagtailAdminModelForm)
+        
+        all_fields = panel_fields + ['interval_minutes']
+        return modelform_factory(cls, form=base_form_class, fields=all_fields)
 
 
 class DataFeedRun(TimeStampedModel):

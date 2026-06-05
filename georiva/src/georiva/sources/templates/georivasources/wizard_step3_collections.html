@@ -1,0 +1,519 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}
+    {% trans "Setup Wizard — Collections" %}
+{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    {{ link_form_cls.media.css }}
+    <style>
+        .gwiz-progress {
+            display: flex;
+            align-items: center;
+            gap: 0.4em;
+            margin-bottom: 1.5em;
+            font-size: 0.85em;
+            flex-wrap: wrap;
+        }
+
+        .gwiz-step {
+            padding: 0.3em 0.75em;
+            border-radius: 999px;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .gwiz-step--done {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .gwiz-step--active {
+            background: var(--w-color-info-100);
+            color: white;
+            border-color: var(--w-color-info-100);
+        }
+
+        .gwiz-step--pending {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .gwiz-sep {
+            color: var(--w-color-grey-400);
+            user-select: none;
+        }
+
+        /* ── Collection card ── */
+        .gcol-card {
+            border: 2px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            margin-bottom: 1em;
+            overflow: hidden;
+            transition: border-color 0.15s;
+        }
+
+        .gcol-card--selected {
+            border-color: var(--w-color-grey-100);
+        }
+
+        .gcol-card__header {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75em;
+            padding: 0.85em 1.1em;
+            background: var(--w-color-grey-50);
+            cursor: default;
+        }
+
+        .gcol-toggle-wrap {
+            flex-shrink: 0;
+            margin-top: 3px;
+        }
+
+        .gcol-toggle-wrap input[type=checkbox] {
+            cursor: pointer;
+        }
+
+        .gcol-card__info {
+            flex: 1;
+        }
+
+        .gcol-card__name {
+            font-weight: 700;
+            font-size: 1em;
+            margin: 0 0 0.2em;
+        }
+
+        .gcol-card__meta {
+            font-size: 0.82em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gcol-single-var-tag {
+            display: inline-block;
+            background: var(--w-color-grey-100, #f5f5f5);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 999px;
+            padding: 0.12em 0.55em;
+            font-size: 0.72em;
+            color: var(--w-color-grey-600, #555);
+            margin-top: 0.35em;
+        }
+
+        /* ── Collapsible body ── */
+        .gcol-card__body {
+            display: none;
+            border-top: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gcol-card__body--visible {
+            display: block;
+        }
+
+        /* ── Variable selection ── */
+        .gcol-vars-section {
+            padding: 0.85em 1.1em;
+        }
+
+        .gcol-vars-header {
+            display: flex;
+            margin-bottom: 0.6em;
+            align-items: center;
+        }
+
+        .gcol-vars-label {
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gcol-select-all-label {
+            display: flex;
+            align-items: center;
+            gap: 0.35em;
+            font-size: 0.8em;
+            color: var(--w-color-info-100);
+            cursor: pointer;
+            user-select: none;
+            padding: 0.35em 0.65em 0.5em;
+        }
+
+        /* ── Groups ── */
+        .gcol-group {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+            margin-bottom: 0.5em;
+            overflow: hidden;
+        }
+
+        .gcol-group-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.3em 0.65em;
+            background: var(--w-color-grey-50, #f8f8f8);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gcol-group-header input[type=checkbox] {
+            cursor: pointer;
+        }
+
+        .gcol-group-name {
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+
+        .gcol-group-count {
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+            margin-left: auto;
+        }
+
+        /* ── Single-column variable list ── */
+        .gcol-var-list {
+            padding: 0.35em 0.65em 0.5em;
+        }
+
+        .gcol-var-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.22em 0;
+            border-bottom: 1px solid color-mix(in srgb, var(--w-color-border-furniture) 50%, transparent);
+        }
+
+        .gcol-var-row:last-child {
+            border-bottom: none;
+        }
+
+        .gcol-var-row input[type=checkbox] {
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .gcol-var-name {
+            font-size: 0.83em;
+            flex: 1;
+        }
+
+        .gcol-var-units {
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+        }
+
+        /* ── Config form ── */
+        .gcol-config-section {
+            padding: 0.85em 1.1em;
+            border-top: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gcol-config-label {
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+            margin-bottom: 0.5em;
+        }
+
+        .gcol-config-section .w-field__wrapper {
+            margin-bottom: 0.75em;
+        }
+
+        /* ── Misc ── */
+        .gcol-message {
+            margin-bottom: 1em;
+        }
+
+        .gcol-intro {
+            margin-bottom: 1.25em;
+            color: var(--w-color-grey-600, #555);
+            font-size: 0.9em;
+        }
+
+        .gcol-toggle-label {
+            cursor: pointer;
+            display: block;
+        }
+
+        .gcol-submit-row {
+            display: flex;
+            gap: 0.75em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=source_verbose_name subtitle=_("Step 3 of 3 — Collections") icon="file-import" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="gwiz-progress">
+            <span class="gwiz-step gwiz-step--done">
+                1. {% trans "Catalog" %}
+            </span>
+            <span class="gwiz-sep">→</span>
+
+            <span class="gwiz-step gwiz-step--done">
+                2. {% trans "Feed Details" %}
+            </span>
+            <span class="gwiz-sep">→</span>
+
+            <span class="gwiz-step gwiz-step--active">
+                3. {% trans "Collections" %}
+            </span>
+        </div>
+
+        <form method="post" id="collections-form">
+            {% csrf_token %}
+
+            {% if messages %}
+                {% for msg in messages %}
+                    <div class="help-block help-block--{{ msg.tags }} gcol-message">{{ msg }}</div>
+                {% endfor %}
+            {% endif %}
+
+            <p class="gcol-intro">
+                {% trans "Select which collections to create. Uncheck variables you don't need." %}
+            </p>
+
+            {% for entry in def_entries %}
+                {% with defn=entry.definition form=entry.config_form %}
+                    <div class="gcol-card {% if defn.key in prefill_keys %}gcol-card--selected{% endif %}"
+                         id="gcol-{{ defn.key }}">
+                        {# ── Header: toggle checkbox + title (no nested form controls) ── #}
+                        <div class="gcol-card__header">
+                            <div class="gcol-toggle-wrap">
+                                <input type="checkbox"
+                                       class="gcol-collection-cb"
+                                       name="collections"
+                                       value="{{ defn.key }}"
+                                       id="chk-{{ defn.key }}"
+                                       data-defn="{{ defn.key }}"
+                                       {% if defn.key in prefill_keys %}checked{% endif %}>
+                            </div>
+                            <div class="gcol-card__info">
+                                <label for="chk-{{ defn.key }}" class="gcol-toggle-label">
+                                    <p class="gcol-card__name">{{ defn.name }}</p>
+                                </label>
+                                <div class="gcol-card__meta">
+                                    {{ defn.time_resolution }}
+                                    {% if not entry.multi_variable %}
+                                        &nbsp;·&nbsp;
+                                        {% for var in defn.variables %}
+                                            <span class="gcol-single-var-tag">{{ var.name }} ({{ var.units }})</span>
+                                        {% endfor %}
+                                    {% else %}
+                                        &nbsp;·&nbsp;{% blocktrans count n=defn.variables|length %}{{ n }} variable
+                                        {% plural %}{{ n }}
+                                        variables{% endblocktrans %}
+                                    {% endif %}
+                                    {% if entry.definition.default_interval_minutes %}
+                                        &nbsp;·&nbsp; {% blocktrans with m=entry.definition.default_interval_minutes %}
+                                        every {{ m }}
+                                        min{% endblocktrans %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        {# ── Body: variables + config ── #}
+                        <div class="gcol-card__body {% if defn.key in prefill_keys %}gcol-card__body--visible{% endif %}"
+                             id="gcol-body-{{ defn.key }}">
+                            {% if entry.multi_variable %}
+                                <div class="gcol-vars-section">
+                                    <div class="gcol-vars-header">
+                                        <label class="gcol-select-all-label">
+                                            <input type="checkbox"
+                                                   class="gcol-select-all"
+                                                   data-defn="{{ defn.key }}"
+                                                   checked>
+                                        </label>
+                                        <span class="gcol-vars-label">
+                                            {% trans "Variables" %}
+                                        </span>
+                                    </div>
+                                    {% for grp in entry.variable_groups %}
+                                        <div class="gcol-group">
+                                            <div class="gcol-group-header">
+                                                <input type="checkbox"
+                                                       class="gcol-group-cb"
+                                                       data-defn="{{ defn.key }}"
+                                                       data-group="{{ grp.key }}"
+                                                       checked>
+                                                <span class="gcol-group-name">
+                                                    {% if grp.type == "ungrouped" and grp.name %}
+                                                        {{ grp.name }}
+                                                    {% elif grp.type == "ungrouped" %}
+                                                        {% trans "Other" %}
+                                                    {% else %}
+                                                        {{ grp.name }}
+                                                    {% endif %}
+                                                </span>
+                                                <span class="gcol-group-count">
+                                                    {{ grp.variables|length }}
+                                                </span>
+                                            </div>
+                                            <div class="gcol-var-list">
+                                                {% for var in grp.variables %}
+                                                    <div class="gcol-var-row">
+                                                        <input type="checkbox"
+                                                               class="gcol-var-cb"
+                                                               name="vars_{{ defn.key }}"
+                                                               value="{{ var.key }}"
+                                                               data-defn="{{ defn.key }}"
+                                                               data-group="{{ grp.key }}"
+                                                               checked>
+                                                        <span class="gcol-var-name">
+                                                            {{ var.name }}
+                                                        </span>
+                                                        <span class="gcol-var-units">
+                                                            ({{ var.units }})
+                                                        </span>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                            {% if form %}
+                                <div class="gcol-config-section">
+                                    <p class="gcol-config-label">{% trans "Collection Settings" %}</p>
+                                    {% for field in form %}
+                                        <div class="w-field__wrapper">
+                                            <label class="w-field__label" for="{{ field.id_for_label }}">
+                                                {{ field.label }}{% if field.field.required %} *{% endif %}
+                                            </label>
+                                            {{ field }}
+                                            {% if field.help_text %}
+                                                <p class="w-field__help-text">{{ field.help_text }}</p>{% endif %}
+                                            {% if field.errors %}
+                                                {% for error in field.errors %}
+                                                    <p class="error-message">
+                                                        {{ error }}
+                                                    </p>
+                                                {% endfor %}
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+
+                        </div>
+                    </div>
+                {% endwith %}
+            {% endfor %}
+
+            <div class="gcol-submit-row">
+                <button type="submit" class="button bicolor button--icon">
+                    <span class="icon-wrapper">
+                        <svg class="icon icon-arrow-right icon" aria-hidden="true">
+                            <use href="#icon-arrow-right"></use>
+                        </svg>
+                    </span>
+                    {% trans "Create Feed" %}
+                </button>
+                <a href="{% url 'wizard_step2_feed' model_name=model_name %}" class="button button-secondary">
+                    {% trans "Back" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    {{ link_form_cls.media.js }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // ── 1. Collection card toggle ──────────────────────────────────────────
+            document.querySelectorAll('.gcol-collection-cb').forEach(function (cb) {
+                function apply(checked) {
+                    const card = document.getElementById('gcol-' + cb.dataset.defn);
+                    const body = document.getElementById('gcol-body-' + cb.dataset.defn);
+                    if (checked) {
+                        card.classList.add('gcol-card--selected');
+                        body.classList.add('gcol-card__body--visible');
+                    } else {
+                        card.classList.remove('gcol-card--selected');
+                        body.classList.remove('gcol-card__body--visible');
+                    }
+                }
+
+                apply(cb.checked);
+                cb.addEventListener('change', function () {
+                    apply(this.checked);
+                });
+            });
+
+            // ── 2. Select-all (per collection) ────────────────────────────────────
+            document.querySelectorAll('.gcol-select-all').forEach(function (master) {
+                const defn = master.dataset.defn;
+
+
+                master.addEventListener('change', function () {
+                    document.querySelectorAll('.gcol-var-cb[data-defn="' + defn + '"]')
+                        .forEach(function (v) {
+                            v.checked = master.checked;
+                        });
+                    document.querySelectorAll('.gcol-group-cb[data-defn="' + defn + '"]')
+                        .forEach(function (g) {
+                            g.checked = master.checked;
+                        });
+                });
+            });
+
+            // ── 3. Group checkbox ─────────────────────────────────────────────────
+            document.querySelectorAll('.gcol-group-cb').forEach(function (gc) {
+                gc.addEventListener('change', function () {
+                    document.querySelectorAll(
+                        '.gcol-var-cb[data-defn="' + gc.dataset.defn + '"][data-group="' + gc.dataset.group + '"]'
+                    ).forEach(function (v) {
+                        v.checked = gc.checked;
+                    });
+                    syncMaster(gc.dataset.defn);
+                });
+            });
+
+            // ── 4. Individual variable checkbox ───────────────────────────────────
+            document.querySelectorAll('.gcol-var-cb').forEach(function (v) {
+                v.addEventListener('change', function () {
+                    syncGroup(v.dataset.defn, v.dataset.group);
+                    syncMaster(v.dataset.defn);
+                });
+            });
+
+            function syncGroup(defn, group) {
+                const gc = document.querySelector('.gcol-group-cb[data-defn="' + defn + '"][data-group="' + group + '"]');
+                if (!gc) return;
+                const all = document.querySelectorAll('.gcol-var-cb[data-defn="' + defn + '"][data-group="' + group + '"]');
+                const n = Array.from(all).filter(function (v) {
+                    return v.checked;
+                }).length;
+                gc.checked = n === all.length;
+                gc.indeterminate = n > 0 && n < all.length;
+            }
+
+            function syncMaster(defn) {
+                const master = document.querySelector('.gcol-select-all[data-defn="' + defn + '"]');
+                if (!master) return;
+                const all = document.querySelectorAll('.gcol-var-cb[data-defn="' + defn + '"]');
+                const n = Array.from(all).filter(function (v) {
+                    return v.checked;
+                }).length;
+                master.checked = n === all.length;
+                master.indeterminate = n > 0 && n < all.length;
+            }
+        });
+    </script>
+{% endblock %}

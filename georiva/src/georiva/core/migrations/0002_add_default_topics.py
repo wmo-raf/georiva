@@ -47,7 +47,7 @@ def remove_default_topics(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ('georivacore', '0002_initial'),
+        ('georivacore', '0001_initial'),
     ]
     
     operations = [

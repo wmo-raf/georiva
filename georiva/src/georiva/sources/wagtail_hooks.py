@@ -11,13 +11,16 @@ from .views import (
     data_feed_list,
     data_feed_add_select,
     data_feed_detail,
+    data_feed_edit,
+    definition_collection_add,
+    definition_collection_edit,
+    definition_collection_remove_confirm,
+    definition_collection_vars_edit,
     setup_wizard_select,
     wizard_step1_catalog,
     wizard_step2_feed,
-    wizard_step3_parameters,
-    wizard_step4_review,
+    wizard_step3_collections,
     wizard_provision,
-    wizard_resume,
 )
 from .viewsets import (
     admin_viewsets,
@@ -33,13 +36,21 @@ def urlconf_georivasources():
         path('data-feeds/', data_feed_list, name="data_feed_list"),
         path('data-feeds/select/', data_feed_add_select, name="data_feed_add_select"),
         path('data-feeds/<int:pk>/', data_feed_detail, name="data_feed_detail"),
+        path('data-feeds/<int:pk>/edit/', data_feed_edit, name="data_feed_edit"),
         path('data-feeds/setup-wizard/', setup_wizard_select, name="setup_wizard_select"),
         path('data-feeds/setup-wizard/<str:model_name>/catalog/', wizard_step1_catalog, name="wizard_step1_catalog"),
         path('data-feeds/setup-wizard/<str:model_name>/feed/', wizard_step2_feed, name="wizard_step2_feed"),
-        path('data-feeds/setup-wizard/<str:model_name>/parameters/', wizard_step3_parameters, name="wizard_step3_parameters"),
-        path('data-feeds/setup-wizard/<str:model_name>/review/', wizard_step4_review, name="wizard_step4_review"),
+        path('data-feeds/setup-wizard/<str:model_name>/collections/', wizard_step3_collections,
+             name="wizard_step3_collections"),
         path('data-feeds/setup-wizard/<str:model_name>/provision/', wizard_provision, name="wizard_provision"),
-        path('data-feeds/<int:pk>/wizard-resume/<str:step>/', wizard_resume, name="wizard_resume"),
+        path('data-feeds/<int:feed_pk>/collections/add/<str:definition_key>/', definition_collection_add,
+             name="definition_collection_add"),
+        path('data-feeds/<int:feed_pk>/collections/<int:link_pk>/edit/', definition_collection_edit,
+             name="definition_collection_edit"),
+        path('data-feeds/<int:feed_pk>/collections/<int:link_pk>/remove/', definition_collection_remove_confirm,
+             name="definition_collection_remove"),
+        path('data-feeds/<int:feed_pk>/collections/<int:link_pk>/variables/', definition_collection_vars_edit,
+             name="definition_collection_vars_edit"),
     ]
 
 
@@ -55,12 +66,12 @@ def register_sources_menu():
 
 def get_data_feed_viewsets():
     data_feed_model_cls = get_all_child_models(DataFeed)
-
+    
     data_feed_viewsets = []
-
+    
     for model_cls in data_feed_model_cls:
         model_name = model_cls._meta.model_name
-
+        
         attrs = {
             "model": model_cls,
             "type": model_name,
@@ -68,18 +79,18 @@ def get_data_feed_viewsets():
             "edit_view_class": DataFeedEditView,
             "delete_view_class": DataFeedDeleteView,
         }
-
+        
         viewset = type(
             f"{model_cls.__name__}ViewSet",
             (ModelViewSet,),
             attrs
         )
-
+        
         viewset_cls = viewset()
-
+        
         data_feed_viewsets.append(viewset_cls)
         data_feed_viewset_registry.register(viewset_cls)
-
+    
     return data_feed_viewsets
 
 

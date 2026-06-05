@@ -121,7 +121,7 @@ def delete_units(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("georivacore", "0003_add_default_topics"),
+        ("georivacore", "0002_add_default_topics"),
     ]
     
     operations = [

@@ -1,0 +1,123 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Remove Collection" %} — {{ collection.name }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .rmc-warning-box {
+            background: color-mix(in srgb, var(--w-color-critical-200) 8%, transparent);
+            border: 1px solid color-mix(in srgb, var(--w-color-critical-200) 40%, transparent);
+            border-radius: 6px;
+            padding: 1.1em 1.25em;
+            margin-bottom: 1.5em;
+        }
+
+        .rmc-warning-title {
+            font-weight: 700;
+            color: var(--w-color-critical-200);
+            margin: 0 0 0.5em;
+            font-size: 0.95em;
+        }
+
+        .rmc-warning-list {
+            margin: 0.5em 0 0 1.2em;
+            padding: 0;
+            font-size: 0.9em;
+            line-height: 1.8;
+        }
+
+        .rmc-collection-meta {
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            padding: 1em 1.25em;
+            margin-bottom: 1.5em;
+            font-size: 0.9em;
+        }
+
+        .rmc-collection-meta strong {
+            display: block;
+            margin-bottom: 0.2em;
+        }
+
+        .rmc-collection-slug {
+            font-family: monospace;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+
+        .rmc-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+
+        .rmc-collection-extra {
+            margin-top: 0.4em;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+
+        .rmc-warning-note {
+            margin-top: 0.75em;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html"  with title=_("Remove Collection") subtitle=feed.name icon="warning" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="rmc-collection-meta">
+            <strong>
+                {{ collection.name }}
+            </strong>
+            <span class="rmc-collection-slug">
+                {{ collection.catalog.slug }}/{{ collection.slug }}
+            </span>
+            <div class="rmc-collection-extra">
+                {{ collection.time_resolution }}
+                &nbsp;·&nbsp;
+                {% blocktrans count n=collection.item_count %}
+                    {{ n }} item{% plural %}{{ n }} items
+                {% endblocktrans %}
+            </div>
+        </div>
+
+        <div class="rmc-warning-box">
+            <p class="rmc-warning-title">{% trans "This action will permanently delete:" %}</p>
+            <ul class="rmc-warning-list">
+                <li>
+                    {% trans "The collection" %} <strong>{{ collection.name }}</strong>
+                </li>
+                <li>
+                    {% trans "All variables in this collection" %}
+                </li>
+                <li>
+                    {% trans "All items and their raster/visual assets" %}
+                </li>
+                <li>
+                    {% trans "All ingestion logs associated with this collection" %}
+                </li>
+            </ul>
+            <p class="rmc-warning-note">
+                {% trans "This cannot be undone." %}
+            </p>
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="rmc-actions">
+                <button type="submit" class="button no">
+                    {% trans "Yes, delete collection" %}
+                </button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                    {% trans "Cancel" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

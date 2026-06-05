@@ -5,12 +5,12 @@
 
 {% block extra_css %}
     <style>
-        /* ── Shared card ──────────────────────────────────────────── */
         .gfeed-card {
-            background: var(--color-white);
+            background: var(--w-color-white);
             border-radius: 8px;
             box-shadow: 0 1px 4px rgba(0, 0, 0, .08), 0 4px 16px rgba(0, 0, 0, .06);
             overflow: hidden;
+            margin-bottom: 1.5em;
         }
 
         .gfeed-card__header {
@@ -18,8 +18,8 @@
             align-items: center;
             justify-content: space-between;
             padding: 0.85em 1.25em;
-            border-bottom: 1px solid var(--color-border);
-            background: var(--color-surface-menus);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            background: var(--w-color-grey-50);
         }
 
         .gfeed-card__title {
@@ -27,7 +27,7 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: var(--color-grey-400);
+            color: var(--w-color-grey-400);
             margin: 0;
         }
 
@@ -35,7 +35,6 @@
             padding: 1.25em;
         }
 
-        /* ── Action bar ───────────────────────────────────────────── */
         .gfeed-action-bar {
             display: flex;
             gap: 0.75em;
@@ -46,14 +45,13 @@
 
         .gfeed-meta {
             margin-left: auto;
-            color: var(--color-grey-400);
+            color: var(--w-color-grey-400);
             font-size: 0.875em;
             display: flex;
             align-items: center;
             gap: 0.4em;
         }
 
-        /* ── Stat cards ───────────────────────────────────────────── */
         .gfeed-stats {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -61,120 +59,119 @@
             margin-bottom: 1.5em;
         }
 
+        .gfeed-stats .gfeed-card {
+            margin-bottom: 0;
+        }
+
         .gfeed-stat__value {
             font-size: 1.7em;
             font-weight: 700;
             line-height: 1.1;
-            color: var(--color-text-label);
+            color: var(--w-color-text-label);
         }
 
         .gfeed-stat__label {
             font-size: 0.75em;
-            color: var(--color-grey-400);
+            color: var(--w-color-grey-400);
             margin-top: 0.3em;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
 
-        /* ── Info grid ────────────────────────────────────────────── */
-        .gfeed-info-grid {
+        /* Collections grid */
+        .gfeed-defn-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.25em;
-            margin-bottom: 1.5em;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1em;
+            padding: 1.25em;
         }
 
-        /* ── Setup card content ───────────────────────────────────── */
-        .gfeed-setup-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.45em;
-            padding: 0.3em 0.8em;
-            border-radius: 999px;
-            font-size: 0.8em;
-            font-weight: 600;
-            margin-bottom: 0.85em;
+        .gfeed-defn-card {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            padding: 1em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5em;
         }
 
-        .gfeed-setup-badge--wizard {
-            background: color-mix(in srgb, var(--color-positive-100) 15%, transparent);
-            color: var(--color-positive-100);
-            border: 1px solid color-mix(in srgb, var(--color-positive-100) 35%, transparent);
+        .gfeed-defn-card--enabled {
+            border-color: var(--w-color-positive-100);
+            background: color-mix(in srgb, var(--w-color-positive-100) 5%, transparent);
         }
 
-        .gfeed-setup-badge--manual {
-            background: color-mix(in srgb, var(--color-grey-400) 12%, transparent);
-            color: var(--color-grey-400);
-            border: 1px solid color-mix(in srgb, var(--color-grey-400) 30%, transparent);
+        .gfeed-defn-card--disabled {
+            opacity: 0.7;
         }
 
-        .gfeed-setup-desc {
-            color: var(--color-grey-400);
-            font-size: 0.875em;
-            margin-bottom: 1em;
-        }
-
-        /* ── Wizard step stepper ─────────────────────────────────── */
-        .gwiz-stepper {
+        .gfeed-defn-header {
             display: flex;
             align-items: center;
-            gap: 0.4em;
-            flex-wrap: wrap;
-            margin-top: 0.85em;
+            justify-content: space-between;
+            gap: 0.5em;
         }
-        .gwiz-step-link {
-            padding: 0.3em 0.7em;
+
+        .gfeed-defn-name {
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+
+        .gfeed-defn-badge {
+            font-size: 0.72em;
+            font-weight: 700;
+            padding: 0.2em 0.55em;
             border-radius: 999px;
-            font-size: 0.78em;
+        }
+
+        .gfeed-defn-badge--enabled {
+            background: color-mix(in srgb, var(--w-color-positive-100) 15%, transparent);
+            color: var(--w-color-positive-100);
+            border: 1px solid color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .gfeed-defn-badge--disabled {
+            background: var(--w-color-grey-100, #f5f5f5);
+            color: var(--w-color-grey-400);
+            border: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gfeed-defn-meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gfeed-defn-config {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35em;
+            margin-top: 0.25em;
+        }
+
+        .gfeed-link-tag {
+            background: color-mix(in srgb, var(--w-color-info-100) 12%, transparent);
+            color: var(--w-color-info-100);
+            border: 1px solid color-mix(in srgb, var(--w-color-info-100) 30%, transparent);
+            border-radius: 999px;
+            padding: 0.15em 0.6em;
+            font-size: 0.72em;
             font-weight: 600;
-            border: 1px solid var(--color-info-100);
-            color: var(--color-info-100);
-            text-decoration: none;
-            white-space: nowrap;
-        }
-        .gwiz-step-link:hover {
-            background: color-mix(in srgb, var(--color-info-100) 12%, transparent);
-            text-decoration: none;
-        }
-        .gwiz-step-sep {
-            color: var(--color-grey-400);
-            font-size: 0.75em;
-            user-select: none;
         }
 
-        /* ── Collection card content ──────────────────────────────── */
-        .gfeed-collection-item {
-            padding-bottom: 0.75em;
-            margin-bottom: 0.75em;
-            border-bottom: 1px solid var(--color-border);
-        }
-        .gfeed-collection-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-
-        .gfeed-collection-name {
-            font-size: 1.05em;
-            font-weight: 600;
-            margin: 0 0 0.25em;
+        .gfeed-defn-actions {
+            display: flex;
+            gap: 0.4em;
+            margin-top: 0.5em;
+            flex-wrap: wrap;
         }
 
-        .gfeed-collection-meta {
-            color: var(--color-grey-400);
-            font-size: 0.85em;
-            line-height: 1.7;
-        }
-
-        .gfeed-collection-empty {
-            color: var(--color-grey-400);
-            font-size: 0.875em;
-        }
-
-        /* ── Runs table ───────────────────────────────────────────── */
+        /* Runs table */
         .gfeed-runs-form {
             margin: 0;
         }
 
         .gfeed-empty-state {
             padding: 1.5em;
-            color: var(--color-grey-400);
+            color: var(--w-color-grey-400);
             font-size: 0.9em;
             text-align: center;
         }
@@ -199,42 +196,41 @@
         }
 
         .gfeed-dot--success {
-            background: var(--color-positive-100);
+            background: var(--w-color-positive-100);
         }
 
         .gfeed-dot--partial {
-            background: var(--color-warning-100);
+            background: var(--w-color-warning-100);
         }
 
         .gfeed-dot--failed {
-            background: var(--color-critical-200);
+            background: var(--w-color-critical-200);
         }
 
         .gfeed-dot--running {
-            background: var(--color-info-100);
+            background: var(--w-color-info-100);
         }
 
-        .gfeed-dot--empty,
-        .gfeed-dot--default {
-            background: var(--color-grey-400);
+        .gfeed-dot--empty, .gfeed-dot--default {
+            background: var(--w-color-grey-400);
         }
 
         .gfeed-failed-count {
-            color: var(--color-critical-200);
+            color: var(--w-color-critical-200);
         }
 
         .gfeed-error-cell {
             font-size: 0.8em;
-            color: var(--color-grey-400);
+            color: var(--w-color-grey-400);
             max-width: 300px;
         }
 
         .gfeed-status-active {
-            color: var(--color-positive-100);
+            color: var(--w-color-positive-100);
         }
 
         .gfeed-status-inactive {
-            color: var(--color-grey-400);
+            color: var(--w-color-grey-400);
         }
     </style>
 {% endblock %}
@@ -244,144 +240,186 @@
 
     <div class="nice-padding">
 
-        {# ── Action bar ──────────────────────────────────────────────────────── #}
+        {# ── Action bar #}
         <div class="gfeed-action-bar">
-            {% if feed.edit_url %}
-                <a href="{{ feed.edit_url }}" class="button bicolor button--icon">
+            <a href="{% url 'data_feed_edit' pk=feed.pk %}" class="button bicolor button--icon">
                 <span class="icon-wrapper">
-                    <svg class="icon icon-edit icon" aria-hidden="true"><use href="#icon-edit"></use></svg>
+                    <svg class="icon icon-edit icon" aria-hidden="true">
+                        <use href="#icon-edit"></use>
+                    </svg>
                 </span>
-                    {% trans "Edit" %}
+                {% trans "Edit Details" %}
+            </a>
+
+            {% if feed.delete_url %}
+                <a href="{{ feed.delete_url }}" class="button no">
+                    {% trans "Delete" %}
                 </a>
             {% endif %}
-            {% if feed.delete_url %}
-                <a href="{{ feed.delete_url }}" class="button no">{% trans "Delete" %}</a>
-            {% endif %}
+
             <div class="gfeed-meta">
                 {% if feed.is_active %}
                     <span class="gfeed-dot gfeed-dot--success"></span>
-                    <span class="gfeed-status-active">{% trans "Active" %}</span>
+                    <span class="gfeed-status-active">
+                        {% trans "Active" %}
+                    </span>
                 {% else %}
                     <span class="gfeed-dot gfeed-dot--default"></span>
-                    <span class="gfeed-status-inactive">{% trans "Inactive" %}</span>
+                    <span class="gfeed-status-inactive">
+                        {% trans "Inactive" %}
+                    </span>
                 {% endif %}
                 &nbsp;·&nbsp;
                 {% blocktrans with interval=feed.interval_minutes %}Runs every {{ interval }} min{% endblocktrans %}
             </div>
         </div>
 
-        {# ── Stat cards ──────────────────────────────────────────────────────── #}
+        {# ── Stat cards #}
         <div class="gfeed-stats">
             <div class="gfeed-card gfeed-card__body">
-                <div class="gfeed-stat__value">{{ feed.total_runs }}</div>
-                <div class="gfeed-stat__label">{% trans "Total Runs" %}</div>
+                <div class="gfeed-stat__value">
+                    {{ feed.total_runs }}
+                </div>
+                <div class="gfeed-stat__label">
+                    {% trans "Total Runs" %}
+                </div>
             </div>
             <div class="gfeed-card gfeed-card__body">
                 <div class="gfeed-stat__value">
-                    {% if feed.last_run_at %}{{ feed.last_run_at|timesince }}{% else %}—{% endif %}
+                    {% if feed.last_run_at %}
+                        {{ feed.last_run_at|timesince }}
+                    {% else %}
+                        —
+                    {% endif %}
                 </div>
-                <div class="gfeed-stat__label">{% trans "Last Run" %}</div>
+                <div class="gfeed-stat__label">
+                    {% trans "Last Run" %}
+                </div>
             </div>
             <div class="gfeed-card gfeed-card__body">
-                <div class="gfeed-stat__value">{{ feed.total_files_fetched }}</div>
-                <div class="gfeed-stat__label">{% trans "Files Fetched" %}</div>
+                <div class="gfeed-stat__value">
+                    {{ feed.total_files_fetched }}
+                </div>
+                <div class="gfeed-stat__label">
+                    {% trans "Files Fetched" %}
+                </div>
             </div>
         </div>
 
-        {# ── Info grid ───────────────────────────────────────────────────────── #}
-        <div class="gfeed-info-grid">
-
-            {# Setup card #}
-            <div class="gfeed-card">
-                <div class="gfeed-card__header">
-                    <h3 class="gfeed-card__title">{% trans "Setup" %}</h3>
-                </div>
-                <div class="gfeed-card__body">
-                    {% if feed.setup_via_wizard %}
-                        <div class="gfeed-setup-badge gfeed-setup-badge--wizard">
-                            &#x2714; {% trans "Created via Setup Wizard" %}
-                        </div>
-                        <p class="gfeed-setup-desc">
-                            {% trans "Edit from any step — your existing configuration will be pre-loaded." %}
-                        </p>
-                        <div class="gwiz-stepper">
-                            <a href="{% url 'wizard_resume' pk=feed.pk step='catalog' %}" class="gwiz-step-link">1. {% trans "Catalog" %}</a>
-                            <span class="gwiz-step-sep">→</span>
-                            <a href="{% url 'wizard_resume' pk=feed.pk step='feed' %}" class="gwiz-step-link">2. {% trans "Feed" %}</a>
-                            <span class="gwiz-step-sep">→</span>
-                            <a href="{% url 'wizard_resume' pk=feed.pk step='parameters' %}" class="gwiz-step-link">3. {% trans "Parameters" %}</a>
-                            <span class="gwiz-step-sep">→</span>
-                            <a href="{% url 'wizard_resume' pk=feed.pk step='review' %}" class="gwiz-step-link">4. {% trans "Review" %}</a>
-                        </div>
-                    {% else %}
-                        <div class="gfeed-setup-badge gfeed-setup-badge--manual">
-                            &#x270E; {% trans "Configured Manually" %}
-                        </div>
-                        <p class="gfeed-setup-desc">
-                            {% trans "This feed was set up directly without the wizard." %}
-                        </p>
-                        {% if feed.edit_url %}
-                            <a href="{{ feed.edit_url }}" class="button bicolor button--icon">
-                            <span class="icon-wrapper">
-                                <svg class="icon icon-edit icon" aria-hidden="true"><use href="#icon-edit"></use></svg>
-                            </span>
-                                {% trans "Edit Feed" %}
-                            </a>
-                        {% endif %}
-                    {% endif %}
-                </div>
+        {# ── Collections card #}
+        <div class="gfeed-card">
+            <div class="gfeed-card__header">
+                <h3 class="gfeed-card__title">
+                    {% trans "Collections" %}
+                    {% with enabled=definition_link_pairs|length %}
+                        &nbsp;({{ enabled }})
+                    {% endwith %}
+                </h3>
             </div>
-
-            {# Connected collections card #}
-            <div class="gfeed-card">
-                <div class="gfeed-card__header">
-                    <h3 class="gfeed-card__title">
-                        {% trans "Connected Collections" %}
-                        {% with count=feed.collections.count %}
-                            {% if count %}&nbsp;({{ count }}){% endif %}
-                        {% endwith %}
-                    </h3>
-                </div>
-                <div class="gfeed-card__body">
-                    {% if linked_collections %}
-                        {% for col in linked_collections %}
-                        <div class="gfeed-collection-item">
-                            <p class="gfeed-collection-name">{{ col.name }}</p>
-                            <div class="gfeed-collection-meta">
-                                <div>{% trans "Catalog" %}: <strong>{{ col.catalog.name }}</strong></div>
-                                <div><code>{{ col.catalog.slug }}/{{ col.slug }}</code></div>
-                                {% if col.time_resolution %}
-                                    <div>{% trans "Resolution" %}: {{ col.get_time_resolution_display }}</div>
+            {% if definition_link_pairs %}
+                <div class="gfeed-defn-grid">
+                    {% for pair in definition_link_pairs %}
+                        {% with defn=pair.definition link=pair.link enabled=pair.enabled %}
+                            <div class="gfeed-defn-card {% if enabled %}gfeed-defn-card--enabled{% else %}gfeed-defn-card--disabled{% endif %}">
+                                <div class="gfeed-defn-header">
+                                    <span class="gfeed-defn-name">
+                                        {{ defn.name }}
+                                    </span>
+                                    <span class="gfeed-defn-badge {% if enabled %}gfeed-defn-badge--enabled{% else %}gfeed-defn-badge--disabled{% endif %}">
+                                        {% if enabled %}
+                                            {% trans "Enabled" %}
+                                        {% else %}
+                                            {% trans "Disabled" %}
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                <div class="gfeed-defn-meta">
+                                    {{ defn.time_resolution }}
+                                    &nbsp;·&nbsp;
+                                    {% if enabled and pair.multi_variable %}
+                                        {{ pair.var_count }}&nbsp;/&nbsp;{{ pair.var_total }}
+                                        {% blocktrans count n=pair.var_total %}
+                                            variable{% plural %}variables
+                                        {% endblocktrans %}
+                                    {% else %}
+                                        {% blocktrans count n=defn.variables|length %}{{ n }} variable
+                                            {% plural %}{{ n }} variables
+                                        {% endblocktrans %}
+                                    {% endif %}
+                                    {% if link.effective_interval %}
+                                        &nbsp;·&nbsp; every {{ link.effective_interval }} min
+                                    {% endif %}
+                                </div>
+                                {% if enabled and link %}
+                                    {% with cfg=link.config %}
+                                        {% if cfg %}
+                                            <div class="gfeed-defn-config">
+                                                {% for key, val in cfg.items %}
+                                                    {% if val %}
+                                                        <span class="gfeed-link-tag">
+                                                            {{ key }}: {{ val }}
+                                                        </span>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </div>
+                                        {% endif %}
+                                    {% endwith %}
                                 {% endif %}
+                                <div class="gfeed-defn-actions">
+                                    {% if enabled and link %}
+                                        {% if pair.multi_variable %}
+                                            <a href="{% url 'definition_collection_vars_edit' feed_pk=feed.pk link_pk=link.pk %}"
+                                               class="button button-small button-secondary">
+                                                {% trans "Variables" %}
+                                            </a>
+                                        {% endif %}
+                                        {% if link.has_configurable_fields %}
+                                            <a href="{% url 'definition_collection_edit' feed_pk=feed.pk link_pk=link.pk %}"
+                                               class="button button-small button-secondary">
+                                                {% trans "Edit Config" %}
+                                            </a>
+                                        {% endif %}
+                                        <a href="{% url 'definition_collection_remove' feed_pk=feed.pk link_pk=link.pk %}"
+                                           class="button button-small no">
+                                            {% trans "Remove" %}
+                                        </a>
+                                    {% else %}
+                                        <a href="{% url 'definition_collection_add' feed_pk=feed.pk definition_key=defn.key %}"
+                                           class="button button-small bicolor button--icon">
+                                            <span class="icon-wrapper">
+                                                <svg class="icon icon-plus icon" aria-hidden="true">
+                                                    <use href="#icon-plus"></use>
+                                                </svg>
+                                            </span>
+                                            {% trans "Add" %}
+                                        </a>
+                                    {% endif %}
+                                </div>
                             </div>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <p class="gfeed-collection-empty">
-                            {% trans "No collections linked yet." %}
-                            {% if feed.edit_url %}
-                                <a href="{{ feed.edit_url }}">{% trans "Edit this feed" %}</a>
-                                {% trans "to assign one." %}
-                            {% endif %}
-                        </p>
-                    {% endif %}
+                        {% endwith %}
+                    {% endfor %}
                 </div>
-            </div>
-
+            {% else %}
+                <p class="gfeed-empty-state">
+                    {% trans "No collection definitions for this feed type." %}
+                </p>
+            {% endif %}
         </div>
 
-        {# ── Recent runs card ────────────────────────────────────────────────── #}
+        {# ── Recent runs card #}
         <div class="gfeed-card">
             <div class="gfeed-card__header">
                 <h3 class="gfeed-card__title">{% trans "Recent Runs" %}</h3>
-                {% if feed.collections.exists %}
+                {% if feed.collection_links.exists %}
                     <form class="gfeed-runs-form" method="post" action="{% url 'data_feed_detail' pk=feed.pk %}">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="run_now">
                         <button class="button bicolor button--icon button-small" type="submit">
-                        <span class="icon-wrapper">
-                            <svg class="icon icon-rotate icon" aria-hidden="true"><use href="#icon-rotate"></use></svg>
-                        </span>
+                            <span class="icon-wrapper">
+                                <svg class="icon icon-rotate icon" aria-hidden="true">
+                                    <use href="#icon-rotate"></use>
+                                </svg>
+                            </span>
                             {% trans "Run Now" %}
                         </button>
                     </form>
@@ -391,47 +429,76 @@
                 <table class="listing">
                     <thead>
                     <tr>
-                        <th>{% trans "Status" %}</th>
-                        <th>{% trans "Started" %}</th>
-                        <th>{% trans "Duration" %}</th>
-                        <th class="gfeed-num">{% trans "Requested" %}</th>
-                        <th class="gfeed-num">{% trans "Fetched" %}</th>
-                        <th class="gfeed-num">{% trans "Failed" %}</th>
-                        <th>{% trans "Errors" %}</th>
+                        <th>
+                            {% trans "Collection" %}
+                        </th>
+                        <th>
+                            {% trans "Status" %}
+                        </th>
+                        <th>
+                            {% trans "Started" %}
+                        </th>
+                        <th>
+                            {% trans "Duration" %}
+                        </th>
+                        <th class="gfeed-num">
+                            {% trans "Fetched" %}
+                        </th>
+                        <th class="gfeed-num">
+                            {% trans "Failed" %}
+                        </th>
+                        <th>
+                            {% trans "Errors" %}
+                        </th>
                     </tr>
                     </thead>
                     <tbody>
                     {% for run in recent_runs %}
                         <tr>
+                            <td>{{ run.collection.name }}</td>
                             <td>
-                            <span class="gfeed-status">
-                                {% if run.status == "success" %}
-                                    <span class="gfeed-dot gfeed-dot--success"></span>{% trans "Success" %}
-                                    {% elif run.status == "partial" %}
-                                    <span class="gfeed-dot gfeed-dot--partial"></span>{% trans "Partial" %}
-                                    {% elif run.status == "failed" %}
-                                    <span class="gfeed-dot gfeed-dot--failed"></span>{% trans "Failed" %}
-                                    {% elif run.status == "running" %}
-                                    <span class="gfeed-dot gfeed-dot--running"></span>{% trans "Running" %}
-                                    {% elif run.status == "empty" %}
-                                    <span class="gfeed-dot gfeed-dot--empty"></span>{% trans "No Data" %}
-                                {% else %}
-                                    <span class="gfeed-dot gfeed-dot--default"></span>{{ run.status }}
-                                {% endif %}
-                            </span>
+                                <span class="gfeed-status">
+                                    {% if run.status == "success" %}
+                                        <span class="gfeed-dot gfeed-dot--success"></span>
+                                        {% trans "Success" %}
+                                        {% elif run.status == "partial" %}
+                                        <span class="gfeed-dot gfeed-dot--partial"></span>
+                                        {% trans "Partial" %}
+                                        {% elif run.status == "failed" %}
+                                        <span class="gfeed-dot gfeed-dot--failed"></span>
+                                        {% trans "Failed" %}
+                                        {% elif run.status == "running" %}
+                                        <span class="gfeed-dot gfeed-dot--running"></span>
+                                        {% trans "Running" %}
+                                        {% elif run.status == "empty" %}
+                                        <span class="gfeed-dot gfeed-dot--empty"></span>
+                                        {% trans "No Data" %}
+                                    {% else %}
+                                        <span class="gfeed-dot gfeed-dot--default"></span>
+                                        {{ run.status }}
+                                    {% endif %}
+                                </span>
                             </td>
-                            <td>{{ run.started_at|timesince }} {% trans "ago" %}</td>
+                            <td>
+                                {{ run.started_at|timesince }} {% trans "ago" %}
+                            </td>
                             <td>
                                 {% if run.duration_seconds is not None %}
                                     {{ run.duration_seconds|floatformat:0 }}s
-                                {% else %}—{% endif %}
+                                {% else %}
+                                    —
+                                {% endif %}</td>
+                            <td class="gfeed-num">
+                                {{ run.files_fetched }}
                             </td>
-                            <td class="gfeed-num">{{ run.files_requested }}</td>
-                            <td class="gfeed-num">{{ run.files_fetched }}</td>
                             <td class="gfeed-num">
                                 {% if run.files_failed %}
-                                    <span class="gfeed-failed-count">{{ run.files_failed }}</span>
-                                {% else %}0{% endif %}
+                                    <span class="gfeed-failed-count">
+                                        {{ run.files_failed }}
+                                    </span>
+                                {% else %}
+                                    0
+                                {% endif %}
                             </td>
                             <td class="gfeed-error-cell">
                                 {% if run.errors %}
@@ -439,7 +506,9 @@
                                     {% if run.errors|length > 1 %}
                                         <em>(+{{ run.errors|length|add:"-1" }} {% trans "more" %})</em>
                                     {% endif %}
-                                {% else %}—{% endif %}
+                                {% else %}
+                                    —
+                                {% endif %}
                             </td>
                         </tr>
                     {% endfor %}
@@ -448,12 +517,8 @@
             {% else %}
                 <p class="gfeed-empty-state">
                     {% trans "No runs recorded yet." %}
-                    {% if not feed.collections.exists %}
-                        {% trans "Link a collection first, then trigger a run." %}
-                    {% endif %}
                 </p>
             {% endif %}
         </div>
-
     </div>
 {% endblock %}

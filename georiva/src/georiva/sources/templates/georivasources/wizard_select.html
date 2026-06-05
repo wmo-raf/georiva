@@ -24,8 +24,12 @@
             </ul>
         {% else %}
             <div class="help-block help-block--default">
-                <p>{% trans "No source types support the parameter manifest contract yet." %}</p>
-                <p>{% trans "Implement describe_parameters() on a BaseDataSource subclass to enable the wizard for that source." %}</p>
+                <p>
+                    {% trans "No source types support the parameter manifest contract yet." %}
+                </p>
+                <p>
+                    {% trans "Implement describe_parameters() on a BaseDataSource subclass to enable the wizard for that source." %}
+                </p>
             </div>
         {% endif %}
     </div>
