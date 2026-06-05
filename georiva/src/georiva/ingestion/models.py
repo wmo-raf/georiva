@@ -98,6 +98,17 @@ class IngestionLog(models.Model):
         default=False
     )
     
+    # db_constraint=False: TimescaleDB does not support FK constraints pointing
+    # to hypertables. Django still handles on_delete=CASCADE at the ORM level.
+    item = models.ForeignKey(
+        'georivacore.Item',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='ingestion_logs',
+        db_constraint=False,
+    )
+
     data_feed_run = models.ForeignKey(
         'georivasources.DataFeedRun',
         null=True,
