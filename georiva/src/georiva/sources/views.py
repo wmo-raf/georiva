@@ -1,3 +1,5 @@
+import json
+
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
@@ -9,6 +11,17 @@ from wagtail.admin.widgets import HeaderButton, ButtonWithDropdown, Button
 from georiva.sources.models import DataFeed
 from georiva.sources.registry import data_feed_viewset_registry
 from georiva.sources.utils import get_all_child_models, get_child_model_by_name
+
+
+def _to_json_safe(value):
+    """Coerce a form cleaned_data value to a JSON-serializable type for session storage."""
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    try:
+        json.dumps(value)
+        return value
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def data_feed_list(request):
@@ -607,7 +620,7 @@ def wizard_step2_feed(request, model_name):
                     for f, errs in extra_form.errors.items()
                 )
             else:
-                global_config = extra_form.cleaned_data
+                global_config = {k: _to_json_safe(v) for k, v in extra_form.cleaned_data.items()}
         
         if not errors:
             session_data.update({
@@ -731,7 +744,7 @@ def wizard_step3_collections(request, model_name):
                 "selected_collection_keys": selected_keys,
                 "collections_config": {
                     k: {
-                           field: str(v) if hasattr(v, 'isoformat') else v
+                           field: _to_json_safe(v)
                            for field, v in cfg.items()
                            if field != "selected_variable_keys"
                        } | (
