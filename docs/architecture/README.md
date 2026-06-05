@@ -5,8 +5,8 @@
 |             |                                         |
 |-------------|-----------------------------------------|
 | **Status**  | Living document — partially implemented |
-| **Version** | 0.2                                     |
-| **Date**    | 2026-05-29                              |
+| **Version** | 0.3                                     |
+| **Date**    | 2026-06-05                              |
 | **Author**  | Erick Otenyo, WMO Africa                |
 
 > **Note (v0.2):** This document began life as a pre-implementation RFC (v0.1, 2025-02-09). Much of
@@ -149,13 +149,13 @@ The plugin architecture means new data sources can be developed and distributed 
 plugin registers itself with the system and provides its admin UI through Wagtail's admin framework.
 
 > **Plugin Contract (As-built):** A source plugin implements a `BaseDataSource`
-> (`sources/source.py`) subclass — setting `type`/`label` and implementing `get_available_variables()`
-> and `generate_requests()` — paired with a polymorphic `LoaderProfile` (`sources/models.py`) that
-> holds operator configuration and scheduling. A pluggable `FetchStrategy` performs the actual
-> download. A proposed extension, the **parameter manifest contract**, lets a plugin declaratively
-> describe every parameter (and combined products such as wind U/V) so the Catalog/Collection/Variable
-> hierarchy can be provisioned by a setup wizard — see
-> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md).
+> (`sources/source.py`) subclass — setting `type`/`label` and implementing `generate_requests()` —
+> paired with a polymorphic **`DataFeed`** model (`sources/models.py`) that holds operator
+> configuration and scheduling. A pluggable `FetchStrategy` performs the actual download. The
+> **collection definition contract** (`get_collection_definitions()`) lets a plugin declaratively
+> describe every collection and variable (including derived products such as wind U/V components) so
+> the `Catalog → Collection → Variable` hierarchy can be provisioned by the setup wizard. See
+> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md) for the full as-built contract.
 
 ### 3.2 Path B: MinIO Drop Zone
 
@@ -236,10 +236,13 @@ model is backed by a TimescaleDB hypertable keyed on the `time` column (the vali
 **Asset** represents a physical data object associated with an Item (following STAC conventions). An Item may have
 multiple Assets: a COG for analysis, an encoded PNG for visualization, a thumbnail, metadata sidecar files, etc.
 
-**LoaderProfile** (implemented as a polymorphic model) tracks a configured data source: its scheduling
-(`interval_minutes`), source-specific configuration, and run statistics. Each Collection links to a LoaderProfile that
-feeds it. Individual executions are recorded as **LoaderRun** (aggregate stats) and surfaced live as **LoaderJob**
-records via the async job system. *(This is the as-built realization of the original "Source Plugin" entity.)*
+**DataFeed** (a polymorphic model, `sources/models.py`) tracks a configured data source: its global
+scheduling interval (`interval_minutes`), source-specific operator configuration, and aggregate run
+statistics. A DataFeed owns one `Catalog` (OneToOne) and links to one or more Collections through
+**DataFeedCollectionLink** — the M2M through-model that carries per-collection configuration (e.g.
+period, start date) and a per-collection `interval_minutes` override that allows different collections
+in the same feed to run at different cadences. Individual executions are recorded as **DataFeedRun**
+(aggregate stats) and surfaced live as **DataFeedJob** records via the async job system.
 
 ### 4.2 Key Design Decisions
 
@@ -563,21 +566,21 @@ managing their own dependencies?
 
 ## 10. Next Steps
 
-The following are the proposed immediate next steps for moving GeoRiva from design to implementation:
+> **v0.3 update:** The items listed below reflect remaining work. Steps 2–7 from earlier revisions
+> are complete: plugin contracts are fully specified (see
+> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md)), the Docker stack is running,
+> core models are implemented, the ingestion pipeline is operational, CHIRPS and ECMWF sample plugins
+> are shipping, and Titiler is serving tiles. Remaining open items:
 
-1. **Review this document:** Contributors should read, comment on, and challenge the architecture. File issues or open
-   discussions for any section.
-2. **Define plugin contracts:** Formalize the base class interfaces for Source Plugins and Analysis Plugins.
-3. **Set up the Docker Compose stack:** Get the core infrastructure (PostgreSQL/TimescaleDB, MinIO, Redis) running.
-   (Note: the originally-planned Mosquitto/MQTT broker was dropped — MinIO events are delivered via a Redis list; see
-   §3.2.)
-4. **Implement core models:** Build the Catalog, Collection, Variable, Item, and Asset models with TimescaleDB
-   integration.
-5. **Build the ingestion pipeline:** Implement the Celery-based pipeline from file input to STAC Item creation.
-6. **Prototype one source plugin:** Pick a well-understood data source and build the first plugin to validate the
-   architecture.
-7. **Stand up Titiler:** Configure Titiler to serve tiles from COGs in MinIO and evaluate the encoded vs. styled tile
-   question with real data.
+1. **Analysis plugin contract** — Formalize the base class interface for analysis modules (§6.2).
+   Currently the two built-in modules (timeseries, zonal stats) are wired directly; a generic
+   registry does not yet exist.
+2. **EDR data retrieval plane** — Implement `position`, `area`, and `cube` endpoints (§5.1a). The
+   metadata plane is complete; data queries are stubbed.
+3. **Collection/Catalog-level virtual Zarr** — Variable-level manifests are working; multi-variable
+   and collection-level aggregation is not yet implemented (§6.4).
+4. **Authentication & access control** — The STAC API is currently public; per-catalog access control
+   is not yet designed (§9.5).
 
 ---
 
