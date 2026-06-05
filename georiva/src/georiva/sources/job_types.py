@@ -59,7 +59,10 @@ class DataFeedJobType(JobType):
             except Collection.DoesNotExist:
                 raise ValueError(f"Collection {job.collection_id} not found.")
         else:
-            collections = list(data_feed.collections.select_related("catalog").all())
+            collections = [
+                link.collection
+                for link in data_feed.collection_links.select_related('collection__catalog')
+            ]
 
         if not collections:
             progress.increment(95, state="No collections linked to this feed")
@@ -77,7 +80,7 @@ class DataFeedJobType(JobType):
 
             progress.increment(0, state=f"{prefix} — planning…")
 
-            data_source = data_feed.get_data_source()
+            data_source = data_feed.get_data_source(collection=collection)
             requests = list(data_source.generate_requests_for_collection(collection))
 
             job.files_total += len(requests)

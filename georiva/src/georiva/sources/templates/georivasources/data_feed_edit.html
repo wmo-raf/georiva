@@ -1,0 +1,66 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}
+    {% trans "Edit" %} — {{ feed.name }}
+{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    {{ form.media.css }}
+
+    <style>
+        .gfeed-error-banner {
+            margin-bottom: 1em;
+        }
+
+        .gfeed-form-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Edit Feed Details") icon="file-import" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <form method="post">
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+                <div class="help-block help-block--critical gfeed-error-banner">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            {% for field in form %}
+                {% if field.is_hidden %}
+                    {{ field }}
+                {% else %}
+                    {% include "wagtailadmin/shared/field.html" %}
+                {% endif %}
+            {% endfor %}
+
+            <div class="gfeed-form-actions">
+                <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-save icon" aria-hidden="true">
+                        <use href="#icon-save"></use>
+                    </svg>
+                </span>
+                    {% trans "Save Changes" %}
+                </button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                    {% trans "Cancel" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    {{ form.media.js }}
+{% endblock %}

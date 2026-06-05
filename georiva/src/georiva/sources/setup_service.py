@@ -1,11 +1,9 @@
 """
-SourceSetupService — provisions Catalog → Collection → Variable records from a
-ParameterManifest declared by a source plugin's describe_parameters() method.
+SourceSetupService — provisions Catalog → Collection → Variable records from
+CollectionDefinition objects declared by a DataFeed plugin.
 
 Idempotent: re-running updates existing records (keyed by slug) rather than
-creating duplicates, so adding new parameters to a plugin is safe to re-run.
-
-ONE DataFeed is created/linked for all provisioned collections (M2M).
+creating duplicates, so adding new collections to a plugin is safe to re-run.
 """
 import logging
 from typing import Optional
@@ -13,167 +11,231 @@ from typing import Optional
 from django.db import transaction
 from django.utils.text import slugify
 
-from georiva.sources.parameters import (
-    Parameter,
-    DerivedParameter,
-    ParameterManifest,
-)
+from georiva.sources.collection_definitions import CollectionDefinition, CollectionVariable
 
 logger = logging.getLogger("georiva.sources.setup_service")
 
 
 class SourceSetupService:
     """
-    Turns a ParameterManifest (plus operator choices) into persisted DB records.
+    Turns selected CollectionDefinitions (plus operator config values) into
+    persisted DB records.
 
     Usage::
 
         service = SourceSetupService()
-        collections, data_feed = service.provision(
-            manifest,
+        data_feed, collections = service.provision(
+            CHIRPSDataFeed,
             catalog=catalog,
-            selected_keys=['2t', 'wind_speed_10m', 'wind_dir_10m'],
-            new_feed_name="ECMWF AIFS Africa",
-            new_feed_interval=360,
-            model_cls=ECMWFAIFSDataFeed,
+            feed_name="CHIRPS Africa",
+            feed_interval=7200,
+            global_config={"head_timeout": 20},
+            selected_definitions=[
+                (monthly_def, {"default_start_date": date(1981, 1, 1)}),
+                (dekadal_def, {"default_start_date": date(1981, 1, 1)}),
+            ],
         )
     """
-
+    
     def provision(
             self,
-            manifest: ParameterManifest,
+            data_feed_model_cls,
             *,
             catalog,
-            selected_keys: list[str],
-            data_feed=None,
-            new_feed_name: Optional[str] = None,
-            new_feed_interval: int = 360,
-            model_cls=None,
-            group_into_collections: bool = True,
+            feed_name: str,
+            feed_interval: int = 360,
+            global_config: Optional[dict] = None,
+            selected_definitions: list[tuple[CollectionDefinition, dict]],
     ) -> tuple:
         """
-        Materialise Collections + Variables for the selected parameter keys.
+        Create DataFeed + Collections + Variables + Links atomically.
 
-        DataFeed creation (mutually exclusive with data_feed):
-        - If new_feed_name + model_cls are given, a new DataFeed is created and
-          linked to ALL provisioned collections via M2M.
-        - If data_feed is given, it is linked to all provisioned collections.
+        Parameters
+        ----------
+        data_feed_model_cls : DataFeed subclass
+        catalog             : Catalog instance (already saved)
+        feed_name           : Name for the new DataFeed
+        feed_interval       : Global interval_minutes for the DataFeed
+        global_config       : Extra fields applied to the DataFeed (e.g. head_timeout)
+        selected_definitions: List of (CollectionDefinition, config_values) pairs
 
-        Returns (collections, data_feed) where data_feed may be None.
+        Returns (data_feed, collections).
         """
-        selected_set = set(selected_keys)
-
+        global_config = global_config or {}
+        
         with transaction.atomic():
-            # Create DataFeed if requested
-            if new_feed_name and model_cls and data_feed is None:
-                data_feed = self._create_data_feed(
-                    model_cls=model_cls,
-                    name=new_feed_name,
-                    interval_minutes=new_feed_interval,
-                    setup_via_wizard=True,
-                )
-
+            data_feed = self._create_data_feed(
+                model_cls=data_feed_model_cls,
+                name=feed_name,
+                interval_minutes=feed_interval,
+                catalog=catalog,
+                extra_data=global_config,
+            )
+            
             created_collections = []
-
-            if group_into_collections:
-                for group in manifest.groups:
-                    group_keys = [k for k in group.member_keys if k in selected_set]
-                    if not group_keys:
-                        continue
-                    collection = self._upsert_collection(
-                        catalog=catalog,
-                        slug=slugify(group.key),
-                        name=group.name,
-                    )
-                    for key in group_keys:
-                        self._upsert_variable(collection, manifest.by_key(key))
-                    if data_feed:
-                        data_feed.collections.add(collection)
-                    created_collections.append(collection)
-
-            ungrouped = [k for k in manifest.ungrouped_keys() if k in selected_set]
-            if ungrouped:
-                collection = self._upsert_collection(
+            for definition, config_values in selected_definitions:
+                collection = self._provision_collection(
                     catalog=catalog,
-                    slug=slugify(catalog.slug),
-                    name=catalog.name,
+                    definition=definition,
+                    data_feed=data_feed,
+                    config_values=config_values,
                 )
-                for key in ungrouped:
-                    self._upsert_variable(collection, manifest.by_key(key))
-                if data_feed:
-                    data_feed.collections.add(collection)
                 created_collections.append(collection)
-
-            return created_collections, data_feed
-
+            
+            return data_feed, created_collections
+    
+    def provision_collection(
+            self,
+            *,
+            catalog,
+            definition: CollectionDefinition,
+            data_feed,
+            config_values: dict,
+    ):
+        """
+        Provision a single collection for an existing DataFeed (used for the
+        "Add collection" action on the detail page).
+        """
+        with transaction.atomic():
+            return self._provision_collection(
+                catalog=catalog,
+                definition=definition,
+                data_feed=data_feed,
+                config_values=config_values,
+            )
+    
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
-
+    
     @staticmethod
-    def _create_data_feed(*, model_cls, name: str, interval_minutes: int, setup_via_wizard: bool = False):
-        """Create a new DataFeed subclass instance using wizard defaults."""
-        defaults = model_cls.get_wizard_defaults()
+    def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: Optional[dict] = None):
+        defaults = {**model_cls.get_wizard_defaults(), **(extra_data or {})}
         data_feed = model_cls(
             name=name,
             interval_minutes=interval_minutes,
-            setup_via_wizard=setup_via_wizard,
+            catalog=catalog,
             **defaults,
         )
         data_feed.save()
         logger.info("Created DataFeed: %s (%s)", name, model_cls.__name__)
         return data_feed
-
-    @staticmethod
-    def _upsert_collection(*, catalog, slug: str, name: str):
-        from georiva.core.models import Collection
-
-        collection, created = Collection.objects.get_or_create(
+    
+    def _provision_collection(self, *, catalog, definition: CollectionDefinition, data_feed, config_values: dict):
+        """Create/update Collection + Variables + Link for one CollectionDefinition."""
+        slug = slugify(f"{catalog.slug}-{definition.key}")
+        
+        # selected_variable_keys is a wizard-only field, not stored on the link
+        config_for_link = dict(config_values)
+        selected_var_keys = config_for_link.pop('selected_variable_keys', None)
+        
+        collection = self._upsert_collection(
             catalog=catalog,
             slug=slug,
-            defaults={"name": name},
+            name=definition.name,
+            time_resolution=definition.time_resolution,
+            is_forecast=definition.is_forecast,
         )
-        action = "created" if created else "found existing"
+        
+        variables_to_create = [
+            v for v in definition.variables
+            if selected_var_keys is None or v.key in selected_var_keys
+        ]
+        for var_def in variables_to_create:
+            self._upsert_variable(collection, var_def)
+        
+        self._upsert_link(
+            data_feed=data_feed,
+            collection=collection,
+            definition=definition,
+            config_values=config_for_link,
+        )
+        
+        return collection
+    
+    @staticmethod
+    def _upsert_collection(*, catalog, slug: str, name: str, time_resolution: str, is_forecast: bool):
+        from georiva.core.models import Collection
+        
+        collection, created = Collection.objects.update_or_create(
+            catalog=catalog,
+            slug=slug,
+            defaults={
+                "name": name,
+                "time_resolution": time_resolution,
+                "is_forecast": is_forecast,
+            },
+        )
+        action = "created" if created else "updated"
         logger.info("Collection %s: %s/%s", action, catalog.slug, slug)
         return collection
-
-    def _upsert_variable(self, collection, param: 'Parameter | DerivedParameter'):
+    
+    def _upsert_variable(self, collection, var_def: CollectionVariable):
         from georiva.core.models import Variable
-
-        slug = slugify(param.key)
-        unit = self._get_or_create_unit(param.units)
-
+        
+        slug = slugify(var_def.key)
+        unit = self._get_or_create_unit(var_def.units)
+        
         base_defaults = {
-            "name": param.name,
-            "description": param.description,
+            "name": var_def.name,
+            "description": var_def.description,
             "unit": unit,
             "source_unit": unit,
-            "value_min": param.value_range[0] if param.value_range else 0.0,
-            "value_max": param.value_range[1] if param.value_range else 1.0,
+            "value_min": var_def.value_range[0] if var_def.value_range else 0.0,
+            "value_max": var_def.value_range[1] if var_def.value_range else 1.0,
         }
-
-        if isinstance(param, Parameter):
+        
+        if var_def.transform == 'passthrough':
             transform = Variable.TransformType.PASSTHROUGH
-            sources_data = [self._source_key_to_block("primary", param.source)]
-        else:
-            transform = param.transform  # 'vector_magnitude' or 'vector_direction'
+            sources_data = [self._source_key_to_block("primary", var_def.source)]
+        elif var_def.transform == 'vector_magnitude':
+            transform = Variable.TransformType.VECTOR_MAGNITUDE
             sources_data = [
-                self._source_key_to_block("u_component", param.components["u"]),
-                self._source_key_to_block("v_component", param.components["v"]),
+                self._source_key_to_block("u_component", var_def.components["u"]),
+                self._source_key_to_block("v_component", var_def.components["v"]),
             ]
-
+        else:  # vector_direction
+            transform = Variable.TransformType.VECTOR_DIRECTION
+            sources_data = [
+                self._source_key_to_block("u_component", var_def.components["u"]),
+                self._source_key_to_block("v_component", var_def.components["v"]),
+            ]
+        
         defaults = {**base_defaults, "transform_type": transform, "sources": sources_data}
-
-        variable, created = Variable.objects.get_or_create(
+        
+        variable, created = Variable.objects.update_or_create(
             collection=collection,
             slug=slug,
             defaults=defaults,
         )
-
-        action = "created" if created else "found existing"
+        action = "created" if created else "updated"
         logger.info("Variable %s: %s/%s", action, collection.slug, slug)
         return variable
-
+    
+    @staticmethod
+    def _upsert_link(*, data_feed, collection, definition: CollectionDefinition, config_values: dict):
+        """Create or update a DataFeedCollectionLink with definition_key and config_values."""
+        link_model = type(data_feed).get_collection_link_model()
+        
+        # Baked-in config from the plugin (e.g. CHIRPS period derived from definition key)
+        baked_config = type(data_feed).get_link_config_for_definition(definition)
+        
+        interval = definition.default_interval_minutes
+        
+        link, _created = link_model.objects.update_or_create(
+            data_feed=data_feed,
+            collection=collection,
+            defaults={
+                "definition_key": definition.key,
+                **({"interval_minutes": interval} if interval is not None else {}),
+                **baked_config,  # plugin-derived, not user-editable
+                **config_values,  # user-provided (can override baked config)
+            },
+        )
+        action = "created" if _created else "updated"
+        logger.info("DataFeedCollectionLink %s: feed=%s collection=%s", action, data_feed.pk, collection.slug)
+        return link
+    
     @staticmethod
     def _source_key_to_block(block_type: str, source_key) -> dict:
         level = source_key.level
@@ -185,11 +247,11 @@ class SourceSetupService:
                 "vertical_value": level.value if level else None,
             },
         }
-
+    
     @staticmethod
     def _get_or_create_unit(symbol: str):
         from georiva.core.models import Unit
-
+        
         unit, created = Unit.objects.get_or_create(
             symbol=symbol,
             defaults={"name": symbol},

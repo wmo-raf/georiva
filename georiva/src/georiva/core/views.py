@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.core.paginator import InvalidPage
-from django.db.models import Count, OuterRef, Q, Subquery, Sum
+from django.db.models import Count, OuterRef, Prefetch, Q, Subquery, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.urls import reverse_lazy
@@ -189,7 +189,13 @@ def collection_items_list(request, collection_pk):
     items = (
         Item.objects.filter(collection=collection)
         .annotate(asset_count=Subquery(asset_count_sq))
-        .select_related("ingestion_log")
+        .prefetch_related(
+            Prefetch(
+                'ingestion_logs',
+                queryset=IngestionLog.objects.order_by('-created_at'),
+                to_attr='prefetched_logs',
+            )
+        )
         .order_by("-time")
     )
     
@@ -220,8 +226,7 @@ def collection_items_list(request, collection_pk):
     data_feed = None
     recent_runs = []
     ingestion_summary = {}
-    
-    data_feed = collection.data_feeds.first()
+
     if data_feed:
         recent_runs = list(
             DataFeedRun.objects.filter(collection=collection)

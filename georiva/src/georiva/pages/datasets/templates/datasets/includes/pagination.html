@@ -1,42 +1,49 @@
 {% load i18n georiva_tags %}
 {% if items.paginator.num_pages > 1 %}
-<nav class="pagination" aria-label="{% trans 'Pagination' %}">
+    <nav class="pagination" aria-label="{% trans 'Pagination' %}">
 
-    <div class="pagination__start">
-        <p>{% blocktrans trimmed with page_num=items.number total_pages=items.paginator.num_pages %}Page {{ page_num }} of {{ total_pages }}{% endblocktrans %}</p>
-    </div>
+        <div class="pagination__start">
+            <p>
+                {% blocktrans trimmed with page_num=items.number total_pages=items.paginator.num_pages %}
+                    Page {{ page_num }} of {{ total_pages }}
+                {% endblocktrans %}
+            </p>
+        </div>
 
-    <ul>
-        <li class="prev">
-            <a{% if items.has_previous %} href="?{% query_string_replace 'p' items.previous_page_number %}"{% endif %}>
-                <i class="bi bi-arrow-left"></i>
-                {% trans "Previous" %}
-            </a>
-        </li>
-
-        {% for page_num in page_range %}
-            <li class="pagination__page-number{% if page_num == items.number %} pagination__page-number--current{% endif %}">
-                {% if page_num == items.paginator.ELLIPSIS %}
-                    <span>{{ page_num }}</span>
-                {% else %}
-                    <a href="?{% query_string_replace 'p' page_num %}"{% if page_num == items.number %} aria-current="page"{% endif %}>
-                        {{ page_num }}
-                    </a>
-                {% endif %}
+        <ul>
+            <li class="prev">
+                <a{% if items.has_previous %}
+                    href="?{% query_string_replace 'p' items.previous_page_number %}"{% endif %}>
+                    <i class="bi bi-arrow-left"></i>
+                    {% trans "Previous" %}
+                </a>
             </li>
-        {% endfor %}
 
-        <li class="next">
-            <a{% if items.has_next %} href="?{% query_string_replace 'p' items.next_page_number %}"{% endif %}>
-                {% trans "Next" %}
-                <i class="bi bi-arrow-right"></i>
-            </a>
-        </li>
-    </ul>
+            {% for page_num in page_range %}
+                <li class="pagination__page-number{% if page_num == items.number %} pagination__page-number--current{% endif %}">
+                    {% if page_num == items.paginator.ELLIPSIS %}
+                        <span>{{ page_num }}</span>
+                    {% else %}
+                        <a href="?{% query_string_replace 'p' page_num %}"{% if page_num == items.number %}
+                           aria-current="page"{% endif %}>
+                            {{ page_num }}
+                        </a>
+                    {% endif %}
+                </li>
+            {% endfor %}
 
-    <div class="pagination__end">
-        <p>{{ items.paginator.count }} item{{ items.paginator.count|pluralize }}</p>
-    </div>
+            <li class="next">
+                <a{% if items.has_next %} href="?{% query_string_replace 'p' items.next_page_number %}"{% endif %}>
+                    {% trans "Next" %}
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+            </li>
+        </ul>
 
-</nav>
+        <div class="pagination__end">
+            <p>
+                {{ items.paginator.count }} item{{ items.paginator.count|pluralize }}
+            </p>
+        </div>
+    </nav>
 {% endif %}

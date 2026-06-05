@@ -4,86 +4,96 @@
 {% block titletag %}{% trans "Add Data Feed" %}{% endblock %}
 
 {% block extra_css %}
-<style>
-.gfeed-type-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75em;
-    max-width: 640px;
-    margin-top: 1.5em;
-}
-.gfeed-type-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1em;
-    padding: 1em 1.25em;
-    background: var(--color-white);
-    border-radius: 8px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
-    text-decoration: none;
-    color: inherit;
-    transition: box-shadow 0.15s ease;
-}
-.gfeed-type-item:hover {
-    box-shadow: 0 2px 8px rgba(0,0,0,.12), 0 6px 20px rgba(0,0,0,.09);
-    text-decoration: none;
-    color: inherit;
-}
-.gfeed-type-name {
-    font-size: 1em;
-    font-weight: 600;
-    color: var(--color-text-label);
-}
-.gfeed-wizard-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35em;
-    padding: 0.25em 0.65em;
-    border-radius: 999px;
-    font-size: 0.75em;
-    font-weight: 600;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-.gfeed-wizard-badge--yes {
-    background: color-mix(in srgb, var(--color-info-100) 15%, transparent);
-    color: var(--color-info-100);
-    border: 1px solid color-mix(in srgb, var(--color-info-100) 35%, transparent);
-}
-.gfeed-wizard-badge--no {
-    background: color-mix(in srgb, var(--color-grey-400) 10%, transparent);
-    color: var(--color-grey-400);
-    border: 1px solid color-mix(in srgb, var(--color-grey-400) 25%, transparent);
-}
-</style>
+    <style>
+        .gfeed-type-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75em;
+            max-width: 640px;
+            margin-top: 1.5em;
+        }
+
+        .gfeed-type-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1em;
+            padding: 1em 1.25em;
+            background: var(--w-color-white);
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .08), 0 4px 16px rgba(0, 0, 0, .06);
+            text-decoration: none;
+            color: inherit;
+            transition: box-shadow 0.15s ease;
+        }
+
+        .gfeed-type-item:hover {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .12), 0 6px 20px rgba(0, 0, 0, .09);
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .gfeed-type-name {
+            font-size: 1em;
+            font-weight: 600;
+            color: var(--w-color-text-label);
+        }
+
+        .gfeed-wizard-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35em;
+            padding: 0.25em 0.65em;
+            border-radius: 999px;
+            font-size: 0.75em;
+            font-weight: 600;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .gfeed-wizard-badge--yes {
+            background: color-mix(in srgb, var(--w-color-info-100) 15%, transparent);
+            color: var(--w-color-info-100);
+            border: 1px solid color-mix(in srgb, var(--w-color-info-100) 35%, transparent);
+        }
+
+        .gfeed-wizard-badge--no {
+            background: color-mix(in srgb, var(--w-color-grey-400) 10%, transparent);
+            color: var(--w-color-grey-400);
+            border: 1px solid color-mix(in srgb, var(--w-color-grey-400) 25%, transparent);
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
-{% include "wagtailadmin/shared/header.html" with title=_("Add Data Feed") icon="file-import" breadcrumbs=breadcrumbs_items %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Add Data Feed") icon="file-import" breadcrumbs=breadcrumbs_items %}
 
-<div class="nice-padding">
-    <p class="help-text">
-        {% trans "Choose a feed type. Types with a Wizard will guide you through setup; others open the manual configuration form." %}
-    </p>
+    <div class="nice-padding">
+        <p class="help-text">
+            {% trans "Choose a feed type. Types with a Wizard will guide you through setup; others open the manual configuration form." %}
+        </p>
 
-    <div class="gfeed-type-list">
-        {% for item in items %}
-        <a href="{{ item.url }}" class="gfeed-type-item">
-            <span class="gfeed-type-name">{{ item.verbose_name }}</span>
-            {% if item.has_wizard %}
-                <span class="gfeed-wizard-badge gfeed-wizard-badge--yes">
+        <div class="gfeed-type-list">
+            {% for item in items %}
+                <a href="{{ item.url }}" class="gfeed-type-item">
+                    <span class="gfeed-type-name">
+                        {{ item.verbose_name }}
+                    </span>
+                    {% if item.has_wizard %}
+                        <span class="gfeed-wizard-badge gfeed-wizard-badge--yes">
                     &#x2726; {% trans "Wizard" %}
                 </span>
-            {% else %}
-                <span class="gfeed-wizard-badge gfeed-wizard-badge--no">
+                    {% else %}
+                        <span class="gfeed-wizard-badge gfeed-wizard-badge--no">
                     {% trans "Manual" %}
                 </span>
-            {% endif %}
-        </a>
-        {% empty %}
-        <p class="help-block">{% trans "No data feed types are registered." %}</p>
-        {% endfor %}
+                    {% endif %}
+                </a>
+                {% empty %}
+                <p class="help-block">
+                    {% trans "No data feed types are registered." %}
+                </p>
+            {% endfor %}
+        </div>
     </div>
-</div>
 {% endblock %}

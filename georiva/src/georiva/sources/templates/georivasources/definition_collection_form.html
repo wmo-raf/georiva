@@ -1,0 +1,281 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}
+    {% if is_edit %}{% trans "Edit Collection Config" %}{% else %}{% trans "Add Collection" %}{% endif %}
+    — {{ feed.name }}
+{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    {% if config_form %}
+        {{ config_form.media.css }}
+    {% endif %}
+
+    <style>
+        .dcf-def-info {
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            padding: 1em;
+            margin-bottom: 1.5em;
+            font-size: 0.9em;
+        }
+
+        .dcf-def-description {
+            color: var(--w-color-grey-400);
+            display: block;
+            margin-top: 0.25em;
+        }
+
+        .dcf-vars-section {
+            margin-bottom: 1.25em;
+        }
+
+        .dcf-vars-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.6em;
+        }
+
+        .dcf-vars-label {
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+            margin: 0;
+        }
+
+        .dcf-select-all-label {
+            display: flex;
+            align-items: center;
+            gap: 0.35em;
+            font-size: 0.8em;
+            color: var(--w-color-info-100);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .dcf-group {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+            margin-bottom: 0.5em;
+            overflow: hidden;
+        }
+
+        .dcf-group-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.3em 0.65em;
+            background: var(--w-color-grey-50, #f8f8f8);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+        }
+
+        .dcf-group-header input[type=checkbox] {
+            cursor: pointer;
+        }
+
+        .dcf-group-name {
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+
+        .dcf-group-count {
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+            margin-left: auto;
+        }
+
+        .dcf-var-list {
+            padding: 0.35em 0.65em 0.5em;
+        }
+
+        .dcf-var-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.22em 0;
+            border-bottom: 1px solid color-mix(in srgb, var(--w-color-border-furniture) 50%, transparent);
+        }
+
+        .dcf-var-row:last-child {
+            border-bottom: none;
+        }
+
+        .dcf-var-row input[type=checkbox] {
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .dcf-var-name {
+            font-size: 0.83em;
+            flex: 1;
+        }
+
+        .dcf-var-units {
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+        }
+
+        .dcf-empty-msg {
+            color: var(--w-color-grey-400);
+        }
+
+        .dcf-form-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=definition.name subtitle=feed.name icon="file-import" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+
+        {% if definition %}
+            <div class="dcf-def-info">
+                <strong>{{ definition.name }}</strong>
+                &nbsp;·&nbsp; {{ definition.time_resolution }}
+                &nbsp;·&nbsp;
+                {% blocktrans count n=definition.variables|length %}{{ n }} variable{% plural %}{{ n }}
+                    variables{% endblocktrans %}
+                {% if definition.description %}
+                    <span class="dcf-def-description">{{ definition.description }}</span>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+
+            {% if multi_variable and not is_edit %}
+                <div class="dcf-vars-section">
+                    <div class="dcf-vars-header">
+                        <p class="dcf-vars-label">{% trans "Variables" %}</p>
+                        <label class="dcf-select-all-label">
+                            <input type="checkbox" id="add-select-all" checked>
+                            {% trans "Select all" %}
+                        </label>
+                    </div>
+
+                    {% for grp in variable_groups %}
+                        <div class="dcf-group">
+                            <div class="dcf-group-header">
+                                <input type="checkbox" class="add-group-cb" data-group="{{ grp.key }}" checked>
+                                <span class="dcf-group-name">
+                        {% if grp.type == "ungrouped" and grp.name %}{{ grp.name }}
+                            {% elif grp.type == "ungrouped" %}{% trans "Other" %}
+                        {% else %}{{ grp.name }}{% endif %}
+                    </span>
+                                <span class="dcf-group-count">{{ grp.variables|length }}</span>
+                            </div>
+                            <div class="dcf-var-list">
+                                {% for var in grp.variables %}
+                                    <div class="dcf-var-row">
+                                        <input type="checkbox" class="add-var-cb" name="variables"
+                                               value="{{ var.key }}" data-group="{{ grp.key }}" checked>
+                                        <span class="dcf-var-name">{{ var.name }}</span>
+                                        <span class="dcf-var-units">({{ var.units }})</span>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% if config_form %}
+                {% for field in config_form %}
+                    {% if field.is_hidden %}
+                        {{ field }}
+                    {% else %}
+                        {% include "wagtailadmin/shared/field.html" %}
+                    {% endif %}
+                {% endfor %}
+            {% else %}
+                <p class="dcf-empty-msg">{% trans "No configuration fields required for this collection." %}</p>
+            {% endif %}
+
+            <div class="dcf-form-actions">
+                <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-save icon" aria-hidden="true">
+                        <use href="#icon-save"></use>
+                    </svg>
+                </span>
+                    {% if is_edit %}
+                        {% trans "Save Changes" %}
+                    {% else %}
+                        {% trans "Add Collection" %}
+                    {% endif %}
+                </button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                    {% trans "Cancel" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+
+    {{ block.super }}
+    {% if config_form %}
+        {{ config_form.media.js }}
+    {% endif %}
+
+
+
+    {% if multi_variable and not is_edit %}
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                const master = document.getElementById('add-select-all');
+                const allVars = document.querySelectorAll('.add-var-cb');
+                const allGroups = document.querySelectorAll('.add-group-cb');
+
+                master.addEventListener('change', () => {
+                    allVars.forEach(v => {
+                        v.checked = master.checked;
+                    });
+                    allGroups.forEach(g => {
+                        g.checked = master.checked;
+                    });
+                });
+
+                allGroups.forEach(gc => {
+                    gc.addEventListener('change', () => {
+                        document.querySelectorAll(`.add-var-cb[data-group="${gc.dataset.group}"]`)
+                            .forEach(v => {
+                                v.checked = gc.checked;
+                            });
+                        sync();
+                    });
+                });
+
+                allVars.forEach(v => {
+                    v.addEventListener('change', () => {
+                        const grpVars = document.querySelectorAll(`.add-var-cb[data-group="${v.dataset.group}"]`);
+                        const gc = document.querySelector(`.add-group-cb[data-group="${v.dataset.group}"]`);
+                        if (gc) {
+                            const n = [...grpVars].filter(x => x.checked).length;
+                            gc.checked = n === grpVars.length;
+                            gc.indeterminate = n > 0 && n < grpVars.length;
+                        }
+                        sync();
+                    });
+                });
+
+                function sync() {
+                    const n = [...allVars].filter(v => v.checked).length;
+                    master.checked = n === allVars.length;
+                    master.indeterminate = n > 0 && n < allVars.length;
+                }
+            });
+        </script>
+    {% endif %}
+{% endblock %}

@@ -1,4 +1,4 @@
-{% load georiva_tags %}
+{% load georiva_tags i18n %}
 
 {# Pre-render stats from Django ORM — JS will update live values from STAC API #}
 {% get_landing_stats as stats %}
@@ -10,37 +10,46 @@
             {% if page.stats_show_catalog_count %}
                 <div class="gr-stat-item gr-animate gr-animate-1">
                     <span class="gr-stat-value">{{ stats.catalog_count|default:"—" }}</span>
-                    <span class="gr-stat-label">Catalogs</span>
+                    <span class="gr-stat-label">
+                        {% trans "Catalogs" %}
+                    </span>
                 </div>
             {% endif %}
 
             {% if page.stats_show_collection_count %}
                 <div class="gr-stat-item gr-animate gr-animate-2">
                     <span class="gr-stat-value" id="stat-collections">{{ stats.collection_count|default:"—" }}</span>
-                    <span class="gr-stat-label">Collections</span>
+                    <span class="gr-stat-label">
+                        {% trans "Collections" %}
+                    </span>
                 </div>
             {% endif %}
 
             {% if page.stats_show_last_updated %}
                 <div class="gr-stat-item gr-animate gr-animate-3">
-                <span class="gr-stat-value gr-mono" style="font-size:1.1rem">
-                    {% if stats.last_updated %}
-                        {{ stats.last_updated|date:"d M Y" }}
-                    {% else %}
-                        —
-                    {% endif %}
-                </span>
-                    <span class="gr-stat-label">Last Updated</span>
+                    <span class="gr-stat-value gr-mono" style="font-size:1.1rem">
+                        {% if stats.last_updated %}
+                            {{ stats.last_updated|date:"d M Y" }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </span>
+                    <span class="gr-stat-label">
+                        {% trans "Last Updated" %}
+                    </span>
                 </div>
             {% endif %}
 
             {% if page.stats_custom_label and page.stats_custom_value %}
                 <div class="gr-stat-item gr-animate gr-animate-4">
-                    <span class="gr-stat-value gr-mono" style="font-size:1.25rem">{{ page.stats_custom_value }}</span>
-                    <span class="gr-stat-label">{{ page.stats_custom_label }}</span>
+                    <span class="gr-stat-value gr-mono" style="font-size:1.25rem">
+                        {{ page.stats_custom_value }}
+                    </span>
+                    <span class="gr-stat-label">
+                        {{ page.stats_custom_label }}
+                    </span>
                 </div>
             {% endif %}
-
         </div>
     </div>
 </div>

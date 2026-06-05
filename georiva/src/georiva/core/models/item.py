@@ -45,13 +45,6 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         blank=True,
         help_text=_("Original source file path"),
     )
-    ingestion_log = models.ForeignKey(
-        'georivaingestion.IngestionLog',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='items',
-    )
     
     # Spatial metadata
     bounds = ArrayField(

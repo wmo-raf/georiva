@@ -1,7 +1,7 @@
 import logging
 
 from django.apps import AppConfig
-from django.db.models.signals import post_save, m2m_changed
+from django.db.models.signals import post_save, post_delete
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,11 @@ def _sync_keep_for_collection(collection):
     it has any linked DataFeeds. Automated collections (with a feed) don't
     use the manual dropzone, so no .keep is needed there."""
     from georiva.core.storage import storage, BucketType
-
+    
     bucket = storage.bucket(BucketType.INCOMING)
     keep_path = f"{collection.catalog.slug}/{collection.slug}/.keep"
-
-    if collection.data_feeds.exists():
+    
+    if collection.feed_links.exists():
         _delete_keep(bucket, keep_path)
     else:
         _put_keep(bucket, keep_path)
@@ -57,25 +57,14 @@ def collection_post_save(sender, instance, created, **kwargs):
     _sync_keep_for_collection(instance)
 
 
-def data_feed_collections_changed(sender, instance, action, pk_set, **kwargs):
-    """Fired when collections are added to or removed from a DataFeed via M2M.
+def data_feed_collection_link_saved(sender, instance, **kwargs):
+    """Fired when a DataFeedCollectionLink is created or updated."""
+    _sync_keep_for_collection(instance.collection)
 
-    `instance` is the DataFeed; `pk_set` is the set of Collection PKs affected.
-    Re-evaluate the .keep status for each affected collection.
-    """
-    if action not in ('post_add', 'post_remove', 'post_clear'):
-        return
 
-    from georiva.core.models import Collection
-
-    if action == 'post_clear':
-        # All collections removed — re-sync every collection that was linked
-        # (we don't have pk_set for post_clear, so sync all in catalog)
-        for collection in instance.collections.all():
-            _sync_keep_for_collection(collection)
-    else:
-        for collection in Collection.objects.filter(pk__in=pk_set):
-            _sync_keep_for_collection(collection)
+def data_feed_collection_link_deleted(sender, instance, **kwargs):
+    """Fired when a DataFeedCollectionLink is deleted."""
+    _sync_keep_for_collection(instance.collection)
 
 
 class CoreConfig(AppConfig):
@@ -83,22 +72,23 @@ class CoreConfig(AppConfig):
     name = 'georiva.core'
     label = 'georivacore'
     verbose_name = "GeoRIVA Core"
-
+    
     def ready(self):
         from .models import Collection, Variable
-        from .tasks import update_collection_data_feed_periodic_task
+        from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
         from .models.visualization import ColorPalette
         from georiva.sources.models import DataFeed
 
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
         post_save.connect(collection_post_save, sender=Collection)
 
-        # When a collection is linked/unlinked from a DataFeed via M2M,
-        # keep the incoming/.keep in sync.
-        m2m_changed.connect(
-            data_feed_collections_changed,
-            sender=DataFeed.collections.through,
-        )
-
+        # When a collection is linked/unlinked from a DataFeed:
+        # keep the incoming/.keep in sync and recalculate the PeriodicTask interval.
+        from georiva.sources.models import DataFeedCollectionLink
+        post_save.connect(data_feed_collection_link_saved, sender=DataFeedCollectionLink)
+        post_delete.connect(data_feed_collection_link_deleted, sender=DataFeedCollectionLink)
+        post_save.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
+        post_delete.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
+        
         post_save.connect(on_variable_save, sender=Variable)
         post_save.connect(on_palette_save, sender=ColorPalette)

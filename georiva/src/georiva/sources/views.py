@@ -2,17 +2,17 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
 from django.utils.translation import gettext as _
+from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.ui.tables import TitleColumn, Table, ButtonsColumnMixin, BooleanColumn
 from wagtail.admin.widgets import HeaderButton, ButtonWithDropdown, Button
 
 from georiva.sources.models import DataFeed
 from georiva.sources.registry import data_feed_viewset_registry
-from georiva.sources.source import BaseDataSource
 from georiva.sources.utils import get_all_child_models, get_child_model_by_name
 
 
 def data_feed_list(request):
-    data_feeds = DataFeed.objects.prefetch_related("collections__catalog").all()
+    data_feeds = DataFeed.objects.all()
     
     class DataFeedButtonsColumn(ButtonsColumnMixin, TitleColumn):
         def get_buttons(self, instance, parent_context):
@@ -92,13 +92,10 @@ def data_feed_detail(request, pk):
     """Dashboard view for a single DataFeed."""
     from georiva.sources.models import DataFeedRun
     
-    feed = get_object_or_404(
-        DataFeed.objects.prefetch_related("collections__catalog"),
-        pk=pk,
-    )
+    feed = get_object_or_404(DataFeed, pk=pk)
     
     if request.method == "POST" and request.POST.get("action") == "run_now":
-        feed.run_now(user=request.user)  # no collection → all collections
+        feed.run_now(user=request.user)
         messages.success(request, _("Run started for '%s'.") % feed.name)
         return redirect("data_feed_detail", pk=pk)
     
@@ -109,6 +106,34 @@ def data_feed_detail(request, pk):
         .order_by("-started_at")[:20]
     )
     
+    raw_links = feed.collection_links.select_related("collection__catalog").all()
+    collection_links = [link.get_real_instance() for link in raw_links]
+    
+    real_feed = feed.get_real_instance()
+    all_definitions = type(real_feed).get_collection_definitions()
+    enabled_keys = {link.definition_key for link in collection_links if link.definition_key}
+    
+    # Pair each definition with its link (or None if not enabled)
+    # For enabled collections, count how many of the definition's variables are present
+    from django.utils.text import slugify as _slugify
+    definition_link_pairs = []
+    link_by_key = {link.definition_key: link for link in collection_links if link.definition_key}
+    for defn in all_definitions:
+        link = link_by_key.get(defn.key)
+        var_count = 0
+        if link and defn.variables:
+            def_slugs = {_slugify(v.key) for v in defn.variables}
+            existing_slugs = set(link.collection.variables.values_list('slug', flat=True))
+            var_count = len(def_slugs & existing_slugs)
+        definition_link_pairs.append({
+            "definition": defn,
+            "link": link,
+            "enabled": defn.key in enabled_keys,
+            "var_count": var_count,
+            "var_total": len(defn.variables),
+            "multi_variable": len(defn.variables) > 1,
+        })
+    
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
@@ -116,27 +141,271 @@ def data_feed_detail(request, pk):
             {"url": "", "label": feed.name},
         ],
         "feed": feed,
-        "linked_collections": feed.collections.select_related("catalog").all(),
+        "real_feed": real_feed,
+        "collection_links": collection_links,
+        "definition_link_pairs": definition_link_pairs,
         "recent_runs": recent_runs,
-        "feed_type_name": feed.get_real_instance_class()._meta.verbose_name,
+        "feed_type_name": type(real_feed)._meta.verbose_name,
     }
     
     return render(request, "georivasources/data_feed_detail.html", context)
 
 
-def data_feed_add_select(request):
-    wizard_capable_names = {cls.__name__ for cls in _capable_source_types()}
+def data_feed_edit(request, pk):
+    """Edit feed name, interval, and global config fields inline."""
+    feed = get_object_or_404(DataFeed, pk=pk)
+    real_feed = feed.get_real_instance()
+    real_cls = type(real_feed)
     
+    form_cls = _global_config_form_class(real_cls, include_base=True)
+    
+    if request.method == "POST":
+        form = form_cls(request.POST, instance=real_feed)
+        if form.is_valid():
+            form.save()
+            messages.success(request, _("Feed details updated."))
+            return redirect("data_feed_detail", pk=pk)
+    else:
+        form = form_cls(instance=real_feed)
+    
+    return render(request, "georivasources/data_feed_edit.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": pk}), "label": feed.name},
+            {"url": "", "label": _("Edit")},
+        ],
+        "feed": feed,
+        "form": form,
+    })
+
+
+def definition_collection_add(request, feed_pk, definition_key):
+    """
+    Enable a CollectionDefinition for an existing DataFeed.
+    Creates the Collection, Variables, and DataFeedCollectionLink.
+    """
+    from georiva.sources.setup_service import SourceSetupService
+    
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    
+    real_feed = feed.get_real_instance()
+    real_cls = type(real_feed)
+    
+    definitions = {d.key: d for d in real_cls.get_collection_definitions()}
+    definition = definitions.get(definition_key)
+    if not definition:
+        messages.error(request, _("Unknown collection definition: %s") % definition_key)
+        return redirect("data_feed_detail", pk=feed_pk)
+    
+    if not feed.catalog:
+        messages.error(request, _("This DataFeed has no linked Catalog. Cannot add collections."))
+        return redirect("data_feed_detail", pk=feed_pk)
+    
+    config_form_cls = real_cls.get_collection_link_model().get_form_class()
+    
+    if request.method == "POST":
+        config_form = config_form_cls(request.POST) if config_form_cls else None
+        config_values = {}
+        errors = []
+        
+        if config_form is not None:
+            if config_form.is_valid():
+                config_values.update(config_form.cleaned_data)
+            else:
+                errors.extend(
+                    f"{config_form.fields[f].label}: {', '.join(errs)}"
+                    for f, errs in config_form.errors.items()
+                )
+        
+        if len(definition.variables) > 1:
+            sel_vars = request.POST.getlist("variables")
+            if not sel_vars:
+                errors.append(_("Select at least one variable."))
+            else:
+                config_values["selected_variable_keys"] = sel_vars
+        
+        if not errors:
+            service = SourceSetupService()
+            service.provision_collection(
+                catalog=feed.catalog,
+                definition=definition,
+                data_feed=real_feed,
+                config_values=config_values,
+            )
+            messages.success(request, _("Collection '%s' added.") % definition.name)
+            return redirect("data_feed_detail", pk=feed_pk)
+        
+        for e in errors:
+            messages.error(request, e)
+    else:
+        config_form = config_form_cls() if config_form_cls else None
+    
+    return render(request, "georivasources/definition_collection_form.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
+            {"url": "", "label": _("Add Collection")},
+        ],
+        "feed": feed,
+        "definition": definition,
+        "config_form": config_form,
+        "multi_variable": len(definition.variables) > 1,
+        "variable_groups": _build_variable_groups(definition),
+    })
+
+
+def definition_collection_edit(request, feed_pk, link_pk):
+    """Edit per-collection config for an existing link."""
+    from georiva.sources.models import DataFeedCollectionLink
+    
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    
+    base_link = get_object_or_404(DataFeedCollectionLink, pk=link_pk, data_feed=feed)
+    link = base_link.get_real_instance()
+    
+    real_cls = type(feed.get_real_instance())
+    definitions = {d.key: d for d in real_cls.get_collection_definitions()}
+    definition = definitions.get(link.definition_key)
+    
+    form_cls = type(link).get_form_class()
+    
+    if not form_cls:
+        messages.info(request, _("This collection link has no configurable fields."))
+        return redirect("data_feed_detail", pk=feed_pk)
+    
+    if request.method == "POST":
+        form = form_cls(request.POST, instance=link)
+        if form.is_valid():
+            form.save()
+            messages.success(request, _("Collection config updated."))
+            return redirect("data_feed_detail", pk=feed_pk)
+    else:
+        form = form_cls(instance=link)
+    
+    return render(request, "georivasources/definition_collection_form.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
+            {"url": "", "label": _("Edit Collection Config")},
+        ],
+        "feed": feed,
+        "link": link,
+        "definition": definition,
+        "config_form": form,
+        "is_edit": True,
+        "multi_variable": False,  # variable selection not available on edit
+    })
+
+
+def definition_collection_remove_confirm(request, feed_pk, link_pk):
+    """Confirmation page before removing a collection link and deleting the collection."""
+    from georiva.sources.models import DataFeedCollectionLink
+    
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    base_link = get_object_or_404(DataFeedCollectionLink, pk=link_pk, data_feed=feed)
+    link = base_link.get_real_instance()
+    collection = link.collection
+    
+    if request.method == "POST":
+        collection_name = collection.name
+        collection.delete()  # cascades: link → Variables → Items → Assets
+        messages.success(request, _("'%s' and all its data have been deleted.") % collection_name)
+        return redirect("data_feed_detail", pk=feed_pk)
+    
+    return render(request, "georivasources/definition_collection_remove_confirm.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
+            {"url": "", "label": _("Remove Collection")},
+        ],
+        "feed": feed,
+        "link": link,
+        "collection": collection,
+    })
+
+
+def definition_collection_vars_edit(request, feed_pk, link_pk):
+    """Manage which variables from the definition are active in the collection."""
+    from django.utils.text import slugify
+    from georiva.sources.models import DataFeedCollectionLink
+    from georiva.sources.setup_service import SourceSetupService
+    
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    base_link = get_object_or_404(DataFeedCollectionLink, pk=link_pk, data_feed=feed)
+    link = base_link.get_real_instance()
+    collection = link.collection
+    
+    real_cls = type(feed.get_real_instance())
+    definitions = {d.key: d for d in real_cls.get_collection_definitions()}
+    definition = definitions.get(link.definition_key)
+    
+    if not definition or len(definition.variables) <= 1:
+        return redirect("data_feed_detail", pk=feed_pk)
+    
+    existing_slugs = set(collection.variables.values_list("slug", flat=True))
+    
+    if request.method == "POST":
+        selected_keys = set(request.POST.getlist("variables"))
+        service = SourceSetupService()
+        
+        for var_def in definition.variables:
+            var_slug = slugify(var_def.key)
+            in_collection = var_slug in existing_slugs
+            selected = var_def.key in selected_keys
+            
+            if selected and not in_collection:
+                service._upsert_variable(collection, var_def)
+            elif not selected and in_collection:
+                collection.variables.filter(slug=var_slug).delete()
+        
+        messages.success(request, _("Variables updated for '%s'.") % collection.name)
+        return redirect("data_feed_detail", pk=feed_pk)
+    
+    # Pre-annotate each group's variables with active state so the template
+    # doesn't need nested lookups.
+    raw_groups = _build_variable_groups(definition)
+    variable_groups = [
+        {
+            **grp,
+            "variables": [
+                {"var_def": v, "active": slugify(v.key) in existing_slugs}
+                for v in grp["variables"]
+            ],
+        }
+        for grp in raw_groups
+    ]
+    
+    return render(request, "georivasources/definition_collection_vars.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
+            {"url": "", "label": _("Manage Variables")},
+        ],
+        "feed": feed,
+        "link": link,
+        "definition": definition,
+        "collection": collection,
+        "variable_groups": variable_groups,
+        "var_total": len(definition.variables),
+    })
+
+
+def data_feed_add_select(request):
     items = []
     for cls in get_all_child_models(DataFeed):
         model_name = cls._meta.model_name
-        has_wizard = cls.__name__ in wizard_capable_names
+        has_wizard = bool(cls.get_collection_definitions())
         
         if has_wizard:
             url = reverse("wizard_step1_catalog", kwargs={"model_name": model_name})
         else:
             viewset = data_feed_viewset_registry.get(model_name)
-            url = reverse(viewset.get_url_name("add"))
+            url = reverse(viewset.get_url_name("add")) if viewset else "#"
         
         items.append({
             "verbose_name": cls._meta.verbose_name,
@@ -157,7 +426,7 @@ def data_feed_add_select(request):
 
 
 # =============================================================================
-# Setup Wizard
+# Setup Wizard (3 steps)
 # =============================================================================
 
 _WIZARD_SESSION_KEY = "georiva_setup_wizard_{model_name}"
@@ -167,42 +436,12 @@ def _wizard_session_key(model_name):
     return _WIZARD_SESSION_KEY.format(model_name=model_name)
 
 
-def _get_data_source_cls(model_cls):
-    """
-    Return the DataSource class for a DataFeed subclass without a DB instance.
-
-    data_source_cls is a property whose getter only does an import + return, so
-    calling it on an uninitialized instance is safe.
-    """
-    prop = model_cls.__dict__.get('data_source_cls')
-    if not isinstance(prop, property):
-        return None
-    try:
-        dummy = object.__new__(model_cls)
-        return prop.fget(dummy)
-    except Exception:
-        return None
-
-
-def _capable_source_types():
-    """Return DataFeed subclasses whose data source implements describe_parameters()."""
-    results = []
-    for model_cls in get_all_child_models(DataFeed):
-        ds_cls = _get_data_source_cls(model_cls)
-        if ds_cls is None:
-            continue
-        if not (isinstance(ds_cls, type) and issubclass(ds_cls, BaseDataSource)):
-            continue
-        if ds_cls.describe_parameters is BaseDataSource.describe_parameters:
-            continue
-        results.append(model_cls)
-    return results
-
-
-def _manifest_for_model(model_cls):
-    """Instantiate a temporary data source with empty config and return its manifest."""
-    ds_cls = _get_data_source_cls(model_cls)
-    return ds_cls({}).describe_parameters()
+def _get_model_or_redirect(request, model_name):
+    model_cls = get_child_model_by_name(DataFeed, model_name)
+    if not model_cls:
+        messages.error(request, _("Unknown source type: %s") % model_name)
+        return None, redirect("setup_wizard_select")
+    return model_cls, None
 
 
 def _wizard_breadcrumbs(model_name, verbose_name, current_label):
@@ -215,42 +454,44 @@ def _wizard_breadcrumbs(model_name, verbose_name, current_label):
     ]
 
 
-def _get_model_or_redirect(request, model_name):
-    """Return (model_cls, None) or (None, redirect_response)."""
-    model_cls = get_child_model_by_name(DataFeed, model_name)
-    if not model_cls:
-        messages.error(request, _("Unknown source type: %s") % model_name)
-        return None, redirect("setup_wizard_select")
-    return model_cls, None
-
-
-def _collection_preview(manifest, selected_keys, group_into_collections):
-    """Return preview list of collections that will be created."""
-    from django.utils.text import slugify
-    selected_set = set(selected_keys)
-    preview = []
-    if group_into_collections:
-        for group in manifest.groups:
-            keys = [k for k in group.member_keys if k in selected_set]
-            if keys:
-                preview.append({
-                    "name": group.name,
-                    "slug": slugify(group.key),
-                    "variables": [manifest.by_key(k).name for k in keys],
-                })
-    ungrouped = [k for k in manifest.ungrouped_keys() if k in selected_set]
-    if ungrouped:
-        preview.append({
-            "name": _("Default Collection"),
-            "slug": _("(from catalog slug)"),
-            "variables": [manifest.by_key(k).name for k in ungrouped],
-        })
-    return preview
+def _global_config_form_class(model_cls, include_base=False):
+    """
+    Build a ModelForm for the DataFeed subclass covering:
+      - base fields (name, is_active, interval_minutes) if include_base=True
+      - any extra fields declared in model_cls.panels beyond base_panels
+    """
+    from wagtail.admin.panels import FieldPanel, MultiFieldPanel
+    from django.forms import modelform_factory
+    
+    base_field_names = {p.field_name for p in DataFeed.base_panels if isinstance(p, FieldPanel)}
+    
+    def _extract_fields(panels):
+        names = []
+        for panel in panels:
+            if isinstance(panel, FieldPanel):
+                names.append(panel.field_name)
+            elif isinstance(panel, MultiFieldPanel):
+                names.extend(_extract_fields(panel.children))
+        return names
+    
+    all_fields = _extract_fields(model_cls.panels)
+    
+    if include_base:
+        fields = all_fields
+    else:
+        fields = [f for f in all_fields if f not in base_field_names]
+    
+    if not fields:
+        return None
+    
+    base_form_class = getattr(model_cls, "base_form_class", WagtailAdminModelForm)
+    
+    return modelform_factory(model_cls, form=base_form_class, fields=fields)
 
 
 def setup_wizard_select(request):
     """Step 0: pick source type."""
-    capable = _capable_source_types()
+    capable = [cls for cls in get_all_child_models(DataFeed) if cls.get_collection_definitions()]
     source_types = [
         {"model_name": cls.__name__, "verbose_name": cls._meta.verbose_name}
         for cls in capable
@@ -267,7 +508,7 @@ def setup_wizard_select(request):
 
 
 def wizard_step1_catalog(request, model_name):
-    """Step 1: select an existing Catalog or create a new one."""
+    """Step 1: create a new Catalog or select an existing unclaimed one."""
     from django.utils.text import slugify
     from georiva.core.models import Catalog
     
@@ -276,7 +517,8 @@ def wizard_step1_catalog(request, model_name):
         return err
     
     verbose_name = model_cls._meta.verbose_name
-    catalogs = Catalog.objects.order_by("name")
+    # Only show catalogs that don't already have a DataFeed linked
+    unclaimed_catalogs = Catalog.objects.filter(data_feed__isnull=True).order_by("name")
     catalog_defaults = model_cls.get_catalog_defaults()
     file_format_choices = Catalog.FileFormat.choices
     
@@ -316,12 +558,7 @@ def wizard_step1_catalog(request, model_name):
             return redirect("wizard_step2_feed", model_name=model_name)
     
     session_data = request.session.get(_wizard_session_key(model_name), {})
-    is_edit = session_data.get("is_edit", False)
-    edit_catalog = None
-    if is_edit and session_data.get("catalog_id"):
-        from georiva.core.models import Catalog
-        edit_catalog = Catalog.objects.filter(pk=session_data["catalog_id"]).first()
-
+    
     breadcrumbs = [
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
         {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
@@ -332,17 +569,16 @@ def wizard_step1_catalog(request, model_name):
         "breadcrumbs_items": breadcrumbs,
         "model_name": model_name,
         "source_verbose_name": verbose_name,
-        "catalogs": catalogs,
+        "unclaimed_catalogs": unclaimed_catalogs,
         "catalog_defaults": catalog_defaults,
         "file_format_choices": file_format_choices,
-        "is_edit": is_edit,
-        "edit_catalog": edit_catalog,
+        "session": session_data,
         "step": 1,
     })
 
 
 def wizard_step2_feed(request, model_name):
-    """Step 2: create a new DataFeed or skip."""
+    """Step 2: feed name, run interval, and plugin-specific global config fields."""
     model_cls, err = _get_model_or_redirect(request, model_name)
     if err:
         return err
@@ -352,163 +588,180 @@ def wizard_step2_feed(request, model_name):
         return redirect("wizard_step1_catalog", model_name=model_name)
     
     verbose_name = model_cls._meta.verbose_name
-    existing_feeds = model_cls.objects.order_by("name")
+    extra_form_cls = _global_config_form_class(model_cls, include_base=False)
     
     if request.method == "POST":
-        feed_mode = request.POST.get("feed_mode", "create")
         new_feed_name = request.POST.get("new_feed_name", "").strip()
         new_feed_interval = int(request.POST.get("new_feed_interval") or 360)
-        data_feed_id = request.POST.get("data_feed_id") or None
+        extra_form = extra_form_cls(request.POST) if extra_form_cls else None
         
         errors = []
-        if feed_mode == "create" and not new_feed_name:
-            errors.append(_("Please enter a name for the new Data Feed."))
+        if not new_feed_name:
+            errors.append(_("Please enter a name for the Data Feed."))
         
-        if errors:
-            for e in errors:
-                messages.error(request, e)
-        else:
+        global_config = {}
+        if extra_form is not None:
+            if not extra_form.is_valid():
+                errors.extend(
+                    f"{extra_form.fields[f].label}: {', '.join(errs)}"
+                    for f, errs in extra_form.errors.items()
+                )
+            else:
+                global_config = extra_form.cleaned_data
+        
+        if not errors:
             session_data.update({
-                "feed_mode": feed_mode,
-                "new_feed_name": new_feed_name if feed_mode == "create" else None,
+                "new_feed_name": new_feed_name,
                 "new_feed_interval": new_feed_interval,
-                "data_feed_id": int(data_feed_id) if feed_mode == "link" and data_feed_id else None,
+                "global_config": global_config,
             })
             request.session[_wizard_session_key(model_name)] = session_data
-            return redirect("wizard_step3_parameters", model_name=model_name)
+            return redirect("wizard_step3_collections", model_name=model_name)
+        
+        for e in errors:
+            messages.error(request, e)
+    else:
+        extra_form = extra_form_cls(initial=session_data.get("global_config", {})) if extra_form_cls else None
     
-    is_edit = session_data.get("is_edit", False)
-    edit_feed = None
-    if is_edit and session_data.get("data_feed_id"):
-        edit_feed = DataFeed.objects.filter(pk=session_data["data_feed_id"]).first()
-
     return render(request, "georivasources/wizard_step2_feed.html", {
-        "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Data Feed")),
+        "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Feed Details")),
         "model_name": model_name,
         "source_verbose_name": verbose_name,
-        "existing_feeds": existing_feeds,
         "default_feed_name": verbose_name,
-        "prefill_feed_mode": session_data.get("feed_mode", "create"),
-        "prefill_feed_id": session_data.get("data_feed_id"),
-        "is_edit": is_edit,
-        "edit_feed": edit_feed,
+        "prefill_feed_name": session_data.get("new_feed_name", ""),
+        "prefill_interval": session_data.get("new_feed_interval", 360),
+        "extra_form": extra_form,
         "step": 2,
     })
 
 
-def wizard_step3_parameters(request, model_name):
-    """Step 3: select parameters and collection grouping."""
+def _build_variable_groups(definition):
+    """
+    Return a list of group dicts for template rendering.
+
+    Each dict has: type ('group' | 'ungrouped'), name, key, variables.
+    Variables not covered by any group are collected into an 'Other' section.
+    When there are no declared groups the single 'ungrouped' entry covers all variables.
+    """
+    if not definition.groups:
+        return [{'type': 'ungrouped', 'key': 'all', 'name': '', 'variables': list(definition.variables)}]
+    
+    var_by_key = {v.key: v for v in definition.variables}
+    covered = set()
+    entries = []
+    for grp in definition.groups:
+        grp_vars = [var_by_key[k] for k in grp.variable_keys if k in var_by_key]
+        if grp_vars:
+            entries.append({'type': 'group', 'key': grp.key, 'name': grp.name, 'variables': grp_vars})
+            covered.update(grp.variable_keys)
+    
+    remaining = [v for v in definition.variables if v.key not in covered]
+    if remaining:
+        entries.append({'type': 'ungrouped', 'key': 'other', 'name': 'Other', 'variables': remaining})
+    return entries
+
+
+def wizard_step3_collections(request, model_name):
+    """Step 3: choose which CollectionDefinitions to enable and fill per-collection config."""
     model_cls, err = _get_model_or_redirect(request, model_name)
     if err:
         return err
     
     session_data = request.session.get(_wizard_session_key(model_name), {})
-    if not session_data.get("feed_mode") and not session_data.get("catalog_mode"):
-        return redirect("wizard_step1_catalog", model_name=model_name)
+    if not session_data.get("new_feed_name") and not session_data.get("new_feed_interval"):
+        return redirect("wizard_step2_feed", model_name=model_name)
     
     verbose_name = model_cls._meta.verbose_name
-    manifest = _manifest_for_model(model_cls)
+    definitions = model_cls.get_collection_definitions()
+    
+    # All definitions share the same link model — build the form class once.
+    link_form_cls = model_cls.get_collection_link_model().get_form_class()
+    
+    def_entries = []
+    for defn in definitions:
+        saved_config = (session_data.get("collections_config") or {}).get(defn.key, {})
+        if request.method == "POST":
+            form = link_form_cls(request.POST, prefix=defn.key) if link_form_cls else None
+        else:
+            form = link_form_cls(initial=saved_config, prefix=defn.key) if link_form_cls else None
+        def_entries.append({
+            "definition": defn,
+            "config_form": form,
+            "variable_groups": _build_variable_groups(defn),
+            "multi_variable": len(defn.variables) > 1,
+        })
     
     if request.method == "POST":
-        selected_keys = request.POST.getlist("parameters")
-        group_into_collections = request.POST.get("group_into_collections") == "on"
+        selected_keys = request.POST.getlist("collections")
+        
+        errors = []
         if not selected_keys:
-            messages.error(request, _("Please select at least one parameter."))
-        else:
+            errors.append(_("Please select at least one collection."))
+        
+        # Validate config forms and collect variable selections
+        collections_config = {}
+        for entry in def_entries:
+            defn = entry["definition"]
+            if defn.key not in selected_keys:
+                continue
+            cfg = {}
+            
+            form = entry["config_form"]
+            if form is not None:
+                if form.is_valid():
+                    cfg.update(form.cleaned_data)
+                else:
+                    errors.extend(
+                        f"{defn.name} — {form.fields[f].label}: {', '.join(errs)}"
+                        for f, errs in form.errors.items()
+                    )
+            
+            # Collect variable selection (only when multiple variables)
+            if len(defn.variables) > 1:
+                sel_vars = request.POST.getlist(f"vars_{defn.key}")
+                if not sel_vars:
+                    errors.append(_("%(name)s: select at least one variable.") % {"name": defn.name})
+                else:
+                    cfg["selected_variable_keys"] = sel_vars
+            
+            collections_config[defn.key] = cfg
+        
+        if not errors:
             session_data.update({
-                "selected_keys": selected_keys,
-                "group_into_collections": group_into_collections,
+                "selected_collection_keys": selected_keys,
+                "collections_config": {
+                    k: {
+                           field: str(v) if hasattr(v, 'isoformat') else v
+                           for field, v in cfg.items()
+                           if field != "selected_variable_keys"
+                       } | (
+                           {"selected_variable_keys": cfg["selected_variable_keys"]}
+                           if "selected_variable_keys" in cfg else {}
+                       )
+                    for k, cfg in collections_config.items()
+                },
             })
             request.session[_wizard_session_key(model_name)] = session_data
-            return redirect("wizard_step4_review", model_name=model_name)
+            return redirect("wizard_provision", model_name=model_name)
+        
+        for e in errors:
+            messages.error(request, e)
     
-    all_keys = set(manifest.all_keys())
-    grouped = []
-    covered = set()
-    for group in manifest.groups:
-        members = []
-        for key in group.member_keys:
-            if key in all_keys:
-                members.append(manifest.by_key(key))
-                covered.add(key)
-        if members:
-            grouped.append({"group": group, "members": members})
-    ungrouped = [manifest.by_key(k) for k in manifest.all_keys() if k not in covered]
+    prefill_keys = set(session_data.get("selected_collection_keys", [k["definition"].key for k in def_entries]))
     
-    prefill_keys = set(session_data.get("selected_keys", []))
-    prefill_group = session_data.get("group_into_collections", True)
-
-    return render(request, "georivasources/wizard_step3_parameters.html", {
-        "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Parameters")),
+    return render(request, "georivasources/wizard_step3_collections.html", {
+        "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Collections")),
         "model_name": model_name,
         "source_verbose_name": verbose_name,
-        "grouped": grouped,
-        "ungrouped": ungrouped,
+        "def_entries": def_entries,
         "prefill_keys": prefill_keys,
-        "prefill_group": prefill_group,
-        "is_edit": session_data.get("is_edit", False),
         "step": 3,
-    })
-
-
-def wizard_step4_review(request, model_name):
-    """Step 4: review summary and confirm before provisioning."""
-    from georiva.core.models import Catalog
-    
-    model_cls, err = _get_model_or_redirect(request, model_name)
-    if err:
-        return err
-    
-    session_data = request.session.get(_wizard_session_key(model_name), {})
-    if not session_data.get("selected_keys"):
-        return redirect("wizard_step3_parameters", model_name=model_name)
-    
-    verbose_name = model_cls._meta.verbose_name
-    manifest = _manifest_for_model(model_cls)
-    selected_keys = session_data["selected_keys"]
-    group_into_collections = session_data.get("group_into_collections", True)
-    
-    # Catalog summary
-    catalog_mode = session_data.get("catalog_mode", "create")
-    if catalog_mode == "select":
-        catalog_summary = Catalog.objects.filter(pk=session_data["catalog_id"]).first()
-        catalog_label = str(catalog_summary) if catalog_summary else "—"
-    else:
-        catalog_label = f"{session_data.get('new_catalog_name')} ({session_data.get('new_catalog_slug')})"
-    
-    # Feed summary
-    feed_mode = session_data.get("feed_mode", "skip")
-    if feed_mode == "create":
-        feed_label = f"{session_data.get('new_feed_name')} — every {session_data.get('new_feed_interval', 360)} min"
-    elif feed_mode == "link":
-        feed_obj = DataFeed.objects.filter(pk=session_data.get("data_feed_id")).first()
-        feed_label = str(feed_obj) if feed_obj else "—"
-    else:
-        feed_label = _("Skip — no Data Feed")
-    
-    collection_preview = _collection_preview(manifest, selected_keys, group_into_collections)
-    
-    if request.method == "POST":
-        return redirect("wizard_provision", model_name=model_name)
-    
-    return render(request, "georivasources/wizard_step4_review.html", {
-        "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Review")),
-        "model_name": model_name,
-        "source_verbose_name": verbose_name,
-        "catalog_mode": catalog_mode,
-        "catalog_label": catalog_label,
-        "catalog_format": session_data.get("new_catalog_format", ""),
-        "feed_mode": feed_mode,
-        "feed_label": feed_label,
-        "selected_count": len(selected_keys),
-        "collection_preview": collection_preview,
-        "is_edit": session_data.get("is_edit", False),
-        "step": 4,
+        "link_form_cls": link_form_cls,
     })
 
 
 def wizard_provision(request, model_name):
-    """Execute provisioning and show the result."""
+    """Execute provisioning and redirect to the new DataFeed detail page."""
     from georiva.core.models import Catalog
     from georiva.sources.setup_service import SourceSetupService
     
@@ -517,7 +770,7 @@ def wizard_provision(request, model_name):
         return err
     
     session_data = request.session.get(_wizard_session_key(model_name))
-    if not session_data or not session_data.get("selected_keys"):
+    if not session_data or not session_data.get("selected_collection_keys"):
         messages.warning(request, _("Please complete all steps first."))
         return redirect("setup_wizard_select")
     
@@ -535,97 +788,54 @@ def wizard_provision(request, model_name):
     else:
         catalog = get_object_or_404(Catalog, pk=session_data["catalog_id"])
     
-    selected_keys = session_data["selected_keys"]
-    group_into_collections = session_data.get("group_into_collections", True)
-    feed_mode = session_data.get("feed_mode", "skip")
-    new_feed_name = session_data.get("new_feed_name")
-    new_feed_interval = session_data.get("new_feed_interval", 360)
-    data_feed_id = session_data.get("data_feed_id")
+    definitions_map = {d.key: d for d in model_cls.get_collection_definitions()}
+    selected_keys = session_data["selected_collection_keys"]
+    raw_configs = session_data.get("collections_config", {})
     
-    data_feed = None
-    if feed_mode == "link" and data_feed_id:
-        data_feed = get_object_or_404(DataFeed, pk=data_feed_id)
+    # Deserialise session config through the link model's form (handles type coercion).
+    link_form_cls = model_cls.get_collection_link_model().get_form_class()
+    selected_definitions = []
+    for key in selected_keys:
+        defn = definitions_map.get(key)
+        if not defn:
+            continue
+        raw_cfg = raw_configs.get(key, {})
+        cfg = {}
+        if link_form_cls:
+            form_data = {k: v for k, v in raw_cfg.items() if k != 'selected_variable_keys'}
+            form = link_form_cls(form_data)
+            if form.is_valid():
+                # interval_minutes=None means "use definition/feed default" — exclude it
+                cfg.update({
+                    k: v for k, v in form.cleaned_data.items()
+                    if not (k == 'interval_minutes' and v is None)
+                })
+        if 'selected_variable_keys' in raw_cfg:
+            cfg['selected_variable_keys'] = raw_cfg['selected_variable_keys']
+        selected_definitions.append((defn, cfg))
     
-    manifest = _manifest_for_model(model_cls)
+    global_config = session_data.get("global_config", {})
+    
     service = SourceSetupService()
     try:
-        collections, data_feed = service.provision(
-            manifest,
+        data_feed, collections = service.provision(
+            model_cls,
             catalog=catalog,
-            selected_keys=selected_keys,
-            data_feed=data_feed,
-            new_feed_name=new_feed_name if feed_mode == "create" else None,
-            new_feed_interval=new_feed_interval,
-            model_cls=model_cls if feed_mode == "create" else None,
-            group_into_collections=group_into_collections,
+            feed_name=session_data["new_feed_name"],
+            feed_interval=session_data.get("new_feed_interval", 360),
+            global_config=global_config,
+            selected_definitions=selected_definitions,
         )
         request.session.pop(_wizard_session_key(model_name), None)
-        
-        breadcrumbs = [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-            {"url": reverse("setup_wizard_select"), "label": _("Setup Wizard")},
-            {"url": "", "label": _("Done")},
-        ]
-        return render(request, "georivasources/wizard_result.html", {
-            "breadcrumbs_items": breadcrumbs,
-            "source_verbose_name": model_cls._meta.verbose_name,
-            "catalog": catalog,
-            "collections": collections,
-            "selected_count": len(selected_keys),
-            "data_feed": data_feed,
-        })
+        messages.success(
+            request,
+            _("%(name)s set up with %(n)d collection(s).") % {
+                "name": data_feed.name,
+                "n": len(collections),
+            }
+        )
+        return redirect("data_feed_detail", pk=data_feed.pk)
     
     except Exception as exc:
         messages.error(request, _("Provisioning failed: %s") % exc)
-        return redirect("wizard_step4_review", model_name=model_name)
-
-
-def wizard_resume(request, pk, step):
-    """
-    Pre-populate the wizard session from an existing DataFeed and redirect
-    to the requested step.  This enables smart re-run: the user can jump
-    directly to any step with all previous choices pre-filled.
-    """
-    from django.utils.text import slugify
-    
-    feed = get_object_or_404(
-        DataFeed.objects.prefetch_related("collections__variables", "collections__catalog"),
-        pk=pk,
-    )
-    
-    real_cls = feed.get_real_instance_class()
-    model_name = real_cls._meta.model_name
-    
-    first_col = feed.collections.select_related("catalog").first()
-    catalog = first_col.catalog if first_col else None
-    
-    selected_keys = [
-        var.slug
-        for col in feed.collections.prefetch_related("variables").all()
-        for var in col.variables.all()
-    ]
-    
-    manifest = _manifest_for_model(real_cls)
-    group_keys = {slugify(g.key) for g in manifest.groups} if manifest else set()
-    collection_slugs = set(feed.collections.values_list("slug", flat=True))
-    
-    session = {
-        "is_edit": True,
-        "catalog_mode": "select" if catalog else "create",
-        "catalog_id": catalog.pk if catalog else None,
-        "feed_mode": "link",
-        "data_feed_id": feed.pk,
-        "new_feed_interval": feed.interval_minutes,
-        "selected_keys": selected_keys,
-        "group_into_collections": bool(collection_slugs & group_keys),
-    }
-    request.session[_wizard_session_key(model_name)] = session
-    
-    step_urls = {
-        "catalog": reverse("wizard_step1_catalog", kwargs={"model_name": model_name}),
-        "feed": reverse("wizard_step2_feed", kwargs={"model_name": model_name}),
-        "parameters": reverse("wizard_step3_parameters", kwargs={"model_name": model_name}),
-        "review": reverse("wizard_step4_review", kwargs={"model_name": model_name}),
-    }
-    return redirect(step_urls.get(step, step_urls["catalog"]))
+        return redirect("wizard_step3_collections", model_name=model_name)

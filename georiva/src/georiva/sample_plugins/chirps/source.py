@@ -46,13 +46,28 @@ def _next_pentad_start(dt: datetime) -> datetime:
     return datetime(dt.year, dt.month, current_start + 5, tzinfo=timezone.utc)
 
 
+def _next_dekad_start(dt: datetime) -> datetime:
+    """
+    Dekads start on day 1, 11, 21.
+    If latest is in dekad 1 (days 1-10), next starts day 11.
+    If latest is in dekad 2 (days 11-20), next starts day 21.
+    If latest is in dekad 3 (days 21+), next starts day 1 of next month.
+    """
+    dt = _as_utc(dt)
+    if dt.day < 11:
+        return datetime(dt.year, dt.month, 11, tzinfo=timezone.utc)
+    if dt.day < 21:
+        return datetime(dt.year, dt.month, 21, tzinfo=timezone.utc)
+    return _next_month_start(dt)
+
+
 # -----------------------------------------------------------------------------
 # CHIRPS spec
 # -----------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class ChirpsPeriodSpec:
-    slug: str  # "monthly" | "pentadal"
+    slug: str  # "monthly" | "pentadal" | "dekadal"
     label: str
     file_template: str  # "/africa_monthly/tifs/chirps-v2.0.{YYYY}.{MM}.tif.gz", etc.
 
@@ -86,6 +101,11 @@ class CHIRPSDataSource(BaseDataSource):
             label="Pentadal",
             file_template="/africa_pentad/tifs/chirps-v2.0.{YYYY}.{MM}.{P}.tif.gz",
         ),
+        "dekadal": ChirpsPeriodSpec(
+            slug="dekadal",
+            label="Dekadal",
+            file_template="/africa_dekad/tifs/chirps-v2.0.{YYYY}.{MM}.{D}.tif.gz",
+        ),
     }
     
     # For “latest available” probing, how far back to try before giving up
@@ -113,11 +133,6 @@ class CHIRPSDataSource(BaseDataSource):
     def source_type(self) -> DataSourceType:
         return DataSourceType.DERIVED
     
-    def get_available_variables(self) -> list[dict]:
-        return [
-            {"slug": "precip", "name": "Precipitation", "units": "mm", "periods": ["monthly", "pentadal"]},
-        ]
-    
     # -------------------------------------------------------------------------
     # Time window behavior: avoid refetching same period when using db latest
     # -------------------------------------------------------------------------
@@ -134,6 +149,8 @@ class CHIRPSDataSource(BaseDataSource):
             return _next_month_start(latest)
         if res == "pentadal":
             return _next_pentad_start(latest)
+        if res == "dekadal":
+            return _next_dekad_start(latest)
         return latest
     
     # -------------------------------------------------------------------------
@@ -168,6 +185,14 @@ class CHIRPSDataSource(BaseDataSource):
         # (1:1-5, 2:6-10, 3:11-15, 4:16-20, 5:21-25, 6:26-end)
         return min(6, ((dt.day - 1) // 5) + 1)
     
+    def _dekad_num(self, dt: datetime) -> int:
+        # Dekad numbering: 1 (days 1-10), 2 (days 11-20), 3 (days 21-end)
+        if dt.day <= 10:
+            return 1
+        if dt.day <= 20:
+            return 2
+        return 3
+    
     def _pentadal_url(self, dt: datetime) -> str:
         spec = self.PERIODS["pentadal"]
         mm = f"{dt.month:02d}"
@@ -177,6 +202,18 @@ class CHIRPSDataSource(BaseDataSource):
             .replace("{YYYY}", f"{dt.year}")
             .replace("{MM}", mm)
             .replace("{P}", f"{p}")
+        )
+        return f"{self.BASE_URL}{path}"
+    
+    def _dekadal_url(self, dt: datetime) -> str:
+        spec = self.PERIODS["dekadal"]
+        mm = f"{dt.month:02d}"
+        d = self._dekad_num(dt)
+        path = (
+            spec.file_template
+            .replace("{YYYY}", f"{dt.year}")
+            .replace("{MM}", mm)
+            .replace("{D}", f"{d}")
         )
         return f"{self.BASE_URL}{path}"
     
@@ -211,6 +248,21 @@ class CHIRPSDataSource(BaseDataSource):
                 last_key = key
             cur += timedelta(days=1)
     
+    def _iter_dekads(self, start: datetime, end: datetime) -> Iterator[datetime]:
+        # Step day-by-day but only yield when dekad boundary changes
+        start = _as_utc(start).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = _as_utc(end).replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        cur = start
+        last_key = None
+        while cur <= end:
+            key = (cur.year, cur.month, self._dekad_num(cur))
+            if key != last_key:
+                dekad_start_day = (key[2] - 1) * 10 + 1
+                yield cur.replace(day=dekad_start_day)
+                last_key = key
+            cur += timedelta(days=1)
+    
     # -------------------------------------------------------------------------
     # Latest available (remote probing)
     # -------------------------------------------------------------------------
@@ -225,6 +277,8 @@ class CHIRPSDataSource(BaseDataSource):
         probes: list[tuple[str, callable]] = []
         if self.enabled_period == "pentadal":
             probes.append(("pentadal", self._pentadal_url))
+        if self.enabled_period == "dekadal":
+            probes.append(("dekadal", self._dekadal_url))
         if self.enabled_period == "monthly":
             probes.append(("monthly", self._monthly_url))
         
@@ -235,6 +289,7 @@ class CHIRPSDataSource(BaseDataSource):
                 if self._url_exists(url):
                     if period == "monthly":
                         return self._month_start(dt)
+                    # pentadal and dekadal: return the start-of-period day
                     return _as_utc(dt).replace(hour=0, minute=0, second=0, microsecond=0)
         
         return None
@@ -314,6 +369,33 @@ class CHIRPSDataSource(BaseDataSource):
                         "year": dt.year,
                         "month": dt.month,
                         "pentad": p,
+                        "variables": variables,
+                    },
+                    expected_format="tif.gz",
+                    variables=variables,
+                )
+        
+        if self.enabled_period == "dekadal":
+            for dt in self._iter_dekads(start_time, end_time):
+                d = self._dekad_num(dt)
+                url = self._dekadal_url(dt)
+                ts = self._ts_for_filename(dt)
+                ident = f"chirps-dekadal-{dt.year}{dt.month:02d}d{d}"
+                
+                filename = f"chirps_dekadal_precip_{ts}.tif.gz"
+                
+                yield FileRequest(
+                    identifier=ident,
+                    filename=filename,
+                    valid_time=dt,  # dekad start
+                    reference_time=None,  # CHIRPS is not a forecast
+                    params={
+                        "url": url,
+                        "period": "dekadal",
+                        "source": "CHIRPS-2.0",
+                        "year": dt.year,
+                        "month": dt.month,
+                        "dekad": d,
                         "variables": variables,
                     },
                     expected_format="tif.gz",

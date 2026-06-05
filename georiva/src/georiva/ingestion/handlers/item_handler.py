@@ -55,7 +55,6 @@ class ItemHandler:
             reference_time=ref_utc,
             defaults={
                 "source_file": source_file,
-                "ingestion_log": ingestion_log,
                 "bounds": list(bounds),
                 "width": width,
                 "height": height,
@@ -68,30 +67,31 @@ class ItemHandler:
                 "crs": crs,
             },
         )
-        
+
         if not created:
             logger.info(
                 "Item already exists for %s @ %s — updating assets", collection, ts_utc
             )
             update_fields = []
-            
+
             if item.source_file != source_file:
                 item.source_file = source_file
                 update_fields.append("source_file")
-            
+
             if list(item.bounds) != list(bounds):
                 item.bounds = list(bounds)
                 item.width = width
                 item.height = height
                 update_fields.extend(["bounds", "width", "height"])
-            
-            if ingestion_log and item.ingestion_log_id != ingestion_log.pk:
-                item.ingestion_log = ingestion_log
-                update_fields.append("ingestion_log")
-            
+
             if update_fields:
                 item.save(update_fields=update_fields)
-        
+
+        # Link the IngestionLog to the Item it produced.
+        if ingestion_log and ingestion_log.item_id != item.pk:
+            ingestion_log.item = item
+            ingestion_log.save(update_fields=["item_id"])
+
         return item, created
     
     def increment_collection_item_count(self, collection: Collection) -> None:

@@ -9,7 +9,7 @@
                     {{ page.featured_heading|default:"Featured Datasets" }}
                 </h2>
                 <a href="#datasets" class="gr-section-action">
-                    View all
+                    {% trans "View all" %}
                     <i class="bi bi-arrow-right"></i>
                 </a>
             </div>
@@ -17,7 +17,7 @@
                 {% for featured in page.featured_catalogs.all %}
                     {% with catalog=featured.catalog %}
                         {% get_catalog_icon catalog.file_format as icon_class %}
-                        <a href="/stac/collections/{{ catalog.slug }}/"
+                        <a href="/datasets/{{ catalog.slug }}/"
                            class="gr-catalog-card gr-animate gr-animate-{{ forloop.counter }}">
                             <div class="gr-catalog-card-header">
                                 <div class="gr-catalog-icon">
@@ -38,24 +38,23 @@
                             </p>
 
                             <div class="gr-catalog-meta">
-                    <span class="gr-catalog-meta-item">
-                        <i class="bi bi-collection"></i>
-                        {% active_collection_count catalog %}
-                        collections
-                    </span>
+                                <span class="gr-catalog-meta-item">
+                                    <i class="bi bi-collection"></i>
+                                    {% active_collection_count catalog %} {% trans "collections" %}
+                                </span>
                                 {% with latest=catalog.collections.first %}
                                     {% if latest.time_end %}
                                         <span class="gr-catalog-meta-item">
-                        <i class="bi bi-calendar3"></i>
-                        {{ latest.time_end|date:"d M Y" }}
-                    </span>
+                                            <i class="bi bi-calendar3"></i>
+                                            {{ latest.time_end|date:"d M Y" }}
+                                        </span>
                                     {% endif %}
                                 {% endwith %}
                                 {% if catalog.license %}
-                                    <span class="gr-catalog-meta-item" style="margin-left:auto">
-                        <i class="bi bi-shield-check"></i>
-                        {{ catalog.license }}
-                    </span>
+                                    <span class="gr-catalog-meta-item gr-catalog-meta-item--right">
+                                        <i class="bi bi-shield-check"></i>
+                                        {{ catalog.license }}
+                                    </span>
                                 {% endif %}
                             </div>
                         </a>

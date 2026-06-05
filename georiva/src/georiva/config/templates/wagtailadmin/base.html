@@ -2,32 +2,32 @@
 {% load static georiva_tags %}
 
 {% block branding_logo %}
-<figure class="georiva-logo">
-    {% include "georiva/logos/georiva.svg" %}
-</figure>
+    <figure class="georiva-logo">
+        {% include "georiva/logos/georiva.svg" %}
+    </figure>
 
-<div style="color:#ababab; font-size: 12px; padding-top:1em; font-weight:600">
-    <a href="https://github.com/wmo-raf/georiva" target="_blank" style="color:#fff; text-decoration:none">
-        v{% georiva_version %}
-    </a>
-</div>
+    <div style="color:#ababab; font-size: 12px; padding-top:1em; font-weight:600">
+        <a href="https://github.com/wmo-raf/georiva" target="_blank" style="color:#fff; text-decoration:none">
+            v{% georiva_version %}
+        </a>
+    </div>
 
-<style>
+    <style>
 
-    .georiva-logo {
-        color: #fff;
-        max-height: 100px;
-        max-width: 120px;
-        padding: 8px
-    }
+        .georiva-logo {
+            color: #fff;
+            max-height: 100px;
+            max-width: 120px;
+            padding: 8px
+        }
 
-    .georiva-logo svg {
-        height: 100%;
-        width: 100%;
-        color: #fff;
-    }
+        .georiva-logo svg {
+            height: 100%;
+            width: 100%;
+            color: #fff;
+        }
 
-</style>
+    </style>
 
 
 {% endblock %}

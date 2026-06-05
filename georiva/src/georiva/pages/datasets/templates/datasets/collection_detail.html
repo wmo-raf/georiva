@@ -8,6 +8,12 @@
     <link rel="stylesheet" href="{% static 'css/georiva-catalog-detail.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-collection-detail.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-pagination.css' %}">
+    <style>
+        .gr-eyebrow-link {
+            color: var(--gr-accent);
+            text-decoration: none;
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -17,7 +23,7 @@
         <div class="gr-container">
 
             <nav class="gr-breadcrumb" aria-label="breadcrumb">
-                <a href="{{ page.url }}"><i class="bi bi-layers"></i> Datasets</a>
+                <a href="{{ page.url }}"><i class="bi bi-layers"></i> {% trans "Datasets" %}</a>
                 <span class="gr-breadcrumb-sep">/</span>
                 <a href="{{ page.url }}{{ catalog.slug }}/">{{ catalog.name }}</a>
                 <span class="gr-breadcrumb-sep">/</span>
@@ -33,8 +39,7 @@
                     </div>
                     <div>
                         <div class="gr-catalog-header-eyebrow">
-                            <a href="{{ page.url }}{{ catalog.slug }}/"
-                               style="color:var(--gr-accent);text-decoration:none">
+                            <a href="{{ page.url }}{{ catalog.slug }}/" class="gr-eyebrow-link">
                                 {{ catalog.name }}
                             </a>
                         </div>
@@ -51,27 +56,27 @@
 
                     {% if collection.time_resolution %}
                         <div class="gr-catalog-meta-item">
-                            <dt><i class="bi bi-clock"></i> Time Resolution</dt>
+                            <dt><i class="bi bi-clock"></i> {% trans "Time Resolution" %}</dt>
                             <dd>{{ collection.get_time_resolution_display }}</dd>
                         </div>
                     {% endif %}
 
                     {% if collection.time_start or collection.time_end %}
                         <div class="gr-catalog-meta-item">
-                            <dt><i class="bi bi-calendar-range"></i> Time Range</dt>
+                            <dt><i class="bi bi-calendar-range"></i> {% trans "Time Range" %}</dt>
                             <dd>
                                 {% if collection.time_start %}{{ collection.time_start|date:"d M Y" }}{% else %}
                                     —{% endif %}
                                 →
                                 {% if collection.time_end %}{{ collection.time_end|date:"d M Y" }}{% else %}
-                                    present{% endif %}
+                                    {% trans "present" %}{% endif %}
                             </dd>
                         </div>
                     {% endif %}
 
                     {% if collection.item_count %}
                         <div class="gr-catalog-meta-item">
-                            <dt><i class="bi bi-calendar3"></i> Items</dt>
+                            <dt><i class="bi bi-calendar3"></i> {% trans "Items" %}</dt>
                             <dd>{{ collection.item_count }}</dd>
                         </div>
                     {% endif %}
@@ -85,7 +90,7 @@
 
                     {% if collection.spatial_extent %}
                         <div class="gr-catalog-meta-item">
-                            <dt><i class="bi bi-bounding-box"></i> Spatial Extent</dt>
+                            <dt><i class="bi bi-bounding-box"></i> {% trans "Spatial Extent" %}</dt>
                             <dd class="gr-mono" style="font-size:0.8rem">
                                 W {{ collection.spatial_extent.0|floatformat:4 }}
                                 S {{ collection.spatial_extent.1|floatformat:4 }}
@@ -96,13 +101,13 @@
                     {% endif %}
 
                     <div class="gr-catalog-meta-item">
-                        <dt><i class="bi bi-file-earmark"></i> Format</dt>
+                        <dt><i class="bi bi-file-earmark"></i> {% trans "File Format" %}</dt>
                         <dd>{{ catalog.get_file_format_display }}</dd>
                     </div>
 
                     {% if catalog.topics.all %}
                         <div class="gr-catalog-meta-item">
-                            <dt><i class="bi bi-tag"></i> Topics</dt>
+                            <dt><i class="bi bi-tag"></i> {% trans "Topics" %}</dt>
                             <dd class="gr-catalog-meta-topics">
                                 {% for topic in catalog.topics.all %}
                                     <a href="{{ page.url }}?topic={{ topic.slug }}" class="gr-dataset-tag">
@@ -115,10 +120,10 @@
                     {% endif %}
 
                     <div class="gr-catalog-meta-item">
-                        <dt><i class="bi bi-activity"></i> Status</dt>
+                        <dt><i class="bi bi-activity"></i> {% trans "Status" %}</dt>
                         <dd style="display:flex;align-items:center;gap:0.4rem">
                             <span class="gr-dataset-active-dot {% if not collection.is_active %}inactive{% endif %}"></span>
-                            {% if collection.is_active %}Active{% else %}Inactive{% endif %}
+                            {% if collection.is_active %}{% trans "Active" %}{% else %}{% trans "Inactive" %}{% endif %}
                         </dd>
                     </div>
 
@@ -127,11 +132,11 @@
                 <div class="gr-collection-api-links">
                     <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/"
                        class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
-                        <i class="bi bi-code-slash"></i> STAC Collection
+                        <i class="bi bi-code-slash"></i> {% trans "STAC Collection" %}
                     </a>
                     <a href="/api/edr/collections/{{ collection.slug }}/"
                        class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
-                        <i class="bi bi-broadcast"></i> EDR Collection
+                        <i class="bi bi-broadcast"></i> {% trans "EDR Collection" %}
                     </a>
                 </div>
 
@@ -144,10 +149,10 @@
         <div class="gr-container">
 
             <div class="gr-section-header">
-                <h2 class="gr-section-title">Items</h2>
+                <h2 class="gr-section-title">{% trans "Items" %}</h2>
                 {% if items.paginator.count %}
                     <span class="gr-section-count">
-                        {{ items.paginator.count }} item{{ items.paginator.count|pluralize }}
+                        {{ items.paginator.count }} {% trans "item" %}{{ items.paginator.count|pluralize }}
                     </span>
                 {% endif %}
             </div>
@@ -162,7 +167,7 @@
                         {% if variables %}
                             <div class="gr-sidebar-filter is-open" id="filter-variables">
                                 <div class="gr-sidebar-filter-header" data-filter-toggle="filter-variables">
-                                    <span>Variable</span>
+                                    <span>{% trans "Variable" %}</span>
                                     <i class="bi bi-chevron-down"></i>
                                 </div>
                                 <div class="gr-sidebar-filter-body">
@@ -190,7 +195,7 @@
                         {# /dates/ endpoint and populates each select in turn.   #}
                         <div class="gr-sidebar-filter is-open" id="filter-date">
                             <div class="gr-sidebar-filter-header" data-filter-toggle="filter-date">
-                                <span>Date</span>
+                                <span>{% trans "Date" %}</span>
                                 <i class="bi bi-chevron-down"></i>
                             </div>
                             <div class="gr-sidebar-filter-body">
@@ -209,14 +214,18 @@
                                         {# Year — always shown #}
                                         <select id="grPickerYear" class="gr-date-picker-select"
                                                 aria-label="Year" disabled>
-                                            <option value="">Year</option>
+                                            <option value="">
+                                                {% trans "Year" %}
+                                            </option>
                                         </select>
 
                                         {# Month — hidden for annual #}
                                         {% if collection.date_picker_type != 'number' %}
                                             <select id="grPickerMonth" class="gr-date-picker-select"
                                                     aria-label="Month" disabled>
-                                                <option value="">Month</option>
+                                                <option value="">
+                                                    {% trans "Month" %}
+                                                </option>
                                             </select>
                                         {% endif %}
 
@@ -224,7 +233,9 @@
                                         {% if collection.date_picker_type == 'date' %}
                                             <select id="grPickerDay" class="gr-date-picker-select"
                                                     aria-label="Day" disabled>
-                                                <option value="">Day</option>
+                                                <option value="">
+                                                    {% trans "Day" %}
+                                                </option>
                                             </select>
                                         {% endif %}
 
@@ -232,7 +243,9 @@
                                         {% if collection.time_resolution in "sub_hourly,hourly,3hourly,6hourly,12hourly" %}
                                             <select id="grPickerHour" class="gr-date-picker-select"
                                                     aria-label="Hour" disabled>
-                                                <option value="">Hour</option>
+                                                <option value="">
+                                                    {% trans "Hour" %}
+                                                </option>
                                             </select>
                                         {% endif %}
 
@@ -240,13 +253,13 @@
 
                                     <button type="button" id="grPickerApply"
                                             class="gr-date-picker-apply" disabled>
-                                        <i class="bi bi-check-lg"></i> Apply
+                                        <i class="bi bi-check-lg"></i> {% trans "Apply" %}
                                     </button>
 
                                     {% if filters.date %}
                                         <a href="?{% query_string_drop 'date' 'p' %}"
                                            class="gr-items-date-clear">
-                                            <i class="bi bi-x"></i> Clear date
+                                            <i class="bi bi-x"></i> {% trans "Clear date" %}
                                         </a>
                                     {% endif %}
 
@@ -258,14 +271,16 @@
                         {% if collection.is_forecast and forecast_runs %}
                             <div class="gr-sidebar-filter is-open" id="filter-reftime">
                                 <div class="gr-sidebar-filter-header" data-filter-toggle="filter-reftime">
-                                    <span>Forecast Run</span>
+                                    <span>{% trans "Forecast run" %}</span>
                                     <i class="bi bi-chevron-down"></i>
                                 </div>
                                 <div class="gr-sidebar-filter-body">
                                     <select name="run" id="grRefTimeFilter"
                                             class="gr-items-ref-select"
                                             aria-label="Filter by forecast run">
-                                        <option value="">All runs</option>
+                                        <option value="">
+                                            {% trans "All runs" %}
+                                        </option>
                                         {% for run_dt in forecast_runs %}
                                             <option value="{{ run_dt|date:"c" }}"
                                                     {% if filters.run == run_dt|date:"c" %}selected{% endif %}>
@@ -304,7 +319,7 @@
                                         {% if item.reference_time %}
                                             <span class="gr-item-card-meta">
                                                 <i class="bi bi-arrow-repeat"></i>
-                                                Run: {{ item.reference_time|date:"d M Y H:i" }} UTC
+                                                {% trans "Run" %}: {{ item.reference_time|date:"d M Y H:i" }} UTC
                                             </span>
                                         {% endif %}
                                         {% if item.horizon_hours %}
@@ -327,12 +342,14 @@
                     {% else %}
                         <div class="gr-empty-state">
                             <i class="bi bi-inbox"></i>
-                            <p style="font-weight:600;margin-bottom:0.35rem">No items found</p>
+                            <p style="font-weight:600;margin-bottom:0.35rem">
+                                {% trans "No items found" %}
+                            </p>
                             <p>
                                 {% if filters.date %}
                                     No data for this variable on {{ filters.date }}.
                                 {% else %}
-                                    No data ingested yet for this variable.
+                                    {% trans "No data ingested yet for this variable." %}
                                 {% endif %}
                             </p>
                         </div>

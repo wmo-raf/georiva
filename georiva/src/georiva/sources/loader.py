@@ -150,7 +150,7 @@ class Loader:
         """
         Execute a loader run.
         
-        Args:
+        Args:o
             dry_run: If True, generate requests but don't fetch
             max_files: Maximum files to fetch (useful for testing)
             skip_existing: Skip files already in storage (default: True)
@@ -334,7 +334,10 @@ class Loader:
         # Handles files that exist in MinIO but have no IngestionLog entry
         # (dropped event, manual upload, consumer restart, etc.).
         if self.data_feed:
-            for sibling in self.data_feed.collections.exclude(pk=self.collection.pk):
+            for link in self.data_feed.collection_links.select_related('collection__catalog').exclude(
+                collection=self.collection
+            ):
+                sibling = link.collection
                 candidate = f"{sibling.catalog.slug}/{sibling.slug}/{filename}"
                 if storage.sources.exists(candidate):
                     return candidate

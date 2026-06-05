@@ -1,0 +1,262 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Manage Variables" %} — {{ collection.name }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .dcv-header-info {
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            padding: 0.85em 1.1em;
+            margin-bottom: 1.25em;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            flex-wrap: wrap;
+        }
+
+        .dcv-collection-name {
+            font-weight: 700;
+        }
+
+        .dcv-meta {
+            color: var(--w-color-grey-400);
+            font-size: 0.85em;
+        }
+
+        .dcv-vars-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.6em;
+        }
+
+        .dcv-vars-label {
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .dcv-select-all-label {
+            display: flex;
+            align-items: center;
+            gap: 0.35em;
+            font-size: 0.8em;
+            color: var(--w-color-info-100);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .dcv-group {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+            margin-bottom: 0.5em;
+            overflow: hidden;
+        }
+
+        .dcv-group-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.3em 0.65em;
+            background: var(--w-color-grey-50, #f8f8f8);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+        }
+
+        .dcv-group-header input[type=checkbox] {
+            cursor: pointer;
+        }
+
+        .dcv-group-name {
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+
+        .dcv-group-count {
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+            margin-left: auto;
+        }
+
+        .dcv-var-list {
+            padding: 0.35em 0.65em 0.5em;
+        }
+
+        .dcv-var-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            padding: 0.22em 0;
+            border-bottom: 1px solid color-mix(in srgb, var(--w-color-border-furniture) 50%, transparent);
+        }
+
+        .dcv-var-row:last-child {
+            border-bottom: none;
+        }
+
+        .dcv-var-row input[type=checkbox] {
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .dcv-var-name {
+            font-size: 0.83em;
+            flex: 1;
+        }
+
+        .dcv-var-units {
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+        }
+
+        .dcv-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Manage Variables") subtitle=collection.name icon="list-ul" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="dcv-header-info">
+            <span class="dcv-collection-name">
+                {{ collection.name }}
+            </span>
+            <span class="dcv-meta">
+                {{ collection.catalog.slug }}/{{ collection.slug }}
+            </span>
+            <span class="dcv-meta">
+                {% blocktrans count n=var_total %}
+                    {{ n }} variable in definition{% plural %}{{ n }} variables in definition
+                {% endblocktrans %}
+            </span>
+        </div>
+
+        <form method="post">
+            {% csrf_token %}
+
+            <div class="dcv-vars-header">
+                <span class="dcv-vars-label">
+                    {% trans "Variables" %}
+                </span>
+                <label class="dcv-select-all-label">
+                    <input type="checkbox" id="dcv-select-all">
+                    {% trans "Select all" %}
+                </label>
+            </div>
+
+            {% for grp in variable_groups %}
+                <div class="dcv-group">
+                    <div class="dcv-group-header">
+                        <input type="checkbox" class="dcv-group-cb" data-group="{{ grp.key }}">
+                        <span class="dcv-group-name">
+                            {% if grp.type == "ungrouped" and grp.name %}
+                                {{ grp.name }}
+                            {% elif grp.type == "ungrouped" %}
+                                {% trans "Other" %}
+                            {% else %}
+                                {{ grp.name }}
+                            {% endif %}
+                        </span>
+                        <span class="dcv-group-count">{{ grp.variables|length }}</span>
+                    </div>
+                    <div class="dcv-var-list">
+                        {% for entry in grp.variables %}
+                            <div class="dcv-var-row">
+                                <input type="checkbox"
+                                       class="dcv-var-cb"
+                                       name="variables"
+                                       value="{{ entry.var_def.key }}"
+                                       data-group="{{ grp.key }}"
+                                       {% if entry.active %}checked{% endif %}>
+                                <span class="dcv-var-name">
+                                    {{ entry.var_def.name }}
+                                </span>
+                                <span class="dcv-var-units">
+                                    ({{ entry.var_def.units }})
+                                </span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+
+            <div class="dcv-actions">
+                <button type="submit" class="button bicolor button--icon">
+                    <span class="icon-wrapper">
+                        <svg class="icon icon-tick icon" aria-hidden="true">
+                            <use href="#icon-tick"></use>
+                        </svg>
+                    </span>
+                    {% trans "Save" %}
+                </button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                    {% trans "Cancel" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const master = document.getElementById('dcv-select-all');
+            const allVars = document.querySelectorAll('.dcv-var-cb');
+            const allGroups = document.querySelectorAll('.dcv-group-cb');
+
+            allGroups.forEach(gc => syncGroup(gc.dataset.group));
+            syncMaster();
+
+            master.addEventListener('change', () => {
+                allVars.forEach(v => {
+                    v.checked = master.checked;
+                });
+                allGroups.forEach(g => {
+                    g.checked = master.checked;
+                    g.indeterminate = false;
+                });
+            });
+
+            allGroups.forEach(gc => {
+                gc.addEventListener('change', () => {
+                    document.querySelectorAll(`.dcv-var-cb[data-group="${gc.dataset.group}"]`)
+                        .forEach(v => {
+                            v.checked = gc.checked;
+                        });
+                    syncMaster();
+                });
+            });
+
+            allVars.forEach(v => {
+                v.addEventListener('change', () => {
+                    syncGroup(v.dataset.group);
+                    syncMaster();
+                });
+            });
+
+            function syncGroup(group) {
+                const gc = document.querySelector(`.dcv-group-cb[data-group="${group}"]`);
+                if (!gc) return;
+                const gvars = document.querySelectorAll(`.dcv-var-cb[data-group="${group}"]`);
+                const n = [...gvars].filter(v => v.checked).length;
+                gc.checked = n === gvars.length;
+                gc.indeterminate = n > 0 && n < gvars.length;
+            }
+
+            function syncMaster() {
+                const n = [...allVars].filter(v => v.checked).length;
+                master.checked = n === allVars.length;
+                master.indeterminate = n > 0 && n < allVars.length;
+            }
+        });
+    </script>
+{% endblock %}

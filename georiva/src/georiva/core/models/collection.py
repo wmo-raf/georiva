@@ -236,13 +236,6 @@ class Collection(TimeStampedModel, ClusterableModel):
             return self.time_end.strftime('%Y-%m')
         return self.time_end.strftime('%Y-%m-%d')
     
-    def get_loader(self):
-        """Get the loader instance for this collection."""
-        feed = self.data_feeds.first()
-        if not feed:
-            return None
-        return feed.get_loader(self)
-    
     def source_variables_list(self):
         """Return a list of source variable names in this collection."""
         source_vars = []

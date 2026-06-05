@@ -10,6 +10,14 @@ from georiva.core.models import Catalog, Item, Collection
 register = template.Library()
 
 
+@register.simple_tag
+def datasets_index_url():
+    """Return the URL of the DatasetsIndexPage, or '/datasets/' as fallback."""
+    from georiva.pages.datasets.models import DatasetsIndexPage
+    page = DatasetsIndexPage.objects.filter(live=True).first()
+    return page.url if page else '/datasets/'
+
+
 @register.filter(is_safe=True)
 def to_json(value):
     """Convert a Python object to JSON string."""
@@ -42,6 +50,19 @@ def get_latest_collections(limit=6):
         .select_related('catalog')
         .prefetch_related('catalog__topics')
         .order_by('-time_end', '-modified')[:limit]
+    )
+
+
+@register.simple_tag
+def get_latest_catalogs(limit=6):
+    """Active catalogs ordered by most recently updated item across their collections."""
+    from django.db.models import Max
+    return (
+        Catalog.objects
+        .filter(is_active=True)
+        .prefetch_related('topics')
+        .annotate(latest_updated=Max('collections__time_end'))
+        .order_by('-latest_updated', 'name')[:limit]
     )
 
 

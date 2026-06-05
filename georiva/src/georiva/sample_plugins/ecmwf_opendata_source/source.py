@@ -13,15 +13,6 @@ from typing import Iterator, Optional
 import requests
 
 from georiva.sources.fetch import FileRequest, HTTPFetchStrategy
-from georiva.sources.parameters import (
-    DerivedParameter,
-    Level,
-    Parameter,
-    ParameterGroup,
-    ParameterManifest,
-    SourceKey,
-    expand_levels,
-)
 from georiva.sources.source import BaseDataSource, DataSourceType
 
 
@@ -98,108 +89,6 @@ class ECMWFAIFSDataSource(BaseDataSource):
     @property
     def source_type(self) -> DataSourceType:
         return DataSourceType.FORECAST
-    
-    def get_available_variables(self) -> list[dict]:
-        """Legacy adapter — flattens describe_parameters() into the dict shape."""
-        manifest = self.describe_parameters()
-        variables = []
-        for p in manifest.parameters:
-            entry = {"slug": p.key, "name": p.name, "units": p.units}
-            if p.source.level:
-                entry["level_type"] = p.source.level.type
-                entry["level"] = p.source.level.value
-            else:
-                entry["level_type"] = "surface"
-            variables.append(entry)
-        return variables
-    
-    def describe_parameters(self) -> ParameterManifest:
-        pl = [
-            Level('pressure', lv, 'isobaricInhPa', 'hPa')
-            for lv in self.pressure_levels
-        ]
-        
-        surface_level = Level('heightAboveGround', None, None, None)
-        
-        parameters = [
-            Parameter(
-                '2t', '2m Temperature', 'K',
-                SourceKey('2t', Level('heightAboveGround', 2, 'heightAboveGround', 'm')),
-                value_range=(213.0, 333.0),
-            ),
-            Parameter(
-                '10u', '10m U Wind Component', 'm/s',
-                SourceKey('10u', Level('heightAboveGround', 10, 'heightAboveGround', 'm')),
-                value_range=(-80.0, 80.0),
-            ),
-            Parameter(
-                '10v', '10m V Wind Component', 'm/s',
-                SourceKey('10v', Level('heightAboveGround', 10, 'heightAboveGround', 'm')),
-                value_range=(-80.0, 80.0),
-            ),
-            Parameter(
-                'msl', 'Mean Sea Level Pressure', 'Pa',
-                SourceKey('msl', surface_level),
-                value_range=(87000.0, 108000.0),
-            ),
-            Parameter(
-                'tp', 'Total Precipitation', 'm',
-                SourceKey('tp', surface_level),
-                value_range=(0.0, 0.5),
-            ),
-            Parameter(
-                'sp', 'Surface Pressure', 'Pa',
-                SourceKey('sp', surface_level),
-                value_range=(47000.0, 108000.0),
-            ),
-            *expand_levels('t', 'Temperature', 'K', 't', pl, value_range=(173.0, 333.0)),
-            *expand_levels('u', 'U Wind Component', 'm/s', 'u', pl, value_range=(-120.0, 120.0)),
-            *expand_levels('v', 'V Wind Component', 'm/s', 'v', pl, value_range=(-120.0, 120.0)),
-            *expand_levels('z', 'Geopotential', 'm2 s-2', 'z', pl),
-            *expand_levels('q', 'Specific Humidity', 'kg kg-1', 'q', pl, value_range=(0.0, 0.04)),
-        ]
-        
-        derived = [
-            DerivedParameter(
-                'wind_speed_10m', '10m Wind Speed', 'm/s',
-                transform='vector_magnitude',
-                components={
-                    'u': SourceKey('10u', Level('heightAboveGround', 10, 'heightAboveGround', 'm')),
-                    'v': SourceKey('10v', Level('heightAboveGround', 10, 'heightAboveGround', 'm')),
-                },
-                value_range=(0.0, 80.0),
-            ),
-            DerivedParameter(
-                'wind_dir_10m', '10m Wind Direction', 'deg',
-                transform='vector_direction',
-                components={
-                    'u': SourceKey('10u', Level('heightAboveGround', 10, 'heightAboveGround', 'm')),
-                    'v': SourceKey('10v', Level('heightAboveGround', 10, 'heightAboveGround', 'm')),
-                },
-                value_range=(0.0, 360.0),
-            ),
-        ]
-        
-        # All surface variables come from the same source file; group them together.
-        # All pressure-level variables also come from the same file; group separately.
-        pl_keys = (
-                [f"t_{lv}" for lv in self.pressure_levels]
-                + [f"u_{lv}" for lv in self.pressure_levels]
-                + [f"v_{lv}" for lv in self.pressure_levels]
-                + [f"z_{lv}" for lv in self.pressure_levels]
-                + [f"q_{lv}" for lv in self.pressure_levels]
-        )
-        
-        groups = [
-            ParameterGroup(
-                'surface',
-                'Surface',
-                ['2t', 'msl', 'tp', 'sp', 'wind_speed_10m', 'wind_dir_10m', '10u', '10v'],
-            ),
-            ParameterGroup('pressure_levels', 'Pressure Levels', pl_keys),
-        ]
-        
-        return ParameterManifest(parameters, derived, groups)
     
     # -------------------------------------------------------------------------
     # Latest-run selection (today -> yesterday fallback)

@@ -1,5 +1,7 @@
-{% load wagtailimages_tags wagtailsettings_tags static %}
+{% load wagtailimages_tags wagtailsettings_tags static georiva_tags %}
 {% get_settings use_default_site=True %}
+
+{% datasets_index_url as datasets_url %}
 
 {% with s=settings.home.GeoRivaSettings %}
     <nav class="gr-navbar" role="navigation" aria-label="main navigation">
@@ -35,8 +37,8 @@
                 <a class="gr-navbar-item" href="/">
                     <i class="bi bi-house"></i> Home
                 </a>
-                <a class="gr-navbar-item" href="/#datasets">
-                    <i class="bi bi-layers"></i> Datasets
+                <a class="gr-navbar-item" href="{{ datasets_url }}">
+                    <i class=" bi bi-layers"></i> Datasets
                 </a>
                 {% if s.map_viewer_url %}
                     <a class="gr-navbar-item" href="{{ s.map_viewer_url }}">

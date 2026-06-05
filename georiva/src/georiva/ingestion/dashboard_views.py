@@ -21,35 +21,34 @@ def ingestion_dashboard_api(request):
     from georiva.sources.models import DataFeedRun
     
     from georiva.sources.models import DataFeed as DataFeedModel
-
+    
     collections = (
         Collection.objects
         .select_related("catalog")
         .filter(is_active=True)
         .order_by("catalog__slug", "sort_order", "name")
     )
-
+    
+    from georiva.sources.models import DataFeedCollectionLink
     automated_collection_ids = set(
-        DataFeedModel.objects
-        .filter(collections__isnull=False)
-        .values_list('collections', flat=True)
+        DataFeedCollectionLink.objects.values_list('collection_id', flat=True)
     )
-
+    
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=29)
-
+    
     recent_logs = (
         IngestionLog.objects
         .filter(created_at__date__gte=thirty_days_ago)
         .values("collection_slug", "catalog_slug", "status", "created_at")
         .order_by("created_at")
     )
-
+    
     logs_by_collection = defaultdict(list)
     for log in recent_logs:
         key = (log["catalog_slug"], log["collection_slug"])
         logs_by_collection[key].append(log)
-
+    
     latest_data_feed_runs = {}
     data_feed_run_qs = (
         DataFeedRun.objects
@@ -63,9 +62,9 @@ def ingestion_dashboard_api(request):
     )
     for run in data_feed_run_qs:
         latest_data_feed_runs[run.collection_id] = run
-
+    
     result = []
-
+    
     for collection in collections:
         is_automated = collection.pk in automated_collection_ids
         key = (collection.catalog.slug, collection.slug)
@@ -159,17 +158,17 @@ def collection_ingestion_jobs_api(request, collection_id):
     so the frontend knows whether to keep polling.
     """
     from django.db.models import Case, IntegerField, When
-
+    
     from georiva.core.models import Collection
     from georiva.ingestion.models import IngestionJob
-
+    
     try:
         collection = Collection.objects.select_related("catalog").get(pk=collection_id)
     except Collection.DoesNotExist:
         raise Http404
-
+    
     active_states = ("pending", "started")
-
+    
     jobs = (
         IngestionJob.objects
         .filter(
@@ -186,7 +185,7 @@ def collection_ingestion_jobs_api(request, collection_id):
         .order_by("_active", "-created_at")
         .select_related("ingestion_log")[:50]
     )
-
+    
     result = []
     has_active = False
     for job in jobs:
@@ -206,7 +205,7 @@ def collection_ingestion_jobs_api(request, collection_id):
             "created_at": job.created_at.isoformat(),
             "updated_at": job.updated_at.isoformat(),
         })
-
+    
     return JsonResponse({"jobs": result, "has_active": has_active})
 
 
