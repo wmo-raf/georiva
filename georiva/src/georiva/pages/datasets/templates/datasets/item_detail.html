@@ -10,6 +10,9 @@
     <link rel="stylesheet" href="{% static 'css/georiva-map.css' %}">
     <link rel="stylesheet" href="{% static 'css/georiva-item-detail.css' %}">
     <link rel="stylesheet" href="{% static 'css/vendor/maplibre-gl.css' %}">
+    <style>
+        .gr-eyebrow-link { color: var(--gr-accent); text-decoration: none; }
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -36,8 +39,7 @@
                     </div>
                     <div>
                         <div class="gr-catalog-header-eyebrow">
-                            <a href="{{ collection_url }}"
-                               style="color:var(--gr-accent);text-decoration:none">
+                            <a href="{{ collection_url }}" class="gr-eyebrow-link">
                                 {{ collection.name }}
                             </a>
                         </div>

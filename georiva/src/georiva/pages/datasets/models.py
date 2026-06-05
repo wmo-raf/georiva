@@ -55,20 +55,19 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     
     @path('')
     def index(self, request):
-        """All collections — filterable by topic, resolution, catalog. Paginated."""
-        
-        collections = self._base_collections_qs()
-        collections, filters = self._apply_filters(request, collections)
-        
-        paginator = Paginator(collections, self.collections_per_page)
-        page = paginator.get_page(request.GET.get('page'))
-        
+        """All catalogs — filterable by topic and time resolution. Paginated."""
+
+        catalogs = self._base_catalogs_qs()
+        catalogs, filters = self._apply_catalog_filters(request, catalogs)
+
+        paginator = Paginator(catalogs, self.collections_per_page)
+        page_obj = paginator.get_page(request.GET.get('page'))
+
         return render(request, 'datasets/index.html', {
             'page': self,
-            'collections': page,
-            'paginator': paginator,
+            'catalogs': page_obj,
             'filters': filters,
-            **self._filter_context(),
+            **self._catalog_filter_context(),
         })
     
     @path('<slug:catalog_slug>/')
@@ -325,6 +324,63 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             pass
         return qs
     
+    def _base_catalogs_qs(self):
+        from django.db.models import Count, Max, Q
+        return (
+            Catalog.objects
+            .filter(is_active=True)
+            .prefetch_related('topics')
+            .annotate(
+                collection_count=Count('collections', filter=Q(collections__is_active=True)),
+                latest_updated=Max('collections__time_end'),
+            )
+            .order_by('name')
+        )
+
+    def _apply_catalog_filters(self, request, qs):
+        from django.db.models import Q
+        filters = {
+            'topic': request.GET.get('topic', ''),
+            'resolution': request.GET.get('resolution', ''),
+            'q': request.GET.get('q', ''),
+        }
+
+        if filters['q']:
+            qs = qs.filter(
+                Q(name__icontains=filters['q']) |
+                Q(description__icontains=filters['q'])
+            )
+
+        if filters['topic']:
+            qs = qs.filter(topics__slug=filters['topic'])
+
+        if filters['resolution']:
+            qs = qs.filter(
+                collections__time_resolution=filters['resolution'],
+                collections__is_active=True,
+            ).distinct()
+
+        return qs, filters
+
+    def _catalog_filter_context(self):
+        active_resolutions = (
+            Collection.objects
+            .filter(is_active=True)
+            .exclude(time_resolution='')
+            .values_list('time_resolution', flat=True)
+            .distinct()
+        )
+        choices = dict(Collection.TimeResolution.choices)
+
+        return {
+            'topics': Topic.objects.filter(catalogs__is_active=True).distinct().order_by('sort_order', 'name'),
+            'time_resolutions': [
+                (value, choices[value])
+                for value in Collection.TimeResolution.values
+                if value in active_resolutions
+            ],
+        }
+
     def _base_collections_qs(self):
         return (
             Collection.objects
