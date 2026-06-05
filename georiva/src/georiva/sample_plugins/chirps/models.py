@@ -30,7 +30,7 @@ COLLECTIONS = {
                 "name": "Precipitation",
                 "units": "mm",
                 "source": "band_1",
-                "value_range": (0.0, 2000.0),
+                "value_range": (0.0, 300.0),
             }
         ],
     },
@@ -44,7 +44,7 @@ COLLECTIONS = {
                 "name": "Precipitation",
                 "units": "mm",
                 "source": "band_1",
-                "value_range": (0.0, 2000.0),
+                "value_range": (0.0, 100.0),
             }
         ],
     },
@@ -58,7 +58,7 @@ COLLECTIONS = {
                 "name": "Precipitation",
                 "units": "mm",
                 "source": "band_1",
-                "value_range": (0.0, 2000.0),
+                "value_range": (0.0, 60.0),
             }
         ],
     },
