@@ -147,6 +147,44 @@ Check these when working on related areas:
   Celery conventions, storage architecture, partial failure handling, and other cross-cutting patterns with file:line
   references
 
+## Template conventions (Django/Wagtail HTML templates)
+
+- **No inline styles** — never use `style="..."` attributes. Extract all CSS into a
+  `{% block extra_css %}<style>…</style>{% endblock %}` block and give elements semantic class names.
+- **Modern JS** — use `const` and `let`; never `var`.
+- **JS placement** — all JavaScript goes in `{% block extra_js %}…{% endblock %}` at the bottom of the template. Wrap
+  code in `document.addEventListener('DOMContentLoaded', function () { … })` instead of IIFEs `(function(){ … }())`.
+
+### CSS variable namespaces
+
+Two separate CSS contexts — use the right tokens for each:
+
+| Context                                                          | Variables     | Where defined                   |
+|------------------------------------------------------------------|---------------|---------------------------------|
+| **Wagtail admin** templates (`extends "wagtailadmin/base.html"`) | `--w-color-*` | Wagtail 7 admin CSS             |
+| **Public-facing** templates (`extends "georiva/base.html"`)      | `--gr-*`      | `config/static/css/georiva.css` |
+
+**Never mix them.** Wagtail 7 removed the old unprefixed `--color-*` aliases entirely — use `--w-color-*` only.
+
+Key `--w-color-*` tokens for admin templates:
+
+- Borders: `--w-color-border-furniture`
+- Muted text / secondary: `--w-color-grey-400`
+- Subtle backgrounds / Panel headers bg: `--w-color-grey-50`, `--w-color-grey-100`
+- Menus: `--w-color-surface-menus`, `--w-color-surface-field`, `--w-color-surface-page`
+- Labels / primary text: `--w-color-text-label`
+- White: `--w-color-white`
+- Status colours: `--w-color-info-100`, `--w-color-positive-100`, `--w-color-warning-100`, `--w-color-critical-200`
+
+Key `--gr-*` tokens for public templates (full list in `georiva.css`):
+
+- Brand accent: `--gr-accent`, `--gr-accent-dark`, `--gr-accent-dim`
+- Text on light: `--gr-text-1`, `--gr-text-2`, `--gr-text-3`
+- Light surfaces: `--gr-light`, `--gr-light-1`, `--gr-light-2`
+
+`visualization/templates/visualization/item_preview.html` is a **standalone** template (no Wagtail or georiva base)
+and defines its own `--geo-*` variables locally — leave them as-is.
+
 ## Adding new features or fixing bugs
 
 **IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that

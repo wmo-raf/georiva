@@ -454,8 +454,8 @@
                     </td>
 
                     <td class="w-text-14">
-                        {% if item.ingestion_log %}
-                            {% with log=item.ingestion_log %}
+                        {% with log=item.prefetched_logs|first %}
+                            {% if log %}
                                 {% if log.status == 'completed' %}
                                     <span class="w-status-tag w-status-tag--primary ci-log-tag">
                                         {{ log.get_status_display }}
@@ -474,10 +474,10 @@
                                         {{ log.get_status_display }}
                                     </span>
                                 {% endif %}
-                            {% endwith %}
-                        {% else %}
-                            <span class="w-text-grey-400">—</span>
-                        {% endif %}
+                            {% else %}
+                                <span class="w-text-grey-400">—</span>
+                            {% endif %}
+                        {% endwith %}
                     </td>
 
                     <td>
