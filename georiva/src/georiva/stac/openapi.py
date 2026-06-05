@@ -90,7 +90,7 @@ def get_openapi_schema(request: Request) -> dict:
                     }
                 }
             },
-            "/collections/{catalogId}/{collectionId}": {
+            "/collections/{catalogId}/{collectionId}/{variableId}": {
                 "get": {
                     "tags": ["Collections"],
                     "summary": "Get Collection",
@@ -98,6 +98,7 @@ def get_openapi_schema(request: Request) -> dict:
                     "parameters": [
                         {"$ref": "#/components/parameters/catalogId"},
                         {"$ref": "#/components/parameters/collectionId"},
+                        {"$ref": "#/components/parameters/variableId"},
                     ],
                     "responses": {
                         "200": {
@@ -112,7 +113,7 @@ def get_openapi_schema(request: Request) -> dict:
                     }
                 }
             },
-            "/collections/{catalogId}/{collectionId}/items": {
+            "/collections/{catalogId}/{collectionId}/{variableId}/items": {
                 "get": {
                     "tags": ["Items"],
                     "summary": "List Items",
@@ -120,6 +121,7 @@ def get_openapi_schema(request: Request) -> dict:
                     "parameters": [
                         {"$ref": "#/components/parameters/catalogId"},
                         {"$ref": "#/components/parameters/collectionId"},
+                        {"$ref": "#/components/parameters/variableId"},
                         {"$ref": "#/components/parameters/limit"},
                         {"$ref": "#/components/parameters/datetime"},
                         {"$ref": "#/components/parameters/bbox"},
@@ -137,7 +139,7 @@ def get_openapi_schema(request: Request) -> dict:
                     }
                 }
             },
-            "/collections/{catalogId}/{collectionId}/items/{itemId}": {
+            "/collections/{catalogId}/{collectionId}/{variableId}/items/{itemId}": {
                 "get": {
                     "tags": ["Items"],
                     "summary": "Get Item",
@@ -145,6 +147,7 @@ def get_openapi_schema(request: Request) -> dict:
                     "parameters": [
                         {"$ref": "#/components/parameters/catalogId"},
                         {"$ref": "#/components/parameters/collectionId"},
+                        {"$ref": "#/components/parameters/variableId"},
                         {"$ref": "#/components/parameters/itemId"},
                     ],
                     "responses": {
@@ -222,7 +225,14 @@ def get_openapi_schema(request: Request) -> dict:
                     "in": "path",
                     "required": True,
                     "schema": {"type": "string"},
-                    "description": "Collection identifier (slug)",
+                    "description": "GeoRiva Collection slug",
+                },
+                "variableId": {
+                    "name": "variableId",
+                    "in": "path",
+                    "required": True,
+                    "schema": {"type": "string"},
+                    "description": "Variable slug within the Collection",
                 },
                 "itemId": {
                     "name": "itemId",
