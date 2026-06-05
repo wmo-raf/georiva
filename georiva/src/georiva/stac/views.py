@@ -2,17 +2,21 @@
 GeoRiva STAC API Views
 
 Hierarchical structure:
-- GET /stac/                                              → Root Catalog
-- GET /stac/collections/                                  → List Catalogs (as Collections)
-- GET /stac/collections/{catalog}/                        → Catalog detail (as Collection)
-- GET /stac/collections/{catalog}/{variable}              → Variable as Collection
-- GET /stac/collections/{catalog}/{variable}/items        → List Items (filtered to variable)
-- GET /stac/collections/{catalog}/{variable}/items/{id}   → Item detail (filtered to variable)
-- GET/POST /stac/search                                   → Cross-collection search
+- GET /stac/                                                              → Root Catalog
+- GET /stac/collections/                                                  → List Catalogs (as Collections)
+- GET /stac/collections/{catalog}/                                        → Catalog detail (as Collection)
+- GET /stac/collections/{catalog}/{collection}/{variable}                 → Variable as Collection
+- GET /stac/collections/{catalog}/{collection}/{variable}/items           → List Items (filtered to variable)
+- GET /stac/collections/{catalog}/{collection}/{variable}/items/{id}      → Item detail (filtered to variable)
+- GET/POST /stac/search                                                   → Cross-collection search
 
-STAC Collection = (Catalog, Variable)
-STAC Collection ID = variable.slug
-URL pattern: /collections/{catalog.slug}/{variable.slug}
+STAC Collection = (Catalog, Collection, Variable)
+STAC Collection ID = {collection.slug}/{variable.slug}
+URL pattern: /collections/{catalog.slug}/{collection.slug}/{variable.slug}
+
+The collection slug is required in the URL because multiple GeoRiva collections within
+the same catalog can contain variables with identical slugs (e.g. 'precip' in both
+chirps-monthly and chirps-dekadal).
 
 Implements STAC API v1.0.0
 """
@@ -46,19 +50,17 @@ from .serializers import (
 # Helpers
 # =============================================================================
 
-def _resolve_variable(catalog_slug: str, variable_slug: str) -> Variable:
-    """
-    Resolve a Variable from a catalog slug and variable slug.
-
-    Looks up the variable across all active collections in the catalog.
-    Variable slugs must be unique within a catalog.
-    """
+def _resolve_variable(
+        catalog_slug: str, collection_slug: str, variable_slug: str
+) -> Variable:
+    """Resolve a Variable from its full three-part address."""
     return get_object_or_404(
         Variable.objects.select_related(
             'collection', 'collection__catalog'
         ).filter(
             collection__catalog__slug=catalog_slug,
             collection__catalog__is_active=True,
+            collection__slug=collection_slug,
             collection__is_active=True,
             is_active=True,
         ),
@@ -227,16 +229,17 @@ class STACCollectionDetailView(STACAPIView):
     """
     Get a variable as a STAC Collection.
 
-    GET /stac/collections/{catalog_slug}/{variable_slug}
+    GET /stac/collections/{catalog_slug}/{collection_slug}/{variable_slug}
     """
-    
+
     def get(
             self,
             request: Request,
             catalog_slug: str,
+            collection_slug: str,
             variable_slug: str,
     ) -> Response:
-        variable = _resolve_variable(catalog_slug, variable_slug)
+        variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
         
         data = STACVariableCollectionSerializer(
             variable,
@@ -254,7 +257,7 @@ class STACItemsView(STACGeoAPIView):
     """
     List Items in a variable collection.
 
-    GET /stac/collections/{catalog_slug}/{variable_slug}/items
+    GET /stac/collections/{catalog_slug}/{collection_slug}/{variable_slug}/items
 
     Items are from the variable's parent Collection, with assets
     filtered to only this variable.
@@ -265,17 +268,18 @@ class STACItemsView(STACGeoAPIView):
         - bbox: Bounding box filter [west,south,east,north]
         - token: Pagination token (datetime of last item)
     """
-    
+
     DEFAULT_LIMIT = 100
     MAX_LIMIT = 1000
-    
+
     def get(
             self,
             request: Request,
             catalog_slug: str,
+            collection_slug: str,
             variable_slug: str,
     ) -> Response:
-        variable = _resolve_variable(catalog_slug, variable_slug)
+        variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
         collection = variable.collection
         
         # Parse query parameters
@@ -407,7 +411,7 @@ class STACItemDetailView(STACGeoAPIView):
     """
     Get a specific STAC Item.
 
-    GET /stac/collections/{catalog_slug}/{variable_slug}/items/{item_id}
+    GET /stac/collections/{catalog_slug}/{collection_slug}/{variable_slug}/items/{item_id}
 
     Assets are filtered to the specified variable only.
 
@@ -415,15 +419,16 @@ class STACItemDetailView(STACGeoAPIView):
         - Non-forecast: {YYYYMMDDTHHMMSSz}
         - Forecast: {ref_time}_{valid_time}
     """
-    
+
     def get(
             self,
             request: Request,
             catalog_slug: str,
+            collection_slug: str,
             variable_slug: str,
             item_id: str,
     ) -> Response:
-        variable = _resolve_variable(catalog_slug, variable_slug)
+        variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
         collection = variable.collection
         
         item = self._find_item(collection, item_id)
@@ -592,39 +597,52 @@ class STACSearchView(STACGeoAPIView):
         """
         Filter by collection IDs.
 
-        Collection IDs are in the format {catalog}/{variable}.
-        Resolves to the parent GeoRiva Collection and filters
-        assets to the specified variable.
+        Collection IDs are in the format {catalog}/{collection}/{variable}.
+        Resolves to the GeoRiva Variable and filters items to its parent Collection.
 
         Returns (queryset, variable) — variable is set when filtering
         by a single collection (for asset filtering in serializer).
         """
         if not collections:
             return queryset, None
-        
+
         q_filter = Q()
         resolved_variable = None
-        
+
         for coll_id in collections:
-            if '/' in coll_id:
-                catalog_slug, variable_slug = coll_id.split('/', 1)
+            parts = coll_id.split('/')
+            if len(parts) == 3:
+                catalog_slug, collection_slug, variable_slug = parts
                 try:
                     var = Variable.objects.select_related(
                         'collection', 'collection__catalog'
                     ).get(
                         collection__catalog__slug=catalog_slug,
+                        collection__slug=collection_slug,
                         slug=variable_slug,
                         collection__is_active=True,
                         is_active=True,
                     )
                     q_filter |= Q(collection=var.collection)
-                    # Track variable for single-collection queries
                     if len(collections) == 1:
                         resolved_variable = var
                 except Variable.DoesNotExist:
                     continue
+            elif len(parts) == 2:
+                # Legacy format {catalog}/{variable} — kept for backward compatibility
+                catalog_slug, variable_slug = parts
+                variables = Variable.objects.filter(
+                    collection__catalog__slug=catalog_slug,
+                    slug=variable_slug,
+                    collection__is_active=True,
+                    is_active=True,
+                ).select_related('collection', 'collection__catalog')
+                for var in variables:
+                    q_filter |= Q(collection=var.collection)
+                if len(collections) == 1 and variables.count() == 1:
+                    resolved_variable = variables.first()
             else:
-                # Just variable slug — match across catalogs
+                # Bare variable slug — match across all catalogs
                 variables = Variable.objects.filter(
                     slug=coll_id,
                     collection__is_active=True,
@@ -634,10 +652,10 @@ class STACSearchView(STACGeoAPIView):
                     q_filter |= Q(collection=var.collection)
                 if len(collections) == 1 and variables.count() == 1:
                     resolved_variable = variables.first()
-        
+
         if q_filter:
             queryset = queryset.filter(q_filter)
-        
+
         return queryset, resolved_variable
     
     def _apply_ids_filter(self, queryset, ids: list):
@@ -783,13 +801,14 @@ class STACQueryablesView(STACAPIView):
 
     GET /stac/queryables
     GET /stac/collections/{catalog_slug}/queryables
-    GET /stac/collections/{catalog_slug}/{variable_slug}/queryables
+    GET /stac/collections/{catalog_slug}/{collection_slug}/{variable_slug}/queryables
     """
-    
+
     def get(
             self,
             request: Request,
             catalog_slug: str = None,
+            collection_slug: str = None,
             variable_slug: str = None,
     ) -> Response:
         base_url = request.build_absolute_uri()
@@ -839,8 +858,8 @@ class STACQueryablesView(STACAPIView):
             ]
         
         # Variable-level: add forecast queryables if applicable
-        if catalog_slug and variable_slug:
-            variable = _resolve_variable(catalog_slug, variable_slug)
+        if catalog_slug and collection_slug and variable_slug:
+            variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
             collection = variable.collection
             
             # Variable info

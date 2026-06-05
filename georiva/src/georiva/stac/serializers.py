@@ -9,8 +9,8 @@ STAC hierarchy:
               └── Assets (for that variable only)
 
 Each GeoRiva Variable becomes a STAC Collection.
-STAC Collection ID = variable.slug
-STAC Collection URL = /collections/{catalog.slug}/{variable.slug}
+STAC Collection ID = {collection.slug}/{variable.slug}
+STAC Collection URL = /collections/{catalog.slug}/{collection.slug}/{variable.slug}
 
 If a GeoRiva Collection has 4 variables, it appears as 4 STAC Collections.
 If it has 1 variable, it appears as 1 STAC Collection.
@@ -208,12 +208,15 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         base_url = self._get_base_url()
         variable = self._get_variable()
         catalog_slug = obj.collection.catalog.slug
-        variable_slug = variable.slug if variable else obj.collection.slug
+        collection_slug = obj.collection.slug
+        variable_slug = variable.slug if variable else collection_slug
         item_id = self.get_id(obj)
-        
-        collection_url = f"{base_url}collections/{catalog_slug}/{variable_slug}"
-        item_url = f"{collection_url}/items/{item_id}"
-        
+
+        collection_url = (
+            f"{base_url}collections/{catalog_slug}/{collection_slug}/{variable_slug}/"
+        )
+        item_url = f"{collection_url}items/{item_id}/"
+
         return [
             {"rel": "self", "href": item_url, "type": "application/geo+json"},
             {"rel": "parent", "href": collection_url, "type": "application/json"},
@@ -238,9 +241,9 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
     
     def get_collection(self, obj):
         variable = self._get_variable()
-        catalog_slug = obj.collection.catalog.slug
-        variable_slug = variable.slug if variable else obj.collection.slug
-        return f"{catalog_slug}/{variable_slug}"
+        collection_slug = obj.collection.slug
+        variable_slug = variable.slug if variable else collection_slug
+        return f"{collection_slug}/{variable_slug}"
 
 
 # =============================================================================
@@ -289,7 +292,7 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         return extensions
     
     def get_id(self, obj):
-        return obj.slug
+        return f"{obj.collection.slug}/{obj.slug}"
     
     def get_title(self, obj):
         collection = obj.collection
@@ -382,27 +385,27 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
     def get_links(self, obj):
         base_url = self._get_base_url()
         catalog_slug = obj.collection.catalog.slug
-        
-        catalog_url = f"{base_url}collections/{catalog_slug}"
-        collection_url = f"{catalog_url}/{obj.slug}"
-        
+        collection_slug = obj.collection.slug
+
+        catalog_url = f"{base_url}collections/{catalog_slug}/"
+        collection_url = f"{base_url}collections/{catalog_slug}/{collection_slug}/{obj.slug}/"
+
         links = [
             {"rel": "self", "href": collection_url, "type": "application/json"},
             {"rel": "parent", "href": catalog_url, "type": "application/json",
              "title": obj.collection.catalog.name},
             {"rel": "root", "href": base_url, "type": "application/json"},
-            {"rel": "items", "href": f"{collection_url}/items",
+            {"rel": "items", "href": f"{collection_url}items/",
              "type": "application/geo+json"},
         ]
-        
-        # License link
+
         if obj.collection.catalog.provider_url:
             links.append({
                 "rel": "license",
                 "href": obj.collection.catalog.provider_url,
                 "title": "Data Provider",
             })
-        
+
         return links
     
     def get_providers(self, obj):
@@ -507,15 +510,15 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
     
     def get_links(self, obj):
         base_url = self._get_base_url()
-        catalog_url = f"{base_url}collections/{obj.slug}"
-        
+        catalog_url = f"{base_url}collections/{obj.slug}/"
+
         links = [
             {"rel": "self", "href": catalog_url, "type": "application/json"},
             {"rel": "parent", "href": f"{base_url}collections/",
              "type": "application/json"},
             {"rel": "root", "href": base_url, "type": "application/json"},
         ]
-        
+
         # Child links — one per variable across all collections
         for collection in obj.collections.filter(is_active=True):
             active_variables = list(collection.variables.filter(is_active=True))
@@ -524,7 +527,7 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
                 title = f"{collection.name} - {variable.name}" if variable_count > 1 else variable.name
                 links.append({
                     "rel": "child",
-                    "href": f"{catalog_url}/{variable.slug}",
+                    "href": f"{base_url}collections/{obj.slug}/{collection.slug}/{variable.slug}/",
                     "type": "application/json",
                     "title": title,
                 })
@@ -630,7 +633,7 @@ class STACRootCatalogSerializer(serializers.Serializer, STACBaseURLMixin):
             if catalog.is_active:
                 links.append({
                     "rel": "child",
-                    "href": f"{base_url}collections/{catalog.slug}",
+                    "href": f"{base_url}collections/{catalog.slug}/",
                     "type": "application/json",
                     "title": catalog.name,
                 })
@@ -683,10 +686,10 @@ class STACVariableCollectionListSerializer(serializers.Serializer, STACBaseURLMi
     def get_links(self, obj):
         base_url = self._get_base_url()
         catalog = obj.get('catalog')
-        catalog_url = f"{base_url}collections/{catalog.slug}" if catalog else base_url
-        
+        catalog_url = f"{base_url}collections/{catalog.slug}/" if catalog else base_url
+
         return [
-            {"rel": "self", "href": f"{catalog_url}/",
+            {"rel": "self", "href": f"{catalog_url}collections/",
              "type": "application/json"},
             {"rel": "parent", "href": catalog_url,
              "type": "application/json"},
@@ -739,7 +742,7 @@ class STACItemCollectionSerializer(serializers.Serializer):
                 base_url = request.build_absolute_uri('/api/stac/')
                 collection_url = (
                     f"{base_url}collections/"
-                    f"{collection.catalog.slug}/{variable.slug}"
+                    f"{collection.catalog.slug}/{collection.slug}/{variable.slug}/"
                 )
                 links.append({
                     "rel": "collection", "href": collection_url,
