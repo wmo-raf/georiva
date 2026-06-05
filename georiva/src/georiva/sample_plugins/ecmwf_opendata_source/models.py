@@ -7,10 +7,169 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
+from timezone_field import TimeZoneField
 from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 
+from georiva.sources.collection_definitions import CollectionDefinition, parse_collection_defs
 from georiva.sources.models import DataFeed
+
+# ---------------------------------------------------------------------------
+# ECMWF AIFS collection definitions
+# ---------------------------------------------------------------------------
+
+_PRESSURE_LEVELS = [1000, 925, 850, 700, 500, 300, 250, 200, 50]
+
+
+def _height(name, value):
+    """Source dict for a height-above-ground level."""
+    return {
+        "name": name,
+        "level": {
+            "type": "heightAboveGround",
+            "value": value,
+            "dimension": "heightAboveGround",
+            "unit": "m"
+        }
+    }
+
+
+def _pl_source(name, level):
+    """Source dict for a pressure level."""
+    return {
+        "name": name,
+        "level": {
+            "type": "pressure",
+            "value": level,
+            "dimension": "isobaricInhPa",
+            "unit": "hPa"
+        }
+    }
+
+
+def _pl_vars(base_key, base_name, units, value_range=None):
+    """Generate one variable dict per pressure level."""
+    v = [
+        {
+            "key": f"{base_key}_{lv}",
+            "name": f"{base_name} at {lv} hPa",
+            "units": units,
+            "source": _pl_source(base_key, lv),
+            **({"value_range": value_range} if value_range else {}),
+        }
+        for lv in _PRESSURE_LEVELS
+    ]
+    return v
+
+
+# ---------------------------------------------------------------------------
+# Raw collection spec — the canonical source of truth for this plugin.
+# ---------------------------------------------------------------------------
+COLLECTIONS = {
+    "ecmwf-aifs-surface": {
+        "name": "Surface Variables",
+        "time_resolution": "hourly",
+        "is_forecast": True,
+        "variables": [
+            {
+                "key": "2t",
+                "name": "2m Temperature",
+                "units": "K",
+                "source": _height("2t", 2),
+                "value_range": (213.0, 333.0),
+            },
+            {
+                "key": "10u",
+                "name": "10m U Wind Component",
+                "units": "m/s",
+                "source": _height("10u", 10),
+                "value_range": (-80.0, 80.0),
+            },
+            {
+                "key": "10v",
+                "name": "10m V Wind Component",
+                "units": "m/s",
+                "source": _height("10v", 10),
+                "value_range": (-80.0, 80.0),
+            },
+            {
+                "key": "msl",
+                "name": "Mean Sea Level Pressure",
+                "units": "Pa",
+                "source": "msl",
+                "value_range": (87000.0, 108000.0),
+            },
+            {
+                "key": "tp",
+                "name": "Total Precipitation",
+                "units": "m",
+                "source": "tp",
+                "value_range": (0.0, 0.5),
+            },
+            {
+                "key": "sp",
+                "name": "Surface Pressure",
+                "units": "Pa",
+                "source": "sp",
+                "value_range": (47000.0, 108000.0),
+            },
+            {
+                "key": "wind_speed_10m",
+                "name": "10m Wind Speed",
+                "units": "m/s",
+                "transform": "vector_magnitude",
+                "components": {"u": _height("10u", 10), "v": _height("10v", 10)},
+                "value_range": (0.0, 80.0),
+            },
+            {
+                "key": "wind_dir_10m",
+                "name": "10m Wind Direction",
+                "units": "deg",
+                "transform": "vector_direction",
+                "components": {"u": _height("10u", 10), "v": _height("10v", 10)},
+                "value_range": (0.0, 360.0),
+            },
+        ],
+        "groups": [
+            {
+                "key": "temp-pressure",
+                "name": "Temperature & Pressure",
+                "variable_keys": ["2t", "msl", "sp", "tp"],
+            },
+            {
+                "key": "wind",
+                "name": "10m Wind",
+                "variable_keys": ["10u", "10v", "wind_speed_10m", "wind_dir_10m"],
+            },
+        ],
+    },
+    "ecmwf-aifs-pressure-levels": {
+        "name": "Pressure Level Variables",
+        "time_resolution": "hourly",
+        "is_forecast": True,
+        "variables": [
+            *_pl_vars("t", "Temperature", "K", value_range=(173.0, 333.0)),
+            *_pl_vars("u", "U Wind Component", "m/s", value_range=(-120.0, 120.0)),
+            *_pl_vars("v", "V Wind Component", "m/s", value_range=(-120.0, 120.0)),
+            *_pl_vars("z", "Geopotential", "m2 s-2"),
+            *_pl_vars("q", "Specific Humidity", "kg kg-1", value_range=(0.0, 0.04)),
+        ],
+        "groups": [
+            {
+                "key": f"pl-{lv}",
+                "name": f"{lv} hPa",
+                "variable_keys": [
+                    f"t_{lv}",
+                    f"u_{lv}",
+                    f"v_{lv}",
+                    f"z_{lv}",
+                    f"q_{lv}",
+                ],
+            }
+            for lv in _PRESSURE_LEVELS
+        ],
+    },
+}
 
 RUN_HOUR_CHOICES = [
     (0, "00Z"),
@@ -67,8 +226,7 @@ class ECMWFAIFSDataFeed(DataFeed, TimeStampedModel):
         help_text="Forecast end day (max 15)",
     )
     
-    display_timezone = models.CharField(
-        max_length=64,
+    display_timezone = TimeZoneField(
         default="Africa/Nairobi",
     )
     
@@ -169,7 +327,7 @@ class ECMWFAIFSDataFeed(DataFeed, TimeStampedModel):
             "start_day": 0,
             "end_day": 5,
         }
-
+    
     @classmethod
     def get_catalog_defaults(cls) -> dict:
         return {
@@ -177,7 +335,11 @@ class ECMWFAIFSDataFeed(DataFeed, TimeStampedModel):
             "file_format": "grib2",
             "description": "ECMWF AIFS global forecast — 0.25° resolution, 6-hourly steps.",
         }
-
+    
+    @classmethod
+    def get_collection_definitions(cls) -> list[CollectionDefinition]:
+        return parse_collection_defs(COLLECTIONS)
+    
     @property
     def data_source_cls(self):
         from .source import ECMWFAIFSDataSource
