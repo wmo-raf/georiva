@@ -13,7 +13,7 @@ from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdow
 
 from georiva.core.models import Catalog
 from georiva.core.models import Collection, Item
-from georiva.ingestion.models import IngestionLog
+from georiva.ingestion.models import FileIngestion
 from georiva.sources.models import DataFeedRun
 from .table import LinkColumnWithIcon
 from .viewsets import CatalogViewSet, CollectionViewSet
@@ -192,7 +192,7 @@ def collection_items_list(request, collection_pk):
         .prefetch_related(
             Prefetch(
                 'ingestion_logs',
-                queryset=IngestionLog.objects.order_by('-created_at'),
+                queryset=FileIngestion.objects.order_by('-created_at'),
                 to_attr='prefetched_logs',
             )
         )
@@ -233,16 +233,16 @@ def collection_items_list(request, collection_pk):
             .order_by("-started_at")[:5]
         )
         
-        logs_qs = IngestionLog.objects.filter(
+        logs_qs = FileIngestion.objects.filter(
             collection_slug=collection.slug,
             catalog_slug=collection.catalog.slug,
         )
         ingestion_summary = logs_qs.aggregate(
             total=Count("id"),
-            completed=Count("id", filter=Q(status=IngestionLog.Status.COMPLETED)),
-            failed=Count("id", filter=Q(status=IngestionLog.Status.FAILED)),
-            pending=Count("id", filter=Q(status=IngestionLog.Status.PENDING)),
-            processing=Count("id", filter=Q(status=IngestionLog.Status.PROCESSING)),
+            completed=Count("id", filter=Q(status=FileIngestion.Status.COMPLETED)),
+            failed=Count("id", filter=Q(status=FileIngestion.Status.FAILED)),
+            pending=Count("id", filter=Q(status=FileIngestion.Status.PENDING)),
+            processing=Count("id", filter=Q(status=FileIngestion.Status.PROCESSING)),
             total_items_created=Sum("items_created"),
             total_assets_created=Sum("assets_created"),
         )

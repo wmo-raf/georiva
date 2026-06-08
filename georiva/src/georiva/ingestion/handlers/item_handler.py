@@ -11,7 +11,7 @@ from georiva.core.models import Collection, Item
 from georiva.ingestion.utils import ensure_utc, normalize_bounds
 
 if TYPE_CHECKING:
-    from georiva.ingestion.models import IngestionLog
+    from georiva.ingestion.models import FileIngestion
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class ItemHandler:
             timestamp: datetime,
             reference_time: Optional[datetime],
             source_file: str,
-            ingestion_log: Optional["IngestionLog"],
+            ingestion_log: Optional["FileIngestion"],
             bounds: tuple | list,
             width: int,
             height: int,
@@ -87,7 +87,7 @@ class ItemHandler:
             if update_fields:
                 item.save(update_fields=update_fields)
 
-        # Link the IngestionLog to the Item it produced.
+        # Link the FileIngestion to the Item it produced.
         if ingestion_log and ingestion_log.item_id != item.pk:
             ingestion_log.item = item
             ingestion_log.save(update_fields=["item_id"])

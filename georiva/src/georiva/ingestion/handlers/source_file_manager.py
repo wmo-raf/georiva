@@ -98,7 +98,7 @@ class SourceFileManager:
             → keep in origin so sweep_unprocessed can retry
 
           No items created (complete failure)
-            → keep in origin (IngestionLog already marks it failed)
+            → keep in origin (FileIngestion already marks it failed)
         """
         has_partial_failures = any(
             "Partial failure" in e for e in result.errors
