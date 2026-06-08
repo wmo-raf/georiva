@@ -18,7 +18,7 @@ from georiva.ingestion.handlers import (
     IngestionHandler,
     SourceFileManager,
 )
-from georiva.ingestion.models import IngestionLog
+from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.result import IngestionResult
 
 logger = logging.getLogger(__name__)
@@ -172,8 +172,8 @@ class IngestionService:
                 result.clip_boundary = str(catalog.boundary)
                 self.logger.info("Clipping enabled: %s", catalog.boundary)
             
-            # ── IngestionLog reference ────────────────────────────────────────
-            ingestion_log = IngestionLog.objects.filter(
+            # ── FileIngestion reference ────────────────────────────────────────
+            ingestion_log = FileIngestion.objects.filter(
                 bucket=origin_bucket, file_path=file_path
             ).first()
             

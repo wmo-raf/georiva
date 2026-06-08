@@ -9,6 +9,6 @@ class SourcesConfig(AppConfig):
 
     def ready(self):
         from task_ferry.registry import job_type_registry
-        from .job_types import DataFeedJobType
+        from .job_types import DataArrivalJobType
 
-        job_type_registry.register(DataFeedJobType())
+        job_type_registry.register(DataArrivalJobType())

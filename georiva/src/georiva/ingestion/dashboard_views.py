@@ -17,7 +17,7 @@ def ingestion_dashboard_api(request):
     Returns collection list with ingestion health data for the dashboard.
     """
     from georiva.core.models import Collection
-    from georiva.ingestion.models import IngestionLog
+    from georiva.ingestion.models import FileIngestion
     from georiva.sources.models import DataFeedRun
     
     from georiva.sources.models import DataFeed as DataFeedModel
@@ -38,7 +38,7 @@ def ingestion_dashboard_api(request):
     thirty_days_ago = today - timedelta(days=29)
     
     recent_logs = (
-        IngestionLog.objects
+        FileIngestion.objects
         .filter(created_at__date__gte=thirty_days_ago)
         .values("collection_slug", "catalog_slug", "status", "created_at")
         .order_by("created_at")
@@ -151,7 +151,7 @@ def collection_data_feed_runs_api(request, collection_id):
 
 def collection_ingestion_jobs_api(request, collection_id):
     """
-    Returns IngestionJob history for one collection with live progress from Redis cache.
+    Returns FileIngestionJob history for one collection with live progress from Redis cache.
 
     All ingestion jobs are system-triggered (user=None) so the task_ferry user-scoped
     API cannot be used. Active jobs are sorted first; the response includes has_active
@@ -160,7 +160,7 @@ def collection_ingestion_jobs_api(request, collection_id):
     from django.db.models import Case, IntegerField, When
     
     from georiva.core.models import Collection
-    from georiva.ingestion.models import IngestionJob
+    from georiva.ingestion.models import FileIngestionJob
     
     try:
         collection = Collection.objects.select_related("catalog").get(pk=collection_id)
@@ -170,7 +170,7 @@ def collection_ingestion_jobs_api(request, collection_id):
     active_states = ("pending", "started")
     
     jobs = (
-        IngestionJob.objects
+        FileIngestionJob.objects
         .filter(
             ingestion_log__catalog_slug=collection.catalog.slug,
             ingestion_log__collection_slug=collection.slug,
@@ -211,11 +211,11 @@ def collection_ingestion_jobs_api(request, collection_id):
 
 def collection_ingestion_logs_api(request, collection_id):
     """
-    Returns IngestionLog entries for one collection.
+    Returns FileIngestion entries for one collection.
     Works for both manual and automated collections.
     """
     from georiva.core.models import Collection
-    from georiva.ingestion.models import IngestionLog
+    from georiva.ingestion.models import FileIngestion
     
     try:
         collection = Collection.objects.select_related("catalog").get(pk=collection_id)
@@ -223,7 +223,7 @@ def collection_ingestion_logs_api(request, collection_id):
         raise Http404
     
     logs = (
-        IngestionLog.objects
+        FileIngestion.objects
         .filter(
             catalog_slug=collection.catalog.slug,
             collection_slug=collection.slug,

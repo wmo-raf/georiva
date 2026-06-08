@@ -1,24 +1,24 @@
 """
-GeoRiva IngestionJobType — wraps IngestionService.process_file() so that every
+GeoRiva FileIngestionJobType — wraps IngestionService.process_file() so that every
 file ingestion run is tracked as a task-ferry Job with real-time progress.
 
-The IngestionLog continues to own distributed locking and retry logic.
-The IngestionJob is the operator-visible layer on top.
+FileIngestion owns distributed locking and retry logic.
+FileIngestionJob is the operator-visible layer on top.
 """
 
 import logging
 
 from task_ferry.registry import JobType
-from .models import IngestionJob, IngestionLog
+from .models import FileIngestionJob, FileIngestion
 
 logger = logging.getLogger(__name__)
 
 
-class IngestionJobType(JobType):
+class FileIngestionJobType(JobType):
     type = "file_ingestion"
-    model_class = IngestionJob
+    model_class = FileIngestionJob
     max_count = 50  # many files can be in-flight in parallel
-    
+
     def prepare_values(self, values: dict, user) -> dict:
         for field in ("file_path", "bucket"):
             if not values.get(field):
@@ -27,60 +27,56 @@ class IngestionJobType(JobType):
             "file_path": values["file_path"],
             "bucket": values["bucket"],
         }
-    
-    def run(self, job: IngestionJob, progress) -> None:
+
+    def run(self, job: FileIngestionJob, progress) -> None:
         """
         Execute a single file ingestion.
 
         Steps and their approximate share of the 100-point progress budget:
-            5  — acquire IngestionLog lock
+            5  — acquire FileIngestion lock
             10 — file registered / lock confirmed
             75 — IngestionService.process_file()  (via a child Progress)
             10 — mark completed / record counts
         """
         from georiva.ingestion.service import IngestionService
-        
+
         worker_id = f"task-ferry-job-{job.id}"
-        
+
         # ── Step 1: acquire the distributed lock ──────────────────────────────
         progress.increment(5, state="Acquiring processing lock…")
-        
-        if not IngestionLog.acquire(job.bucket, job.file_path, worker_id):
-            # Another worker already owns this file — nothing to do.
+
+        if not FileIngestion.acquire(job.bucket, job.file_path, worker_id):
             progress.increment(95, state="Skipped — already being processed")
             logger.info(
-                "IngestionJob %d: skipping %s/%s — lock not acquired",
+                "FileIngestionJob %d: skipping %s/%s — lock not acquired",
                 job.id, job.bucket, job.file_path,
             )
             return
-        
-        # Link the Job to the IngestionLog record now that we hold the lock.
+
+        # Link the Job to the FileIngestion record now that we hold the lock.
         try:
-            log = IngestionLog.objects.get(bucket=job.bucket, file_path=job.file_path)
-            job.ingestion_log = log
-            job.save(update_fields=["ingestion_log"])
-        except IngestionLog.DoesNotExist:
+            fi = FileIngestion.objects.get(bucket=job.bucket, file_path=job.file_path)
+            job.file_ingestion = fi
+            job.save(update_fields=["file_ingestion"])
+        except FileIngestion.DoesNotExist:
             pass  # very unlikely; carry on without the FK
-        
+
         progress.increment(10, state="Lock acquired — starting ingestion")
-        
+
         # ── Step 2: run the ingestion pipeline ────────────────────────────────
-        # IngestionService has several internal stages (extract, encode, index).
-        # We can't hook into them directly, so we give this slice one big child
-        # that fires a single callback when the service returns.
         ingest_stage = progress.create_child(represents=75, total=1)
-        
+
         service = IngestionService()
         result = service.process_file(
             file_path=job.file_path,
             origin_bucket=job.bucket,
         )
-        
+
         ingest_stage.increment(1, state="Pipeline complete")
-        
+
         # ── Step 3: record result ─────────────────────────────────────────────
         if result and result.success:
-            IngestionLog.mark_completed(
+            FileIngestion.mark_completed(
                 bucket=job.bucket,
                 file_path=job.file_path,
                 archive_path=result.archive_path,
@@ -95,38 +91,36 @@ class IngestionJobType(JobType):
                 f"{len(result.assets_created)} assets created"
             ))
             logger.info(
-                "IngestionJob %d: completed %s/%s — %d items, %d assets",
+                "FileIngestionJob %d: completed %s/%s — %d items, %d assets",
                 job.id, job.bucket, job.file_path,
                 len(result.items_created), len(result.assets_created),
             )
         else:
             error_msg = "; ".join(result.errors) if result else "No result returned"
-            IngestionLog.mark_failed(
+            FileIngestion.mark_failed(
                 bucket=job.bucket,
                 file_path=job.file_path,
                 error=error_msg,
             )
-            # Raise so JobHandler marks this Job as failed too.
             raise RuntimeError(error_msg)
-    
-    def on_error(self, job: IngestionJob, exc: Exception) -> None:
+
+    def on_error(self, job: FileIngestionJob, exc: Exception) -> None:
         logger.exception(
-            "IngestionJob %d failed for %s/%s: %s",
+            "FileIngestionJob %d failed for %s/%s: %s",
             job.id, job.bucket, job.file_path, exc,
         )
-    
-    def on_cancelled(self, job: IngestionJob) -> None:
-        # Release the IngestionLog lock so sweep can retry the file.
-        if job.ingestion_log_id:
-            IngestionLog.mark_failed(
+
+    def on_cancelled(self, job: FileIngestionJob) -> None:
+        # Release the FileIngestion lock so sweep can retry the file.
+        if job.file_ingestion_id:
+            FileIngestion.mark_failed(
                 bucket=job.bucket,
                 file_path=job.file_path,
                 error="Cancelled by operator",
             )
-    
-    def before_delete(self, job: IngestionJob) -> None:
-        # Unlink from IngestionLog before deleting — the log record should
-        # outlive the job for audit purposes.
-        if job.ingestion_log_id:
-            job.ingestion_log = None
-            job.save(update_fields=["ingestion_log"])
+
+    def before_delete(self, job: FileIngestionJob) -> None:
+        # Unlink before deleting — the FileIngestion record should outlive the job.
+        if job.file_ingestion_id:
+            job.file_ingestion = None
+            job.save(update_fields=["file_ingestion"])

@@ -193,7 +193,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         """Record data feed run result."""
         from django.utils import timezone
         from georiva.core.storage import BucketType
-        from georiva.ingestion.models import IngestionLog
+        from georiva.ingestion.models import FileIngestion
         
         data_feed_run = DataFeedRun.objects.create(
             collection=collection,
@@ -212,7 +212,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         )
         
         if result.stored_paths:
-            IngestionLog.objects.filter(
+            FileIngestion.objects.filter(
                 file_path__in=result.stored_paths,
                 bucket=BucketType.SOURCES,
                 data_feed_run__isnull=True,
@@ -260,7 +260,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         collection — if given, run only for that collection; if None, run for
                      all collections linked to this feed.
 
-        async_run=True  (default) — creates a DataFeedJob with real-time
+        async_run=True  (default) — creates a DataArrivalJob with real-time
                          progress tracking.  Returns the Job instance.
 
         async_run=False — runs synchronously; useful for management commands
@@ -490,40 +490,3 @@ class DataFeedRun(TimeStampedModel):
 # Task-ferry Job model
 # ---------------------------------------------------------------------------
 
-from task_ferry.models import Job  # noqa: E402
-
-
-class DataFeedJob(Job):
-    """
-    Operator-visible record for a single Loader.run() execution.
-
-    Progress is available in real-time via GET /api/jobs/<id>/
-    A companion DataFeedRun is created by DataFeed.record_run() at the
-    end of the run — it holds the aggregate statistics.
-    """
-    
-    data_feed = models.ForeignKey(
-        DataFeed,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="jobs",
-    )
-    collection = models.ForeignKey(
-        "georivacore.Collection",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="data_feed_jobs",
-    )
-    
-    # Live counters updated as each file completes — readable from the API
-    # before the DataFeedRun aggregate is written.
-    files_total = models.IntegerField(default=0)
-    files_fetched = models.IntegerField(default=0)
-    files_skipped = models.IntegerField(default=0)
-    files_failed = models.IntegerField(default=0)
-    bytes_transferred = models.BigIntegerField(default=0)
-    
-    class Meta:
-        app_label = "georivasources"

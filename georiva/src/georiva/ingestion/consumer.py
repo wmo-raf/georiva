@@ -11,7 +11,7 @@ from django.conf import settings
 from georiva.core.filename import validate_path
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType, get_bucket_config
-from georiva.ingestion.models import IngestionLog
+from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def _handle_event(ev: dict):
         logger.warning("Unknown catalog '%s': %s", catalog_slug, key)
         return
     
-    log, created = IngestionLog.register(
+    log, created = FileIngestion.register(
         bucket=origin_bucket,
         file_path=key,
         catalog_slug=catalog_slug,
@@ -80,14 +80,14 @@ def _handle_event(ev: dict):
     )
     
     if not created:
-        if log.status == IngestionLog.Status.PROCESSING:
+        if log.status == FileIngestion.Status.PROCESSING:
             logger.debug("Already processing: %s/%s", origin_bucket, key)
             return
-        if log.status == IngestionLog.Status.COMPLETED and log.has_live_data:
+        if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
             return
-        if log.status == IngestionLog.Status.COMPLETED and not log.has_live_data:
+        if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
             logger.warning("Completed but no live data, re-ingesting: %s", key)
-            IngestionLog.reset_for_reingest(origin_bucket, key)
+            FileIngestion.reset_for_reingest(origin_bucket, key)
     
     process_incoming_file.delay(
         file_path=key,

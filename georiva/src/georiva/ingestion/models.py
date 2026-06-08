@@ -24,9 +24,83 @@ from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
 
 
+class DataArrival(models.Model):
+    """Top-level record for every batch of data entering MinIO, regardless of trigger."""
+
+    class Trigger(models.TextChoices):
+        SCHEDULED = 'scheduled', 'Scheduled'
+        MANUAL_UPLOAD = 'manual_upload', 'Manual Upload'
+
+    class Status(models.TextChoices):
+        UPLOADING = 'uploading', 'Uploading'
+        PENDING = 'pending', 'Pending'
+        PROCESSING = 'processing', 'Processing'
+        COMPLETED = 'completed', 'Completed'
+        PARTIAL = 'partial', 'Partial'
+        FAILED = 'failed', 'Failed'
+        EMPTY = 'empty', 'Empty'
+
+    trigger = models.CharField(max_length=20, choices=Trigger.choices)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    file_path = models.CharField(max_length=500, blank=True, default='')
+
+    data_feed = models.ForeignKey(
+        'georivasources.DataFeed',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='arrivals',
+    )
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='data_arrivals',
+    )
+
+    files_requested = models.IntegerField(default=0)
+    files_fetched = models.IntegerField(default=0)
+    files_skipped = models.IntegerField(default=0)
+    files_failed = models.IntegerField(default=0)
+    files_queued = models.IntegerField(default=0)
+    bytes_transferred = models.BigIntegerField(default=0)
+
+    started_at = models.DateTimeField(default=dj_timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = 'georivaingestion'
+        ordering = ['-created_at']
+
+    @classmethod
+    def find_or_create(cls, file_path: str, trigger: str, **kwargs) -> tuple['DataArrival', bool]:
+        """
+        Find an existing DataArrival by file_path or create a new one.
+
+        Matches by file_path so admin uploads (pre-created with status=uploading)
+        are found when the bucket event fires, preventing duplicate records.
+        Returns (arrival, created).
+        """
+        if file_path:
+            existing = cls.objects.filter(file_path=file_path).first()
+            if existing:
+                return existing, False
+
+        arrival = cls.objects.create(
+            file_path=file_path,
+            trigger=trigger,
+            **kwargs,
+        )
+        return arrival, True
+
+
 @register_snippet
-class IngestionLog(models.Model):
-    """Tracks processing state for every file entering GeoRiva storage."""
+class FileIngestion(models.Model):
+    """Per-file record of processing a single file from MinIO into STAC items and assets."""
     
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
@@ -105,7 +179,7 @@ class IngestionLog(models.Model):
         null=True,
         blank=True,
         on_delete=models.CASCADE,
-        related_name='ingestion_logs',
+        related_name='file_ingestions',
         db_constraint=False,
     )
 
@@ -114,7 +188,15 @@ class IngestionLog(models.Model):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='ingestion_logs',
+        related_name='file_ingestions',
+    )
+
+    data_arrival = models.ForeignKey(
+        DataArrival,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='file_ingestions',
     )
     
     # =========================================================================
@@ -175,7 +257,7 @@ class IngestionLog(models.Model):
     # =========================================================================
     
     @classmethod
-    def register(cls, bucket: str, file_path: str, **kwargs) -> tuple['IngestionLog', bool]:
+    def register(cls, bucket: str, file_path: str, **kwargs) -> tuple['FileIngestion', bool]:
         """
         Register a file in the log. Returns (log, created).
 
@@ -404,18 +486,18 @@ from task_ferry.models import Job  # noqa: E402
 
 
 @register_snippet
-class IngestionJob(Job):
+class FileIngestionJob(Job):
     """
     Operator-visible record for a single file ingestion run.
 
     Lifecycle: pending → started → finished / failed / cancelled
     Progress and state are readable in real-time via GET /api/jobs/<id>/
 
-    The companion IngestionLog handles distributed locking and retry logic
-    independently.  One IngestionJob is created per process_incoming_file
-    invocation; when the run succeeds the IngestionLog FK is populated.
+    The companion FileIngestion handles distributed locking and retry logic
+    independently. One FileIngestionJob is created per process_incoming_file
+    invocation; when the run succeeds the FileIngestion FK is populated.
     """
-    
+
     file_path = models.CharField(
         max_length=500,
         help_text="Path relative to bucket root.",
@@ -424,8 +506,8 @@ class IngestionJob(Job):
         max_length=50,
         help_text="Origin bucket: 'incoming' or 'sources'.",
     )
-    ingestion_log = models.OneToOneField(
-        IngestionLog,
+    file_ingestion = models.OneToOneField(
+        FileIngestion,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
@@ -434,6 +516,45 @@ class IngestionJob(Job):
     )
     items_created = models.IntegerField(default=0)
     assets_created = models.IntegerField(default=0)
-    
+
+    class Meta:
+        app_label = "georivaingestion"
+
+
+class DataArrivalJob(Job):
+    """
+    Operator-visible record for a single DataArrival run (fetch + queue phase).
+
+    Progress is available in real-time via GET /api/jobs/<id>/
+    """
+
+    data_feed = models.ForeignKey(
+        'georivasources.DataFeed',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="arrival_jobs",
+    )
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="data_arrival_jobs",
+    )
+    data_arrival = models.ForeignKey(
+        DataArrival,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="jobs",
+    )
+
+    files_total = models.IntegerField(default=0)
+    files_fetched = models.IntegerField(default=0)
+    files_skipped = models.IntegerField(default=0)
+    files_failed = models.IntegerField(default=0)
+    bytes_transferred = models.BigIntegerField(default=0)
+
     class Meta:
         app_label = "georivaingestion"

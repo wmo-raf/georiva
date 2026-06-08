@@ -11,6 +11,6 @@ class IngestionConfig(AppConfig):
         import georiva.ingestion.signals  # noqa: F401
 
         from task_ferry.registry import job_type_registry
-        from .job_types import IngestionJobType
+        from .job_types import FileIngestionJobType
 
-        job_type_registry.register(IngestionJobType())
+        job_type_registry.register(FileIngestionJobType())

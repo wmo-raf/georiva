@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from georiva.ingestion.clipper import BoundaryClipper
     from georiva.ingestion.encoder import VariableEncoder
     from georiva.ingestion.extractor import VariableExtractor
-    from georiva.ingestion.models import IngestionLog
+    from georiva.ingestion.models import FileIngestion
 
 
 @dataclass
@@ -37,4 +37,4 @@ class IngestionContext:
     # --- Run metadata --------------------------------------------------------
     origin_bucket: str
     reference_time: Optional[datetime] = None
-    ingestion_log: Optional["IngestionLog"] = None
+    ingestion_log: Optional["FileIngestion"] = None

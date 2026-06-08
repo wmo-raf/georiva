@@ -293,16 +293,16 @@ class Loader:
         for another collection in the same DataFeed.
 
         Strategy:
-        1. IngestionLog query (fast, no storage I/O) — only PENDING/PROCESSING
+        1. FileIngestion query (fast, no storage I/O) — only PENDING/PROCESSING
            because COMPLETED means the source file was already deleted by
            SourceFileManager.cleanup().
         2. Direct storage check on sibling collection paths — catches the case
-           where the file exists in MinIO but has no IngestionLog entry
+           where the file exists in MinIO but has no FileIngestion entry
            (dropped event, manual upload, consumer restart, etc.).
         """
         from georiva.core.filename import build_filename
         from georiva.core.storage import BucketType
-        from georiva.ingestion.models import IngestionLog
+        from georiva.ingestion.models import FileIngestion
 
         filename = build_filename(
             original_filename=request.filename,
@@ -311,16 +311,16 @@ class Loader:
         catalog_slug = self.collection.catalog.slug
         collection_slug = self.collection.slug
 
-        # ── 1. IngestionLog check ─────────────────────────────────────────────
+        # ── 1. FileIngestion check ─────────────────────────────────────────────
         log_path = (
-            IngestionLog.objects
+            FileIngestion.objects
             .filter(
                 bucket=BucketType.SOURCES,
                 catalog_slug=catalog_slug,
                 file_path__endswith=f"/{filename}",
                 status__in=[
-                    IngestionLog.Status.PENDING,
-                    IngestionLog.Status.PROCESSING,
+                    FileIngestion.Status.PENDING,
+                    FileIngestion.Status.PROCESSING,
                 ],
             )
             .exclude(collection_slug=collection_slug)
@@ -331,7 +331,7 @@ class Loader:
             return log_path
 
         # ── 2. Direct storage check on sibling collections ────────────────────
-        # Handles files that exist in MinIO but have no IngestionLog entry
+        # Handles files that exist in MinIO but have no FileIngestion entry
         # (dropped event, manual upload, consumer restart, etc.).
         if self.data_feed:
             for link in self.data_feed.collection_links.select_related('collection__catalog').exclude(

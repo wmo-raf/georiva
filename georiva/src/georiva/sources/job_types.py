@@ -1,5 +1,5 @@
 """
-GeoRiva DataFeedJobType — wraps Loader.run() so every data-source fetch is
+GeoRiva DataArrivalJobType — wraps Loader.run() so every data-source fetch is
 tracked as a task-ferry Job with real-time per-file progress.
 
 If collection_id is provided, only that collection is run.
@@ -11,25 +11,27 @@ import logging
 
 from task_ferry.registry import JobType
 
-from .models import DataFeedJob
-
 logger = logging.getLogger(__name__)
 
 
-class DataFeedJobType(JobType):
+class DataArrivalJobType(JobType):
     type = "data_source_load"
-    model_class = DataFeedJob
     max_count = 5
+
+    @property
+    def model_class(self):
+        from georiva.ingestion.models import DataArrivalJob
+        return DataArrivalJob
 
     def prepare_values(self, values: dict, user) -> dict:
         if not values.get("data_feed_id"):
             raise ValueError("'data_feed_id' is required.")
         return {
             "data_feed_id": values["data_feed_id"],
-            "collection_id": values.get("collection_id"),  # None → all collections
+            "collection_id": values.get("collection_id"),
         }
 
-    def run(self, job: DataFeedJob, progress) -> None:
+    def run(self, job, progress) -> None:
         """
         Execute Loader runs for one or all collections in the DataFeed.
 
@@ -37,7 +39,7 @@ class DataFeedJobType(JobType):
         Within each collection's slice:
           - small portion for request planning
           - rest for file fetches (one tick per file)
-          - small portion for recording the DataFeedRun
+          - small portion for recording the DataArrival
         """
         from georiva.core.models import Collection
         from .loader import Loader
@@ -68,7 +70,6 @@ class DataFeedJobType(JobType):
             progress.increment(95, state="No collections linked to this feed")
             return
 
-        # Remaining 95 points split evenly across collections
         per_col_budget = 95 // len(collections)
 
         for i, collection in enumerate(collections, 1):
@@ -87,7 +88,7 @@ class DataFeedJobType(JobType):
             job.save(update_fields=["files_total"])
 
             logger.info(
-                "DataFeedJob %d (%s): %d files to fetch",
+                "DataArrivalJob %d (%s): %d files to fetch",
                 job.id, col_label, len(requests),
             )
 
@@ -104,9 +105,7 @@ class DataFeedJobType(JobType):
                 job.files_fetched += 1
                 job.bytes_transferred += fetch_result.bytes_transferred or 0
                 job.save(update_fields=["files_fetched", "bytes_transferred"])
-                _stage.increment(
-                    state=f"[{_label}] {request.filename}"
-                )
+                _stage.increment(state=f"[{_label}] {request.filename}")
 
             loader = Loader(
                 data_source=data_source,
@@ -123,23 +122,23 @@ class DataFeedJobType(JobType):
             data_feed.record_run(result, collection)
 
             logger.info(
-                "DataFeedJob %d (%s): %s",
+                "DataArrivalJob %d (%s): %s",
                 job.id, col_label, result.summary(),
             )
 
             if result.files_failed > 0 and result.files_fetched == 0:
                 logger.error(
-                    "DataFeedJob %d (%s): all fetches failed — %s",
+                    "DataArrivalJob %d (%s): all fetches failed — %s",
                     job.id, col_label, "; ".join(result.errors[:3]),
                 )
 
-    def on_error(self, job: DataFeedJob, exc: Exception) -> None:
+    def on_error(self, job, exc: Exception) -> None:
         logger.exception(
-            "DataFeedJob %d failed (data_feed=%s, collection=%s): %s",
+            "DataArrivalJob %d failed (data_feed=%s, collection=%s): %s",
             job.id, job.data_feed_id, job.collection_id, exc,
         )
 
-    def before_delete(self, job: DataFeedJob) -> None:
+    def before_delete(self, job) -> None:
         job.data_feed = None
         job.collection = None
         job.save(update_fields=["data_feed", "collection"])
