@@ -189,3 +189,17 @@ and defines its own `--geo-*` variables locally — leave them as-is.
 
 **IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that
 branch for the reminder of the session
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`wmo-raf/georiva`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Using the five canonical default label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
