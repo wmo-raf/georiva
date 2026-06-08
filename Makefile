@@ -25,7 +25,7 @@ LOG_ARGS ?= --tail 100
 	dev-up dev-down dev-stop dev-restart dev-build dev-ps dev-logs \
 	dev-app-logs dev-worker-logs dev-beat-logs \
 	dev-shell dev-worker-shell dev-beat-shell \
-	dev-migrate dev-makemigrations
+	dev-migrate dev-makemigrations dev-test
 
 # ======================
 # PROD (default)
@@ -143,3 +143,12 @@ dev-migrate:
 
 dev-makemigrations:
 	$(DEV_DC) exec $(APP) georiva makemigrations
+
+# Run tests bypassing PgBouncer (which cannot CREATE DATABASE).
+# Reads DB credentials from .env and connects directly to georiva-db.
+# Usage: make dev-test TEST_ARGS="georiva.ingestion.tests -v 2"
+dev-test:
+	@export $$(grep -v '^[[:space:]]*#' .env | grep -v '^[[:space:]]*$$' | grep -v '^UID=' | xargs) && \
+	$(DEV_DC) exec \
+	  -e "DATABASE_URL=timescalegis://$$GEORIVA_DB_USER:$$GEORIVA_DB_PASSWORD@georiva-db:5432/$$GEORIVA_DB_NAME" \
+	  $(APP) georiva test --keepdb $(TEST_ARGS)

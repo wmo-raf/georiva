@@ -11,7 +11,7 @@ from django.conf import settings
 from georiva.core.filename import validate_path
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType, get_bucket_config
-from georiva.ingestion.models import FileIngestion
+from georiva.ingestion.models import DataArrival, FileIngestion
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -71,12 +71,21 @@ def _handle_event(ev: dict):
         logger.warning("Unknown catalog '%s': %s", catalog_slug, key)
         return
     
+    arrival, arrival_created = DataArrival.find_or_create(
+        file_path=key,
+        trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+    )
+    if not arrival_created and arrival.status == DataArrival.Status.UPLOADING:
+        arrival.status = DataArrival.Status.PENDING
+        arrival.save(update_fields=['status', 'updated_at'])
+
     log, created = FileIngestion.register(
         bucket=origin_bucket,
         file_path=key,
         catalog_slug=catalog_slug,
         collection_slug=collection_slug or "",
         reference_time=meta.get("reference_time"),
+        data_arrival=arrival,
     )
     
     if not created:
