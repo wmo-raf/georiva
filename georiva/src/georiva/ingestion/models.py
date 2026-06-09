@@ -59,6 +59,8 @@ class DataArrival(models.Model):
         related_name='data_arrivals',
     )
 
+    error_message = models.TextField(blank=True, default='')
+
     files_requested = models.IntegerField(default=0)
     files_fetched = models.IntegerField(default=0)
     files_skipped = models.IntegerField(default=0)
