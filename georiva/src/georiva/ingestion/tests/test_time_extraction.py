@@ -78,7 +78,7 @@ class ContentFallbackTests(SimpleTestCase):
         mock_plugin.get_timestamps.return_value = [expected_ts]
 
         with patch("georiva.ingestion.time_extraction.format_registry") as mock_registry:
-            mock_registry.get_plugin_for.return_value = mock_plugin
+            mock_registry.get_for_file.return_value = mock_plugin
             result = extract_times("unrecognised.grib2", "YYYYMMDD", file_obj=BytesIO(b"fake"))
 
         self.assertEqual(result["valid_time"], expected_ts)
@@ -87,14 +87,14 @@ class ContentFallbackTests(SimpleTestCase):
         with patch("georiva.ingestion.time_extraction.format_registry") as mock_registry:
             result = extract_times("file.tif", "YYYYMMDD", file_obj=BytesIO(b"fake"))
 
-        mock_registry.get_plugin_for.assert_not_called()
+        mock_registry.get_for_file.assert_not_called()
         self.assertEqual(result, {})
 
     def test_content_fallback_not_called_when_both_fields_resolved_from_filename(self):
         with patch("georiva.ingestion.time_extraction.format_registry") as mock_registry:
             result = extract_times("GR--20250115T0600--20250116.grib2", "YYYYMMDD", file_obj=BytesIO(b"fake"))
 
-        mock_registry.get_plugin_for.assert_not_called()
+        mock_registry.get_for_file.assert_not_called()
         self.assertIn("reference_time", result)
         self.assertIn("valid_time", result)
 

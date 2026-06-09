@@ -70,7 +70,7 @@ def _fill_from_content(filename: str, file_obj, result: dict):
             tmp.write(file_obj.read())
             tmp_path = tmp.name
 
-        plugin = format_registry.get_plugin_for(tmp_path)
+        plugin = format_registry.get_for_file(tmp_path)
         if plugin is None:
             return
 

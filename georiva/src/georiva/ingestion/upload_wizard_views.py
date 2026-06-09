@@ -135,7 +135,7 @@ def upload_wizard_step3(request):
                     tmp.write(chunk)
                 tmp_path = tmp.name
 
-            plugin = format_registry.get_plugin_for(tmp_path)
+            plugin = format_registry.get_for_file(tmp_path)
             if plugin is None:
                 messages.error(request, _("Unsupported file format: %s") % uploaded.name)
                 return render(request, "georivaingestion/wizard_step3_sample.html", {

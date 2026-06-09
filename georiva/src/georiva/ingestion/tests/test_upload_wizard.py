@@ -131,7 +131,7 @@ class Step3SampleFileTests(TestCase):
             {"name": "2t", "long_name": "2m temperature", "units": "K"},
         ]
         with patch("georiva.ingestion.upload_wizard_views.format_registry") as mock_reg:
-            mock_reg.get_plugin_for.return_value = mock_plugin
+            mock_reg.get_for_file.return_value = mock_plugin
             response = self.client.post(STEP3_URL, {
                 "sample_file": BytesIO(b"fake-grib-content"),
             }, format="multipart", **{"CONTENT_TYPE": "multipart/form-data"})
@@ -147,7 +147,7 @@ class Step3SampleFileTests(TestCase):
         sample = BytesIO(b"fake")
         sample.name = "sample.grib2"
         with patch("georiva.ingestion.upload_wizard_views.format_registry") as mock_reg:
-            mock_reg.get_plugin_for.return_value = mock_plugin
+            mock_reg.get_for_file.return_value = mock_plugin
             response = self.client.post(STEP3_URL, {"sample_file": sample})
 
         self.assertRedirects(response, STEP4_URL, fetch_redirect_response=False)
