@@ -17,77 +17,63 @@ def ingestion_dashboard_api(request):
     Returns collection list with ingestion health data for the dashboard.
     """
     from georiva.core.models import Collection
-    from georiva.ingestion.models import FileIngestion
-    from georiva.sources.models import DataFeedRun
-    
-    from georiva.sources.models import DataFeed as DataFeedModel
-    
+    from georiva.ingestion.models import DataArrival, FileIngestion
+    from georiva.sources.models import DataFeedCollectionLink
+
     collections = (
         Collection.objects
         .select_related("catalog")
         .filter(is_active=True)
         .order_by("catalog__slug", "sort_order", "name")
     )
-    
-    from georiva.sources.models import DataFeedCollectionLink
+
     automated_collection_ids = set(
         DataFeedCollectionLink.objects.values_list('collection_id', flat=True)
     )
-    
+
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=29)
-    
+
     recent_logs = (
         FileIngestion.objects
         .filter(created_at__date__gte=thirty_days_ago)
         .values("collection_slug", "catalog_slug", "status", "created_at")
         .order_by("created_at")
     )
-    
+
     logs_by_collection = defaultdict(list)
     for log in recent_logs:
         key = (log["catalog_slug"], log["collection_slug"])
         logs_by_collection[key].append(log)
-    
-    latest_data_feed_runs = {}
-    data_feed_run_qs = (
-        DataFeedRun.objects
-        .filter(
-            collection__in=collections,
-            collection_id__in=automated_collection_ids,
-        )
+
+    latest_arrivals = {}
+    for arrival in (
+        DataArrival.objects
+        .filter(collection__in=collections)
         .order_by("collection_id", "-started_at")
         .distinct("collection_id")
-        .select_related("collection")
-    )
-    for run in data_feed_run_qs:
-        latest_data_feed_runs[run.collection_id] = run
-    
+    ):
+        latest_arrivals[arrival.collection_id] = arrival
+
     result = []
-    
+
     for collection in collections:
         is_automated = collection.pk in automated_collection_ids
         key = (collection.catalog.slug, collection.slug)
         logs = logs_by_collection.get(key, [])
-        
+
         sparkline = _build_sparkline(logs, today)
-        
+
         last_run_at = None
         last_run_status = None
-        
-        if is_automated:
-            run = latest_data_feed_runs.get(collection.pk)
-            if run:
-                last_run_at = run.started_at.isoformat()
-                last_run_status = run.status
-        else:
-            if logs:
-                latest_log = max(logs, key=lambda l: l["created_at"])
-                last_run_at = latest_log["created_at"].isoformat()
-                last_run_status = latest_log["status"]
-        
+
+        arrival = latest_arrivals.get(collection.pk)
+        if arrival:
+            last_run_at = arrival.started_at.isoformat()
+            last_run_status = arrival.status
+
         status = _derive_status(sparkline, last_run_status)
-        
+
         result.append({
             "id": collection.pk,
             "slug": collection.slug,
@@ -102,7 +88,7 @@ def ingestion_dashboard_api(request):
             "status": status,
             "sparkline": sparkline,
         })
-    
+
     return JsonResponse({"collections": result})
 
 
@@ -110,43 +96,45 @@ def ingestion_dashboard_api(request):
 # Drawer detail APIs
 # =============================================================================
 
-def collection_data_feed_runs_api(request, collection_id):
+def collection_data_arrivals_api(request, collection_id):
     """
-    Returns DataFeedRun history for one collection (automated only).
+    Returns DataArrival history for one collection.
     """
     from georiva.core.models import Collection
-    from georiva.sources.models import DataFeedRun
-    
+    from georiva.ingestion.models import DataArrival
+
     try:
         collection = Collection.objects.get(pk=collection_id)
     except Collection.DoesNotExist:
         raise Http404
-    
-    runs = (
-        DataFeedRun.objects
+
+    arrivals = (
+        DataArrival.objects
         .filter(collection=collection)
         .order_by("-started_at")[:100]
     )
-    
+
     result = []
-    for run in runs:
+    for arrival in arrivals:
+        duration = None
+        if arrival.finished_at and arrival.started_at:
+            duration = (arrival.finished_at - arrival.started_at).total_seconds()
         result.append({
-            "id": run.pk,
-            "status": run.status,
-            "started_at": run.started_at.isoformat(),
-            "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-            "duration_seconds": run.duration_seconds,
-            "run_time": run.run_time.isoformat() if run.run_time else None,
-            "files_requested": run.files_requested,
-            "files_fetched": run.files_fetched,
-            "files_skipped": run.files_skipped,
-            "files_failed": run.files_failed,
-            "files_queued": run.files_queued,
-            "bytes_transferred": run.bytes_transferred,
-            "errors": run.errors or [],
+            "id": arrival.pk,
+            "trigger": arrival.trigger,
+            "status": arrival.status,
+            "started_at": arrival.started_at.isoformat(),
+            "finished_at": arrival.finished_at.isoformat() if arrival.finished_at else None,
+            "duration_seconds": duration,
+            "files_requested": arrival.files_requested,
+            "files_fetched": arrival.files_fetched,
+            "files_skipped": arrival.files_skipped,
+            "files_failed": arrival.files_failed,
+            "files_queued": arrival.files_queued,
+            "bytes_transferred": arrival.bytes_transferred,
         })
-    
-    return JsonResponse({"runs": result})
+
+    return JsonResponse({"arrivals": result})
 
 
 def collection_ingestion_jobs_api(request, collection_id):
@@ -172,8 +160,8 @@ def collection_ingestion_jobs_api(request, collection_id):
     jobs = (
         FileIngestionJob.objects
         .filter(
-            ingestion_log__catalog_slug=collection.catalog.slug,
-            ingestion_log__collection_slug=collection.slug,
+            file_ingestion__catalog_slug=collection.catalog.slug,
+            file_ingestion__collection_slug=collection.slug,
         )
         .annotate(
             _active=Case(
@@ -183,7 +171,7 @@ def collection_ingestion_jobs_api(request, collection_id):
             )
         )
         .order_by("_active", "-created_at")
-        .select_related("ingestion_log")[:50]
+        .select_related("file_ingestion")[:50]
     )
     
     result = []

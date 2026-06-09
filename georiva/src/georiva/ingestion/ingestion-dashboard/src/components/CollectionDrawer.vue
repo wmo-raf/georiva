@@ -319,10 +319,10 @@ async function fetchAll(collection) {
 }
 
 async function fetchRuns(id) {
-  const res = await fetch(`/admin/api/ingestion/collections/${id}/loader-runs/`);
+  const res = await fetch(`/admin/api/ingestion/collections/${id}/arrivals/`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  runs.value = data.runs;
+  runs.value = data.arrivals;
 }
 
 async function fetchLogs(id) {
