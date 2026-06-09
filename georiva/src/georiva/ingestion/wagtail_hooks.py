@@ -1,5 +1,6 @@
-from django.urls import path
+from django.urls import path, reverse_lazy
 from wagtail import hooks
+from wagtail.admin.menu import MenuItem
 
 from .panels import IngestionActivityPanel
 
@@ -24,6 +25,31 @@ def register_ingestion_dashboard_urls():
     ]
 
 
+@hooks.register("register_admin_menu_item")
+def register_manual_uploads_menu():
+    from django.utils.translation import gettext as _
+    return MenuItem(
+        _("Manual Uploads"),
+        reverse_lazy("manual_upload_config_list"),
+        icon_name="upload",
+        order=850,
+    )
+
+
+@hooks.register("register_admin_urls")
+def register_manual_upload_config_urls():
+    from .manual_upload_views import (
+        manual_upload_config_list,
+        manual_upload_config_edit,
+        manual_upload_config_delete,
+    )
+    return [
+        path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
+        path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
+        path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
+    ]
+
+
 @hooks.register("register_admin_urls")
 def register_upload_wizard_urls():
     from .upload_wizard_views import (
@@ -32,8 +58,8 @@ def register_upload_wizard_urls():
         upload_wizard_step3,
         upload_wizard_step4,
         upload_wizard_step5,
-        upload_wizard_step6,
         upload_wizard_provision,
+        upload_wizard_upload_sample,
     )
 
     return [
@@ -42,8 +68,8 @@ def register_upload_wizard_urls():
         path("manual-uploads/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
         path("manual-uploads/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
         path("manual-uploads/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
-        path("manual-uploads/wizard/step6/", upload_wizard_step6, name="upload_wizard_step6"),
         path("manual-uploads/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
+        path("manual-uploads/wizard/upload-sample/", upload_wizard_upload_sample, name="upload_wizard_upload_sample"),
     ]
 
 

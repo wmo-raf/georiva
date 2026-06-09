@@ -1,0 +1,72 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Edit configuration" %} — {{ config.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .muc-edit-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+    .muc-vars-section {
+        margin-top: 2em; padding-top: 1em;
+        border-top: 1px solid var(--w-color-border-furniture);
+    }
+    .muc-vars-title { font-weight: 700; color: var(--w-color-text-label); margin-bottom: 0.25em; }
+    .muc-vars-help { color: var(--w-color-grey-400); font-size: 0.9em; margin-bottom: 0.75em; }
+    .muc-vars-table { width: 100%; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=config.name subtitle=_("Edit configuration") icon="edit" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <form method="post" action="">
+        {% csrf_token %}
+        {% for field in form %}
+            {% if field.is_hidden %}
+                {{ field }}
+            {% else %}
+                {% include "wagtailadmin/shared/field.html" %}
+            {% endif %}
+        {% endfor %}
+        <div class="muc-edit-actions">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+                {% trans "Save" %}
+            </button>
+            <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+
+    <div class="muc-vars-section">
+        <div class="muc-vars-title">{% trans "Variables" %}</div>
+        <p class="muc-vars-help">
+            {% trans "Variables are defined when the configuration is created. To tune palettes, value ranges, or transforms, edit the variable in its collection." %}
+        </p>
+        <table class="listing muc-vars-table">
+            <thead>
+                <tr>
+                    <th>{% trans "Variable" %}</th>
+                    <th>{% trans "Display name" %}</th>
+                    <th>{% trans "Units" %}</th>
+                    <th>{% trans "Collection" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for var in variables %}
+                <tr>
+                    <td><code>{{ var.variable_name }}</code></td>
+                    <td>{{ var.long_name|default:"—" }}</td>
+                    <td>{{ var.units|default:"—" }}</td>
+                    <td>
+                        <a href="{% url 'collection:edit' var.collection_id %}">{{ var.collection.name }}</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4">{% trans "No variables configured." %}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

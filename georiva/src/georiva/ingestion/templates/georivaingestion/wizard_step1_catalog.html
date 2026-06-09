@@ -27,6 +27,7 @@
             <label class="w-field__label" for="new_catalog_slug">{% trans "Slug" %} <sup>*</sup></label>
             <input type="text" name="new_catalog_slug" id="new_catalog_slug" class="w-field__input"
                    value="{{ session.new_catalog_slug|default:'' }}" pattern="[a-z0-9\-]+">
+            <p class="w-field__help-text">{% trans "Lowercase letters, digits, and hyphens. Cannot be changed after data is ingested." %}</p>
         </div>
         <div class="w-field__wrapper uwiz-field">
             <label class="w-field__label" for="new_catalog_format">{% trans "File format" %} <sup>*</sup></label>
@@ -36,6 +37,11 @@
                     <option value="{{ value }}" {% if session.new_catalog_format == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
             </select>
+        </div>
+        <div class="w-field__wrapper uwiz-field">
+            <label class="w-field__label" for="new_catalog_description">{% trans "Description" %}</label>
+            <textarea name="new_catalog_description" id="new_catalog_description" class="w-field__input"
+                      rows="2">{{ session.new_catalog_description|default:'' }}</textarea>
         </div>
     </div>
 
@@ -66,6 +72,14 @@
 {{ block.super }}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    const nameInput = document.getElementById('new_catalog_name');
+    const slugInput = document.getElementById('new_catalog_slug');
+    if (nameInput && slugInput) {
+        nameInput.addEventListener('input', function () {
+            slugInput.value = this.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        });
+    }
+
     const modeSelect = document.getElementById('catalog_mode');
     if (!modeSelect) return;
     const sCreate = document.getElementById('section-create');

@@ -1,0 +1,65 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Review" %}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .uwiz-review-table { width: auto; margin-bottom: 1.5em; }
+    .uwiz-review-table th.uwiz-th-top { vertical-align: top; }
+    .uwiz-review-coll { margin-bottom: 0.75em; }
+    .uwiz-review-slug { color: var(--w-color-grey-400); font-size: 0.85em; margin-left: 0.4em; }
+    .uwiz-review-vars { margin: 0.3em 0 0 1.2em; padding: 0; }
+    .uwiz-review-muted { color: var(--w-color-grey-400); }
+</style>
+{% endblock %}
+
+{% block wizard_content %}
+
+<table class="listing uwiz-review-table">
+    <tbody>
+        <tr><th>{% trans "Catalog" %}</th><td>{{ catalog_display }}</td></tr>
+        <tr><th>{% trans "Config name" %}</th><td>{{ session.config_name }}</td></tr>
+        <tr><th>{% trans "Forecast data" %}</th><td>{% if session.is_forecast %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td></tr>
+        {% if session.valid_time_format != "CONTENT" %}
+        <tr><th>{% trans "Filename format" %}</th><td><code>{{ session.valid_time_format }}</code></td></tr>
+        {% else %}
+        <tr><th>{% trans "Time source" %}</th><td>{% trans "From file content" %}</td></tr>
+        {% endif %}
+        <tr>
+            <th class="uwiz-th-top">{% trans "Collections" %}</th>
+            <td>
+                {% for coll in collections_display %}
+                <div class="uwiz-review-coll">
+                    <strong>{{ coll.name }}</strong>
+                    <code class="uwiz-review-slug">/ {{ coll.slug }}</code>
+                    <ul class="uwiz-review-vars">
+                        {% for a in coll.variables %}
+                        <li>
+                            <code>{{ a.variable_name }}</code>
+                            {% if a.long_name %} — {{ a.long_name }}{% endif %}
+                            <span class="uwiz-review-muted">
+                                ({{ a.value_min }} – {{ a.value_max }}
+                                {% if a.unit_display %}{{ a.unit_display }}{% elif a.units %}{{ a.units }}{% endif %})
+                            </span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+<form method="post" action="{% url 'upload_wizard_provision' %}">
+    {% csrf_token %}
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+            {% trans "Create configuration" %}
+        </button>
+        <a href="{% url 'upload_wizard_step4' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+{% endblock %}

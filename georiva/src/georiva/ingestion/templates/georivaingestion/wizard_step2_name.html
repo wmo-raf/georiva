@@ -7,7 +7,7 @@
     <div class="w-field__wrapper uwiz-field--lg">
         <label class="w-field__label" for="config_name">{% trans "Configuration name" %} <sup>*</sup></label>
         <input type="text" name="config_name" id="config_name" class="w-field__input"
-               value="{{ session.config_name|default:'' }}"
+               value="{{ session.config_name|default:default_config_name }}"
                placeholder="{% trans 'e.g. Surface variables' %}" required>
         <p class="w-field__help-text">{% trans "A label to identify this upload configuration, e.g. 'Surface variables' or 'Pressure levels'." %}</p>
     </div>

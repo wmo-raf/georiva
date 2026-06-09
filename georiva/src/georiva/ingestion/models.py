@@ -490,6 +490,7 @@ class ManualUploadConfig(models.Model):
         YYYYMMDDHHMM = 'YYYYMMDDHHMM', 'YYYYMMDDHHMM'
         DDMMYY       = 'DDMMYY',       'DDMMYY'
         YYMMDD       = 'YYMMDD',       'YYMMDD'
+        CONTENT      = 'CONTENT',      'From file content'
 
     catalog = models.ForeignKey(
         'georivacore.Catalog',
@@ -502,11 +503,17 @@ class ManualUploadConfig(models.Model):
 
     class Meta:
         app_label = 'georivaingestion'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['catalog', 'name'],
+                name='unique_manual_upload_config_name_per_catalog',
+            ),
+        ]
 
-    def strptime_pattern(self) -> str:
-        """Return the Python strptime pattern for the configured valid_time_format."""
+    def strptime_pattern(self) -> str | None:
+        """Return the Python strptime pattern, or None for content-based formats."""
         from georiva.ingestion.time_extraction import _FORMAT_PATTERNS
-        return _FORMAT_PATTERNS[self.valid_time_format]
+        return _FORMAT_PATTERNS.get(self.valid_time_format)
 
 
 class ManualUploadConfigVariable(models.Model):

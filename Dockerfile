@@ -5,7 +5,7 @@ ARG GID=9999
 # =============================================================================
 # Builder — install dependencies and compile everything
 # =============================================================================
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS builder
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.12.1 AS builder
 
 ARG UID
 ARG GID
@@ -71,7 +71,7 @@ RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
 # Runtime base — shared between prod and dev
 # Sets up OS-level runtime dependencies, user, and tools.
 # =============================================================================
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.12.1 AS runtime-base
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.12.1 AS runtime-base
 
 ARG UID
 ARG GID

@@ -220,7 +220,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
     
     def _open(self, file_path: Path) -> xr.Dataset:
         """Open a NetCDF file with lazy loading."""
-        return xr.open_dataset(file_path, chunks={})
+        return xr.open_dataset(file_path, chunks={}, engine="netcdf4")
     
     # ------------------------------------------------------------------
     # Internal: time handling
