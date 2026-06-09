@@ -76,6 +76,12 @@ class DataArrival(models.Model):
         app_label = 'georivaingestion'
         ordering = ['-created_at']
 
+    @property
+    def duration_seconds(self):
+        if self.finished_at and self.started_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None
+
     @classmethod
     def find_or_create(cls, file_path: str, trigger: str, **kwargs) -> tuple['DataArrival', bool]:
         """
@@ -183,19 +189,9 @@ class FileIngestion(models.Model):
         db_constraint=False,
     )
 
-    data_feed_run = models.ForeignKey(
-        'georivasources.DataFeedRun',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='file_ingestions',
-    )
-
     data_arrival = models.ForeignKey(
         DataArrival,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         related_name='file_ingestions',
     )
     

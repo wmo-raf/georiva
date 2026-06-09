@@ -50,12 +50,14 @@ class RecordRunCreatesDataArrivalTests(TestCase):
             "test-cat/test-col/file_a.grib2",
             "test-cat/test-col/file_b.grib2",
         ]
+        preliminary = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
         for path in paths:
             FileIngestion.objects.create(
                 bucket=BucketType.SOURCES,
                 file_path=path,
                 catalog_slug="test-cat",
                 collection_slug="test-col",
+                data_arrival=preliminary,
             )
 
         result = LoaderRunResult(files_fetched=2, stored_paths=paths)

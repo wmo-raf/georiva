@@ -103,17 +103,17 @@ def data_feed_list(request):
 
 def data_feed_detail(request, pk):
     """Dashboard view for a single DataFeed."""
-    from georiva.sources.models import DataFeedRun
-    
+    from georiva.ingestion.models import DataArrival
+
     feed = get_object_or_404(DataFeed, pk=pk)
-    
+
     if request.method == "POST" and request.POST.get("action") == "run_now":
         feed.run_now(user=request.user)
         messages.success(request, _("Run started for '%s'.") % feed.name)
         return redirect("data_feed_detail", pk=pk)
-    
+
     recent_runs = (
-        DataFeedRun.objects
+        DataArrival.objects
         .filter(data_feed=feed)
         .select_related("collection")
         .order_by("-started_at")[:20]

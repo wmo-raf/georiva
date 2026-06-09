@@ -80,7 +80,7 @@ class LoaderRunResult:
     
     def summary(self) -> str:
         return (
-            f"DataFeedRun[{self.status}]: "
+            f"LoaderRunResult[{self.status}]: "
             f"{self.files_fetched} fetched, {self.files_skipped} skipped, "
             f"{self.files_failed} failed, {self.bytes_transferred / 1024 / 1024:.1f} MB "
             f"in {self.duration_seconds:.1f}s"

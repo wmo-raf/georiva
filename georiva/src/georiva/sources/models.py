@@ -222,7 +222,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             FileIngestion.objects.filter(
                 file_path__in=result.stored_paths,
                 bucket=BucketType.SOURCES,
-                data_arrival__isnull=True,
             ).update(data_arrival=arrival)
 
         now = timezone.now()
@@ -432,67 +431,6 @@ class DataFeedCollectionLink(PolymorphicModel):
         
         all_fields = panel_fields + ['interval_minutes']
         return modelform_factory(cls, form=base_form_class, fields=all_fields)
-
-
-class DataFeedRun(TimeStampedModel):
-    """Tracks each execution of the DataFeed for a Collection."""
-    
-    class Status(models.TextChoices):
-        RUNNING = 'running', 'Running'
-        SUCCESS = 'success', 'Success'
-        PARTIAL = 'partial', 'Partial'
-        FAILED = 'failed', 'Failed'
-        EMPTY = 'empty', 'Empty'
-        QUEUED = 'queued', 'Queued'
-    
-    collection = models.ForeignKey(
-        'georivacore.Collection',
-        on_delete=models.CASCADE,
-        related_name='data_feed_runs',
-    )
-    
-    data_feed = models.ForeignKey(
-        'georivasources.DataFeed',
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='runs',
-    )
-    # Timing
-    started_at = models.DateTimeField()
-    finished_at = models.DateTimeField(null=True, blank=True)
-    
-    # Status
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
-    
-    # Counts
-    files_requested = models.IntegerField(default=0)
-    files_fetched = models.IntegerField(default=0)
-    files_skipped = models.IntegerField(default=0)
-    files_failed = models.IntegerField(default=0)
-    files_queued = models.IntegerField(default=0)
-    bytes_transferred = models.BigIntegerField(default=0)
-    
-    # Context
-    run_time = models.DateTimeField(null=True, blank=True)  # forecast reference time
-    
-    # Errors (last 50)
-    errors = models.JSONField(default=list, blank=True)
-    
-    class Meta:
-        ordering = ['-started_at']
-        indexes = [
-            models.Index(fields=['collection', '-started_at']),
-            models.Index(fields=['status']),
-        ]
-    
-    def __str__(self):
-        return f"{self.collection} | {self.started_at:%Y-%m-%d %H:%M} | {self.status}"
-    
-    @property
-    def duration_seconds(self):
-        if self.finished_at:
-            return (self.finished_at - self.started_at).total_seconds()
-        return None
 
 
 # ---------------------------------------------------------------------------

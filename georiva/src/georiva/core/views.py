@@ -14,7 +14,6 @@ from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdow
 from georiva.core.models import Catalog
 from georiva.core.models import Collection, Item
 from georiva.ingestion.models import FileIngestion
-from georiva.sources.models import DataFeedRun
 from .table import LinkColumnWithIcon
 from .viewsets import CatalogViewSet, CollectionViewSet
 
@@ -228,11 +227,6 @@ def collection_items_list(request, collection_pk):
     ingestion_summary = {}
 
     if data_feed:
-        recent_runs = list(
-            DataFeedRun.objects.filter(collection=collection)
-            .order_by("-started_at")[:5]
-        )
-        
         logs_qs = FileIngestion.objects.filter(
             collection_slug=collection.slug,
             catalog_slug=collection.catalog.slug,
