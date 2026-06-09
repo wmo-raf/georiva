@@ -1,0 +1,49 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Variables" %}{% endblock %}
+{% block wizard_content %}
+<form method="post" action="">
+    {% csrf_token %}
+
+    <table class="listing" style="width:100%;margin-bottom:1.25em;">
+        <thead>
+            <tr>
+                <th>{% trans "Variable" %}</th>
+                <th>{% trans "Long name" %}</th>
+                <th>{% trans "Units" %}</th>
+                <th>{% trans "Collection" %} <sup>*</sup></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for var in variables %}
+            <tr>
+                <td><code>{{ var.name }}</code></td>
+                <td>{{ var.long_name }}</td>
+                <td>{{ var.units }}</td>
+                <td>
+                    <select name="collection_{{ var.name }}" class="w-field__input" required>
+                        <option value="">— {% trans "Choose" %} —</option>
+                        {% for col in collections %}
+                            <option value="{{ col.pk }}"
+                                {% for a in session.assignments %}
+                                    {% if a.variable_name == var.name and a.collection_id == col.pk %}selected{% endif %}
+                                {% endfor %}>
+                                {{ col.catalog.name }} / {{ col.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% trans "Next: Review" %}
+        </button>
+        <a href="{% url 'upload_wizard_step4' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+{% endblock %}

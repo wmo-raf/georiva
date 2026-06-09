@@ -18,8 +18,8 @@ STEP_LABELS = [
     _("Catalog"),
     _("Config Name"),
     _("Sample File"),
+    _("Format & Timing"),
     _("Variables"),
-    _("Filename Format"),
     _("Review"),
 ]
 
@@ -48,6 +48,7 @@ def upload_wizard_step1(request):
         new_catalog_name = request.POST.get("new_catalog_name", "").strip()
         new_catalog_slug = request.POST.get("new_catalog_slug", "").strip() or slugify(new_catalog_name)
         new_catalog_format = request.POST.get("new_catalog_format", "")
+        new_catalog_description = request.POST.get("new_catalog_description", "").strip()
 
         errors = []
         if catalog_mode == "select" and not catalog_id:
@@ -71,6 +72,7 @@ def upload_wizard_step1(request):
                 "new_catalog_name": new_catalog_name if catalog_mode == "create" else None,
                 "new_catalog_slug": new_catalog_slug if catalog_mode == "create" else None,
                 "new_catalog_format": new_catalog_format if catalog_mode == "create" else None,
+                "new_catalog_description": new_catalog_description if catalog_mode == "create" else None,
             })
             _save_session(request, session)
             return redirect("upload_wizard_step2")
@@ -103,8 +105,20 @@ def upload_wizard_step2(request):
             _save_session(request, session)
             return redirect("upload_wizard_step3")
 
+    default_config_name = session.get("config_name", "")
+    if not default_config_name:
+        if session.get("catalog_mode") == "create" and session.get("new_catalog_name"):
+            default_config_name = f"{session['new_catalog_name']} Config"
+        elif session.get("catalog_id"):
+            from georiva.core.models import Catalog as _Catalog
+            try:
+                default_config_name = f"{_Catalog.objects.get(pk=session['catalog_id']).name} Config"
+            except _Catalog.DoesNotExist:
+                pass
+
     return render(request, "georivaingestion/wizard_step2_name.html", {
         "session": session,
+        "default_config_name": default_config_name,
         "step": 2,
         "step_labels": STEP_LABELS,
     })
@@ -167,6 +181,7 @@ def upload_wizard_step3(request):
             })
 
         session["variables"] = variables
+        session["sample_filename"] = uploaded.name
         _save_session(request, session)
         return redirect("upload_wizard_step4")
 
@@ -178,59 +193,15 @@ def upload_wizard_step3(request):
 
 
 # =============================================================================
-# Step 4 — Assign variables to Collections, set is_forecast
+# Step 4 — Filename format & forecast timing
 # =============================================================================
 
 def upload_wizard_step4(request):
-    from georiva.core.models import Collection
+    from georiva.ingestion.models import ManualUploadConfig
 
     session = _session(request)
     if not session.get("variables"):
         return redirect("upload_wizard_step3")
-
-    variables = session["variables"]
-    collections = Collection.objects.select_related("catalog").order_by("catalog__name", "name")
-
-    if request.method == "POST":
-        is_forecast = request.POST.get("is_forecast") == "1"
-        assignments = []
-        errors = []
-
-        for var in variables:
-            col_id = request.POST.get(f"collection_{var['name']}")
-            if not col_id:
-                errors.append(_("Please assign variable '%s' to a collection.") % var["name"])
-            else:
-                assignments.append({"variable_name": var["name"], "collection_id": int(col_id)})
-
-        if errors:
-            for e in errors:
-                messages.error(request, e)
-        else:
-            session["is_forecast"] = is_forecast
-            session["assignments"] = assignments
-            _save_session(request, session)
-            return redirect("upload_wizard_step5")
-
-    return render(request, "georivaingestion/wizard_step4_variables.html", {
-        "session": session,
-        "variables": variables,
-        "collections": collections,
-        "step": 4,
-        "step_labels": STEP_LABELS,
-    })
-
-
-# =============================================================================
-# Step 5 — Filename format
-# =============================================================================
-
-def upload_wizard_step5(request):
-    from georiva.ingestion.models import ManualUploadConfig
-
-    session = _session(request)
-    if "assignments" not in session:
-        return redirect("upload_wizard_step4")
 
     format_choices = ManualUploadConfig.ValidTimeFormat.choices
 
@@ -245,17 +216,62 @@ def upload_wizard_step5(request):
 
     if request.method == "POST":
         valid_time_format = request.POST.get("valid_time_format", "")
+        is_forecast = request.POST.get("is_forecast") == "1"
         if not valid_time_format:
             messages.error(request, _("Please choose a filename format."))
         else:
             session["valid_time_format"] = valid_time_format
+            session["is_forecast"] = is_forecast
             _save_session(request, session)
-            return redirect("upload_wizard_step6")
+            return redirect("upload_wizard_step5")
 
-    return render(request, "georivaingestion/wizard_step5_format.html", {
+    return render(request, "georivaingestion/wizard_step4_format.html", {
         "session": session,
         "format_choices": format_choices,
         "format_examples": FORMAT_EXAMPLES,
+        "sample_filename": session.get("sample_filename", ""),
+        "step": 4,
+        "step_labels": STEP_LABELS,
+    })
+
+
+# =============================================================================
+# Step 5 — Assign variables to Collections
+# =============================================================================
+
+def upload_wizard_step5(request):
+    from georiva.core.models import Collection
+
+    session = _session(request)
+    if not session.get("valid_time_format"):
+        return redirect("upload_wizard_step4")
+
+    variables = session["variables"]
+    collections = Collection.objects.select_related("catalog").order_by("catalog__name", "name")
+
+    if request.method == "POST":
+        assignments = []
+        errors = []
+
+        for var in variables:
+            col_id = request.POST.get(f"collection_{var['name']}")
+            if not col_id:
+                errors.append(_("Please assign variable '%s' to a collection.") % var["name"])
+            else:
+                assignments.append({"variable_name": var["name"], "collection_id": int(col_id)})
+
+        if errors:
+            for e in errors:
+                messages.error(request, e)
+        else:
+            session["assignments"] = assignments
+            _save_session(request, session)
+            return redirect("upload_wizard_step6")
+
+    return render(request, "georivaingestion/wizard_step5_variables.html", {
+        "session": session,
+        "variables": variables,
+        "collections": collections,
         "step": 5,
         "step_labels": STEP_LABELS,
     })
@@ -269,7 +285,7 @@ def upload_wizard_step6(request):
     from georiva.core.models import Catalog, Collection
 
     session = _session(request)
-    if not session.get("valid_time_format"):
+    if not session.get("assignments"):
         return redirect("upload_wizard_step5")
 
     # Build display summary
@@ -323,6 +339,7 @@ def upload_wizard_provision(request):
             defaults={
                 "name": session["new_catalog_name"],
                 "file_format": session["new_catalog_format"],
+                "description": session.get("new_catalog_description") or "",
             },
         )
     else:

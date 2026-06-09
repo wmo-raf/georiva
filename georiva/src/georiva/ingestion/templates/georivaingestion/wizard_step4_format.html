@@ -1,0 +1,177 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Format & Timing" %}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .uwiz-preview-box {
+        margin-top: 1em;
+        padding: 0.75em 1em;
+        border: 1px solid var(--w-color-border-furniture);
+        border-radius: 4px;
+        background: var(--w-color-grey-50);
+        font-size: 0.9em;
+        line-height: 1.6;
+        min-height: 2.5em;
+    }
+    .uwiz-preview-ok { color: var(--w-color-positive-100); font-weight: 600; }
+    .uwiz-preview-warn { color: var(--w-color-warning-100); font-weight: 600; }
+    .uwiz-preview-label { color: var(--w-color-grey-400); }
+</style>
+{% endblock %}
+
+{% block wizard_content %}
+<form method="post" action="">
+    {% csrf_token %}
+
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label">{% trans "Forecast data?" %}</label>
+        <label style="display:inline-flex;align-items:center;gap:0.5em;">
+            <input type="checkbox" name="is_forecast" id="is_forecast" value="1"
+                   {% if session.is_forecast %}checked{% endif %}>
+            {% trans "Yes — this data represents a forecast (model run with a reference time)" %}
+        </label>
+    </div>
+
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label">{% trans "Valid time format" %} <sup>*</sup></label>
+        <p class="w-field__help-text">
+            {% trans "Choose the date format used in uploaded filenames. The stem of the filename must match this pattern." %}
+        </p>
+        <table class="listing" style="width:auto;margin-top:0.5em;">
+            <thead>
+                <tr><th></th><th>{% trans "Format" %}</th><th>{% trans "Example filename" %}</th></tr>
+            </thead>
+            <tbody>
+                {% for value, label in format_choices %}
+                <tr>
+                    <td>
+                        <input type="radio" name="valid_time_format" value="{{ value }}"
+                               id="fmt_{{ value }}"
+                               {% if session.valid_time_format == value %}checked{% endif %}
+                               required>
+                    </td>
+                    <td><label for="fmt_{{ value }}"><code>{{ label }}</code></label></td>
+                    <td>{% for k, v in format_examples.items %}{% if k == value %}<code>{{ v }}</code>{% endif %}{% endfor %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if sample_filename %}
+    <div class="w-field__wrapper uwiz-field">
+        <label class="w-field__label">{% trans "Filename preview" %}</label>
+        <div class="uwiz-preview-box" id="fname-preview">
+            <span class="uwiz-preview-label">{% trans "Select a format above to see the parse result." %}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% trans "Next: Variables" %}
+        </button>
+        <a href="{% url 'upload_wizard_step3' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const SAMPLE = '{{ sample_filename|escapejs }}';
+    const previewEl = document.getElementById('fname-preview');
+    if (!SAMPLE || !previewEl) return;
+
+    const GR_RE = /^GR--(\d{8}T\d{4})--(.+)$/;
+    const PATTERNS = {
+        'YYYYMMDD':     { re: /^(\d{4})(\d{2})(\d{2})$/,             fields: ['Y','M','D'] },
+        'DDMMYYYY':     { re: /^(\d{2})(\d{2})(\d{4})$/,             fields: ['D','M','Y'] },
+        'YYYYMMDDHH':   { re: /^(\d{4})(\d{2})(\d{2})(\d{2})$/,      fields: ['Y','M','D','h'] },
+        'YYYYMMDDHHMM': { re: /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/, fields: ['Y','M','D','h','m'] },
+        'DDMMYY':       { re: /^(\d{2})(\d{2})(\d{2})$/,             fields: ['D','M','y'] },
+        'YYMMDD':       { re: /^(\d{2})(\d{2})(\d{2})$/,             fields: ['y','M','D'] },
+    };
+
+    function parseGR(fname) {
+        const m = fname.match(GR_RE);
+        if (!m) return { refTime: null, original: fname };
+        const s = m[1];
+        const dt = new Date(Date.UTC(
+            parseInt(s.slice(0,4)), parseInt(s.slice(4,6))-1, parseInt(s.slice(6,8)),
+            parseInt(s.slice(9,11)), parseInt(s.slice(11,13))
+        ));
+        return { refTime: isNaN(dt.getTime()) ? null : dt, original: m[2] };
+    }
+
+    function stemOf(name) {
+        const dot = name.lastIndexOf('.');
+        return dot > 0 ? name.slice(0, dot) : name;
+    }
+
+    function parseStem(stem, fmt) {
+        const pat = PATTERNS[fmt];
+        if (!pat) return null;
+        const m = stem.match(pat.re);
+        if (!m) return null;
+        const v = {};
+        pat.fields.forEach(function (f, i) { v[f] = m[i + 1]; });
+        const year = v.Y ? parseInt(v.Y) : (v.y ? 2000 + parseInt(v.y) : null);
+        const month = parseInt(v.M) - 1;
+        const day = parseInt(v.D);
+        const hour = v.h ? parseInt(v.h) : 0;
+        const min = v.m ? parseInt(v.m) : 0;
+        if (year === null || month < 0 || month > 11 || day < 1 || day > 31) return null;
+        const dt = new Date(Date.UTC(year, month, day, hour, min));
+        return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    function fmtUTC(dt) {
+        return dt.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    }
+
+    function update() {
+        const fmt = (document.querySelector('input[name="valid_time_format"]:checked') || {}).value;
+        const isForecast = document.getElementById('is_forecast').checked;
+
+        if (!fmt) {
+            previewEl.innerHTML = '<span class="uwiz-preview-label">{% trans "Select a format above to see the parse result." %}</span>';
+            return;
+        }
+
+        const { refTime, original } = parseGR(SAMPLE);
+        const stem = stemOf(original);
+        const validTime = parseStem(stem, fmt);
+
+        let html = '<span class="uwiz-preview-label">{% trans "Sample file:" %}</span> <code>' + SAMPLE + '</code><br>';
+
+        if (validTime) {
+            html += '<span class="uwiz-preview-ok">✓ valid_time: ' + fmtUTC(validTime) + '</span>';
+        } else {
+            html += '<span class="uwiz-preview-warn">⚠ {% trans "No valid_time found — check the format matches your filename stem" %}</span>';
+        }
+
+        if (isForecast) {
+            html += '<br>';
+            if (refTime) {
+                html += '<span class="uwiz-preview-ok">✓ reference_time: ' + fmtUTC(refTime) + '</span>';
+            } else {
+                html += '<span class="uwiz-preview-warn">⚠ {% trans "No GR-- prefix found — forecast uploads must use GR--YYYYMMDDTHHMM-- prefix" %}</span>';
+            }
+        }
+
+        previewEl.innerHTML = html;
+    }
+
+    document.querySelectorAll('input[name="valid_time_format"]').forEach(function (r) {
+        r.addEventListener('change', update);
+    });
+    document.getElementById('is_forecast').addEventListener('change', update);
+    update();
+});
+</script>
+{% endblock %}

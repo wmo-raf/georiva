@@ -42,9 +42,10 @@ def _full_session(collection_id):
         "new_catalog_format": "grib2",
         "config_name": "Surface variables",
         "variables": [{"name": "2t", "long_name": "2m temperature", "units": "K"}],
+        "sample_filename": "20250115.grib2",
+        "valid_time_format": "YYYYMMDD",
         "is_forecast": False,
         "assignments": [{"variable_name": "2t", "collection_id": collection_id}],
-        "valid_time_format": "YYYYMMDD",
     }
 
 
@@ -164,79 +165,82 @@ class Step3SampleFileTests(TestCase):
         self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
 
 
-class Step4VariablesTests(TestCase):
+class Step4FormatTimingTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4", "d@e.com", "pw")
         self.client.force_login(self.user)
-        self.catalog = _make_catalog("cat4")
-        self.collection = _make_collection(self.catalog, "col4")
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
             "new_catalog_slug": "wm", "new_catalog_format": "grib2",
             "config_name": "Surface variables",
             "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+            "sample_filename": "20250115.grib2",
         })
 
-    def test_step4_renders_with_variables(self):
-        response = self.client.get(STEP4_URL)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "2t")
+    def test_step4_renders(self):
+        self.assertEqual(self.client.get(STEP4_URL).status_code, 200)
 
-    def test_step4_valid_post_stores_assignments_and_redirects(self):
+    def test_step4_valid_post_stores_format_and_is_forecast_redirects(self):
         response = self.client.post(STEP4_URL, {
-            "is_forecast": "",
-            f"collection_2t": str(self.collection.pk),
+            "valid_time_format": "YYYYMMDD",
+            "is_forecast": "1",
         })
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
         session = self.client.session[SESSION_KEY]
-        self.assertEqual(session["assignments"][0]["collection_id"], self.collection.pk)
-        self.assertFalse(session["is_forecast"])
+        self.assertEqual(session["valid_time_format"], "YYYYMMDD")
+        self.assertTrue(session["is_forecast"])
 
-    def test_step4_is_forecast_stored_as_true_when_checked(self):
-        self.client.post(STEP4_URL, {
-            "is_forecast": "1",
-            "collection_2t": str(self.collection.pk),
-        })
-        self.assertTrue(self.client.session[SESSION_KEY]["is_forecast"])
+    def test_step4_is_forecast_false_when_unchecked(self):
+        self.client.post(STEP4_URL, {"valid_time_format": "YYYYMMDD"})
+        self.assertFalse(self.client.session[SESSION_KEY]["is_forecast"])
 
-    def test_step4_missing_assignment_rerenders(self):
-        response = self.client.post(STEP4_URL, {})
+    def test_step4_missing_format_rerenders(self):
+        response = self.client.post(STEP4_URL, {"valid_time_format": ""})
         self.assertEqual(response.status_code, 200)
 
-    def test_step4_back_navigation_preserves_session(self):
-        _seed_session(self.client, {
-            "catalog_mode": "create", "config_name": "X",
-            "variables": [{"name": "tp", "long_name": "", "units": ""}],
-            "assignments": [{"variable_name": "tp", "collection_id": self.collection.pk}],
-        })
+    def test_step4_without_variables_redirects_to_step3(self):
+        _seed_session(self.client, {"catalog_mode": "create", "config_name": "X"})
         response = self.client.get(STEP4_URL)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("assignments", self.client.session[SESSION_KEY])
+        self.assertRedirects(response, STEP3_URL, fetch_redirect_response=False)
 
 
-class Step5FormatTests(TestCase):
+class Step5VariablesTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin5", "e@f.com", "pw")
         self.client.force_login(self.user)
-        catalog = _make_catalog("cat5")
-        col = _make_collection(catalog, "col5")
+        self.catalog = _make_catalog("cat5")
+        self.collection = _make_collection(self.catalog, "col5")
         _seed_session(self.client, {
             "catalog_mode": "create", "config_name": "X",
             "variables": [{"name": "2t", "long_name": "", "units": ""}],
-            "assignments": [{"variable_name": "2t", "collection_id": col.pk}],
+            "valid_time_format": "YYYYMMDD",
+            "is_forecast": False,
         })
 
-    def test_step5_renders(self):
-        self.assertEqual(self.client.get(STEP5_URL).status_code, 200)
-
-    def test_step5_valid_post_stores_format_and_redirects(self):
-        response = self.client.post(STEP5_URL, {"valid_time_format": "YYYYMMDD"})
-        self.assertRedirects(response, STEP6_URL, fetch_redirect_response=False)
-        self.assertEqual(self.client.session[SESSION_KEY]["valid_time_format"], "YYYYMMDD")
-
-    def test_step5_missing_format_rerenders(self):
-        response = self.client.post(STEP5_URL, {"valid_time_format": ""})
+    def test_step5_renders_with_variables(self):
+        response = self.client.get(STEP5_URL)
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "2t")
+
+    def test_step5_valid_post_stores_assignments_and_redirects(self):
+        response = self.client.post(STEP5_URL, {
+            "collection_2t": str(self.collection.pk),
+        })
+        self.assertRedirects(response, STEP6_URL, fetch_redirect_response=False)
+        session = self.client.session[SESSION_KEY]
+        self.assertEqual(session["assignments"][0]["collection_id"], self.collection.pk)
+
+    def test_step5_missing_assignment_rerenders(self):
+        response = self.client.post(STEP5_URL, {})
+        self.assertEqual(response.status_code, 200)
+
+    def test_step5_without_format_redirects_to_step4(self):
+        _seed_session(self.client, {
+            "catalog_mode": "create", "config_name": "X",
+            "variables": [{"name": "2t", "long_name": "", "units": ""}],
+        })
+        response = self.client.get(STEP5_URL)
+        self.assertRedirects(response, STEP4_URL, fetch_redirect_response=False)
 
 
 class Step6ReviewTests(TestCase):
