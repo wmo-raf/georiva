@@ -1,0 +1,22 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Config Name" %}{% endblock %}
+{% block wizard_content %}
+<form method="post" action="">
+    {% csrf_token %}
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label" for="config_name">{% trans "Configuration name" %} <sup>*</sup></label>
+        <input type="text" name="config_name" id="config_name" class="w-field__input"
+               value="{{ session.config_name|default:'' }}"
+               placeholder="{% trans 'e.g. Surface variables' %}" required>
+        <p class="w-field__help-text">{% trans "A label to identify this upload configuration, e.g. 'Surface variables' or 'Pressure levels'." %}</p>
+    </div>
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% trans "Next: Sample File" %}
+        </button>
+        <a href="{% url 'upload_wizard_step1' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+{% endblock %}

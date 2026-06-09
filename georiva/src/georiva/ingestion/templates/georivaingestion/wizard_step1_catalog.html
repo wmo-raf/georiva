@@ -1,0 +1,82 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Catalog" %}{% endblock %}
+{% block wizard_content %}
+<form method="post" action="">
+    {% csrf_token %}
+
+    {% if all_catalogs %}
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label" for="catalog_mode">{% trans "Catalog" %}</label>
+        <select name="catalog_mode" id="catalog_mode" class="w-field__input">
+            <option value="create" {% if session.catalog_mode != "select" %}selected{% endif %}>{% trans "Create New Catalog" %}</option>
+            <option value="select" {% if session.catalog_mode == "select" %}selected{% endif %}>{% trans "Use Existing Catalog" %}</option>
+        </select>
+    </div>
+    {% else %}
+        <input type="hidden" name="catalog_mode" value="create">
+    {% endif %}
+
+    <div id="section-create">
+        <div class="w-field__wrapper uwiz-field">
+            <label class="w-field__label" for="new_catalog_name">{% trans "Name" %} <sup>*</sup></label>
+            <input type="text" name="new_catalog_name" id="new_catalog_name" class="w-field__input"
+                   value="{{ session.new_catalog_name|default:'' }}">
+        </div>
+        <div class="w-field__wrapper uwiz-field">
+            <label class="w-field__label" for="new_catalog_slug">{% trans "Slug" %} <sup>*</sup></label>
+            <input type="text" name="new_catalog_slug" id="new_catalog_slug" class="w-field__input"
+                   value="{{ session.new_catalog_slug|default:'' }}" pattern="[a-z0-9\-]+">
+        </div>
+        <div class="w-field__wrapper uwiz-field">
+            <label class="w-field__label" for="new_catalog_format">{% trans "File format" %} <sup>*</sup></label>
+            <select name="new_catalog_format" id="new_catalog_format" class="w-field__input">
+                <option value="">— {% trans "Choose" %} —</option>
+                {% for value, label in file_format_choices %}
+                    <option value="{{ value }}" {% if session.new_catalog_format == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    {% if all_catalogs %}
+    <div id="section-select" class="uwiz-hidden">
+        <div class="w-field__wrapper uwiz-field">
+            <label class="w-field__label" for="catalog_id">{% trans "Catalog" %}</label>
+            <select name="catalog_id" id="catalog_id" class="w-field__input">
+                <option value="">— {% trans "Choose" %} —</option>
+                {% for cat in all_catalogs %}
+                    <option value="{{ cat.pk }}" {% if session.catalog_id == cat.pk %}selected{% endif %}>{{ cat.name }} ({{ cat.slug }})</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% trans "Next: Config Name" %}
+        </button>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modeSelect = document.getElementById('catalog_mode');
+    if (!modeSelect) return;
+    const sCreate = document.getElementById('section-create');
+    const sSelect = document.getElementById('section-select');
+    function toggle() {
+        const v = modeSelect.value;
+        if (sCreate) sCreate.style.display = v === 'create' ? '' : 'none';
+        if (sSelect) sSelect.style.display = v === 'select' ? '' : 'none';
+    }
+    modeSelect.addEventListener('change', toggle);
+    toggle();
+});
+</script>
+{% endblock %}
