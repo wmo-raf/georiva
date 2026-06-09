@@ -238,6 +238,29 @@ def collection_ingestion_logs_api(request, collection_id):
 
 
 # =============================================================================
+# Arrival status polling endpoint
+# =============================================================================
+
+def arrival_status_api(request, arrival_id):
+    """
+    Returns {id, status, error_message} for a single DataArrival.
+    Polled by the upload page until the arrival reaches a terminal status.
+    """
+    from georiva.ingestion.models import DataArrival
+
+    try:
+        arrival = DataArrival.objects.get(pk=arrival_id)
+    except DataArrival.DoesNotExist:
+        raise Http404
+
+    return JsonResponse({
+        "id": arrival.pk,
+        "status": arrival.status,
+        "error_message": arrival.error_message,
+    })
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 
