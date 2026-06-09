@@ -1,0 +1,343 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Collection Setup" %}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .uwiz-section-title {
+        font-weight: 700; font-size: 1em;
+        margin: 1.5em 0 0.75em; padding-bottom: 0.3em;
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        color: var(--w-color-text-label);
+    }
+    .uwiz-coll-slot {
+        display: flex; align-items: center; gap: 0.75em;
+        margin-bottom: 0.6em; padding: 0.55em 0.8em;
+        border: 1px solid var(--w-color-border-furniture);
+        border-radius: 4px; background: var(--w-color-grey-50);
+    }
+    .uwiz-coll-num {
+        font-weight: 700; color: var(--w-color-grey-400);
+        min-width: 1.4em; text-align: right; font-size: 0.9em;
+    }
+    .uwiz-coll-name  { flex: 1; }
+    .uwiz-coll-slug  { color: var(--w-color-grey-400); font-size: 0.85em; min-width: 10em; }
+    .uwiz-inline-error { color: var(--w-color-critical-200); font-size: 0.9em; margin-top: 0.4em; display: none; }
+    .uwiz-inline-error--visible { display: block; }
+    .uwiz-section-help { margin-bottom: 0.75em; }
+    .uwiz-add-coll-btn { margin-bottom: 1em; }
+    .uwiz-vars-table { width: 100%; margin-bottom: 1.25em; }
+    .uwiz-range-cell { display: flex; align-items: center; gap: 0.35em; }
+    .uwiz-range-input { width: 6em !important; }
+    .uwiz-range-sep { color: var(--w-color-grey-400); }
+    .uwiz-unit-select { min-width: 11em; }
+    .uwiz-row-error td { border-top: none; padding-top: 0; }
+    .uwiz-row-error .uwiz-inline-error { margin-top: 0; }
+</style>
+{% endblock %}
+
+{% block wizard_content %}
+<form id="wizard-form" method="post">
+    {% csrf_token %}
+    <input type="hidden" name="collections_json" id="collections_json">
+    <input type="hidden" name="assignments_json"  id="assignments_json">
+
+    {# ── Collections ── #}
+    <div class="uwiz-section-title">{% trans "Collections" %}</div>
+    <p class="w-field__help-text uwiz-section-help">
+        {% trans "Define the collections for this catalog. By default one collection is created. Add more and reassign variables to group them." %}
+    </p>
+    <div id="collections-list"></div>
+    <button type="button" id="add-coll-btn" class="button button-secondary button-small uwiz-add-coll-btn">
+        + {% trans "Add collection" %}
+    </button>
+    <div class="uwiz-inline-error" id="coll-error"></div>
+
+    {# ── Variable assignment ── #}
+    <div class="uwiz-section-title">{% trans "Variable assignments" %}</div>
+    <p class="w-field__help-text uwiz-section-help">
+        {% trans "Edit the display name, unit, and expected value range for each variable, and assign it to a collection. The value range drives palette mapping and tile encoding — it was pre-filled from the sample file where possible." %}
+    </p>
+    <table class="listing uwiz-vars-table">
+        <thead>
+            <tr>
+                <th>{% trans "Variable" %}</th>
+                <th>{% trans "Display name" %}</th>
+                <th>{% trans "Unit" %} <sup>*</sup></th>
+                <th>{% trans "Value range" %} <sup>*</sup></th>
+                <th>{% trans "Collection" %} <sup>*</sup></th>
+            </tr>
+        </thead>
+        <tbody id="variables-tbody"></tbody>
+    </table>
+    <div class="uwiz-inline-error" id="vars-error"></div>
+
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% trans "Next: Review" %}
+        </button>
+        <a href="{% url 'upload_wizard_step3' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    const COLL_BASE    = '{{ collection_base_name|escapejs }}';
+    const SELECTED_VARS = {{ selected_variables_json|safe }};
+    const UNITS        = {{ units_json|safe }};
+    const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    let nextId = 0;
+    let collections = [];
+
+    // ── Utilities ──────────────────────────────────────────────────────────
+    function slugify(s) {
+        return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    }
+
+    function esc(s) {
+        return String(s)
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Collection slots ───────────────────────────────────────────────────
+    function renderSlots() {
+        const list = document.getElementById('collections-list');
+        list.innerHTML = '';
+        collections.forEach(function (c, i) {
+            const canRemove = collections.length > 1;
+            const div = document.createElement('div');
+            div.className = 'uwiz-coll-slot';
+            div.innerHTML =
+                '<div class="uwiz-coll-num">' + (i + 1) + '</div>' +
+                '<input type="text" class="w-field__input uwiz-coll-name" data-cid="' + c.id + '" value="' + esc(c.name) + '" placeholder="{% trans "Collection name" %}">' +
+                '<span class="uwiz-coll-slug">/ <code class="slug-preview">' + esc(c.slug) + '</code></span>' +
+                (canRemove
+                    ? '<button type="button" class="button button-secondary button-small uwiz-remove-coll" data-cid="' + c.id + '">{% trans "Remove" %}</button>'
+                    : '');
+            list.appendChild(div);
+        });
+
+        document.querySelectorAll('.uwiz-coll-name').forEach(function (inp) {
+            inp.addEventListener('input', function () {
+                const cid = parseInt(this.dataset.cid);
+                const c = collections.find(function (x) { return x.id === cid; });
+                if (!c) return;
+                c.name = this.value;
+                c.slug = slugify(this.value);
+                this.closest('.uwiz-coll-slot').querySelector('.slug-preview').textContent = c.slug;
+                rebuildDropdowns();
+            });
+        });
+
+        document.querySelectorAll('.uwiz-remove-coll').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const cid = parseInt(this.dataset.cid);
+                // Remember which selects had this collection selected
+                document.querySelectorAll('.uwiz-var-coll').forEach(function (sel) {
+                    if (parseInt(sel.value) === cid) sel.dataset.removedCid = '1';
+                });
+                collections = collections.filter(function (c) { return c.id !== cid; });
+                renderSlots();
+                rebuildDropdowns();
+                // Fall back removed selects to first available
+                document.querySelectorAll('.uwiz-var-coll[data-removed-cid]').forEach(function (sel) {
+                    sel.value = collections.length ? String(collections[0].id) : '';
+                    delete sel.dataset.removedCid;
+                });
+            });
+        });
+    }
+
+    function rebuildDropdowns() {
+        document.querySelectorAll('.uwiz-var-coll').forEach(function (sel) {
+            const current = sel.value;
+            sel.innerHTML = '';
+            collections.forEach(function (c) {
+                const opt = document.createElement('option');
+                opt.value = String(c.id);
+                opt.textContent = c.name || '({% trans "unnamed" %})';
+                sel.appendChild(opt);
+            });
+            if (current && collections.some(function (c) { return String(c.id) === current; })) {
+                sel.value = current;
+            } else if (collections.length) {
+                sel.value = String(collections[0].id);
+            }
+        });
+    }
+
+    // ── Variable rows ──────────────────────────────────────────────────────
+    function unitOptionsHtml(v, savedUnitId, savedCreate) {
+        let html = '<option value="">{% trans "— choose unit —" %}</option>';
+        if (v.can_create && v.units) {
+            html += '<option value="__create__"' + (savedCreate ? ' selected' : '') + '>' +
+                '{% trans "Create unit" %} &quot;' + esc(v.units) + '&quot;</option>';
+        }
+        UNITS.forEach(function (u) {
+            const sel = savedUnitId === u.id;
+            html += '<option value="' + u.id + '"' + (sel ? ' selected' : '') + '>' +
+                esc(u.name) + ' (' + esc(u.symbol) + ')</option>';
+        });
+        return html;
+    }
+
+    function buildVariableRows(vars, assignments) {
+        const tbody = document.getElementById('variables-tbody');
+        tbody.innerHTML = '';
+        vars.forEach(function (v) {
+            const a = assignments ? assignments.find(function (x) { return x.variable_name === v.name; }) : null;
+            const longName = a ? a.long_name : (v.long_name || '');
+            const vmin = a ? a.value_min : (v.value_min != null ? v.value_min : null);
+            const vmax = a ? a.value_max : (v.value_max != null ? v.value_max : null);
+            // Preselect: saved assignment first, then the scan's matched unit
+            const unitId = a ? a.unit_id : (v.unit_id != null ? v.unit_id : null);
+            const unitCreate = a ? !!a.unit_create : (unitId == null && v.can_create);
+            const sid = 'vr_' + v.name.replace(/\W/g, '_');
+
+            const tr = document.createElement('tr');
+            tr.innerHTML =
+                '<td><code>' + esc(v.name) + '</code></td>' +
+                '<td><input type="text" class="w-field__input" id="' + sid + '_ln" value="' + esc(longName) + '"></td>' +
+                '<td><select class="w-field__input uwiz-unit-select" id="' + sid + '_unit" required>' +
+                    unitOptionsHtml(v, unitCreate ? null : unitId, unitCreate) + '</select></td>' +
+                '<td><div class="uwiz-range-cell">' +
+                    '<input type="number" step="any" class="w-field__input uwiz-range-input" id="' + sid + '_min" value="' + (vmin != null ? esc(vmin) : '') + '" placeholder="{% trans "min" %}" required>' +
+                    '<span class="uwiz-range-sep">–</span>' +
+                    '<input type="number" step="any" class="w-field__input uwiz-range-input" id="' + sid + '_max" value="' + (vmax != null ? esc(vmax) : '') + '" placeholder="{% trans "max" %}" required>' +
+                '</div></td>' +
+                '<td><select class="w-field__input uwiz-var-coll" data-varname="' + esc(v.name) + '" data-sid="' + sid + '" required></select></td>';
+            tbody.appendChild(tr);
+        });
+
+        rebuildDropdowns();
+
+        // Restore collection selection from prefill
+        if (assignments && assignments.length) {
+            assignments.forEach(function (a) {
+                const sel = document.querySelector('.uwiz-var-coll[data-varname="' + esc(a.variable_name) + '"]');
+                if (!sel) return;
+                const c = collections[a.collection_idx];
+                if (c) sel.value = String(c.id);
+            });
+        }
+    }
+
+    // ── Add collection button ──────────────────────────────────────────────
+    document.getElementById('add-coll-btn').addEventListener('click', function () {
+        const n = collections.length + 1;
+        const name = COLL_BASE + ' ' + n;
+        collections.push({ id: nextId++, name: name, slug: slugify(name) });
+        renderSlots();
+        rebuildDropdowns();
+    });
+
+    // ── Form submit ────────────────────────────────────────────────────────
+    document.getElementById('wizard-form').addEventListener('submit', function (e) {
+        const errEl = document.getElementById('coll-error');
+
+        // Validate collection names
+        const emptyName = collections.find(function (c) { return !c.name.trim(); });
+        if (emptyName) {
+            e.preventDefault();
+            errEl.textContent = '{% trans "All collections must have a name." %}';
+            errEl.classList.add('uwiz-inline-error--visible');
+            return;
+        }
+
+        // Serialize
+        const collArr = collections.map(function (c) {
+            return { name: c.name.trim(), slug: c.slug || slugify(c.name) };
+        });
+
+        const varsErrEl = document.getElementById('vars-error');
+        let varError = '';
+
+        const assignArr = SELECTED_VARS.map(function (v) {
+            const sid = 'vr_' + v.name.replace(/\W/g, '_');
+            const sel = document.querySelector('.uwiz-var-coll[data-varname="' + esc(v.name) + '"]');
+            const collId  = sel ? parseInt(sel.value) : (collections[0] ? collections[0].id : 0);
+            const collIdx = collections.findIndex(function (c) { return c.id === collId; });
+            const lnEl   = document.getElementById(sid + '_ln');
+            const unitEl = document.getElementById(sid + '_unit');
+            const minEl  = document.getElementById(sid + '_min');
+            const maxEl  = document.getElementById(sid + '_max');
+
+            const unitVal = unitEl ? unitEl.value : '';
+            const vmin = minEl && minEl.value !== '' ? parseFloat(minEl.value) : null;
+            const vmax = maxEl && maxEl.value !== '' ? parseFloat(maxEl.value) : null;
+
+            if (!varError && !unitVal) {
+                varError = '{% trans "Choose a unit for" %} ' + v.name + '.';
+            }
+            if (!varError && (vmin === null || vmax === null || isNaN(vmin) || isNaN(vmax))) {
+                varError = '{% trans "Enter a value range for" %} ' + v.name + '.';
+            }
+            if (!varError && vmin >= vmax) {
+                varError = v.name + ': {% trans "min must be less than max." %}';
+            }
+
+            return {
+                variable_name:  v.name,
+                long_name:      lnEl ? lnEl.value.trim() : '',
+                units:          v.units || '',
+                unit_id:        unitVal && unitVal !== '__create__' ? parseInt(unitVal) : null,
+                unit_create:    unitVal === '__create__' ? (v.units || '') : '',
+                unit_display:   unitEl && unitVal ? unitEl.options[unitEl.selectedIndex].textContent : '',
+                value_min:      vmin,
+                value_max:      vmax,
+                collection_idx: collIdx >= 0 ? collIdx : 0,
+            };
+        });
+
+        if (varError) {
+            e.preventDefault();
+            varsErrEl.textContent = varError;
+            varsErrEl.classList.add('uwiz-inline-error--visible');
+            return;
+        }
+        varsErrEl.classList.remove('uwiz-inline-error--visible');
+
+        // Validate no empty collections
+        const usedIdxs = new Set(assignArr.map(function (a) { return a.collection_idx; }));
+        const emptyColls = collArr.filter(function (_, i) { return !usedIdxs.has(i); });
+        if (emptyColls.length) {
+            e.preventDefault();
+            errEl.textContent = '{% trans "Every collection must have at least one variable assigned." %}';
+            errEl.classList.add('uwiz-inline-error--visible');
+            return;
+        }
+
+        errEl.classList.remove('uwiz-inline-error--visible');
+        document.getElementById('collections_json').value = JSON.stringify(collArr);
+        document.getElementById('assignments_json').value  = JSON.stringify(assignArr);
+    });
+
+    // ── Initialise from session prefill or defaults ────────────────────────
+    (function () {
+        const pCollections = {{ prefill_collections_json|safe }};
+        const pAssignments = {{ prefill_assignments_json|safe }};
+
+        if (pCollections && pCollections.length) {
+            collections = pCollections.map(function (c) {
+                return { id: nextId++, name: c.name, slug: c.slug || slugify(c.name) };
+            });
+        } else {
+            const name = COLL_BASE + ' 1';
+            collections = [{ id: nextId++, name: name, slug: slugify(name) }];
+        }
+
+        renderSlots();
+        buildVariableRows(SELECTED_VARS, pAssignments.length ? pAssignments : null);
+    })();
+
+});
+</script>
+{% endblock %}

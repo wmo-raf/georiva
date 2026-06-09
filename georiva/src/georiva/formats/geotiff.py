@@ -38,6 +38,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
     name = "geotiff"
     display_name = "GeoTIFF"
     extensions = [".tif", ".tiff", ".geotiff"]
+    time_from_filename = True
     
     def can_handle(self, file_path: PathLike) -> bool:
         file_path = Path(file_path)

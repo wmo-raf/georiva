@@ -93,6 +93,7 @@ class BaseFormatPlugin(ABC):
     name: str = "base"
     display_name: str = "Base Format"
     extensions: list[str] = []
+    time_from_filename: bool = False  # True only for formats that have no native time dimension (e.g. GeoTIFF)
     
     def __init__(self):
         self.logger = logging.getLogger(f"georiva.formats.{self.name}")

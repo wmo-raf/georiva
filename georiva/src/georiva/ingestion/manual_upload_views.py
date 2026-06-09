@@ -2,7 +2,6 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
-from wagtail.admin.widgets import HeaderButton
 
 
 def manual_upload_config_list(request):
@@ -17,13 +16,7 @@ def manual_upload_config_list(request):
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": "", "label": _("Manual Uploads")},
         ],
-        "header_buttons": [
-            HeaderButton(
-                label=_("New config"),
-                url=reverse("upload_wizard_step1"),
-                icon_name="plus",
-            ),
-        ],
+        "add_url": reverse("upload_wizard_step1"),
         "configs": configs,
     })
 
@@ -48,6 +41,10 @@ def manual_upload_config_edit(request, pk):
     else:
         form = EditForm(instance=config)
 
+    variables = config.variables.select_related("collection").order_by(
+        "collection__name", "variable_name"
+    )
+
     return render(request, "georivaingestion/manual_upload_config_edit.html", {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
@@ -56,6 +53,7 @@ def manual_upload_config_edit(request, pk):
         ],
         "config": config,
         "form": form,
+        "variables": variables,
     })
 
 

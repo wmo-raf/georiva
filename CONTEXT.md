@@ -42,6 +42,73 @@ _Avoid_: manual drop, manual ingest, manual ingestion
 **Trigger**:
 The cause of a `DataArrival`. One of: `scheduled` (created by a DataFeed) or `manual_upload` (created by a human).
 
+### Manual upload setup
+
+**Manual Uploads Menu**:
+A top-level Wagtail admin sidebar item ("Manual Uploads") ordered after "Data Feeds". Links to the
+`ManualUploadConfig` list page, which shows all configs across all Catalogs, each with an "Upload" button that
+navigates to that config's Upload Page.
+
+**ManualUploadConfig**:
+A one-time operator-created configuration that enables manual file uploads for a Catalog. Many configs can exist per
+Catalog (e.g. one for surface variables, one for pressure levels). Each config defines which Collections it populates,
+whether the data is a forecast (`is_forecast`), and the `valid_time_format` (a predefined choice, e.g. `YYYYMMDD`)
+used to parse valid time from uploaded filenames. File format is derived from the linked Catalog's `file_format`
+field — not stored separately on the config.
+_Avoid_: upload profile, upload template, feed config
+
+**Manual Upload Setup Wizard**:
+A multi-step Wagtail admin flow that creates a `ManualUploadConfig`. Steps: (1) select/create Catalog, (2) name the
+config (e.g. "Surface variables") — unique per Catalog, (3) upload a Sample File (required; server calls
+`list_variables()`, scans each variable's data min/max, resolves units against `Unit` records, then discards the
+file), set `is_forecast` and choose `valid_time_format`, and select variables, (4) define Collections and per-variable
+display name, unit, and value range, (5) review and save. Provisioning is atomic and creates, alongside the config:
+any new Catalog/Collections, a core `Variable` per assignment (passthrough transform, primary source =
+`variable_name`, unit, value range — via `get_or_create` so existing hand-tuned Variables are never clobbered), and
+any `Unit` chosen via the "Create unit" dropdown option. Parallel to the DataFeed setup wizard.
+_Avoid_: upload wizard, config wizard
+
+**Sample File**:
+A representative file uploaded during the Manual Upload Setup Wizard solely to extract variable metadata via
+`list_variables()` plus a per-variable data min/max scan (lazy, via `open_variable()`). Discarded immediately after
+extraction — never ingested.
+_Avoid_: seed file, template file
+
+**ManualUploadConfigVariable**:
+Through model linking a `ManualUploadConfig` to a `Collection` for one variable. Created by the wizard from
+`list_variables()` output. Fields: `config` (FK), `collection` (FK), `variable_name`, `long_name`, `units`.
+The collection FK is what routes each variable to the right Collection at upload time.
+_Avoid_: variable mapping, variable link
+
+**Arrival Status Endpoint**:
+A lightweight polling endpoint `GET /api/arrivals/{id}/status/` returning `{id, status, error_message}`. Used by
+the admin upload interface to poll until the `DataArrival` reaches a terminal status. Separate from the heavier
+collection arrivals list endpoint.
+
+**Upload Page**:
+The admin page where an operator submits a single file for ingestion. Shows: a config selector (if the Catalog has
+multiple `ManualUploadConfig` records), a variable dropdown (from `ManualUploadConfigVariable`), auto-extracted or
+manually entered time fields, and a file picker. One file per submission; each submission creates one `DataArrival`.
+After submit, the page polls the Arrival Status Endpoint and shows progress inline.
+
+**Upload Flow**:
+The sequence for a manual upload via the admin interface: (1) operator submits the upload form; (2) server creates
+`DataArrival(trigger=MANUAL_UPLOAD, status=UPLOADING)`; (3) server writes the file to MinIO `incoming` bucket — on
+failure, sets `DataArrival.status=FAILED, error_message=<reason>` and returns 500; (4) on success, sets
+`DataArrival.status=PENDING` and enqueues the ingestion task; (5) server returns `DataArrival.id`; (6) client polls
+the Arrival Status Endpoint until terminal. The file never goes client → MinIO directly (no presigned URLs).
+`DataArrival` gains an `error_message = TextField(blank=True)` field to carry upload-time failure reasons.
+_Avoid_: upload pipeline, ingest flow
+
+**Time Extraction**:
+The process of determining `reference_time` and `valid_time` from an incoming file before it is processed. Attempted
+in order: (1) parse the filename using universal conventions + the config's `valid_time_format`, (2) read file content
+(GRIB/NetCDF only). Universal filename conventions: `GR--{reftime}--` prefix extracts `reference_time`; the last
+segment of the filename before the extension is parsed as `valid_time` using the format from `ManualUploadConfig`.
+When extraction succeeds, the admin upload form pre-fills the time fields. When extraction fails, the admin shows
+manual entry fields; a direct MinIO drop (outside admin) raises an error and stops ingestion.
+_Avoid_: time parsing, date detection
+
 ### Jobs
 
 **DataArrivalJob**:

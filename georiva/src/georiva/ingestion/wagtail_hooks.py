@@ -58,8 +58,8 @@ def register_upload_wizard_urls():
         upload_wizard_step3,
         upload_wizard_step4,
         upload_wizard_step5,
-        upload_wizard_step6,
         upload_wizard_provision,
+        upload_wizard_upload_sample,
     )
 
     return [
@@ -68,8 +68,8 @@ def register_upload_wizard_urls():
         path("manual-uploads/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
         path("manual-uploads/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
         path("manual-uploads/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
-        path("manual-uploads/wizard/step6/", upload_wizard_step6, name="upload_wizard_step6"),
         path("manual-uploads/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
+        path("manual-uploads/wizard/upload-sample/", upload_wizard_upload_sample, name="upload_wizard_upload_sample"),
     ]
 
 

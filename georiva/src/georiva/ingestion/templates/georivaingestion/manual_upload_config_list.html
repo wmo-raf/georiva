@@ -4,7 +4,7 @@
 {% block titletag %}{% trans "Manual Uploads" %}{% endblock %}
 
 {% block content %}
-{% include "wagtailadmin/shared/header.html" with title=_("Manual Uploads") icon="upload" breadcrumbs=breadcrumbs_items header_buttons=header_buttons %}
+{% include "wagtailadmin/shared/header.html" with title=_("Manual Uploads") icon="upload" breadcrumbs=breadcrumbs_items action_url=add_url action_text=_("New config") action_icon="plus" %}
 
 <div class="nice-padding">
     {% if configs %}
