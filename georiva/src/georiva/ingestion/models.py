@@ -477,6 +477,61 @@ class FileIngestion(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Manual upload configuration models
+# ---------------------------------------------------------------------------
+
+class ManualUploadConfig(models.Model):
+    """Operator-created configuration enabling manual file uploads for a Catalog."""
+
+    class ValidTimeFormat(models.TextChoices):
+        YYYYMMDD     = 'YYYYMMDD',     'YYYYMMDD'
+        DDMMYYYY     = 'DDMMYYYY',     'DDMMYYYY'
+        YYYYMMDDHH   = 'YYYYMMDDHH',   'YYYYMMDDHH'
+        YYYYMMDDHHMM = 'YYYYMMDDHHMM', 'YYYYMMDDHHMM'
+        DDMMYY       = 'DDMMYY',       'DDMMYY'
+        YYMMDD       = 'YYMMDD',       'YYMMDD'
+
+    catalog = models.ForeignKey(
+        'georivacore.Catalog',
+        on_delete=models.CASCADE,
+        related_name='manual_upload_configs',
+    )
+    name = models.CharField(max_length=255)
+    is_forecast = models.BooleanField(default=False)
+    valid_time_format = models.CharField(max_length=20, choices=ValidTimeFormat.choices)
+
+    class Meta:
+        app_label = 'georivaingestion'
+
+    def strptime_pattern(self) -> str:
+        """Return the Python strptime pattern for the configured valid_time_format."""
+        from georiva.ingestion.time_extraction import _FORMAT_PATTERNS
+        return _FORMAT_PATTERNS[self.valid_time_format]
+
+
+class ManualUploadConfigVariable(models.Model):
+    """Links a ManualUploadConfig to a Collection for one variable."""
+
+    config = models.ForeignKey(
+        ManualUploadConfig,
+        on_delete=models.CASCADE,
+        related_name='variables',
+    )
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        on_delete=models.CASCADE,
+        related_name='manual_upload_variables',
+    )
+    variable_name = models.CharField(max_length=255)
+    long_name = models.CharField(max_length=255, blank=True, default='')
+    units = models.CharField(max_length=50, blank=True, default='')
+
+    class Meta:
+        app_label = 'georivaingestion'
+        unique_together = [('config', 'variable_name')]
+
+
+# ---------------------------------------------------------------------------
 # Task-ferry Job models
 # ---------------------------------------------------------------------------
 
