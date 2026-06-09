@@ -24,6 +24,29 @@ def register_ingestion_dashboard_urls():
     ]
 
 
+@hooks.register("register_admin_urls")
+def register_upload_wizard_urls():
+    from .upload_wizard_views import (
+        upload_wizard_step1,
+        upload_wizard_step2,
+        upload_wizard_step3,
+        upload_wizard_step4,
+        upload_wizard_step5,
+        upload_wizard_step6,
+        upload_wizard_provision,
+    )
+
+    return [
+        path("manual-uploads/wizard/step1/", upload_wizard_step1, name="upload_wizard_step1"),
+        path("manual-uploads/wizard/step2/", upload_wizard_step2, name="upload_wizard_step2"),
+        path("manual-uploads/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
+        path("manual-uploads/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
+        path("manual-uploads/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
+        path("manual-uploads/wizard/step6/", upload_wizard_step6, name="upload_wizard_step6"),
+        path("manual-uploads/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
+    ]
+
+
 @hooks.register('construct_homepage_panels')
 def add_ingestion_activity_panel(request, panels):
     panels.append(IngestionActivityPanel())

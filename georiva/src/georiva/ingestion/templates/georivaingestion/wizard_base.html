@@ -1,0 +1,61 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block extra_css %}
+<style>
+    .uwiz-progress {
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        margin-bottom: 1.5em;
+        font-size: 0.85em;
+        flex-wrap: wrap;
+    }
+    .uwiz-step {
+        padding: 0.3em 0.75em;
+        border-radius: 999px;
+        font-weight: 600;
+        border: 1px solid;
+    }
+    .uwiz-step--done {
+        background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+        color: var(--w-color-positive-100);
+        border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+    }
+    .uwiz-step--active {
+        background: var(--w-color-info-100);
+        color: white;
+        border-color: var(--w-color-info-100);
+    }
+    .uwiz-step--pending {
+        background: transparent;
+        color: var(--w-color-grey-400);
+        border-color: var(--w-color-border-furniture);
+    }
+    .uwiz-sep { color: var(--w-color-grey-400); user-select: none; }
+    .uwiz-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+    .uwiz-field { margin-bottom: 0.75em; }
+    .uwiz-field--lg { margin-bottom: 1.25em; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=_("Manual Upload Setup Wizard") subtitle=step_subtitle icon="upload" %}
+<div class="nice-padding">
+    <div class="uwiz-progress">
+        {% for label in step_labels %}
+            {% with forloop.counter as n %}
+                {% if n < step %}
+                    <span class="uwiz-step uwiz-step--done">{{ n }}. {{ label }}</span>
+                {% elif n == step %}
+                    <span class="uwiz-step uwiz-step--active">{{ n }}. {{ label }}</span>
+                {% else %}
+                    <span class="uwiz-step uwiz-step--pending">{{ n }}. {{ label }}</span>
+                {% endif %}
+                {% if not forloop.last %}<span class="uwiz-sep">→</span>{% endif %}
+            {% endwith %}
+        {% endfor %}
+    </div>
+    {% block wizard_content %}{% endblock %}
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "georivaingestion/wizard_base.html" %}
+{% load i18n %}
+{% block titletag %}{% trans "Upload Wizard — Sample File" %}{% endblock %}
+{% block wizard_content %}
+<form method="post" action="" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label" for="sample_file">{% trans "Sample file" %} <sup>*</sup></label>
+        <input type="file" name="sample_file" id="sample_file" class="w-field__input" required>
+        <p class="w-field__help-text">
+            {% trans "Upload a representative file. The server will extract variable names and immediately discard the file — it will not be ingested." %}
+        </p>
+    </div>
+    <div class="uwiz-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% trans "Next: Variables" %}
+        </button>
+        <a href="{% url 'upload_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+{% endblock %}
