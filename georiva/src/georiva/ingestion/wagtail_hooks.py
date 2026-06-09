@@ -1,5 +1,6 @@
-from django.urls import path
+from django.urls import path, reverse_lazy
 from wagtail import hooks
+from wagtail.admin.menu import MenuItem
 
 from .panels import IngestionActivityPanel
 
@@ -21,6 +22,31 @@ def register_ingestion_dashboard_urls():
              name="collection_ingestion_logs_api"),
         path("api/ingestion/collections/<int:collection_id>/ingestion-jobs/", collection_ingestion_jobs_api,
              name="collection_ingestion_jobs_api"),
+    ]
+
+
+@hooks.register("register_admin_menu_item")
+def register_manual_uploads_menu():
+    from django.utils.translation import gettext as _
+    return MenuItem(
+        _("Manual Uploads"),
+        reverse_lazy("manual_upload_config_list"),
+        icon_name="upload",
+        order=850,
+    )
+
+
+@hooks.register("register_admin_urls")
+def register_manual_upload_config_urls():
+    from .manual_upload_views import (
+        manual_upload_config_list,
+        manual_upload_config_edit,
+        manual_upload_config_delete,
+    )
+    return [
+        path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
+        path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
+        path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
     ]
 
 

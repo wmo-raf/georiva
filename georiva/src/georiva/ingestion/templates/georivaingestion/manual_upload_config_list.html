@@ -1,0 +1,45 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Manual Uploads" %}{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=_("Manual Uploads") icon="upload" breadcrumbs=breadcrumbs_items header_buttons=header_buttons %}
+
+<div class="nice-padding">
+    {% if configs %}
+    <table class="listing">
+        <thead>
+            <tr>
+                <th>{% trans "Configuration" %}</th>
+                <th>{% trans "Catalog" %}</th>
+                <th>{% trans "Variables" %}</th>
+                <th>{% trans "Forecast" %}</th>
+                <th>{% trans "Filename format" %}</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for config in configs %}
+            <tr>
+                <td>{{ config.name }}</td>
+                <td>{{ config.catalog.name }}</td>
+                <td>{{ config.variables.count }}</td>
+                <td>{% if config.is_forecast %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td>
+                <td><code>{{ config.valid_time_format }}</code></td>
+                <td>
+                    <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-small button-secondary">{% trans "Edit" %}</a>
+                    <a href="{% url 'manual_upload_config_delete' config.pk %}" class="button button-small no">{% trans "Delete" %}</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="help-block help-info">
+        {% trans "No upload configurations yet." %}
+        <a href="{% url 'upload_wizard_step1' %}">{% trans "Create your first configuration." %}</a>
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
