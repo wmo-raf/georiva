@@ -8,8 +8,6 @@ class IngestionConfig(AppConfig):
     verbose_name = "GeoRIVA Ingestion"
 
     def ready(self):
-        import georiva.ingestion.signals  # noqa: F401
-
         from task_ferry.registry import job_type_registry
         from .job_types import FileIngestionJobType
 

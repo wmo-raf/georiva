@@ -108,17 +108,18 @@ class DashboardLastRunFromDataArrivalTests(TestCase):
         self.assertEqual(col["status"], "empty")
 
     def test_derived_status_is_ok_when_last_arrival_completed(self):
+        arrival = DataArrival.objects.create(
+            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+            status=DataArrival.Status.COMPLETED,
+            collection=self.collection,
+        )
         FileIngestion.objects.create(
             bucket=BucketType.SOURCES,
             file_path="cat/col/f.grib2",
             catalog_slug="cat",
             collection_slug="col",
             status=FileIngestion.Status.COMPLETED,
-        )
-        DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.COMPLETED,
-            collection=self.collection,
+            data_arrival=arrival,
         )
 
         response = self.client.get(DASHBOARD_URL)
@@ -126,17 +127,18 @@ class DashboardLastRunFromDataArrivalTests(TestCase):
         self.assertEqual(col["status"], "ok")
 
     def test_derived_status_is_failed_when_last_arrival_failed(self):
+        arrival = DataArrival.objects.create(
+            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+            status=DataArrival.Status.FAILED,
+            collection=self.collection,
+        )
         FileIngestion.objects.create(
             bucket=BucketType.SOURCES,
             file_path="cat/col/f2.grib2",
             catalog_slug="cat",
             collection_slug="col",
             status=FileIngestion.Status.FAILED,
-        )
-        DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.FAILED,
-            collection=self.collection,
+            data_arrival=arrival,
         )
 
         response = self.client.get(DASHBOARD_URL)
@@ -216,6 +218,7 @@ class CollectionIngestionLogsAPITests(TestCase):
         self.collection = _setup_collection("cat3", "col3")
 
     def test_ingestion_logs_returns_file_ingestion_history(self):
+        arrival = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
         FileIngestion.objects.create(
             bucket=BucketType.SOURCES,
             file_path="cat3/col3/file.grib2",
@@ -224,6 +227,7 @@ class CollectionIngestionLogsAPITests(TestCase):
             status=FileIngestion.Status.COMPLETED,
             items_created=2,
             assets_created=4,
+            data_arrival=arrival,
         )
 
         response = self.client.get(LOGS_URL.format(self.collection.pk))
@@ -251,11 +255,13 @@ class CollectionIngestionLogsAPITests(TestCase):
 
 
 def _make_file_ingestion(catalog_slug, collection_slug, file_path=None):
+    arrival = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
     return FileIngestion.objects.create(
         bucket=BucketType.SOURCES,
         file_path=file_path or f"{catalog_slug}/{collection_slug}/file.grib2",
         catalog_slug=catalog_slug,
         collection_slug=collection_slug,
+        data_arrival=arrival,
     )
 
 

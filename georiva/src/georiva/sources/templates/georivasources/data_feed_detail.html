@@ -458,18 +458,18 @@
                             <td>{{ run.collection.name }}</td>
                             <td>
                                 <span class="gfeed-status">
-                                    {% if run.status == "success" %}
+                                    {% if run.status == "completed" %}
                                         <span class="gfeed-dot gfeed-dot--success"></span>
-                                        {% trans "Success" %}
+                                        {% trans "Completed" %}
                                         {% elif run.status == "partial" %}
                                         <span class="gfeed-dot gfeed-dot--partial"></span>
                                         {% trans "Partial" %}
                                         {% elif run.status == "failed" %}
                                         <span class="gfeed-dot gfeed-dot--failed"></span>
                                         {% trans "Failed" %}
-                                        {% elif run.status == "running" %}
+                                        {% elif run.status == "processing" %}
                                         <span class="gfeed-dot gfeed-dot--running"></span>
-                                        {% trans "Running" %}
+                                        {% trans "Processing" %}
                                         {% elif run.status == "empty" %}
                                         <span class="gfeed-dot gfeed-dot--empty"></span>
                                         {% trans "No Data" %}
