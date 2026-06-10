@@ -16,6 +16,10 @@
     }
     .mup-meta-label { color: var(--w-color-grey-400); }
     .mup-actions { display: flex; gap: 1em; margin-top: 1.5em; align-items: center; }
+    .mup-collections {
+        margin: 0.4em 0 0 0; padding-left: 1.3em; line-height: 1.9;
+    }
+    .mup-collections li { color: var(--w-color-text-label); }
     .mup-error {
         display: none; color: var(--w-color-critical-200);
         font-size: 0.95em; margin-top: 1em;
@@ -68,6 +72,7 @@
     <form id="upload-form" class="mup-form">
         {% csrf_token %}
 
+        {% if is_geotiff %}
         <div class="w-field__wrapper mup-field">
             <label class="w-field__label" for="variable-select">{% trans "Variable" %} <sup>*</sup></label>
             <select id="variable-select" class="w-field__input" required>
@@ -78,6 +83,17 @@
                 {% endfor %}
             </select>
         </div>
+        {% else %}
+        <div class="mup-field">
+            <div class="w-field__label">{% trans "Collections to be processed" %}</div>
+            <ul class="mup-collections">
+                {% for collection in affected_collections %}
+                <li>{{ collection.name }}</li>
+                {% endfor %}
+            </ul>
+            <div class="mup-help">{% trans "All active variables in these collections will be extracted from the uploaded file." %}</div>
+        </div>
+        {% endif %}
 
         <div class="w-field__wrapper mup-field">
             <label class="w-field__label" for="time-input">
@@ -138,7 +154,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const form        = document.getElementById('upload-form');
     const fileInput   = document.getElementById('file-input');
     const timeInput   = document.getElementById('time-input');
-    const variableSel = document.getElementById('variable-select');
+    const variableSel = document.getElementById('variable-select'); // null for GRIB/NetCDF
     const submitBtn   = document.getElementById('submit-btn');
     const formError   = document.getElementById('form-error');
     const panel       = document.getElementById('progress-panel');
@@ -216,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const fd = new FormData();
         fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
-        fd.append('variable_id', variableSel.value);
+        if (variableSel) fd.append('variable_id', variableSel.value);
         fd.append('time', timeInput.value);
         fd.append('file', fileInput.files[0]);
 

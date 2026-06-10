@@ -98,6 +98,17 @@ def manual_upload_page(request, pk):
         "long_name", "variable_name"
     )
     file_format = config.catalog.file_format
+    is_geotiff = file_format == "geotiff"
+
+    # For GRIB/NetCDF: deduplicate collections so the template can show
+    # "these collections will be processed" without a variable picker.
+    affected_collections = []
+    if not is_geotiff:
+        seen = set()
+        for v in variables:
+            if v.collection_id not in seen:
+                seen.add(v.collection_id)
+                affected_collections.append(v.collection)
 
     return render(request, "georivaingestion/manual_upload_page.html", {
         "breadcrumbs_items": [
@@ -110,10 +121,12 @@ def manual_upload_page(request, pk):
         # by the time extra_js renders.
         "upload_config": config,
         "variables": variables,
+        "is_geotiff": is_geotiff,
+        "affected_collections": affected_collections,
         "accept_extensions": _CATALOG_FORMAT_ACCEPT.get(file_format, ""),
         "format_label": _CATALOG_FORMAT_LABEL.get(file_format, file_format),
         "time_label": _("Model run time") if config.is_forecast else _("Observation date"),
-        "time_required": config.is_forecast or file_format == "geotiff",
+        "time_required": config.is_forecast or is_geotiff,
     })
 
 
@@ -159,6 +172,8 @@ def manual_upload_submit(request, pk):
     variable_id = request.POST.get("variable_id")
     operator_time = _parse_datetime_local(request.POST.get("time", ""))
 
+    is_geotiff = config.catalog.file_format == "geotiff"
+
     errors = []
     if not uploaded:
         errors.append(str(_("Please choose a file to upload.")))
@@ -166,7 +181,7 @@ def manual_upload_submit(request, pk):
     variable = None
     if variable_id:
         variable = config.variables.select_related("collection").filter(pk=variable_id).first()
-    if variable is None:
+    if is_geotiff and variable is None:
         errors.append(str(_("Please choose a variable.")))
 
     if errors:
@@ -194,7 +209,7 @@ def manual_upload_submit(request, pk):
         trigger=DataArrival.Trigger.MANUAL_UPLOAD,
         status=DataArrival.Status.UPLOADING,
         file_path=file_path,
-        collection=variable.collection if config.catalog.file_format == "geotiff" else None,
+        collection=variable.collection if is_geotiff else None,
         files_requested=1,
     )
 
@@ -229,7 +244,7 @@ def manual_upload_submit(request, pk):
         bucket=BucketType.INCOMING,
         file_path=saved_path,
         catalog_slug=config.catalog.slug,
-        collection_slug=variable.collection.slug if config.catalog.file_format == "geotiff" else "",
+        collection_slug=variable.collection.slug if is_geotiff else "",
         reference_time=reference_time,
         data_arrival=arrival,
     )
