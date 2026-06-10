@@ -38,6 +38,27 @@ class ActivityPageRenderTests(TestCase):
 # Cycle 3: Dashboard panel has "View all" link to the activity feed
 # =============================================================================
 
+# =============================================================================
+# Cycle 1 (issue #55): Cancel wiring present in activity feed template
+# =============================================================================
+
+class ActivityFeedCancelWiringTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_cw", "cw@test.com", "pw")
+        self.client.force_login(self.user)
+
+    def test_page_contains_cancel_jobs_url_prefix(self):
+        response = self.client.get(ACTIVITY_URL)
+        self.assertContains(response, "/api/jobs/")
+
+    def test_page_contains_csrf_token_for_cancel_post(self):
+        # The template inlines the CSRF token via {{ csrf_token }} into a JS
+        # constant; verify the constant is declared (token value will differ per request).
+        response = self.client.get(ACTIVITY_URL)
+        self.assertContains(response, "CSRF_TOKEN")
+
+
 class DashboardPanelViewAllTests(TestCase):
 
     def setUp(self):
