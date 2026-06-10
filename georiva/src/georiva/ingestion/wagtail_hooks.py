@@ -43,10 +43,19 @@ def register_manual_upload_config_urls():
         manual_upload_config_edit,
         manual_upload_config_delete,
     )
+    from .upload_views import (
+        manual_upload_page,
+        manual_upload_extract_times,
+        manual_upload_submit,
+    )
     return [
         path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
         path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
         path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
+        path("manual-uploads/<int:pk>/upload/", manual_upload_page, name="manual_upload_page"),
+        path("manual-uploads/<int:pk>/upload/extract-times/", manual_upload_extract_times,
+             name="manual_upload_extract_times"),
+        path("manual-uploads/<int:pk>/upload/submit/", manual_upload_submit, name="manual_upload_submit"),
     ]
 
 

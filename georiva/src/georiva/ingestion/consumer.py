@@ -37,6 +37,46 @@ def _catalog_exists(catalog_slug: str) -> bool:
     return Catalog.objects.filter(slug=catalog_slug, is_active=True).exists()
 
 
+def _required_time_error(catalog_slug: str, key: str) -> str | None:
+    """
+    For formats with no native time dimension (time_from_filename), a file's
+    valid time must be parseable from its filename. Returns a descriptive
+    error string when extraction fails, None when the file is fine.
+
+    Only enforced when the catalog has ManualUploadConfigs to supply a
+    valid_time_format — catalogs fed purely by DataFeeds are unaffected.
+    """
+    from georiva.formats.registry import format_registry
+    from georiva.ingestion.models import ManualUploadConfig
+    from georiva.ingestion.time_extraction import extract_times
+
+    catalog = Catalog.objects.filter(slug=catalog_slug).only("file_format").first()
+    if catalog is None:
+        return None
+    plugin = format_registry.get(catalog.file_format)
+    if plugin is None or not plugin.time_from_filename:
+        return None  # time is read from file content during ingestion
+
+    formats = list(
+        ManualUploadConfig.objects.filter(catalog=catalog)
+        .values_list("valid_time_format", flat=True)
+        .distinct()
+    )
+    if not formats:
+        return None
+
+    filename = Path(key).name
+    for fmt in formats:
+        if extract_times(filename, fmt).get("valid_time"):
+            return None
+
+    return (
+        f"Could not extract a valid time from filename '{filename}'. "
+        f"Expected the filename stem to match one of: {', '.join(formats)} "
+        f"(optionally with a GR--YYYYMMDDTHHMM-- reference time prefix)."
+    )
+
+
 def _should_stop(stop_event) -> bool:
     return stop_event is not None and stop_event.is_set()
 
@@ -87,7 +127,20 @@ def _handle_event(ev: dict):
         reference_time=meta.get("reference_time"),
         data_arrival=arrival,
     )
-    
+
+    # Only genuine direct drops: admin uploads pre-create the DataArrival and
+    # have already validated times server-side (the date may have been entered
+    # in the form rather than encoded in the filename).
+    if arrival_created:
+        time_error = _required_time_error(catalog_slug, key)
+        if time_error:
+            logger.warning("Time extraction failed for %s: %s", key, time_error)
+            FileIngestion.mark_failed(origin_bucket, key, time_error)
+            arrival.status = DataArrival.Status.FAILED
+            arrival.error_message = time_error
+            arrival.save(update_fields=['status', 'error_message', 'updated_at'])
+            return
+
     if not created:
         if log.status == FileIngestion.Status.PROCESSING:
             logger.debug("Already processing: %s/%s", origin_bucket, key)
