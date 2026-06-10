@@ -31,13 +31,16 @@ async def _event_stream():
     from .events import CHANNEL
     from .snapshot import build_arrival_snapshot
 
-    snapshot = await build_arrival_snapshot()
-    yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
-
+    # Subscribe to Redis BEFORE fetching the snapshot so that events published
+    # during the snapshot query are queued in pubsub and not lost.
     r = aioredis.from_url(settings.REDIS_URL)
     try:
         pubsub = r.pubsub()
         await pubsub.subscribe(CHANNEL)
+
+        snapshot = await build_arrival_snapshot()
+        yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
+
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
