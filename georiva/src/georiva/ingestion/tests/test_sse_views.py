@@ -81,11 +81,14 @@ class SnapshotShapeTests(TestCase):
         for field in ("id", "status", "job_id", "job_state"):
             self.assertIn(field, fi)
 
-    def test_snapshot_respects_limit(self):
+    def test_snapshot_caps_terminal_arrivals(self):
         from georiva.ingestion.snapshot import build_arrival_snapshot
 
-        result = async_to_sync(build_arrival_snapshot)(limit=1)
-        self.assertEqual(len(result), 1)
+        result = async_to_sync(build_arrival_snapshot)(terminal_limit=0)
+        # terminal_limit=0 → no completed/failed arrivals; active ones still returned
+        statuses = {r["status"] for r in result}
+        self.assertNotIn("completed", statuses)
+        self.assertIn("processing", statuses)
 
 
 # =============================================================================

@@ -28,6 +28,24 @@
             background: var(--w-color-grey-50);
             border-bottom: 1px solid var(--w-color-border-furniture);
             font-size: 0.88em;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .iaf-card--collapsed .iaf-card-header {
+            border-bottom: none;
+        }
+
+        .iaf-chevron {
+            display: inline-block;
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+            transition: transform 0.15s;
+            flex-shrink: 0;
+        }
+
+        .iaf-card--collapsed .iaf-chevron {
+            transform: rotate(-90deg);
         }
 
         .iaf-trigger {
@@ -77,6 +95,10 @@
 
         .iaf-card-body {
             padding: 0.6em 1em 0.8em;
+        }
+
+        .iaf-card--collapsed .iaf-card-body {
+            display: none;
         }
 
         .iaf-filepath {
@@ -155,6 +177,8 @@
             const emptyEl = document.getElementById('feed-empty');
 
             const TERMINAL_JOB_STATES = ['finished', 'failed', 'cancelled'];
+            const TERMINAL_ARRIVAL_STATUSES = ['completed', 'failed', 'partial', 'empty'];
+            const COLLAPSE_DELAY_MS = 3000;
 
             // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -186,7 +210,8 @@
                 btn.className = 'iaf-cancel-btn';
                 btn.textContent = '{% trans "Cancel" %}';
                 btn.dataset.cancelBtn = jobId;
-                btn.addEventListener('click', function () {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
                     btn.disabled = true;
                     fetch(CANCEL_URL_TPL.replace('__ID__', jobId), {
                         method: 'POST',
@@ -204,6 +229,21 @@
                 if (btn) btn.remove();
             }
 
+            // ── Collapse / expand ──────────────────────────────────────────────────
+
+            function collapseCard(card) {
+                card.classList.add('iaf-card--collapsed');
+            }
+
+            function wireHeaderToggle(card) {
+                const header = card.querySelector('.iaf-card-header');
+                if (!header) return;
+                header.addEventListener('click', function (e) {
+                    if (e.target.closest('button')) return;
+                    card.classList.toggle('iaf-card--collapsed');
+                });
+            }
+
             // ── Card builder ───────────────────────────────────────────────────────
 
             function buildCard(arrival) {
@@ -211,12 +251,16 @@
                 card.className = 'iaf-card';
                 card.dataset.arrivalId = arrival.id;
 
+                const isTerminal = TERMINAL_ARRIVAL_STATUSES.includes(arrival.status);
+                if (isTerminal) card.classList.add('iaf-card--collapsed');
+
                 const collection = arrival.collection_name
                     ? (arrival.catalog_name ? arrival.catalog_name + ' / ' : '') + arrival.collection_name
                     : (arrival.catalog_name || '');
 
                 card.innerHTML =
                     '<div class="iaf-card-header">' +
+                    '<span class="iaf-chevron">▾</span>' +
                     '<span class="iaf-trigger">' + (arrival.trigger || '') + '</span>' +
                     (collection ? '<span class="iaf-collection">' + collection + '</span>' : '') +
                     '<span class="' + pillClass(arrival.status) + '" data-status-pill>' +
@@ -231,6 +275,8 @@
                     '<ul class="iaf-log-steps" data-log-steps></ul>' +
                     '<div class="iaf-log-summary" data-log-summary></div>' +
                     '</div>';
+
+                wireHeaderToggle(card);
 
                 arrival.file_ingestions.forEach(function (fi) {
                     if (fi.job_id && !TERMINAL_JOB_STATES.includes(fi.job_state)) {
@@ -303,6 +349,9 @@
                 if (pill) {
                     pill.textContent = data.status;
                     pill.className = pillClass(data.status);
+                }
+                if (TERMINAL_ARRIVAL_STATUSES.includes(data.status)) {
+                    setTimeout(function () { collapseCard(card); }, COLLAPSE_DELAY_MS);
                 }
             }
 
