@@ -74,7 +74,7 @@ class FileIngestionJobType(JobType):
         # ── Step 2: run the ingestion pipeline ────────────────────────────────
         from georiva.ingestion.progress import PublishingProgress
 
-        pub_progress = PublishingProgress(total=100)
+        pub_progress = PublishingProgress(total=100, job_id=job.pk)
         service = IngestionService()
         result = service.process_file(
             file_path=job.file_path,

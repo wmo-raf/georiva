@@ -12,3 +12,5 @@ class IngestionConfig(AppConfig):
         from .job_types import FileIngestionJobType
 
         job_type_registry.register(FileIngestionJobType())
+
+        import georiva.ingestion.signals  # noqa: F401 — registers signal handlers
