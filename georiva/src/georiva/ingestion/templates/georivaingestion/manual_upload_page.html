@@ -26,29 +26,44 @@
     }
     .mup-error--visible { display: block; }
 
-    .mup-progress {
-        display: none; margin-top: 1.5em; padding: 0.9em 1.1em;
+    /* Progress log */
+    .mup-log {
+        display: none; max-width: 42em; margin-top: 1.5em;
         border: 1px solid var(--w-color-border-furniture);
         border-radius: 4px; background: var(--w-color-grey-50);
     }
-    .mup-progress--visible { display: block; }
-    .mup-status-row { display: flex; align-items: center; gap: 0.6em; }
+    .mup-log--visible { display: block; }
+    .mup-log-header {
+        display: flex; align-items: center; gap: 0.6em;
+        padding: 0.7em 1em;
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        font-weight: 600; font-size: 0.9em;
+    }
     .mup-spinner {
-        display: inline-block; width: 1.1em; height: 1.1em;
+        display: inline-block; width: 1em; height: 1em;
         border: 2px solid var(--w-color-border-furniture);
         border-top-color: var(--w-color-info-100);
         border-radius: 50%;
         animation: mup-spin 0.7s linear infinite;
+        flex-shrink: 0;
     }
+    .mup-spinner--hidden { display: none; }
     @keyframes mup-spin { to { transform: rotate(360deg); } }
-    .mup-status-pill {
-        padding: 0.15em 0.7em; border-radius: 1em;
-        font-size: 0.85em; font-weight: 600;
-        background: var(--w-color-grey-100); color: var(--w-color-text-label);
+    .mup-log-steps {
+        list-style: none; margin: 0; padding: 0.4em 1em 0.6em;
+        font-size: 0.88em; line-height: 1.9;
+        color: var(--w-color-text-label);
     }
-    .mup-status-pill--success { background: var(--w-color-positive-100); color: var(--w-color-white); }
-    .mup-status-pill--failed  { background: var(--w-color-critical-200); color: var(--w-color-white); }
-    .mup-progress-error { color: var(--w-color-critical-200); margin-top: 0.5em; font-size: 0.9em; }
+    .mup-log-steps li::before { content: "›  "; color: var(--w-color-grey-400); }
+    .mup-log-summary {
+        padding: 0.5em 1em 0.8em;
+        font-size: 0.88em;
+    }
+    .mup-log-summary--success { color: var(--w-color-positive-100); font-weight: 600; }
+    .mup-log-summary--error   { color: var(--w-color-critical-200); }
+    .mup-log-retry {
+        padding: 0 1em 0.8em; font-size: 0.88em;
+    }
 </style>
 {% endblock %}
 
@@ -128,13 +143,14 @@
         </div>
     </form>
 
-    <div class="mup-progress" id="progress-panel">
-        <div class="mup-status-row">
-            <span class="mup-spinner" id="progress-spinner"></span>
-            <span class="mup-status-pill" id="status-pill">{% trans "uploading" %}</span>
-            <span id="status-text">{% trans "Uploading file…" %}</span>
+    <div id="progress-log" class="mup-log">
+        <div class="mup-log-header">
+            <span class="mup-spinner" id="log-spinner"></span>
+            <span id="log-title">{% trans "Ingesting…" %}</span>
         </div>
-        <div class="mup-progress-error" id="progress-error"></div>
+        <ul class="mup-log-steps" id="log-steps"></ul>
+        <div class="mup-log-summary" id="log-summary"></div>
+        <div class="mup-log-retry" id="log-retry"></div>
     </div>
 </div>
 {% endblock %}
@@ -147,6 +163,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const EXTRACT_URL  = '{% url "manual_upload_extract_times" upload_config.pk %}';
     const SUBMIT_URL   = '{% url "manual_upload_submit" upload_config.pk %}';
     const STATUS_URL   = '{% url "arrival_status_api" 999999999 %}';
+    const SSE_URL      = '/admin/api/ingestion/events/';
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
     const POLL_MS      = 2500;
     const TERMINAL     = ['completed', 'partial', 'failed', 'empty'];
@@ -154,14 +171,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const form        = document.getElementById('upload-form');
     const fileInput   = document.getElementById('file-input');
     const timeInput   = document.getElementById('time-input');
-    const variableSel = document.getElementById('variable-select'); // null for GRIB/NetCDF
+    const variableSel = document.getElementById('variable-select');
     const submitBtn   = document.getElementById('submit-btn');
     const formError   = document.getElementById('form-error');
-    const panel       = document.getElementById('progress-panel');
-    const spinner     = document.getElementById('progress-spinner');
-    const pill        = document.getElementById('status-pill');
-    const statusText  = document.getElementById('status-text');
-    const progError   = document.getElementById('progress-error');
 
     let pollTimer = null;
 
@@ -189,32 +201,74 @@ document.addEventListener('DOMContentLoaded', function () {
             .catch(function () { /* pre-fill is best-effort */ });
     });
 
-    // ── Status polling ─────────────────────────────────────────────────────
-    function setStatus(status, errorMessage) {
-        pill.textContent = status;
-        pill.className = 'mup-status-pill' +
-            (status === 'completed' ? ' mup-status-pill--success' :
-             status === 'failed'    ? ' mup-status-pill--failed'  : '');
+    // ── Progress log component ─────────────────────────────────────────────
+    function mountProgressLog(jobId, sseUrl) {
+        const logEl      = document.getElementById('progress-log');
+        const spinner    = document.getElementById('log-spinner');
+        const titleEl    = document.getElementById('log-title');
+        const stepsList  = document.getElementById('log-steps');
+        const summaryEl  = document.getElementById('log-summary');
 
-        if (TERMINAL.includes(status)) {
-            spinner.style.display = 'none';
-            statusText.textContent = status === 'completed'
-                ? '{% trans "Ingestion finished successfully." %}'
-                : status === 'failed'
-                    ? '{% trans "Ingestion failed." %}'
-                    : '{% trans "Ingestion finished with status:" %} ' + status;
-            progError.textContent = errorMessage || '';
-            submitBtn.disabled = false;
-        } else {
-            statusText.textContent = '{% trans "Processing…" %}';
+        logEl.classList.add('mup-log--visible');
+
+        let es = null;
+        let finished = false;
+
+        function appendStep(state) {
+            const li = document.createElement('li');
+            li.textContent = state;
+            stepsList.appendChild(li);
         }
+
+        function finish(summaryText, isError) {
+            if (finished) return;
+            finished = true;
+            if (es) { es.close(); es = null; }
+            spinner.classList.add('mup-spinner--hidden');
+            titleEl.textContent = isError
+                ? '{% trans "Ingestion failed" %}'
+                : '{% trans "Ingestion complete" %}';
+            summaryEl.textContent = summaryText;
+            summaryEl.className = 'mup-log-summary ' +
+                (isError ? 'mup-log-summary--error' : 'mup-log-summary--success');
+            submitBtn.disabled = false;
+        }
+
+        try {
+            es = new EventSource(sseUrl);
+        } catch (e) {
+            finish('{% trans "Could not open event stream." %}', true);
+            return;
+        }
+
+        es.addEventListener('job.progress_updated', function (ev) {
+            const data = JSON.parse(ev.data);
+            if (data.job_id !== jobId) return;
+            if (data.state) appendStep(data.state);
+        });
+
+        es.addEventListener('job.state_changed', function (ev) {
+            const data = JSON.parse(ev.data);
+            if (data.id !== jobId) return;
+            if (data.state === 'finished') {
+                finish('{% trans "Items and assets created successfully." %}', false);
+            } else if (data.state === 'failed' || data.state === 'cancelled') {
+                finish(data.error || '{% trans "Ingestion failed — check logs for details." %}', true);
+            }
+        });
+
+        es.onerror = function () {
+            if (!finished) {
+                es.close(); es = null;
+            }
+        };
     }
 
+    // ── Arrival status polling (fallback) ──────────────────────────────────
     function poll(arrivalId) {
         fetch(STATUS_URL.replace('999999999', String(arrivalId)))
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                setStatus(data.status, data.error_message);
                 if (!TERMINAL.includes(data.status)) {
                     pollTimer = setTimeout(function () { poll(arrivalId); }, POLL_MS);
                 }
@@ -237,25 +291,22 @@ document.addEventListener('DOMContentLoaded', function () {
         fd.append('file', fileInput.files[0]);
 
         submitBtn.disabled = true;
-        panel.classList.add('mup-progress--visible');
-        spinner.style.display = '';
-        progError.textContent = '';
-        pill.className = 'mup-status-pill';
-        pill.textContent = '{% trans "uploading" %}';
-        statusText.textContent = '{% trans "Uploading file…" %}';
 
         fetch(SUBMIT_URL, { method: 'POST', body: fd })
             .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
             .then(function (res) {
                 if (!res.ok || res.data.error) {
-                    setStatus('failed', res.data.error || '{% trans "Upload failed." %}');
+                    showError(res.data.error || '{% trans "Upload failed." %}');
+                    submitBtn.disabled = false;
                     return;
                 }
-                setStatus('pending', '');
+                form.style.display = 'none';
+                mountProgressLog(res.data.job_id, SSE_URL);
                 poll(res.data.data_arrival_id);
             })
             .catch(function () {
-                setStatus('failed', '{% trans "Upload failed — network error." %}');
+                showError('{% trans "Upload failed — network error." %}');
+                submitBtn.disabled = false;
             });
     });
 
