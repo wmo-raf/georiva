@@ -84,6 +84,26 @@ class UploadPageRenderTests(TestCase):
     def test_unknown_config_returns_404(self):
         self.assertEqual(self.client.get(PAGE_URL.format(99999)).status_code, 404)
 
+    # ------------------------------------------------------------------
+    # Cycle 1: progress log structure
+    # ------------------------------------------------------------------
+
+    def test_page_has_progress_log_container(self):
+        _, _, config, _ = _geotiff_setup()
+        response = self.client.get(PAGE_URL.format(config.pk))
+        self.assertContains(response, 'id="progress-log"')
+
+    def test_page_exposes_sse_url_to_js(self):
+        _, _, config, _ = _geotiff_setup()
+        response = self.client.get(PAGE_URL.format(config.pk))
+        self.assertContains(response, "SSE_URL")
+        self.assertContains(response, "/admin/api/ingestion/events/")
+
+    def test_upload_form_has_id_for_js_targeting(self):
+        _, _, config, _ = _geotiff_setup()
+        response = self.client.get(PAGE_URL.format(config.pk))
+        self.assertContains(response, 'id="upload-form"')
+
 
 class ExtractTimesTests(TestCase):
     def setUp(self):
