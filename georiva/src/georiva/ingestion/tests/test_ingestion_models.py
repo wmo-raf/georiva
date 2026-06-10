@@ -109,3 +109,54 @@ class FileIngestionJobLinkTests(TestCase):
             job.save(update_fields=["file_ingestion"])
 
         self.assertEqual(log.jobs.count(), 2)
+
+
+class JobCrashLockReleaseTests(TestCase):
+    """
+    An unexpected crash in a FileIngestionJob run must release the
+    FileIngestion lock.
+
+    Regression: on_error() only logged, so a crash after acquire() left the
+    record stuck in 'processing' — with retries exhausted, unreclaimable
+    even by the stale-lock sweep.
+    """
+
+    def _job_for(self, log):
+        ct = ContentType.objects.get_for_model(
+            FileIngestionJob, for_concrete_model=False
+        )
+        return FileIngestionJob.objects.create(
+            user=None, content_type=ct,
+            file_path=log.file_path, bucket=log.bucket,
+        )
+
+    def test_on_error_releases_own_lock(self):
+        from georiva.ingestion.job_types import FileIngestionJobType
+
+        _, log = _setup()
+        job = self._job_for(log)
+        self.assertTrue(
+            FileIngestion.acquire(log.bucket, log.file_path, f"task-ferry-job-{job.id}")
+        )
+
+        FileIngestionJobType().on_error(job, RuntimeError("boom"))
+
+        log.refresh_from_db()
+        self.assertEqual(log.status, FileIngestion.Status.FAILED)
+        self.assertEqual(log.locked_by, "")
+        self.assertIn("boom", log.error)
+
+    def test_on_error_does_not_clobber_another_workers_lock(self):
+        from georiva.ingestion.job_types import FileIngestionJobType
+
+        _, log = _setup()
+        job = self._job_for(log)
+        self.assertTrue(
+            FileIngestion.acquire(log.bucket, log.file_path, "some-other-worker")
+        )
+
+        FileIngestionJobType().on_error(job, RuntimeError("boom"))
+
+        log.refresh_from_db()
+        self.assertEqual(log.status, FileIngestion.Status.PROCESSING)
+        self.assertEqual(log.locked_by, "some-other-worker")

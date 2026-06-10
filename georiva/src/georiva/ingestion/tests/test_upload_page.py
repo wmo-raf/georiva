@@ -240,6 +240,42 @@ class UploadSubmitTests(TestCase):
         })
         self.assertEqual(response.status_code, 400)
 
+    def test_reupload_resets_spent_file_ingestion(self, mock_incoming, mock_task):
+        mock_incoming.return_value = _mock_incoming_bucket()
+        _, _, config, variable = _geotiff_setup()
+
+        # A previous run exhausted its retries.
+        old_arrival = DataArrival.objects.create(
+            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+            status=DataArrival.Status.FAILED,
+            file_path="imagery/ndvi/band_1/2025/01/15/20250115.tif",
+        )
+        spent, _ = FileIngestion.register(
+            bucket="incoming",
+            file_path="imagery/ndvi/band_1/2025/01/15/20250115.tif",
+            catalog_slug="imagery",
+            data_arrival=old_arrival,
+        )
+        FileIngestion.objects.filter(pk=spent.pk).update(
+            status=FileIngestion.Status.FAILED,
+            retry_count=FileIngestion.MAX_RETRIES,
+            error="old failure",
+        )
+
+        response = self.client.post(SUBMIT_URL.format(config.pk), {
+            "variable_id": variable.pk,
+            "time": "",
+            "file": SimpleUploadedFile("20250115.tif", b"tiff-bytes"),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        spent.refresh_from_db()
+        self.assertEqual(spent.status, FileIngestion.Status.PENDING)
+        self.assertEqual(spent.retry_count, 0)
+        self.assertEqual(spent.error, "")
+        self.assertIsNotNone(spent.data_arrival_id)
+        mock_task.delay.assert_called_once()
+
     def test_minio_failure_marks_arrival_failed_and_returns_500(self, mock_incoming, mock_task):
         bucket = MagicMock()
         bucket.save.side_effect = RuntimeError("minio down")

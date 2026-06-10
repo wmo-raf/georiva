@@ -225,7 +225,7 @@ def manual_upload_submit(request, pk):
 
     # Register before enqueueing: FileIngestion.acquire() only locks existing
     # rows. The bucket event will also fire; register/lock keep it idempotent.
-    FileIngestion.register(
+    log, created = FileIngestion.register(
         bucket=BucketType.INCOMING,
         file_path=saved_path,
         catalog_slug=config.catalog.slug,
@@ -233,6 +233,11 @@ def manual_upload_submit(request, pk):
         reference_time=reference_time,
         data_arrival=arrival,
     )
+    if not created:
+        # Explicit re-upload of a known file: a completed or failed (even
+        # retries-exhausted) record must run again, with a fresh retry budget.
+        FileIngestion.reset_for_reingest(BucketType.INCOMING, saved_path)
+        FileIngestion.objects.filter(pk=log.pk).update(data_arrival=arrival)
 
     process_incoming_file.delay(
         file_path=saved_path,
