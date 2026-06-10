@@ -61,7 +61,16 @@ class SnapshotShapeTests(TestCase):
         for field in ("id", "status", "trigger", "started_at", "file_ingestions"):
             self.assertIn(field, arrival_dict)
 
-    def test_snapshot_file_ingestions_have_id_and_status(self):
+    def test_snapshot_arrival_has_activity_feed_fields(self):
+        from georiva.ingestion.snapshot import build_arrival_snapshot
+
+        result = async_to_sync(build_arrival_snapshot)()
+        arrival_dict = next(r for r in result if r["id"] == self.arrival.pk)
+
+        for field in ("file_path", "collection_name", "catalog_name"):
+            self.assertIn(field, arrival_dict)
+
+    def test_snapshot_file_ingestions_have_id_status_and_job_fields(self):
         from georiva.ingestion.snapshot import build_arrival_snapshot
 
         result = async_to_sync(build_arrival_snapshot)()
@@ -69,8 +78,8 @@ class SnapshotShapeTests(TestCase):
 
         self.assertEqual(len(arrival_dict["file_ingestions"]), 1)
         fi = arrival_dict["file_ingestions"][0]
-        self.assertIn("id", fi)
-        self.assertIn("status", fi)
+        for field in ("id", "status", "job_id", "job_state"):
+            self.assertIn(field, fi)
 
     def test_snapshot_respects_limit(self):
         from georiva.ingestion.snapshot import build_arrival_snapshot
