@@ -1,11 +1,12 @@
 from datetime import datetime
 
 import pytz
+from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Item
 from georiva.ingestion.handlers.item_handler import ItemHandler
-from georiva.ingestion.models import DataArrival, FileIngestion
+from georiva.ingestion.models import DataArrival, FileIngestion, FileIngestionJob
 
 
 def _setup():
@@ -79,3 +80,32 @@ class FileIngestionItemLinkTests(TestCase):
         self.assertTrue(created)
         log.refresh_from_db()
         self.assertEqual(log.item_id, item2.pk)
+
+
+class FileIngestionJobLinkTests(TestCase):
+    """
+    Retries create a new FileIngestionJob per process_incoming_file
+    invocation, all pointing at the same FileIngestion.
+
+    Regression: file_ingestion was a OneToOneField, so the second run of a
+    retried file failed with 'duplicate key value violates unique constraint
+    georivaingestion_fileingestionjob_file_ingestion_id_key'.
+    """
+
+    def test_multiple_jobs_can_link_the_same_file_ingestion(self):
+        _, log = _setup()
+        ct = ContentType.objects.get_for_model(
+            FileIngestionJob, for_concrete_model=False
+        )
+
+        for _run in range(2):
+            job = FileIngestionJob.objects.create(
+                user=None,
+                content_type=ct,
+                file_path=log.file_path,
+                bucket=log.bucket,
+            )
+            job.file_ingestion = log
+            job.save(update_fields=["file_ingestion"])
+
+        self.assertEqual(log.jobs.count(), 2)

@@ -119,5 +119,7 @@ A task-ferry job providing real-time status of a single `DataArrival` run — co
 _Avoid_: DataFeedJob
 
 **FileIngestionJob**:
-A task-ferry job providing real-time status of a single `FileIngestion`. Paired one-to-one with its `FileIngestion`.
+A task-ferry job providing real-time status of a single `FileIngestion` run. One job is created per
+`process_incoming_file` invocation, so retries and re-ingests produce multiple jobs pointing at the same
+`FileIngestion` (FK, not one-to-one).
 _Avoid_: IngestionJob

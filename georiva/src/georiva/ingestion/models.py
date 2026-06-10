@@ -570,12 +570,14 @@ class FileIngestionJob(Job):
         max_length=50,
         help_text="Origin bucket: 'incoming' or 'sources'.",
     )
-    file_ingestion = models.OneToOneField(
+    # ForeignKey, not OneToOne: retries and re-ingests create a new job per
+    # process_incoming_file invocation, all pointing at the same lock record.
+    file_ingestion = models.ForeignKey(
         FileIngestion,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="job",
+        related_name="jobs",
         help_text="Lock record for this file; set after the lock is acquired.",
     )
     items_created = models.IntegerField(default=0)
