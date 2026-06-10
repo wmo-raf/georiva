@@ -181,12 +181,16 @@ class FileIngestion(models.Model):
     )
     
     # db_constraint=False: TimescaleDB does not support FK constraints pointing
-    # to hypertables. Django still handles on_delete=CASCADE at the ORM level.
+    # to hypertables. Django still handles on_delete at the ORM level.
+    # SET_NULL, not CASCADE: this is the lock/audit record for the file — it
+    # must survive Item deletion (e.g. ItemHandler.delete_orphan() removing an
+    # empty Item mid-run would otherwise cascade-delete it and break every
+    # subsequent ingestion_log.save() in the same run).
     item = models.ForeignKey(
         'georivacore.Item',
         null=True,
         blank=True,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='file_ingestions',
         db_constraint=False,
     )
@@ -566,12 +570,14 @@ class FileIngestionJob(Job):
         max_length=50,
         help_text="Origin bucket: 'incoming' or 'sources'.",
     )
-    file_ingestion = models.OneToOneField(
+    # ForeignKey, not OneToOne: retries and re-ingests create a new job per
+    # process_incoming_file invocation, all pointing at the same lock record.
+    file_ingestion = models.ForeignKey(
         FileIngestion,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name="job",
+        related_name="jobs",
         help_text="Lock record for this file; set after the lock is acquired.",
     )
     items_created = models.IntegerField(default=0)

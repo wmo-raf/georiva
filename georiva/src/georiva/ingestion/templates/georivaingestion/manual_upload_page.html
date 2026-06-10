@@ -1,0 +1,248 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Upload" %} — {{ upload_config.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .mup-form { max-width: 42em; }
+    .mup-field { margin-bottom: 1.25em; }
+    .mup-help { color: var(--w-color-grey-400); font-size: 0.9em; margin-top: 0.3em; }
+    .mup-meta {
+        margin-bottom: 1.5em; padding: 0.6em 0.9em;
+        border: 1px solid var(--w-color-border-furniture);
+        border-radius: 4px; background: var(--w-color-grey-50);
+        font-size: 0.9em; line-height: 1.7;
+    }
+    .mup-meta-label { color: var(--w-color-grey-400); }
+    .mup-actions { display: flex; gap: 1em; margin-top: 1.5em; align-items: center; }
+    .mup-error {
+        display: none; color: var(--w-color-critical-200);
+        font-size: 0.95em; margin-top: 1em;
+    }
+    .mup-error--visible { display: block; }
+
+    .mup-progress {
+        display: none; margin-top: 1.5em; padding: 0.9em 1.1em;
+        border: 1px solid var(--w-color-border-furniture);
+        border-radius: 4px; background: var(--w-color-grey-50);
+    }
+    .mup-progress--visible { display: block; }
+    .mup-status-row { display: flex; align-items: center; gap: 0.6em; }
+    .mup-spinner {
+        display: inline-block; width: 1.1em; height: 1.1em;
+        border: 2px solid var(--w-color-border-furniture);
+        border-top-color: var(--w-color-info-100);
+        border-radius: 50%;
+        animation: mup-spin 0.7s linear infinite;
+    }
+    @keyframes mup-spin { to { transform: rotate(360deg); } }
+    .mup-status-pill {
+        padding: 0.15em 0.7em; border-radius: 1em;
+        font-size: 0.85em; font-weight: 600;
+        background: var(--w-color-grey-100); color: var(--w-color-text-label);
+    }
+    .mup-status-pill--success { background: var(--w-color-positive-100); color: var(--w-color-white); }
+    .mup-status-pill--failed  { background: var(--w-color-critical-200); color: var(--w-color-white); }
+    .mup-progress-error { color: var(--w-color-critical-200); margin-top: 0.5em; font-size: 0.9em; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=upload_config.name subtitle=_("Upload file") icon="upload" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <div class="mup-meta">
+        <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ upload_config.catalog.name }}
+        &nbsp;·&nbsp;
+        <span class="mup-meta-label">{% trans "Format:" %}</span> {{ format_label }}
+        &nbsp;·&nbsp;
+        <span class="mup-meta-label">{% trans "Type:" %}</span>
+        {% if upload_config.is_forecast %}{% trans "Forecast" %}{% else %}{% trans "Observation" %}{% endif %}
+        {% if upload_config.valid_time_format != "CONTENT" %}
+        &nbsp;·&nbsp;
+        <span class="mup-meta-label">{% trans "Filename format:" %}</span> <code>{{ upload_config.valid_time_format }}</code>
+        {% endif %}
+    </div>
+
+    <form id="upload-form" class="mup-form">
+        {% csrf_token %}
+
+        <div class="w-field__wrapper mup-field">
+            <label class="w-field__label" for="variable-select">{% trans "Variable" %} <sup>*</sup></label>
+            <select id="variable-select" class="w-field__input" required>
+                {% for var in variables %}
+                <option value="{{ var.pk }}">
+                    {{ var.long_name|default:var.variable_name }} ({{ var.collection.name }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="w-field__wrapper mup-field">
+            <label class="w-field__label" for="time-input">
+                {{ time_label }}{% if time_required %} <sup>*</sup>{% endif %}
+            </label>
+            <input type="datetime-local" id="time-input" class="w-field__input"
+                   {% if time_required %}required{% endif %}>
+            <div class="mup-help" id="time-help">
+                {% if upload_config.valid_time_format != "CONTENT" %}
+                {% trans "Pre-filled from the filename when it matches the" %} <code>{{ upload_config.valid_time_format }}</code> {% trans "format." %}
+                {% else %}
+                {% trans "Pre-filled from the filename when it carries a" %} <code>GR--YYYYMMDDTHHMM--</code> {% trans "prefix." %}
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="w-field__wrapper mup-field">
+            <label class="w-field__label" for="file-input">{% trans "File" %} <sup>*</sup></label>
+            <input type="file" id="file-input" class="w-field__input"
+                   accept="{{ accept_extensions }}" required>
+            <div class="mup-help">{{ format_label }} {% trans "files only" %} ({{ accept_extensions }})</div>
+        </div>
+
+        <div class="mup-error" id="form-error"></div>
+
+        <div class="mup-actions">
+            <button type="submit" id="submit-btn" class="button bicolor button--icon">
+                <span class="icon-wrapper"><svg class="icon icon-upload" aria-hidden="true"><use href="#icon-upload"></use></svg></span>
+                {% trans "Upload & ingest" %}
+            </button>
+            <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+
+    <div class="mup-progress" id="progress-panel">
+        <div class="mup-status-row">
+            <span class="mup-spinner" id="progress-spinner"></span>
+            <span class="mup-status-pill" id="status-pill">{% trans "uploading" %}</span>
+            <span id="status-text">{% trans "Uploading file…" %}</span>
+        </div>
+        <div class="mup-progress-error" id="progress-error"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    const EXTRACT_URL  = '{% url "manual_upload_extract_times" upload_config.pk %}';
+    const SUBMIT_URL   = '{% url "manual_upload_submit" upload_config.pk %}';
+    const STATUS_URL   = '{% url "arrival_status_api" 999999999 %}';
+    const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const POLL_MS      = 2500;
+    const TERMINAL     = ['completed', 'partial', 'failed', 'empty'];
+
+    const form        = document.getElementById('upload-form');
+    const fileInput   = document.getElementById('file-input');
+    const timeInput   = document.getElementById('time-input');
+    const variableSel = document.getElementById('variable-select');
+    const submitBtn   = document.getElementById('submit-btn');
+    const formError   = document.getElementById('form-error');
+    const panel       = document.getElementById('progress-panel');
+    const spinner     = document.getElementById('progress-spinner');
+    const pill        = document.getElementById('status-pill');
+    const statusText  = document.getElementById('status-text');
+    const progError   = document.getElementById('progress-error');
+
+    let pollTimer = null;
+
+    function showError(msg) {
+        formError.textContent = msg;
+        formError.classList.add('mup-error--visible');
+    }
+
+    function clearError() {
+        formError.classList.remove('mup-error--visible');
+    }
+
+    // ── Time pre-fill on file pick ─────────────────────────────────────────
+    fileInput.addEventListener('change', function () {
+        if (!this.files.length) return;
+        clearError();
+        const fd = new FormData();
+        fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
+        fd.append('filename', this.files[0].name);
+        fetch(EXTRACT_URL, { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.prefill) timeInput.value = data.prefill;
+            })
+            .catch(function () { /* pre-fill is best-effort */ });
+    });
+
+    // ── Status polling ─────────────────────────────────────────────────────
+    function setStatus(status, errorMessage) {
+        pill.textContent = status;
+        pill.className = 'mup-status-pill' +
+            (status === 'completed' ? ' mup-status-pill--success' :
+             status === 'failed'    ? ' mup-status-pill--failed'  : '');
+
+        if (TERMINAL.includes(status)) {
+            spinner.style.display = 'none';
+            statusText.textContent = status === 'completed'
+                ? '{% trans "Ingestion finished successfully." %}'
+                : status === 'failed'
+                    ? '{% trans "Ingestion failed." %}'
+                    : '{% trans "Ingestion finished with status:" %} ' + status;
+            progError.textContent = errorMessage || '';
+            submitBtn.disabled = false;
+        } else {
+            statusText.textContent = '{% trans "Processing…" %}';
+        }
+    }
+
+    function poll(arrivalId) {
+        fetch(STATUS_URL.replace('999999999', String(arrivalId)))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                setStatus(data.status, data.error_message);
+                if (!TERMINAL.includes(data.status)) {
+                    pollTimer = setTimeout(function () { poll(arrivalId); }, POLL_MS);
+                }
+            })
+            .catch(function () {
+                pollTimer = setTimeout(function () { poll(arrivalId); }, POLL_MS);
+            });
+    }
+
+    // ── Submit ─────────────────────────────────────────────────────────────
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        clearError();
+        if (pollTimer) clearTimeout(pollTimer);
+
+        const fd = new FormData();
+        fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
+        fd.append('variable_id', variableSel.value);
+        fd.append('time', timeInput.value);
+        fd.append('file', fileInput.files[0]);
+
+        submitBtn.disabled = true;
+        panel.classList.add('mup-progress--visible');
+        spinner.style.display = '';
+        progError.textContent = '';
+        pill.className = 'mup-status-pill';
+        pill.textContent = '{% trans "uploading" %}';
+        statusText.textContent = '{% trans "Uploading file…" %}';
+
+        fetch(SUBMIT_URL, { method: 'POST', body: fd })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (res) {
+                if (!res.ok || res.data.error) {
+                    setStatus('failed', res.data.error || '{% trans "Upload failed." %}');
+                    return;
+                }
+                setStatus('pending', '');
+                poll(res.data.data_arrival_id);
+            })
+            .catch(function () {
+                setStatus('failed', '{% trans "Upload failed — network error." %}');
+            });
+    });
+
+});
+</script>
+{% endblock %}

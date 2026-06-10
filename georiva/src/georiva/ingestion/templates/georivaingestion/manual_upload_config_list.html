@@ -28,6 +28,7 @@
                 <td>{% if config.is_forecast %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td>
                 <td><code>{{ config.valid_time_format }}</code></td>
                 <td>
+                    <a href="{% url 'manual_upload_page' config.pk %}" class="button button-small">{% trans "Upload" %}</a>
                     <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-small button-secondary">{% trans "Edit" %}</a>
                     <a href="{% url 'manual_upload_config_delete' config.pk %}" class="button button-small no">{% trans "Delete" %}</a>
                 </td>

@@ -109,6 +109,23 @@ class FileIngestionJobType(JobType):
             "FileIngestionJob %d failed for %s/%s: %s",
             job.id, job.bucket, job.file_path, exc,
         )
+        # Release the lock if this job's run holds it — an unexpected crash
+        # must not leave the FileIngestion stuck in 'processing' (with retries
+        # exhausted that state is unreclaimable, even by the stale-lock sweep).
+        # Scoped to our own worker id so an active run by another worker is
+        # never clobbered. The curated failure path (mark_failed + raise in
+        # run()) has already cleared the lock, so this matches nothing there.
+        FileIngestion.objects.filter(
+            bucket=job.bucket,
+            file_path=job.file_path,
+            status=FileIngestion.Status.PROCESSING,
+            locked_by=f"task-ferry-job-{job.id}",
+        ).update(
+            status=FileIngestion.Status.FAILED,
+            locked_at=None,
+            locked_by="",
+            error=str(exc)[:2000],
+        )
 
     def on_cancelled(self, job: FileIngestionJob) -> None:
         # Release the FileIngestion lock so sweep can retry the file.

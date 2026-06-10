@@ -86,10 +86,13 @@ the admin upload interface to poll until the `DataArrival` reaches a terminal st
 collection arrivals list endpoint.
 
 **Upload Page**:
-The admin page where an operator submits a single file for ingestion. Shows: a config selector (if the Catalog has
-multiple `ManualUploadConfig` records), a variable dropdown (from `ManualUploadConfigVariable`), auto-extracted or
-manually entered time fields, and a file picker. One file per submission; each submission creates one `DataArrival`.
-After submit, the page polls the Arrival Status Endpoint and shows progress inline.
+The admin page where an operator submits a single file for ingestion, one page per `ManualUploadConfig` (reached via
+the list page's "Upload" button at `/admin/manual-uploads/<pk>/upload/`). Shows: a variable dropdown (from
+`ManualUploadConfigVariable`), a single time field (labelled "Model run time" when `is_forecast`, "Observation date"
+otherwise) pre-filled from the filename on file pick, and a file picker. One file per submission; each submission
+creates one `DataArrival`. After submit, the page polls the Arrival Status Endpoint every 2.5s and shows progress
+inline until a terminal status. Incoming paths: GeoTIFF
+`{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}`; GRIB/NetCDF `{catalog}/[GR--{reftime}--]{filename}`.
 
 **Upload Flow**:
 The sequence for a manual upload via the admin interface: (1) operator submits the upload form; (2) server creates
@@ -116,5 +119,7 @@ A task-ferry job providing real-time status of a single `DataArrival` run — co
 _Avoid_: DataFeedJob
 
 **FileIngestionJob**:
-A task-ferry job providing real-time status of a single `FileIngestion`. Paired one-to-one with its `FileIngestion`.
+A task-ferry job providing real-time status of a single `FileIngestion` run. One job is created per
+`process_incoming_file` invocation, so retries and re-ingests produce multiple jobs pointing at the same
+`FileIngestion` (FK, not one-to-one).
 _Avoid_: IngestionJob
