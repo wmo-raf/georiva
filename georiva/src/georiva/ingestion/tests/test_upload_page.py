@@ -8,6 +8,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.ingestion.models import (
     DataArrival,
     FileIngestion,
+    FileIngestionJob,
     ManualUploadConfig,
     ManualUploadConfigVariable,
 )
@@ -153,11 +154,11 @@ class UploadSubmitTests(TestCase):
         self.assertEqual(fi.collection_slug, "ndvi")
         self.assertEqual(fi.data_arrival, arrival)
 
-        mock_task.delay.assert_called_once_with(
-            file_path=expected_path,
-            origin_bucket="incoming",
-            reference_time=None,
-        )
+        call_kwargs = mock_task.delay.call_args.kwargs
+        self.assertEqual(call_kwargs["file_path"], expected_path)
+        self.assertEqual(call_kwargs["origin_bucket"], "incoming")
+        self.assertIsNone(call_kwargs["reference_time"])
+        self.assertIsInstance(call_kwargs["job_id"], int)
 
     def test_geotiff_date_from_form_when_filename_unparseable(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -294,6 +295,35 @@ class UploadSubmitTests(TestCase):
         self.assertIn("minio down", arrival.error_message)
         mock_task.delay.assert_not_called()
 
+    def test_submit_response_includes_job_id(self, mock_incoming, mock_task):
+        mock_incoming.return_value = _mock_incoming_bucket()
+        _, _, config, variable = _geotiff_setup()
+
+        response = self.client.post(SUBMIT_URL.format(config.pk), {
+            "variable_id": variable.pk,
+            "time": "",
+            "file": SimpleUploadedFile("20250115.tif", b"tiff-bytes"),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("job_id", data)
+        self.assertIsNotNone(data["job_id"])
+
+    def test_file_ingestion_job_exists_before_task_is_enqueued(self, mock_incoming, mock_task):
+        mock_incoming.return_value = _mock_incoming_bucket()
+        _, _, config, variable = _geotiff_setup()
+
+        response = self.client.post(SUBMIT_URL.format(config.pk), {
+            "variable_id": variable.pk,
+            "time": "",
+            "file": SimpleUploadedFile("20250115.tif", b"tiff-bytes"),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        job_id = response.json()["job_id"]
+        self.assertTrue(FileIngestionJob.objects.filter(pk=job_id).exists())
+
 
 @patch("georiva.ingestion.consumer.process_incoming_file")
 class DirectDropTimeValidationTests(TestCase):
@@ -362,3 +392,44 @@ class DirectDropTimeValidationTests(TestCase):
         fi = FileIngestion.objects.get(file_path="imagery/operator_named.tif")
         self.assertNotEqual(fi.status, FileIngestion.Status.FAILED)
         mock_task.delay.assert_called_once()
+
+
+# =============================================================================
+# process_incoming_file task — job_id wiring
+# =============================================================================
+
+@patch("task_ferry.handler.JobHandler.run")
+class ProcessIncomingFileJobIdTests(TestCase):
+
+    def _make_job(self, file_path="chirps/rainfall/2024/01/15/file.tif", bucket="incoming"):
+        from django.contrib.contenttypes.models import ContentType
+        ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
+        return FileIngestionJob.objects.create(
+            user=None,
+            content_type=ct,
+            file_path=file_path,
+            bucket=bucket,
+        )
+
+    def test_task_reuses_existing_job_when_job_id_provided(self, mock_run):
+        from georiva.ingestion.tasks import process_incoming_file
+        job = self._make_job()
+
+        process_incoming_file.run(
+            file_path=job.file_path,
+            origin_bucket=job.bucket,
+            job_id=job.pk,
+        )
+
+        self.assertEqual(FileIngestionJob.objects.count(), 1)
+        mock_run.assert_called_once_with(job)
+
+    def test_task_creates_new_job_when_no_job_id(self, mock_run):
+        from georiva.ingestion.tasks import process_incoming_file
+
+        process_incoming_file.run(
+            file_path="chirps/rainfall/2024/01/15/file.tif",
+            origin_bucket="incoming",
+        )
+
+        self.assertEqual(FileIngestionJob.objects.count(), 1)

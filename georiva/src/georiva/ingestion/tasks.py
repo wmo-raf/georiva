@@ -29,6 +29,7 @@ def process_incoming_file(
         file_path: str,
         origin_bucket: str,
         reference_time: str = None,  # kept for backwards compat; IngestionService resolves it
+        job_id: int = None,
 ):
     """
     Process a single incoming file.
@@ -48,14 +49,17 @@ def process_incoming_file(
     from georiva.ingestion.models import FileIngestionJob
     
     logger.info("process_incoming_file: %s/%s", origin_bucket, file_path)
-    
-    ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
-    job = FileIngestionJob.objects.create(
-        user=None,
-        content_type=ct,
-        file_path=file_path,
-        bucket=origin_bucket,
-    )
+
+    if job_id is not None:
+        job = FileIngestionJob.objects.get(pk=job_id)
+    else:
+        ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
+        job = FileIngestionJob.objects.create(
+            user=None,
+            content_type=ct,
+            file_path=file_path,
+            bucket=origin_bucket,
+        )
     
     # Run in-place — we are already inside a Celery worker, so bypass the
     # executor and call JobHandler.run() directly.  This gives us the full
