@@ -13,8 +13,10 @@ def register_ingestion_dashboard_urls():
         collection_ingestion_logs_api,
         collection_ingestion_jobs_api,
     )
+    from .sse_views import ingestion_events_sse
 
     return [
+        path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),
         path("api/ingestion/collections/<int:collection_id>/arrivals/", collection_data_arrivals_api,
              name="collection_data_arrivals_api"),

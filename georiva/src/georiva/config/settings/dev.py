@@ -16,7 +16,7 @@ GEOS_LIBRARY_PATH = env.str('GEOS_LIBRARY_PATH', None)
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-INSTALLED_APPS = INSTALLED_APPS + [
+INSTALLED_APPS = ["daphne"] + INSTALLED_APPS + [
     "wagtail.contrib.styleguide",
 ]
 
