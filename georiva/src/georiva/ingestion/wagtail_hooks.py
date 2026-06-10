@@ -5,8 +5,20 @@ from wagtail.admin.menu import MenuItem
 from .panels import IngestionActivityPanel
 
 
+@hooks.register("register_admin_menu_item")
+def register_ingestion_activity_menu():
+    from django.utils.translation import gettext as _
+    return MenuItem(
+        _("Ingestion Activity"),
+        reverse_lazy("ingestion_activity_feed"),
+        icon_name="history",
+        order=840,
+    )
+
+
 @hooks.register("register_admin_urls")
 def register_ingestion_dashboard_urls():
+    from .activity_views import ingestion_activity_feed
     from .dashboard_views import (
         ingestion_dashboard_api,
         collection_data_arrivals_api,
@@ -16,6 +28,7 @@ def register_ingestion_dashboard_urls():
     from .sse_views import ingestion_events_sse
 
     return [
+        path("ingestion/activity/", ingestion_activity_feed, name="ingestion_activity_feed"),
         path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),
         path("api/ingestion/collections/<int:collection_id>/arrivals/", collection_data_arrivals_api,
