@@ -125,7 +125,13 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
             # Time selection (lazy)
             time_dim = self._time_dim(var)
             if timestamp is not None and time_dim:
-                var = var.sel({time_dim: timestamp}, method="nearest")
+                sel_ts = timestamp
+                # If the file's time axis is tz-naive but our timestamp is tz-aware,
+                # strip tzinfo before selection — pandas refuses to compare the two.
+                coord_tz = getattr(var.coords[time_dim].dtype, "tz", None)
+                if coord_tz is None and getattr(timestamp, "tzinfo", None) is not None:
+                    sel_ts = timestamp.replace(tzinfo=None)
+                var = var.sel({time_dim: sel_ts}, method="nearest")
             elif time_dim and var[time_dim].size > 0:
                 var = var.isel({time_dim: 0})
             
