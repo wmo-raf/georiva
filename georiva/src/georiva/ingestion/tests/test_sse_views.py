@@ -159,6 +159,7 @@ class SSELiveEventForwardingTests(TestCase):
         response = await self.async_client.get("/admin/api/ingestion/events/")
 
         # Consume the snapshot first, then publish a synthetic event and read it.
+        # Skip SSE comment lines (keepalives start with ':').
         async def _collect_next_event_after_snapshot():
             skipped_snapshot = False
             async for chunk in response.streaming_content:
@@ -167,7 +168,8 @@ class SSELiveEventForwardingTests(TestCase):
                     if "event: snapshot" in decoded:
                         skipped_snapshot = True
                     continue
-                if decoded.strip():
+                stripped = decoded.strip()
+                if stripped and not stripped.startswith(":"):
                     return decoded
             return ""
 
