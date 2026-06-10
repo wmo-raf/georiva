@@ -80,6 +80,7 @@ class IngestionService:
             file_path: str,
             origin_bucket: str = BucketType.INCOMING,
             reference_time: datetime = None,
+            progress=None,
     ) -> IngestionResult:
         """
         Process a single incoming geospatial file end-to-end.
@@ -101,6 +102,10 @@ class IngestionService:
         Returns:
             IngestionResult summarising what was created and any errors.
         """
+        from task_ferry.progress import Progress
+        if progress is None:
+            progress = Progress(total=100)
+
         origin = storage.bucket(origin_bucket)
         self.logger.info("Processing: %s/%s", origin.bucket_name, file_path)
         
@@ -189,7 +194,9 @@ class IngestionService:
                 ingestion_log=ingestion_log,
             )
             handler = IngestionHandler(ctx)
-            
+
+            progress.increment(by=10, state="file opened")
+
             # ── Process ───────────────────────────────────────────────────────
             try:
                 sfm = self._source_file_manager
@@ -201,7 +208,7 @@ class IngestionService:
                                 f"No active variables for: {collection.slug}"
                             )
                             continue
-                        
+
                         timestamps = plugin.get_timestamps(
                             local_path, first_variable_name
                         )
@@ -210,14 +217,28 @@ class IngestionService:
                                 f"No timestamps found in: {file_path}"
                             )
                             continue
-                        
+
                         self.logger.info(
                             "Found %d timestamp(s) for %s",
                             len(timestamps), collection.slug,
                         )
                         result.collection_slug = collection.slug
-                        
+
+                        progress.increment(
+                            by=5,
+                            state=f"{collection.slug}: {len(timestamps)} timestamps found",
+                        )
+                        n_vars = len(
+                            [v for v in collection.variables.all() if v.is_active]
+                        )
+                        loop = progress.create_child(
+                            represents=70, total=max(1, len(timestamps))
+                        )
+
                         for ts in timestamps:
+                            ts_slot = loop.create_child(
+                                represents=1, total=max(1, n_vars)
+                            )
                             try:
                                 item, assets, clip_info, failed_vars = (
                                     handler.process_timestamp(
@@ -225,6 +246,7 @@ class IngestionService:
                                         local_path=local_path,
                                         timestamp=ts,
                                         source_file=f"{origin_bucket}:{file_path}",
+                                        progress=ts_slot,
                                     )
                                 )
                                 
@@ -259,8 +281,11 @@ class IngestionService:
                     plugin.clear_cache()
             
             # ── Archive + cleanup ─────────────────────────────────────────────
+            progress.increment(by=10, state="archiving")
             self._source_file_manager.cleanup(origin, file_path, catalog, result)
-            
+
+            progress.increment(by=5, state="done")
+
             if result.clipped and result.size_reduction_percent:
                 self.logger.info(
                     "Clipping reduced data size by %.1f%%",

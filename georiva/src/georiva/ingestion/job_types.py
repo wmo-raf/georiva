@@ -64,15 +64,17 @@ class FileIngestionJobType(JobType):
         progress.increment(10, state="Lock acquired — starting ingestion")
 
         # ── Step 2: run the ingestion pipeline ────────────────────────────────
-        ingest_stage = progress.create_child(represents=75, total=1)
+        from georiva.ingestion.progress import PublishingProgress
 
+        pub_progress = PublishingProgress(total=100)
         service = IngestionService()
         result = service.process_file(
             file_path=job.file_path,
             origin_bucket=job.bucket,
+            progress=pub_progress,
         )
 
-        ingest_stage.increment(1, state="Pipeline complete")
+        progress.increment(75, state="Pipeline complete")
 
         # ── Step 3: record result ─────────────────────────────────────────────
         if result and result.success:
