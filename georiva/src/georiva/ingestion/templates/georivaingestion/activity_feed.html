@@ -25,12 +25,8 @@
         font-weight: 600; color: var(--w-color-text-label);
         text-transform: capitalize;
     }
-    .iaf-collection {
-        color: var(--w-color-grey-400);
-    }
-    .iaf-time {
-        margin-left: auto; color: var(--w-color-grey-400); font-size: 0.85em;
-    }
+    .iaf-collection { color: var(--w-color-grey-400); }
+    .iaf-time { margin-left: auto; color: var(--w-color-grey-400); font-size: 0.85em; }
     .iaf-status-pill {
         padding: 0.1em 0.6em; border-radius: 1em;
         font-size: 0.8em; font-weight: 600;
@@ -46,8 +42,6 @@
         color: var(--w-color-grey-400); word-break: break-all;
         margin-bottom: 0.5em;
     }
-
-    /* Inline progress log (reuses mup-log styles via shared classes) */
     .iaf-log-steps {
         list-style: none; margin: 0.3em 0 0; padding: 0;
         font-size: 0.85em; line-height: 1.8;
@@ -57,6 +51,14 @@
     .iaf-log-summary { font-size: 0.85em; margin-top: 0.4em; }
     .iaf-log-summary--success { color: var(--w-color-positive-100); font-weight: 600; }
     .iaf-log-summary--error   { color: var(--w-color-critical-200); }
+    .iaf-cancel-btn {
+        margin-left: 0.5em; padding: 0.1em 0.7em;
+        font-size: 0.8em; border-radius: 3px; cursor: pointer;
+        border: 1px solid var(--w-color-critical-200);
+        color: var(--w-color-critical-200);
+        background: transparent;
+    }
+    .iaf-cancel-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>
 {% endblock %}
 
@@ -75,23 +77,54 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 
-    const SSE_URL   = '/admin/api/ingestion/events/';
-    const feedEl    = document.getElementById('activity-feed');
-    const emptyEl   = document.getElementById('feed-empty');
+    const SSE_URL        = '/admin/api/ingestion/events/';
+    const CANCEL_URL_TPL = '/api/jobs/__ID__/cancel/';
+    const CSRF_TOKEN     = '{{ csrf_token }}';
+    const feedEl         = document.getElementById('activity-feed');
+    const emptyEl        = document.getElementById('feed-empty');
+
+    const TERMINAL_JOB_STATES = ['finished', 'failed', 'cancelled'];
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
     function fmtTime(iso) {
         if (!iso) return '';
-        try {
-            return new Date(iso).toLocaleString();
-        } catch (e) { return iso; }
+        try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
     }
 
     function pillClass(status) {
         const map = { processing: '--processing', completed: '--completed',
                       failed: '--failed', partial: '--partial' };
         return 'iaf-status-pill' + (map[status] || '');
+    }
+
+    function csrfHeaders() {
+        return { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' };
+    }
+
+    // ── Cancel button ──────────────────────────────────────────────────────
+
+    function addCancelButton(card, jobId) {
+        const btn = document.createElement('button');
+        btn.className = 'iaf-cancel-btn';
+        btn.textContent = '{% trans "Cancel" %}';
+        btn.dataset.cancelBtn = jobId;
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            fetch(CANCEL_URL_TPL.replace('__ID__', jobId), {
+                method: 'POST',
+                headers: csrfHeaders(),
+            }).catch(function () {
+                btn.disabled = false;
+            });
+        });
+        const header = card.querySelector('.iaf-card-header');
+        if (header) header.appendChild(btn);
+    }
+
+    function removeCancelButton(card) {
+        const btn = card.querySelector('[data-cancel-btn]');
+        if (btn) btn.remove();
     }
 
     // ── Card builder ───────────────────────────────────────────────────────
@@ -122,10 +155,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 '<div class="iaf-log-summary" data-log-summary></div>' +
             '</div>';
 
-        // Attach inline progress log for in-flight jobs
         arrival.file_ingestions.forEach(function (fi) {
-            if (fi.job_id && fi.job_state !== 'finished' && fi.job_state !== 'failed') {
+            if (fi.job_id && !TERMINAL_JOB_STATES.includes(fi.job_state)) {
                 attachJobLog(card, fi.job_id);
+                addCancelButton(card, fi.job_id);
             } else if (fi.job_summary) {
                 const sumEl = card.querySelector('[data-log-summary]');
                 sumEl.textContent = fi.job_summary;
@@ -156,6 +189,7 @@ document.addEventListener('DOMContentLoaded', function () {
         sumEl.textContent = summaryText;
         sumEl.className = 'iaf-log-summary ' +
             (isError ? 'iaf-log-summary--error' : 'iaf-log-summary--success');
+        removeCancelButton(card);
         delete card.dataset.jobId;
     }
 
@@ -185,10 +219,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ── SSE event handlers ─────────────────────────────────────────────────
 
-    function onSnapshot(arrivals) {
-        renderSnapshot(arrivals);
-    }
-
     function onArrivalStatusChanged(data) {
         const card = cardByArrival(data.id);
         if (!card) return;
@@ -211,7 +241,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (data.state === 'finished') {
             finishJobOnCard(card, '{% trans "Items and assets created successfully." %}', false);
         } else if (data.state === 'failed' || data.state === 'cancelled') {
-            finishJobOnCard(card, data.error || '{% trans "Ingestion failed." %}', true);
+            finishJobOnCard(card, data.error || '{% trans "Cancelled by operator." %}', true);
         }
     }
 
@@ -220,7 +250,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const es = new EventSource(SSE_URL);
 
     es.addEventListener('snapshot', function (ev) {
-        onSnapshot(JSON.parse(ev.data));
+        renderSnapshot(JSON.parse(ev.data));
     });
 
     es.addEventListener('data_arrival.status_changed', function (ev) {
