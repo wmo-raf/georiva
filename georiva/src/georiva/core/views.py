@@ -190,7 +190,7 @@ def collection_items_list(request, collection_pk):
         .annotate(asset_count=Subquery(asset_count_sq))
         .prefetch_related(
             Prefetch(
-                'ingestion_logs',
+                'file_ingestions',
                 queryset=FileIngestion.objects.order_by('-created_at'),
                 to_attr='prefetched_logs',
             )

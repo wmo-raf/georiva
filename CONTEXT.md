@@ -112,6 +112,16 @@ When extraction succeeds, the admin upload form pre-fills the time fields. When 
 manual entry fields; a direct MinIO drop (outside admin) raises an error and stops ingestion.
 _Avoid_: time parsing, date detection
 
+### Operator-facing monitoring surfaces
+
+**Collection Health Panel**:
+The Wagtail admin home panel showing a per-collection health summary — sparklines, OK/Warning/Failed counts, and last-run time. A fleet-level view across all active Collections. Entry point to the Ingestion Activity Feed via a "View all" link.
+_Avoid_: ingestion dashboard, activity panel
+
+**Ingestion Activity Feed**:
+A dedicated admin page (`/admin/ingestion/activity/`) showing a live, chronologically-ordered feed of `DataArrival` records with inline `FileIngestion` status and per-job step-by-step progress. Updated in real time via SSE. Covers both manual and scheduled arrivals. Accessible from the sidebar and from the Collection Health Panel.
+_Avoid_: live feed, ingestion log, activity dashboard
+
 ### Jobs
 
 **DataArrivalJob**:
