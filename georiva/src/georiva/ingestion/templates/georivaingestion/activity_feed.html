@@ -175,11 +175,11 @@ document.addEventListener('DOMContentLoaded', function () {
         card.dataset.jobId = jobId;
     }
 
-    function appendStep(card, state) {
+    function appendStep(card, state, percentage) {
         const list = card.querySelector('[data-log-steps]');
         if (!list) return;
         const li = document.createElement('li');
-        li.textContent = state;
+        li.textContent = (percentage != null) ? '[' + Math.round(percentage) + '%] ' + state : state;
         list.appendChild(li);
     }
 
@@ -232,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function onJobProgressUpdated(data) {
         const card = cardByJob(data.job_id);
         if (!card) return;
-        if (data.state) appendStep(card, data.state);
+        if (data.state) appendStep(card, data.state, data.percentage);
     }
 
     function onJobStateChanged(data) {
@@ -251,6 +251,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     es.addEventListener('snapshot', function (ev) {
         renderSnapshot(JSON.parse(ev.data));
+    });
+
+    es.addEventListener('data_arrival.created', function (ev) {
+        const arrival = JSON.parse(ev.data);
+        if (cardByArrival(arrival.id)) return;
+        emptyEl.style.display = 'none';
+        feedEl.insertBefore(buildCard(arrival), feedEl.firstChild);
     });
 
     es.addEventListener('data_arrival.status_changed', function (ev) {
