@@ -157,8 +157,10 @@ def manual_upload_extract_times(request, pk):
 
 
 def manual_upload_submit(request, pk):
+    from django.contrib.contenttypes.models import ContentType
+
     from georiva.core.storage import BucketType, storage
-    from georiva.ingestion.models import DataArrival, FileIngestion, ManualUploadConfig
+    from georiva.ingestion.models import DataArrival, FileIngestion, FileIngestionJob, ManualUploadConfig
     from georiva.ingestion.tasks import process_incoming_file
 
     if request.method != "POST":
@@ -254,10 +256,19 @@ def manual_upload_submit(request, pk):
         FileIngestion.reset_for_reingest(BucketType.INCOMING, saved_path)
         FileIngestion.objects.filter(pk=log.pk).update(data_arrival=arrival)
 
+    ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
+    job = FileIngestionJob.objects.create(
+        user=None,
+        content_type=ct,
+        file_path=saved_path,
+        bucket=BucketType.INCOMING,
+    )
+
     process_incoming_file.delay(
         file_path=saved_path,
         origin_bucket=BucketType.INCOMING,
         reference_time=reference_time.isoformat() if reference_time else None,
+        job_id=job.pk,
     )
 
-    return JsonResponse({"data_arrival_id": arrival.pk})
+    return JsonResponse({"data_arrival_id": arrival.pk, "job_id": job.pk})
