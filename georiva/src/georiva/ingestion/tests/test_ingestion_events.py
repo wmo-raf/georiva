@@ -5,6 +5,7 @@ from django.conf import settings
 from django.test import TestCase
 
 from georiva.ingestion.events import CHANNEL
+from georiva.ingestion.models import DataArrival
 
 # =============================================================================
 # Shared test base — subscribes to ingestion:events before each test
@@ -80,11 +81,25 @@ class DataArrivalStatusEventTests(IngestionEventsTestCase):
         self.assertEqual(event["id"], arrival.pk)
         self.assertEqual(event["status"], "processing")
 
-    def test_creation_does_not_publish_status_event(self):
-        self._make_arrival()
+    def test_creation_publishes_created_event(self):
+        arrival = self._make_arrival()
 
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "data_arrival.created")
+        self.assertEqual(event["id"], arrival.pk)
+        self.assertEqual(event["trigger"], DataArrival.Trigger.MANUAL_UPLOAD)
+        self.assertIn("status", event)
+        self.assertIn("file_path", event)
+        self.assertIn("started_at", event)
+        self.assertIn("file_ingestions", event)
+
+    def test_creation_does_not_publish_status_changed_event(self):
+        self._make_arrival()
         event = self._next_event(timeout=0.5)
-        self.assertIsNone(event)
+        # creation should publish data_arrival.created, not data_arrival.status_changed
+        if event:
+            self.assertNotEqual(event["type"], "data_arrival.status_changed")
 
 
 # =============================================================================
@@ -118,8 +133,10 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
         self.assertEqual(event["id"], fi.pk)
         self.assertEqual(event["status"], "processing")
 
-    def test_creation_does_not_publish_event(self):
+    def test_creation_does_not_publish_file_ingestion_event(self):
         self._make_file_ingestion()
+        # drain the data_arrival.created event (DataArrival is created inside _make_file_ingestion)
+        self._drain()
 
         event = self._next_event(timeout=0.5)
         self.assertIsNone(event)

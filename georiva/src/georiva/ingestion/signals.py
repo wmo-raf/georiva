@@ -3,12 +3,32 @@ from django.dispatch import receiver
 
 
 @receiver(post_save, sender="georivaingestion.DataArrival")
-def _data_arrival_status_changed(sender, instance, created, update_fields, **kwargs):
+def _data_arrival_post_save(sender, instance, created, update_fields, **kwargs):
+    from georiva.ingestion.events import publish_event
     if created:
+        collection_name = None
+        catalog_name = None
+        try:
+            if instance.collection_id:
+                col = instance.collection
+                collection_name = col.name if col else None
+                catalog_name = col.catalog.name if col and col.catalog_id else None
+        except Exception:
+            pass
+        publish_event({
+            "type": "data_arrival.created",
+            "id": instance.pk,
+            "trigger": instance.trigger,
+            "status": instance.status,
+            "file_path": instance.file_path,
+            "started_at": instance.started_at.isoformat() if instance.started_at else None,
+            "collection_name": collection_name,
+            "catalog_name": catalog_name,
+            "file_ingestions": [],
+        })
         return
     if update_fields is None or "status" not in update_fields:
         return
-    from georiva.ingestion.events import publish_event
     publish_event({
         "type": "data_arrival.status_changed",
         "id": instance.pk,
