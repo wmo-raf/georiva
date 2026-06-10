@@ -55,6 +55,7 @@ class IngestionHandler:
             local_path: Path,
             timestamp: datetime,
             source_file: str,
+            progress=None,
     ) -> tuple[Optional[Item], list[Asset], dict, list[str]]:
         """
         Process all Variables for *collection* at *timestamp*.
@@ -148,12 +149,16 @@ class IngestionHandler:
                     clip_window=clip_window,
                 )
                 assets.extend(variable_assets)
+                if progress is not None:
+                    progress.increment(state=f"{variable.slug}: succeeded")
             except Exception as e:
                 logger.error(
                     "Variable %s failed: %s\n%s",
                     variable.slug, e, traceback.format_exc(),
                 )
                 failed_variables.append(variable.slug)
+                if progress is not None:
+                    progress.increment(state=f"{variable.slug}: failed — {e}")
         
         # ── Extent update ─────────────────────────────────────────────────────
         self.extent_handler.expand(collection, ts_utc, bounds)
