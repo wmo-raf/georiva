@@ -4,279 +4,364 @@
 {% block titletag %}{% trans "Ingestion Activity" %}{% endblock %}
 
 {% block extra_css %}
-<style>
-    .iaf-empty {
-        padding: 2em 0; text-align: center;
-        color: var(--w-color-grey-400); font-size: 0.95em;
-    }
-    .iaf-card {
-        border: 1px solid var(--w-color-border-furniture);
-        border-radius: 4px; background: var(--w-color-surface-page);
-        margin-bottom: 1em; overflow: hidden;
-    }
-    .iaf-card-header {
-        display: flex; align-items: center; gap: 0.75em;
-        padding: 0.65em 1em;
-        background: var(--w-color-grey-50);
-        border-bottom: 1px solid var(--w-color-border-furniture);
-        font-size: 0.88em;
-    }
-    .iaf-trigger {
-        font-weight: 600; color: var(--w-color-text-label);
-        text-transform: capitalize;
-    }
-    .iaf-collection { color: var(--w-color-grey-400); }
-    .iaf-time { margin-left: auto; color: var(--w-color-grey-400); font-size: 0.85em; }
-    .iaf-status-pill {
-        padding: 0.1em 0.6em; border-radius: 1em;
-        font-size: 0.8em; font-weight: 600;
-        background: var(--w-color-grey-100); color: var(--w-color-text-label);
-    }
-    .iaf-status-pill--processing  { background: var(--w-color-info-100);     color: var(--w-color-white); }
-    .iaf-status-pill--completed   { background: var(--w-color-positive-100); color: var(--w-color-white); }
-    .iaf-status-pill--failed      { background: var(--w-color-critical-200); color: var(--w-color-white); }
-    .iaf-status-pill--partial     { background: var(--w-color-warning-100);  color: var(--w-color-text-label); }
-    .iaf-card-body { padding: 0.6em 1em 0.8em; }
-    .iaf-filepath {
-        font-family: monospace; font-size: 0.82em;
-        color: var(--w-color-grey-400); word-break: break-all;
-        margin-bottom: 0.5em;
-    }
-    .iaf-log-steps {
-        list-style: none; margin: 0.3em 0 0; padding: 0;
-        font-size: 0.85em; line-height: 1.8;
-        color: var(--w-color-text-label);
-    }
-    .iaf-log-steps li::before { content: "›  "; color: var(--w-color-grey-400); }
-    .iaf-log-summary { font-size: 0.85em; margin-top: 0.4em; }
-    .iaf-log-summary--success { color: var(--w-color-positive-100); font-weight: 600; }
-    .iaf-log-summary--error   { color: var(--w-color-critical-200); }
-    .iaf-cancel-btn {
-        margin-left: 0.5em; padding: 0.1em 0.7em;
-        font-size: 0.8em; border-radius: 3px; cursor: pointer;
-        border: 1px solid var(--w-color-critical-200);
-        color: var(--w-color-critical-200);
-        background: transparent;
-    }
-    .iaf-cancel-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-</style>
+    <style>
+        .iaf-empty {
+            padding: 2em 0;
+            text-align: center;
+            color: var(--w-color-grey-400);
+            font-size: 0.95em;
+        }
+
+        .iaf-card {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+            background: var(--w-color-surface-page);
+            margin-bottom: 1em;
+            overflow: hidden;
+        }
+
+        .iaf-card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75em;
+            padding: 0.65em 1em;
+            background: var(--w-color-grey-50);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            font-size: 0.88em;
+        }
+
+        .iaf-trigger {
+            font-weight: 600;
+            color: var(--w-color-text-label);
+            text-transform: capitalize;
+        }
+
+        .iaf-collection {
+            color: var(--w-color-grey-400);
+        }
+
+        .iaf-time {
+            margin-left: auto;
+            color: var(--w-color-grey-400);
+            font-size: 0.85em;
+        }
+
+        .iaf-status-pill {
+            padding: 0.1em 0.6em;
+            border-radius: 1em;
+            font-size: 0.8em;
+            font-weight: 600;
+            background: var(--w-color-grey-100);
+            color: var(--w-color-text-label);
+        }
+
+        .iaf-status-pill--processing {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+        }
+
+        .iaf-status-pill--completed {
+            background: var(--w-color-positive-100);
+            color: var(--w-color-white);
+        }
+
+        .iaf-status-pill--failed {
+            background: var(--w-color-critical-200);
+            color: var(--w-color-white);
+        }
+
+        .iaf-status-pill--partial {
+            background: var(--w-color-warning-100);
+            color: var(--w-color-text-label);
+        }
+
+        .iaf-card-body {
+            padding: 0.6em 1em 0.8em;
+        }
+
+        .iaf-filepath {
+            font-family: monospace;
+            font-size: 0.82em;
+            color: var(--w-color-grey-400);
+            word-break: break-all;
+            margin-bottom: 0.5em;
+        }
+
+        .iaf-log-steps {
+            list-style: none;
+            margin: 0.3em 0 0;
+            padding: 0;
+            font-size: 0.85em;
+            line-height: 1.8;
+            color: var(--w-color-text-label);
+        }
+
+        .iaf-log-steps li::before {
+            content: "›  ";
+            color: var(--w-color-grey-400);
+        }
+
+        .iaf-log-summary {
+            font-size: 0.85em;
+            margin-top: 0.4em;
+        }
+
+        .iaf-log-summary--success {
+            color: var(--w-color-positive-100);
+            font-weight: 600;
+        }
+
+        .iaf-log-summary--error {
+            color: var(--w-color-critical-200);
+        }
+
+        .iaf-cancel-btn {
+            margin-left: 0.5em;
+            padding: 0.1em 0.7em;
+            font-size: 0.8em;
+            border-radius: 3px;
+            cursor: pointer;
+            border: 1px solid var(--w-color-critical-200);
+            color: var(--w-color-critical-200);
+            background: transparent;
+        }
+
+        .iaf-cancel-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
-{% include "wagtailadmin/shared/header.html" with title=_("Ingestion Activity") icon="history" breadcrumbs=breadcrumbs_items %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Ingestion Activity") icon="history" breadcrumbs=breadcrumbs_items %}
 
-<div class="nice-padding">
-    <div id="activity-feed">
-        <div class="iaf-empty" id="feed-empty">{% trans "Connecting…" %}</div>
+    <div class="nice-padding">
+        <div id="activity-feed">
+            <div class="iaf-empty" id="feed-empty">{% trans "Connecting…" %}</div>
+        </div>
     </div>
-</div>
 {% endblock %}
 
 {% block extra_js %}
-{{ block.super }}
-<script>
-document.addEventListener('DOMContentLoaded', function () {
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
 
-    const SSE_URL        = '/admin/api/ingestion/events/';
-    const CANCEL_URL_TPL = '/api/jobs/__ID__/cancel/';
-    const CSRF_TOKEN     = '{{ csrf_token }}';
-    const feedEl         = document.getElementById('activity-feed');
-    const emptyEl        = document.getElementById('feed-empty');
+            const SSE_URL = '/admin/api/ingestion/events/';
+            const CANCEL_URL_TPL = '/api/jobs/__ID__/cancel/';
+            const CSRF_TOKEN = '{{ csrf_token }}';
+            const feedEl = document.getElementById('activity-feed');
+            const emptyEl = document.getElementById('feed-empty');
 
-    const TERMINAL_JOB_STATES = ['finished', 'failed', 'cancelled'];
+            const TERMINAL_JOB_STATES = ['finished', 'failed', 'cancelled'];
 
-    // ── Helpers ────────────────────────────────────────────────────────────
+            // ── Helpers ────────────────────────────────────────────────────────────
 
-    function fmtTime(iso) {
-        if (!iso) return '';
-        try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
-    }
-
-    function pillClass(status) {
-        const map = { processing: '--processing', completed: '--completed',
-                      failed: '--failed', partial: '--partial' };
-        return 'iaf-status-pill' + (map[status] || '');
-    }
-
-    function csrfHeaders() {
-        return { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' };
-    }
-
-    // ── Cancel button ──────────────────────────────────────────────────────
-
-    function addCancelButton(card, jobId) {
-        const btn = document.createElement('button');
-        btn.className = 'iaf-cancel-btn';
-        btn.textContent = '{% trans "Cancel" %}';
-        btn.dataset.cancelBtn = jobId;
-        btn.addEventListener('click', function () {
-            btn.disabled = true;
-            fetch(CANCEL_URL_TPL.replace('__ID__', jobId), {
-                method: 'POST',
-                headers: csrfHeaders(),
-            }).catch(function () {
-                btn.disabled = false;
-            });
-        });
-        const header = card.querySelector('.iaf-card-header');
-        if (header) header.appendChild(btn);
-    }
-
-    function removeCancelButton(card) {
-        const btn = card.querySelector('[data-cancel-btn]');
-        if (btn) btn.remove();
-    }
-
-    // ── Card builder ───────────────────────────────────────────────────────
-
-    function buildCard(arrival) {
-        const card = document.createElement('div');
-        card.className = 'iaf-card';
-        card.dataset.arrivalId = arrival.id;
-
-        const collection = arrival.collection_name
-            ? (arrival.catalog_name ? arrival.catalog_name + ' / ' : '') + arrival.collection_name
-            : (arrival.catalog_name || '');
-
-        card.innerHTML =
-            '<div class="iaf-card-header">' +
-                '<span class="iaf-trigger">' + (arrival.trigger || '') + '</span>' +
-                (collection ? '<span class="iaf-collection">' + collection + '</span>' : '') +
-                '<span class="' + pillClass(arrival.status) + '" data-status-pill>' +
-                    arrival.status +
-                '</span>' +
-                '<span class="iaf-time">' + fmtTime(arrival.started_at) + '</span>' +
-            '</div>' +
-            '<div class="iaf-card-body">' +
-                (arrival.file_path
-                    ? '<div class="iaf-filepath">' + arrival.file_path + '</div>'
-                    : '') +
-                '<ul class="iaf-log-steps" data-log-steps></ul>' +
-                '<div class="iaf-log-summary" data-log-summary></div>' +
-            '</div>';
-
-        arrival.file_ingestions.forEach(function (fi) {
-            if (fi.job_id && !TERMINAL_JOB_STATES.includes(fi.job_state)) {
-                attachJobLog(card, fi.job_id);
-                addCancelButton(card, fi.job_id);
-            } else if (fi.job_summary) {
-                const sumEl = card.querySelector('[data-log-summary]');
-                sumEl.textContent = fi.job_summary;
-                sumEl.className = 'iaf-log-summary iaf-log-summary--success';
+            function fmtTime(iso) {
+                if (!iso) return '';
+                try {
+                    return new Date(iso).toLocaleString();
+                } catch (e) {
+                    return iso;
+                }
             }
+
+            function pillClass(status) {
+                const map = {
+                    processing: '--processing', completed: '--completed',
+                    failed: '--failed', partial: '--partial'
+                };
+                return 'iaf-status-pill' + (map[status] || '');
+            }
+
+            function csrfHeaders() {
+                return {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'};
+            }
+
+            // ── Cancel button ──────────────────────────────────────────────────────
+
+            function addCancelButton(card, jobId) {
+                const btn = document.createElement('button');
+                btn.className = 'iaf-cancel-btn';
+                btn.textContent = '{% trans "Cancel" %}';
+                btn.dataset.cancelBtn = jobId;
+                btn.addEventListener('click', function () {
+                    btn.disabled = true;
+                    fetch(CANCEL_URL_TPL.replace('__ID__', jobId), {
+                        method: 'POST',
+                        headers: csrfHeaders(),
+                    }).catch(function () {
+                        btn.disabled = false;
+                    });
+                });
+                const header = card.querySelector('.iaf-card-header');
+                if (header) header.appendChild(btn);
+            }
+
+            function removeCancelButton(card) {
+                const btn = card.querySelector('[data-cancel-btn]');
+                if (btn) btn.remove();
+            }
+
+            // ── Card builder ───────────────────────────────────────────────────────
+
+            function buildCard(arrival) {
+                const card = document.createElement('div');
+                card.className = 'iaf-card';
+                card.dataset.arrivalId = arrival.id;
+
+                const collection = arrival.collection_name
+                    ? (arrival.catalog_name ? arrival.catalog_name + ' / ' : '') + arrival.collection_name
+                    : (arrival.catalog_name || '');
+
+                card.innerHTML =
+                    '<div class="iaf-card-header">' +
+                    '<span class="iaf-trigger">' + (arrival.trigger || '') + '</span>' +
+                    (collection ? '<span class="iaf-collection">' + collection + '</span>' : '') +
+                    '<span class="' + pillClass(arrival.status) + '" data-status-pill>' +
+                    arrival.status +
+                    '</span>' +
+                    '<span class="iaf-time">' + fmtTime(arrival.started_at) + '</span>' +
+                    '</div>' +
+                    '<div class="iaf-card-body">' +
+                    (arrival.file_path
+                        ? '<div class="iaf-filepath">' + arrival.file_path + '</div>'
+                        : '') +
+                    '<ul class="iaf-log-steps" data-log-steps></ul>' +
+                    '<div class="iaf-log-summary" data-log-summary></div>' +
+                    '</div>';
+
+                arrival.file_ingestions.forEach(function (fi) {
+                    if (fi.job_id && !TERMINAL_JOB_STATES.includes(fi.job_state)) {
+                        attachJobLog(card, fi.job_id);
+                        addCancelButton(card, fi.job_id);
+                    } else if (fi.job_summary) {
+                        const sumEl = card.querySelector('[data-log-summary]');
+                        sumEl.textContent = fi.job_summary;
+                        sumEl.className = 'iaf-log-summary iaf-log-summary--success';
+                    }
+                });
+
+                return card;
+            }
+
+            // ── Inline job progress log ────────────────────────────────────────────
+
+            function attachJobLog(card, jobId) {
+                card.dataset.jobId = jobId;
+            }
+
+            function appendStep(card, state, percentage) {
+                const list = card.querySelector('[data-log-steps]');
+                if (!list) return;
+                const li = document.createElement('li');
+                li.textContent = (percentage != null) ? '[' + Math.round(percentage) + '%] ' + state : state;
+                list.appendChild(li);
+            }
+
+            function finishJobOnCard(card, summaryText, isError) {
+                const sumEl = card.querySelector('[data-log-summary]');
+                if (!sumEl) return;
+                sumEl.textContent = summaryText;
+                sumEl.className = 'iaf-log-summary ' +
+                    (isError ? 'iaf-log-summary--error' : 'iaf-log-summary--success');
+                removeCancelButton(card);
+                delete card.dataset.jobId;
+            }
+
+            // ── Card registry ──────────────────────────────────────────────────────
+
+            function cardByArrival(id) {
+                return feedEl.querySelector('[data-arrival-id="' + id + '"]');
+            }
+
+            function cardByJob(id) {
+                return feedEl.querySelector('[data-job-id="' + id + '"]');
+            }
+
+            // ── Snapshot render ────────────────────────────────────────────────────
+
+            function renderSnapshot(arrivals) {
+                emptyEl.style.display = 'none';
+                if (!arrivals.length) {
+                    emptyEl.textContent = '{% trans "No arrivals yet." %}';
+                    emptyEl.style.display = '';
+                    return;
+                }
+                arrivals.forEach(function (arrival) {
+                    feedEl.appendChild(buildCard(arrival));
+                });
+            }
+
+            // ── SSE event handlers ─────────────────────────────────────────────────
+
+            function onArrivalStatusChanged(data) {
+                const card = cardByArrival(data.id);
+                if (!card) return;
+                const pill = card.querySelector('[data-status-pill]');
+                if (pill) {
+                    pill.textContent = data.status;
+                    pill.className = pillClass(data.status);
+                }
+            }
+
+            function onJobProgressUpdated(data) {
+                const card = cardByJob(data.job_id);
+                if (!card) return;
+                if (data.state) appendStep(card, data.state, data.percentage);
+            }
+
+            function onJobStateChanged(data) {
+                const card = cardByJob(data.id);
+                if (!card) return;
+                if (data.state === 'finished') {
+                    finishJobOnCard(card, '{% trans "Items and assets created successfully." %}', false);
+                } else if (data.state === 'failed' || data.state === 'cancelled') {
+                    finishJobOnCard(card, data.error || '{% trans "Cancelled by operator." %}', true);
+                }
+            }
+
+            // ── SSE connection ─────────────────────────────────────────────────────
+
+            const es = new EventSource(SSE_URL);
+
+            es.addEventListener('snapshot', function (ev) {
+                renderSnapshot(JSON.parse(ev.data));
+            });
+
+            es.addEventListener('data_arrival.created', function (ev) {
+                const arrival = JSON.parse(ev.data);
+                if (cardByArrival(arrival.id)) return;
+                emptyEl.style.display = 'none';
+                feedEl.insertBefore(buildCard(arrival), feedEl.firstChild);
+            });
+
+            es.addEventListener('data_arrival.job_created', function (ev) {
+                const data = JSON.parse(ev.data);
+                const card = cardByArrival(data.id);
+                if (!card) return;
+                attachJobLog(card, data.job_id);
+                addCancelButton(card, data.job_id);
+            });
+
+            es.addEventListener('data_arrival.status_changed', function (ev) {
+                onArrivalStatusChanged(JSON.parse(ev.data));
+            });
+
+            es.addEventListener('job.progress_updated', function (ev) {
+                onJobProgressUpdated(JSON.parse(ev.data));
+            });
+
+            es.addEventListener('job.state_changed', function (ev) {
+                onJobStateChanged(JSON.parse(ev.data));
+            });
+
+            es.onerror = function () {
+                emptyEl.textContent = '{% trans "Connection lost. Reconnecting…" %}';
+                emptyEl.style.display = '';
+            };
+
         });
-
-        return card;
-    }
-
-    // ── Inline job progress log ────────────────────────────────────────────
-
-    function attachJobLog(card, jobId) {
-        card.dataset.jobId = jobId;
-    }
-
-    function appendStep(card, state, percentage) {
-        const list = card.querySelector('[data-log-steps]');
-        if (!list) return;
-        const li = document.createElement('li');
-        li.textContent = (percentage != null) ? '[' + Math.round(percentage) + '%] ' + state : state;
-        list.appendChild(li);
-    }
-
-    function finishJobOnCard(card, summaryText, isError) {
-        const sumEl = card.querySelector('[data-log-summary]');
-        if (!sumEl) return;
-        sumEl.textContent = summaryText;
-        sumEl.className = 'iaf-log-summary ' +
-            (isError ? 'iaf-log-summary--error' : 'iaf-log-summary--success');
-        removeCancelButton(card);
-        delete card.dataset.jobId;
-    }
-
-    // ── Card registry ──────────────────────────────────────────────────────
-
-    function cardByArrival(id) {
-        return feedEl.querySelector('[data-arrival-id="' + id + '"]');
-    }
-
-    function cardByJob(id) {
-        return feedEl.querySelector('[data-job-id="' + id + '"]');
-    }
-
-    // ── Snapshot render ────────────────────────────────────────────────────
-
-    function renderSnapshot(arrivals) {
-        emptyEl.style.display = 'none';
-        if (!arrivals.length) {
-            emptyEl.textContent = '{% trans "No arrivals yet." %}';
-            emptyEl.style.display = '';
-            return;
-        }
-        arrivals.forEach(function (arrival) {
-            feedEl.appendChild(buildCard(arrival));
-        });
-    }
-
-    // ── SSE event handlers ─────────────────────────────────────────────────
-
-    function onArrivalStatusChanged(data) {
-        const card = cardByArrival(data.id);
-        if (!card) return;
-        const pill = card.querySelector('[data-status-pill]');
-        if (pill) {
-            pill.textContent = data.status;
-            pill.className = pillClass(data.status);
-        }
-    }
-
-    function onJobProgressUpdated(data) {
-        const card = cardByJob(data.job_id);
-        if (!card) return;
-        if (data.state) appendStep(card, data.state, data.percentage);
-    }
-
-    function onJobStateChanged(data) {
-        const card = cardByJob(data.id);
-        if (!card) return;
-        if (data.state === 'finished') {
-            finishJobOnCard(card, '{% trans "Items and assets created successfully." %}', false);
-        } else if (data.state === 'failed' || data.state === 'cancelled') {
-            finishJobOnCard(card, data.error || '{% trans "Cancelled by operator." %}', true);
-        }
-    }
-
-    // ── SSE connection ─────────────────────────────────────────────────────
-
-    const es = new EventSource(SSE_URL);
-
-    es.addEventListener('snapshot', function (ev) {
-        renderSnapshot(JSON.parse(ev.data));
-    });
-
-    es.addEventListener('data_arrival.created', function (ev) {
-        const arrival = JSON.parse(ev.data);
-        if (cardByArrival(arrival.id)) return;
-        emptyEl.style.display = 'none';
-        feedEl.insertBefore(buildCard(arrival), feedEl.firstChild);
-    });
-
-    es.addEventListener('data_arrival.status_changed', function (ev) {
-        onArrivalStatusChanged(JSON.parse(ev.data));
-    });
-
-    es.addEventListener('job.progress_updated', function (ev) {
-        onJobProgressUpdated(JSON.parse(ev.data));
-    });
-
-    es.addEventListener('job.state_changed', function (ev) {
-        onJobStateChanged(JSON.parse(ev.data));
-    });
-
-    es.onerror = function () {
-        emptyEl.textContent = '{% trans "Connection lost. Reconnecting…" %}';
-        emptyEl.style.display = '';
-    };
-
-});
-</script>
+    </script>
 {% endblock %}

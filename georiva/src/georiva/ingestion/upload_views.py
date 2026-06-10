@@ -271,4 +271,7 @@ def manual_upload_submit(request, pk):
         job_id=job.pk,
     )
 
+    from georiva.ingestion.events import publish_event
+    publish_event({"type": "data_arrival.job_created", "id": arrival.pk, "job_id": job.pk})
+
     return JsonResponse({"data_arrival_id": arrival.pk, "job_id": job.pk})

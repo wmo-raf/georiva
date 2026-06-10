@@ -15,6 +15,11 @@ from .models import DataArrival, FileIngestionJob, FileIngestion
 logger = logging.getLogger(__name__)
 
 
+def _publish_arrival_status(arrival_id: int, status: str) -> None:
+    from georiva.ingestion.events import publish_event
+    publish_event({"type": "data_arrival.status_changed", "id": arrival_id, "status": status})
+
+
 class FileIngestionJobType(JobType):
     type = "file_ingestion"
     model_class = FileIngestionJob
@@ -68,6 +73,7 @@ class FileIngestionJobType(JobType):
             DataArrival.objects.filter(pk=arrival_id).update(
                 status=DataArrival.Status.PROCESSING,
             )
+            _publish_arrival_status(arrival_id, DataArrival.Status.PROCESSING)
 
         progress.increment(10, state="Lock acquired — starting ingestion")
 
@@ -105,6 +111,7 @@ class FileIngestionJobType(JobType):
                     status=arrival_status,
                     finished_at=dj_timezone.now(),
                 )
+                _publish_arrival_status(arrival_id, arrival_status)
             progress.increment(10, state=(
                 f"Done — {len(result.items_created)} items, "
                 f"{len(result.assets_created)} assets created"
@@ -127,6 +134,7 @@ class FileIngestionJobType(JobType):
                     error_message=error_msg[:2000],
                     finished_at=dj_timezone.now(),
                 )
+                _publish_arrival_status(arrival_id, DataArrival.Status.FAILED)
             raise RuntimeError(error_msg)
 
     def on_error(self, job: FileIngestionJob, exc: Exception) -> None:
