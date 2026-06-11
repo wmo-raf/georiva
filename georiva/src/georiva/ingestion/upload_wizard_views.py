@@ -509,6 +509,45 @@ def upload_wizard_step4(request):
                         _("Variable '%s': unit '%s' is not a valid unit symbol.") % (var_label, unit_create)
                     )
 
+        # Duplicate source_name check: each variable_name must map to exactly
+        # one collection per catalog (unambiguous collection resolution for
+        # GRIB/NetCDF ingestion).
+        source_name_to_collection = {}
+        for a in assignments:
+            source_name = a.get("variable_name", "").strip()
+            coll_idx = a.get("collection_idx")
+            if not source_name or coll_idx is None or coll_idx >= len(collections):
+                continue
+            coll = collections[coll_idx]
+            coll_slug = coll.get("slug", "").strip() or slugify(coll.get("name", ""))
+            coll_name = coll.get("name", f"Collection {coll_idx + 1}")
+            if source_name in source_name_to_collection:
+                existing_slug, existing_name = source_name_to_collection[source_name]
+                if existing_slug != coll_slug:
+                    errors.append(
+                        _("Variable '%(var)s' is assigned to both '%(c1)s' and '%(c2)s' — "
+                          "each source_name must map to exactly one collection per catalog.")
+                        % {"var": source_name, "c1": existing_name, "c2": coll_name}
+                    )
+            else:
+                source_name_to_collection[source_name] = (coll_slug, coll_name)
+
+        # Also check against existing ManualUploadConfigs for the same catalog.
+        catalog_id = session.get("catalog_id")
+        if catalog_id:
+            from georiva.ingestion.models import ManualUploadConfigVariable
+            for ev in ManualUploadConfigVariable.objects.filter(
+                config__catalog_id=catalog_id
+            ).select_related("collection"):
+                if ev.variable_name in source_name_to_collection:
+                    new_slug, new_name = source_name_to_collection[ev.variable_name]
+                    if ev.collection.slug != new_slug:
+                        errors.append(
+                            _("Variable '%(var)s' is already assigned to collection '%(existing)s' "
+                              "in this catalog — cannot also assign it to '%(new)s'.")
+                            % {"var": ev.variable_name, "existing": ev.collection.name, "new": new_name}
+                        )
+
         if errors:
             for e in errors:
                 messages.error(request, e)

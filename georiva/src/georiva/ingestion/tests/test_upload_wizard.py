@@ -454,6 +454,113 @@ class Step4CollectionsTests(TestCase):
 
 
 # =============================================================================
+# Step 4 — duplicate source_name validation
+# =============================================================================
+
+class Step4DuplicateSourceNameTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin4dup", "dup@test.com", "pw")
+        self.client.force_login(self.user)
+        _seed_session(self.client, {
+            "catalog_mode": "create",
+            "new_catalog_name": "WM",
+            "new_catalog_slug": "wm",
+            "new_catalog_format": "grib2",
+            "config_name": "Surface variables",
+            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+            "selected_variable_names": ["2t"],
+            "sample_filename": "20250115.grib2",
+            "valid_time_format": "CONTENT",
+            "is_forecast": False,
+        })
+
+    def _post(self, collections, assignments):
+        return self.client.post(STEP4_URL, {
+            "collections_json": json.dumps(collections),
+            "assignments_json": json.dumps(assignments),
+        })
+
+    def test_same_source_name_in_two_collections_rerenders_with_error(self):
+        collections = [
+            {"name": "Col A", "slug": "col-a"},
+            {"name": "Col B", "slug": "col-b"},
+        ]
+        assignments = [
+            _assignment(variable_name="2t", collection_idx=0),
+            _assignment(variable_name="2t", collection_idx=1),
+        ]
+        response = self._post(collections, assignments)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "2t")
+        self.assertContains(response, "Col A")
+        self.assertContains(response, "Col B")
+
+    def test_same_source_name_same_collection_is_allowed(self):
+        # Two assignments pointing to the same collection slug — not a conflict.
+        collections = [{"name": "Col A", "slug": "col-a"}]
+        assignments = [
+            _assignment(variable_name="2t", collection_idx=0),
+            _assignment(variable_name="2t", collection_idx=0),
+        ]
+        response = self._post(collections, assignments)
+        self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
+
+    def test_conflict_with_existing_config_in_different_collection_rerenders(self):
+        catalog = _make_catalog(slug="existing-cat")
+        existing_col = _make_collection(catalog, slug="existing-col")
+        existing_config = ManualUploadConfig.objects.create(
+            catalog=catalog, name="Existing config",
+            is_forecast=False, valid_time_format="CONTENT",
+        )
+        ManualUploadConfigVariable.objects.create(
+            config=existing_config, collection=existing_col,
+            variable_name="2t", long_name="2m temperature", units="K",
+        )
+        _seed_session(self.client, {
+            "catalog_mode": "existing",
+            "catalog_id": catalog.pk,
+            "config_name": "New config",
+            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+            "selected_variable_names": ["2t"],
+            "sample_filename": "20250115.grib2",
+            "valid_time_format": "CONTENT",
+            "is_forecast": False,
+        })
+        collections = [{"name": "New Col", "slug": "new-col"}]
+        assignments = [_assignment(variable_name="2t", collection_idx=0)]
+        response = self._post(collections, assignments)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "2t")
+
+    def test_same_source_name_same_existing_collection_is_allowed(self):
+        catalog = _make_catalog(slug="reuse-cat")
+        existing_col = _make_collection(catalog, slug="reuse-col")
+        existing_config = ManualUploadConfig.objects.create(
+            catalog=catalog, name="Existing config",
+            is_forecast=False, valid_time_format="CONTENT",
+        )
+        ManualUploadConfigVariable.objects.create(
+            config=existing_config, collection=existing_col,
+            variable_name="2t", long_name="2m temperature", units="K",
+        )
+        _seed_session(self.client, {
+            "catalog_mode": "existing",
+            "catalog_id": catalog.pk,
+            "config_name": "New config 2",
+            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+            "selected_variable_names": ["2t"],
+            "sample_filename": "20250115.grib2",
+            "valid_time_format": "CONTENT",
+            "is_forecast": False,
+        })
+        # Assigning the same variable to the same collection slug — should pass.
+        collections = [{"name": "Reuse Col", "slug": "reuse-col"}]
+        assignments = [_assignment(variable_name="2t", collection_idx=0)]
+        response = self._post(collections, assignments)
+        self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
+
+
+# =============================================================================
 # Step 5 — Review
 # =============================================================================
 
