@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.core.paginator import InvalidPage
-from django.db.models import Count, OuterRef, Prefetch, Q, Subquery, Sum
+from django.db.models import Count, OuterRef, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.urls import reverse_lazy
@@ -13,7 +13,6 @@ from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdow
 
 from georiva.core.models import Catalog
 from georiva.core.models import Collection, Item
-from georiva.ingestion.models import FileIngestion
 from .table import LinkColumnWithIcon
 from .viewsets import CatalogViewSet, CollectionViewSet
 
@@ -188,13 +187,6 @@ def collection_items_list(request, collection_pk):
     items = (
         Item.objects.filter(collection=collection)
         .annotate(asset_count=Subquery(asset_count_sq))
-        .prefetch_related(
-            Prefetch(
-                'file_ingestions',
-                queryset=FileIngestion.objects.order_by('-created_at'),
-                to_attr='prefetched_logs',
-            )
-        )
         .order_by("-time")
     )
     
@@ -218,29 +210,33 @@ def collection_items_list(request, collection_pk):
         page_obj = paginator.page(1)
     
     elided_page_range = paginator.get_elided_page_range(page_obj.number)
-    
-    # ------------------------------------------------------------------
-    # Automation section (only rendered if data_feed is set)
-    # ------------------------------------------------------------------
-    data_feed = None
-    recent_runs = []
-    ingestion_summary = {}
 
-    if data_feed:
-        logs_qs = FileIngestion.objects.filter(
-            collection_slug=collection.slug,
-            catalog_slug=collection.catalog.slug,
-        )
-        ingestion_summary = logs_qs.aggregate(
-            total=Count("id"),
-            completed=Count("id", filter=Q(status=FileIngestion.Status.COMPLETED)),
-            failed=Count("id", filter=Q(status=FileIngestion.Status.FAILED)),
-            pending=Count("id", filter=Q(status=FileIngestion.Status.PENDING)),
-            processing=Count("id", filter=Q(status=FileIngestion.Status.PROCESSING)),
-            total_items_created=Sum("items_created"),
-            total_assets_created=Sum("assets_created"),
-        )
-    
+    # ------------------------------------------------------------------
+    # Attach ingestion_log to each item on this page.
+    # Bulk lookup by source_file (convention: "{bucket}:{file_path}") so
+    # every item — including GRIB/NetCDF items that are not the last one
+    # written — gets the correct status badge.
+    # ------------------------------------------------------------------
+    from django.db.models import F, Value
+    from django.db.models.functions import Concat
+    from georiva.ingestion.models import FileIngestion
+
+    source_files = {item.source_file for item in page_obj.object_list if item.source_file}
+    fi_by_source_file = {}
+    if source_files:
+        for fi in (
+            FileIngestion.objects
+            .annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path")))
+            .filter(_sf__in=source_files)
+            .order_by("-created_at")
+        ):
+            key = f"{fi.bucket}:{fi.file_path}"
+            if key not in fi_by_source_file:
+                fi_by_source_file[key] = fi
+
+    for item in page_obj.object_list:
+        item.ingestion_log = fi_by_source_file.get(item.source_file)
+
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
@@ -259,9 +255,6 @@ def collection_items_list(request, collection_pk):
         "page_obj": page_obj,
         "paginator": paginator,
         "elided_page_range": elided_page_range,
-        "data_feed": data_feed,
-        "recent_runs": recent_runs,
-        "ingestion_summary": ingestion_summary,
     }
     
     return render(request, "core/collection_items.html", context)
