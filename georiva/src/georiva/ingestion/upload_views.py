@@ -211,7 +211,7 @@ def manual_upload_submit(request, pk):
         trigger=DataArrival.Trigger.MANUAL_UPLOAD,
         status=DataArrival.Status.UPLOADING,
         file_path=file_path,
-        collection=variable.collection if is_geotiff else None,
+        catalog=config.catalog,
         files_requested=1,
     )
 
@@ -245,8 +245,6 @@ def manual_upload_submit(request, pk):
     log, created = FileIngestion.register(
         bucket=BucketType.INCOMING,
         file_path=saved_path,
-        catalog_slug=config.catalog.slug,
-        collection_slug=variable.collection.slug if is_geotiff else "",
         reference_time=reference_time,
         data_arrival=arrival,
     )

@@ -13,14 +13,14 @@ def _build_arrival_dict(arrival) -> dict:
             "job_id": latest_job.pk if latest_job else None,
             "job_state": latest_job.state if latest_job else None,
         })
-    collection = arrival.collection
+    catalog = arrival.catalog
     return {
         "id": arrival.pk,
         "status": arrival.status,
         "trigger": arrival.trigger,
         "file_path": arrival.file_path,
-        "collection_name": collection.name if collection else None,
-        "catalog_name": collection.catalog.name if collection else None,
+        "collection_name": None,
+        "catalog_name": catalog.name if catalog else None,
         "started_at": arrival.started_at.isoformat(),
         "finished_at": arrival.finished_at.isoformat() if arrival.finished_at else None,
         "file_ingestions": file_ingestions,
@@ -33,7 +33,7 @@ def _fetch_arrivals(terminal_limit: int) -> list[dict]:
 
     base = (
         DataArrival.objects
-        .select_related("collection__catalog")
+        .select_related("catalog")
         .prefetch_related("file_ingestions__jobs")
     )
     # All active arrivals (no cap — operator needs to see everything in flight).

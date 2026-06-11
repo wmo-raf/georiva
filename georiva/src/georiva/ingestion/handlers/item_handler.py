@@ -87,11 +87,6 @@ class ItemHandler:
             if update_fields:
                 item.save(update_fields=update_fields)
 
-        # Link the FileIngestion to the Item it produced.
-        if ingestion_log and ingestion_log.item_id != item.pk:
-            ingestion_log.item = item
-            ingestion_log.save(update_fields=["item_id"])
-
         return item, created
     
     def increment_collection_item_count(self, collection: Collection) -> None:

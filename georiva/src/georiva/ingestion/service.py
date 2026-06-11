@@ -181,7 +181,12 @@ class IngestionService:
             ingestion_log = FileIngestion.objects.filter(
                 bucket=origin_bucket, file_path=file_path
             ).first()
-            
+
+            # Write resolved collections immediately — even a run that fails
+            # before creating any Items remains collection-trackable.
+            if ingestion_log:
+                ingestion_log.collections.set(collections)
+
             # ── Build shared context + handler ────────────────────────────────
             ctx = IngestionContext(
                 plugin=plugin,

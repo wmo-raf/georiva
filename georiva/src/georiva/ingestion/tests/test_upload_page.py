@@ -146,7 +146,7 @@ class UploadSubmitTests(TestCase):
     def test_geotiff_submit_success_full_transition(self, mock_incoming, mock_task):
         bucket = _mock_incoming_bucket()
         mock_incoming.return_value = bucket
-        _, collection, config, variable = _geotiff_setup()
+        catalog, collection, config, variable = _geotiff_setup()
 
         response = self.client.post(SUBMIT_URL.format(config.pk), {
             "variable_id": variable.pk,
@@ -162,7 +162,7 @@ class UploadSubmitTests(TestCase):
         self.assertEqual(arrival.trigger, DataArrival.Trigger.MANUAL_UPLOAD)
         self.assertEqual(arrival.status, DataArrival.Status.PENDING)
         self.assertEqual(arrival.file_path, expected_path)
-        self.assertEqual(arrival.collection, collection)
+        self.assertEqual(arrival.catalog, catalog)
         self.assertEqual(arrival.files_fetched, 1)
 
         bucket.save.assert_called_once()
@@ -170,8 +170,6 @@ class UploadSubmitTests(TestCase):
 
         fi = FileIngestion.objects.get(file_path=expected_path)
         self.assertEqual(fi.bucket, "incoming")
-        self.assertEqual(fi.catalog_slug, "imagery")
-        self.assertEqual(fi.collection_slug, "ndvi")
         self.assertEqual(fi.data_arrival, arrival)
 
         call_kwargs = mock_task.delay.call_args.kwargs
@@ -207,7 +205,7 @@ class UploadSubmitTests(TestCase):
         self.assertEqual(response.status_code, 200)
         arrival = DataArrival.objects.get(pk=response.json()["data_arrival_id"])
         self.assertEqual(arrival.file_path, "models/GR--20250115T0600--gfs.grib2")
-        self.assertIsNone(arrival.collection)
+        self.assertIsNotNone(arrival.catalog)
 
         mock_task.delay.assert_called_once()
         self.assertEqual(
@@ -274,7 +272,6 @@ class UploadSubmitTests(TestCase):
         spent, _ = FileIngestion.register(
             bucket="incoming",
             file_path="imagery/ndvi/band_1/2025/01/15/20250115.tif",
-            catalog_slug="imagery",
             data_arrival=old_arrival,
         )
         FileIngestion.objects.filter(pk=spent.pk).update(

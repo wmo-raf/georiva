@@ -153,8 +153,6 @@ def sweep_unprocessed(sync: bool = False):
             FileIngestion.register(
                 bucket=bucket_type,
                 file_path=path,
-                catalog_slug=meta.get('catalog', ''),
-                collection_slug=meta.get('collection', ''),
                 reference_time=meta.get('reference_time'),
             )
             

@@ -43,7 +43,7 @@ class RecordRunCreatesDataArrivalTests(TestCase):
         self.assertEqual(arrival.files_skipped, 1)
         self.assertEqual(arrival.files_failed, 0)
         self.assertEqual(arrival.bytes_transferred, 2048)
-        self.assertEqual(arrival.collection, self.collection)
+        self.assertEqual(arrival.catalog, self.collection.catalog)
 
     def test_record_run_links_file_ingestions_to_arrival(self):
         paths = [
@@ -55,8 +55,6 @@ class RecordRunCreatesDataArrivalTests(TestCase):
             FileIngestion.objects.create(
                 bucket=BucketType.SOURCES,
                 file_path=path,
-                catalog_slug="test-cat",
-                collection_slug="test-col",
                 data_arrival=preliminary,
             )
 

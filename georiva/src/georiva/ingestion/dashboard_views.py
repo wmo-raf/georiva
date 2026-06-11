@@ -20,7 +20,7 @@ def ingestion_dashboard_api(request):
     from georiva.ingestion.models import DataArrival, FileIngestion
     from georiva.sources.models import DataFeedCollectionLink
 
-    collections = (
+    collections = list(
         Collection.objects
         .select_related("catalog")
         .filter(is_active=True)
@@ -34,40 +34,42 @@ def ingestion_dashboard_api(request):
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=29)
 
+    # Sparkline data: one row per (FileIngestion × Collection) pair via M2M join.
     recent_logs = (
         FileIngestion.objects
         .filter(created_at__date__gte=thirty_days_ago)
-        .values("collection_slug", "catalog_slug", "status", "created_at")
+        .filter(collections__isnull=False)
+        .values("collections", "status", "created_at")
         .order_by("created_at")
     )
 
     logs_by_collection = defaultdict(list)
     for log in recent_logs:
-        key = (log["catalog_slug"], log["collection_slug"])
-        logs_by_collection[key].append(log)
+        logs_by_collection[log["collections"]].append(log)
 
-    latest_arrivals = {}
+    # Latest DataArrival per catalog (catalog-scoped, not collection-scoped).
+    catalog_ids = {c.catalog_id for c in collections}
+    latest_arrivals_by_catalog = {}
     for arrival in (
         DataArrival.objects
-        .filter(collection__in=collections)
-        .order_by("collection_id", "-started_at")
-        .distinct("collection_id")
+        .filter(catalog_id__in=catalog_ids)
+        .order_by("catalog_id", "-started_at")
+        .distinct("catalog_id")
     ):
-        latest_arrivals[arrival.collection_id] = arrival
+        latest_arrivals_by_catalog[arrival.catalog_id] = arrival
 
     result = []
 
     for collection in collections:
         is_automated = collection.pk in automated_collection_ids
-        key = (collection.catalog.slug, collection.slug)
-        logs = logs_by_collection.get(key, [])
+        logs = logs_by_collection.get(collection.pk, [])
 
         sparkline = _build_sparkline(logs, today)
 
         last_run_at = None
         last_run_status = None
 
-        arrival = latest_arrivals.get(collection.pk)
+        arrival = latest_arrivals_by_catalog.get(collection.catalog_id)
         if arrival:
             last_run_at = arrival.started_at.isoformat()
             last_run_status = arrival.status
@@ -110,7 +112,7 @@ def collection_data_arrivals_api(request, collection_id):
 
     arrivals = (
         DataArrival.objects
-        .filter(collection=collection)
+        .filter(catalog=collection.catalog)
         .order_by("-started_at")[:100]
     )
 
@@ -159,10 +161,7 @@ def collection_ingestion_jobs_api(request, collection_id):
     
     jobs = (
         FileIngestionJob.objects
-        .filter(
-            file_ingestion__catalog_slug=collection.catalog.slug,
-            file_ingestion__collection_slug=collection.slug,
-        )
+        .filter(file_ingestion__collections=collection)
         .annotate(
             _active=Case(
                 When(state__in=active_states, then=0),
@@ -180,6 +179,7 @@ def collection_ingestion_jobs_api(request, collection_id):
         state = job.get_cached_state()
         if state in active_states:
             has_active = True
+        fi = job.file_ingestion
         result.append({
             "id": job.pk,
             "state": state,
@@ -187,8 +187,8 @@ def collection_ingestion_jobs_api(request, collection_id):
             "progress_state": job.get_cached_progress_state(),
             "file_path": job.file_path,
             "bucket": job.bucket,
-            "items_created": job.items_created,
-            "assets_created": job.assets_created,
+            "items_created": fi.items_created if fi else job.items_created,
+            "assets_created": fi.assets_created if fi else job.assets_created,
             "error": job.error or "",
             "created_at": job.created_at.isoformat(),
             "updated_at": job.updated_at.isoformat(),
@@ -212,10 +212,7 @@ def collection_ingestion_logs_api(request, collection_id):
     
     logs = (
         FileIngestion.objects
-        .filter(
-            catalog_slug=collection.catalog.slug,
-            collection_slug=collection.slug,
-        )
+        .filter(collections=collection)
         .order_by("-created_at")[:200]
     )
     
@@ -292,15 +289,11 @@ def _build_sparkline(logs, today):
 def _derive_status(sparkline, last_run_status):
     if not any(s["status"] != "empty" for s in sparkline):
         return "empty"
-    
-    if last_run_status in ("completed", "success"):
-        return "ok"
-    
-    if last_run_status == "failed":
-        return "failed"
-    
-    recent = [s["status"] for s in sparkline[-3:]]
-    if all(s == "empty" for s in recent):
-        return "warning"
-    
-    return "ok"
+
+    for entry in reversed(sparkline):
+        if entry["status"] == "failed":
+            return "failed"
+        if entry["status"] == "success":
+            return "ok"
+
+    return "empty"

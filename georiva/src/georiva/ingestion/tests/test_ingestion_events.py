@@ -114,8 +114,6 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
         fi, _ = FileIngestion.register(
             bucket="incoming",
             file_path="catalog/somefile.grib2",
-            catalog_slug="catalog",
-            collection_slug="",
             data_arrival=arrival,
         )
         return fi

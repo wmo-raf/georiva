@@ -39,10 +39,12 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         help_text=_("When data was produced (model run time for forecasts)"),
     )
     
-    # Source tracking
+    # Source tracking — convention: "{bucket}:{file_path}" (matches
+    # FileIngestion.bucket + FileIngestion.file_path for the audit join).
     source_file = models.CharField(
         max_length=500,
         blank=True,
+        db_index=True,
         help_text=_("Original source file path"),
     )
     

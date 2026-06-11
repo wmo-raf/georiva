@@ -1,4 +1,3 @@
-import json
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -24,6 +23,25 @@ def _setup_collection(catalog_slug="cat", collection_slug="col"):
     return Collection.objects.create(name=collection_slug, slug=collection_slug, catalog=catalog)
 
 
+def _make_arrival(catalog, trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+                  status=DataArrival.Status.COMPLETED, **kwargs):
+    return DataArrival.objects.create(trigger=trigger, status=status, catalog=catalog, **kwargs)
+
+
+def _make_file_ingestion(collection, file_path=None, status=FileIngestion.Status.COMPLETED,
+                         **kwargs):
+    arrival = _make_arrival(collection.catalog)
+    fi = FileIngestion.objects.create(
+        bucket=BucketType.SOURCES,
+        file_path=file_path or f"{collection.catalog.slug}/{collection.slug}/file.grib2",
+        status=status,
+        data_arrival=arrival,
+        **kwargs,
+    )
+    fi.collections.add(collection)
+    return fi
+
+
 class DashboardLastRunFromDataArrivalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "admin@test.com", "pw")
@@ -31,10 +49,9 @@ class DashboardLastRunFromDataArrivalTests(TestCase):
         self.collection = _setup_collection()
 
     def test_dashboard_returns_last_run_at_from_data_arrival(self):
-        arrival = DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+        arrival = _make_arrival(
+            self.collection.catalog,
             status=DataArrival.Status.COMPLETED,
-            collection=self.collection,
         )
 
         response = self.client.get(DASHBOARD_URL)
@@ -50,16 +67,10 @@ class DashboardLastRunFromDataArrivalTests(TestCase):
         manual_col = _setup_collection("cat-m", "col-m")
         scheduled_col = _setup_collection("cat-s", "col-s")
 
-        DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.COMPLETED,
-            collection=manual_col,
-        )
-        DataArrival.objects.create(
-            trigger=DataArrival.Trigger.SCHEDULED,
-            status=DataArrival.Status.COMPLETED,
-            collection=scheduled_col,
-        )
+        _make_arrival(manual_col.catalog, trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+                      status=DataArrival.Status.COMPLETED)
+        _make_arrival(scheduled_col.catalog, trigger=DataArrival.Trigger.SCHEDULED,
+                      status=DataArrival.Status.COMPLETED)
 
         response = self.client.get(DASHBOARD_URL)
         data = response.json()
@@ -68,9 +79,7 @@ class DashboardLastRunFromDataArrivalTests(TestCase):
         manual_entry = by_id[manual_col.pk]
         scheduled_entry = by_id[scheduled_col.pk]
 
-        # Both have the same keys
         self.assertEqual(set(manual_entry.keys()), set(scheduled_entry.keys()))
-        # Both have last_run_at populated
         self.assertIsNotNone(manual_entry["last_run_at"])
         self.assertIsNotNone(scheduled_entry["last_run_at"])
 
@@ -107,43 +116,83 @@ class DashboardLastRunFromDataArrivalTests(TestCase):
         col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
         self.assertEqual(col["status"], "empty")
 
-    def test_derived_status_is_ok_when_last_arrival_completed(self):
-        arrival = DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.COMPLETED,
-            collection=self.collection,
-        )
-        FileIngestion.objects.create(
-            bucket=BucketType.SOURCES,
-            file_path="cat/col/f.grib2",
-            catalog_slug="cat",
-            collection_slug="col",
-            status=FileIngestion.Status.COMPLETED,
-            data_arrival=arrival,
-        )
+    def test_derived_status_is_ok_when_completed_file_ingestion_linked_via_m2m(self):
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
 
         response = self.client.get(DASHBOARD_URL)
         col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
         self.assertEqual(col["status"], "ok")
 
-    def test_derived_status_is_failed_when_last_arrival_failed(self):
-        arrival = DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.FAILED,
-            collection=self.collection,
-        )
-        FileIngestion.objects.create(
-            bucket=BucketType.SOURCES,
-            file_path="cat/col/f2.grib2",
-            catalog_slug="cat",
-            collection_slug="col",
-            status=FileIngestion.Status.FAILED,
-            data_arrival=arrival,
-        )
+    def test_derived_status_is_failed_when_failed_file_ingestion_linked_via_m2m(self):
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.FAILED)
 
         response = self.client.get(DASHBOARD_URL)
         col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
         self.assertEqual(col["status"], "failed")
+
+    def test_grib_collection_shows_success_sparkline_via_m2m(self):
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
+
+        response = self.client.get(DASHBOARD_URL)
+        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+        today_entry = col["sparkline"][-1]
+        self.assertEqual(today_entry["status"], "success")
+
+    def test_grib_collection_shows_failed_sparkline_when_no_items_created(self):
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.FAILED)
+
+        response = self.client.get(DASHBOARD_URL)
+        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+        today_entry = col["sparkline"][-1]
+        self.assertEqual(today_entry["status"], "failed")
+
+    def test_multi_collection_grib_independent_sparkline_statuses(self):
+        """A single GRIB file serving two collections shows each collection's own status."""
+        catalog = Catalog.objects.create(name="shared-cat", slug="shared-cat", file_format="grib2")
+        col_a = Collection.objects.create(name="col-a", slug="col-a", catalog=catalog)
+        col_b = Collection.objects.create(name="col-b", slug="col-b", catalog=catalog)
+
+        arrival = _make_arrival(catalog)
+
+        fi_a = FileIngestion.objects.create(
+            bucket=BucketType.SOURCES,
+            file_path="shared-cat/col-a/file.grib2",
+            status=FileIngestion.Status.COMPLETED,
+            data_arrival=arrival,
+        )
+        fi_a.collections.add(col_a)
+
+        fi_b = FileIngestion.objects.create(
+            bucket=BucketType.SOURCES,
+            file_path="shared-cat/col-b/file.grib2",
+            status=FileIngestion.Status.FAILED,
+            data_arrival=arrival,
+        )
+        fi_b.collections.add(col_b)
+
+        response = self.client.get(DASHBOARD_URL)
+        by_id = {c["id"]: c for c in response.json()["collections"]}
+
+        self.assertEqual(by_id[col_a.pk]["sparkline"][-1]["status"], "success")
+        self.assertEqual(by_id[col_b.pk]["sparkline"][-1]["status"], "failed")
+
+    def test_last_run_at_comes_from_most_recent_catalog_arrival(self):
+        """last_run_at is the most recent DataArrival for the collection's catalog."""
+        older = _make_arrival(
+            self.collection.catalog,
+            status=DataArrival.Status.COMPLETED,
+            started_at=timezone.now() - timedelta(days=2),
+        )
+        newer = _make_arrival(
+            self.collection.catalog,
+            status=DataArrival.Status.FAILED,
+        )
+
+        response = self.client.get(DASHBOARD_URL)
+        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+
+        self.assertEqual(col["last_run_at"], newer.started_at.isoformat())
+        self.assertEqual(col["last_run_status"], DataArrival.Status.FAILED)
 
 
 class CollectionArrivalsAPITests(TestCase):
@@ -153,10 +202,10 @@ class CollectionArrivalsAPITests(TestCase):
         self.collection = _setup_collection("cat2", "col2")
 
     def test_arrivals_endpoint_returns_data_arrival_history(self):
-        DataArrival.objects.create(
+        _make_arrival(
+            self.collection.catalog,
             trigger=DataArrival.Trigger.SCHEDULED,
             status=DataArrival.Status.COMPLETED,
-            collection=self.collection,
             files_fetched=3,
             bytes_transferred=1024,
         )
@@ -187,10 +236,10 @@ class CollectionArrivalsAPITests(TestCase):
     def test_arrivals_duration_seconds_computed_from_started_and_finished_at(self):
         started = timezone.now()
         finished = started + timedelta(seconds=90)
-        DataArrival.objects.create(
+        _make_arrival(
+            self.collection.catalog,
             trigger=DataArrival.Trigger.SCHEDULED,
             status=DataArrival.Status.COMPLETED,
-            collection=self.collection,
             started_at=started,
             finished_at=finished,
         )
@@ -200,15 +249,23 @@ class CollectionArrivalsAPITests(TestCase):
         self.assertEqual(entry["duration_seconds"], 90.0)
 
     def test_arrivals_duration_seconds_is_null_when_not_finished(self):
-        DataArrival.objects.create(
+        _make_arrival(
+            self.collection.catalog,
             trigger=DataArrival.Trigger.MANUAL_UPLOAD,
             status=DataArrival.Status.PROCESSING,
-            collection=self.collection,
         )
 
         response = self.client.get(ARRIVALS_URL.format(self.collection.pk))
         entry = response.json()["arrivals"][0]
         self.assertIsNone(entry["duration_seconds"])
+
+    def test_arrivals_from_different_catalog_not_included(self):
+        other_collection = _setup_collection("other-cat", "other-col")
+        _make_arrival(other_collection.catalog)
+
+        response = self.client.get(ARRIVALS_URL.format(self.collection.pk))
+        data = response.json()
+        self.assertEqual(data["arrivals"], [])
 
 
 class CollectionIngestionLogsAPITests(TestCase):
@@ -218,16 +275,11 @@ class CollectionIngestionLogsAPITests(TestCase):
         self.collection = _setup_collection("cat3", "col3")
 
     def test_ingestion_logs_returns_file_ingestion_history(self):
-        arrival = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
-        FileIngestion.objects.create(
-            bucket=BucketType.SOURCES,
-            file_path="cat3/col3/file.grib2",
-            catalog_slug="cat3",
-            collection_slug="col3",
+        _make_file_ingestion(
+            self.collection,
             status=FileIngestion.Status.COMPLETED,
             items_created=2,
             assets_created=4,
-            data_arrival=arrival,
         )
 
         response = self.client.get(LOGS_URL.format(self.collection.pk))
@@ -239,11 +291,18 @@ class CollectionIngestionLogsAPITests(TestCase):
 
         entry = data["logs"][0]
         self.assertEqual(entry["status"], FileIngestion.Status.COMPLETED)
-        self.assertEqual(entry["file_path"], "cat3/col3/file.grib2")
         self.assertEqual(entry["items_created"], 2)
         self.assertEqual(entry["assets_created"], 4)
 
-    def test_ingestion_logs_returns_empty_list_when_no_logs(self):
+    def test_ingestion_logs_returns_empty_list_when_no_m2m_link(self):
+        # FileIngestion exists but is not linked to this collection
+        arrival = _make_arrival(self.collection.catalog)
+        FileIngestion.objects.create(
+            bucket=BucketType.SOURCES,
+            file_path="cat3/col3/unlinked.grib2",
+            data_arrival=arrival,
+        )
+
         response = self.client.get(LOGS_URL.format(self.collection.pk))
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -253,16 +312,26 @@ class CollectionIngestionLogsAPITests(TestCase):
         response = self.client.get(LOGS_URL.format(99999))
         self.assertEqual(response.status_code, 404)
 
+    def test_ingestion_logs_for_grib_collection_linked_via_m2m(self):
+        """GRIB produces items for multiple collections; each collection only sees its own logs."""
+        catalog = Catalog.objects.create(name="grib-cat", slug="grib-cat", file_format="grib2")
+        col_x = Collection.objects.create(name="col-x", slug="col-x", catalog=catalog)
+        col_y = Collection.objects.create(name="col-y", slug="col-y", catalog=catalog)
 
-def _make_file_ingestion(catalog_slug, collection_slug, file_path=None):
-    arrival = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
-    return FileIngestion.objects.create(
-        bucket=BucketType.SOURCES,
-        file_path=file_path or f"{catalog_slug}/{collection_slug}/file.grib2",
-        catalog_slug=catalog_slug,
-        collection_slug=collection_slug,
-        data_arrival=arrival,
-    )
+        arrival = _make_arrival(catalog)
+        fi = FileIngestion.objects.create(
+            bucket=BucketType.SOURCES,
+            file_path="grib-cat/multi.grib2",
+            status=FileIngestion.Status.COMPLETED,
+            data_arrival=arrival,
+        )
+        fi.collections.set([col_x, col_y])
+
+        resp_x = self.client.get(LOGS_URL.format(col_x.pk))
+        resp_y = self.client.get(LOGS_URL.format(col_y.pk))
+
+        self.assertEqual(len(resp_x.json()["logs"]), 1)
+        self.assertEqual(len(resp_y.json()["logs"]), 1)
 
 
 def _make_job(fi, **kwargs):
@@ -283,8 +352,8 @@ class CollectionIngestionJobsAPITests(TestCase):
         self.collection = _setup_collection("cat4", "col4")
 
     def test_ingestion_jobs_returns_job_history(self):
-        fi = _make_file_ingestion("cat4", "col4")
-        _make_job(fi, items_created=1, assets_created=2)
+        fi = _make_file_ingestion(self.collection, items_created=1, assets_created=2)
+        _make_job(fi)
 
         response = self.client.get(JOBS_URL.format(self.collection.pk))
         self.assertEqual(response.status_code, 200)
@@ -300,15 +369,16 @@ class CollectionIngestionJobsAPITests(TestCase):
         self.assertEqual(entry["assets_created"], 2)
 
     def test_has_active_true_when_job_is_pending(self):
-        fi = _make_file_ingestion("cat4", "col4", "cat4/col4/pending.grib2")
-        _make_job(fi)  # default state is "pending"
+        fi = _make_file_ingestion(self.collection,
+                                   file_path="cat4/col4/pending.grib2")
+        _make_job(fi)
 
         response = self.client.get(JOBS_URL.format(self.collection.pk))
         data = response.json()
         self.assertTrue(data["has_active"])
 
     def test_has_active_false_when_all_jobs_finished(self):
-        fi = _make_file_ingestion("cat4", "col4", "cat4/col4/done.grib2")
+        fi = _make_file_ingestion(self.collection, file_path="cat4/col4/done.grib2")
         _make_job(fi, state="finished")
 
         response = self.client.get(JOBS_URL.format(self.collection.pk))
