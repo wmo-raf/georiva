@@ -454,7 +454,7 @@
                     </td>
 
                     <td class="w-text-14">
-                        {% with log=item.prefetched_logs|first %}
+                        {% with log=item.ingestion_log %}
                             {% if log %}
                                 {% if log.status == 'completed' %}
                                     <span class="w-status-tag w-status-tag--primary ci-log-tag">
