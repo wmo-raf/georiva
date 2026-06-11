@@ -74,7 +74,7 @@ def ingestion_dashboard_api(request):
             last_run_at = arrival.started_at.isoformat()
             last_run_status = arrival.status
 
-        status = _derive_status(sparkline, last_run_status)
+        status = _derive_status(sparkline)
 
         result.append({
             "id": collection.pk,
@@ -100,13 +100,16 @@ def ingestion_dashboard_api(request):
 
 def collection_data_arrivals_api(request, collection_id):
     """
-    Returns DataArrival history for one collection.
+    Returns DataArrival history for the catalog that owns this collection.
+
+    DataArrival is catalog-scoped (one arrival per catalog per fetch/upload),
+    so all collections in the same catalog share the same arrivals list.
     """
     from georiva.core.models import Collection
     from georiva.ingestion.models import DataArrival
 
     try:
-        collection = Collection.objects.get(pk=collection_id)
+        collection = Collection.objects.select_related("catalog").get(pk=collection_id)
     except Collection.DoesNotExist:
         raise Http404
 
@@ -286,14 +289,10 @@ def _build_sparkline(logs, today):
     return sparkline
 
 
-def _derive_status(sparkline, last_run_status):
-    if not any(s["status"] != "empty" for s in sparkline):
-        return "empty"
-
+def _derive_status(sparkline):
     for entry in reversed(sparkline):
         if entry["status"] == "failed":
             return "failed"
         if entry["status"] == "success":
             return "ok"
-
     return "empty"

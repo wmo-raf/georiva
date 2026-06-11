@@ -1,4 +1,5 @@
 from asgiref.sync import sync_to_async
+from django.db.models import Prefetch
 
 TERMINAL_STATUSES = frozenset(["completed", "failed", "partial", "empty"])
 
@@ -6,7 +7,9 @@ TERMINAL_STATUSES = frozenset(["completed", "failed", "partial", "empty"])
 def _build_arrival_dict(arrival) -> dict:
     file_ingestions = []
     for fi in arrival.file_ingestions.all():
-        latest_job = fi.jobs.order_by("-created_at").first()
+        # jobs are pre-sorted by the Prefetch in _fetch_arrivals; no extra query.
+        all_jobs = fi.jobs.all()
+        latest_job = all_jobs[0] if all_jobs else None
         file_ingestions.append({
             "id": fi.pk,
             "status": fi.status,
@@ -31,10 +34,17 @@ def _build_arrival_dict(arrival) -> dict:
 def _fetch_arrivals(terminal_limit: int) -> list[dict]:
     from georiva.ingestion.models import DataArrival
 
+    from georiva.ingestion.models import FileIngestionJob
+
     base = (
         DataArrival.objects
         .select_related("catalog")
-        .prefetch_related("file_ingestions__jobs")
+        .prefetch_related(
+            Prefetch(
+                "file_ingestions__jobs",
+                queryset=FileIngestionJob.objects.order_by("-created_at"),
+            )
+        )
     )
     # All active arrivals (no cap — operator needs to see everything in flight).
     active = list(base.exclude(status__in=TERMINAL_STATUSES).order_by("-created_at"))

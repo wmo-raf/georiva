@@ -6,13 +6,11 @@ from django.dispatch import receiver
 def _data_arrival_post_save(sender, instance, created, update_fields, **kwargs):
     from georiva.ingestion.events import publish_event
     if created:
-        collection_name = None
         catalog_name = None
         try:
-            if instance.collection_id:
-                col = instance.collection
-                collection_name = col.name if col else None
-                catalog_name = col.catalog.name if col and col.catalog_id else None
+            if instance.catalog_id:
+                catalog = instance.catalog
+                catalog_name = catalog.name if catalog else None
         except Exception:
             pass
         publish_event({
@@ -22,7 +20,7 @@ def _data_arrival_post_save(sender, instance, created, update_fields, **kwargs):
             "status": instance.status,
             "file_path": instance.file_path,
             "started_at": instance.started_at.isoformat() if instance.started_at else None,
-            "collection_name": collection_name,
+            "collection_name": None,
             "catalog_name": catalog_name,
             "file_ingestions": [],
         })

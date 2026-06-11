@@ -2,6 +2,20 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def _backfill_catalog(apps, schema_editor):
+    """
+    Populate DataArrival.catalog from the old collection FK before it is dropped.
+    Rows without a collection (or whose collection has no catalog) are left NULL.
+    """
+    DataArrival = apps.get_model("georivaingestion", "DataArrival")
+    for arrival in DataArrival.objects.filter(collection__isnull=False).select_related(
+        "collection__catalog"
+    ):
+        if arrival.collection and arrival.collection.catalog_id:
+            arrival.catalog_id = arrival.collection.catalog_id
+            arrival.save(update_fields=["catalog_id"])
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -22,6 +36,8 @@ class Migration(migrations.Migration):
                 to="georivacore.catalog",
             ),
         ),
+        # Backfill catalog from the existing collection FK before it is dropped.
+        migrations.RunPython(_backfill_catalog, migrations.RunPython.noop),
         migrations.RemoveField(
             model_name="dataarrival",
             name="collection",
