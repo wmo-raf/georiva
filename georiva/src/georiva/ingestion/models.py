@@ -30,6 +30,7 @@ class DataArrival(models.Model):
     class Trigger(models.TextChoices):
         SCHEDULED = 'scheduled', 'Scheduled'
         MANUAL_UPLOAD = 'manual_upload', 'Manual Upload'
+        SWEEP = 'sweep', 'Sweep'
 
     class Status(models.TextChoices):
         UPLOADING = 'uploading', 'Uploading'
