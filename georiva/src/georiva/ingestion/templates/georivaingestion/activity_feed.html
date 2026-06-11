@@ -254,15 +254,13 @@
                 const isTerminal = TERMINAL_ARRIVAL_STATUSES.includes(arrival.status);
                 if (isTerminal) card.classList.add('iaf-card--collapsed');
 
-                const collection = arrival.collection_name
-                    ? (arrival.catalog_name ? arrival.catalog_name + ' / ' : '') + arrival.collection_name
-                    : (arrival.catalog_name || '');
+                const catalogLabel = arrival.catalog_name || '';
 
                 card.innerHTML =
                     '<div class="iaf-card-header">' +
                     '<span class="iaf-chevron">▾</span>' +
                     '<span class="iaf-trigger">' + (arrival.trigger || '') + '</span>' +
-                    (collection ? '<span class="iaf-collection">' + collection + '</span>' : '') +
+                    (catalogLabel ? '<span class="iaf-collection">' + catalogLabel + '</span>' : '') +
                     '<span class="' + pillClass(arrival.status) + '" data-status-pill>' +
                     arrival.status +
                     '</span>' +
