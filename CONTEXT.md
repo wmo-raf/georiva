@@ -19,12 +19,16 @@ _Avoid_: processing, import, fetch (for this phase)
 
 **DataArrival**:
 A batch of one or more files entering MinIO from any trigger. The top-level observable unit of work in the pipeline —
-exists for both scheduled and manual upload paths.
+exists for both scheduled and manual upload paths. Catalog-scoped: always carries a `catalog` FK. Does not link
+directly to a Collection — collection resolution is the job of `FileIngestion`.
 _Avoid_: LoaderRun, DataFeedRun, IngestionRun
 
 **FileIngestion**:
 The per-file record of processing a single file from MinIO into STAC items and assets. Owns the distributed lock, state
-machine, and retry logic for that file.
+machine, and retry logic for that file. Carries a `collections` M2M populated immediately after collection resolution
+(before per-collection processing begins), so failed runs are still collection-trackable even when no Items are
+created. Items produced by a FileIngestion are found via `Item.source_file` (indexed, value:
+`"{bucket}:{file_path}"`) — correct for all formats, including GRIB/NetCDF multi-item files.
 _Avoid_: IngestionLog
 
 ### Triggers
@@ -115,7 +119,7 @@ _Avoid_: time parsing, date detection
 ### Operator-facing monitoring surfaces
 
 **Collection Health Panel**:
-The Wagtail admin home panel showing a per-collection health summary — sparklines, OK/Warning/Failed counts, and last-run time. A fleet-level view across all active Collections. Entry point to the Ingestion Activity Feed via a "View all" link.
+The Wagtail admin home panel showing a per-collection health summary — sparklines, OK/Warning/Failed counts, and last-run time. A fleet-level view across all active Collections. Entry point to the Ingestion Activity Feed via a "View all" link. Sparkline data (30-day binary per-day status: success / failed / empty) is derived entirely from `FileIngestion.collections` M2M — completed runs for success days, failed runs for failure days. Both signals come from the same model with the same query shape.
 _Avoid_: ingestion dashboard, activity panel
 
 **Ingestion Activity Feed**:

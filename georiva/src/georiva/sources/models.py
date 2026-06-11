@@ -207,7 +207,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             trigger=DataArrival.Trigger.SCHEDULED,
             status=_status_map.get(result.status, DataArrival.Status.PENDING),
             data_feed=self,
-            collection=collection,
+            catalog=collection.catalog,
             files_requested=result.files_requested,
             files_fetched=result.files_fetched,
             files_skipped=result.files_skipped,

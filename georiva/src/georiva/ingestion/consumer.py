@@ -33,8 +33,8 @@ def _resolve_origin(bucket_name: str):
     return _get_ingest_buckets().get(bucket_name)
 
 
-def _catalog_exists(catalog_slug: str) -> bool:
-    return Catalog.objects.filter(slug=catalog_slug, is_active=True).exists()
+def _get_catalog(catalog_slug: str):
+    return Catalog.objects.filter(slug=catalog_slug, is_active=True).first()
 
 
 def _required_time_error(catalog_slug: str, key: str) -> str | None:
@@ -106,14 +106,16 @@ def _handle_event(ev: dict):
     
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
-    
-    if not _catalog_exists(catalog_slug):
+
+    catalog = _get_catalog(catalog_slug)
+    if catalog is None:
         logger.warning("Unknown catalog '%s': %s", catalog_slug, key)
         return
-    
+
     arrival, arrival_created = DataArrival.find_or_create(
         file_path=key,
         trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+        catalog=catalog,
     )
     if not arrival_created and arrival.status == DataArrival.Status.UPLOADING:
         arrival.status = DataArrival.Status.PENDING
@@ -122,8 +124,6 @@ def _handle_event(ev: dict):
     log, created = FileIngestion.register(
         bucket=origin_bucket,
         file_path=key,
-        catalog_slug=catalog_slug,
-        collection_slug=collection_slug or "",
         reference_time=meta.get("reference_time"),
         data_arrival=arrival,
     )
@@ -132,7 +132,7 @@ def _handle_event(ev: dict):
     # have already validated times server-side (the date may have been entered
     # in the form rather than encoded in the filename).
     if arrival_created:
-        time_error = _required_time_error(catalog_slug, key)
+        time_error = _required_time_error(catalog.slug, key)
         if time_error:
             logger.warning("Time extraction failed for %s: %s", key, time_error)
             FileIngestion.mark_failed(origin_bucket, key, time_error)

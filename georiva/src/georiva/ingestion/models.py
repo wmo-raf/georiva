@@ -52,8 +52,8 @@ class DataArrival(models.Model):
         on_delete=models.SET_NULL,
         related_name='arrivals',
     )
-    collection = models.ForeignKey(
-        'georivacore.Collection',
+    catalog = models.ForeignKey(
+        'georivacore.Catalog',
         null=True, blank=True,
         on_delete=models.SET_NULL,
         related_name='data_arrivals',
@@ -161,11 +161,21 @@ class FileIngestion(models.Model):
     error = models.TextField(blank=True, default='')
     
     # =========================================================================
+    # Collections M2M — populated after _resolve_collections() succeeds,
+    # before per-collection processing begins. Authoritative record of which
+    # collections a file touched or attempted to touch.
+    # =========================================================================
+
+    collections = models.ManyToManyField(
+        'georivacore.Collection',
+        blank=True,
+        related_name='file_ingestions',
+    )
+
+    # =========================================================================
     # Metadata
     # =========================================================================
-    
-    catalog_slug = models.CharField(max_length=100, blank=True, default='')
-    collection_slug = models.CharField(max_length=100, blank=True, null=True, default='')
+
     reference_time = models.DateTimeField(null=True, blank=True)
     file_size = models.BigIntegerField(null=True, blank=True)
     
@@ -180,21 +190,6 @@ class FileIngestion(models.Model):
         default=False
     )
     
-    # db_constraint=False: TimescaleDB does not support FK constraints pointing
-    # to hypertables. Django still handles on_delete at the ORM level.
-    # SET_NULL, not CASCADE: this is the lock/audit record for the file — it
-    # must survive Item deletion (e.g. ItemHandler.delete_orphan() removing an
-    # empty Item mid-run would otherwise cascade-delete it and break every
-    # subsequent ingestion_log.save() in the same run).
-    item = models.ForeignKey(
-        'georivacore.Item',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='file_ingestions',
-        db_constraint=False,
-    )
-
     data_arrival = models.ForeignKey(
         DataArrival,
         on_delete=models.CASCADE,
@@ -264,7 +259,7 @@ class FileIngestion(models.Model):
         Register a file in the log. Returns (log, created).
 
         If the file is already registered, returns the existing record.
-        Extra kwargs are passed to defaults (catalog_slug, reference_time, etc).
+        Extra kwargs are passed to defaults (reference_time, data_arrival, etc).
         """
         defaults = {
             'status': cls.Status.PENDING,
@@ -446,18 +441,9 @@ class FileIngestion(models.Model):
         A completed log with no live items means data was lost — re-ingest.
         """
         from georiva.core.models import Item
-        
+
         source_file = f"{self.bucket}:{self.file_path}"
-        
-        qs = Item.objects.filter(
-            collection__catalog__slug=self.catalog_slug,
-            source_file__contains=source_file,
-        )
-        
-        if self.collection_slug:
-            qs = qs.filter(collection__slug=self.collection_slug)
-        
-        return qs.exists()
+        return Item.objects.filter(source_file=source_file).exists()
     
     @classmethod
     def reset_for_reingest(cls, bucket: str, file_path: str) -> bool:

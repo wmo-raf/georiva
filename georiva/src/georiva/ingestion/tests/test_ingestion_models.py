@@ -4,7 +4,7 @@ import pytz
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 
-from georiva.core.models import Catalog, Collection, Item
+from georiva.core.models import Catalog, Collection
 from georiva.ingestion.handlers.item_handler import ItemHandler
 from georiva.ingestion.models import DataArrival, FileIngestion, FileIngestionJob
 
@@ -22,7 +22,6 @@ def _setup():
     log, _ = FileIngestion.register(
         bucket="incoming",
         file_path="wrf/file.nc",
-        catalog_slug="wrf",
         data_arrival=arrival,
     )
     return collection, log
@@ -30,27 +29,14 @@ def _setup():
 
 class FileIngestionItemLinkTests(TestCase):
     """
-    Deleting an Item must never delete the FileIngestion lock/audit record.
+    ItemHandler.delete_orphan() must not break subsequent timestamps.
 
-    Regression: FileIngestion.item was on_delete=CASCADE, so
-    ItemHandler.delete_orphan() (run when a timestamp produced no assets)
-    cascade-deleted the FileIngestion mid-run, and every subsequent
-    timestamp failed with 'Save with update_fields did not affect any rows.'
+    Regression: FileIngestion.item was on_delete=CASCADE; deleting an orphan
+    Item mid-run cascade-deleted the FileIngestion record, causing every
+    subsequent save() to fail. The item FK has since been removed — Items are
+    now linked via Item.source_file. This test verifies that delete_orphan()
+    is safe and that the next timestamp can still create an Item.
     """
-
-    def test_item_delete_nulls_link_instead_of_cascading(self):
-        collection, log = _setup()
-        item = Item.objects.create(
-            collection=collection,
-            time=pytz.utc.localize(datetime(2023, 7, 1, 6)),
-        )
-        log.item = item
-        log.save(update_fields=["item"])
-
-        item.delete()
-
-        log.refresh_from_db()
-        self.assertIsNone(log.item)
 
     def test_orphan_deletion_does_not_break_next_timestamp(self):
         collection, log = _setup()
@@ -66,20 +52,19 @@ class FileIngestionItemLinkTests(TestCase):
             crs="EPSG:4326",
         )
 
-        # Timestamp 1: item created and linked, then all variables fail
-        # and the orphan item is deleted.
+        # Timestamp 1: item created, then all variables fail and orphan is deleted.
         item1, _ = handler.get_or_create(
             timestamp=pytz.utc.localize(datetime(2023, 7, 1, 6)), **kwargs
         )
         handler.delete_orphan(item1)
 
-        # Timestamp 2 must still be able to link the same FileIngestion.
+        # Timestamp 2 must still succeed — FileIngestion must still exist.
         item2, created = handler.get_or_create(
             timestamp=pytz.utc.localize(datetime(2023, 7, 2, 6)), **kwargs
         )
         self.assertTrue(created)
         log.refresh_from_db()
-        self.assertEqual(log.item_id, item2.pk)
+        self.assertEqual(log.status, FileIngestion.Status.PENDING)
 
 
 class FileIngestionJobLinkTests(TestCase):
