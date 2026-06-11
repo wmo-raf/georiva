@@ -17,34 +17,59 @@ _Avoid_: processing, import, fetch (for this phase)
 
 ### Pipeline records
 
-**DataArrival**:
-A batch of one or more files entering MinIO from any trigger. The top-level observable unit of work in the pipeline —
-exists for both scheduled and manual upload paths. Catalog-scoped: always carries a `catalog` FK. Does not link
-directly to a Collection — collection resolution is the job of `FileIngestion`.
-_Avoid_: LoaderRun, DataFeedRun, IngestionRun
+**FetchRun**:
+The record of a single automated DataFeed execution. Created at the start of the run — before any files are fetched —
+to enable real-time monitoring. One `FetchRun` per DataFeed execution, covering all collections in that feed.
+Status: `running → completed / failed / cancelled`. Success vs partial outcome is derived from `FetchedFile` children,
+not stored on the run itself.
+_Avoid_: DataArrival, LoaderRun, DataFeedRun
+
+**FetchedFile**:
+Per-file acquisition record within a `FetchRun`. Created and updated incrementally as the Loader processes each file.
+Status: `pending → fetching → stored / skipped / failed`. Skipped files (already exist in storage) appear as
+`FetchedFile` records with `status=skipped`. Linked to `FileIngestion` via `file_path` — there is no FK.
+_Avoid_: FetchResult (that is a transient in-memory dataclass, not a model)
+
+**UploadSession**:
+The record of a manual multi-file upload by an operator. Owned by `catalog` + `user`. Status:
+`active → completed / failed / cancelled`. Transitions to `completed` automatically once all `UploadedFile` children
+reach a terminal state (`stored` or `failed`). Not linked to a `DataFeed` — manual uploads are independent of
+configured automated sources.
+_Avoid_: DataArrival, upload batch, upload job
+
+**UploadedFile**:
+Per-file upload record within an `UploadSession`. Status: `pending → uploading → stored / failed`. No `skipped`
+state — user-chosen files are always attempted. Linked to `FileIngestion` via `file_path` — there is no FK.
+_Avoid_: UploadArrival
 
 **FileIngestion**:
-The per-file record of processing a single file from MinIO into STAC items and assets. Owns the distributed lock, state
-machine, and retry logic for that file. Carries a `collections` M2M populated immediately after collection resolution
-(before per-collection processing begins), so failed runs are still collection-trackable even when no Items are
-created. Items produced by a FileIngestion are found via `Item.source_file` (indexed, value:
-`"{bucket}:{file_path}"`) — correct for all formats, including GRIB/NetCDF multi-item files.
+The per-file record of processing a single file from MinIO into STAC items and assets. Owns the distributed lock,
+state machine, and retry logic for that file. Created directly by the MinIO consumer (bucket event) or by the
+sweep task — with no reference to any acquisition record. Carries a `collections` M2M populated immediately after
+collection resolution (before per-collection processing begins), so failed runs are still collection-trackable even
+when no Items are created. Summary fields populated on completion: `variables_discovered` (int),
+`valid_time_start` (datetime), `valid_time_end` (datetime), `timestep_count` (int), `reference_time` (datetime).
+Items produced by a FileIngestion are found via `Item.source_file` (indexed, value: `"{bucket}:{file_path}"`) —
+correct for all formats, including GRIB/NetCDF multi-item files.
 _Avoid_: IngestionLog
 
 ### Triggers
 
 **DataFeed**:
-A configured automated data source — what to fetch, how often, and from where. Creates `DataArrival` records on a
+A configured automated data source — what to fetch, how often, and from where. Creates `FetchRun` records on a
 schedule via the Loader.
 _Avoid_: data source, loader config, plugin (when referring to the configured instance)
 
 **Manual Upload**:
-A `DataArrival` triggered by a human, either via the admin upload interface (DataArrival created before the file lands)
-or by dropping a file directly into MinIO (DataArrival created at the bucket event).
+A file upload triggered by a human via the admin upload interface. Creates an `UploadSession` and one
+`UploadedFile` per submitted file. Files never go client → MinIO directly (no presigned URLs).
 _Avoid_: manual drop, manual ingest, manual ingestion
 
-**Trigger**:
-The cause of a `DataArrival`. One of: `scheduled` (created by a DataFeed) or `manual_upload` (created by a human).
+**Sweep**:
+A periodic safety-net task that finds files in MinIO that have no corresponding `FileIngestion` record and
+registers them for processing. Sweep is not an acquisition event — it creates `FileIngestion` records directly,
+without a `FetchRun` or `UploadSession`.
+_Avoid_: sweep arrival, sweep ingestion
 
 ### Manual upload setup
 
@@ -84,27 +109,20 @@ Through model linking a `ManualUploadConfig` to a `Collection` for one variable.
 The collection FK is what routes each variable to the right Collection at upload time.
 _Avoid_: variable mapping, variable link
 
-**Arrival Status Endpoint**:
-A lightweight polling endpoint `GET /api/arrivals/{id}/status/` returning `{id, status, error_message}`. Used by
-the admin upload interface to poll until the `DataArrival` reaches a terminal status. Separate from the heavier
-collection arrivals list endpoint.
-
 **Upload Page**:
-The admin page where an operator submits a single file for ingestion, one page per `ManualUploadConfig` (reached via
-the list page's "Upload" button at `/admin/manual-uploads/<pk>/upload/`). Shows: a variable dropdown (from
-`ManualUploadConfigVariable`), a single time field (labelled "Model run time" when `is_forecast`, "Observation date"
-otherwise) pre-filled from the filename on file pick, and a file picker. One file per submission; each submission
-creates one `DataArrival`. After submit, the page polls the Arrival Status Endpoint every 2.5s and shows progress
-inline until a terminal status. Incoming paths: GeoTIFF
-`{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}`; GRIB/NetCDF `{catalog}/[GR--{reftime}--]{filename}`.
+The admin page where an operator submits files for ingestion, one page per `ManualUploadConfig` (reached via
+the list page's "Upload" button at `/admin/manual-uploads/<pk>/upload/`). Supports multi-file upload (like
+Wagtail's images/multiple/add interface). Each submission creates one `UploadSession` with one `UploadedFile`
+per file. After submit, the page shows per-file progress in real time.
+_Avoid_: upload form, upload interface
 
 **Upload Flow**:
-The sequence for a manual upload via the admin interface: (1) operator submits the upload form; (2) server creates
-`DataArrival(trigger=MANUAL_UPLOAD, status=UPLOADING)`; (3) server writes the file to MinIO `incoming` bucket — on
-failure, sets `DataArrival.status=FAILED, error_message=<reason>` and returns 500; (4) on success, sets
-`DataArrival.status=PENDING` and enqueues the ingestion task; (5) server returns `DataArrival.id`; (6) client polls
-the Arrival Status Endpoint until terminal. The file never goes client → MinIO directly (no presigned URLs).
-`DataArrival` gains an `error_message = TextField(blank=True)` field to carry upload-time failure reasons.
+The sequence for a manual upload via the admin interface: (1) operator selects one or more files and submits;
+(2) server creates `UploadSession(status=active)` and one `UploadedFile(status=pending)` per file; (3) for each
+file: transition to `uploading`, stream to MinIO `incoming` bucket — on failure set `status=failed`; on success
+set `status=stored`; (4) when all `UploadedFile` children reach a terminal state, `UploadSession` transitions to
+`completed`. The MinIO bucket event then triggers `FileIngestion` independently. Files never go client → MinIO
+directly (no presigned URLs).
 _Avoid_: upload pipeline, ingest flow
 
 **Time Extraction**:
@@ -119,18 +137,26 @@ _Avoid_: time parsing, date detection
 ### Operator-facing monitoring surfaces
 
 **Collection Health Panel**:
-The Wagtail admin home panel showing a per-collection health summary — sparklines, OK/Warning/Failed counts, and last-run time. A fleet-level view across all active Collections. Entry point to the Ingestion Activity Feed via a "View all" link. Sparkline data (30-day binary per-day status: success / failed / empty) is derived entirely from `FileIngestion.collections` M2M — completed runs for success days, failed runs for failure days. Both signals come from the same model with the same query shape.
+The Wagtail admin home panel showing a per-collection health summary — sparklines, OK/Warning/Failed counts, and
+last-run time. A fleet-level view across all active Collections. Entry point to the Ingestion Feed via a "View all"
+link. Sparkline data (30-day binary per-day status: success / failed / empty) is derived entirely from
+`FileIngestion.collections` M2M — completed runs for success days, failed runs for failure days.
 _Avoid_: ingestion dashboard, activity panel
 
-**Ingestion Activity Feed**:
-A dedicated admin page (`/admin/ingestion/activity/`) showing a live, chronologically-ordered feed of `DataArrival` records with inline `FileIngestion` status and per-job step-by-step progress. Updated in real time via SSE. Covers both manual and scheduled arrivals. Accessible from the sidebar and from the Collection Health Panel.
-_Avoid_: live feed, ingestion log, activity dashboard
+**Acquisition Feed**:
+A dedicated admin page showing a live, chronologically-ordered feed of acquisition activity — both `FetchRun`
+records (automated DataFeed executions) and `UploadSession` records (manual uploads). Each card shows the run/session
+status with per-file detail expandable. Updated in real time via SSE.
+_Avoid_: fetch feed, arrival feed, data arrival feed
+
+**Ingestion Feed**:
+A dedicated admin page showing a live, chronologically-ordered feed of `FileIngestion` records with inline
+per-job step-by-step progress and summary fields (variables discovered, valid time range, timestep count). Updated
+in real time via SSE. Covers files from any trigger — automated fetch, manual upload, or sweep. Accessible from
+the sidebar and from the Collection Health Panel.
+_Avoid_: live feed, ingestion log, activity dashboard, Ingestion Activity Feed
 
 ### Jobs
-
-**DataArrivalJob**:
-A task-ferry job providing real-time status of a single `DataArrival` run — covers the full batch from start to finish.
-_Avoid_: DataFeedJob
 
 **FileIngestionJob**:
 A task-ferry job providing real-time status of a single `FileIngestion` run. One job is created per
