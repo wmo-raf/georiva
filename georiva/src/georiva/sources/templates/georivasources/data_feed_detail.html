@@ -430,7 +430,7 @@
                     <thead>
                     <tr>
                         <th>
-                            {% trans "Collection" %}
+                            {% trans "Catalog" %}
                         </th>
                         <th>
                             {% trans "Status" %}
@@ -455,7 +455,7 @@
                     <tbody>
                     {% for run in recent_runs %}
                         <tr>
-                            <td>{{ run.collection.name }}</td>
+                            <td>{{ run.catalog.name }}</td>
                             <td>
                                 <span class="gfeed-status">
                                     {% if run.status == "completed" %}

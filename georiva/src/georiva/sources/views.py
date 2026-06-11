@@ -115,7 +115,7 @@ def data_feed_detail(request, pk):
     recent_runs = (
         DataArrival.objects
         .filter(data_feed=feed)
-        .select_related("collection")
+        .select_related("catalog")
         .order_by("-started_at")[:20]
     )
     
