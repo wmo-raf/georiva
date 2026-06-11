@@ -316,14 +316,14 @@ class Loader:
             FileIngestion.objects
             .filter(
                 bucket=BucketType.SOURCES,
-                catalog_slug=catalog_slug,
+                data_arrival__catalog__slug=catalog_slug,
                 file_path__endswith=f"/{filename}",
                 status__in=[
                     FileIngestion.Status.PENDING,
                     FileIngestion.Status.PROCESSING,
                 ],
             )
-            .exclude(collection_slug=collection_slug)
+            .exclude(file_path__contains=f"/{collection_slug}/")
             .values_list("file_path", flat=True)
             .first()
         )
