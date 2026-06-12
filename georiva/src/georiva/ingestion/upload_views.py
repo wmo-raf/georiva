@@ -160,7 +160,10 @@ def manual_upload_submit(request, pk):
     from django.contrib.contenttypes.models import ContentType
 
     from georiva.core.storage import BucketType, storage
-    from georiva.ingestion.models import DataArrival, FileIngestion, FileIngestionJob, ManualUploadConfig
+    from georiva.ingestion.models import (
+        FileIngestion, FileIngestionJob, ManualUploadConfig,
+        UploadSession, UploadedFile,
+    )
     from georiva.ingestion.tasks import process_incoming_file
 
     if request.method != "POST":
@@ -207,52 +210,38 @@ def manual_upload_submit(request, pk):
 
     file_path = _build_incoming_path(config, variable, uploaded.name, reference_time, valid_time)
 
-    arrival = DataArrival.objects.create(
-        trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-        status=DataArrival.Status.UPLOADING,
-        file_path=file_path,
+    session = UploadSession.objects.create(
         catalog=config.catalog,
-        files_requested=1,
+        user=request.user if request.user.is_authenticated else None,
     )
+    uf = UploadedFile.objects.create(
+        session=session,
+        original_filename=uploaded.name,
+    )
+    uf.mark_uploading()
 
     try:
         saved_path = storage.incoming.save(file_path, uploaded)
     except Exception as exc:
         logger.error("Manual upload MinIO write failed for %s: %s", file_path, exc)
-        arrival.status = DataArrival.Status.FAILED
-        arrival.error_message = str(exc)[:2000]
-        arrival.save(update_fields=["status", "error_message", "updated_at"])
+        uf.mark_failed(error=str(exc)[:2000])
+        session.mark_failed()
         return JsonResponse(
-            {"error": str(_("Upload to storage failed: %s") % exc), "data_arrival_id": arrival.pk},
+            {"error": str(_("Upload to storage failed: %s") % exc),
+             "upload_session_id": session.pk},
             status=500,
         )
 
-    # Django storage may dedupe-rename on collision — keep the real path.
-    if saved_path != file_path:
-        arrival.file_path = saved_path
+    uf.mark_stored(file_path=saved_path, bytes=uploaded.size or 0)
 
-    arrival.status = DataArrival.Status.PENDING
-    arrival.files_fetched = 1
-    arrival.files_queued = 1
-    arrival.bytes_transferred = uploaded.size or 0
-    arrival.save(update_fields=[
-        "status", "file_path", "files_fetched", "files_queued",
-        "bytes_transferred", "updated_at",
-    ])
-
-    # Register before enqueueing: FileIngestion.acquire() only locks existing
-    # rows. The bucket event will also fire; register/lock keep it idempotent.
+    # Register before enqueueing — idempotent with the bucket event that will also fire.
     log, created = FileIngestion.register(
         bucket=BucketType.INCOMING,
         file_path=saved_path,
         reference_time=reference_time,
-        data_arrival=arrival,
     )
     if not created:
-        # Explicit re-upload of a known file: a completed or failed (even
-        # retries-exhausted) record must run again, with a fresh retry budget.
         FileIngestion.reset_for_reingest(BucketType.INCOMING, saved_path)
-        FileIngestion.objects.filter(pk=log.pk).update(data_arrival=arrival)
 
     ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
     job = FileIngestionJob.objects.create(
@@ -270,6 +259,10 @@ def manual_upload_submit(request, pk):
     )
 
     from georiva.ingestion.events import publish_event
-    publish_event({"type": "data_arrival.job_created", "id": arrival.pk, "job_id": job.pk})
+    publish_event({"type": "upload_session.job_created", "id": session.pk, "job_id": job.pk})
 
-    return JsonResponse({"data_arrival_id": arrival.pk, "job_id": job.pk})
+    return JsonResponse({
+        "upload_session_id": session.pk,
+        "uploaded_file_id": uf.pk,
+        "job_id": job.pk,
+    })

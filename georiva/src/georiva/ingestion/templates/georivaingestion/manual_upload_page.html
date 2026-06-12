@@ -162,11 +162,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const EXTRACT_URL  = '{% url "manual_upload_extract_times" upload_config.pk %}';
     const SUBMIT_URL   = '{% url "manual_upload_submit" upload_config.pk %}';
-    const STATUS_URL   = '{% url "arrival_status_api" 999999999 %}';
+    const STATUS_URL   = '{% url "upload_session_status_api" 999999999 %}';
     const SSE_URL      = '/admin/api/ingestion/events/';
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
     const POLL_MS      = 2500;
-    const TERMINAL     = ['completed', 'partial', 'failed', 'empty'];
+    const TERMINAL     = ['completed', 'failed', 'cancelled'];
 
     const form        = document.getElementById('upload-form');
     const fileInput   = document.getElementById('file-input');
@@ -264,17 +264,17 @@ document.addEventListener('DOMContentLoaded', function () {
         };
     }
 
-    // ── Arrival status polling (fallback) ──────────────────────────────────
-    function poll(arrivalId) {
-        fetch(STATUS_URL.replace('999999999', String(arrivalId)))
+    // ── Upload session status polling (fallback) ───────────────────────────
+    function poll(sessionId) {
+        fetch(STATUS_URL.replace('999999999', String(sessionId)))
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (!TERMINAL.includes(data.status)) {
-                    pollTimer = setTimeout(function () { poll(arrivalId); }, POLL_MS);
+                    pollTimer = setTimeout(function () { poll(sessionId); }, POLL_MS);
                 }
             })
             .catch(function () {
-                pollTimer = setTimeout(function () { poll(arrivalId); }, POLL_MS);
+                pollTimer = setTimeout(function () { poll(sessionId); }, POLL_MS);
             });
     }
 
@@ -302,7 +302,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
                 form.style.display = 'none';
                 mountProgressLog(res.data.job_id, SSE_URL);
-                poll(res.data.data_arrival_id);
+                poll(res.data.upload_session_id);
             })
             .catch(function () {
                 showError('{% trans "Upload failed — network error." %}');
