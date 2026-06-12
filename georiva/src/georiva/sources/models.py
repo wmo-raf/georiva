@@ -189,53 +189,20 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     # Run Management
     # =========================================================================
     
-    def record_run(self, result, collection):
-        """Record data feed run result. Returns the created DataArrival."""
+    def _update_run_stats(self, result, collection):
+        """Update feed-level and collection-link scheduling stats after a run."""
         from django.utils import timezone
-        from georiva.core.storage import BucketType
-        from georiva.ingestion.models import DataArrival, FileIngestion
-
-        _status_map = {
-            'success': DataArrival.Status.COMPLETED,
-            'partial': DataArrival.Status.PARTIAL,
-            'failed': DataArrival.Status.FAILED,
-            'empty': DataArrival.Status.EMPTY,
-            'queued': DataArrival.Status.PENDING,
-        }
-
-        arrival = DataArrival.objects.create(
-            trigger=DataArrival.Trigger.SCHEDULED,
-            status=_status_map.get(result.status, DataArrival.Status.PENDING),
-            data_feed=self,
-            catalog=collection.catalog,
-            files_requested=result.files_requested,
-            files_fetched=result.files_fetched,
-            files_skipped=result.files_skipped,
-            files_failed=result.files_failed,
-            files_queued=result.files_queued,
-            bytes_transferred=result.bytes_transferred,
-            started_at=result.started_at,
-            finished_at=result.finished_at,
-        )
-
-        if result.stored_paths:
-            FileIngestion.objects.filter(
-                file_path__in=result.stored_paths,
-                bucket=BucketType.SOURCES,
-            ).update(data_arrival=arrival)
 
         now = timezone.now()
-        
-        # Update per-collection link's last_run_at for independent scheduling
         self.collection_links.filter(collection=collection).update(last_run_at=now)
-        
+
         self.last_run_at = now
         self.last_run_status = result.status
         self.last_run_message = '; '.join(result.errors[:3]) if result.errors else ''
         self.total_runs += 1
         self.total_files_fetched += result.files_fetched
         self.total_bytes_transferred += result.bytes_transferred
-        
+
         if result.success:
             self.last_success_at = self.last_run_at
 
@@ -244,8 +211,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             'last_success_at', 'total_runs', 'total_files_fetched',
             'total_bytes_transferred',
         ])
-
-        return arrival
     
     def is_due(self) -> bool:
         """Check if data feed is due to run."""
@@ -292,7 +257,6 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         for coll in collections:
             loader = self.get_loader(coll)
             result = loader.run()
-            self.record_run(result, coll)
             results.append(result)
         return results
     

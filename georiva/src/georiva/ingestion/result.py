@@ -38,6 +38,12 @@ class IngestionResult:
     
     # Archive path — populated if catalog.archive_source_files is True
     archive_path: str = ""
+
+    # Processing summary — populated after the ingestion loop completes
+    variables_discovered: Optional[int] = None
+    valid_time_start: Optional[datetime] = None
+    valid_time_end: Optional[datetime] = None
+    timestep_count: Optional[int] = None
     
     def add_error(self, msg: str):
         self.errors.append(msg)

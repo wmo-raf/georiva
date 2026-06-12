@@ -48,7 +48,6 @@ def run_data_feed_loader(self, data_feed_id):
         collection = real_link.collection
         loader = data_feed.get_loader(collection)
         result = loader.run()
-        data_feed.record_run(result, collection)
         results.append(result.to_dict())
     
     return results

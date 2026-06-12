@@ -98,6 +98,10 @@ class FileIngestionJobType(JobType):
                 archive_path=result.archive_path,
                 items_created=len(result.items_created),
                 assets_created=len(result.assets_created),
+                variables_discovered=result.variables_discovered,
+                valid_time_start=result.valid_time_start,
+                valid_time_end=result.valid_time_end,
+                timestep_count=result.timestep_count,
             )
             job.items_created = len(result.items_created)
             job.assets_created = len(result.assets_created)

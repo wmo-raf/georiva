@@ -280,6 +280,14 @@ class IngestionService:
                                 )
                 
                 result.success = len(result.items_created) > 0
+
+                # Populate summary fields from the last collection processed
+                if timestamps:
+                    result.variables_discovered = n_vars
+                    result.timestep_count = len(timestamps)
+                    sorted_ts = sorted(timestamps)
+                    result.valid_time_start = sorted_ts[0]
+                    result.valid_time_end = sorted_ts[-1]
             
             finally:
                 if hasattr(plugin, "clear_cache"):

@@ -342,6 +342,10 @@ class FileIngestion(models.Model):
             archive_path: str = '',
             items_created: int = 0,
             assets_created: int = 0,
+            variables_discovered: int = None,
+            valid_time_start=None,
+            valid_time_end=None,
+            timestep_count: int = None,
     ):
         """Mark a file as successfully processed."""
         cls.objects.filter(
@@ -354,6 +358,10 @@ class FileIngestion(models.Model):
             items_created=items_created,
             assets_created=assets_created,
             error='',
+            variables_discovered=variables_discovered,
+            valid_time_start=valid_time_start,
+            valid_time_end=valid_time_end,
+            timestep_count=timestep_count,
         )
     
     @classmethod
