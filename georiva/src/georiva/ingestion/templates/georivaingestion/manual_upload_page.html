@@ -5,7 +5,7 @@
 
 {% block extra_css %}
 <style>
-    .mup-form { max-width: 42em; }
+    .mup-form { max-width: 48em; }
     .mup-field { margin-bottom: 1.25em; }
     .mup-help { color: var(--w-color-grey-400); font-size: 0.9em; margin-top: 0.3em; }
     .mup-meta {
@@ -16,9 +16,7 @@
     }
     .mup-meta-label { color: var(--w-color-grey-400); }
     .mup-actions { display: flex; gap: 1em; margin-top: 1.5em; align-items: center; }
-    .mup-collections {
-        margin: 0.4em 0 0 0; padding-left: 1.3em; line-height: 1.9;
-    }
+    .mup-collections { margin: 0.4em 0 0 0; padding-left: 1.3em; line-height: 1.9; }
     .mup-collections li { color: var(--w-color-text-label); }
     .mup-error {
         display: none; color: var(--w-color-critical-200);
@@ -26,9 +24,46 @@
     }
     .mup-error--visible { display: block; }
 
+    /* File queue */
+    .mup-queue {
+        margin-top: 0.75em;
+        border: 1px solid var(--w-color-border-furniture);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .mup-queue-row {
+        display: grid;
+        align-items: center;
+        gap: 0.6em;
+        padding: 0.55em 0.8em;
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        font-size: 0.88em;
+        background: var(--w-color-surface-page);
+    }
+    .mup-queue-row:last-child { border-bottom: none; }
+    .mup-queue-row--geotiff { grid-template-columns: 1fr 1fr 1fr auto; }
+    .mup-queue-row--plain   { grid-template-columns: 1fr auto; }
+
+    .mup-row-filename {
+        font-family: monospace;
+        font-size: 0.9em;
+        word-break: break-all;
+        color: var(--w-color-text-label);
+    }
+    .mup-row-select, .mup-row-time { font-size: 0.88em; width: 100%; }
+    .mup-row-status {
+        font-size: 0.8em; padding: 0.15em 0.5em;
+        border-radius: 3px; white-space: nowrap;
+        background: var(--w-color-grey-100);
+        color: var(--w-color-text-label);
+    }
+    .mup-row-status--uploading { background: var(--w-color-info-100); color: var(--w-color-white); }
+    .mup-row-status--stored    { background: var(--w-color-positive-100); color: var(--w-color-white); }
+    .mup-row-status--failed    { background: var(--w-color-critical-200); color: var(--w-color-white); }
+
     /* Progress log */
     .mup-log {
-        display: none; max-width: 42em; margin-top: 1.5em;
+        display: none; max-width: 48em; margin-top: 1.5em;
         border: 1px solid var(--w-color-border-furniture);
         border-radius: 4px; background: var(--w-color-grey-50);
     }
@@ -51,24 +86,17 @@
     @keyframes mup-spin { to { transform: rotate(360deg); } }
     .mup-log-steps {
         list-style: none; margin: 0; padding: 0.4em 1em 0.6em;
-        font-size: 0.88em; line-height: 1.9;
-        color: var(--w-color-text-label);
+        font-size: 0.88em; line-height: 1.9; color: var(--w-color-text-label);
     }
     .mup-log-steps li::before { content: "›  "; color: var(--w-color-grey-400); }
-    .mup-log-summary {
-        padding: 0.5em 1em 0.8em;
-        font-size: 0.88em;
-    }
+    .mup-log-summary { padding: 0.5em 1em 0.8em; font-size: 0.88em; }
     .mup-log-summary--success { color: var(--w-color-positive-100); font-weight: 600; }
     .mup-log-summary--error   { color: var(--w-color-critical-200); }
-    .mup-log-retry {
-        padding: 0 1em 0.8em; font-size: 0.88em;
-    }
 </style>
 {% endblock %}
 
 {% block content %}
-{% include "wagtailadmin/shared/header.html" with title=upload_config.name subtitle=_("Upload file") icon="upload" breadcrumbs=breadcrumbs_items %}
+{% include "wagtailadmin/shared/header.html" with title=upload_config.name subtitle=_("Upload files") icon="upload" breadcrumbs=breadcrumbs_items %}
 
 <div class="nice-padding">
     <div class="mup-meta">
@@ -87,18 +115,7 @@
     <form id="upload-form" class="mup-form">
         {% csrf_token %}
 
-        {% if is_geotiff %}
-        <div class="w-field__wrapper mup-field">
-            <label class="w-field__label" for="variable-select">{% trans "Variable" %} <sup>*</sup></label>
-            <select id="variable-select" class="w-field__input" required>
-                {% for var in variables %}
-                <option value="{{ var.pk }}">
-                    {{ var.long_name|default:var.variable_name }} ({{ var.collection.name }})
-                </option>
-                {% endfor %}
-            </select>
-        </div>
-        {% else %}
+        {% if not is_geotiff %}
         <div class="mup-field">
             <div class="w-field__label">{% trans "Collections to be processed" %}</div>
             <ul class="mup-collections">
@@ -106,17 +123,16 @@
                 <li>{{ collection.name }}</li>
                 {% endfor %}
             </ul>
-            <div class="mup-help">{% trans "All active variables in these collections will be extracted from the uploaded file." %}</div>
+            <div class="mup-help">{% trans "All active variables in these collections will be extracted from each uploaded file." %}</div>
         </div>
-        {% endif %}
 
-        <div class="w-field__wrapper mup-field">
-            <label class="w-field__label" for="time-input">
+        <div class="w-field__wrapper mup-field" id="shared-time-field">
+            <label class="w-field__label" for="shared-time-input">
                 {{ time_label }}{% if time_required %} <sup>*</sup>{% endif %}
             </label>
-            <input type="datetime-local" id="time-input" class="w-field__input"
+            <input type="datetime-local" id="shared-time-input" class="w-field__input"
                    {% if time_required %}required{% endif %}>
-            <div class="mup-help" id="time-help">
+            <div class="mup-help">
                 {% if upload_config.valid_time_format != "CONTENT" %}
                 {% trans "Pre-filled from the filename when it matches the" %} <code>{{ upload_config.valid_time_format }}</code> {% trans "format." %}
                 {% else %}
@@ -124,13 +140,16 @@
                 {% endif %}
             </div>
         </div>
+        {% endif %}
 
         <div class="w-field__wrapper mup-field">
-            <label class="w-field__label" for="file-input">{% trans "File" %} <sup>*</sup></label>
+            <label class="w-field__label" for="file-input">{% trans "Files" %} <sup>*</sup></label>
             <input type="file" id="file-input" class="w-field__input"
-                   accept="{{ accept_extensions }}" required>
+                   accept="{{ accept_extensions }}" multiple required>
             <div class="mup-help">{{ format_label }} {% trans "files only" %} ({{ accept_extensions }})</div>
         </div>
+
+        <div id="file-queue"></div>
 
         <div class="mup-error" id="form-error"></div>
 
@@ -150,7 +169,6 @@
         </div>
         <ul class="mup-log-steps" id="log-steps"></ul>
         <div class="mup-log-summary" id="log-summary"></div>
-        <div class="mup-log-retry" id="log-retry"></div>
     </div>
 </div>
 {% endblock %}
@@ -167,14 +185,18 @@ document.addEventListener('DOMContentLoaded', function () {
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
     const POLL_MS      = 2500;
     const TERMINAL     = ['completed', 'failed', 'cancelled'];
+    const IS_GEOTIFF   = {{ is_geotiff|yesno:"true,false" }};
+    const TIME_LABEL   = '{{ time_label|escapejs }}';
+    const VARIABLES    = [{% for var in variables %}{"id": {{ var.pk }}, "label": "{{ var.long_name|default:var.variable_name|escapejs }} ({{ var.collection.name|escapejs }})"}{% if not forloop.last %},{% endif %}{% endfor %}];
 
-    const form        = document.getElementById('upload-form');
-    const fileInput   = document.getElementById('file-input');
-    const timeInput   = document.getElementById('time-input');
-    const variableSel = document.getElementById('variable-select');
-    const submitBtn   = document.getElementById('submit-btn');
-    const formError   = document.getElementById('form-error');
+    const form         = document.getElementById('upload-form');
+    const fileInput    = document.getElementById('file-input');
+    const sharedTime   = document.getElementById('shared-time-input');
+    const submitBtn    = document.getElementById('submit-btn');
+    const formError    = document.getElementById('form-error');
+    const queueEl      = document.getElementById('file-queue');
 
+    let fileRows = [];
     let pollTimer = null;
 
     function showError(msg) {
@@ -186,33 +208,131 @@ document.addEventListener('DOMContentLoaded', function () {
         formError.classList.remove('mup-error--visible');
     }
 
-    // ── Time pre-fill on file pick ─────────────────────────────────────────
-    fileInput.addEventListener('change', function () {
-        if (!this.files.length) return;
-        clearError();
+    // ── Build per-file row (GeoTIFF) ───────────────────────────────────────
+    function buildVariableSelect() {
+        const sel = document.createElement('select');
+        sel.className = 'mup-row-select w-field__input';
+        VARIABLES.forEach(function (v) {
+            const opt = document.createElement('option');
+            opt.value = v.id;
+            opt.textContent = v.label;
+            sel.appendChild(opt);
+        });
+        return sel;
+    }
+
+    function buildTimeInput() {
+        const inp = document.createElement('input');
+        inp.type = 'datetime-local';
+        inp.className = 'mup-row-time w-field__input';
+        inp.placeholder = TIME_LABEL;
+        inp.title = TIME_LABEL;
+        return inp;
+    }
+
+    function buildRow(file, index) {
+        const row = document.createElement('div');
+        row.className = IS_GEOTIFF ? 'mup-queue-row mup-queue-row--geotiff' : 'mup-queue-row mup-queue-row--plain';
+        row.dataset.index = index;
+
+        const nameEl = document.createElement('span');
+        nameEl.className = 'mup-row-filename';
+        nameEl.textContent = file.name;
+
+        const statusEl = document.createElement('span');
+        statusEl.className = 'mup-row-status';
+        statusEl.textContent = '{% trans "pending" %}';
+        statusEl.dataset.statusEl = '';
+
+        row.appendChild(nameEl);
+
+        if (IS_GEOTIFF) {
+            const sel  = buildVariableSelect();
+            const time = buildTimeInput();
+            row._variableSel = sel;
+            row._timeInput   = time;
+            row.appendChild(sel);
+            row.appendChild(time);
+        }
+
+        row.appendChild(statusEl);
+        return row;
+    }
+
+    function setRowStatus(row, status) {
+        const el = row.querySelector('[data-status-el]');
+        if (!el) return;
+        el.textContent = status;
+        el.className = 'mup-row-status mup-row-status--' + status;
+    }
+
+    // ── Time pre-fill (GeoTIFF rows) ───────────────────────────────────────
+    function prefillRowTime(file, row) {
         const fd = new FormData();
         fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
-        fd.append('filename', this.files[0].name);
+        fd.append('filename', file.name);
         fetch(EXTRACT_URL, { method: 'POST', body: fd })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                if (data.prefill) timeInput.value = data.prefill;
+                if (data.prefill && row._timeInput) row._timeInput.value = data.prefill;
             })
-            .catch(function () { /* pre-fill is best-effort */ });
+            .catch(function () {});
+    }
+
+    // ── GRIB shared-time pre-fill (first file only) ────────────────────────
+    function prefillSharedTime(file) {
+        if (!sharedTime) return;
+        const fd = new FormData();
+        fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
+        fd.append('filename', file.name);
+        fetch(EXTRACT_URL, { method: 'POST', body: fd })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.prefill) sharedTime.value = data.prefill;
+            })
+            .catch(function () {});
+    }
+
+    // ── File selection ─────────────────────────────────────────────────────
+    fileInput.addEventListener('change', function () {
+        clearError();
+        queueEl.innerHTML = '';
+        fileRows = [];
+
+        const files = Array.from(this.files);
+        if (!files.length) return;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'mup-queue';
+
+        files.forEach(function (file, i) {
+            const row = buildRow(file, i);
+            wrap.appendChild(row);
+            fileRows.push(row);
+            if (IS_GEOTIFF) {
+                prefillRowTime(file, row);
+            } else if (i === 0) {
+                prefillSharedTime(file);
+            }
+        });
+
+        queueEl.appendChild(wrap);
     });
 
-    // ── Progress log component ─────────────────────────────────────────────
-    function mountProgressLog(jobId, sseUrl) {
-        const logEl      = document.getElementById('progress-log');
-        const spinner    = document.getElementById('log-spinner');
-        const titleEl    = document.getElementById('log-title');
-        const stepsList  = document.getElementById('log-steps');
-        const summaryEl  = document.getElementById('log-summary');
+    // ── Progress log ───────────────────────────────────────────────────────
+    function mountIngestionProgress(jobIds) {
+        if (!jobIds.length) return;
+        const logEl    = document.getElementById('progress-log');
+        const spinner  = document.getElementById('log-spinner');
+        const titleEl  = document.getElementById('log-title');
+        const stepsList = document.getElementById('log-steps');
+        const summaryEl = document.getElementById('log-summary');
 
         logEl.classList.add('mup-log--visible');
 
+        const pending = new Set(jobIds);
         let es = null;
-        let finished = false;
+        let done = false;
 
         function appendStep(state) {
             const li = document.createElement('li');
@@ -220,55 +340,52 @@ document.addEventListener('DOMContentLoaded', function () {
             stepsList.appendChild(li);
         }
 
-        function finish(summaryText, isError) {
-            if (finished) return;
-            finished = true;
+        function finish(isError) {
+            if (done) return;
+            done = true;
             if (es) { es.close(); es = null; }
             spinner.classList.add('mup-spinner--hidden');
-            titleEl.textContent = isError
-                ? '{% trans "Ingestion failed" %}'
-                : '{% trans "Ingestion complete" %}';
-            summaryEl.textContent = summaryText;
-            summaryEl.className = 'mup-log-summary ' +
-                (isError ? 'mup-log-summary--error' : 'mup-log-summary--success');
+            const allOk = !isError;
+            titleEl.textContent = allOk
+                ? '{% trans "Ingestion complete" %}'
+                : '{% trans "Ingestion finished with errors" %}';
+            summaryEl.textContent = allOk
+                ? '{% trans "Items and assets created successfully." %}'
+                : '{% trans "Some files failed — check logs for details." %}';
+            summaryEl.className = 'mup-log-summary ' + (allOk ? 'mup-log-summary--success' : 'mup-log-summary--error');
             submitBtn.disabled = false;
         }
 
-        try {
-            es = new EventSource(sseUrl);
-        } catch (e) {
-            finish('{% trans "Could not open event stream." %}', true);
-            return;
-        }
+        try { es = new EventSource(SSE_URL); } catch (e) { finish(true); return; }
 
         es.addEventListener('job.progress_updated', function (ev) {
             const data = JSON.parse(ev.data);
-            if (data.job_id !== jobId) return;
-            if (data.state) appendStep(data.state);
+            if (pending.has(data.job_id) && data.state) appendStep(data.state);
         });
 
         es.addEventListener('job.state_changed', function (ev) {
             const data = JSON.parse(ev.data);
-            if (data.id !== jobId) return;
-            if (data.state === 'finished') {
-                finish('{% trans "Items and assets created successfully." %}', false);
-            } else if (data.state === 'failed' || data.state === 'cancelled') {
-                finish(data.error || '{% trans "Ingestion failed — check logs for details." %}', true);
+            if (!pending.has(data.id)) return;
+            if (data.state === 'finished') { pending.delete(data.id); }
+            else if (data.state === 'failed' || data.state === 'cancelled') { pending.delete(data.id); }
+            if (pending.size === 0) {
+                const hasError = data.state === 'failed' || data.state === 'cancelled';
+                finish(hasError);
             }
         });
 
-        es.onerror = function () {
-            if (!finished) {
-                es.close(); es = null;
-            }
-        };
+        es.onerror = function () { if (es) { es.close(); es = null; } };
     }
 
-    // ── Upload session status polling (fallback) ───────────────────────────
+    // ── Upload session polling (fallback / session completion) ─────────────
     function poll(sessionId) {
         fetch(STATUS_URL.replace('999999999', String(sessionId)))
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                // Update per-file row statuses from polling response.
+                (data.files || []).forEach(function (f, i) {
+                    if (fileRows[i]) setRowStatus(fileRows[i], f.status);
+                });
                 if (!TERMINAL.includes(data.status)) {
                     pollTimer = setTimeout(function () { poll(sessionId); }, POLL_MS);
                 }
@@ -284,13 +401,32 @@ document.addEventListener('DOMContentLoaded', function () {
         clearError();
         if (pollTimer) clearTimeout(pollTimer);
 
+        const files = Array.from(fileInput.files);
+        if (!files.length) {
+            showError('{% trans "Please choose at least one file to upload." %}');
+            return;
+        }
+
         const fd = new FormData();
         fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
-        if (variableSel) fd.append('variable_id', variableSel.value);
-        fd.append('time', timeInput.value);
-        fd.append('file', fileInput.files[0]);
+
+        files.forEach(function (file, i) {
+            fd.append('files', file);
+        });
+
+        if (IS_GEOTIFF) {
+            fileRows.forEach(function (row) {
+                fd.append('variable_ids', row._variableSel ? row._variableSel.value : '');
+                fd.append('times', row._timeInput ? row._timeInput.value : '');
+            });
+        } else {
+            files.forEach(function () {
+                fd.append('times', sharedTime ? sharedTime.value : '');
+            });
+        }
 
         submitBtn.disabled = true;
+        fileRows.forEach(function (row) { setRowStatus(row, 'uploading'); });
 
         fetch(SUBMIT_URL, { method: 'POST', body: fd })
             .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
@@ -298,15 +434,26 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (!res.ok || res.data.error) {
                     showError(res.data.error || '{% trans "Upload failed." %}');
                     submitBtn.disabled = false;
+                    fileRows.forEach(function (row) { setRowStatus(row, 'pending'); });
                     return;
                 }
+
+                const resultFiles = res.data.files || [];
+                const jobIds = [];
+
+                resultFiles.forEach(function (f, i) {
+                    if (fileRows[i]) setRowStatus(fileRows[i], f.status);
+                    if (f.job_id) jobIds.push(f.job_id);
+                });
+
                 form.style.display = 'none';
-                mountProgressLog(res.data.job_id, SSE_URL);
+                mountIngestionProgress(jobIds);
                 poll(res.data.upload_session_id);
             })
             .catch(function () {
                 showError('{% trans "Upload failed — network error." %}');
                 submitBtn.disabled = false;
+                fileRows.forEach(function (row) { setRowStatus(row, 'pending'); });
             });
     });
 
