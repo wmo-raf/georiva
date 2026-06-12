@@ -173,96 +173,98 @@ def manual_upload_submit(request, pk):
         ManualUploadConfig.objects.select_related("catalog"), pk=pk
     )
 
-    uploaded = request.FILES.get("file")
-    variable_id = request.POST.get("variable_id")
-    operator_time = _parse_datetime_local(request.POST.get("time", ""))
-
+    uploaded_files = request.FILES.getlist("files")
     is_geotiff = config.catalog.file_format == "geotiff"
+    variable_ids = request.POST.getlist("variable_ids")
+    times = request.POST.getlist("times")
 
-    errors = []
-    if not uploaded:
-        errors.append(str(_("Please choose a file to upload.")))
+    if not uploaded_files:
+        return JsonResponse({"error": str(_("Please choose a file to upload."))}, status=400)
 
-    variable = None
-    if variable_id:
-        variable = config.variables.select_related("collection").filter(pk=variable_id).first()
-    if is_geotiff and variable is None:
-        errors.append(str(_("Please choose a variable.")))
+    # For GeoTIFF, validate that each file has a corresponding variable.
+    if is_geotiff:
+        for i, uploaded in enumerate(uploaded_files):
+            vid = variable_ids[i] if i < len(variable_ids) else None
+            if not vid or not config.variables.filter(pk=vid).exists():
+                return JsonResponse(
+                    {"error": str(_("Please choose a variable for each file."))}, status=400
+                )
 
-    if errors:
-        return JsonResponse({"error": " ".join(errors)}, status=400)
-
-    reference_time, valid_time = _resolve_times(config, uploaded.name, operator_time)
-
-    if config.is_forecast and reference_time is None:
-        return JsonResponse(
-            {"error": str(_("Model run time is required for forecast uploads."))},
-            status=400,
-        )
-    if config.catalog.file_format == "geotiff" and valid_time is None:
-        return JsonResponse(
-            {"error": str(_(
-                "Could not determine the observation date. Use a filename matching "
-                "the '%s' format, or fill in the date field."
-            ) % config.valid_time_format)},
-            status=400,
-        )
-
-    file_path = _build_incoming_path(config, variable, uploaded.name, reference_time, valid_time)
+    # Pre-validate time requirements before creating the session.
+    for i, uploaded in enumerate(uploaded_files):
+        operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
+        reference_time, valid_time = _resolve_times(config, uploaded.name, operator_time)
+        if config.is_forecast and reference_time is None:
+            return JsonResponse(
+                {"error": str(_("Model run time is required for forecast uploads."))},
+                status=400,
+            )
+        if is_geotiff and valid_time is None:
+            return JsonResponse(
+                {"error": str(_(
+                    "Could not determine the observation date. Use a filename matching "
+                    "the '%s' format, or fill in the date field."
+                ) % config.valid_time_format)},
+                status=400,
+            )
 
     session = UploadSession.objects.create(
         catalog=config.catalog,
         user=request.user if request.user.is_authenticated else None,
     )
-    uf = UploadedFile.objects.create(
-        session=session,
-        original_filename=uploaded.name,
-    )
-    uf.mark_uploading()
-
-    try:
-        saved_path = storage.incoming.save(file_path, uploaded)
-    except Exception as exc:
-        logger.error("Manual upload MinIO write failed for %s: %s", file_path, exc)
-        uf.mark_failed(error=str(exc)[:2000])
-        session.mark_failed()
-        return JsonResponse(
-            {"error": str(_("Upload to storage failed: %s") % exc),
-             "upload_session_id": session.pk},
-            status=500,
-        )
-
-    uf.mark_stored(file_path=saved_path, bytes=uploaded.size or 0)
-
-    # Register before enqueueing — idempotent with the bucket event that will also fire.
-    log, created = FileIngestion.register(
-        bucket=BucketType.INCOMING,
-        file_path=saved_path,
-        reference_time=reference_time,
-    )
-    if not created:
-        FileIngestion.reset_for_reingest(BucketType.INCOMING, saved_path)
 
     ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
-    job = FileIngestionJob.objects.create(
-        user=None,
-        content_type=ct,
-        file_path=saved_path,
-        bucket=BucketType.INCOMING,
-    )
+    result_files = []
 
-    process_incoming_file.delay(
-        file_path=saved_path,
-        origin_bucket=BucketType.INCOMING,
-        reference_time=reference_time.isoformat() if reference_time else None,
-        job_id=job.pk,
-    )
+    for i, uploaded in enumerate(uploaded_files):
+        vid = variable_ids[i] if i < len(variable_ids) else None
+        variable = (
+            config.variables.select_related("collection").filter(pk=vid).first()
+            if vid else None
+        )
+        operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
+        reference_time, valid_time = _resolve_times(config, uploaded.name, operator_time)
 
-    from georiva.ingestion.events import publish_event
-    publish_event({"type": "upload_session.job_created", "id": session.pk, "job_id": job.pk})
+        file_path = _build_incoming_path(
+            config, variable, uploaded.name, reference_time, valid_time
+        )
 
-    return JsonResponse({
-        "upload_session_id": session.pk,
-        "uploaded_file_id": uf.pk,
-        "job_id": job.pk,
-    })
+        uf = UploadedFile.objects.create(session=session, original_filename=uploaded.name)
+        uf.mark_uploading()
+
+        try:
+            saved_path = storage.incoming.save(file_path, uploaded)
+        except Exception as exc:
+            logger.error("Manual upload MinIO write failed for %s: %s", file_path, exc)
+            uf.mark_failed(error=str(exc)[:2000])
+            result_files.append({"id": uf.pk, "status": "failed", "error": str(exc), "job_id": None})
+            continue
+
+        uf.mark_stored(file_path=saved_path, bytes=uploaded.size or 0)
+
+        # Register before enqueueing — idempotent with the bucket event that will also fire.
+        _fi, created = FileIngestion.register(
+            bucket=BucketType.INCOMING,
+            file_path=saved_path,
+            reference_time=reference_time,
+        )
+        if not created:
+            FileIngestion.reset_for_reingest(BucketType.INCOMING, saved_path)
+
+        job = FileIngestionJob.objects.create(
+            user=None,
+            content_type=ct,
+            file_path=saved_path,
+            bucket=BucketType.INCOMING,
+        )
+
+        process_incoming_file.delay(
+            file_path=saved_path,
+            origin_bucket=BucketType.INCOMING,
+            reference_time=reference_time.isoformat() if reference_time else None,
+            job_id=job.pk,
+        )
+
+        result_files.append({"id": uf.pk, "status": "stored", "job_id": job.pk})
+
+    return JsonResponse({"upload_session_id": session.pk, "files": result_files})
