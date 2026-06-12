@@ -4,6 +4,7 @@ from django.test import TestCase
 User = get_user_model()
 
 ACTIVITY_URL = "/admin/ingestion/activity/"
+ACQUISITION_URL = "/admin/ingestion/acquisition/"
 
 
 # =============================================================================
@@ -93,3 +94,30 @@ class DashboardPanelViewAllTests(TestCase):
         ctx = panel.get_context_data({"request": request})
         html = render_to_string(panel.template_name, ctx)
         self.assertIn("/admin/ingestion/activity/", html)
+
+
+# =============================================================================
+# Acquisition Feed template — per-file live event wiring
+# =============================================================================
+
+class AcquisitionFeedPageTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_aq", "aq@test.com", "pw")
+        self.client.force_login(self.user)
+
+    def test_acquisition_feed_returns_200(self):
+        response = self.client.get(ACQUISITION_URL)
+        self.assertEqual(response.status_code, 200)
+
+    def test_acquisition_feed_connects_to_sse_endpoint(self):
+        response = self.client.get(ACQUISITION_URL)
+        self.assertContains(response, "/admin/api/ingestion/acquisition/events/")
+
+    def test_acquisition_feed_handles_fetched_file_status_changed(self):
+        response = self.client.get(ACQUISITION_URL)
+        self.assertContains(response, "fetched_file.status_changed")
+
+    def test_acquisition_feed_handles_uploaded_file_status_changed(self):
+        response = self.client.get(ACQUISITION_URL)
+        self.assertContains(response, "uploaded_file.status_changed")

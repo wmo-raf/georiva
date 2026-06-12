@@ -128,17 +128,42 @@ document.addEventListener('DOMContentLoaded', function () {
         return 'acq-file-status acq-file-status--' + status;
     }
 
+    function buildFileLi(f) {
+        const name = f.filename || f.original_filename || f.file_path || '';
+        const li = document.createElement('li');
+        if (f.id) li.dataset.fileId = f.id;
+        li.innerHTML =
+            '<span class="' + fileStatusClass(f.status) + '" data-file-status>' + f.status + '</span>' +
+            '<span>' + name + '</span>' +
+            (f.error ? '<span style="color:var(--w-color-critical-200)">' + f.error + '</span>' : '');
+        return li;
+    }
+
     function buildFileList(files) {
-        if (!files || !files.length) return '';
-        const rows = files.map(function (f) {
-            const name = f.filename || f.original_filename || f.file_path || '';
-            return '<li>' +
-                '<span class="' + fileStatusClass(f.status) + '">' + f.status + '</span>' +
-                '<span>' + name + '</span>' +
-                (f.error ? '<span style="color:var(--w-color-critical-200)">' + f.error + '</span>' : '') +
-                '</li>';
-        }).join('');
-        return '<ul class="acq-files">' + rows + '</ul>';
+        if (!files || !files.length) return '<ul class="acq-files"></ul>';
+        const ul = document.createElement('ul');
+        ul.className = 'acq-files';
+        files.forEach(function (f) { ul.appendChild(buildFileLi(f)); });
+        return ul.outerHTML;
+    }
+
+    function upsertFileRow(cardBody, fileId, status, filename) {
+        let li = cardBody.querySelector('[data-file-id="' + fileId + '"]');
+        if (li) {
+            const badge = li.querySelector('[data-file-status]');
+            if (badge) {
+                badge.textContent = status;
+                badge.className = fileStatusClass(status);
+            }
+        } else {
+            let ul = cardBody.querySelector('.acq-files');
+            if (!ul) {
+                ul = document.createElement('ul');
+                ul.className = 'acq-files';
+                cardBody.appendChild(ul);
+            }
+            ul.appendChild(buildFileLi({ id: fileId, status: status, file_path: filename || '' }));
+        }
     }
 
     function buildFetchRunCard(run) {
@@ -253,6 +278,22 @@ document.addEventListener('DOMContentLoaded', function () {
 
     es.addEventListener('upload_session.status_changed', function (ev) {
         onStatusChanged('upload_session', JSON.parse(ev.data));
+    });
+
+    es.addEventListener('fetched_file.status_changed', function (ev) {
+        const data = JSON.parse(ev.data);
+        const card = findCard('fetch_run', data.fetch_run_id);
+        if (!card) return;
+        const body = card.querySelector('.acq-card-body');
+        if (body) upsertFileRow(body, data.id, data.status, data.file_path || '');
+    });
+
+    es.addEventListener('uploaded_file.status_changed', function (ev) {
+        const data = JSON.parse(ev.data);
+        const card = findCard('upload_session', data.session_id);
+        if (!card) return;
+        const body = card.querySelector('.acq-card-body');
+        if (body) upsertFileRow(body, data.id, data.status, data.filename || '');
     });
 
     es.onerror = function () {
