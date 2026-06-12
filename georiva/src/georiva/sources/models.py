@@ -434,6 +434,115 @@ class DataFeedCollectionLink(PolymorphicModel):
 
 
 # ---------------------------------------------------------------------------
+# Acquisition tracking models
+# ---------------------------------------------------------------------------
+
+class FetchRun(models.Model):
+    """Tracks one fetch run of a DataFeed — the acquisition phase before ingestion."""
+
+    class Status(models.TextChoices):
+        RUNNING = 'running', 'Running'
+        COMPLETED = 'completed', 'Completed'
+        FAILED = 'failed', 'Failed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    data_feed = models.ForeignKey(
+        DataFeed,
+        on_delete=models.CASCADE,
+        related_name='fetch_runs',
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    files_requested = models.IntegerField(default=0)
+    files_fetched = models.IntegerField(default=0)
+    files_skipped = models.IntegerField(default=0)
+    files_failed = models.IntegerField(default=0)
+    bytes_transferred = models.BigIntegerField(default=0)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-started_at']
+
+    def _finish(self, status, **update_fields):
+        from django.utils import timezone
+        self.status = status
+        self.finished_at = timezone.now()
+        for k, v in update_fields.items():
+            setattr(self, k, v)
+        fields = ['status', 'finished_at'] + list(update_fields.keys())
+        self.save(update_fields=fields)
+
+    def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0):
+        self._finish(
+            self.Status.COMPLETED,
+            files_fetched=files_fetched,
+            files_skipped=files_skipped,
+            files_failed=files_failed,
+            bytes_transferred=bytes_transferred,
+        )
+
+    def mark_failed(self, error=''):
+        self._finish(self.Status.FAILED, error_message=error)
+
+    def mark_cancelled(self):
+        self._finish(self.Status.CANCELLED)
+
+
+class FetchedFile(models.Model):
+    """Per-file record within a FetchRun."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        FETCHING = 'fetching', 'Fetching'
+        STORED = 'stored', 'Stored'
+        SKIPPED = 'skipped', 'Skipped'
+        FAILED = 'failed', 'Failed'
+
+    fetch_run = models.ForeignKey(
+        FetchRun,
+        on_delete=models.CASCADE,
+        related_name='fetched_files',
+    )
+    file_path = models.CharField(max_length=500)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    skip_reason = models.CharField(max_length=255, blank=True)
+    error = models.TextField(blank=True)
+    bytes_transferred = models.BigIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def mark_fetching(self):
+        from django.utils import timezone
+        self.status = self.Status.FETCHING
+        self.started_at = timezone.now()
+        self.save(update_fields=['status', 'started_at'])
+
+    def mark_stored(self, bytes_transferred=0):
+        from django.utils import timezone
+        self.status = self.Status.STORED
+        self.bytes_transferred = bytes_transferred
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'bytes_transferred', 'completed_at'])
+
+    def mark_skipped(self, reason=''):
+        self.status = self.Status.SKIPPED
+        self.skip_reason = reason
+        self.save(update_fields=['status', 'skip_reason'])
+
+    def mark_failed(self, error=''):
+        from django.utils import timezone
+        self.status = self.Status.FAILED
+        self.error = error
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'error', 'completed_at'])
+
+
+# ---------------------------------------------------------------------------
 # Task-ferry Job model
 # ---------------------------------------------------------------------------
 
