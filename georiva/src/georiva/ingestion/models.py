@@ -193,9 +193,16 @@ class FileIngestion(models.Model):
     
     data_arrival = models.ForeignKey(
         DataArrival,
+        null=True, blank=True,
         on_delete=models.CASCADE,
         related_name='file_ingestions',
     )
+
+    # Processing summary — populated after ingestion completes
+    variables_discovered = models.IntegerField(null=True)
+    valid_time_start = models.DateTimeField(null=True)
+    valid_time_end = models.DateTimeField(null=True)
+    timestep_count = models.IntegerField(null=True)
     
     # =========================================================================
     # Configuration
@@ -465,6 +472,110 @@ class FileIngestion(models.Model):
             force_reingest=False,
         )
         return updated > 0
+
+
+# ---------------------------------------------------------------------------
+# Acquisition tracking models
+# ---------------------------------------------------------------------------
+
+class UploadSession(models.Model):
+    """Tracks a batch of files uploaded through the manual upload UI."""
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        COMPLETED = 'completed', 'Completed'
+        FAILED = 'failed', 'Failed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    catalog = models.ForeignKey(
+        'georivacore.Catalog',
+        on_delete=models.CASCADE,
+        related_name='upload_sessions',
+    )
+    user = models.ForeignKey(
+        'auth.User',
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='upload_sessions',
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'georivaingestion'
+        ordering = ['-started_at']
+
+    def _finish(self, status):
+        from django.utils import timezone
+        self.status = status
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'completed_at'])
+
+    def mark_failed(self):
+        self._finish(self.Status.FAILED)
+
+    def mark_cancelled(self):
+        self._finish(self.Status.CANCELLED)
+
+    def _check_auto_complete(self):
+        """Auto-complete when all files have reached a terminal state."""
+        if self.status != self.Status.ACTIVE:
+            return
+        terminal = {UploadedFile.Status.STORED, UploadedFile.Status.FAILED}
+        files = list(self.uploaded_files.values_list('status', flat=True))
+        if files and all(s in terminal for s in files):
+            self._finish(self.Status.COMPLETED)
+
+
+class UploadedFile(models.Model):
+    """Per-file record within an UploadSession."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        UPLOADING = 'uploading', 'Uploading'
+        STORED = 'stored', 'Stored'
+        FAILED = 'failed', 'Failed'
+
+    session = models.ForeignKey(
+        UploadSession,
+        on_delete=models.CASCADE,
+        related_name='uploaded_files',
+    )
+    original_filename = models.CharField(max_length=500)
+    file_path = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    error = models.TextField(blank=True)
+    bytes = models.BigIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = 'georivaingestion'
+        ordering = ['id']
+
+    def mark_uploading(self):
+        from django.utils import timezone
+        self.status = self.Status.UPLOADING
+        self.started_at = timezone.now()
+        self.save(update_fields=['status', 'started_at'])
+
+    def mark_stored(self, file_path='', bytes=0):
+        from django.utils import timezone
+        self.status = self.Status.STORED
+        self.file_path = file_path
+        self.bytes = bytes
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'file_path', 'bytes', 'completed_at'])
+        self.session._check_auto_complete()
+
+    def mark_failed(self, error=''):
+        from django.utils import timezone
+        self.status = self.Status.FAILED
+        self.error = error
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'error', 'completed_at'])
+        self.session._check_auto_complete()
 
 
 # ---------------------------------------------------------------------------

@@ -145,3 +145,51 @@ class JobCrashLockReleaseTests(TestCase):
         log.refresh_from_db()
         self.assertEqual(log.status, FileIngestion.Status.PROCESSING)
         self.assertEqual(log.locked_by, "some-other-worker")
+
+
+class FileIngestionNullableArrivalTests(TestCase):
+    """FileIngestion.data_arrival must be nullable so sweep-path files can be registered."""
+
+    def test_register_without_data_arrival(self):
+        log, created = FileIngestion.register(
+            bucket="incoming",
+            file_path="sweep/file.nc",
+        )
+        self.assertTrue(created)
+        self.assertIsNone(log.data_arrival)
+
+    def test_register_with_data_arrival_still_works(self):
+        arrival = DataArrival.objects.create(
+            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
+            status=DataArrival.Status.PENDING,
+        )
+        log, created = FileIngestion.register(
+            bucket="incoming",
+            file_path="with-arrival/file.nc",
+            data_arrival=arrival,
+        )
+        self.assertTrue(created)
+        self.assertEqual(log.data_arrival, arrival)
+
+
+class FileIngestionSummaryFieldTests(TestCase):
+    """Processing summary fields are stored and readable."""
+
+    def test_summary_fields_persist(self):
+        from datetime import datetime, timezone
+
+        log, _ = FileIngestion.register(bucket="incoming", file_path="summary/file.nc")
+        t_start = datetime(2024, 6, 1, 0, 0, tzinfo=timezone.utc)
+        t_end = datetime(2024, 6, 30, 0, 0, tzinfo=timezone.utc)
+
+        log.variables_discovered = 5
+        log.valid_time_start = t_start
+        log.valid_time_end = t_end
+        log.timestep_count = 30
+        log.save(update_fields=['variables_discovered', 'valid_time_start', 'valid_time_end', 'timestep_count'])
+
+        log.refresh_from_db()
+        self.assertEqual(log.variables_discovered, 5)
+        self.assertEqual(log.valid_time_start, t_start)
+        self.assertEqual(log.valid_time_end, t_end)
+        self.assertEqual(log.timestep_count, 30)
