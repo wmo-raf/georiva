@@ -227,3 +227,128 @@ class UploadSessionEventTests(IngestionEventsTestCase):
         self.assertEqual(event["type"], "upload_session.status_changed")
         self.assertEqual(event["id"], session.pk)
         self.assertEqual(event["status"], "failed")
+
+
+# =============================================================================
+# Cycle 7: Per-file acquisition events (FetchedFile, UploadedFile)
+# =============================================================================
+
+class FetchedFileEventTests(IngestionEventsTestCase):
+
+    def _make_run(self):
+        from georiva.core.models import Catalog
+        from georiva.sources.models import DataFeed, FetchRun
+        catalog = Catalog.objects.create(name="FF", slug="ff-ev", file_format="grib2")
+        feed = DataFeed.objects.create(name="FF Feed", catalog=catalog)
+        return FetchRun.objects.create(data_feed=feed)
+
+    def test_mark_fetching_publishes_status_changed_event(self):
+        from georiva.sources.models import FetchedFile
+        run = self._make_run()
+        ff = FetchedFile.objects.create(fetch_run=run, file_path="cat/file.grib2")
+        self._drain()
+
+        ff.mark_fetching()
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "fetched_file.status_changed")
+        self.assertEqual(event["id"], ff.pk)
+        self.assertEqual(event["fetch_run_id"], run.pk)
+        self.assertEqual(event["status"], "fetching")
+        self.assertEqual(event["file_path"], "cat/file.grib2")
+
+    def test_mark_stored_publishes_status_changed_event(self):
+        from georiva.sources.models import FetchedFile
+        run = self._make_run()
+        ff = FetchedFile.objects.create(fetch_run=run, file_path="cat/file2.grib2")
+        self._drain()
+
+        ff.mark_stored(bytes_transferred=1024)
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "fetched_file.status_changed")
+        self.assertEqual(event["status"], "stored")
+
+    def test_mark_failed_publishes_status_changed_event(self):
+        from georiva.sources.models import FetchedFile
+        run = self._make_run()
+        ff = FetchedFile.objects.create(fetch_run=run, file_path="cat/file3.grib2")
+        self._drain()
+
+        ff.mark_failed(error="timeout")
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "fetched_file.status_changed")
+        self.assertEqual(event["status"], "failed")
+
+    def test_creation_does_not_publish_event(self):
+        from georiva.sources.models import FetchedFile
+        run = self._make_run()
+        self._drain()
+        FetchedFile.objects.create(fetch_run=run, file_path="cat/file4.grib2")
+
+        event = self._next_event(timeout=0.5)
+        self.assertIsNone(event)
+
+
+class UploadedFileEventTests(IngestionEventsTestCase):
+
+    def _make_session(self):
+        from georiva.core.models import Catalog
+        from georiva.ingestion.models import UploadSession
+        catalog = Catalog.objects.create(name="UF", slug="uf-ev", file_format="geotiff")
+        return UploadSession.objects.create(catalog=catalog)
+
+    def test_mark_uploading_publishes_status_changed_event(self):
+        from georiva.ingestion.models import UploadedFile
+        session = self._make_session()
+        uf = UploadedFile.objects.create(session=session, original_filename="rain.tif")
+        self._drain()
+
+        uf.mark_uploading()
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "uploaded_file.status_changed")
+        self.assertEqual(event["id"], uf.pk)
+        self.assertEqual(event["session_id"], session.pk)
+        self.assertEqual(event["status"], "uploading")
+        self.assertEqual(event["filename"], "rain.tif")
+
+    def test_mark_stored_publishes_status_changed_event(self):
+        from georiva.ingestion.models import UploadedFile
+        session = self._make_session()
+        uf = UploadedFile.objects.create(session=session, original_filename="rain2.tif")
+        self._drain()
+
+        uf.mark_stored(file_path="cat/rain2.tif", bytes=512)
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "uploaded_file.status_changed")
+        self.assertEqual(event["status"], "stored")
+
+    def test_mark_failed_publishes_status_changed_event(self):
+        from georiva.ingestion.models import UploadedFile
+        session = self._make_session()
+        uf = UploadedFile.objects.create(session=session, original_filename="rain3.tif")
+        self._drain()
+
+        uf.mark_failed(error="disk full")
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "uploaded_file.status_changed")
+        self.assertEqual(event["status"], "failed")
+
+    def test_creation_does_not_publish_event(self):
+        from georiva.ingestion.models import UploadedFile
+        session = self._make_session()
+        self._drain()
+        UploadedFile.objects.create(session=session, original_filename="rain4.tif")
+
+        event = self._next_event(timeout=0.5)
+        self.assertIsNone(event)

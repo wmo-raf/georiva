@@ -56,3 +56,19 @@ def _upload_session_post_save(sender, instance, created, update_fields, **kwargs
         "id": instance.pk,
         "status": instance.status,
     })
+
+
+@receiver(post_save, sender="georivaingestion.UploadedFile")
+def _uploaded_file_post_save(sender, instance, created, update_fields, **kwargs):
+    if created:
+        return
+    if update_fields is None or "status" not in update_fields:
+        return
+    from georiva.ingestion.events import publish_event
+    publish_event({
+        "type": "uploaded_file.status_changed",
+        "id": instance.pk,
+        "session_id": instance.session_id,
+        "status": instance.status,
+        "filename": instance.original_filename or instance.file_path or "",
+    })
