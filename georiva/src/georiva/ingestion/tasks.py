@@ -149,23 +149,10 @@ def sweep_unprocessed(sync: bool = False):
             
             logger.info("Found untracked file: %s/%s", bucket_type, path)
 
-            # Ensure a DataArrival exists before registering the FileIngestion.
-            from georiva.core.models import Catalog
-            from georiva.ingestion.models import DataArrival
-            catalog_slug = meta.get('catalog')
-            catalog = Catalog.objects.filter(slug=catalog_slug).first() if catalog_slug else None
-            arrival, _ = DataArrival.find_or_create(
-                file_path=path,
-                trigger=DataArrival.Trigger.SWEEP,
-                catalog=catalog,
-            )
-
-            # Register
             FileIngestion.register(
                 bucket=bucket_type,
                 file_path=path,
                 reference_time=meta.get('reference_time'),
-                data_arrival=arrival,
             )
             
             # Queue for processing

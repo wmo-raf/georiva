@@ -1,69 +1,94 @@
+"""
+Tests for Loader-driven FetchRun creation after a scheduled data-feed run.
+
+Replaces the old DataArrival-based tests that verified DataFeed.record_run().
+"""
+from unittest.mock import MagicMock, patch
+
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
-from georiva.core.storage import BucketType
-from georiva.ingestion.models import DataArrival, FileIngestion
-from georiva.sources.loader import LoaderRunResult
-from georiva.sources.models import DataFeed
+from georiva.sources.loader import Loader
+from georiva.sources.models import DataFeed, FetchRun
+from georiva.sources.fetch.base import FetchResult
 
 
-def _make_feed():
-    return DataFeed.objects.create(name="Test Feed")
+def _make_feed_and_collection():
+    catalog = Catalog.objects.create(name="Sched", slug="sched", file_format="grib2")
+    collection = Collection.objects.create(name="Col", slug="col", catalog=catalog)
+    feed = DataFeed.objects.create(name="Sched Feed", catalog=catalog)
+    return feed, collection
 
 
-def _make_collection():
-    catalog = Catalog.objects.create(name="Test", slug="test-cat", file_format="grib2")
-    return Collection.objects.create(name="Test Col", slug="test-col", catalog=catalog)
+def _mock_request(filename):
+    req = MagicMock()
+    req.filename = filename
+    req.reference_time = None
+    req.expected_size = None
+    return req
 
 
-class RecordRunCreatesDataArrivalTests(TestCase):
+class ScheduledRunCreatesFetchRunTests(TestCase):
     def setUp(self):
-        self.feed = _make_feed()
-        self.collection = _make_collection()
+        self.feed, self.collection = _make_feed_and_collection()
 
-    def test_successful_run_creates_scheduled_data_arrival(self):
-        result = LoaderRunResult(
-            files_requested=4,
-            files_fetched=3,
-            files_skipped=1,
-            files_failed=0,
-            bytes_transferred=2048,
-        )
-        result.finish()
-
-        self.feed.record_run(result, self.collection)
-
-        arrival = DataArrival.objects.get(
-            trigger=DataArrival.Trigger.SCHEDULED,
+    def _run(self, requests, fetch_results):
+        loader = Loader(
+            data_source=MagicMock(),
+            collection=self.collection,
             data_feed=self.feed,
         )
-        self.assertEqual(arrival.status, DataArrival.Status.COMPLETED)
-        self.assertEqual(arrival.files_requested, 4)
-        self.assertEqual(arrival.files_fetched, 3)
-        self.assertEqual(arrival.files_skipped, 1)
-        self.assertEqual(arrival.files_failed, 0)
-        self.assertEqual(arrival.bytes_transferred, 2048)
-        self.assertEqual(arrival.catalog, self.collection.catalog)
+        loader.data_source.name = "test"
+        loader.data_source.generate_requests_for_collection.return_value = requests
+        loader.data_source.post_process_fetched_file.side_effect = lambda r, p: (p, None)
+        fetch_iter = iter(fetch_results)
+        with (
+            patch.object(loader, '_already_exists', return_value=False),
+            patch.object(loader, '_find_existing_catalog_path', return_value=None),
+            patch.object(loader, '_fetch_and_store', side_effect=lambda r: next(fetch_iter)),
+            patch.object(loader, '_cleanup_temp'),
+            patch.object(loader.fetch_strategy, 'connect'),
+            patch.object(loader.fetch_strategy, 'disconnect'),
+        ):
+            return loader.run()
 
-    def test_record_run_links_file_ingestions_to_arrival(self):
-        paths = [
-            "test-cat/test-col/file_a.grib2",
-            "test-cat/test-col/file_b.grib2",
-        ]
-        preliminary = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
-        for path in paths:
-            FileIngestion.objects.create(
-                bucket=BucketType.SOURCES,
-                file_path=path,
-                data_arrival=preliminary,
-            )
+    def test_successful_run_creates_completed_fetch_run(self):
+        req = _mock_request("rain.grib")
+        result = self._run(
+            [req],
+            [FetchResult(request=req, success=True, status="success",
+                         bytes_transferred=4096)],
+        )
 
-        result = LoaderRunResult(files_fetched=2, stored_paths=paths)
-        result.finish()
+        run = FetchRun.objects.get(data_feed=self.feed)
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.files_fetched, 1)
+        self.assertEqual(run.bytes_transferred, 4096)
+        self.assertEqual(run.files_failed, 0)
 
-        self.feed.record_run(result, self.collection)
+    def test_feed_stats_updated_after_run(self):
+        req = _mock_request("temp.grib")
+        self._run(
+            [req],
+            [FetchResult(request=req, success=True, status="success",
+                         bytes_transferred=512)],
+        )
 
-        arrival = DataArrival.objects.get(trigger=DataArrival.Trigger.SCHEDULED)
-        linked = FileIngestion.objects.filter(data_arrival=arrival)
-        self.assertEqual(linked.count(), 2)
-        self.assertSetEqual(set(linked.values_list("file_path", flat=True)), set(paths))
+        self.feed.refresh_from_db()
+        self.assertEqual(self.feed.total_runs, 1)
+        self.assertEqual(self.feed.total_files_fetched, 1)
+        self.assertIsNotNone(self.feed.last_run_at)
+
+    def test_collection_link_last_run_at_updated(self):
+        from georiva.sources.models import DataFeedCollectionLink
+        DataFeedCollectionLink.objects.create(
+            data_feed=self.feed, collection=self.collection
+        )
+        req = _mock_request("wind.grib")
+        self._run(
+            [req],
+            [FetchResult(request=req, success=True, status="success",
+                         bytes_transferred=256)],
+        )
+        link = self.feed.collection_links.get(collection=self.collection)
+        self.assertIsNotNone(link.last_run_at)

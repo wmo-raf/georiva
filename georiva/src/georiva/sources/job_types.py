@@ -119,11 +119,6 @@ class DataArrivalJobType(JobType):
             job.files_failed += result.files_failed
             job.save(update_fields=["files_skipped", "files_failed"])
 
-            arrival = data_feed.record_run(result, collection)
-            if arrival and not job.data_arrival_id:
-                job.data_arrival = arrival
-                job.save(update_fields=["data_arrival"])
-
             logger.info(
                 "DataArrivalJob %d (%s): %s",
                 job.id, col_label, result.summary(),

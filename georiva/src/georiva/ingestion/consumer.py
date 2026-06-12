@@ -11,7 +11,7 @@ from django.conf import settings
 from georiva.core.filename import validate_path
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType, get_bucket_config
-from georiva.ingestion.models import DataArrival, FileIngestion
+from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -112,34 +112,17 @@ def _handle_event(ev: dict):
         logger.warning("Unknown catalog '%s': %s", catalog_slug, key)
         return
 
-    arrival, arrival_created = DataArrival.find_or_create(
-        file_path=key,
-        trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-        catalog=catalog,
-    )
-    if not arrival_created and arrival.status == DataArrival.Status.UPLOADING:
-        arrival.status = DataArrival.Status.PENDING
-        arrival.save(update_fields=['status', 'updated_at'])
-
     log, created = FileIngestion.register(
         bucket=origin_bucket,
         file_path=key,
         reference_time=meta.get("reference_time"),
-        data_arrival=arrival,
     )
 
-    # Only genuine direct drops: admin uploads pre-create the DataArrival and
-    # have already validated times server-side (the date may have been entered
-    # in the form rather than encoded in the filename).
-    if arrival_created:
-        time_error = _required_time_error(catalog.slug, key)
-        if time_error:
-            logger.warning("Time extraction failed for %s: %s", key, time_error)
-            FileIngestion.mark_failed(origin_bucket, key, time_error)
-            arrival.status = DataArrival.Status.FAILED
-            arrival.error_message = time_error
-            arrival.save(update_fields=['status', 'error_message', 'updated_at'])
-            return
+    time_error = _required_time_error(catalog.slug, key)
+    if time_error:
+        logger.warning("Time extraction failed for %s: %s", key, time_error)
+        FileIngestion.mark_failed(origin_bucket, key, time_error)
+        return
 
     if not created:
         if log.status == FileIngestion.Status.PROCESSING:

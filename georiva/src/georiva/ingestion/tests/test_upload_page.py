@@ -365,10 +365,6 @@ class DirectDropTimeValidationTests(TestCase):
         self.assertIn("Could not extract a valid time", fi.error)
         self.assertIn("YYYYMMDD", fi.error)
 
-        arrival = DataArrival.objects.get(file_path="imagery/random_name.tif")
-        self.assertEqual(arrival.status, DataArrival.Status.FAILED)
-        self.assertIn("Could not extract a valid time", arrival.error_message)
-
         mock_task.delay.assert_not_called()
 
     def test_parseable_geotiff_drop_is_enqueued(self, mock_task):
@@ -391,11 +387,12 @@ class DirectDropTimeValidationTests(TestCase):
         self.assertEqual(fi.status, FileIngestion.Status.PENDING)
         mock_task.delay.assert_called_once()
 
-    def test_admin_upload_event_skips_filename_check(self, mock_task):
+    def test_consumer_applies_time_check_uniformly(self, mock_task):
+        """Consumer checks time extractability for all drops; no DataArrival bypass."""
         from georiva.ingestion.consumer import _handle_event
         _geotiff_setup()
 
-        # Admin upload pre-creates the arrival before the bucket event fires
+        # A pre-existing DataArrival no longer bypasses the time check.
         DataArrival.objects.create(
             trigger=DataArrival.Trigger.MANUAL_UPLOAD,
             status=DataArrival.Status.UPLOADING,
@@ -404,11 +401,13 @@ class DirectDropTimeValidationTests(TestCase):
 
         _handle_event(self._event("imagery/operator_named.tif"))
 
-        arrival = DataArrival.objects.get(file_path="imagery/operator_named.tif")
-        self.assertEqual(arrival.status, DataArrival.Status.PENDING)
+        # FileIngestion is created but fails time extraction
         fi = FileIngestion.objects.get(file_path="imagery/operator_named.tif")
-        self.assertNotEqual(fi.status, FileIngestion.Status.FAILED)
-        mock_task.delay.assert_called_once()
+        self.assertEqual(fi.status, FileIngestion.Status.FAILED)
+        # DataArrival is left untouched — consumer no longer manages it
+        arrival = DataArrival.objects.get(file_path="imagery/operator_named.tif")
+        self.assertEqual(arrival.status, DataArrival.Status.UPLOADING)
+        mock_task.delay.assert_not_called()
 
 
 # =============================================================================

@@ -158,52 +158,64 @@ class Loader:
         Returns:
             LoaderRunResult with statistics and details
         """
+        from georiva.sources.models import FetchRun, FetchedFile
+
         result = LoaderRunResult()
-        
+        fetch_run = None
+
+        if self.data_feed:
+            fetch_run = FetchRun.objects.create(data_feed=self.data_feed, status='running')
+
         try:
             self.logger.info(f"Starting loader run for {self.collection.name}")
-            
+
             # Connect fetch strategy
             self.fetch_strategy.connect()
             self.logger.debug("Fetch strategy connected")
-            
+
             # Generate requests from data source
             requests = list(self.data_source.generate_requests_for_collection(self.collection))
             result.files_requested = len(requests)
-            
+
             if not requests:
                 self.logger.warning("No file requests generated")
                 result.finish()
                 return result
-            
+
             # Extract run time from first request (for forecasts)
             if requests[0].reference_time:
                 result.run_time = requests[0].reference_time
                 self.logger.info(
                     f"Processing forecast run: {result.run_time.isoformat()}"
                 )
-            
+
             self.logger.info(f"Generated {len(requests)} file requests")
-            
+
             if dry_run:
                 self.logger.info("Dry run - skipping fetch")
                 for req in requests:
                     self.logger.debug(f"  Would fetch: {req.filename}")
                 result.finish()
                 return result
-            
+
             # Filter already-fetched files; copy from another collection if available
             requests_to_fetch = []
             for request in requests:
+                storage_path = self._get_storage_path(request)
+
                 if skip_existing and self._already_exists(request):
                     result.files_skipped += 1
                     self.logger.debug(f"Skipping (exists): {request.filename}")
+                    if fetch_run:
+                        ff = FetchedFile.objects.create(
+                            fetch_run=fetch_run, file_path=storage_path)
+                        ff.mark_skipped(reason="already exists")
                     continue
-                
+
                 if skip_existing:
                     existing_path = self._find_existing_catalog_path(request)
                     if existing_path:
-                        dest_path = self._get_storage_path(request)
+                        dest_path = storage_path
                         try:
                             storage.sources.copy(existing_path, dest_path)
                             result.files_fetched += 1
@@ -211,71 +223,95 @@ class Loader:
                             self.logger.info(
                                 f"Copied (no re-download): {existing_path} → {dest_path}"
                             )
+                            if fetch_run:
+                                ff = FetchedFile.objects.create(
+                                    fetch_run=fetch_run, file_path=dest_path)
+                                ff.mark_fetching()
+                                ff.mark_stored(bytes_transferred=0)
                         except Exception as e:
                             self.logger.warning(
                                 f"Copy failed, will re-download: {e}"
                             )
                             requests_to_fetch.append(request)
                         continue
-                
+
                 requests_to_fetch.append(request)
-                
+
                 if max_files and len(requests_to_fetch) >= max_files:
                     self.logger.info(f"Reached max_files limit ({max_files})")
                     break
-            
+
             self.logger.info(
                 f"{len(requests_to_fetch)} to fetch, {result.files_skipped} skipped"
             )
-            
+
             # Fetch files
             for i, request in enumerate(requests_to_fetch, 1):
                 self.logger.info(
                     f"[{i}/{len(requests_to_fetch)}] Fetching {request.filename}"
                 )
-                
+
+                ff = None
+                if fetch_run:
+                    ff = FetchedFile.objects.create(
+                        fetch_run=fetch_run,
+                        file_path=self._get_storage_path(request),
+                    )
+                    ff.mark_fetching()
+
                 fetch_result = self._fetch_and_store(request)
                 result.fetch_results.append(fetch_result)
-                
+
                 if fetch_result.success:
                     result.files_fetched += 1
                     result.bytes_transferred += fetch_result.bytes_transferred
                     result.stored_paths.append(self._get_storage_path(request))
-                    
+                    if ff:
+                        ff.mark_stored(bytes_transferred=fetch_result.bytes_transferred or 0)
+
                     # Callback
                     if self.on_file_fetched:
                         try:
                             self.on_file_fetched(request, fetch_result)
                         except Exception as e:
                             self.logger.warning(f"on_file_fetched callback error: {e}")
-                
+
                 elif fetch_result.status == 'queued':
                     result.files_queued += 1
                 else:
                     result.files_failed += 1
                     if fetch_result.error:
                         result.add_error(f"{request.filename}: {fetch_result.error}")
-        
+                    if ff:
+                        ff.mark_failed(error=fetch_result.error or "")
+
         except Exception as e:
             self.logger.exception(f"Loader run failed: {e}")
             result.add_error(str(e))
-        
+
         finally:
             # Cleanup
             try:
                 self.fetch_strategy.disconnect()
             except Exception as e:
                 self.logger.warning(f"Error disconnecting: {e}")
-            
+
             self._cleanup_temp()
             result.finish()
-            
-            # Record if we have a profile reference
+
+            if fetch_run:
+                fetch_run.mark_completed(
+                    files_fetched=result.files_fetched,
+                    files_skipped=result.files_skipped,
+                    files_failed=result.files_failed,
+                    bytes_transferred=result.bytes_transferred,
+                )
+
             if self.data_feed:
-                self.data_feed.record_run(result, self.collection)
-            
+                self.data_feed._update_run_stats(result, self.collection)
+
             self.logger.info(result.summary())
-        
+
         return result
     
     # =========================================================================
@@ -316,7 +352,7 @@ class Loader:
             FileIngestion.objects
             .filter(
                 bucket=BucketType.SOURCES,
-                data_arrival__catalog__slug=catalog_slug,
+                file_path__startswith=f"{catalog_slug}/",
                 file_path__endswith=f"/{filename}",
                 status__in=[
                     FileIngestion.Status.PENDING,

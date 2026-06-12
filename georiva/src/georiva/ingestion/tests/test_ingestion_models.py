@@ -193,3 +193,28 @@ class FileIngestionSummaryFieldTests(TestCase):
         self.assertEqual(log.valid_time_start, t_start)
         self.assertEqual(log.valid_time_end, t_end)
         self.assertEqual(log.timestep_count, 30)
+
+    def test_mark_completed_writes_summary_fields(self):
+        from datetime import datetime, timezone
+
+        FileIngestion.register(bucket="incoming", file_path="mark/file.nc")
+        t_start = datetime(2024, 7, 1, tzinfo=timezone.utc)
+        t_end = datetime(2024, 7, 31, tzinfo=timezone.utc)
+
+        FileIngestion.mark_completed(
+            bucket="incoming",
+            file_path="mark/file.nc",
+            items_created=4,
+            assets_created=8,
+            variables_discovered=3,
+            valid_time_start=t_start,
+            valid_time_end=t_end,
+            timestep_count=31,
+        )
+
+        log = FileIngestion.objects.get(file_path="mark/file.nc")
+        self.assertEqual(log.status, FileIngestion.Status.COMPLETED)
+        self.assertEqual(log.variables_discovered, 3)
+        self.assertEqual(log.valid_time_start, t_start)
+        self.assertEqual(log.valid_time_end, t_end)
+        self.assertEqual(log.timestep_count, 31)
