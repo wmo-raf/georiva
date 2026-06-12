@@ -7,7 +7,7 @@ ManualUploadConfig and track its ingestion progress:
 1. GET  manual_upload_page          — render the upload form
 2. POST manual_upload_extract_times — pre-fill the time field from a filename
 3. POST manual_upload_submit        — validate, write to MinIO incoming,
-                                      create DataArrival, enqueue ingestion
+                                      create UploadSession, enqueue ingestion
 4. Client polls GET /api/arrivals/{id}/status/ until a terminal status.
 """
 

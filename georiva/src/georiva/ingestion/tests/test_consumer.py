@@ -1,11 +1,11 @@
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType
 from georiva.ingestion.consumer import _handle_event
-from georiva.ingestion.models import DataArrival, FileIngestion
+from georiva.ingestion.models import FileIngestion
 
 
 def _make_event(bucket_name: str, key: str) -> dict:
@@ -33,15 +33,9 @@ class ConsumerDirectFileIngestionTests(TestCase):
         self.file_path = "test-catalog/test-collection/somefile.grib2"
         self.ev = _make_event("georiva-sources", self.file_path)
 
-    def test_direct_drop_creates_file_ingestion_without_data_arrival(self):
+    def test_direct_drop_creates_file_ingestion(self):
         _run(self.ev)
-
-        log = FileIngestion.objects.get(file_path=self.file_path)
-        self.assertIsNone(log.data_arrival)
-
-    def test_direct_drop_does_not_create_data_arrival(self):
-        _run(self.ev)
-        self.assertEqual(DataArrival.objects.count(), 0)
+        self.assertTrue(FileIngestion.objects.filter(file_path=self.file_path).exists())
 
     def test_time_extraction_failure_marks_file_ingestion_failed(self):
         with (
@@ -62,14 +56,13 @@ class ConsumerDirectFileIngestionTests(TestCase):
         log = FileIngestion.objects.get(file_path=self.file_path)
         self.assertEqual(log.status, FileIngestion.Status.FAILED)
         self.assertIn("valid time", log.error)
-        self.assertEqual(DataArrival.objects.count(), 0)
 
 
 class SweepDirectFileIngestionTests(TestCase):
     def setUp(self):
         Catalog.objects.create(name="Sweep", slug="sweep-cat", file_format="grib2")
 
-    def test_sweep_registers_file_without_data_arrival(self):
+    def test_sweep_registers_file(self):
         from georiva.core.storage import BucketType as BT
         from georiva.ingestion.tasks import sweep_unprocessed
 
@@ -93,6 +86,6 @@ class SweepDirectFileIngestionTests(TestCase):
 
             sweep_unprocessed(sync=True)
 
-        log = FileIngestion.objects.get(file_path=file_path, bucket=BT.SOURCES)
-        self.assertIsNone(log.data_arrival)
-        self.assertEqual(DataArrival.objects.count(), 0)
+        self.assertTrue(
+            FileIngestion.objects.filter(file_path=file_path, bucket=BT.SOURCES).exists()
+        )

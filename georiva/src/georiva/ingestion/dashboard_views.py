@@ -17,7 +17,7 @@ def ingestion_dashboard_api(request):
     Returns collection list with ingestion health data for the dashboard.
     """
     from georiva.core.models import Collection
-    from georiva.ingestion.models import DataArrival, FileIngestion
+    from georiva.ingestion.models import FileIngestion
     from georiva.sources.models import DataFeedCollectionLink
 
     collections = list(
@@ -47,16 +47,17 @@ def ingestion_dashboard_api(request):
     for log in recent_logs:
         logs_by_collection[log["collections"]].append(log)
 
-    # Latest DataArrival per catalog (catalog-scoped, not collection-scoped).
-    catalog_ids = {c.catalog_id for c in collections}
-    latest_arrivals_by_catalog = {}
-    for arrival in (
-        DataArrival.objects
-        .filter(catalog_id__in=catalog_ids)
-        .order_by("catalog_id", "-started_at")
-        .distinct("catalog_id")
+    # Latest FileIngestion per collection (for last_run_at / last_run_status).
+    collection_ids = [c.pk for c in collections]
+    latest_fi_by_collection = {}
+    for fi in (
+        FileIngestion.objects
+        .filter(collections__in=collection_ids)
+        .values("collections", "status", "created_at")
+        .order_by("collections", "-created_at")
+        .distinct("collections")
     ):
-        latest_arrivals_by_catalog[arrival.catalog_id] = arrival
+        latest_fi_by_collection[fi["collections"]] = fi
 
     result = []
 
@@ -69,10 +70,10 @@ def ingestion_dashboard_api(request):
         last_run_at = None
         last_run_status = None
 
-        arrival = latest_arrivals_by_catalog.get(collection.catalog_id)
-        if arrival:
-            last_run_at = arrival.started_at.isoformat()
-            last_run_status = arrival.status
+        latest_fi = latest_fi_by_collection.get(collection.pk)
+        if latest_fi:
+            last_run_at = latest_fi["created_at"].isoformat()
+            last_run_status = latest_fi["status"]
 
         status = _derive_status(sparkline)
 
@@ -97,49 +98,6 @@ def ingestion_dashboard_api(request):
 # =============================================================================
 # Drawer detail APIs
 # =============================================================================
-
-def collection_data_arrivals_api(request, collection_id):
-    """
-    Returns DataArrival history for the catalog that owns this collection.
-
-    DataArrival is catalog-scoped (one arrival per catalog per fetch/upload),
-    so all collections in the same catalog share the same arrivals list.
-    """
-    from georiva.core.models import Collection
-    from georiva.ingestion.models import DataArrival
-
-    try:
-        collection = Collection.objects.select_related("catalog").get(pk=collection_id)
-    except Collection.DoesNotExist:
-        raise Http404
-
-    arrivals = (
-        DataArrival.objects
-        .filter(catalog=collection.catalog)
-        .order_by("-started_at")[:100]
-    )
-
-    result = []
-    for arrival in arrivals:
-        duration = None
-        if arrival.finished_at and arrival.started_at:
-            duration = (arrival.finished_at - arrival.started_at).total_seconds()
-        result.append({
-            "id": arrival.pk,
-            "trigger": arrival.trigger,
-            "status": arrival.status,
-            "started_at": arrival.started_at.isoformat(),
-            "finished_at": arrival.finished_at.isoformat() if arrival.finished_at else None,
-            "duration_seconds": duration,
-            "files_requested": arrival.files_requested,
-            "files_fetched": arrival.files_fetched,
-            "files_skipped": arrival.files_skipped,
-            "files_failed": arrival.files_failed,
-            "files_queued": arrival.files_queued,
-            "bytes_transferred": arrival.bytes_transferred,
-        })
-
-    return JsonResponse({"arrivals": result})
 
 
 def collection_ingestion_jobs_api(request, collection_id):
@@ -236,28 +194,6 @@ def collection_ingestion_logs_api(request, collection_id):
     
     return JsonResponse({"logs": result})
 
-
-# =============================================================================
-# Arrival status polling endpoint
-# =============================================================================
-
-def arrival_status_api(request, arrival_id):
-    """
-    Returns {id, status, error_message} for a single DataArrival.
-    Polled by the upload page until the arrival reaches a terminal status.
-    """
-    from georiva.ingestion.models import DataArrival
-
-    try:
-        arrival = DataArrival.objects.get(pk=arrival_id)
-    except DataArrival.DoesNotExist:
-        raise Http404
-
-    return JsonResponse({
-        "id": arrival.pk,
-        "status": arrival.status,
-        "error_message": arrival.error_message,
-    })
 
 
 def upload_session_status_api(request, session_id):

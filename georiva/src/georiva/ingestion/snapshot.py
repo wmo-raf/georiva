@@ -1,60 +1,50 @@
 from asgiref.sync import sync_to_async
 from django.db.models import Prefetch
 
-TERMINAL_STATUSES = frozenset(["completed", "failed", "partial", "empty"])
+TERMINAL_STATUSES = frozenset(["completed", "failed"])
 
 
-def _build_arrival_dict(arrival) -> dict:
-    file_ingestions = []
-    for fi in arrival.file_ingestions.all():
-        # jobs are pre-sorted by the Prefetch in _fetch_arrivals; no extra query.
-        all_jobs = fi.jobs.all()
-        latest_job = all_jobs[0] if all_jobs else None
-        file_ingestions.append({
-            "id": fi.pk,
-            "status": fi.status,
-            "job_id": latest_job.pk if latest_job else None,
-            "job_state": latest_job.state if latest_job else None,
-        })
-    catalog = arrival.catalog
+def _build_file_ingestion_dict(fi) -> dict:
+    all_jobs = fi.jobs.all()
+    latest_job = all_jobs[0] if all_jobs else None
     return {
-        "id": arrival.pk,
-        "status": arrival.status,
-        "trigger": arrival.trigger,
-        "file_path": arrival.file_path,
-        "collection_name": None,
-        "catalog_name": catalog.name if catalog else None,
-        "started_at": arrival.started_at.isoformat(),
-        "finished_at": arrival.finished_at.isoformat() if arrival.finished_at else None,
-        "file_ingestions": file_ingestions,
+        "id": fi.pk,
+        "status": fi.status,
+        "bucket": fi.bucket,
+        "file_path": fi.file_path,
+        "created_at": fi.created_at.isoformat(),
+        "completed_at": fi.completed_at.isoformat() if fi.completed_at else None,
+        "job_id": latest_job.pk if latest_job else None,
+        "job_state": latest_job.state if latest_job else None,
+        "variables_discovered": fi.variables_discovered,
+        "valid_time_start": fi.valid_time_start.isoformat() if fi.valid_time_start else None,
+        "valid_time_end": fi.valid_time_end.isoformat() if fi.valid_time_end else None,
+        "timestep_count": fi.timestep_count,
+        "error": fi.error or "",
     }
 
 
 @sync_to_async
-def _fetch_arrivals(terminal_limit: int) -> list[dict]:
-    from georiva.ingestion.models import DataArrival
+def _fetch_file_ingestions(terminal_limit: int) -> list[dict]:
+    from georiva.ingestion.models import FileIngestion, FileIngestionJob
 
-    from georiva.ingestion.models import FileIngestionJob
-
-    base = (
-        DataArrival.objects
-        .select_related("catalog")
-        .prefetch_related(
-            Prefetch(
-                "file_ingestions__jobs",
-                queryset=FileIngestionJob.objects.order_by("-created_at"),
-            )
+    base = FileIngestion.objects.prefetch_related(
+        Prefetch(
+            "jobs",
+            queryset=FileIngestionJob.objects.order_by("-created_at"),
         )
     )
-    # All active arrivals (no cap — operator needs to see everything in flight).
-    active = list(base.exclude(status__in=TERMINAL_STATUSES).order_by("-created_at"))
-    # Only the most recent N terminal arrivals to keep the list manageable.
-    terminal = list(base.filter(status__in=TERMINAL_STATUSES).order_by("-created_at")[:terminal_limit])
+    active = list(
+        base.exclude(status__in=TERMINAL_STATUSES).order_by("-created_at")
+    )
+    terminal = list(
+        base.filter(status__in=TERMINAL_STATUSES).order_by("-created_at")[:terminal_limit]
+    )
 
-    combined = sorted(active + terminal, key=lambda a: a.created_at, reverse=True)
-    return [_build_arrival_dict(a) for a in combined]
+    combined = sorted(active + terminal, key=lambda fi: fi.created_at, reverse=True)
+    return [_build_file_ingestion_dict(fi) for fi in combined]
 
 
-async def build_arrival_snapshot(terminal_limit: int = 10) -> list[dict]:
-    """Return all active arrivals plus the last `terminal_limit` completed/failed ones."""
-    return await _fetch_arrivals(terminal_limit)
+async def build_ingestion_snapshot(terminal_limit: int = 10) -> list[dict]:
+    """Return all active FileIngestions plus the last `terminal_limit` completed/failed ones."""
+    return await _fetch_file_ingestions(terminal_limit)

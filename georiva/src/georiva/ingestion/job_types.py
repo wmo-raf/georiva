@@ -8,22 +8,16 @@ FileIngestionJob is the operator-visible layer on top.
 
 import logging
 
-from django.utils import timezone as dj_timezone
 from task_ferry.registry import JobType
-from .models import DataArrival, FileIngestionJob, FileIngestion
+from .models import FileIngestionJob, FileIngestion
 
 logger = logging.getLogger(__name__)
-
-
-def _publish_arrival_status(arrival_id: int, status: str) -> None:
-    from georiva.ingestion.events import publish_event
-    publish_event({"type": "data_arrival.status_changed", "id": arrival_id, "status": status})
 
 
 class FileIngestionJobType(JobType):
     type = "file_ingestion"
     model_class = FileIngestionJob
-    max_count = 50  # many files can be in-flight in parallel
+    max_count = 50
 
     def prepare_values(self, values: dict, user) -> dict:
         for field in ("file_path", "bucket"):
@@ -35,20 +29,10 @@ class FileIngestionJobType(JobType):
         }
 
     def run(self, job: FileIngestionJob, progress) -> None:
-        """
-        Execute a single file ingestion.
-
-        Steps and their approximate share of the 100-point progress budget:
-            5  — acquire FileIngestion lock
-            10 — file registered / lock confirmed
-            75 — IngestionService.process_file()  (via a child Progress)
-            10 — mark completed / record counts
-        """
         from georiva.ingestion.service import IngestionService
 
         worker_id = f"task-ferry-job-{job.id}"
 
-        # ── Step 1: acquire the distributed lock ──────────────────────────────
         progress.increment(5, state="Acquiring processing lock…")
 
         if not FileIngestion.acquire(job.bucket, job.file_path, worker_id):
@@ -59,25 +43,16 @@ class FileIngestionJobType(JobType):
             )
             return
 
-        # Link the Job to the FileIngestion record now that we hold the lock.
         fi = None
         try:
             fi = FileIngestion.objects.get(bucket=job.bucket, file_path=job.file_path)
             job.file_ingestion = fi
             job.save(update_fields=["file_ingestion"])
         except FileIngestion.DoesNotExist:
-            pass  # very unlikely; carry on without the FK
-
-        arrival_id = fi.data_arrival_id if fi else None
-        if arrival_id:
-            DataArrival.objects.filter(pk=arrival_id).update(
-                status=DataArrival.Status.PROCESSING,
-            )
-            _publish_arrival_status(arrival_id, DataArrival.Status.PROCESSING)
+            pass
 
         progress.increment(10, state="Lock acquired — starting ingestion")
 
-        # ── Step 2: run the ingestion pipeline ────────────────────────────────
         from georiva.ingestion.progress import PublishingProgress
 
         pub_progress = PublishingProgress(total=100, job_id=job.pk)
@@ -90,7 +65,6 @@ class FileIngestionJobType(JobType):
 
         progress.increment(75, state="Pipeline complete")
 
-        # ── Step 3: record result ─────────────────────────────────────────────
         if result and result.success:
             FileIngestion.mark_completed(
                 bucket=job.bucket,
@@ -106,16 +80,6 @@ class FileIngestionJobType(JobType):
             job.items_created = len(result.items_created)
             job.assets_created = len(result.assets_created)
             job.save(update_fields=["items_created", "assets_created"])
-            if arrival_id:
-                arrival_status = (
-                    DataArrival.Status.PARTIAL if result.errors
-                    else DataArrival.Status.COMPLETED
-                )
-                DataArrival.objects.filter(pk=arrival_id).update(
-                    status=arrival_status,
-                    finished_at=dj_timezone.now(),
-                )
-                _publish_arrival_status(arrival_id, arrival_status)
             progress.increment(10, state=(
                 f"Done — {len(result.items_created)} items, "
                 f"{len(result.assets_created)} assets created"
@@ -132,13 +96,6 @@ class FileIngestionJobType(JobType):
                 file_path=job.file_path,
                 error=error_msg,
             )
-            if arrival_id:
-                DataArrival.objects.filter(pk=arrival_id).update(
-                    status=DataArrival.Status.FAILED,
-                    error_message=error_msg[:2000],
-                    finished_at=dj_timezone.now(),
-                )
-                _publish_arrival_status(arrival_id, DataArrival.Status.FAILED)
             raise RuntimeError(error_msg)
 
     def on_error(self, job: FileIngestionJob, exc: Exception) -> None:
@@ -146,12 +103,6 @@ class FileIngestionJobType(JobType):
             "FileIngestionJob %d failed for %s/%s: %s",
             job.id, job.bucket, job.file_path, exc,
         )
-        # Release the lock if this job's run holds it — an unexpected crash
-        # must not leave the FileIngestion stuck in 'processing' (with retries
-        # exhausted that state is unreclaimable, even by the stale-lock sweep).
-        # Scoped to our own worker id so an active run by another worker is
-        # never clobbered. The curated failure path (mark_failed + raise in
-        # run()) has already cleared the lock, so this matches nothing there.
         FileIngestion.objects.filter(
             bucket=job.bucket,
             file_path=job.file_path,
@@ -163,29 +114,8 @@ class FileIngestionJobType(JobType):
             locked_by="",
             error=str(exc)[:2000],
         )
-        # Propagate failure to the DataArrival for arrivals still in a live
-        # state. The curated path (mark_failed + raise in run()) already
-        # transitioned the arrival, so this only fires on unexpected crashes.
-        if job.file_ingestion_id:
-            try:
-                fi = FileIngestion.objects.get(pk=job.file_ingestion_id)
-                if fi.data_arrival_id:
-                    DataArrival.objects.filter(
-                        pk=fi.data_arrival_id,
-                        status__in=[
-                            DataArrival.Status.PENDING,
-                            DataArrival.Status.PROCESSING,
-                        ],
-                    ).update(
-                        status=DataArrival.Status.FAILED,
-                        error_message=str(exc)[:2000],
-                        finished_at=dj_timezone.now(),
-                    )
-            except FileIngestion.DoesNotExist:
-                pass
 
     def on_cancelled(self, job: FileIngestionJob) -> None:
-        # Release the FileIngestion lock so sweep can retry the file.
         if job.file_ingestion_id:
             FileIngestion.mark_failed(
                 bucket=job.bucket,
@@ -194,7 +124,6 @@ class FileIngestionJobType(JobType):
             )
 
     def before_delete(self, job: FileIngestionJob) -> None:
-        # Unlink before deleting — the FileIngestion record should outlive the job.
         if job.file_ingestion_id:
             job.file_ingestion = None
             job.save(update_fields=["file_ingestion"])

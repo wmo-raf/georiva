@@ -6,7 +6,6 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.models import (
-    DataArrival,
     FileIngestion,
     FileIngestionJob,
     ManualUploadConfig,
@@ -187,7 +186,7 @@ class UploadSubmitTests(TestCase):
             "file": SimpleUploadedFile("20250115.tif", b"tiff-bytes"),
         })
 
-        self.assertEqual(DataArrival.objects.count(), 0)
+        self.assertEqual(UploadSession.objects.count(), 1)
 
     def test_file_ingestion_registered_without_data_arrival(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -201,7 +200,6 @@ class UploadSubmitTests(TestCase):
 
         fi = FileIngestion.objects.get(file_path="imagery/ndvi/band_1/2025/01/15/20250115.tif")
         self.assertEqual(fi.bucket, "incoming")
-        self.assertIsNone(fi.data_arrival)
 
     def test_geotiff_date_from_form_when_filename_unparseable(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -409,25 +407,14 @@ class DirectDropTimeValidationTests(TestCase):
         mock_task.delay.assert_called_once()
 
     def test_consumer_applies_time_check_uniformly(self, mock_task):
-        """Consumer checks time extractability for all drops; no DataArrival bypass."""
+        """Consumer checks time extractability for all drops — no bypass."""
         from georiva.ingestion.consumer import _handle_event
         _geotiff_setup()
 
-        # A pre-existing DataArrival no longer bypasses the time check.
-        DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.UPLOADING,
-            file_path="imagery/operator_named.tif",
-        )
-
         _handle_event(self._event("imagery/operator_named.tif"))
 
-        # FileIngestion is created but fails time extraction
         fi = FileIngestion.objects.get(file_path="imagery/operator_named.tif")
         self.assertEqual(fi.status, FileIngestion.Status.FAILED)
-        # DataArrival is left untouched — consumer no longer manages it
-        arrival = DataArrival.objects.get(file_path="imagery/operator_named.tif")
-        self.assertEqual(arrival.status, DataArrival.Status.UPLOADING)
         mock_task.delay.assert_not_called()
 
 
