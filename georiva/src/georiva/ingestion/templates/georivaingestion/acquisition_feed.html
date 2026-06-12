@@ -1,0 +1,265 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Acquisition Feed" %}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .acq-empty {
+            padding: 2em 0;
+            text-align: center;
+            color: var(--w-color-grey-400);
+            font-size: 0.95em;
+        }
+
+        .acq-card {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+            background: var(--w-color-surface-page);
+            margin-bottom: 1em;
+            overflow: hidden;
+        }
+
+        .acq-card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75em;
+            padding: 0.65em 1em;
+            background: var(--w-color-grey-50);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            font-size: 0.88em;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .acq-card--collapsed .acq-card-header {
+            border-bottom: none;
+        }
+
+        .acq-chevron {
+            display: inline-block;
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+            transition: transform 0.15s;
+            flex-shrink: 0;
+        }
+
+        .acq-card--collapsed .acq-chevron {
+            transform: rotate(-90deg);
+        }
+
+        .acq-card--collapsed .acq-card-body {
+            display: none;
+        }
+
+        .acq-type-badge {
+            font-size: 0.78em;
+            padding: 0.1em 0.5em;
+            border-radius: 3px;
+            background: var(--w-color-grey-100);
+            color: var(--w-color-text-label);
+        }
+
+        .acq-status-pill { font-size: 0.8em; padding: 0.15em 0.5em; border-radius: 3px; }
+        .acq-status-pill--running { background: var(--w-color-info-100); }
+        .acq-status-pill--completed { background: var(--w-color-positive-100); }
+        .acq-status-pill--failed { background: var(--w-color-critical-200); }
+        .acq-status-pill--active { background: var(--w-color-info-100); }
+        .acq-status-pill--cancelled { background: var(--w-color-warning-100); }
+
+        .acq-time { color: var(--w-color-grey-400); font-size: 0.82em; margin-left: auto; }
+
+        .acq-card-body { padding: 0.5em 1em 0.75em; }
+
+        .acq-files { list-style: none; margin: 0; padding: 0; }
+        .acq-files li {
+            display: flex; align-items: center; gap: 0.5em;
+            padding: 0.25em 0;
+            font-size: 0.85em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+        }
+        .acq-files li:last-child { border-bottom: none; }
+        .acq-file-status { font-size: 0.78em; padding: 0.1em 0.4em; border-radius: 3px; background: var(--w-color-grey-100); }
+        .acq-file-status--stored, .acq-file-status--success { background: var(--w-color-positive-100); }
+        .acq-file-status--failed { background: var(--w-color-critical-200); }
+        .acq-file-status--skipped { background: var(--w-color-grey-100); }
+
+        .acq-counts { font-size: 0.82em; color: var(--w-color-grey-400); }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Acquisition Feed") icon="download" %}
+
+    <div class="nice-padding">
+        <div id="acquisition-feed"></div>
+        <p id="feed-empty" class="acq-empty" style="display:none">
+            {% trans "No acquisition activity yet." %}
+        </p>
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    const SSE_URL = '/admin/api/ingestion/acquisition/events/';
+    const feedEl = document.getElementById('acquisition-feed');
+    const emptyEl = document.getElementById('feed-empty');
+
+    const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'];
+    const COLLAPSE_DELAY_MS = 3000;
+
+    function fmtTime(iso) {
+        if (!iso) return '';
+        try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
+    }
+
+    function pillClass(status) {
+        const map = {
+            running: '--running', active: '--active',
+            completed: '--completed', failed: '--failed', cancelled: '--cancelled'
+        };
+        return 'acq-status-pill' + (map[status] || '');
+    }
+
+    function fileStatusClass(status) {
+        return 'acq-file-status acq-file-status--' + status;
+    }
+
+    function buildFileList(files) {
+        if (!files || !files.length) return '';
+        const rows = files.map(function (f) {
+            const name = f.filename || f.original_filename || f.file_path || '';
+            return '<li>' +
+                '<span class="' + fileStatusClass(f.status) + '">' + f.status + '</span>' +
+                '<span>' + name + '</span>' +
+                (f.error ? '<span style="color:var(--w-color-critical-200)">' + f.error + '</span>' : '') +
+                '</li>';
+        }).join('');
+        return '<ul class="acq-files">' + rows + '</ul>';
+    }
+
+    function buildFetchRunCard(run) {
+        const card = document.createElement('div');
+        card.className = 'acq-card';
+        card.dataset.type = 'fetch_run';
+        card.dataset.runId = run.id;
+        const isTerminal = TERMINAL_STATUSES.includes(run.status);
+        if (isTerminal) card.classList.add('acq-card--collapsed');
+
+        const counts = [
+            run.files_fetched + ' fetched',
+            run.files_skipped + ' skipped',
+            run.files_failed + ' failed',
+        ].join(' · ');
+
+        card.innerHTML =
+            '<div class="acq-card-header">' +
+            '<span class="acq-chevron">▾</span>' +
+            '<span class="acq-type-badge">{% trans "Fetch Run" %}</span>' +
+            '<span>' + (run.data_feed_name || '') + '</span>' +
+            '<span class="' + pillClass(run.status) + '" data-status-pill>' + run.status + '</span>' +
+            '<span class="acq-counts">' + counts + '</span>' +
+            '<span class="acq-time">' + fmtTime(run.started_at) + '</span>' +
+            '</div>' +
+            '<div class="acq-card-body">' + buildFileList(run.files) + '</div>';
+
+        card.querySelector('.acq-card-header').addEventListener('click', function () {
+            card.classList.toggle('acq-card--collapsed');
+        });
+        return card;
+    }
+
+    function buildUploadSessionCard(session) {
+        const card = document.createElement('div');
+        card.className = 'acq-card';
+        card.dataset.type = 'upload_session';
+        card.dataset.sessionId = session.id;
+        const isTerminal = TERMINAL_STATUSES.includes(session.status);
+        if (isTerminal) card.classList.add('acq-card--collapsed');
+
+        const userLabel = session.user_display ? ' · ' + session.user_display : '';
+
+        card.innerHTML =
+            '<div class="acq-card-header">' +
+            '<span class="acq-chevron">▾</span>' +
+            '<span class="acq-type-badge">{% trans "Upload" %}</span>' +
+            '<span>' + (session.catalog_name || '') + userLabel + '</span>' +
+            '<span class="' + pillClass(session.status) + '" data-status-pill>' + session.status + '</span>' +
+            '<span class="acq-time">' + fmtTime(session.started_at) + '</span>' +
+            '</div>' +
+            '<div class="acq-card-body">' + buildFileList(session.files) + '</div>';
+
+        card.querySelector('.acq-card-header').addEventListener('click', function () {
+            card.classList.toggle('acq-card--collapsed');
+        });
+        return card;
+    }
+
+    function buildCard(item) {
+        return item.type === 'fetch_run' ? buildFetchRunCard(item) : buildUploadSessionCard(item);
+    }
+
+    function findCard(type, id) {
+        return feedEl.querySelector('[data-type="' + type + '"][data-' +
+            (type === 'fetch_run' ? 'run' : 'session') + '-id="' + id + '"]');
+    }
+
+    function onStatusChanged(type, data) {
+        const card = findCard(type, data.id);
+        if (!card) return;
+        const pill = card.querySelector('[data-status-pill]');
+        if (pill) { pill.textContent = data.status; pill.className = pillClass(data.status); }
+        if (TERMINAL_STATUSES.includes(data.status)) {
+            setTimeout(function () { card.classList.add('acq-card--collapsed'); }, COLLAPSE_DELAY_MS);
+        }
+    }
+
+    function renderSnapshot(items) {
+        emptyEl.style.display = 'none';
+        if (!items.length) {
+            emptyEl.textContent = '{% trans "No acquisition activity yet." %}';
+            emptyEl.style.display = '';
+            return;
+        }
+        items.forEach(function (item) { feedEl.appendChild(buildCard(item)); });
+    }
+
+    const es = new EventSource(SSE_URL);
+
+    es.addEventListener('snapshot', function (ev) {
+        renderSnapshot(JSON.parse(ev.data));
+    });
+
+    es.addEventListener('fetch_run.created', function (ev) {
+        const run = JSON.parse(ev.data);
+        if (findCard('fetch_run', run.id)) return;
+        emptyEl.style.display = 'none';
+        feedEl.insertBefore(buildFetchRunCard(run), feedEl.firstChild);
+    });
+
+    es.addEventListener('fetch_run.status_changed', function (ev) {
+        onStatusChanged('fetch_run', JSON.parse(ev.data));
+    });
+
+    es.addEventListener('upload_session.created', function (ev) {
+        const session = JSON.parse(ev.data);
+        if (findCard('upload_session', session.id)) return;
+        emptyEl.style.display = 'none';
+        feedEl.insertBefore(buildUploadSessionCard(session), feedEl.firstChild);
+    });
+
+    es.addEventListener('upload_session.status_changed', function (ev) {
+        onStatusChanged('upload_session', JSON.parse(ev.data));
+    });
+
+    es.onerror = function () {
+        emptyEl.textContent = '{% trans "Connection lost. Reconnecting…" %}';
+        emptyEl.style.display = '';
+    };
+
+});
+</script>
+{% endblock %}

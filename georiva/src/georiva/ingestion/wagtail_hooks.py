@@ -16,23 +16,33 @@ def register_ingestion_activity_menu():
     )
 
 
+@hooks.register("register_admin_menu_item")
+def register_acquisition_feed_menu():
+    from django.utils.translation import gettext as _
+    return MenuItem(
+        _("Acquisition Feed"),
+        reverse_lazy("acquisition_feed"),
+        icon_name="download",
+        order=841,
+    )
+
+
 @hooks.register("register_admin_urls")
 def register_ingestion_dashboard_urls():
-    from .activity_views import ingestion_activity_feed
+    from .activity_views import ingestion_activity_feed, acquisition_feed
     from .dashboard_views import (
         ingestion_dashboard_api,
-        collection_data_arrivals_api,
         collection_ingestion_logs_api,
         collection_ingestion_jobs_api,
     )
-    from .sse_views import ingestion_events_sse
+    from .sse_views import ingestion_events_sse, acquisition_events_sse
 
     return [
         path("ingestion/activity/", ingestion_activity_feed, name="ingestion_activity_feed"),
+        path("ingestion/acquisition/", acquisition_feed, name="acquisition_feed"),
         path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
+        path("api/ingestion/acquisition/events/", acquisition_events_sse, name="acquisition_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),
-        path("api/ingestion/collections/<int:collection_id>/arrivals/", collection_data_arrivals_api,
-             name="collection_data_arrivals_api"),
         path("api/ingestion/collections/<int:collection_id>/ingestion-logs/", collection_ingestion_logs_api,
              name="collection_ingestion_logs_api"),
         path("api/ingestion/collections/<int:collection_id>/ingestion-jobs/", collection_ingestion_jobs_api,

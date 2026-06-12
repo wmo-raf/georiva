@@ -177,7 +177,7 @@
             const emptyEl = document.getElementById('feed-empty');
 
             const TERMINAL_JOB_STATES = ['finished', 'failed', 'cancelled'];
-            const TERMINAL_ARRIVAL_STATUSES = ['completed', 'failed', 'partial', 'empty'];
+            const TERMINAL_FI_STATUSES = ['completed', 'failed'];
             const COLLAPSE_DELAY_MS = 3000;
 
             // ── Helpers ────────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@
             function pillClass(status) {
                 const map = {
                     processing: '--processing', completed: '--completed',
-                    failed: '--failed', partial: '--partial'
+                    failed: '--failed', pending: '--pending'
                 };
                 return 'iaf-status-pill' + (map[status] || '');
             }
@@ -246,46 +246,40 @@
 
             // ── Card builder ───────────────────────────────────────────────────────
 
-            function buildCard(arrival) {
+            function buildCard(fi) {
                 const card = document.createElement('div');
                 card.className = 'iaf-card';
-                card.dataset.arrivalId = arrival.id;
+                card.dataset.fiId = fi.id;
 
-                const isTerminal = TERMINAL_ARRIVAL_STATUSES.includes(arrival.status);
+                const isTerminal = TERMINAL_FI_STATUSES.includes(fi.status);
                 if (isTerminal) card.classList.add('iaf-card--collapsed');
 
-                const catalogLabel = arrival.catalog_name || '';
+                const summaryParts = [];
+                if (fi.variables_discovered != null) summaryParts.push(fi.variables_discovered + ' vars');
+                if (fi.timestep_count != null) summaryParts.push(fi.timestep_count + ' steps');
 
                 card.innerHTML =
                     '<div class="iaf-card-header">' +
                     '<span class="iaf-chevron">▾</span>' +
-                    '<span class="iaf-trigger">' + (arrival.trigger || '') + '</span>' +
-                    (catalogLabel ? '<span class="iaf-collection">' + catalogLabel + '</span>' : '') +
-                    '<span class="' + pillClass(arrival.status) + '" data-status-pill>' +
-                    arrival.status +
+                    '<span class="iaf-trigger">' + (fi.bucket || '') + '</span>' +
+                    '<span class="' + pillClass(fi.status) + '" data-status-pill>' +
+                    fi.status +
                     '</span>' +
-                    '<span class="iaf-time">' + fmtTime(arrival.started_at) + '</span>' +
+                    '<span class="iaf-time">' + fmtTime(fi.created_at) + '</span>' +
                     '</div>' +
                     '<div class="iaf-card-body">' +
-                    (arrival.file_path
-                        ? '<div class="iaf-filepath">' + arrival.file_path + '</div>'
-                        : '') +
+                    '<div class="iaf-filepath">' + (fi.file_path || '') + '</div>' +
+                    (summaryParts.length ? '<div class="iaf-summary">' + summaryParts.join(' · ') + '</div>' : '') +
                     '<ul class="iaf-log-steps" data-log-steps></ul>' +
                     '<div class="iaf-log-summary" data-log-summary></div>' +
                     '</div>';
 
                 wireHeaderToggle(card);
 
-                arrival.file_ingestions.forEach(function (fi) {
-                    if (fi.job_id && !TERMINAL_JOB_STATES.includes(fi.job_state)) {
-                        attachJobLog(card, fi.job_id);
-                        addCancelButton(card, fi.job_id);
-                    } else if (fi.job_summary) {
-                        const sumEl = card.querySelector('[data-log-summary]');
-                        sumEl.textContent = fi.job_summary;
-                        sumEl.className = 'iaf-log-summary iaf-log-summary--success';
-                    }
-                });
+                if (fi.job_id && !TERMINAL_JOB_STATES.includes(fi.job_state)) {
+                    attachJobLog(card, fi.job_id);
+                    addCancelButton(card, fi.job_id);
+                }
 
                 return card;
             }
@@ -316,8 +310,8 @@
 
             // ── Card registry ──────────────────────────────────────────────────────
 
-            function cardByArrival(id) {
-                return feedEl.querySelector('[data-arrival-id="' + id + '"]');
+            function cardByFi(id) {
+                return feedEl.querySelector('[data-fi-id="' + id + '"]');
             }
 
             function cardByJob(id) {
@@ -326,29 +320,29 @@
 
             // ── Snapshot render ────────────────────────────────────────────────────
 
-            function renderSnapshot(arrivals) {
+            function renderSnapshot(items) {
                 emptyEl.style.display = 'none';
-                if (!arrivals.length) {
-                    emptyEl.textContent = '{% trans "No arrivals yet." %}';
+                if (!items.length) {
+                    emptyEl.textContent = '{% trans "No file ingestions yet." %}';
                     emptyEl.style.display = '';
                     return;
                 }
-                arrivals.forEach(function (arrival) {
-                    feedEl.appendChild(buildCard(arrival));
+                items.forEach(function (fi) {
+                    feedEl.appendChild(buildCard(fi));
                 });
             }
 
             // ── SSE event handlers ─────────────────────────────────────────────────
 
-            function onArrivalStatusChanged(data) {
-                const card = cardByArrival(data.id);
+            function onFiStatusChanged(data) {
+                const card = cardByFi(data.id);
                 if (!card) return;
                 const pill = card.querySelector('[data-status-pill]');
                 if (pill) {
                     pill.textContent = data.status;
                     pill.className = pillClass(data.status);
                 }
-                if (TERMINAL_ARRIVAL_STATUSES.includes(data.status)) {
+                if (TERMINAL_FI_STATUSES.includes(data.status)) {
                     setTimeout(function () { collapseCard(card); }, COLLAPSE_DELAY_MS);
                 }
             }
@@ -377,23 +371,15 @@
                 renderSnapshot(JSON.parse(ev.data));
             });
 
-            es.addEventListener('data_arrival.created', function (ev) {
-                const arrival = JSON.parse(ev.data);
-                if (cardByArrival(arrival.id)) return;
+            es.addEventListener('file_ingestion.created', function (ev) {
+                const fi = JSON.parse(ev.data);
+                if (cardByFi(fi.id)) return;
                 emptyEl.style.display = 'none';
-                feedEl.insertBefore(buildCard(arrival), feedEl.firstChild);
+                feedEl.insertBefore(buildCard(fi), feedEl.firstChild);
             });
 
-            es.addEventListener('data_arrival.job_created', function (ev) {
-                const data = JSON.parse(ev.data);
-                const card = cardByArrival(data.id);
-                if (!card) return;
-                attachJobLog(card, data.job_id);
-                addCancelButton(card, data.job_id);
-            });
-
-            es.addEventListener('data_arrival.status_changed', function (ev) {
-                onArrivalStatusChanged(JSON.parse(ev.data));
+            es.addEventListener('file_ingestion.status_changed', function (ev) {
+                onFiStatusChanged(JSON.parse(ev.data));
             });
 
             es.addEventListener('job.progress_updated', function (ev) {

@@ -1,5 +1,5 @@
 """
-GeoRiva DataArrivalJobType — wraps Loader.run() so every data-source fetch is
+GeoRiva LoaderJobType — wraps Loader.run() so every data-source fetch is
 tracked as a task-ferry Job with real-time per-file progress.
 
 If collection_id is provided, only that collection is run.
@@ -14,14 +14,14 @@ from task_ferry.registry import JobType
 logger = logging.getLogger(__name__)
 
 
-class DataArrivalJobType(JobType):
+class LoaderJobType(JobType):
     type = "data_source_load"
     max_count = 5
 
     @property
     def model_class(self):
-        from georiva.ingestion.models import DataArrivalJob
-        return DataArrivalJob
+        from georiva.ingestion.models import LoaderJob
+        return LoaderJob
 
     def prepare_values(self, values: dict, user) -> dict:
         if not values.get("data_feed_id"):
@@ -39,7 +39,6 @@ class DataArrivalJobType(JobType):
         Within each collection's slice:
           - small portion for request planning
           - rest for file fetches (one tick per file)
-          - small portion for recording the DataArrival
         """
         from georiva.core.models import Collection
         from .loader import Loader
@@ -88,7 +87,7 @@ class DataArrivalJobType(JobType):
             job.save(update_fields=["files_total"])
 
             logger.info(
-                "DataArrivalJob %d (%s): %d files to fetch",
+                "LoaderJob %d (%s): %d files to fetch",
                 job.id, col_label, len(requests),
             )
 
@@ -120,19 +119,19 @@ class DataArrivalJobType(JobType):
             job.save(update_fields=["files_skipped", "files_failed"])
 
             logger.info(
-                "DataArrivalJob %d (%s): %s",
+                "LoaderJob %d (%s): %s",
                 job.id, col_label, result.summary(),
             )
 
             if result.files_failed > 0 and result.files_fetched == 0:
                 logger.error(
-                    "DataArrivalJob %d (%s): all fetches failed — %s",
+                    "LoaderJob %d (%s): all fetches failed — %s",
                     job.id, col_label, "; ".join(result.errors[:3]),
                 )
 
     def on_error(self, job, exc: Exception) -> None:
         logger.exception(
-            "DataArrivalJob %d failed (data_feed=%s, collection=%s): %s",
+            "LoaderJob %d failed (data_feed=%s, collection=%s): %s",
             job.id, job.data_feed_id, job.collection_id, exc,
         )
 

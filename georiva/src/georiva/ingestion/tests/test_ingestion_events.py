@@ -5,11 +5,7 @@ from django.conf import settings
 from django.test import TestCase
 
 from georiva.ingestion.events import CHANNEL
-from georiva.ingestion.models import DataArrival
 
-# =============================================================================
-# Shared test base — subscribes to ingestion:events before each test
-# =============================================================================
 
 class IngestionEventsTestCase(TestCase):
 
@@ -17,7 +13,6 @@ class IngestionEventsTestCase(TestCase):
         self.r = redis.from_url(settings.REDIS_URL)
         self.pubsub = self.r.pubsub()
         self.pubsub.subscribe(CHANNEL)
-        # Wait for the subscribe confirmation so we don't race with publish calls.
         for _ in range(20):
             msg = self.pubsub.get_message(timeout=0.1)
             if msg and msg.get("type") == "subscribe":
@@ -56,70 +51,41 @@ class PublishEventTests(IngestionEventsTestCase):
 
 
 # =============================================================================
-# Cycle 2: DataArrival status changes publish an event
+# Cycle 2: FileIngestion creation publishes file_ingestion.created
 # =============================================================================
 
-class DataArrivalStatusEventTests(IngestionEventsTestCase):
-
-    def _make_arrival(self, status="pending"):
-        from georiva.ingestion.models import DataArrival
-        return DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=status,
-        )
-
-    def test_status_change_publishes_event(self):
-        arrival = self._make_arrival()
-        self._drain()  # discard any creation events
-
-        arrival.status = "processing"
-        arrival.save(update_fields=["status"])
-
-        event = self._next_event()
-        self.assertIsNotNone(event)
-        self.assertEqual(event["type"], "data_arrival.status_changed")
-        self.assertEqual(event["id"], arrival.pk)
-        self.assertEqual(event["status"], "processing")
+class FileIngestionCreatedEventTests(IngestionEventsTestCase):
 
     def test_creation_publishes_created_event(self):
-        arrival = self._make_arrival()
+        from georiva.ingestion.models import FileIngestion
+        fi, _ = FileIngestion.register(bucket="incoming", file_path="cat/file.grib2")
 
         event = self._next_event()
         self.assertIsNotNone(event)
-        self.assertEqual(event["type"], "data_arrival.created")
-        self.assertEqual(event["id"], arrival.pk)
-        self.assertEqual(event["trigger"], DataArrival.Trigger.MANUAL_UPLOAD)
+        self.assertEqual(event["type"], "file_ingestion.created")
+        self.assertEqual(event["id"], fi.pk)
         self.assertIn("status", event)
+        self.assertIn("bucket", event)
         self.assertIn("file_path", event)
-        self.assertIn("started_at", event)
-        self.assertIn("file_ingestions", event)
 
-    def test_creation_does_not_publish_status_changed_event(self):
-        self._make_arrival()
-        event = self._next_event(timeout=0.5)
-        # creation should publish data_arrival.created, not data_arrival.status_changed
-        if event:
-            self.assertNotEqual(event["type"], "data_arrival.status_changed")
+    def test_creation_event_is_not_status_changed(self):
+        from georiva.ingestion.models import FileIngestion
+        FileIngestion.register(bucket="incoming", file_path="cat/file2.grib2")
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertNotEqual(event["type"], "file_ingestion.status_changed")
 
 
 # =============================================================================
-# Cycle 3: FileIngestion status changes publish an event
+# Cycle 3: FileIngestion status changes publish file_ingestion.status_changed
 # =============================================================================
 
 class FileIngestionStatusEventTests(IngestionEventsTestCase):
 
-    def _make_file_ingestion(self):
-        from georiva.ingestion.models import DataArrival, FileIngestion
-        arrival = DataArrival.objects.create(trigger=DataArrival.Trigger.MANUAL_UPLOAD)
-        fi, _ = FileIngestion.register(
-            bucket="incoming",
-            file_path="catalog/somefile.grib2",
-            data_arrival=arrival,
-        )
-        return fi
-
     def test_status_change_publishes_event(self):
-        fi = self._make_file_ingestion()
+        from georiva.ingestion.models import FileIngestion
+        fi, _ = FileIngestion.register(bucket="incoming", file_path="cat/file3.grib2")
         self._drain()
 
         fi.status = "processing"
@@ -130,14 +96,6 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
         self.assertEqual(event["type"], "file_ingestion.status_changed")
         self.assertEqual(event["id"], fi.pk)
         self.assertEqual(event["status"], "processing")
-
-    def test_creation_does_not_publish_file_ingestion_event(self):
-        self._make_file_ingestion()
-        # drain the data_arrival.created event (DataArrival is created inside _make_file_ingestion)
-        self._drain()
-
-        event = self._next_event(timeout=0.5)
-        self.assertIsNone(event)
 
 
 # =============================================================================
@@ -203,3 +161,69 @@ class PublishingProgressEventTests(IngestionEventsTestCase):
 
         event = self._next_event(timeout=0.5)
         self.assertIsNone(event)
+
+
+# =============================================================================
+# Cycle 6: Acquisition model events (FetchRun, UploadSession)
+# =============================================================================
+
+class FetchRunEventTests(IngestionEventsTestCase):
+
+    def _make_feed(self):
+        from georiva.core.models import Catalog
+        from georiva.sources.models import DataFeed
+        catalog = Catalog.objects.create(name="FR", slug="fr-ev", file_format="grib2")
+        return DataFeed.objects.create(name="FR Feed", catalog=catalog)
+
+    def test_fetch_run_creation_publishes_event(self):
+        from georiva.sources.models import FetchRun
+        feed = self._make_feed()
+        run = FetchRun.objects.create(data_feed=feed)
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "fetch_run.created")
+        self.assertEqual(event["id"], run.pk)
+
+    def test_fetch_run_status_change_publishes_event(self):
+        from georiva.sources.models import FetchRun
+        feed = self._make_feed()
+        run = FetchRun.objects.create(data_feed=feed)
+        self._drain()
+
+        run.mark_completed()
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "fetch_run.status_changed")
+        self.assertEqual(event["id"], run.pk)
+        self.assertEqual(event["status"], "completed")
+
+
+class UploadSessionEventTests(IngestionEventsTestCase):
+
+    def _make_session(self):
+        from georiva.core.models import Catalog
+        from georiva.ingestion.models import UploadSession
+        catalog = Catalog.objects.create(name="US", slug="us-ev", file_format="geotiff")
+        return UploadSession.objects.create(catalog=catalog)
+
+    def test_upload_session_creation_publishes_event(self):
+        session = self._make_session()
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "upload_session.created")
+        self.assertEqual(event["id"], session.pk)
+
+    def test_upload_session_status_change_publishes_event(self):
+        session = self._make_session()
+        self._drain()
+
+        session.mark_failed()
+
+        event = self._next_event()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "upload_session.status_changed")
+        self.assertEqual(event["id"], session.pk)
+        self.assertEqual(event["status"], "failed")

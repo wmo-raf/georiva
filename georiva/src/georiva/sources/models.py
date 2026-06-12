@@ -233,7 +233,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         collection — if given, run only for that collection; if None, run for
                      all collections linked to this feed.
 
-        async_run=True  (default) — creates a DataArrivalJob with real-time
+        async_run=True  (default) — creates a LoaderJob with real-time
                          progress tracking.  Returns the Job instance.
 
         async_run=False — runs synchronously; useful for management commands

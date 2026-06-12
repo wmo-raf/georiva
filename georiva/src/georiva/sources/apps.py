@@ -9,6 +9,7 @@ class SourcesConfig(AppConfig):
 
     def ready(self):
         from task_ferry.registry import job_type_registry
-        from .job_types import DataArrivalJobType
+        from .job_types import LoaderJobType
 
-        job_type_registry.register(DataArrivalJobType())
+        job_type_registry.register(LoaderJobType())
+        import georiva.sources.signals  # noqa: F401

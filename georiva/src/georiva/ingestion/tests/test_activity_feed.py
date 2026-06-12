@@ -48,9 +48,9 @@ class ActivityFeedLiveArrivalTests(TestCase):
         self.user = User.objects.create_superuser("admin_la", "la@test.com", "pw")
         self.client.force_login(self.user)
 
-    def test_page_handles_data_arrival_created_event(self):
+    def test_page_handles_file_ingestion_created_event(self):
         response = self.client.get(ACTIVITY_URL)
-        self.assertContains(response, "data_arrival.created")
+        self.assertContains(response, "file_ingestion.created")
 
     def test_page_shows_percentage_in_progress_step(self):
         response = self.client.get(ACTIVITY_URL)

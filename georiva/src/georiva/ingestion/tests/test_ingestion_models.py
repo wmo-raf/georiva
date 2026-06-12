@@ -6,7 +6,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.handlers.item_handler import ItemHandler
-from georiva.ingestion.models import DataArrival, FileIngestion, FileIngestionJob
+from georiva.ingestion.models import FileIngestion, FileIngestionJob
 
 
 def _setup():
@@ -14,15 +14,9 @@ def _setup():
     collection = Collection.objects.create(
         catalog=catalog, name="Forecast", slug="wrf-forecast-collection-1",
     )
-    arrival = DataArrival.objects.create(
-        trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-        status=DataArrival.Status.PENDING,
-        file_path="wrf/file.nc",
-    )
     log, _ = FileIngestion.register(
         bucket="incoming",
         file_path="wrf/file.nc",
-        data_arrival=arrival,
     )
     return collection, log
 
@@ -146,30 +140,6 @@ class JobCrashLockReleaseTests(TestCase):
         self.assertEqual(log.status, FileIngestion.Status.PROCESSING)
         self.assertEqual(log.locked_by, "some-other-worker")
 
-
-class FileIngestionNullableArrivalTests(TestCase):
-    """FileIngestion.data_arrival must be nullable so sweep-path files can be registered."""
-
-    def test_register_without_data_arrival(self):
-        log, created = FileIngestion.register(
-            bucket="incoming",
-            file_path="sweep/file.nc",
-        )
-        self.assertTrue(created)
-        self.assertIsNone(log.data_arrival)
-
-    def test_register_with_data_arrival_still_works(self):
-        arrival = DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.PENDING,
-        )
-        log, created = FileIngestion.register(
-            bucket="incoming",
-            file_path="with-arrival/file.nc",
-            data_arrival=arrival,
-        )
-        self.assertTrue(created)
-        self.assertEqual(log.data_arrival, arrival)
 
 
 class FileIngestionSummaryFieldTests(TestCase):

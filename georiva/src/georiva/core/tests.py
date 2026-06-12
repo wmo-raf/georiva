@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Item
-from georiva.ingestion.models import DataArrival, FileIngestion
+from georiva.ingestion.models import FileIngestion
 
 User = get_user_model()
 
@@ -16,28 +16,19 @@ def _setup():
     return catalog, collection
 
 
-def _make_arrival(catalog):
-    return DataArrival.objects.create(
-        trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-        catalog=catalog,
-    )
-
-
 def _make_item(collection, source_file, t=None):
     if t is None:
         t = datetime(2024, 1, 1, tzinfo=timezone.utc)
     return Item.objects.create(collection=collection, time=t, source_file=source_file)
 
 
-def _make_fi(bucket, file_path, status, arrival, error=""):
-    fi = FileIngestion.objects.create(
+def _make_fi(bucket, file_path, status, error=""):
+    return FileIngestion.objects.create(
         bucket=bucket,
         file_path=file_path,
         status=status,
-        data_arrival=arrival,
         error=error,
     )
-    return fi
 
 
 class CollectionItemsIngestionBadgeTests(TestCase):
@@ -48,9 +39,8 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         self.url = reverse("collection_items_list", args=[self.collection.pk])
 
     def test_completed_ingestion_shows_completed_badge(self):
-        arrival = _make_arrival(self.catalog)
         _make_item(self.collection, "mybucket:models/surface/file.grib")
-        _make_fi("mybucket", "models/surface/file.grib", FileIngestion.Status.COMPLETED, arrival)
+        _make_fi("mybucket", "models/surface/file.grib", FileIngestion.Status.COMPLETED)
 
         response = self.client.get(self.url)
 
@@ -58,11 +48,10 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         self.assertContains(response, "w-status-tag--primary")
 
     def test_failed_ingestion_shows_failed_badge_with_error(self):
-        arrival = _make_arrival(self.catalog)
         _make_item(self.collection, "mybucket:models/surface/failed.grib")
         _make_fi(
             "mybucket", "models/surface/failed.grib",
-            FileIngestion.Status.FAILED, arrival, error="Decoding error",
+            FileIngestion.Status.FAILED, error="Decoding error",
         )
 
         response = self.client.get(self.url)
@@ -80,10 +69,9 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         self.assertContains(response, "w-text-grey-400")
 
     def test_multiple_items_from_same_source_file_all_show_status(self):
-        arrival = _make_arrival(self.catalog)
         _make_item(self.collection, "mybucket:models/surface/multi.grib", t=datetime(2024, 1, 1, tzinfo=timezone.utc))
         _make_item(self.collection, "mybucket:models/surface/multi.grib", t=datetime(2024, 1, 2, tzinfo=timezone.utc))
-        _make_fi("mybucket", "models/surface/multi.grib", FileIngestion.Status.COMPLETED, arrival)
+        _make_fi("mybucket", "models/surface/multi.grib", FileIngestion.Status.COMPLETED)
 
         response = self.client.get(self.url)
 

@@ -12,8 +12,6 @@ User = get_user_model()
 class SSEAuthTests(TestCase):
 
     def test_unauthenticated_is_rejected(self):
-        # Wagtail's require_admin_access wraps all admin URLs and redirects
-        # anonymous requests to login (302). XHR requests get a 403 instead.
         response = self.client.get(
             "/admin/api/ingestion/events/",
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
@@ -22,73 +20,62 @@ class SSEAuthTests(TestCase):
 
 
 # =============================================================================
-# Cycle 2: Snapshot data shape
+# Cycle 2: Ingestion snapshot shape (FileIngestion-keyed)
 # =============================================================================
 
-class SnapshotShapeTests(TestCase):
+class IngestionSnapshotShapeTests(TestCase):
 
     def setUp(self):
-        from georiva.ingestion.models import DataArrival, FileIngestion
+        from georiva.ingestion.models import FileIngestion
 
-        self.arrival = DataArrival.objects.create(
-            trigger=DataArrival.Trigger.MANUAL_UPLOAD,
-            status=DataArrival.Status.COMPLETED,
-        )
-        DataArrival.objects.create(
-            trigger=DataArrival.Trigger.SCHEDULED,
-            status=DataArrival.Status.PROCESSING,
-        )
-        FileIngestion.objects.create(
+        self.fi_completed = FileIngestion.objects.create(
             bucket="incoming",
             file_path="cat/col/file.grib2",
             status=FileIngestion.Status.COMPLETED,
-            data_arrival=self.arrival,
+        )
+        self.fi_pending = FileIngestion.objects.create(
+            bucket="incoming",
+            file_path="cat/col/file2.grib2",
+            status=FileIngestion.Status.PENDING,
         )
 
-    def test_snapshot_returns_list_of_arrival_dicts(self):
-        from georiva.ingestion.snapshot import build_arrival_snapshot
+    def test_snapshot_returns_list(self):
+        from georiva.ingestion.snapshot import build_ingestion_snapshot
 
-        result = async_to_sync(build_arrival_snapshot)()
+        result = async_to_sync(build_ingestion_snapshot)()
         self.assertIsInstance(result, list)
-        self.assertGreaterEqual(len(result), 2)
+        self.assertGreaterEqual(len(result), 1)
 
-    def test_snapshot_arrival_has_required_fields(self):
-        from georiva.ingestion.snapshot import build_arrival_snapshot
+    def test_snapshot_includes_active_file_ingestions(self):
+        from georiva.ingestion.snapshot import build_ingestion_snapshot
 
-        result = async_to_sync(build_arrival_snapshot)()
-        arrival_dict = next(r for r in result if r["id"] == self.arrival.pk)
+        result = async_to_sync(build_ingestion_snapshot)()
+        ids = [r["id"] for r in result]
+        self.assertIn(self.fi_pending.pk, ids)
 
-        for field in ("id", "status", "trigger", "started_at", "file_ingestions"):
-            self.assertIn(field, arrival_dict)
+    def test_snapshot_item_has_required_fields(self):
+        from georiva.ingestion.snapshot import build_ingestion_snapshot
 
-    def test_snapshot_arrival_has_activity_feed_fields(self):
-        from georiva.ingestion.snapshot import build_arrival_snapshot
+        result = async_to_sync(build_ingestion_snapshot)()
+        item = next(r for r in result if r["id"] == self.fi_pending.pk)
+        for field in ("id", "status", "bucket", "file_path", "created_at", "job_id", "job_state"):
+            self.assertIn(field, item)
 
-        result = async_to_sync(build_arrival_snapshot)()
-        arrival_dict = next(r for r in result if r["id"] == self.arrival.pk)
+    def test_snapshot_item_has_summary_fields(self):
+        from georiva.ingestion.snapshot import build_ingestion_snapshot
 
-        for field in ("file_path", "collection_name", "catalog_name"):
-            self.assertIn(field, arrival_dict)
+        result = async_to_sync(build_ingestion_snapshot)()
+        item = next(r for r in result if r["id"] == self.fi_completed.pk)
+        for field in ("variables_discovered", "valid_time_start", "valid_time_end", "timestep_count"):
+            self.assertIn(field, item)
 
-    def test_snapshot_file_ingestions_have_id_status_and_job_fields(self):
-        from georiva.ingestion.snapshot import build_arrival_snapshot
+    def test_snapshot_caps_terminal_file_ingestions(self):
+        from georiva.ingestion.snapshot import build_ingestion_snapshot
 
-        result = async_to_sync(build_arrival_snapshot)()
-        arrival_dict = next(r for r in result if r["id"] == self.arrival.pk)
-
-        self.assertEqual(len(arrival_dict["file_ingestions"]), 1)
-        fi = arrival_dict["file_ingestions"][0]
-        for field in ("id", "status", "job_id", "job_state"):
-            self.assertIn(field, fi)
-
-    def test_snapshot_caps_terminal_arrivals(self):
-        from georiva.ingestion.snapshot import build_arrival_snapshot
-
-        result = async_to_sync(build_arrival_snapshot)(terminal_limit=0)
-        # terminal_limit=0 → no completed/failed arrivals; active ones still returned
+        result = async_to_sync(build_ingestion_snapshot)(terminal_limit=0)
         statuses = {r["status"] for r in result}
         self.assertNotIn("completed", statuses)
-        self.assertIn("processing", statuses)
+        self.assertIn("pending", statuses)
 
 
 # =============================================================================
@@ -102,7 +89,6 @@ class SSESnapshotOnConnectTests(TestCase):
 
     @staticmethod
     def _parse_sse_events(raw: bytes) -> list[dict]:
-        """Parse all SSE events from raw bytes; returns list of {event, data}."""
         import json
         events = []
         current = {}
@@ -118,7 +104,6 @@ class SSESnapshotOnConnectTests(TestCase):
 
     @staticmethod
     async def _read_snapshot_chunk(response) -> bytes:
-        """Consume streaming_content until the snapshot event chunk is received."""
         async for chunk in response.streaming_content:
             if b"event: snapshot" in chunk:
                 return chunk
@@ -161,8 +146,6 @@ class SSELiveEventForwardingTests(TestCase):
         await self.async_client.aforce_login(self.user)
         response = await self.async_client.get("/admin/api/ingestion/events/")
 
-        # Consume the snapshot first, then publish a synthetic event and read it.
-        # Skip SSE comment lines (keepalives start with ':').
         async def _collect_next_event_after_snapshot():
             skipped_snapshot = False
             async for chunk in response.streaming_content:
@@ -179,7 +162,7 @@ class SSELiveEventForwardingTests(TestCase):
         async def _publish_after_delay():
             await asyncio.sleep(0.1)
             r = aioredis.from_url(settings.REDIS_URL)
-            payload = json.dumps({"type": "data_arrival.status_changed", "id": 99, "status": "completed"})
+            payload = json.dumps({"type": "file_ingestion.status_changed", "id": 99, "status": "completed"})
             await r.publish(CHANNEL, payload)
             await r.aclose()
 
@@ -188,5 +171,5 @@ class SSELiveEventForwardingTests(TestCase):
             _collect_next_event_after_snapshot(),
         )
 
-        self.assertIn("event: data_arrival.status_changed", chunk)
+        self.assertIn("event: file_ingestion.status_changed", chunk)
         self.assertIn('"status": "completed"', chunk)
