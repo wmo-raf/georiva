@@ -260,6 +260,30 @@ def arrival_status_api(request, arrival_id):
     })
 
 
+def upload_session_status_api(request, session_id):
+    """Returns {id, status, files} for a single UploadSession."""
+    from georiva.ingestion.models import UploadSession
+
+    try:
+        session = UploadSession.objects.prefetch_related('uploaded_files').get(pk=session_id)
+    except UploadSession.DoesNotExist:
+        raise Http404
+
+    return JsonResponse({
+        "id": session.pk,
+        "status": session.status,
+        "files": [
+            {
+                "id": uf.pk,
+                "status": uf.status,
+                "file_path": uf.file_path,
+                "error": uf.error,
+            }
+            for uf in session.uploaded_files.all()
+        ],
+    })
+
+
 # =============================================================================
 # Helpers
 # =============================================================================

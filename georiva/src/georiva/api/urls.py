@@ -2,7 +2,7 @@ from django.urls import path, include
 
 from georiva.core.tile_config_view import TileConfigView
 from georiva.edr import urls as edr_urls
-from georiva.ingestion.dashboard_views import arrival_status_api
+from georiva.ingestion.dashboard_views import arrival_status_api, upload_session_status_api
 from georiva.stac import urls as georiva_stac_urls
 
 urlpatterns = [
@@ -17,4 +17,5 @@ urlpatterns = [
     path("analysis/", include("georiva.analysis.urls")),
     path('datasets/', include('georiva.pages.datasets.urls', namespace='datasets')),
     path('arrivals/<int:arrival_id>/status/', arrival_status_api, name='arrival_status_api'),
+    path('upload-sessions/<int:session_id>/status/', upload_session_status_api, name='upload_session_status_api'),
 ]
