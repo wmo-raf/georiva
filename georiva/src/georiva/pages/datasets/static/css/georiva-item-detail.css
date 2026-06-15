@@ -73,7 +73,7 @@
 
 .gr-download-assets {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.5rem;
 }
 
@@ -165,7 +165,7 @@
 
 .gr-download-tab-panel {
     display: none;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.5rem;
 }
 
@@ -189,10 +189,6 @@
         margin-top: 1rem;
         width: 100%;
         justify-content: space-between;
-    }
-
-    .gr-download-assets {
-        flex-direction: column;
     }
 
     .gr-map-section .gr-container {
