@@ -15,6 +15,7 @@ User = get_user_model()
 DASHBOARD_URL = "/admin/api/ingestion/dashboard/"
 LOGS_URL = "/admin/api/ingestion/collections/{}/ingestion-logs/"
 JOBS_URL = "/admin/api/ingestion/collections/{}/ingestion-jobs/"
+FETCH_RUNS_URL = "/admin/api/ingestion/collections/{}/fetch-runs/"
 
 
 def _setup_collection(catalog_slug="cat", collection_slug="col"):
@@ -205,6 +206,72 @@ class CollectionIngestionLogsAPITests(TestCase):
 
         self.assertEqual(len(resp_x.json()["logs"]), 1)
         self.assertEqual(len(resp_y.json()["logs"]), 1)
+
+
+class CollectionFetchRunsAPITests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin5", "g@h.com", "pw")
+        self.client.force_login(self.user)
+        catalog = Catalog.objects.create(name="cat5", slug="cat5", file_format="grib2")
+        self.collection = Collection.objects.create(name="col5", slug="col5", catalog=catalog)
+        self.feed = DataFeed.objects.create(name="Test Feed")
+        DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.collection)
+
+    def test_fetch_runs_returns_200(self):
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        self.assertEqual(response.status_code, 200)
+
+    def test_fetch_runs_returns_fetch_runs_key(self):
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        self.assertIn("fetch_runs", response.json())
+
+    def test_fetch_runs_includes_runs_for_collection_feed(self):
+        from georiva.sources.models import FetchRun
+        run = FetchRun.objects.create(data_feed=self.feed)
+
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        data = response.json()
+        self.assertEqual(len(data["fetch_runs"]), 1)
+        entry = data["fetch_runs"][0]
+        self.assertEqual(entry["id"], run.pk)
+        self.assertEqual(entry["status"], "running")
+        self.assertIn("started_at", entry)
+        self.assertIn("files_fetched", entry)
+        self.assertIn("files_skipped", entry)
+        self.assertIn("files_failed", entry)
+        self.assertIn("bytes_transferred", entry)
+        self.assertEqual(entry["data_feed_name"], self.feed.name)
+
+    def test_fetch_runs_excludes_runs_from_unrelated_feeds(self):
+        from georiva.sources.models import FetchRun
+        other_feed = DataFeed.objects.create(name="Other Feed")
+        FetchRun.objects.create(data_feed=other_feed)
+
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        self.assertEqual(len(response.json()["fetch_runs"]), 0)
+
+    def test_fetch_runs_returns_404_for_unknown_collection(self):
+        response = self.client.get(FETCH_RUNS_URL.format(99999))
+        self.assertEqual(response.status_code, 404)
+
+    def test_fetch_runs_duration_seconds_set_when_run_finished(self):
+        from django.utils import timezone
+        from georiva.sources.models import FetchRun
+        run = FetchRun.objects.create(data_feed=self.feed)
+        run.finished_at = run.started_at + timedelta(seconds=42)
+        run.save(update_fields=["finished_at"])
+
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        entry = response.json()["fetch_runs"][0]
+        self.assertAlmostEqual(entry["duration_seconds"], 42, delta=1)
+
+    def test_fetch_runs_duration_seconds_null_when_run_not_finished(self):
+        from georiva.sources.models import FetchRun
+        FetchRun.objects.create(data_feed=self.feed)
+
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        entry = response.json()["fetch_runs"][0]
+        self.assertIsNone(entry["duration_seconds"])
 
 
 def _make_job(fi, **kwargs):
