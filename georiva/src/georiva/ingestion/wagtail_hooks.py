@@ -25,7 +25,7 @@ def register_monitoring_menu():
             ),
         ]),
         icon_name="view",
-        order=840,
+        order=860,
     )
 
 
