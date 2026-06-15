@@ -7,33 +7,33 @@
         <div class="header-title-group">
           <h1 class="dashboard-title">Ingestion Dashboard</h1>
           <div class="header-badges">
-                        <span class="meta-badge">
-                            <i class="pi pi-database"></i>
-                            {{ collections.length }} Collections
-                        </span>
             <span class="meta-badge">
-                            <i class="pi pi-bolt"></i>
-                            {{ collections.filter(c => c.type === 'automated').length }} Automated
-                        </span>
+              <i class="pi pi-database"></i>
+              {{ allCollections.length }} Collections
+            </span>
             <span class="meta-badge">
-                            <i class="pi pi-upload"></i>
-                            {{ collections.filter(c => c.type === 'manual').length }} Manual
-                        </span>
+              <i class="pi pi-bolt"></i>
+              {{ allCollections.filter(c => c.type === 'automated').length }} Automated
+            </span>
+            <span class="meta-badge">
+              <i class="pi pi-upload"></i>
+              {{ allCollections.filter(c => c.type === 'manual').length }} Manual
+            </span>
           </div>
         </div>
 
         <div class="status-summary-group">
           <div class="summary-card success" @click="setFilter('ok')" :class="{active: activeFilter === 'ok'}">
             <span class="summary-label">Active</span>
-            <span class="summary-count">{{ summary.ok }}</span>
-          </div>
-          <div class="summary-card warning" @click="setFilter('warning')" :class="{active: activeFilter === 'warning'}">
-            <span class="summary-label">Warning</span>
-            <span class="summary-count">{{ summary.warning }}</span>
+            <span class="summary-count">{{ globalSummary.ok }}</span>
           </div>
           <div class="summary-card danger" @click="setFilter('failed')" :class="{active: activeFilter === 'failed'}">
             <span class="summary-label">Failed</span>
-            <span class="summary-count">{{ summary.failed }}</span>
+            <span class="summary-count">{{ globalSummary.failed }}</span>
+          </div>
+          <div class="summary-card info" @click="setFilter('empty')" :class="{active: activeFilter === 'empty'}">
+            <span class="summary-label">No Data</span>
+            <span class="summary-count">{{ globalSummary.empty }}</span>
           </div>
         </div>
       </div>
@@ -69,106 +69,96 @@
             label="Refresh"
             class="refresh-btn"
             :loading="loading"
-            @click="fetchCollections"
+            @click="fetchCatalogs"
         />
       </div>
 
-      <!-- Error -->
       <Message v-if="error" severity="error" class="mb-3">{{ error }}</Message>
 
-      <!-- Table -->
-      <div class="table-wrapper">
-        <DataTable
-            :value="filteredCollections"
-            :loading="loading"
-            row-hover
-            size="small"
-            paginator
-            :rows="50"
-            @row-click="onRowClick"
-            :row-class="() => 'cursor-pointer'"
-        >
-          <template #empty>
-            <div class="empty-state">No collections found.</div>
-          </template>
+      <!-- Catalog hierarchy -->
+      <div class="catalog-list" v-if="!loading || catalogs.length">
 
-          <!-- Name + catalog -->
-          <Column header="Collection" style="min-width: 16rem">
-            <template #body="{data}">
+        <div v-if="!visibleCatalogs.length" class="empty-state">No collections found.</div>
+
+        <div
+            v-for="cat in visibleCatalogs"
+            :key="cat.id"
+            class="catalog-group"
+        >
+          <!-- Catalog header row -->
+          <div class="catalog-row" @click="toggleCatalog(cat.id)">
+            <i :class="['expand-icon', 'pi', expandedCatalogs.has(cat.id) ? 'pi-chevron-down' : 'pi-chevron-right']"/>
+            <div class="catalog-name">{{ cat.name }}</div>
+            <div :class="['status-indicator', statusClass(cat.status)]">
+              <i :class="statusIcon(cat.status)"/>
+              {{ statusLabel(cat.status) }}
+            </div>
+            <div class="catalog-summary">
+              <span v-if="cat.summary.ok" class="summary-chip ok">{{ cat.summary.ok }} ok</span>
+              <span v-if="cat.summary.failed" class="summary-chip failed">{{ cat.summary.failed }} failed</span>
+              <span v-if="cat.summary.empty" class="summary-chip empty">{{ cat.summary.empty }} empty</span>
+            </div>
+            <span class="catalog-col-count">{{ cat.collections.length }} collection{{ cat.collections.length !== 1 ? 's' : '' }}</span>
+          </div>
+
+          <!-- Collection rows -->
+          <div v-if="expandedCatalogs.has(cat.id)" class="collection-list">
+            <div
+                v-for="col in cat.collections"
+                :key="col.id"
+                class="collection-row"
+                @click="openDrawer(col)"
+            >
+              <!-- Name + icon -->
               <div class="collection-cell">
                 <div class="collection-icon-box">
-                  <i :class="data.type === 'automated' ? 'pi pi-bolt' : 'pi pi-upload'"/>
+                  <i :class="col.type === 'automated' ? 'pi pi-bolt' : 'pi pi-upload'"/>
                 </div>
-                <div>
-                  <div class="cell-title">{{ data.name }}</div>
-                  <div class="sub-text">{{ data.catalog_name }}</div>
-                </div>
+                <div class="cell-title">{{ col.name }}</div>
               </div>
-            </template>
-          </Column>
 
-          <!-- Status -->
-          <Column header="Status" style="width: 9rem">
-            <template #body="{data}">
-              <div :class="['status-indicator', statusClass(data.status)]">
-                <i :class="statusIcon(data.status)"/>
-                {{ statusLabel(data.status) }}
+              <!-- Status -->
+              <div :class="['status-indicator', statusClass(col.status)]">
+                <i :class="statusIcon(col.status)"/>
+                {{ statusLabel(col.status) }}
               </div>
-            </template>
-          </Column>
 
-          <!-- Type -->
-          <Column header="Type" style="width: 8rem">
-            <template #body="{data}">
-                            <span class="type-badge" :class="data.type">
-                                {{ data.type === 'automated' ? 'Automated' : 'Manual' }}
-                            </span>
-            </template>
-          </Column>
+              <!-- Type badge -->
+              <span class="type-badge" :class="col.type">
+                {{ col.type === 'automated' ? 'Automated' : 'Manual' }}
+              </span>
 
-          <!-- Last run -->
-          <Column header="Last Run" style="width: 12rem">
-            <template #body="{data}">
-              <div class="time-cell" v-if="data.last_run_at">
-                                <span
-                                    class="time-main"
-                                    :class="{'text-danger': isStale(data.last_run_at)}"
-                                >
-                                    {{ timeAgo(data.last_run_at) }}
-                                </span>
-                <span class="time-sub">{{ formatShortDate(data.last_run_at) }}</span>
+              <!-- Last run -->
+              <div class="time-cell" v-if="col.last_run_at">
+                <span class="time-main" :class="{'text-danger': isStale(col.last_run_at)}">
+                  {{ timeAgo(col.last_run_at) }}
+                </span>
+                <span class="time-sub">{{ formatShortDate(col.last_run_at) }}</span>
               </div>
-              <span v-else class="time-main" style="color:#94a3b8">Never</span>
-            </template>
-          </Column>
+              <span v-else class="time-main never">Never</span>
 
-          <!-- Items -->
-          <Column header="Items" style="width: 6rem">
-            <template #body="{data}">
-                            <span class="font-mono" style="font-size:14px">
-                                {{ data.item_count.toLocaleString() }}
-                            </span>
-            </template>
-          </Column>
+              <!-- Items -->
+              <span class="items-count">{{ col.item_count.toLocaleString() }}</span>
 
-          <!-- Sparkline -->
-          <Column header="Last 30 Days" style="width: 14rem">
-            <template #body="{data}">
+              <!-- Sparkline -->
               <div class="sparkline">
                 <div
-                    v-for="(day, i) in data.sparkline"
+                    v-for="(day, i) in col.sparkline"
                     :key="i"
                     :class="['spark-bar', `spark-bar--${day.status}`]"
                     :title="`${day.date}: ${sparklineLabel(day.status)}`"
                 />
               </div>
-            </template>
-          </Column>
-        </DataTable>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="loading && !catalogs.length" class="loading-state">
+        <i class="pi pi-spin pi-spinner"/> Loading...
       </div>
     </div>
 
-    <!-- Drawer -->
     <CollectionDrawer
         v-model="drawerVisible"
         :collection="selectedCollection"
@@ -177,9 +167,7 @@
 </template>
 
 <script setup>
-import {computed, onMounted, ref} from "vue";
-import DataTable from "primevue/datatable";
-import Column from "primevue/column";
+import {computed, onMounted, onUnmounted, ref, watch} from "vue";
 import Button from "primevue/button";
 import Message from "primevue/message";
 import InputText from "primevue/inputtext";
@@ -189,81 +177,185 @@ const props = defineProps({
   apiUrl: {type: String, required: true},
 });
 
-const collections = ref([]);
+const catalogs = ref([]);
 const loading = ref(false);
 const error = ref(null);
 const searchQuery = ref("");
 const activeFilter = ref("all");
 const drawerVisible = ref(false);
 const selectedCollection = ref(null);
+const expandedCatalogs = ref(new Set());
+let sseSource = null;
 
 const filterOptions = [
   {label: "All", value: "all", cls: ""},
   {label: "Automated", value: "automated", cls: ""},
   {label: "Manual", value: "manual", cls: ""},
   {label: "Active", value: "ok", cls: "success"},
-  {label: "Warning", value: "warning", cls: "warning"},
   {label: "Failed", value: "failed", cls: "danger"},
+  {label: "No Data", value: "empty", cls: ""},
 ];
 
-const summary = computed(() => ({
-  ok: collections.value.filter(c => c.status === "ok").length,
-  warning: collections.value.filter(c => c.status === "warning").length,
-  failed: collections.value.filter(c => c.status === "failed").length,
+const allCollections = computed(() =>
+    catalogs.value.flatMap(cat => cat.collections)
+);
+
+const globalSummary = computed(() => ({
+  ok: allCollections.value.filter(c => c.status === "ok").length,
+  failed: allCollections.value.filter(c => c.status === "failed").length,
+  empty: allCollections.value.filter(c => c.status === "empty").length,
 }));
+
+const visibleCatalogs = computed(() => {
+  const q = searchQuery.value.toLowerCase();
+  const filter = activeFilter.value;
+  const isFiltering = q || filter !== "all";
+
+  return catalogs.value
+      .map(cat => {
+        const collections = cat.collections.filter(col => {
+          const matchesSearch = !q || col.name.toLowerCase().includes(q) || col.catalog.toLowerCase().includes(q);
+          let matchesFilter = true;
+          if (filter === "automated") matchesFilter = col.type === "automated";
+          else if (filter === "manual") matchesFilter = col.type === "manual";
+          else if (["ok", "failed", "empty"].includes(filter)) matchesFilter = col.status === filter;
+          return matchesSearch && matchesFilter;
+        });
+        return {...cat, collections};
+      })
+      .filter(cat => cat.collections.length > 0);
+});
+
+// When a filter/search is active: auto-expand matching catalogs.
+// When cleared: restore default (only failing expanded).
+watch(visibleCatalogs, (cats) => {
+  const isFiltering = searchQuery.value || activeFilter.value !== "all";
+  if (isFiltering) {
+    const next = new Set(expandedCatalogs.value);
+    cats.forEach(cat => next.add(cat.id));
+    expandedCatalogs.value = next;
+  } else {
+    applyDefaultExpansion();
+  }
+});
 
 function setFilter(value) {
   activeFilter.value = activeFilter.value === value ? "all" : value;
 }
 
-const filteredCollections = computed(() => {
-  const q = searchQuery.value.toLowerCase();
-  return collections.value.filter((c) => {
-    const matchesSearch = !q || c.name.toLowerCase().includes(q) || c.catalog.toLowerCase().includes(q);
-    let matchesFilter = true;
-    if (activeFilter.value === "automated") matchesFilter = c.type === "automated";
-    else if (activeFilter.value === "manual") matchesFilter = c.type === "manual";
-    else if (["ok", "warning", "failed", "empty"].includes(activeFilter.value))
-      matchesFilter = c.status === activeFilter.value;
-    return matchesSearch && matchesFilter;
-  });
-});
+function toggleCatalog(id) {
+  const next = new Set(expandedCatalogs.value);
+  next.has(id) ? next.delete(id) : next.add(id);
+  expandedCatalogs.value = next;
+}
 
-async function fetchCollections() {
+function applyDefaultExpansion() {
+  const next = new Set();
+  catalogs.value.forEach(cat => {
+    if (cat.status === "failed") next.add(cat.id);
+  });
+  expandedCatalogs.value = next;
+}
+
+async function fetchCatalogs() {
   loading.value = true;
   error.value = null;
   try {
     const res = await fetch(props.apiUrl);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    collections.value = data.collections;
+    catalogs.value = data.catalogs;
+    applyDefaultExpansion();
   } catch (e) {
-    error.value = `Failed to load collections: ${e.message}`;
+    error.value = `Failed to load dashboard: ${e.message}`;
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(fetchCollections);
+// Silent background re-fetch on SSE events: patches status + last_run_at only,
+// leaves sparklines intact to avoid visual noise during active ingestion.
+async function refreshStatuses() {
+  try {
+    const res = await fetch(props.apiUrl);
+    if (!res.ok) return;
+    const data = await res.json();
 
-function onRowClick({data}) {
-  selectedCollection.value = data;
+    const colIndex = {};
+    for (const cat of catalogs.value) {
+      for (const col of cat.collections) {
+        colIndex[col.id] = col;
+      }
+    }
+
+    for (const newCat of data.catalogs) {
+      for (const newCol of newCat.collections) {
+        const existing = colIndex[newCol.id];
+        if (existing) {
+          existing.status = newCol.status;
+          existing.last_run_at = newCol.last_run_at;
+          existing.last_run_status = newCol.last_run_status;
+          existing.item_count = newCol.item_count;
+        }
+      }
+    }
+
+    // Recalculate catalog badges from updated collection statuses.
+    for (const cat of catalogs.value) {
+      const statuses = cat.collections.map(c => c.status);
+      cat.status = statuses.includes("failed") ? "failed"
+          : statuses.some(s => s === "ok") ? "ok"
+              : "empty";
+      cat.summary = {
+        ok: statuses.filter(s => s === "ok").length,
+        failed: statuses.filter(s => s === "failed").length,
+        empty: statuses.filter(s => s === "empty").length,
+      };
+    }
+  } catch (_) {
+    // Silent — SSE-triggered refresh is best-effort.
+  }
+}
+
+function connectSSE() {
+  if (sseSource) return;
+  sseSource = new EventSource("/admin/api/ingestion/events/");
+  sseSource.addEventListener("file_ingestion.status_changed", refreshStatuses);
+  sseSource.onerror = () => {
+    sseSource?.close();
+    sseSource = null;
+    // Reconnect after 5s on error.
+    setTimeout(connectSSE, 5000);
+  };
+}
+
+function openDrawer(col) {
+  selectedCollection.value = col;
   drawerVisible.value = true;
 }
 
+onMounted(() => {
+  fetchCatalogs();
+  connectSSE();
+});
+
+onUnmounted(() => {
+  sseSource?.close();
+  sseSource = null;
+});
+
 function statusLabel(s) {
-  return {ok: "Active", failed: "Failed", warning: "Warning", empty: "No Data"}[s] ?? s;
+  return {ok: "Active", failed: "Failed", empty: "No Data"}[s] ?? s;
 }
 
 function statusClass(s) {
-  return {ok: "success", failed: "danger", warning: "warning", empty: "info"}[s] ?? "info";
+  return {ok: "success", failed: "danger", empty: "info"}[s] ?? "info";
 }
 
 function statusIcon(s) {
   return {
     ok: "pi pi-check-circle",
     failed: "pi pi-times-circle",
-    warning: "pi pi-exclamation-triangle",
     empty: "pi pi-minus-circle",
   }[s] ?? "pi pi-circle";
 }
@@ -346,7 +438,6 @@ function isStale(iso) {
   border: 1px solid #e2e8f0;
 }
 
-/* Summary cards */
 .status-summary-group {
   display: flex;
   gap: 12px;
@@ -367,13 +458,8 @@ function isStale(iso) {
   user-select: none;
 }
 
-.summary-card:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-}
-
-.summary-card.active {
-  box-shadow: 0 0 0 2px currentColor;
-}
+.summary-card:hover { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1); }
+.summary-card.active { box-shadow: 0 0 0 2px currentColor; }
 
 .summary-label {
   font-size: 11px;
@@ -390,29 +476,12 @@ function isStale(iso) {
   line-height: 1;
 }
 
-.summary-card.success {
-  border-bottom: 3px solid #15803d;
-}
-
-.summary-card.success .summary-count {
-  color: #15803d;
-}
-
-.summary-card.warning {
-  border-bottom: 3px solid #b45309;
-}
-
-.summary-card.warning .summary-count {
-  color: #b45309;
-}
-
-.summary-card.danger {
-  border-bottom: 3px solid #b91c1c;
-}
-
-.summary-card.danger .summary-count {
-  color: #b91c1c;
-}
+.summary-card.success { border-bottom: 3px solid #15803d; }
+.summary-card.success .summary-count { color: #15803d; }
+.summary-card.danger  { border-bottom: 3px solid #b91c1c; }
+.summary-card.danger .summary-count  { color: #b91c1c; }
+.summary-card.info    { border-bottom: 3px solid #64748b; }
+.summary-card.info .summary-count    { color: #64748b; }
 
 /* Content */
 .content-section {
@@ -436,9 +505,7 @@ function isStale(iso) {
   align-items: center;
 }
 
-.search-wrapper {
-  position: relative;
-}
+.search-wrapper { position: relative; }
 
 .search-icon {
   position: absolute;
@@ -482,34 +549,11 @@ function isStale(iso) {
   transition: all 0.1s;
 }
 
-.filter-btn:last-child {
-  border-right: none;
-}
-
-.filter-btn:hover {
-  background: #f8fafc;
-  color: #0f172a;
-}
-
-.filter-btn.active {
-  background: #0f172a;
-  color: #fff;
-}
-
-.filter-btn.success.active {
-  background: #166534;
-  color: #fff;
-}
-
-.filter-btn.warning.active {
-  background: #d97706;
-  color: #fff;
-}
-
-.filter-btn.danger.active {
-  background: #dc2626;
-  color: #fff;
-}
+.filter-btn:last-child { border-right: none; }
+.filter-btn:hover { background: #f8fafc; color: #0f172a; }
+.filter-btn.active { background: #0f172a; color: #fff; }
+.filter-btn.success.active { background: #166534; color: #fff; }
+.filter-btn.danger.active  { background: #dc2626; color: #fff; }
 
 .refresh-btn {
   border: 1px solid #cbd5e1 !important;
@@ -517,51 +561,95 @@ function isStale(iso) {
   font-size: 13px !important;
 }
 
-/* Table */
-.table-wrapper {
+/* Catalog hierarchy */
+.catalog-list {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   overflow: hidden;
 }
 
-:deep(.p-datatable-thead > tr > th) {
-  background: #f1f5f9 !important;
-  color: #475569 !important;
-  font-weight: 600 !important;
-  text-transform: uppercase !important;
-  font-size: 12px !important;
-  letter-spacing: 0.05em !important;
-  padding: 14px 20px !important;
-  border-bottom: 1px solid #e2e8f0 !important;
-  border-top: none !important;
+.catalog-group + .catalog-group {
+  border-top: 1px solid #e2e8f0;
 }
 
-:deep(.p-datatable-tbody > tr > td) {
-  padding: 14px 20px !important;
-  border-bottom: 1px solid #f1f5f9 !important;
-  color: #334155;
-  font-size: 14px;
-}
-
-:deep(.p-datatable-tbody > tr:last-child > td) {
-  border-bottom: none !important;
-}
-
-:deep(.p-datatable-tbody > tr:hover > td) {
-  background: #f8fafc !important;
-  cursor: pointer;
-}
-
-/* Collection cell */
-.collection-cell {
+.catalog-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 12px 20px;
+  background: #f1f5f9;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.catalog-row:hover { background: #e9eef5; }
+
+.expand-icon {
+  color: #64748b;
+  font-size: 11px;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.catalog-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: #0f172a;
+  flex: 1;
+}
+
+.catalog-summary {
+  display: flex;
+  gap: 6px;
+}
+
+.summary-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.summary-chip.ok     { background: #dcfce7; color: #15803d; }
+.summary-chip.failed { background: #fee2e2; color: #b91c1c; }
+.summary-chip.empty  { background: #f1f5f9; color: #64748b; }
+
+.catalog-col-count {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+/* Collection rows */
+.collection-list {
+  border-top: 1px solid #e2e8f0;
+}
+
+.collection-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px 12px 46px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.collection-row:last-child { border-bottom: none; }
+.collection-row:hover { background: #f8fafc; }
+
+.collection-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 14rem;
+  flex: 1;
 }
 
 .collection-icon-box {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
@@ -570,21 +658,15 @@ function isStale(iso) {
   justify-content: center;
   color: #64748b;
   flex-shrink: 0;
+  font-size: 11px;
 }
 
 .cell-title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: #0f172a;
 }
 
-.sub-text {
-  font-size: 11px;
-  color: #94a3b8;
-  margin-top: 2px;
-}
-
-/* Status indicator */
 .status-indicator {
   display: inline-flex;
   align-items: center;
@@ -593,29 +675,13 @@ function isStale(iso) {
   font-weight: 600;
   padding: 3px 8px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
-.status-indicator.success {
-  background: #dcfce7;
-  color: #15803d;
-}
+.status-indicator.success { background: #dcfce7; color: #15803d; }
+.status-indicator.danger  { background: #fee2e2; color: #b91c1c; }
+.status-indicator.info    { background: #f1f5f9; color: #64748b; }
 
-.status-indicator.warning {
-  background: #fef3c7;
-  color: #b45309;
-}
-
-.status-indicator.danger {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.status-indicator.info {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-/* Type badge */
 .type-badge {
   font-size: 11px;
   font-weight: 600;
@@ -623,23 +689,13 @@ function isStale(iso) {
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
-.type-badge.automated {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
+.type-badge.automated { background: #dbeafe; color: #1d4ed8; }
+.type-badge.manual    { background: #f1f5f9; color: #475569; }
 
-.type-badge.manual {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-/* Time cell */
-.time-cell {
-  display: flex;
-  flex-direction: column;
-}
+.time-cell { display: flex; flex-direction: column; min-width: 9rem; }
 
 .time-main {
   font-weight: 500;
@@ -647,15 +703,22 @@ function isStale(iso) {
   font-size: 13px;
 }
 
-.time-main.text-danger {
-  color: #dc2626;
-}
+.time-main.text-danger { color: #dc2626; }
+.time-main.never { color: #94a3b8; }
 
 .time-sub {
   font-size: 11px;
   color: #94a3b8;
   margin-top: 2px;
   font-family: 'SF Mono', 'Roboto Mono', monospace;
+}
+
+.items-count {
+  font-size: 13px;
+  font-family: 'SF Mono', 'Roboto Mono', monospace;
+  color: #334155;
+  min-width: 4rem;
+  text-align: right;
 }
 
 /* Sparkline */
@@ -673,38 +736,21 @@ function isStale(iso) {
   transition: opacity 0.15s;
 }
 
-.spark-bar--success {
-  height: 14px;
-  background: #15803d;
-}
+.spark-bar--success { height: 14px; background: #15803d; }
+.spark-bar--failed  { height: 14px; background: #dc2626; }
+.spark-bar--empty   { height: 6px;  background: #e2e8f0; }
+.spark-bar:hover { opacity: 0.75; }
 
-.spark-bar--failed {
-  height: 14px;
-  background: #dc2626;
-}
-
-.spark-bar--empty {
-  height: 6px;
-  background: #e2e8f0;
-}
-
-.spark-bar:hover {
-  opacity: 0.75;
-}
-
-.empty-state {
+.empty-state, .loading-state {
   padding: 40px;
   text-align: center;
   color: #64748b;
+  font-size: 14px;
 }
 
 @media (max-width: 768px) {
-  .header-top-row, .controls-left, .status-summary-group {
-    flex-direction: column;
-  }
-
-  .search-input {
-    width: 100%;
-  }
+  .header-top-row, .controls-left, .status-summary-group { flex-direction: column; }
+  .search-input { width: 100%; }
+  .collection-row { flex-wrap: wrap; padding-left: 20px; }
 }
 </style>

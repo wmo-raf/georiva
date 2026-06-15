@@ -27,34 +27,32 @@
 
     <div v-if="collection" class="drawer-body">
 
-      <!-- Tabs: automated gets loader tab; all get ingestion logs + jobs -->
       <div class="tab-bar">
+        <!-- Acquisition tab — always visible, content varies by type -->
         <button
-            v-if="collection.type === 'automated'"
-            :class="['tab-btn', {active: activeTab === 'loader'}]"
-            @click="activeTab = 'loader'"
+            :class="['tab-btn', {active: activeTab === 'acquisition'}]"
+            @click="activeTab = 'acquisition'"
         >
-          <i class="pi pi-sync"/> Loader Runs
-          <span v-if="runs.length" class="tab-count">{{ runs.length }}</span>
+          <i class="pi pi-cloud-download"/> Acquisition
+          <span v-if="acquisitionCount" class="tab-count">{{ acquisitionCount }}</span>
         </button>
         <button
-            :class="['tab-btn', {active: activeTab === 'ingestion'}]"
-            @click="activeTab = 'ingestion'"
+            :class="['tab-btn', {active: activeTab === 'file-history'}]"
+            @click="activeTab = 'file-history'"
         >
-          <i class="pi pi-inbox"/> Ingestion Logs
+          <i class="pi pi-inbox"/> File History
           <span v-if="logs.length" class="tab-count">{{ logs.length }}</span>
         </button>
         <button
-            :class="['tab-btn', {active: activeTab === 'jobs'}]"
-            @click="activeTab = 'jobs'"
+            :class="['tab-btn', {active: activeTab === 'active-jobs'}]"
+            @click="activeTab = 'active-jobs'"
         >
-          <i class="pi pi-cog"/> Ingestion Jobs
+          <i class="pi pi-cog"/> Active Jobs
           <span v-if="activeJobCount" :class="['tab-count', 'tab-count--active']">{{ activeJobCount }}</span>
           <span v-else-if="jobs.length" class="tab-count">{{ jobs.length }}</span>
         </button>
       </div>
 
-      <!-- Loading state -->
       <div v-if="loading" class="loading-state">
         <i class="pi pi-spin pi-spinner"/> Loading...
       </div>
@@ -63,130 +61,101 @@
         <i class="pi pi-exclamation-triangle"/> {{ error }}
       </div>
 
-      <!-- Loader Runs tab -->
-      <div v-else-if="activeTab === 'loader'" class="tab-content">
-        <div v-if="!runs.length" class="empty-state">No loader runs found.</div>
+      <!-- Acquisition tab -->
+      <div v-else-if="activeTab === 'acquisition'" class="tab-content">
 
-        <div v-for="run in runs" :key="run.id" class="run-row">
-          <div class="run-row__top">
-            <div class="run-row__left">
-              <span :class="['status-pill', loaderStatusClass(run.status)]">
-                <i :class="loaderStatusIcon(run.status)"/>
-                {{ run.status }}
-              </span>
-              <span class="run-time" :title="formatDateTime(run.started_at)">
-                {{ timeAgo(run.started_at) }}
-              </span>
-              <span class="run-date">{{ formatShortDate(run.started_at) }}</span>
+        <!-- Automated: FetchRuns -->
+        <template v-if="collection.type === 'automated'">
+          <div v-if="!runs.length" class="empty-state">No fetch runs found.</div>
+          <div v-for="run in runs" :key="run.id" class="run-row">
+            <div class="run-row__top">
+              <div class="run-row__left">
+                <span :class="['status-pill', loaderStatusClass(run.status)]">
+                  <i :class="loaderStatusIcon(run.status)"/>
+                  {{ run.status }}
+                </span>
+                <span class="run-time" :title="formatDateTime(run.started_at)">
+                  {{ timeAgo(run.started_at) }}
+                </span>
+                <span class="run-date">{{ formatShortDate(run.started_at) }}</span>
+              </div>
+              <div class="run-row__right">
+                <span v-if="run.duration_seconds != null" class="run-duration">
+                  <i class="pi pi-clock"/> {{ formatDuration(run.duration_seconds) }}
+                </span>
+                <span class="run-feed">{{ run.data_feed_name }}</span>
+              </div>
             </div>
-            <div class="run-row__right">
-              <span v-if="run.duration_seconds != null" class="run-duration">
-                <i class="pi pi-clock"/> {{ formatDuration(run.duration_seconds) }}
+            <div class="run-row__counts">
+              <span class="count-chip fetched">
+                <i class="pi pi-download"/> {{ run.files_fetched }} fetched
               </span>
-              <span v-if="run.run_time" class="run-ref">
-                <i class="pi pi-calendar"/> {{ formatShortDate(run.run_time) }}
+              <span class="count-chip skipped">
+                <i class="pi pi-forward"/> {{ run.files_skipped }} skipped
+              </span>
+              <span class="count-chip failed" v-if="run.files_failed > 0">
+                <i class="pi pi-times"/> {{ run.files_failed }} failed
+              </span>
+              <span class="count-chip bytes" v-if="run.bytes_transferred > 0">
+                <i class="pi pi-arrow-right-arrow-left"/> {{ formatBytes(run.bytes_transferred) }}
               </span>
             </div>
-          </div>
-
-          <!-- File counts -->
-          <div class="run-row__counts">
-            <span class="count-chip fetched">
-              <i class="pi pi-download"/> {{ run.files_fetched }} fetched
-            </span>
-            <span class="count-chip skipped">
-              <i class="pi pi-forward"/> {{ run.files_skipped }} skipped
-            </span>
-            <span class="count-chip failed" v-if="run.files_failed > 0">
-              <i class="pi pi-times"/> {{ run.files_failed }} failed
-            </span>
-            <span class="count-chip bytes" v-if="run.bytes_transferred > 0">
-              <i class="pi pi-arrow-right-arrow-left"/> {{ formatBytes(run.bytes_transferred) }}
-            </span>
-          </div>
-
-          <!-- Errors (collapsible) -->
-          <div v-if="run.errors?.length" class="run-errors">
-            <button class="error-toggle" @click="toggleRunErrors(run.id)">
-              <i class="pi pi-exclamation-triangle"/>
-              {{ run.errors.length }} error{{ run.errors.length > 1 ? 's' : '' }}
-              <i :class="expandedRunErrors.has(run.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"/>
-            </button>
-            <div v-if="expandedRunErrors.has(run.id)" class="error-list">
-              <div v-for="(err, i) in run.errors" :key="i" class="error-item">
-                {{ err }}
+            <div v-if="run.errors?.length" class="run-errors">
+              <button class="error-toggle" @click="toggleRunErrors(run.id)">
+                <i class="pi pi-exclamation-triangle"/>
+                {{ run.errors.length }} error{{ run.errors.length > 1 ? 's' : '' }}
+                <i :class="expandedRunErrors.has(run.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"/>
+              </button>
+              <div v-if="expandedRunErrors.has(run.id)" class="error-list">
+                <div v-for="(err, i) in run.errors" :key="i" class="error-item">{{ err }}</div>
               </div>
             </div>
           </div>
-        </div>
+        </template>
+
+        <!-- Manual: UploadSessions -->
+        <template v-else>
+          <div v-if="!uploadSessions.length" class="empty-state">No upload sessions found.</div>
+          <div v-for="session in uploadSessions" :key="session.id" class="run-row">
+            <div class="run-row__top">
+              <div class="run-row__left">
+                <span :class="['status-pill', uploadSessionStatusClass(session.status)]">
+                  <i :class="uploadSessionStatusIcon(session.status)"/>
+                  {{ session.status }}
+                </span>
+                <span class="run-time" :title="formatDateTime(session.started_at)">
+                  {{ timeAgo(session.started_at) }}
+                </span>
+                <span class="run-date">{{ formatShortDate(session.started_at) }}</span>
+              </div>
+              <div class="run-row__right">
+                <span v-if="session.duration_seconds != null" class="run-duration">
+                  <i class="pi pi-clock"/> {{ formatDuration(session.duration_seconds) }}
+                </span>
+                <span class="run-feed">{{ session.uploaded_by ?? 'Manual upload' }}</span>
+              </div>
+            </div>
+            <div class="run-row__counts">
+              <span class="count-chip fetched">
+                <i class="pi pi-upload"/> {{ session.files_stored }}/{{ session.files_count }} stored
+              </span>
+              <span class="count-chip failed" v-if="session.files_failed > 0">
+                <i class="pi pi-times"/> {{ session.files_failed }} failed
+              </span>
+            </div>
+          </div>
+        </template>
       </div>
 
-      <!-- Ingestion Jobs tab -->
-      <div v-else-if="activeTab === 'jobs'" class="tab-content">
-        <div v-if="!jobs.length" class="empty-state">No ingestion jobs found.</div>
-
-        <div v-for="job in jobs" :key="job.id" class="log-row">
-          <div class="log-row__top">
-            <span :class="['status-pill', jobStatusClass(job.state)]">
-              <i :class="jobStatusIcon(job.state)"/>
-              {{ job.state }}
-            </span>
-            <span class="run-time" :title="formatDateTime(job.created_at)">
-              {{ timeAgo(job.created_at) }}
-            </span>
-            <span class="run-date">{{ formatShortDate(job.created_at) }}</span>
-          </div>
-
-          <!-- File path -->
-          <div class="log-filepath">
-            <i class="pi pi-file"/> {{ fileName(job.file_path) }}
-            <span class="log-filepath__dir">{{ fileDir(job.file_path) }}</span>
-          </div>
-
-          <!-- Progress bar (active jobs only) -->
-          <div v-if="job.state === 'started'" class="job-progress">
-            <div class="progress-bar-wrap">
-              <div class="progress-bar-fill" :style="{width: job.progress_percentage + '%'}"/>
-            </div>
-            <div class="progress-label">
-              {{ job.progress_percentage }}%
-              <span v-if="job.progress_state" class="progress-state">— {{ job.progress_state }}</span>
-            </div>
-          </div>
-
-          <!-- Stats chips (finished jobs) -->
-          <div v-if="job.state === 'finished'" class="log-row__stats">
-            <span class="count-chip fetched">
-              <i class="pi pi-box"/> {{ job.items_created }} items
-            </span>
-            <span class="count-chip fetched">
-              <i class="pi pi-images"/> {{ job.assets_created }} assets
-            </span>
-          </div>
-
-          <!-- Error (collapsible) -->
-          <div v-if="job.error" class="run-errors">
-            <button class="error-toggle" @click="toggleJobError(job.id)">
-              <i class="pi pi-exclamation-triangle"/>
-              Error
-              <i :class="expandedJobErrors.has(job.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"/>
-            </button>
-            <div v-if="expandedJobErrors.has(job.id)" class="error-list">
-              <div class="error-item">{{ job.error }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Ingestion Logs tab -->
-      <div v-else-if="activeTab === 'ingestion'" class="tab-content">
-        <div v-if="!logs.length" class="empty-state">No ingestion logs found.</div>
+      <!-- File History tab -->
+      <div v-else-if="activeTab === 'file-history'" class="tab-content">
+        <div v-if="!logs.length" class="empty-state">No file history found.</div>
 
         <div v-for="log in logs" :key="log.id" class="log-row">
           <div class="log-row__top">
             <span :class="['status-pill', ingestionStatusClass(log.status)]">
-                <i :class="ingestionStatusIcon(log.status)"/>
-                {{ log.status }}
+              <i :class="ingestionStatusIcon(log.status)"/>
+              {{ log.status }}
             </span>
             <span class="run-time" :title="formatDateTime(log.created_at)">
               {{ timeAgo(log.created_at) }}
@@ -196,14 +165,10 @@
               {{ log.retry_count }} retr{{ log.retry_count > 1 ? 'ies' : 'y' }}
             </span>
           </div>
-
-          <!-- File path -->
           <div class="log-filepath">
             <i class="pi pi-file"/> {{ fileName(log.file_path) }}
             <span class="log-filepath__dir">{{ fileDir(log.file_path) }}</span>
           </div>
-
-          <!-- Stats row -->
           <div class="log-row__stats">
             <span v-if="log.reference_time" class="count-chip bytes">
               <i class="pi pi-calendar"/> {{ formatShortDate(log.reference_time) }}
@@ -215,8 +180,6 @@
               <i class="pi pi-images"/> {{ log.assets_created }} assets
             </span>
           </div>
-
-          <!-- Error (collapsible) -->
           <div v-if="log.error" class="run-errors">
             <button class="error-toggle" @click="toggleLogError(log.id)">
               <i class="pi pi-exclamation-triangle"/>
@@ -227,6 +190,87 @@
               <div class="error-item">{{ log.error }}</div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Active Jobs tab -->
+      <div v-else-if="activeTab === 'active-jobs'" class="tab-content">
+
+        <!-- Live queue -->
+        <template v-if="liveJobs.length">
+          <div class="section-label">Live</div>
+          <div v-for="job in liveJobs" :key="job.id" class="log-row log-row--active">
+            <div class="log-row__top">
+              <span :class="['status-pill', jobStatusClass(job.state)]">
+                <i :class="jobStatusIcon(job.state)"/>
+                {{ job.state }}
+              </span>
+              <span class="run-time" :title="formatDateTime(job.created_at)">
+                {{ timeAgo(job.created_at) }}
+              </span>
+              <span class="run-date">{{ formatShortDate(job.created_at) }}</span>
+            </div>
+            <div class="log-filepath">
+              <i class="pi pi-file"/> {{ fileName(job.file_path) }}
+              <span class="log-filepath__dir">{{ fileDir(job.file_path) }}</span>
+            </div>
+            <div v-if="job.state === 'started'" class="job-progress">
+              <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" :style="{width: job.progress_percentage + '%'}"/>
+              </div>
+              <div class="progress-label">
+                {{ job.progress_percentage }}%
+                <span v-if="job.progress_state" class="progress-state">— {{ job.progress_state }}</span>
+              </div>
+            </div>
+            <div v-if="job.error" class="run-errors">
+              <button class="error-toggle" @click="toggleJobError(job.id)">
+                <i class="pi pi-exclamation-triangle"/> Error
+                <i :class="expandedJobErrors.has(job.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"/>
+              </button>
+              <div v-if="expandedJobErrors.has(job.id)" class="error-list">
+                <div class="error-item">{{ job.error }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- Recent section -->
+        <template v-if="recentJobs.length">
+          <div class="section-label" :class="{'section-label--mt': liveJobs.length}">Recent</div>
+          <div v-for="job in recentJobs" :key="job.id" class="log-row">
+            <div class="log-row__top">
+              <span :class="['status-pill', jobStatusClass(job.state)]">
+                <i :class="jobStatusIcon(job.state)"/>
+                {{ job.state }}
+              </span>
+              <span class="run-time" :title="formatDateTime(job.created_at)">
+                {{ timeAgo(job.created_at) }}
+              </span>
+              <span class="run-date">{{ formatShortDate(job.created_at) }}</span>
+            </div>
+            <div class="log-filepath">
+              <i class="pi pi-file"/> {{ fileName(job.file_path) }}
+              <span class="log-filepath__dir">{{ fileDir(job.file_path) }}</span>
+            </div>
+            <div v-if="job.state === 'finished'" class="log-row__stats">
+              <span class="count-chip fetched"><i class="pi pi-box"/> {{ job.items_created }} items</span>
+              <span class="count-chip fetched"><i class="pi pi-images"/> {{ job.assets_created }} assets</span>
+            </div>
+            <div v-if="job.error" class="run-errors">
+              <button class="error-toggle" @click="toggleJobError(job.id)">
+                <i class="pi pi-exclamation-triangle"/> Error
+                <i :class="expandedJobErrors.has(job.id) ? 'pi pi-chevron-up' : 'pi pi-chevron-down'"/>
+              </button>
+              <div v-if="expandedJobErrors.has(job.id)" class="error-list">
+                <div class="error-item">{{ job.error }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="!liveJobs.length && !recentJobs.length" class="empty-state">
+          No jobs found.
         </div>
       </div>
 
@@ -243,15 +287,16 @@ const props = defineProps({
   collection: {type: Object, default: null},
 });
 
-const emit = defineEmits(["update:modelValue"])
+const emit = defineEmits(["update:modelValue"]);
 
 const visibleProxy = computed({
   get: () => props.modelValue,
   set: (value) => emit("update:modelValue", value),
 });
 
-const activeTab = ref("loader");
+const activeTab = ref("file-history");
 const runs = ref([]);
+const uploadSessions = ref([]);
 const logs = ref([]);
 const jobs = ref([]);
 const loading = ref(false);
@@ -265,11 +310,18 @@ const activeJobCount = computed(() =>
     jobs.value.filter(j => j.state === "pending" || j.state === "started").length
 );
 
-function closeDrawer() {
-  emit("update:modelValue", false);
-}
+const liveJobs = computed(() =>
+    jobs.value.filter(j => j.state === "pending" || j.state === "started")
+);
 
-// When collection changes or drawer opens, fetch data
+const recentJobs = computed(() =>
+    jobs.value.filter(j => j.state === "finished" || j.state === "failed" || j.state === "cancelled")
+);
+
+const acquisitionCount = computed(() =>
+    props.collection?.type === "automated" ? runs.value.length : uploadSessions.value.length
+);
+
 watch(
     () => [props.modelValue, props.collection?.id],
     async ([visible, collectionId]) => {
@@ -279,8 +331,9 @@ watch(
         return;
       }
 
-      activeTab.value = props.collection.type === "automated" ? "loader" : "ingestion";
+      activeTab.value = "file-history";
       runs.value = [];
+      uploadSessions.value = [];
       logs.value = [];
       jobs.value = [];
       expandedRunErrors.value = new Set();
@@ -291,12 +344,17 @@ watch(
     }
 );
 
-// Also fetch when tab switches if data not yet loaded
 watch(activeTab, async (tab) => {
   if (!props.collection) return;
-  if (tab === "loader" && !runs.value.length) await fetchRuns(props.collection.id);
-  if (tab === "ingestion" && !logs.value.length) await fetchLogs(props.collection.id);
-  if (tab === "jobs") {
+  if (tab === "acquisition") {
+    if (props.collection.type === "automated" && !runs.value.length) {
+      await fetchRuns(props.collection.id);
+    } else if (props.collection.type === "manual" && !uploadSessions.value.length) {
+      await fetchUploadSessions(props.collection.id);
+    }
+  }
+  if (tab === "file-history" && !logs.value.length) await fetchLogs(props.collection.id);
+  if (tab === "active-jobs") {
     await fetchJobs(props.collection.id);
     startJobPolling(props.collection.id);
   } else {
@@ -310,6 +368,7 @@ async function fetchAll(collection) {
   try {
     const promises = [fetchLogs(collection.id)];
     if (collection.type === "automated") promises.push(fetchRuns(collection.id));
+    else promises.push(fetchUploadSessions(collection.id));
     await Promise.all(promises);
   } catch (e) {
     error.value = e.message;
@@ -319,10 +378,17 @@ async function fetchAll(collection) {
 }
 
 async function fetchRuns(id) {
-  const res = await fetch(`/admin/api/ingestion/collections/${id}/arrivals/`);
+  const res = await fetch(`/admin/api/ingestion/collections/${id}/fetch-runs/`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  runs.value = data.arrivals;
+  runs.value = data.fetch_runs;
+}
+
+async function fetchUploadSessions(id) {
+  const res = await fetch(`/admin/api/ingestion/collections/${id}/upload-sessions/`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  uploadSessions.value = data.upload_sessions;
 }
 
 async function fetchLogs(id) {
@@ -373,26 +439,26 @@ function toggleJobError(id) {
   expandedJobErrors.value = s;
 }
 
-// --- Status helpers ---
 function loaderStatusClass(s) {
-  return {
-    success: "success",
-    partial: "warning",
-    failed: "danger",
-    running: "info",
-    empty: "neutral",
-    queued: "neutral"
-  }[s] ?? "neutral";
+  return {completed: "success", partial: "warning", failed: "danger", running: "info", empty: "neutral", queued: "neutral"}[s] ?? "neutral";
 }
 
 function loaderStatusIcon(s) {
   return {
-    success: "pi pi-check-circle",
-    partial: "pi pi-exclamation-triangle",
-    failed: "pi pi-times-circle",
-    running: "pi pi-spin pi-spinner",
-    empty: "pi pi-minus-circle",
-    queued: "pi pi-clock"
+    completed: "pi pi-check-circle", partial: "pi pi-exclamation-triangle",
+    failed: "pi pi-times-circle", running: "pi pi-spin pi-spinner",
+    empty: "pi pi-minus-circle", queued: "pi pi-clock",
+  }[s] ?? "pi pi-circle";
+}
+
+function uploadSessionStatusClass(s) {
+  return {completed: "success", failed: "danger", cancelled: "neutral", active: "info"}[s] ?? "neutral";
+}
+
+function uploadSessionStatusIcon(s) {
+  return {
+    completed: "pi pi-check-circle", failed: "pi pi-times-circle",
+    cancelled: "pi pi-ban", active: "pi pi-spin pi-spinner",
   }[s] ?? "pi pi-circle";
 }
 
@@ -402,10 +468,8 @@ function ingestionStatusClass(s) {
 
 function ingestionStatusIcon(s) {
   return {
-    completed: "pi pi-check-circle",
-    failed: "pi pi-times-circle",
-    processing: "pi pi-spin pi-spinner",
-    pending: "pi pi-clock"
+    completed: "pi pi-check-circle", failed: "pi pi-times-circle",
+    processing: "pi pi-spin pi-spinner", pending: "pi pi-clock",
   }[s] ?? "pi pi-circle";
 }
 
@@ -415,15 +479,11 @@ function jobStatusClass(s) {
 
 function jobStatusIcon(s) {
   return {
-    pending: "pi pi-clock",
-    started: "pi pi-spin pi-spinner",
-    finished: "pi pi-check-circle",
-    failed: "pi pi-times-circle",
-    cancelled: "pi pi-ban",
+    pending: "pi pi-clock", started: "pi pi-spin pi-spinner",
+    finished: "pi pi-check-circle", failed: "pi pi-times-circle", cancelled: "pi pi-ban",
   }[s] ?? "pi pi-circle";
 }
 
-// --- Formatters ---
 function timeAgo(iso) {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -474,7 +534,6 @@ function fileDir(path) {
   font-size: 10px;
 }
 
-
 .drawer-header {
   display: flex;
   flex-direction: column;
@@ -511,7 +570,6 @@ function fileDir(path) {
   color: #334155;
 }
 
-/* Tabs */
 .tab-bar {
   display: flex;
   border-bottom: 2px solid #e2e8f0;
@@ -558,7 +616,11 @@ function fileDir(path) {
   color: #fff;
 }
 
-/* Content area */
+.tab-count--active {
+  background: #dbeafe !important;
+  color: #1d4ed8 !important;
+}
+
 .tab-content {
   display: flex;
   flex-direction: column;
@@ -576,7 +638,19 @@ function fileDir(path) {
   color: #dc2626;
 }
 
-/* Run row */
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  padding: 4px 0 2px;
+}
+
+.section-label--mt {
+  margin-top: 12px;
+}
+
 .run-row, .log-row {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -585,6 +659,11 @@ function fileDir(path) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.log-row--active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
 .run-row:hover, .log-row:hover {
@@ -612,7 +691,6 @@ function fileDir(path) {
   flex-wrap: wrap;
 }
 
-/* Status pill */
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -624,30 +702,11 @@ function fileDir(path) {
   text-transform: capitalize;
 }
 
-.status-pill.success {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.status-pill.warning {
-  background: #fef3c7;
-  color: #b45309;
-}
-
-.status-pill.danger {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.status-pill.info {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-.status-pill.neutral {
-  background: #f1f5f9;
-  color: #64748b;
-}
+.status-pill.success { background: #dcfce7; color: #15803d; }
+.status-pill.warning { background: #fef3c7; color: #b45309; }
+.status-pill.danger  { background: #fee2e2; color: #b91c1c; }
+.status-pill.info    { background: #dbeafe; color: #1d4ed8; }
+.status-pill.neutral { background: #f1f5f9; color: #64748b; }
 
 .run-time {
   font-size: 13px;
@@ -661,7 +720,7 @@ function fileDir(path) {
   font-family: 'SF Mono', 'Roboto Mono', monospace;
 }
 
-.run-duration, .run-ref {
+.run-duration, .run-feed {
   font-size: 12px;
   color: #64748b;
   display: flex;
@@ -678,7 +737,6 @@ function fileDir(path) {
   border-radius: 4px;
 }
 
-/* Count chips */
 .run-row__counts, .log-row__stats {
   display: flex;
   gap: 6px;
@@ -695,27 +753,11 @@ function fileDir(path) {
   border-radius: 4px;
 }
 
-.count-chip.fetched {
-  background: #dcfce7;
-  color: #166534;
-}
+.count-chip.fetched { background: #dcfce7; color: #166534; }
+.count-chip.skipped { background: #f1f5f9; color: #475569; }
+.count-chip.failed  { background: #fee2e2; color: #b91c1c; }
+.count-chip.bytes   { background: #ede9fe; color: #6d28d9; }
 
-.count-chip.skipped {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.count-chip.failed {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.count-chip.bytes {
-  background: #ede9fe;
-  color: #6d28d9;
-}
-
-/* File path */
 .log-filepath {
   font-size: 12px;
   color: #334155;
@@ -738,7 +780,6 @@ function fileDir(path) {
   white-space: nowrap;
 }
 
-/* Error toggle */
 .run-errors {
   margin-top: 2px;
 }
@@ -758,9 +799,7 @@ function fileDir(path) {
   transition: background 0.1s;
 }
 
-.error-toggle:hover {
-  background: #fecaca;
-}
+.error-toggle:hover { background: #fecaca; }
 
 .error-list {
   margin-top: 6px;
@@ -782,13 +821,6 @@ function fileDir(path) {
   word-break: break-all;
 }
 
-/* Active tab count badge (blue for live jobs) */
-.tab-count--active {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-/* Progress bar */
 .job-progress {
   display: flex;
   flex-direction: column;
@@ -818,7 +850,5 @@ function fileDir(path) {
   gap: 4px;
 }
 
-.progress-state {
-  color: #94a3b8;
-}
+.progress-state { color: #94a3b8; }
 </style>
