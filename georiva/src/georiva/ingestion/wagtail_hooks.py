@@ -35,6 +35,7 @@ def register_ingestion_dashboard_urls():
         collection_ingestion_logs_api,
         collection_ingestion_jobs_api,
         collection_fetch_runs_api,
+        collection_upload_sessions_api,
     )
     from .sse_views import ingestion_events_sse, acquisition_events_sse
 
@@ -50,6 +51,8 @@ def register_ingestion_dashboard_urls():
              name="collection_ingestion_jobs_api"),
         path("api/ingestion/collections/<int:collection_id>/fetch-runs/", collection_fetch_runs_api,
              name="collection_fetch_runs_api"),
+        path("api/ingestion/collections/<int:collection_id>/upload-sessions/", collection_upload_sessions_api,
+             name="collection_upload_sessions_api"),
     ]
 
 

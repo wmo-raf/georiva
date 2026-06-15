@@ -16,6 +16,7 @@ DASHBOARD_URL = "/admin/api/ingestion/dashboard/"
 LOGS_URL = "/admin/api/ingestion/collections/{}/ingestion-logs/"
 JOBS_URL = "/admin/api/ingestion/collections/{}/ingestion-jobs/"
 FETCH_RUNS_URL = "/admin/api/ingestion/collections/{}/fetch-runs/"
+UPLOAD_SESSIONS_URL = "/admin/api/ingestion/collections/{}/upload-sessions/"
 
 
 def _setup_collection(catalog_slug="cat", collection_slug="col"):
@@ -35,6 +36,94 @@ def _make_file_ingestion(collection, file_path=None, status=FileIngestion.Status
     return fi
 
 
+class DashboardCatalogGroupedTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_cg", "cg@test.com", "pw")
+        self.client.force_login(self.user)
+        self.catalog = Catalog.objects.create(name="CHIRPS", slug="chirps", file_format="grib2")
+        self.collection = Collection.objects.create(name="Daily", slug="daily", catalog=self.catalog)
+
+    def test_dashboard_returns_catalogs_key(self):
+        response = self.client.get(DASHBOARD_URL)
+        self.assertIn("catalogs", response.json())
+
+    def test_collections_nested_under_parent_catalog(self):
+        response = self.client.get(DASHBOARD_URL)
+        catalogs = response.json()["catalogs"]
+        cat = next(c for c in catalogs if c["id"] == self.catalog.pk)
+        col_ids = [c["id"] for c in cat["collections"]]
+        self.assertIn(self.collection.pk, col_ids)
+
+    def test_catalog_entry_has_required_fields(self):
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
+        for field in ("id", "slug", "name", "status", "summary", "collections"):
+            self.assertIn(field, cat)
+
+    def test_catalog_status_is_failed_when_any_child_is_failed(self):
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.FAILED)
+        col2 = Collection.objects.create(name="Monthly", slug="monthly", catalog=self.catalog)
+        _make_file_ingestion(col2, status=FileIngestion.Status.COMPLETED)
+
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
+        self.assertEqual(cat["status"], "failed")
+
+    def test_catalog_status_is_empty_when_all_children_are_empty(self):
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
+        self.assertEqual(cat["status"], "empty")
+
+    def test_catalog_status_is_ok_when_no_child_is_failed(self):
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
+
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
+        self.assertEqual(cat["status"], "ok")
+
+    def test_catalog_summary_counts_are_accurate(self):
+        col2 = Collection.objects.create(name="Monthly", slug="monthly", catalog=self.catalog)
+        col3 = Collection.objects.create(name="Weekly", slug="weekly", catalog=self.catalog)
+        _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
+        _make_file_ingestion(col2, status=FileIngestion.Status.FAILED)
+        # col3 has no FileIngestion → empty
+
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
+        self.assertEqual(cat["summary"]["ok"], 1)
+        self.assertEqual(cat["summary"]["failed"], 1)
+        self.assertEqual(cat["summary"]["empty"], 1)
+
+    def test_catalog_with_no_active_collections_excluded(self):
+        empty_catalog = Catalog.objects.create(name="Empty", slug="empty-cat", file_format="grib2")
+        col = Collection.objects.create(name="col", slug="col-e", catalog=empty_catalog)
+        col.is_active = False
+        col.save()
+
+        response = self.client.get(DASHBOARD_URL)
+        catalog_ids = [c["id"] for c in response.json()["catalogs"]]
+        self.assertNotIn(empty_catalog.pk, catalog_ids)
+
+    def test_per_collection_fields_preserved_in_nested_entry(self):
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
+        col = next(c for c in cat["collections"] if c["id"] == self.collection.pk)
+        for field in ("id", "slug", "name", "type", "status", "sparkline", "last_run_at", "item_count"):
+            self.assertIn(field, col)
+
+
+def _find_collection_in_response(data, collection_pk):
+    for cat in data["catalogs"]:
+        for col in cat["collections"]:
+            if col["id"] == collection_pk:
+                return col
+    return None
+
+
+def _all_collections_in_response(data):
+    return [col for cat in data["catalogs"] for col in cat["collections"]]
+
+
 class DashboardCollectionListTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "admin@test.com", "pw")
@@ -43,8 +132,7 @@ class DashboardCollectionListTests(TestCase):
 
     def test_collection_with_no_file_ingestions_has_null_last_run_fields(self):
         response = self.client.get(DASHBOARD_URL)
-        data = response.json()
-        col = next(c for c in data["collections"] if c["id"] == self.collection.pk)
+        col = _find_collection_in_response(response.json(), self.collection.pk)
 
         self.assertIsNone(col["last_run_at"])
         self.assertIsNone(col["last_run_status"])
@@ -58,12 +146,11 @@ class DashboardCollectionListTests(TestCase):
             self.collection, file_path="cat/col/new.grib2",
             status=FileIngestion.Status.FAILED,
         )
-        # Force newer to have a later created_at
         newer.created_at = older.created_at + timedelta(seconds=10)
         newer.save(update_fields=["created_at"])
 
         response = self.client.get(DASHBOARD_URL)
-        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+        col = _find_collection_in_response(response.json(), self.collection.pk)
 
         self.assertEqual(col["last_run_status"], FileIngestion.Status.FAILED)
 
@@ -73,7 +160,7 @@ class DashboardCollectionListTests(TestCase):
         inactive.save()
 
         response = self.client.get(DASHBOARD_URL)
-        ids = [c["id"] for c in response.json()["collections"]]
+        ids = [c["id"] for c in _all_collections_in_response(response.json())]
         self.assertNotIn(inactive.pk, ids)
 
     def test_type_field_is_automated_when_data_feed_link_exists(self):
@@ -82,45 +169,43 @@ class DashboardCollectionListTests(TestCase):
         DataFeedCollectionLink.objects.create(data_feed=feed, collection=automated_col)
 
         response = self.client.get(DASHBOARD_URL)
-        by_id = {c["id"]: c for c in response.json()["collections"]}
+        by_id = {c["id"]: c for c in _all_collections_in_response(response.json())}
 
         self.assertEqual(by_id[automated_col.pk]["type"], "automated")
         self.assertEqual(by_id[self.collection.pk]["type"], "manual")
 
     def test_derived_status_is_empty_when_no_file_ingestion_logs(self):
         response = self.client.get(DASHBOARD_URL)
-        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+        col = _find_collection_in_response(response.json(), self.collection.pk)
         self.assertEqual(col["status"], "empty")
 
     def test_derived_status_is_ok_when_completed_file_ingestion_linked_via_m2m(self):
         _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
 
         response = self.client.get(DASHBOARD_URL)
-        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+        col = _find_collection_in_response(response.json(), self.collection.pk)
         self.assertEqual(col["status"], "ok")
 
     def test_derived_status_is_failed_when_failed_file_ingestion_linked_via_m2m(self):
         _make_file_ingestion(self.collection, status=FileIngestion.Status.FAILED)
 
         response = self.client.get(DASHBOARD_URL)
-        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
+        col = _find_collection_in_response(response.json(), self.collection.pk)
         self.assertEqual(col["status"], "failed")
 
     def test_grib_collection_shows_success_sparkline_via_m2m(self):
         _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
 
         response = self.client.get(DASHBOARD_URL)
-        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
-        today_entry = col["sparkline"][-1]
-        self.assertEqual(today_entry["status"], "success")
+        col = _find_collection_in_response(response.json(), self.collection.pk)
+        self.assertEqual(col["sparkline"][-1]["status"], "success")
 
     def test_grib_collection_shows_failed_sparkline_when_no_items_created(self):
         _make_file_ingestion(self.collection, status=FileIngestion.Status.FAILED)
 
         response = self.client.get(DASHBOARD_URL)
-        col = next(c for c in response.json()["collections"] if c["id"] == self.collection.pk)
-        today_entry = col["sparkline"][-1]
-        self.assertEqual(today_entry["status"], "failed")
+        col = _find_collection_in_response(response.json(), self.collection.pk)
+        self.assertEqual(col["sparkline"][-1]["status"], "failed")
 
     def test_multi_collection_grib_independent_sparkline_statuses(self):
         catalog = Catalog.objects.create(name="shared-cat", slug="shared-cat", file_format="grib2")
@@ -142,7 +227,7 @@ class DashboardCollectionListTests(TestCase):
         fi_b.collections.add(col_b)
 
         response = self.client.get(DASHBOARD_URL)
-        by_id = {c["id"]: c for c in response.json()["collections"]}
+        by_id = {c["id"]: c for c in _all_collections_in_response(response.json())}
 
         self.assertEqual(by_id[col_a.pk]["sparkline"][-1]["status"], "success")
         self.assertEqual(by_id[col_b.pk]["sparkline"][-1]["status"], "failed")
@@ -188,6 +273,44 @@ class CollectionIngestionLogsAPITests(TestCase):
     def test_ingestion_logs_returns_404_for_unknown_collection(self):
         response = self.client.get(LOGS_URL.format(99999))
         self.assertEqual(response.status_code, 404)
+
+    def test_failed_records_appear_before_non_failed_records(self):
+        # The completed record is created AFTER the failed one — so plain
+        # most-recent-first ordering would put it first. Pinning must override this.
+        fi_fail = _make_file_ingestion(
+            self.collection, file_path="cat3/col3/fail.grib2",
+            status=FileIngestion.Status.FAILED,
+        )
+        fi_ok = _make_file_ingestion(
+            self.collection, file_path="cat3/col3/ok.grib2",
+            status=FileIngestion.Status.COMPLETED,
+        )
+        fi_ok.created_at = fi_fail.created_at + timedelta(seconds=5)
+        fi_ok.save(update_fields=["created_at"])
+
+        response = self.client.get(LOGS_URL.format(self.collection.pk))
+        logs = response.json()["logs"]
+        statuses = [l["status"] for l in logs]
+        failed_indices = [i for i, s in enumerate(statuses) if s == "failed"]
+        non_failed_indices = [i for i, s in enumerate(statuses) if s != "failed"]
+        self.assertTrue(all(f < nf for f in failed_indices for nf in non_failed_indices))
+
+    def test_within_failed_group_most_recent_first(self):
+        fi1 = _make_file_ingestion(
+            self.collection, file_path="cat3/col3/fail1.grib2",
+            status=FileIngestion.Status.FAILED,
+        )
+        fi2 = _make_file_ingestion(
+            self.collection, file_path="cat3/col3/fail2.grib2",
+            status=FileIngestion.Status.FAILED,
+        )
+        fi2.created_at = fi1.created_at + timedelta(seconds=10)
+        fi2.save(update_fields=["created_at"])
+
+        response = self.client.get(LOGS_URL.format(self.collection.pk))
+        logs = response.json()["logs"]
+        self.assertEqual(logs[0]["id"], fi2.pk)
+        self.assertEqual(logs[1]["id"], fi1.pk)
 
     def test_ingestion_logs_for_grib_collection_linked_via_m2m(self):
         catalog = Catalog.objects.create(name="grib-cat", slug="grib-cat", file_format="grib2")
@@ -273,6 +396,14 @@ class CollectionFetchRunsAPITests(TestCase):
         entry = response.json()["fetch_runs"][0]
         self.assertIsNone(entry["duration_seconds"])
 
+    def test_fetch_runs_does_not_include_run_time_field(self):
+        from georiva.sources.models import FetchRun
+        FetchRun.objects.create(data_feed=self.feed)
+
+        response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
+        entry = response.json()["fetch_runs"][0]
+        self.assertNotIn("run_time", entry)
+
 
 def _make_job(fi, **kwargs):
     ct = ContentType.objects.get_for_model(FileIngestionJob)
@@ -334,3 +465,74 @@ class CollectionIngestionJobsAPITests(TestCase):
     def test_ingestion_jobs_returns_404_for_unknown_collection(self):
         response = self.client.get(JOBS_URL.format(99999))
         self.assertEqual(response.status_code, 404)
+
+
+def _make_upload_session(catalog, user=None, file_path=None, collection=None):
+    """Create an UploadSession with one UploadedFile, optionally linked via FileIngestion."""
+    from georiva.ingestion.models import UploadSession, UploadedFile
+    session = UploadSession.objects.create(catalog=catalog, user=user)
+    fp = file_path or f"{catalog.slug}/file.grib2"
+    uf = UploadedFile.objects.create(session=session, original_filename="file.grib2", file_path=fp)
+    if collection is not None:
+        fi = FileIngestion.objects.create(bucket=BucketType.SOURCES, file_path=fp)
+        fi.collections.add(collection)
+    return session
+
+
+class CollectionUploadSessionsAPITests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_us", "us@test.com", "pw")
+        self.client.force_login(self.user)
+        self.catalog = Catalog.objects.create(name="cat-us", slug="cat-us", file_format="grib2")
+        self.collection = Collection.objects.create(name="col-us", slug="col-us", catalog=self.catalog)
+
+    def test_upload_sessions_returns_200_with_upload_sessions_key(self):
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("upload_sessions", response.json())
+
+    def test_upload_sessions_returns_sessions_linked_via_file_ingestion_m2m(self):
+        session = _make_upload_session(self.catalog, collection=self.collection)
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        ids = [s["id"] for s in response.json()["upload_sessions"]]
+        self.assertIn(session.pk, ids)
+
+    def test_upload_sessions_excludes_unlinked_sessions(self):
+        other_collection = Collection.objects.create(
+            name="other", slug="other-col", catalog=self.catalog
+        )
+        _make_upload_session(self.catalog, collection=other_collection)
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        self.assertEqual(len(response.json()["upload_sessions"]), 0)
+
+    def test_upload_sessions_returns_404_for_unknown_collection(self):
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(99999))
+        self.assertEqual(response.status_code, 404)
+
+    def test_upload_sessions_duration_seconds_set_when_completed(self):
+        from georiva.ingestion.models import UploadSession
+        session = _make_upload_session(self.catalog, collection=self.collection)
+        session.completed_at = session.started_at + timedelta(seconds=30)
+        session.save(update_fields=["completed_at"])
+
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        entry = response.json()["upload_sessions"][0]
+        self.assertAlmostEqual(entry["duration_seconds"], 30, delta=1)
+
+    def test_upload_sessions_duration_seconds_null_when_not_completed(self):
+        _make_upload_session(self.catalog, collection=self.collection)
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        entry = response.json()["upload_sessions"][0]
+        self.assertIsNone(entry["duration_seconds"])
+
+    def test_upload_sessions_uploaded_by_is_username(self):
+        _make_upload_session(self.catalog, user=self.user, collection=self.collection)
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        entry = response.json()["upload_sessions"][0]
+        self.assertEqual(entry["uploaded_by"], self.user.username)
+
+    def test_upload_sessions_uploaded_by_is_null_for_anonymous(self):
+        _make_upload_session(self.catalog, user=None, collection=self.collection)
+        response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
+        entry = response.json()["upload_sessions"][0]
+        self.assertIsNone(entry["uploaded_by"])
