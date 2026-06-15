@@ -12,6 +12,70 @@ from georiva.core.utils import get_full_url_by_request
 
 ITEMS_PER_PAGE = 24
 
+# unit: label suffix for the level value
+# ascending: True = sort smallest first (e.g. 2m before 100m), False = largest first (e.g. 1000 hPa before 500 hPa)
+VERTICAL_DIMENSION_CONFIG = {
+    'isobaricInhPa':     {'unit': 'hPa', 'ascending': False},
+    'isobaricLayer':     {'unit': 'hPa', 'ascending': False},
+    'heightAboveGround': {'unit': 'm',   'ascending': True},
+    'depthBelowLandLayer': {'unit': 'm', 'ascending': True},
+}
+
+
+def _get_variable_vertical_info(variable):
+    """Return (vertical_dimension, vertical_value) from the first source that has one."""
+    if not variable.sources:
+        return None, None
+    for block in variable.sources:
+        vd = block.value.get('vertical_dimension') or ''
+        vv = block.value.get('vertical_value')
+        if vd:
+            return vd, vv
+    return None, None
+
+
+def _format_level_label(vd, vv):
+    unit = VERTICAL_DIMENSION_CONFIG.get(vd, {}).get('unit', '')
+    value_str = f"{vv:g}"
+    return f"{value_str} {unit}" if unit else value_str
+
+
+def _group_variables_by_level(variables):
+    """
+    Return (ungrouped, sorted_groups).
+    ungrouped: variables with no vertical_dimension or vertical_value, in original order.
+    sorted_groups: list of {label, value, variables} dicts keyed by
+                   (vertical_dimension, vertical_value), sorted per-dimension config.
+    """
+    ungrouped = []
+    groups = {}
+    dim_order = {}  # tracks which vertical_dimensions appear, preserving first-seen order
+
+    for variable in variables:
+        vd, vv = _get_variable_vertical_info(variable)
+        if not vd or vv is None:
+            ungrouped.append(variable)
+        else:
+            key = (vd, vv)
+            if key not in groups:
+                groups[key] = {
+                    'label': _format_level_label(vd, vv),
+                    'value': vv,
+                    'dim': vd,
+                    'variables': [],
+                }
+            if vd not in dim_order:
+                dim_order[vd] = len(dim_order)
+            groups[key]['variables'].append(variable)
+
+    def sort_key(g):
+        cfg = VERTICAL_DIMENSION_CONFIG.get(g['dim'], {})
+        ascending = cfg.get('ascending', False)
+        return (dim_order[g['dim']], g['value'] if ascending else -g['value'])
+
+    sorted_groups = sorted(groups.values(), key=sort_key)
+    return ungrouped, sorted_groups
+
 
 class DatasetsIndexPage(RoutablePageMixin, Page):
     """
@@ -56,13 +120,13 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     @path('')
     def index(self, request):
         """All catalogs — filterable by topic and time resolution. Paginated."""
-
+        
         catalogs = self._base_catalogs_qs()
         catalogs, filters = self._apply_catalog_filters(request, catalogs)
-
+        
         paginator = Paginator(catalogs, self.collections_per_page)
         page_obj = paginator.get_page(request.GET.get('page'))
-
+        
         return render(request, 'datasets/index.html', {
             'page': self,
             'catalogs': page_obj,
@@ -138,6 +202,17 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         for variable in variables:
             variable.has_coverage = variable.slug in coverage
         
+        ungrouped_variables, variable_groups = _group_variables_by_level(variables)
+
+        # Mark the group containing the active variable as open; fall back to first group
+        active_group_marked = False
+        for group in variable_groups:
+            group['is_active'] = active_var_slug in {v.slug for v in group['variables']}
+            if group['is_active']:
+                active_group_marked = True
+        if not active_group_marked and variable_groups:
+            variable_groups[0]['is_active'] = True
+
         # Fall back active variable to first one with COG coverage
         if not active_var_slug or active_var_slug not in coverage:
             fallback = next((v for v in variables if v.has_coverage), None)
@@ -183,6 +258,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'catalog': catalog,
             'collection': collection,
             'variables': variables,
+            'ungrouped_variables': ungrouped_variables,
+            'variable_groups': variable_groups,
             'active_var_slug': active_var_slug,
             'items': items_page,
             'page_range': page_range,
@@ -336,7 +413,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             )
             .order_by('name')
         )
-
+    
     def _apply_catalog_filters(self, request, qs):
         from django.db.models import Q
         filters = {
@@ -344,24 +421,24 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'resolution': request.GET.get('resolution', ''),
             'q': request.GET.get('q', ''),
         }
-
+        
         if filters['q']:
             qs = qs.filter(
                 Q(name__icontains=filters['q']) |
                 Q(description__icontains=filters['q'])
             )
-
+        
         if filters['topic']:
             qs = qs.filter(topics__slug=filters['topic'])
-
+        
         if filters['resolution']:
             qs = qs.filter(
                 collections__time_resolution=filters['resolution'],
                 collections__is_active=True,
             ).distinct()
-
+        
         return qs, filters
-
+    
     def _catalog_filter_context(self):
         active_resolutions = (
             Collection.objects
@@ -371,7 +448,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .distinct()
         )
         choices = dict(Collection.TimeResolution.choices)
-
+        
         return {
             'topics': Topic.objects.filter(catalogs__is_active=True).distinct().order_by('sort_order', 'name'),
             'time_resolutions': [
@@ -380,7 +457,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 if value in active_resolutions
             ],
         }
-
+    
     def _base_collections_qs(self):
         return (
             Collection.objects
