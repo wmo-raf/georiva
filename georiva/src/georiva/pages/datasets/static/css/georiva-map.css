@@ -8,14 +8,18 @@
 }
 
 .gr-map-shell {
-    max-width: 1180px;
-    margin: 0 auto;
+    display: flex;
+    gap: 1rem;
     height: 620px;
+    max-width: 1400px;
+    margin: 0 auto;
+    align-items: stretch;
 }
 
 .gr-map-canvas {
     position: relative;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: 100%;
     overflow: hidden;
     border-radius: var(--gr-radius-lg);
@@ -32,7 +36,96 @@
 }
 
 /* ==========================================================================
-   Variable Sidebar
+   Map Panel (light, side-by-side with map)
+   ========================================================================== */
+
+.gr-map-panel {
+    width: 240px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    overflow-y: auto;
+    padding: 0.25rem 0;
+}
+
+.gr-map-panel-divider {
+    height: 1px;
+    background: var(--gr-light-border);
+    margin: 0.25rem 0;
+}
+
+.gr-map-panel-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.gr-map-panel-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gr-text-3);
+    padding: 0 0.25rem;
+}
+
+/* Variable buttons in the light panel */
+.gr-map-panel .gr-map-var-btn {
+    background: transparent;
+    border-color: transparent;
+    color: var(--gr-text-1);
+    border-radius: var(--gr-radius);
+    font-size: 0.82rem;
+}
+
+.gr-map-panel .gr-map-var-btn:hover {
+    background: var(--gr-light-1);
+    border-color: var(--gr-light-border);
+    color: var(--gr-text-1);
+}
+
+.gr-map-panel .gr-map-var-btn--active {
+    background: transparent;
+    border-color: transparent;
+    color: var(--gr-accent);
+    font-weight: 600;
+}
+
+.gr-map-panel .gr-map-var-dot {
+    background: var(--gr-text-3);
+}
+
+.gr-map-panel .gr-map-var-btn--active .gr-map-var-dot {
+    background: var(--gr-accent);
+}
+
+.gr-map-panel .gr-map-var-unit {
+    color: var(--gr-text-3);
+}
+
+/* Layer buttons in the light panel */
+.gr-map-panel .gr-map-layer-btn {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    color: var(--gr-text-2);
+    font-size: 0.8rem;
+}
+
+.gr-map-panel .gr-map-layer-btn:hover {
+    background: var(--gr-light-1);
+    color: var(--gr-text-1);
+}
+
+.gr-map-panel .gr-map-layer-btn.is-active {
+    background: var(--gr-accent);
+    border-color: var(--gr-accent);
+    color: #fff;
+}
+
+/* ==========================================================================
+   Variable Sidebar (floating, kept for other uses)
    ========================================================================== */
 
 .gr-map-sidebar {
@@ -651,7 +744,28 @@
 
 @media (max-width: 768px) {
     .gr-map-shell {
-        height: 520px;
+        flex-direction: column;
+        height: auto;
+    }
+
+    .gr-map-panel {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+        overflow-x: auto;
+        overflow-y: visible;
+        gap: 0.5rem;
+        padding-bottom: 0.25rem;
+    }
+
+    .gr-map-panel .gr-var-group {
+        min-width: 160px;
+        flex: 1;
+    }
+
+    .gr-map-canvas {
+        height: 420px;
+        border-radius: var(--gr-radius-lg);
     }
 
     .gr-map-sidebar {
@@ -668,8 +782,8 @@
 }
 
 @media (max-width: 480px) {
-    .gr-map-shell {
-        height: 480px;
+    .gr-map-canvas {
+        height: 360px;
     }
 
     .gr-map-sidebar {

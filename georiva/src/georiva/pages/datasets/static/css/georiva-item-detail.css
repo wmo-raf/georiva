@@ -103,6 +103,68 @@
 }
 
 /* ==========================================================================
+   Download Tabs
+   ========================================================================== */
+
+.gr-download-tab-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    border-bottom: 2px solid var(--gr-light-border);
+    margin-bottom: 1.25rem;
+}
+
+.gr-download-tab-btn {
+    align-items: center;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: var(--gr-radius) var(--gr-radius) 0 0;
+    color: var(--gr-text-3);
+    cursor: pointer;
+    display: inline-flex;
+    font-family: var(--gr-font-sans);
+    font-size: 0.82rem;
+    gap: 0.4rem;
+    margin-bottom: -2px;
+    padding: 0.5rem 1rem;
+    transition: color var(--gr-dur) var(--gr-ease),
+                background var(--gr-dur) var(--gr-ease),
+                border-color var(--gr-dur) var(--gr-ease);
+}
+
+.gr-download-tab-btn:hover {
+    background: var(--gr-light-1);
+    color: var(--gr-text-1);
+}
+
+.gr-download-tab-btn.is-active {
+    border-bottom-color: var(--gr-accent);
+    color: var(--gr-accent);
+    font-weight: 600;
+}
+
+.gr-download-tab-unit {
+    color: var(--gr-text-3);
+    font-size: 0.68rem;
+}
+
+.gr-download-tab-btn.is-active .gr-download-tab-unit {
+    color: var(--gr-accent);
+    opacity: 0.7;
+}
+
+.gr-download-tab-panel {
+    display: none;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.gr-download-tab-panel.is-active {
+    display: flex;
+}
+
+/* ==========================================================================
    Map — reuses georiva-collection-detail.css map classes
    (gr-map-section, gr-map-shell, gr-map-canvas, gr-map-sidebar, etc.)
    No extra map styles needed here.

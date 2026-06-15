@@ -77,6 +77,41 @@ def _group_variables_by_level(variables):
     return ungrouped, sorted_groups
 
 
+def _group_assets_by_level(assets):
+    """
+    Like _group_variables_by_level but for Asset objects (uses asset.variable for level info).
+    Returns (ungrouped_assets, sorted_groups) where each group has {label, value, dim, assets}.
+    """
+    ungrouped = []
+    groups = {}
+    dim_order = {}
+
+    for asset in assets:
+        vd, vv = _get_variable_vertical_info(asset.variable)
+        if not vd or vv is None:
+            ungrouped.append(asset)
+        else:
+            key = (vd, vv)
+            if key not in groups:
+                groups[key] = {
+                    'label': _format_level_label(vd, vv),
+                    'value': vv,
+                    'dim': vd,
+                    'assets': [],
+                }
+            if vd not in dim_order:
+                dim_order[vd] = len(dim_order)
+            groups[key]['assets'].append(asset)
+
+    def sort_key(g):
+        cfg = VERTICAL_DIMENSION_CONFIG.get(g['dim'], {})
+        ascending = cfg.get('ascending', False)
+        return (dim_order[g['dim']], g['value'] if ascending else -g['value'])
+
+    sorted_groups = sorted(groups.values(), key=sort_key)
+    return ungrouped, sorted_groups
+
+
 class DatasetsIndexPage(RoutablePageMixin, Page):
     """
     Landing page for browsing datasets.
@@ -339,7 +374,17 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             for a in cog_assets
         ]
         
-        # Group downloadable assets by variable for the template
+        # Group COG assets by vertical level for the map panel
+        ungrouped_cog_assets, cog_asset_groups = _group_assets_by_level(cog_assets)
+        active_group_marked = False
+        for group in cog_asset_groups:
+            group['is_active'] = active_var_slug in {a.variable.slug for a in group['assets']}
+            if group['is_active']:
+                active_group_marked = True
+        if not active_group_marked and cog_asset_groups:
+            cog_asset_groups[0]['is_active'] = True
+
+        # Group downloadable assets by variable for the downloads tabs
         downloads_by_variable = {}
         for asset in downloadable_assets:
             slug = asset.variable.slug
@@ -349,7 +394,11 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                     'assets': [],
                 }
             downloads_by_variable[slug]['assets'].append(asset)
-        
+
+        downloads_list = list(downloads_by_variable.values())
+        for i, group in enumerate(downloads_list):
+            group['is_active'] = (group['variable'].slug == active_var_slug) or (i == 0 and active_var_slug not in downloads_by_variable)
+
         return render(request, 'datasets/item_detail.html', {
             'page': self,
             'catalog': catalog,
@@ -357,8 +406,11 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'item': item,
             'active_var_slug': active_var_slug,
             'cog_assets': cog_assets,
+            'ungrouped_cog_assets': ungrouped_cog_assets,
+            'cog_asset_groups': cog_asset_groups,
             'map_layers': map_layers,
             'downloads_by_variable': downloads_by_variable,
+            'downloads_list': downloads_list,
             'prev_item': prev_item,
             'next_item': next_item,
             'collection_url': f"{self.url}{catalog.slug}/{collection.slug}/",
