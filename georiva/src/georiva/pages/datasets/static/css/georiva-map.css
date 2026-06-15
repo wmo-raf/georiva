@@ -419,7 +419,7 @@
 .gr-map-coords {
     position: absolute;
     bottom: 2rem;
-    right: 0.75rem;
+    right: 3rem;
     font-family: var(--gr-font-mono);
     font-size: 0.62rem;
     color: rgba(255, 255, 255, 0.5);
