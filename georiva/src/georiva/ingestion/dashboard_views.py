@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db import models
 from django.http import JsonResponse, Http404
 from django.utils import timezone
 
@@ -14,27 +15,26 @@ logger = logging.getLogger(__name__)
 
 def ingestion_dashboard_api(request):
     """
-    Returns collection list with ingestion health data for the dashboard.
+    Returns collections grouped under their parent Catalog with health roll-ups.
     """
-    from georiva.core.models import Collection
+    from georiva.core.models import Catalog, Collection
     from georiva.ingestion.models import FileIngestion
     from georiva.sources.models import DataFeedCollectionLink
-    
+
     collections = list(
         Collection.objects
         .select_related("catalog")
         .filter(is_active=True)
         .order_by("catalog__slug", "sort_order", "name")
     )
-    
+
     automated_collection_ids = set(
         DataFeedCollectionLink.objects.values_list('collection_id', flat=True)
     )
-    
+
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=29)
-    
-    # Sparkline data: one row per (FileIngestion × Collection) pair via M2M join.
+
     recent_logs = (
         FileIngestion.objects
         .filter(created_at__date__gte=thirty_days_ago)
@@ -42,57 +42,68 @@ def ingestion_dashboard_api(request):
         .values("collections", "status", "created_at")
         .order_by("created_at")
     )
-    
+
     logs_by_collection = defaultdict(list)
     for log in recent_logs:
         logs_by_collection[log["collections"]].append(log)
-    
-    # Latest FileIngestion per collection (for last_run_at / last_run_status).
+
     collection_ids = [c.pk for c in collections]
     latest_fi_by_collection = {}
     for fi in (
-            FileIngestion.objects
-                    .filter(collections__in=collection_ids)
-                    .values("collections", "status", "created_at")
-                    .order_by("collections", "-created_at")
-                    .distinct("collections")
+        FileIngestion.objects
+        .filter(collections__in=collection_ids)
+        .values("collections", "status", "created_at")
+        .order_by("collections", "-created_at")
+        .distinct("collections")
     ):
         latest_fi_by_collection[fi["collections"]] = fi
-    
-    result = []
-    
+
+    # Build per-collection entries grouped by catalog pk.
+    collections_by_catalog = defaultdict(list)
+    catalog_index = {}
+
     for collection in collections:
-        is_automated = collection.pk in automated_collection_ids
         logs = logs_by_collection.get(collection.pk, [])
-        
         sparkline = _build_sparkline(logs, today)
-        
-        last_run_at = None
-        last_run_status = None
-        
+
         latest_fi = latest_fi_by_collection.get(collection.pk)
-        if latest_fi:
-            last_run_at = latest_fi["created_at"].isoformat()
-            last_run_status = latest_fi["status"]
-        
-        status = _derive_status(sparkline)
-        
-        result.append({
+        last_run_at = latest_fi["created_at"].isoformat() if latest_fi else None
+        last_run_status = latest_fi["status"] if latest_fi else None
+
+        col_entry = {
             "id": collection.pk,
             "slug": collection.slug,
             "name": collection.name,
             "catalog": collection.catalog.slug,
             "catalog_name": collection.catalog.name,
-            "type": "automated" if is_automated else "manual",
+            "type": "automated" if collection.pk in automated_collection_ids else "manual",
             "is_active": collection.is_active,
             "item_count": collection.item_count,
             "last_run_at": last_run_at,
             "last_run_status": last_run_status,
-            "status": status,
+            "status": _derive_status(sparkline),
             "sparkline": sparkline,
+        }
+
+        catalog = collection.catalog
+        catalog_index[catalog.pk] = catalog
+        collections_by_catalog[catalog.pk].append(col_entry)
+
+    result = []
+    for catalog_pk, col_entries in collections_by_catalog.items():
+        catalog = catalog_index[catalog_pk]
+        cat_status, summary = _derive_catalog_status(col_entries)
+        result.append({
+            "id": catalog.pk,
+            "slug": catalog.slug,
+            "name": catalog.name,
+            "status": cat_status,
+            "summary": summary,
+            "collections": col_entries,
         })
-    
-    return JsonResponse({"collections": result})
+
+    result.sort(key=lambda c: c["slug"])
+    return JsonResponse({"catalogs": result})
 
 
 # =============================================================================
@@ -174,7 +185,15 @@ def collection_ingestion_logs_api(request, collection_id):
     logs = (
         FileIngestion.objects
         .filter(collections=collection)
-        .order_by("-created_at")[:200]
+        .order_by(
+            # Failed records first, then most-recent-first within each group.
+            models.Case(
+                models.When(status=FileIngestion.Status.FAILED, then=0),
+                default=1,
+                output_field=models.IntegerField(),
+            ),
+            "-created_at",
+        )[:200]
     )
     
     result = []
@@ -234,7 +253,6 @@ def collection_fetch_runs_api(request, collection_id):
             "status": run.status,
             "started_at": run.started_at.isoformat(),
             "duration_seconds": duration,
-            "run_time": None,
             "data_feed_name": run.data_feed.name,
             "files_fetched": run.files_fetched,
             "files_skipped": run.files_skipped,
@@ -244,6 +262,62 @@ def collection_fetch_runs_api(request, collection_id):
         })
     
     return JsonResponse({"fetch_runs": result})
+
+
+def collection_upload_sessions_api(request, collection_id):
+    """
+    Returns UploadSession records associated with a Collection via FileIngestion.collections M2M.
+    Used by the CollectionDrawer Acquisition tab for manual Collections.
+    """
+    from georiva.core.models import Collection
+    from georiva.ingestion.models import FileIngestion, UploadedFile, UploadSession
+
+    try:
+        Collection.objects.get(pk=collection_id)
+    except Collection.DoesNotExist:
+        raise Http404
+
+    fi_paths = (
+        FileIngestion.objects
+        .filter(collections=collection_id)
+        .values_list("file_path", flat=True)
+    )
+
+    session_ids = (
+        UploadedFile.objects
+        .filter(file_path__in=fi_paths)
+        .values_list("session_id", flat=True)
+        .distinct()
+    )
+
+    sessions = (
+        UploadSession.objects
+        .filter(pk__in=session_ids)
+        .select_related("user")
+        .prefetch_related("uploaded_files")
+        .order_by("-started_at")[:100]
+    )
+
+    result = []
+    for session in sessions:
+        duration = None
+        if session.completed_at and session.started_at:
+            duration = (session.completed_at - session.started_at).total_seconds()
+
+        files = list(session.uploaded_files.all())
+        result.append({
+            "id": session.pk,
+            "status": session.status,
+            "started_at": session.started_at.isoformat(),
+            "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+            "duration_seconds": duration,
+            "files_count": len(files),
+            "files_stored": sum(1 for f in files if f.status == "stored"),
+            "files_failed": sum(1 for f in files if f.status == "failed"),
+            "uploaded_by": session.user.username if session.user else None,
+        })
+
+    return JsonResponse({"upload_sessions": result})
 
 
 def upload_session_status_api(request, session_id):
@@ -297,6 +371,20 @@ def _build_sparkline(logs, today):
         sparkline.append({"date": str(d), "status": status})
     
     return sparkline
+
+
+def _derive_catalog_status(col_entries):
+    statuses = [c["status"] for c in col_entries]
+    summary = {
+        "ok": statuses.count("ok"),
+        "failed": statuses.count("failed"),
+        "empty": statuses.count("empty"),
+    }
+    if summary["failed"] > 0:
+        return "failed", summary
+    if summary["ok"] > 0:
+        return "ok", summary
+    return "empty", summary
 
 
 def _derive_status(sparkline):
