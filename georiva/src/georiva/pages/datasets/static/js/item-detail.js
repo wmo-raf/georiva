@@ -588,4 +588,13 @@
         if (el) el.style.display = visible ? 'flex' : 'none';
     }
 
+    // ── Filter toggle (sidebar-filter cards in the map panel) ─────────────────
+
+    document.querySelectorAll('[data-filter-toggle]').forEach(function (header) {
+        header.addEventListener('click', function () {
+            const panel = document.getElementById(header.dataset.filterToggle);
+            if (panel) panel.classList.toggle('is-open');
+        });
+    });
+
 })();

@@ -102,9 +102,18 @@
     color: var(--gr-text-3);
 }
 
+.gr-download-format {
+    font-size: 0.72rem;
+    color: var(--gr-text-3);
+}
+
 /* ==========================================================================
    Download Tabs
    ========================================================================== */
+
+.gr-download-tabs--has-flat {
+    margin-top: 1.5rem;
+}
 
 .gr-download-tab-list {
     display: flex;

@@ -42,35 +42,11 @@
 .gr-map-panel {
     width: 240px;
     flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
     overflow-y: auto;
-    padding: 0.25rem 0;
 }
 
-.gr-map-panel-divider {
-    height: 1px;
-    background: var(--gr-light-border);
-    margin: 0.25rem 0;
-}
-
-.gr-map-panel-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-}
-
-.gr-map-panel-label {
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--gr-text-3);
-    padding: 0 0.25rem;
-}
-
-/* Variable buttons in the light panel */
+/* Variable buttons inside the light panel card inherit sidebar-filter body;
+   override the dark defaults from gr-map-var-btn to match the light card. */
 .gr-map-panel .gr-map-var-btn {
     background: transparent;
     border-color: transparent;
@@ -104,24 +80,26 @@
     color: var(--gr-text-3);
 }
 
-/* Layer buttons in the light panel */
-.gr-map-panel .gr-map-layer-btn {
-    background: var(--gr-light);
-    border: 1px solid var(--gr-light-border);
-    border-radius: var(--gr-radius);
-    color: var(--gr-text-2);
-    font-size: 0.8rem;
-}
+/* ==========================================================================
+   Layer Controls (floating dark card inside map canvas)
+   ========================================================================== */
 
-.gr-map-panel .gr-map-layer-btn:hover {
-    background: var(--gr-light-1);
-    color: var(--gr-text-1);
-}
-
-.gr-map-panel .gr-map-layer-btn.is-active {
-    background: var(--gr-accent);
-    border-color: var(--gr-accent);
-    color: #fff;
+.gr-map-layer-controls {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    background: rgba(8, 13, 24, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    z-index: 30;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    min-width: 130px;
 }
 
 /* ==========================================================================
@@ -750,17 +728,7 @@
 
     .gr-map-panel {
         width: 100%;
-        flex-direction: row;
-        flex-wrap: wrap;
-        overflow-x: auto;
         overflow-y: visible;
-        gap: 0.5rem;
-        padding-bottom: 0.25rem;
-    }
-
-    .gr-map-panel .gr-var-group {
-        min-width: 160px;
-        flex: 1;
     }
 
     .gr-map-canvas {

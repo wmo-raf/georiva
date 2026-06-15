@@ -100,67 +100,77 @@
         <div class="gr-container">
             <div class="gr-map-shell">
 
-                {# ── Layer panel (left) ── #}
+                {# ── Variable panel (left) — styled as sidebar-filter card ── #}
                 {% if cog_assets %}
                     <aside class="gr-map-panel">
-
-                        {# Ungrouped (surface) variables — no section header #}
-                        {% for asset in ungrouped_cog_assets %}
-                            <button type="button"
-                                    class="gr-map-var-btn {% if asset.variable.slug == active_var_slug %}gr-map-var-btn--active{% endif %}"
-                                    data-variable-slug="{{ asset.variable.slug }}"
-                                    data-variable-name="{{ asset.variable.name }}"
-                                    data-variable-units="{{ asset.variable.units|default:'' }}">
-                                <span class="gr-map-var-dot"></span>
-                                <span class="gr-map-var-name">{{ asset.variable.name }}</span>
-                                {% if asset.variable.units %}
-                                    <span class="gr-map-var-unit gr-mono">{{ asset.variable.units }}</span>
-                                {% endif %}
-                            </button>
-                        {% endfor %}
-
-                        {# Level groups — collapsible #}
-                        {% for group in cog_asset_groups %}
-                            <div class="gr-var-group {% if group.is_active %}is-open{% endif %}" id="map-var-group-{{ forloop.counter }}">
-                                <div class="gr-var-group-header" data-filter-toggle="map-var-group-{{ forloop.counter }}">
-                                    <span>{{ group.label }}</span>
-                                    <i class="bi bi-chevron-down"></i>
-                                </div>
-                                <div class="gr-var-group-body">
-                                    {% for asset in group.assets %}
-                                        <button type="button"
-                                                class="gr-map-var-btn {% if asset.variable.slug == active_var_slug %}gr-map-var-btn--active{% endif %}"
-                                                data-variable-slug="{{ asset.variable.slug }}"
-                                                data-variable-name="{{ asset.variable.name }}"
-                                                data-variable-units="{{ asset.variable.units|default:'' }}">
-                                            <span class="gr-map-var-dot"></span>
-                                            <span class="gr-map-var-name">{{ asset.variable.name }}</span>
-                                            {% if asset.variable.units %}
-                                                <span class="gr-map-var-unit gr-mono">{{ asset.variable.units }}</span>
-                                            {% endif %}
-                                        </button>
-                                    {% endfor %}
-                                </div>
+                        <div class="gr-sidebar-filter is-open" id="map-filter-variables">
+                            <div class="gr-sidebar-filter-header" data-filter-toggle="map-filter-variables">
+                                <span>{% trans "Variable" %}</span>
+                                <i class="bi bi-chevron-down"></i>
                             </div>
-                        {% endfor %}
+                            <div class="gr-sidebar-filter-body">
 
-                        {# Layer mode switcher — only shown if boundary stats are configured #}
-                        {% if boundary_stats_levels %}
-                            <div class="gr-map-panel-divider"></div>
-                            <div class="gr-map-panel-section">
-                                <span class="gr-map-panel-label">{% trans "Layers" %}</span>
-                                <div class="gr-map-layer-switcher" id="grLayerSwitcher">
-                                    <button type="button" class="gr-map-layer-btn is-active" data-mode="raster">
-                                        <i class="bi bi-image"></i> {% trans "Raster" %}
+                                {# Ungrouped (surface) variables — no sub-header #}
+                                {% for asset in ungrouped_cog_assets %}
+                                    <button type="button"
+                                            class="gr-map-var-btn {% if asset.variable.slug == active_var_slug %}gr-map-var-btn--active{% endif %}"
+                                            data-variable-slug="{{ asset.variable.slug }}"
+                                            data-variable-name="{{ asset.variable.name }}"
+                                            data-variable-units="{{ asset.variable.units|default:'' }}">
+                                        <span class="gr-map-var-dot"></span>
+                                        <span class="gr-map-var-name">{{ asset.variable.name }}</span>
+                                        {% if asset.variable.units %}
+                                            <span class="gr-map-var-unit gr-mono">{{ asset.variable.units }}</span>
+                                        {% endif %}
                                     </button>
-                                    <button type="button" class="gr-map-layer-btn" data-mode="boundaries">
-                                        <i class="bi bi-hexagon"></i> {% trans "Boundaries" %}
-                                    </button>
-                                </div>
+                                {% endfor %}
+
+                                {# Level groups — collapsible sub-cards #}
+                                {% for group in cog_asset_groups %}
+                                    <div class="gr-var-group {% if group.is_active %}is-open{% endif %}" id="map-var-group-{{ forloop.counter }}">
+                                        <div class="gr-var-group-header" data-filter-toggle="map-var-group-{{ forloop.counter }}">
+                                            <span>{{ group.label }}</span>
+                                            <i class="bi bi-chevron-down"></i>
+                                        </div>
+                                        <div class="gr-var-group-body">
+                                            {% for asset in group.assets %}
+                                                <button type="button"
+                                                        class="gr-map-var-btn {% if asset.variable.slug == active_var_slug %}gr-map-var-btn--active{% endif %}"
+                                                        data-variable-slug="{{ asset.variable.slug }}"
+                                                        data-variable-name="{{ asset.variable.name }}"
+                                                        data-variable-units="{{ asset.variable.units|default:'' }}">
+                                                    <span class="gr-map-var-dot"></span>
+                                                    <span class="gr-map-var-name">{{ asset.variable.name }}</span>
+                                                    {% if asset.variable.units %}
+                                                        <span class="gr-map-var-unit gr-mono">{{ asset.variable.units }}</span>
+                                                    {% endif %}
+                                                </button>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+
                             </div>
+                        </div>
+                    </aside>
+                {% endif %}
 
-                            <div class="gr-map-panel-section" id="grLevelSelector" style="display:none">
-                                <span class="gr-map-panel-label">{% trans "Admin Level" %}</span>
+                {# ── Map canvas (right) ── #}
+                <div class="gr-map-canvas" id="grMapCanvas">
+                    <div id="grMap"></div>
+
+                    {# Layer mode switcher — floats inside map, only if boundary stats configured #}
+                    {% if boundary_stats_levels %}
+                        <div class="gr-map-layer-controls">
+                            <div class="gr-map-layer-switcher" id="grLayerSwitcher">
+                                <button type="button" class="gr-map-layer-btn is-active" data-mode="raster">
+                                    <i class="bi bi-image"></i> {% trans "Raster" %}
+                                </button>
+                                <button type="button" class="gr-map-layer-btn" data-mode="boundaries">
+                                    <i class="bi bi-hexagon"></i> {% trans "Boundaries" %}
+                                </button>
+                            </div>
+                            <div id="grLevelSelector" style="display:none">
                                 <div class="gr-map-level-pills">
                                     {% for level in boundary_stats_levels %}
                                         <button type="button"
@@ -171,14 +181,8 @@
                                     {% endfor %}
                                 </div>
                             </div>
-                        {% endif %}
-
-                    </aside>
-                {% endif %}
-
-                {# ── Map canvas (right) ── #}
-                <div class="gr-map-canvas" id="grMapCanvas">
-                    <div id="grMap"></div>
+                        </div>
+                    {% endif %}
 
                     {# Basemap selector #}
                     <div class="gr-map-basemap-selector">
@@ -293,7 +297,7 @@
     </section>
 
     {# ── Downloads ── #}
-    {% if downloads_list %}
+    {% if ungrouped_downloads or download_groups %}
         <section class="gr-section">
             <div class="gr-container">
 
@@ -301,41 +305,57 @@
                     <h2 class="gr-section-title">{% trans "Downloads" %}</h2>
                 </div>
 
-                <div class="gr-download-tabs">
-                    <div class="gr-download-tab-list" role="tablist">
-                        {% for group in downloads_list %}
-                            <button type="button"
-                                    class="gr-download-tab-btn {% if group.is_active %}is-active{% endif %}"
-                                    role="tab"
-                                    data-tab="{{ group.variable.slug }}">
-                                {{ group.variable.name }}
-                                {% if group.variable.units %}
-                                    <span class="gr-download-tab-unit gr-mono">{{ group.variable.units }}</span>
+                {# Ungrouped (surface) variables — flat list before any tabs #}
+                {% if ungrouped_downloads %}
+                    <div class="gr-download-assets">
+                        {% for asset in ungrouped_downloads %}
+                            <a href="{{ asset.url }}" class="gr-download-btn"
+                               download target="_blank" rel="noopener">
+                                <i class="bi bi-download"></i>
+                                {{ asset.variable.name }}
+                                <span class="gr-download-format gr-mono">{{ asset.get_format_display }}</span>
+                                {% if asset.file_size %}
+                                    <span class="gr-download-size gr-mono">{{ asset.file_size|filesizeformat }}</span>
                                 {% endif %}
-                            </button>
+                            </a>
                         {% endfor %}
                     </div>
-                    <div class="gr-download-tab-panels">
-                        {% for group in downloads_list %}
-                            <div class="gr-download-tab-panel {% if group.is_active %}is-active{% endif %}"
-                                 id="dl-tab-{{ group.variable.slug }}"
-                                 role="tabpanel">
-                                {% for asset in group.assets %}
-                                    <a href="{{ asset.url }}" class="gr-download-btn"
-                                       download target="_blank" rel="noopener">
-                                        <i class="bi bi-download"></i>
-                                        {{ asset.get_format_display }}
-                                        {% if asset.file_size %}
-                                            <span class="gr-download-size gr-mono">
-                                                {{ asset.file_size|filesizeformat }}
-                                            </span>
-                                        {% endif %}
-                                    </a>
-                                {% endfor %}
-                            </div>
-                        {% endfor %}
+                {% endif %}
+
+                {# Level groups — one tab per level (e.g. 850 hPa, 500 hPa) #}
+                {% if download_groups %}
+                    <div class="gr-download-tabs {% if ungrouped_downloads %}gr-download-tabs--has-flat{% endif %}">
+                        <div class="gr-download-tab-list" role="tablist">
+                            {% for group in download_groups %}
+                                <button type="button"
+                                        class="gr-download-tab-btn {% if group.is_active %}is-active{% endif %}"
+                                        role="tab"
+                                        data-tab="dl-group-{{ forloop.counter }}">
+                                    {{ group.label }}
+                                </button>
+                            {% endfor %}
+                        </div>
+                        <div class="gr-download-tab-panels">
+                            {% for group in download_groups %}
+                                <div class="gr-download-tab-panel {% if group.is_active %}is-active{% endif %}"
+                                     id="dl-group-{{ forloop.counter }}"
+                                     role="tabpanel">
+                                    {% for asset in group.assets %}
+                                        <a href="{{ asset.url }}" class="gr-download-btn"
+                                           download target="_blank" rel="noopener">
+                                            <i class="bi bi-download"></i>
+                                            {{ asset.variable.name }}
+                                            <span class="gr-download-format gr-mono">{{ asset.get_format_display }}</span>
+                                            {% if asset.file_size %}
+                                                <span class="gr-download-size gr-mono">{{ asset.file_size|filesizeformat }}</span>
+                                            {% endif %}
+                                        </a>
+                                    {% endfor %}
+                                </div>
+                            {% endfor %}
+                        </div>
                     </div>
-                </div>
+                {% endif %}
 
             </div>
         </section>
@@ -368,7 +388,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             document.querySelectorAll('.gr-download-tab-btn').forEach(function (btn) {
                 btn.addEventListener('click', function () {
-                    const tab = btn.dataset.tab;
+                    const panelId = btn.dataset.tab;
                     document.querySelectorAll('.gr-download-tab-btn').forEach(function (b) {
                         b.classList.remove('is-active');
                     });
@@ -376,7 +396,7 @@
                         p.classList.remove('is-active');
                     });
                     btn.classList.add('is-active');
-                    document.getElementById('dl-tab-' + tab).classList.add('is-active');
+                    document.getElementById(panelId).classList.add('is-active');
                 });
             });
         });

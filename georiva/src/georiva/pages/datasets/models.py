@@ -384,20 +384,15 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         if not active_group_marked and cog_asset_groups:
             cog_asset_groups[0]['is_active'] = True
 
-        # Group downloadable assets by variable for the downloads tabs
-        downloads_by_variable = {}
-        for asset in downloadable_assets:
-            slug = asset.variable.slug
-            if slug not in downloads_by_variable:
-                downloads_by_variable[slug] = {
-                    'variable': asset.variable,
-                    'assets': [],
-                }
-            downloads_by_variable[slug]['assets'].append(asset)
-
-        downloads_list = list(downloads_by_variable.values())
-        for i, group in enumerate(downloads_list):
-            group['is_active'] = (group['variable'].slug == active_var_slug) or (i == 0 and active_var_slug not in downloads_by_variable)
+        # Group downloadable assets by vertical level for the downloads section
+        ungrouped_downloads, download_groups = _group_assets_by_level(downloadable_assets)
+        active_dl_marked = False
+        for group in download_groups:
+            group['is_active'] = active_var_slug in {a.variable.slug for a in group['assets']}
+            if group['is_active']:
+                active_dl_marked = True
+        if not active_dl_marked and download_groups:
+            download_groups[0]['is_active'] = True
 
         return render(request, 'datasets/item_detail.html', {
             'page': self,
@@ -409,8 +404,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'ungrouped_cog_assets': ungrouped_cog_assets,
             'cog_asset_groups': cog_asset_groups,
             'map_layers': map_layers,
-            'downloads_by_variable': downloads_by_variable,
-            'downloads_list': downloads_list,
+            'ungrouped_downloads': ungrouped_downloads,
+            'download_groups': download_groups,
             'prev_item': prev_item,
             'next_item': next_item,
             'collection_url': f"{self.url}{catalog.slug}/{collection.slug}/",
