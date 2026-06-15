@@ -36,6 +36,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ("home", "0003_homepage_featured_heading_and_more"),
         ("datasets", "0001_initial"),
+        ("wagtailsearch", "0010_add_text_fields"),
     ]
     
     operations = [
