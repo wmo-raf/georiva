@@ -1,29 +1,31 @@
 from django.urls import path, reverse_lazy
 from wagtail import hooks
-from wagtail.admin.menu import MenuItem
+from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 
 from .panels import IngestionActivityPanel
 
 
 @hooks.register("register_admin_menu_item")
-def register_ingestion_activity_menu():
+def register_monitoring_menu():
     from django.utils.translation import gettext as _
-    return MenuItem(
-        _("Ingestion Activity"),
-        reverse_lazy("ingestion_activity_feed"),
-        icon_name="history",
+    return SubmenuMenuItem(
+        _("Monitoring"),
+        Menu(items=[
+            MenuItem(
+                _("Ingestion Activity"),
+                reverse_lazy("ingestion_activity_feed"),
+                icon_name="history",
+                order=10,
+            ),
+            MenuItem(
+                _("Acquisition Feed"),
+                reverse_lazy("acquisition_feed"),
+                icon_name="download",
+                order=20,
+            ),
+        ]),
+        icon_name="view",
         order=840,
-    )
-
-
-@hooks.register("register_admin_menu_item")
-def register_acquisition_feed_menu():
-    from django.utils.translation import gettext as _
-    return MenuItem(
-        _("Acquisition Feed"),
-        reverse_lazy("acquisition_feed"),
-        icon_name="download",
-        order=841,
     )
 
 
