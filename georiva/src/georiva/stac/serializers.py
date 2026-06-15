@@ -164,8 +164,18 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         return obj.bounds
     
     def get_properties(self, obj):
+        variable = self._get_variable()
+        variable_name = variable.name if variable else obj.collection.name
+        time_resolution = obj.collection.time_resolution or ''
+        time_label = obj.display_time(time_resolution)
+        if obj.is_forecast:
+            ref_label = obj.reference_time.strftime('%d %b %Y %H:%M')
+            title = f"{variable_name} (Ref {ref_label}) (Valid {time_label})"
+        else:
+            title = f"{variable_name} ({time_label})"
         props = {
             "datetime": obj.time.isoformat() if obj.time else None,
+            "title": title,
             "created": obj.created.isoformat() if obj.created else None,
             "updated": obj.modified.isoformat() if obj.modified else None,
         }
@@ -345,7 +355,7 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
             summaries["forecast:is_forecast"] = True
             if collection.forecast_horizon_hours:
                 summaries["forecast:horizon_hours"] = collection.forecast_horizon_hours
-            summaries["forecast:retain_past"] = collection.retain_past_forecasts
+
         
         return summaries
     
