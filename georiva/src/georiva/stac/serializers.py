@@ -18,7 +18,10 @@ If it has 1 variable, it appears as 1 STAC Collection.
 Implements STAC Spec v1.0.0
 """
 
+import calendar
+from datetime import timedelta
 from typing import Optional
+from urllib.parse import urlencode
 
 from rest_framework import serializers
 
@@ -173,24 +176,35 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             title = f"{variable_name} (Ref {ref_label}) (Valid {time_label})"
         else:
             title = f"{variable_name} ({time_label})"
+        description = (
+            (variable.description if variable and variable.description else None)
+            or (obj.collection.description or None)
+        )
+        start_dt, end_dt = self._get_time_range(obj)
+        created = obj.created.isoformat() if obj.created else None
         props = {
             "datetime": obj.time.isoformat() if obj.time else None,
             "title": title,
-            "created": obj.created.isoformat() if obj.created else None,
+            "description": description,
+            "start_datetime": start_dt,
+            "end_datetime": end_dt,
+            "created": created,
             "updated": obj.modified.isoformat() if obj.modified else None,
+            "published": created,
         }
-        
+
         # Forecast extension
         if obj.is_forecast:
             props["forecast:reference_datetime"] = obj.reference_time.isoformat()
             if obj.horizon_hours is not None:
                 props["forecast:horizon"] = f"PT{int(obj.horizon_hours)}H"
-        
+
         # Projection extension
         if obj.width and obj.height:
             props["proj:shape"] = [obj.height, obj.width]
         if obj.crs:
             props["proj:epsg"] = self._parse_epsg(obj.crs)
+            props["proj:wkt2"] = self._crs_to_wkt2(obj.crs)
         if obj.resolution_x and obj.resolution_y:
             props["proj:transform"] = self._build_transform(obj)
         
@@ -200,6 +214,61 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         
         return {k: v for k, v in props.items() if v is not None}
     
+    def _get_time_range(self, obj):
+        """Return (start_datetime, end_datetime) ISO strings based on time_resolution, or (None, None)."""
+        t = obj.time
+        TR = obj.collection.TimeResolution
+        res = obj.collection.time_resolution
+
+        def day_start(dt):
+            return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        def day_end(dt):
+            return dt.replace(hour=23, minute=59, second=59, microsecond=0)
+
+        if res == TR.DAILY:
+            return day_start(t).isoformat(), day_end(t).isoformat()
+
+        if res == TR.PENTADAL:
+            start = day_start(t)
+            return start.isoformat(), day_end(start + timedelta(days=4)).isoformat()
+
+        if res == TR.DEKADAL:
+            day = t.day
+            if day <= 10:
+                start = t.replace(day=1)
+                end = t.replace(day=10)
+            elif day <= 20:
+                start = t.replace(day=11)
+                end = t.replace(day=20)
+            else:
+                start = t.replace(day=21)
+                last = calendar.monthrange(t.year, t.month)[1]
+                end = t.replace(day=last)
+            return day_start(start).isoformat(), day_end(end).isoformat()
+
+        if res in (TR.MONTHLY, TR.CLIMATOLOGY):
+            start = t.replace(day=1)
+            last = calendar.monthrange(t.year, t.month)[1]
+            end = t.replace(day=last)
+            return day_start(start).isoformat(), day_end(end).isoformat()
+
+        if res == TR.SEASONAL:
+            start = day_start(t.replace(day=1))
+            end_month = t.month + 2
+            end_year = t.year + (end_month - 1) // 12
+            end_month = (end_month - 1) % 12 + 1
+            last = calendar.monthrange(end_year, end_month)[1]
+            end = day_end(t.replace(year=end_year, month=end_month, day=last))
+            return start.isoformat(), end.isoformat()
+
+        if res == TR.ANNUAL:
+            start = t.replace(month=1, day=1)
+            end = t.replace(month=12, day=31)
+            return day_start(start).isoformat(), day_end(end).isoformat()
+
+        return None, None
+
     def _parse_epsg(self, crs: str) -> Optional[int]:
         if crs and crs.upper().startswith('EPSG:'):
             try:
@@ -207,13 +276,20 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             except (ValueError, IndexError):
                 pass
         return None
-    
+
+    def _crs_to_wkt2(self, crs: str) -> Optional[str]:
+        try:
+            from rasterio.crs import CRS
+            return CRS.from_user_input(crs).to_wkt()
+        except Exception:
+            return None
+
     def _build_transform(self, obj) -> Optional[list]:
         if obj.bounds and obj.resolution_x:
             west, south, east, north = obj.bounds
             return [obj.resolution_x, 0, west, 0, -abs(obj.resolution_y), north]
         return None
-    
+
     def get_links(self, obj):
         base_url = self._get_base_url()
         variable = self._get_variable()
@@ -238,16 +314,39 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         """Only include assets for the context variable."""
         variable = self._get_variable()
         assets = {}
-        
+
         for asset in obj.assets.all():
-            # Filter to the specific variable if provided
             if variable and asset.variable_id != variable.id:
                 continue
-            
             key = f"{asset.variable.slug}_{asset.format}" if asset.format else asset.variable.slug
             assets[key] = STACAssetSerializer(asset, context=self.context).data
-        
+
+        # Thumbnail from Titiler
+        if variable:
+            request = self.context.get('request')
+            thumb_href = self._build_thumbnail_href(obj, variable, request)
+            if thumb_href:
+                assets["thumbnail"] = {
+                    "href": thumb_href,
+                    "type": "image/webp",
+                    "title": "Thumbnail",
+                    "roles": ["thumbnail"],
+                }
+
         return assets
+
+    def _build_thumbnail_href(self, obj, variable, request) -> Optional[str]:
+        params = {"time": obj.time_iso}
+        if obj.reference_time:
+            params["reftime"] = obj.reference_time_iso
+        path = (
+            f"/titiler/{obj.collection.catalog.slug}"
+            f"/{obj.collection.slug}/{variable.slug}/preview.webp"
+            f"?{urlencode(params)}"
+        )
+        if request:
+            return request.build_absolute_uri(path)
+        return path
     
     def get_collection(self, obj):
         variable = self._get_variable()
