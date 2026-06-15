@@ -24,6 +24,50 @@
 
 /* ── Variable radio selector ── */
 
+.gr-var-group {
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    margin-bottom: 0.4rem;
+    overflow: hidden;
+}
+
+.gr-var-group-header {
+    align-items: center;
+    background: var(--gr-light-1);
+    cursor: pointer;
+    display: flex;
+    font-size: 0.78rem;
+    font-weight: 600;
+    justify-content: space-between;
+    padding: 0.45rem 0.75rem;
+    user-select: none;
+    color: var(--gr-text-1);
+    transition: background var(--gr-dur) var(--gr-ease);
+}
+
+.gr-var-group-header:hover {
+    background: var(--gr-light-2);
+}
+
+.gr-var-group-header i {
+    color: var(--gr-text-3);
+    font-size: 0.7rem;
+    transition: transform var(--gr-dur) var(--gr-ease);
+}
+
+.gr-var-group.is-open .gr-var-group-header i {
+    transform: rotate(180deg);
+}
+
+.gr-var-group-body {
+    display: none;
+    padding: 0.25rem 0;
+}
+
+.gr-var-group.is-open .gr-var-group-body {
+    display: block;
+}
+
 .gr-items-var-radio {
     align-items: center;
     border: 1px solid transparent;
