@@ -8,15 +8,19 @@
 }
 
 .gr-map-shell {
-    max-width: 1180px;
+    display: flex;
+    gap: 1rem;
+    max-width: 1400px;
     margin: 0 auto;
-    height: 620px;
+    align-items: flex-start;
 }
 
 .gr-map-canvas {
-    position: relative;
-    width: 100%;
-    height: 100%;
+    position: sticky;
+    top: 80px;
+    flex: 1;
+    min-width: 0;
+    height: 620px;
     overflow: hidden;
     border-radius: var(--gr-radius-lg);
     border: 1px solid var(--gr-light-border);
@@ -32,7 +36,73 @@
 }
 
 /* ==========================================================================
-   Variable Sidebar
+   Map Panel (light, side-by-side with map)
+   ========================================================================== */
+
+.gr-map-panel {
+    width: 240px;
+    flex-shrink: 0;
+}
+
+/* Variable buttons inside the light panel card inherit sidebar-filter body;
+   override the dark defaults from gr-map-var-btn to match the light card. */
+.gr-map-panel .gr-map-var-btn {
+    background: transparent;
+    border-color: transparent;
+    color: var(--gr-text-1);
+    border-radius: var(--gr-radius);
+    font-size: 0.82rem;
+}
+
+.gr-map-panel .gr-map-var-btn:hover {
+    background: var(--gr-light-1);
+    border-color: var(--gr-light-border);
+    color: var(--gr-text-1);
+}
+
+.gr-map-panel .gr-map-var-btn--active {
+    background: transparent;
+    border-color: transparent;
+    color: var(--gr-accent);
+    font-weight: 600;
+}
+
+.gr-map-panel .gr-map-var-dot {
+    background: var(--gr-text-3);
+}
+
+.gr-map-panel .gr-map-var-btn--active .gr-map-var-dot {
+    background: var(--gr-accent);
+}
+
+.gr-map-panel .gr-map-var-unit {
+    color: var(--gr-text-3);
+}
+
+/* ==========================================================================
+   Layer Controls (floating dark card inside map canvas)
+   ========================================================================== */
+
+.gr-map-layer-controls {
+    position: absolute;
+    top: 1rem;
+    left: 1rem;
+    background: rgba(8, 13, 24, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    z-index: 30;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    min-width: 130px;
+}
+
+/* ==========================================================================
+   Variable Sidebar (floating, kept for other uses)
    ========================================================================== */
 
 .gr-map-sidebar {
@@ -349,7 +419,7 @@
 .gr-map-coords {
     position: absolute;
     bottom: 2rem;
-    right: 0.75rem;
+    right: 3rem;
     font-family: var(--gr-font-mono);
     font-size: 0.62rem;
     color: rgba(255, 255, 255, 0.5);
@@ -651,7 +721,20 @@
 
 @media (max-width: 768px) {
     .gr-map-shell {
-        height: 520px;
+        flex-direction: column;
+        height: auto;
+    }
+
+    .gr-map-panel {
+        width: 100%;
+        overflow-y: visible;
+    }
+
+    .gr-map-canvas {
+        position: relative;
+        top: 0;
+        height: 420px;
+        border-radius: var(--gr-radius-lg);
     }
 
     .gr-map-sidebar {
@@ -668,8 +751,8 @@
 }
 
 @media (max-width: 480px) {
-    .gr-map-shell {
-        height: 480px;
+    .gr-map-canvas {
+        height: 360px;
     }
 
     .gr-map-sidebar {
