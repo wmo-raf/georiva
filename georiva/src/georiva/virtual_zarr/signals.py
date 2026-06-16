@@ -20,24 +20,32 @@ def mark_manifest_stale_on_cog_save(sender, instance: Asset, created: bool, **kw
     """
     if instance.format != Asset.Format.COG:
         return
-    
+
     try:
-        manifest = VirtualZarrManifest.objects.get(
+        manifest, created = VirtualZarrManifest.objects.get_or_create(
             variable=instance.variable,
-            status=VirtualZarrManifest.Status.READY,
+            defaults={
+                "manifest_path": VirtualZarrManifest.make_manifest_path(instance.variable),
+            },
         )
-        manifest.mark_stale()
         col = instance.variable.collection
-        logger.debug(
-            "Marked manifest stale: %s/%s/%s",
-            col.catalog.slug,
-            col.slug,
-            instance.variable.slug,
-        )
-    except VirtualZarrManifest.DoesNotExist:
-        pass
+        if created:
+            logger.debug(
+                "Created manifest record (PENDING): %s/%s/%s",
+                col.catalog.slug,
+                col.slug,
+                instance.variable.slug,
+            )
+        else:
+            manifest.mark_stale()
+            logger.debug(
+                "Marked manifest stale: %s/%s/%s",
+                col.catalog.slug,
+                col.slug,
+                instance.variable.slug,
+            )
     except Exception as exc:
         logger.warning(
-            "Failed to mark manifest stale for asset %s: %s",
+            "Failed to update manifest for asset %s: %s",
             instance.pk, exc,
         )
