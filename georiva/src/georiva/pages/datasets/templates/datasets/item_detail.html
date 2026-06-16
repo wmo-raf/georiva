@@ -209,19 +209,26 @@
 
                     {# Legend #}
                     <div class="gr-map-legend" id="grLegend" style="display:none">
-                        <div class="gr-map-legend-title" id="grLegendTitle">—</div>
-                        <div class="gr-map-legend-scale" id="grLegendScale"></div>
-                        <div class="gr-map-legend-labels">
-                            <span id="grLegendMin">0</span>
-                            <span id="grLegendMax">100</span>
+                        <div class="gr-map-legend-header" id="grLegendHeader">
+                            <div class="gr-map-legend-title" id="grLegendTitle">—</div>
+                            <button class="gr-map-legend-toggle" id="grLegendToggle" type="button" aria-label="Toggle legend">
+                                <i class="bi bi-chevron-up"></i>
+                            </button>
                         </div>
-                        <div class="gr-map-legend-units" id="grLegendUnits"></div>
-                        <div class="gr-map-legend-opacity">
-                            <span>Opacity</span>
-                            <span id="grOpacityVal">100%</span>
+                        <div class="gr-map-legend-body" id="grLegendBody">
+                            <div class="gr-map-legend-scale" id="grLegendScale"></div>
+                            <div class="gr-map-legend-labels">
+                                <span id="grLegendMin">0</span>
+                                <span id="grLegendMax">100</span>
+                            </div>
+                            <div class="gr-map-legend-units" id="grLegendUnits"></div>
+                            <div class="gr-map-legend-opacity">
+                                <span>Opacity</span>
+                                <span id="grOpacityVal">100%</span>
+                            </div>
+                            <input type="range" class="gr-map-opacity-slider" id="grOpacitySlider"
+                                   min="0" max="100" value="100">
                         </div>
-                        <input type="range" class="gr-map-opacity-slider" id="grOpacitySlider"
-                               min="0" max="100" value="100">
                     </div>
 
                     {# Loading #}
@@ -237,6 +244,31 @@
             </div>
         </div>
     </div>
+
+    {# ── Timeseries Analysis Panel ── #}
+    <section class="gr-timeseries-panel" id="grTimeseriesPanel" style="display:none">
+        <div class="gr-container">
+            <div class="gr-timeseries-header">
+                <div class="gr-timeseries-title">
+                    <i class="bi bi-graph-up"></i>
+                    <span id="grTsVarName">—</span>
+                    <span class="gr-timeseries-coords" id="grTsCoords"></span>
+                </div>
+                <button class="gr-timeseries-close" id="grTsClose" type="button" aria-label="Close">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="gr-timeseries-loading" id="grTsLoading" style="display:none">
+                <div class="gr-map-spinner"></div>
+                <span>Loading timeseries…</span>
+            </div>
+            <div id="grTsChart" class="gr-timeseries-chart"></div>
+            <div class="gr-timeseries-error" id="grTsError" style="display:none">
+                <i class="bi bi-exclamation-triangle"></i>
+                <span id="grTsErrorMsg">Failed to load timeseries data.</span>
+            </div>
+        </div>
+    </section>
 
     {# ── Metadata ── #}
     <section class="gr-section gr-section--alt">
@@ -380,6 +412,7 @@
         }
     </script>
 
+    <script src="{% static 'js/vendor/echarts.min.js' %}"></script>
     <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>

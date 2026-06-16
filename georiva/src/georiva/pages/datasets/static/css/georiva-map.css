@@ -308,11 +308,52 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
+.gr-map-legend-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    cursor: pointer;
+    margin-bottom: 0.6rem;
+}
+
+.gr-map-legend.is-collapsed .gr-map-legend-header {
+    margin-bottom: 0;
+}
+
 .gr-map-legend-title {
     font-size: 0.75rem;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 0.6rem;
+}
+
+.gr-map-legend-toggle {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    font-size: 0.6rem;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    transition: color 180ms ease, transform 180ms ease;
+}
+
+.gr-map-legend-toggle:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.gr-map-legend.is-collapsed .gr-map-legend-toggle i {
+    display: inline-block;
+    transform: rotate(180deg);
+}
+
+.gr-map-legend-body {
+    display: block;
+}
+
+.gr-map-legend.is-collapsed .gr-map-legend-body {
+    display: none;
 }
 
 .gr-map-legend-scale {
@@ -504,6 +545,14 @@
     background: rgba(255, 255, 255, 0.88);
     border-color: rgba(0, 0, 0, 0.08);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.gr-map-canvas--light .gr-map-legend-toggle {
+    color: rgba(0, 0, 0, 0.3);
+}
+
+.gr-map-canvas--light .gr-map-legend-toggle:hover {
+    color: rgba(0, 0, 0, 0.7);
 }
 
 .gr-map-canvas--light .gr-map-legend-title {
