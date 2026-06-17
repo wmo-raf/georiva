@@ -22,29 +22,32 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # [[plugins]]
-# name = "FTP Plugin"
-# git  = "https://github.com/wmo-raf/adl-ftp-plugin.git"
-# tag  = "2.1.0"
+# name = "GeoRiva Copernicus Data Store Plugin"
+# git  = "https://github.com/wmo-raf/georiva-cds-plugin.git"
+# tag  = "1.0.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LOCAL DEVELOPMENT (Flow B) — test a plugin from source against this Georiva stack
+# LOCAL DEVELOPMENT — test a plugin from source against this GeoRiva stack
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. In docker-compose.override.yml, bind-mount your plugin source into the container:
 #
 #      services:
 #        georiva:
 #          volumes:
-#            - ../adl-my-plugin/plugins/adl_my_plugin:/adl/dev-plugins/adl_my_plugin
-#        adl_celery_worker:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#        georiva-celery-default-worker:
 #          volumes:
-#            - ../adl-my-plugin/plugins/adl_my_plugin:/adl/dev-plugins/adl_my_plugin
-#        adl_celery_beat:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#        georiva-celery-ingestion-worker:
 #          volumes:
-#            - ../adl-my-plugin/plugins/adl_my_plugin:/adl/dev-plugins/adl_my_plugin
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#        georiva-celery-beat:
+#          volumes:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
 #
 # 2. Uncomment and edit the section below — folder must be the container-side path:
 #
 # [[plugins]]
 # name    = "My Plugin (dev)"
-# folder  = "/adl/dev-plugins/adl_my_plugin"
+# folder  = "/georiva/dev-plugins/georiva_my_plugin"
 # dev     = true     # pip install -e so edits to source are reflected immediately
