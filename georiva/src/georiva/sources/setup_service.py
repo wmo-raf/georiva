@@ -250,12 +250,28 @@ class SourceSetupService:
     
     @staticmethod
     def _get_or_create_unit(symbol: str):
+        from django.db import IntegrityError
+
         from georiva.core.models import Unit
-        
-        unit, created = Unit.objects.get_or_create(
-            symbol=symbol,
-            defaults={"name": symbol},
-        )
-        if created:
+
+        # Case-insensitive symbol match covers plugins that use e.g. "Dimensionless"
+        # while the DB stores "dimensionless".
+        unit = Unit.objects.filter(symbol__iexact=symbol).first()
+        if unit:
+            return unit
+
+        # Some plugins pass the unit's display name rather than its pint symbol.
+        unit = Unit.objects.filter(name__iexact=symbol).first()
+        if unit:
+            return unit
+
+        try:
+            unit = Unit.objects.create(symbol=symbol, name=symbol)
             logger.info("Created Unit: %s", symbol)
-        return unit
+            return unit
+        except IntegrityError:
+            # Concurrent ingestion worker created the same unit; re-fetch it.
+            return (
+                Unit.objects.filter(symbol__iexact=symbol).first()
+                or Unit.objects.filter(name__iexact=symbol).first()
+            )

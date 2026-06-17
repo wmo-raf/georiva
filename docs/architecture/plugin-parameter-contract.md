@@ -535,6 +535,8 @@ Collections run **sequentially within one task** to keep cross-collection file d
 
 **App registration**
 
-- [ ] Add to `INSTALLED_APPS` in `settings/base.py` (built-in plugins) or via `GEORIVA_PLUGIN_GIT_REPOS` (external
-  plugins)
+- [ ] Register the plugin — choose one:
+    - **In-tree / built-in**: add the app label to `INSTALLED_APPS` in `settings/base.py`
+    - **External (production)**: declare in `plugins.toml` and rebuild the image; settings auto-discovers it from `GEORIVA_PLUGIN_DIRS`
+    - **Local dev**: bind-mount source into the container and declare in `plugins.toml` with `dev = true`; see [`docs/plugins/installation.md`](../plugins/installation.md#local-development)
 - [ ] Run `makemigrations` and `migrate`

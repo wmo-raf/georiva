@@ -1,0 +1,53 @@
+# GeoRiva Plugins Manifest
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy this file to plugins.toml and uncomment the plugins you want to install.
+# Then run `docker compose build` to bake them into the image.
+#
+# Each plugin is declared with a [[plugins]] header followed by its fields.
+# No indentation is required. Comments start with #.
+#
+# Fields (use exactly one of git / url / folder per section):
+#   git     = "..."   GitHub or git repository URL       (tag appended as #tag when set)
+#   url     = "..."   Direct .tar.gz download URL
+#   folder  = "..."   Absolute path INSIDE the container to a local plugin directory
+#   tag     = "..."   Git release tag, e.g. "1.2.0"    (git only; omit for latest branch)
+#   hash    = "..."   Optional SHA-1 hash for integrity verification (git and url)
+#   name    = "..."   Optional display label shown in installation logs
+#   enabled = false   Set to false to skip without deleting the entry (default: true)
+#   dev     = true    Editable install (pip install -e) — folder only; use for local dev hot-reload
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Check https://github.com/wmo-raf for the list of available GeoRiva plugins and
+# their latest release tags before editing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [[plugins]]
+# name = "GeoRiva Copernicus Data Store Plugin"
+# git  = "https://github.com/wmo-raf/georiva-cds-plugin.git"
+# tag  = "1.0.0"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOCAL DEVELOPMENT — test a plugin from source against this GeoRiva stack
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. In docker-compose.override.yml, bind-mount your plugin source into the container:
+#
+#      services:
+#        georiva:
+#          volumes:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#        georiva-celery-default-worker:
+#          volumes:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#        georiva-celery-ingestion-worker:
+#          volumes:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#        georiva-celery-beat:
+#          volumes:
+#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#
+# 2. Uncomment and edit the section below — folder must be the container-side path:
+#
+# [[plugins]]
+# name    = "My Plugin (dev)"
+# folder  = "/georiva/dev-plugins/georiva_my_plugin"
+# dev     = true     # pip install -e so edits to source are reflected immediately

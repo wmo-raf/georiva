@@ -100,7 +100,6 @@ Environment variables in `.env` (see `.env.sample` for all options):
 - `GEORIVA_LOG_LEVEL` — Logging level
 - `AWS_*` / `MINIO_*` — S3/MinIO connection
 - `GEORIVA_CELERY_*_WORKER_CONCURRENCY` — Worker scaling
-- `GEORIVA_PLUGIN_GIT_REPOS` — External plugin Git URLs
 
 Settings split: `config/settings/base.py` (shared) → `dev.py` / `production.py` (overrides).
 

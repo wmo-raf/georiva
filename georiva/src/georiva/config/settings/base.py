@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 
 import dj_database_url
 import environ
@@ -84,6 +86,35 @@ INSTALLED_APPS = [
     "georiva.pages.home",
     "georiva.pages.datasets",
 ]
+
+GEORIVA_PLUGIN_DIRS = env.list("GEORIVA_PLUGIN_DIRS", default=["/georiva/plugins"])
+
+# Automatically include the dev-plugins directory when it exists (bind-mounted in dev).
+# Mirrors the GEORIVA_DEV_PLUGIN_DIR used by startup_plugin_setup in utils.sh.
+_dev_plugin_dir = os.environ.get("GEORIVA_DEV_PLUGIN_DIR", "/georiva/dev-plugins")
+if Path(_dev_plugin_dir).exists() and _dev_plugin_dir not in GEORIVA_PLUGIN_DIRS:
+    GEORIVA_PLUGIN_DIRS.append(_dev_plugin_dir)
+
+GEORIVA_PLUGIN_FOLDERS = []
+for plugin_dir in GEORIVA_PLUGIN_DIRS:
+    plugin_dir = Path(plugin_dir)
+    if plugin_dir.exists():
+        plugin_folders = [file for file in plugin_dir.iterdir() if file.is_dir()]
+        GEORIVA_PLUGIN_FOLDERS.extend(plugin_folders)
+
+GEORIVA_PLUGIN_NAMES = [d.name for d in GEORIVA_PLUGIN_FOLDERS]
+
+# Make plugin packages importable even when not pip-installed (e.g. dev bind-mounts).
+# Supports both flat layout (package at plugin root) and src layout (package under src/).
+for _plugin_folder in GEORIVA_PLUGIN_FOLDERS:
+    _src = _plugin_folder / "src"
+    _path = str(_src) if _src.is_dir() else str(_plugin_folder.parent)
+    if _path not in sys.path:
+        sys.path.append(_path)
+
+if GEORIVA_PLUGIN_NAMES:
+    print(f"Loaded GeoRiva plugins: {','.join(GEORIVA_PLUGIN_NAMES)}")
+    INSTALLED_APPS.extend(GEORIVA_PLUGIN_NAMES)
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",

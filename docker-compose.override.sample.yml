@@ -1,0 +1,28 @@
+x-backend-variables: &backend-variables
+  ENV_KEY: value
+
+services:
+  georiva:
+    environment:
+      <<: *backend-variables
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+
+  georiva-celery-default-worker:
+    environment:
+      <<: *backend-variables
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  georiva-celery-ingestion-worker:
+    environment:
+      <<: *backend-variables
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  georiva-celery-beat:
+    environment:
+      <<: *backend-variables
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
