@@ -251,11 +251,18 @@ class SourceSetupService:
     @staticmethod
     def _get_or_create_unit(symbol: str):
         from georiva.core.models import Unit
-        
-        unit, created = Unit.objects.get_or_create(
-            symbol=symbol,
-            defaults={"name": symbol},
-        )
-        if created:
-            logger.info("Created Unit: %s", symbol)
+
+        # Case-insensitive symbol match covers plugins that use e.g. "Dimensionless"
+        # while the DB stores "dimensionless".
+        unit = Unit.objects.filter(symbol__iexact=symbol).first()
+        if unit:
+            return unit
+
+        # Some plugins pass the unit's display name rather than its pint symbol.
+        unit = Unit.objects.filter(name__iexact=symbol).first()
+        if unit:
+            return unit
+
+        unit = Unit.objects.create(symbol=symbol, name=symbol)
+        logger.info("Created Unit: %s", symbol)
         return unit
