@@ -167,8 +167,7 @@ georiva/src/georiva/      # Main Django/Wagtail application
 ├── analysis/             # Time-series + zonal-statistics modules
 ├── virtual_zarr/         # Per-Variable virtual Zarr (kerchunk) manifests
 ├── visualization/        # Wagtail admin hooks for map/tile config
-├── pages/                # Wagtail CMS pages
-└── sample_plugins/       # Example source plugins (CHIRPS, ECMWF Open Data)
+└── pages/                # Wagtail CMS pages
 
 titiler-app/              # Custom Titiler tile server (FastAPI)
 source-plugin-boilerplate/# Cookiecutter template for new source plugins

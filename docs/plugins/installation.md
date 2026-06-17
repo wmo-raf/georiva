@@ -53,7 +53,7 @@ cp plugins.toml.sample plugins.toml
 # From a GitHub release tag (recommended for production)
 [[plugins]]
 name = "GeoRiva CDS Plugin"
-git  = "https://github.com/wmo-raf/georiva-cds-plugin.git"
+git  = "https://github.com/wmo-raf/georiva-source-cds.git"
 tag  = "1.2.0"
 
 # From any Git repository (latest default branch)
@@ -207,8 +207,9 @@ The generated plugin is a standard Django/Wagtail app. The key files to implemen
 | `migrations/` | Django migrations for your models |
 
 See the [Source Plugin Contract](../architecture/plugin-parameter-contract.md) for the full component
-specification. Reference implementations: `georiva/src/georiva/sample_plugins/chirps/` and
-`georiva/src/georiva/sample_plugins/ecmwf_opendata_source/`.
+specification. Reference implementations: the standalone
+[`georiva-source-chirps`](https://github.com/wmo-raf/georiva-source-chirps) and
+[`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-ecmwf) plugins.
 
 ### Plugin package layout
 
