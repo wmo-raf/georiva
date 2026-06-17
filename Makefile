@@ -5,6 +5,12 @@
 PROD = -f docker-compose.yml
 DEV  = -f docker-compose.yml -f docker-compose.dev.yml
 
+# Optional override: make <target> OV=1
+# Includes docker-compose.override.yml in DEV commands
+ifdef OV
+DEV += -f docker-compose.override.yml
+endif
+
 DC     = docker compose $(PROD)
 DEV_DC = docker compose $(DEV)
 
@@ -22,9 +28,9 @@ LOG_ARGS ?= --tail 100
 	app-logs worker-logs beat-logs \
 	shell worker-shell beat-shell \
 	migrate makemigrations \
-	dev-up dev-down dev-stop dev-restart dev-build dev-ps dev-logs \
-	dev-app-logs dev-worker-logs dev-beat-logs \
-	dev-shell dev-worker-shell dev-beat-shell \
+	dev-up dev-up-d dev-down dev-stop dev-restart dev-build dev-ps dev-config dev-logs \
+	dev-app-logs dev-worker-default-logs dev-worker-ingestion-logs dev-beat-logs dev-titiler-logs \
+	dev-shell dev-worker-default-shell dev-worker-ingestion-shell dev-beat-shell dev-titiler-shell \
 	dev-migrate dev-makemigrations dev-test
 
 # ======================
@@ -71,7 +77,7 @@ beat-shell:
 	$(DC) exec $(BEAT) bash
 
 migrate:
-	$(DC) exec $(APP) georivamigrate
+	$(DC) exec $(APP) georiva migrate
 
 makemigrations:
 	$(DC) exec $(APP) georiva makemigrations
@@ -147,6 +153,7 @@ dev-makemigrations:
 # Run tests bypassing PgBouncer (which cannot CREATE DATABASE).
 # Reads DB credentials from .env and connects directly to georiva-db.
 # Usage: make dev-test TEST_ARGS="georiva.ingestion.tests -v 2"
+# Usage with override: make dev-test OV=1 TEST_ARGS="georiva.ingestion.tests -v 2"
 dev-test:
 	@export $$(grep -v '^[[:space:]]*#' .env | grep -v '^[[:space:]]*$$' | grep -v '^UID=' | xargs) && \
 	$(DEV_DC) exec \
