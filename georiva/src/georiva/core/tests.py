@@ -230,3 +230,73 @@ class CatalogIndexTests(TestCase):
         
         page2 = self.client.get(self.url, {"p": 2})
         self.assertEqual(len(page2.context["catalog_panels"]), 5)
+
+
+class DashboardSummaryTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_dash", "dash@test.com", "pw")
+        self.client.force_login(self.user)
+
+    def _request(self):
+        from django.test import RequestFactory
+        request = RequestFactory().get("/admin/")
+        request.user = self.user
+        return request
+
+    def test_summary_item_counts(self):
+        from django.conf import settings
+        from georiva.core.summary_items import (
+            CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem,
+        )
+
+        cat = Catalog.objects.create(name="A", slug="a", file_format="grib2")
+        Catalog.objects.create(name="B", slug="b", file_format="grib2")
+        Collection.objects.create(catalog=cat, name="c1", slug="c1")
+
+        request = self._request()
+        self.assertEqual(CatalogSummaryItem(request).get_count(), 2)
+        self.assertEqual(CollectionSummaryItem(request).get_count(), 1)
+        self.assertEqual(
+            PluginSummaryItem(request).get_count(), len(settings.GEORIVA_PLUGIN_NAMES)
+        )
+
+    def test_dashboard_renders_three_cards(self):
+        response = self.client.get(reverse("wagtailadmin_home"))
+        self.assertEqual(response.status_code, 200)
+        # Substrings match both singular/plural label forms (the count drives
+        # which is shown, and the test environment may have exactly 1 plugin).
+        self.assertContains(response, "Catalog")
+        self.assertContains(response, "Collection")
+        self.assertContains(response, "Plugin")
+        # Catalog/Collection cards link to the accordion; Plugins card to its page.
+        self.assertContains(response, reverse("catalog:index"))
+        self.assertContains(response, reverse("plugin_list"))
+
+
+class PluginListTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_plugins", "pl@test.com", "pw")
+        self.client.force_login(self.user)
+        self.url = reverse("plugin_list")
+
+    def test_page_renders(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Plugins")
+
+    def test_metadata_for_installed_package(self):
+        # Use a package guaranteed to be installed to exercise the helper
+        # independently of which plugins happen to be loaded.
+        from georiva.core.plugins import get_plugin_metadata
+
+        meta = get_plugin_metadata("wagtail")
+        self.assertTrue(meta["available"])
+        self.assertTrue(meta["name"])
+        self.assertTrue(meta["version"])
+
+    def test_metadata_for_missing_package(self):
+        from georiva.core.plugins import get_plugin_metadata
+
+        meta = get_plugin_metadata("definitely_not_a_real_package_xyz")
+        self.assertFalse(meta["available"])
+        self.assertEqual(meta["name"], "definitely_not_a_real_package_xyz")

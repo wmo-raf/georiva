@@ -3,7 +3,8 @@ from django.urls import path
 from wagtail import hooks
 from wagtail.snippets.models import register_snippet
 
-from .views import collection_items_list
+from .summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
+from .views import collection_items_list, plugin_list
 from .viewsets import BoundaryChooserViewSet, admin_viewsets
 from .viewsets import ItemViewSet, AssetViewSet
 
@@ -12,6 +13,7 @@ from .viewsets import ItemViewSet, AssetViewSet
 def urlconf_georivacore():
     return [
         path('collection/<int:collection_pk>/items/', collection_items_list, name="collection_items_list"),
+        path('plugins/', plugin_list, name="plugin_list"),
     ]
 
 
@@ -40,7 +42,11 @@ def construct_homepage_summary_items(request, summary_items):
     
     summary_items[:] = [item for item in summary_items if item.__class__.__name__ not in hidden_summary_items]
     
-    summary_items[:] = []
+    summary_items[:] = [
+        CatalogSummaryItem(request),
+        CollectionSummaryItem(request),
+        PluginSummaryItem(request),
+    ]
 
 
 @hooks.register("register_icons")
