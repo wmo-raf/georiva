@@ -382,14 +382,14 @@ def get_collection_definitions(cls):
 
 ### 3.4 Reference: CHIRPS plugin
 
-The CHIRPS plugin (`sample_plugins/chirps/`) is the canonical reference implementation:
+The CHIRPS plugin (the standalone [`georiva-source-chirps`](https://github.com/wmo-raf/georiva-source-chirps) package) is the canonical reference implementation:
 
 - `models.py` — `CHIRPSDataFeed` + `CHIRPSDataFeedCollectionLink` with `period` and `default_start_date`
 - `source.py` — `CHIRPSDataSource` with `advance_start_from_latest()` override (skips to next dekad/pentad/month)
 - Three collections declared via `parse_collection_defs()`: monthly, dekadal, pentadal, each with its own
   `default_interval_minutes`
 
-The ECMWF AIFS plugin (`sample_plugins/ecmwf_opendata_source/`) is the reference for **forecast data**:
+The ECMWF AIFS plugin (the standalone [`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-ecmwf) package) is the reference for **forecast data**:
 multi-collection (surface + pressure levels), variable groups, no custom `CollectionLink` subclass.
 
 ---

@@ -79,9 +79,7 @@ INSTALLED_APPS = [
     "georiva.edr",
     "georiva.visualization",
     "georiva.sources",
-    "georiva.sample_plugins.ecmwf_opendata_source",
-    "georiva.sample_plugins.chirps",
-    
+
     # pages
     "georiva.pages.home",
     "georiva.pages.datasets",

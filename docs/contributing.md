@@ -79,8 +79,10 @@ valuable as writing code.
 If you work with a geospatial data provider (weather models, satellite products, reanalysis datasets), building a source
 plugin is one of the most impactful contributions. A source plugin is a Wagtail app that implements the source plugin
 contract — see the architecture doc's [Source Plugins section](architecture/README.md#31-path-a-source-plugins) for the
-design. For reference implementations, look at the in-tree examples under
-`georiva/src/georiva/sample_plugins/` (`chirps/` and `ecmwf_opendata_source/`), and use the cookiecutter template in
+design. For reference implementations, look at the standalone example plugins
+[`georiva-source-chirps`](https://github.com/wmo-raf/georiva-source-chirps) and
+[`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-ecmwf) (and
+[`georiva-source-cds`](https://github.com/wmo-raf/georiva-source-cds)), and use the cookiecutter template in
 `source-plugin-boilerplate/` to scaffold a new one.
 
 Key references for plugin authors:

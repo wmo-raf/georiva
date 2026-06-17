@@ -51,7 +51,6 @@ georiva/src/georiva/          # Main Django application
 ├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk) manifests over COG assets
 ├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)
 ├── pages/                    # Wagtail CMS pages (home, datasets)
-├── sample_plugins/           # Example plugins (CHIRPS, ECMWF)
 └── utils/                    # Shared utilities
 ```
 

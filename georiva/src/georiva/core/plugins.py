@@ -26,8 +26,8 @@ def _valid_url(value):
 
 
 def _distribution_name(module_name):
-    """Map an import-package name (e.g. ``georiva_cds``) to its distribution
-    name (e.g. ``georiva-cds``). ``packages_distributions`` handles the case
+    """Map an import-package name (e.g. ``georiva_source_cds``) to its distribution
+    name (e.g. ``georiva-source-cds``). ``packages_distributions`` handles the case
     where they differ; fall back to the module name, which importlib also
     normalizes."""
     mapping = importlib.metadata.packages_distributions()
