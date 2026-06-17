@@ -2,9 +2,11 @@
 
 {{ cookiecutter.project_description }}
 
-This is a **GeoRiva source plugin** — a standalone Django/Wagtail app that plugs
-a remote data provider into a [GeoRiva](https://github.com/wmo-raf/georiva)
-instance. It is installed into a running GeoRiva stack (not run on its own).
+This is a **GeoRiva source plugin** — a standalone Python package (a Django/Wagtail
+app) that plugs a remote data provider into a
+[GeoRiva](https://github.com/wmo-raf/georiva) instance. It is **not a service you
+run on its own**: it is installed into a running GeoRiva stack, which provides the
+database, Redis, MinIO, Titiler, and the workers.
 
 ## What's in this plugin
 
@@ -14,10 +16,11 @@ instance. It is installed into a running GeoRiva stack (not run on its own).
 | `src/{{ cookiecutter.project_module }}/source.py` | The `BaseDataSource` subclass — what files to fetch and how to build each `FileRequest` |
 | `src/{{ cookiecutter.project_module }}/apps.py` | Plain `AppConfig` — **no registration code needed** |
 | `src/{{ cookiecutter.project_module }}/wagtail_hooks.py` | Optional Wagtail admin customisation |
+| `georiva_plugin_info.json` | Plugin metadata (name, version, declared `requires_env`) |
 
 GeoRiva **auto-discovers** your `DataFeed` subclass and builds its admin form and
 setup wizard. You do not register anything by hand — just define the `DataFeed`
-and `BaseDataSource`, and make sure the package is on the plugin path.
+and `BaseDataSource`.
 
 ## The plugin contract
 
@@ -40,61 +43,79 @@ derived) and [`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-
 (GRIB / forecast) plugins, and the
 [Source Plugin Contract](https://github.com/wmo-raf/georiva/blob/main/docs/architecture/plugin-parameter-contract.md).
 
-## Getting started
+## Developing against the GeoRiva dev stack
 
-### Prerequisites
+A plugin is developed by **bind-mounting it into the core GeoRiva dev stack** —
+that stack provides the database, Redis, MinIO and workers your plugin needs.
+There is no plugin-only Docker image to build.
 
-- Docker and Docker Compose.
-- A locally built GeoRiva core image (`georiva:latest`). Follow the
-  [GeoRiva core repository](https://github.com/wmo-raf/georiva) to build it.
+1. **Get the core dev stack running.** Clone
+   [GeoRiva](https://github.com/wmo-raf/georiva) and build/run it per its README
+   (`make dev-build`).
 
-### Build & run this plugin
-
-`dev.Dockerfile` uses the `georiva:latest` image as its base and installs this
-plugin into it. Source is bind-mounted, so edits hot-reload the dev server.
-
-1. Clone and enter the plugin:
+2. **Clone this plugin** somewhere the core stack can reach by relative path — by
+   convention, a sibling of the core repo:
 
    ```bash
    git clone https://github.com/wmo-raf/{{ cookiecutter.project_slug }}.git
-   cd {{ cookiecutter.project_slug }}
    ```
 
-2. Create the `.env` file and set the build UID/GID to your user:
+3. **Bind-mount the package** into the core stack. In the core repo's
+   `docker-compose.override.yml` (copy it from `docker-compose.override.sample.yml`,
+   which has a commented template), add this plugin's package to the dev-plugin
+   volumes for every backend service:
+
+   ```yaml
+   - ../{{ cookiecutter.project_slug }}/plugins/{{ cookiecutter.project_module }}:/georiva/dev-plugins/{{ cookiecutter.project_module }}
+   ```
+
+   GeoRiva installs every folder under `/georiva/dev-plugins` as an editable
+   package (`pip install -e`, pulling your `requirements/base.txt`) and adds it to
+   `INSTALLED_APPS` automatically — edits hot-reload.
+
+4. **Start the stack with the override and run your migrations:**
 
    ```bash
-   cp .env.sample .env
-   # set PLUGIN_BUILD_UID=$(id -u) and PLUGIN_BUILD_GID=$(id -g), plus DB values
+   make dev-up OV=1
+   make dev-makemigrations          # generates this plugin's migrations
+   make dev-migrate
    ```
 
-3. Build and start:
+5. In the GeoRiva admin, open **Automated Sources → Set up wizard** and choose
+   your feed.
 
-   ```bash
-   docker compose build      # add DOCKER_BUILDKIT=0 if you hit a base-image pull error
-   docker compose up
-   ```
+## Configuration
 
-4. Create a superuser and run this plugin's migrations:
+If your source needs credentials or other runtime settings, read them from the
+process environment (`os.environ` / your data source's config) and **declare the
+variable names** in `georiva_plugin_info.json`:
 
-   ```bash
-   docker compose exec georiva georiva createsuperuser
-   docker compose exec georiva georiva makemigrations {{ cookiecutter.project_module }}
-   docker compose exec georiva georiva migrate
-   ```
-
-   (`georiva` is shorthand for `python manage.py`.)
-
-The app is at `http://localhost:8000` (change via `PORT` in `.env`). In the
-GeoRiva admin, open **Automated Sources → Set up wizard** and choose your feed.
-
-### Developing against an existing GeoRiva stack
-
-Alternatively, bind-mount this plugin's package into a running GeoRiva dev stack
-by adding it to that repo's `docker-compose.override.yml`:
-
-```yaml
-- ../{{ cookiecutter.project_slug }}/plugins/{{ cookiecutter.project_module }}:/georiva/dev-plugins/{{ cookiecutter.project_module }}
+```json
+"requires_env": [
+  {"name": "EXAMPLE_API_KEY", "required": true,
+   "description": "API key for the upstream provider (https://example.com/account)"},
+  {"name": "EXAMPLE_API_URL", "required": false,
+   "description": "Override the default endpoint"}
+]
 ```
 
-GeoRiva installs every folder under `/georiva/dev-plugins` as an editable package
-and adds it to `INSTALLED_APPS` automatically.
+`requires_env` is **declaration only** — it lists the variable *names* a plugin
+needs, never their values. Operators supply the actual values in the **GeoRiva
+stack's `.env`** (or the service `environment`), so they are available to the
+web and worker processes at runtime. Leave `requires_env` as `[]` if your plugin
+needs none.
+
+## Installing in production
+
+Operators install this plugin by declaring it in their GeoRiva `plugins.toml`
+(baked into the image at build time):
+
+```toml
+[[plugins]]
+name = "{{ cookiecutter.project_name }}"
+git  = "https://github.com/wmo-raf/{{ cookiecutter.project_slug }}.git"
+tag  = "1.0.0"
+```
+
+Then they set any `requires_env` values in their stack `.env`, rebuild, and run
+this plugin's migrations.

@@ -1,28 +1,50 @@
 x-backend-variables: &backend-variables
   ENV_KEY: value
 
+# --- Plugin development ------------------------------------------------------
+# Develop a source plugin by bind-mounting its package into this dev stack —
+# there is no separate per-plugin image. Each folder under /georiva/dev-plugins
+# is installed editable (pip install -e, pulling its requirements) and added to
+# INSTALLED_APPS automatically, so edits hot-reload.
+#
+# To enable: add the plugin package to dev-plugin-volumes below (replace the
+# empty `[]`), pointing at <plugin-repo>/plugins/<module> on the host. Then run
+# the stack with the override (`make dev-up OV=1`) and its migrations
+# (`make dev-makemigrations && make dev-migrate`).
+x-dev-plugin-env: &dev-plugin-env
+  GEORIVA_PLUGIN_DIRS: /georiva/plugins,/georiva/dev-plugins
+  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ""   # re-enable editable install on startup (dev)
+
+x-dev-plugin-volumes: &dev-plugin-volumes
+  []
+  # - ../plugins/georiva-source-cds/plugins/georiva_source_cds:/georiva/dev-plugins/georiva_source_cds
+  # - ../plugins/georiva-source-chirps/plugins/georiva_source_chirps:/georiva/dev-plugins/georiva_source_chirps
+
 services:
   georiva:
     environment:
-      <<: *backend-variables
+      <<: [*backend-variables, *dev-plugin-env]
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
+    volumes: *dev-plugin-volumes
 
   georiva-celery-default-worker:
     environment:
-      <<: *backend-variables
+      <<: [*backend-variables, *dev-plugin-env]
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes: *dev-plugin-volumes
 
   georiva-celery-ingestion-worker:
     environment:
-      <<: *backend-variables
+      <<: [*backend-variables, *dev-plugin-env]
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes: *dev-plugin-volumes
 
   georiva-celery-beat:
     environment:
-      <<: *backend-variables
+      <<: [*backend-variables, *dev-plugin-env]
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes: *dev-plugin-volumes
