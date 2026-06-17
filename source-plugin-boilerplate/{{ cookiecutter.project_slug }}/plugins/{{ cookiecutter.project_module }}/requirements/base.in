@@ -1,0 +1,6 @@
+# Direct runtime dependencies for this plugin, one per line, e.g.:
+#   requests>=2.31
+#
+# Dependencies already provided by GeoRiva core (xarray, rasterio, cfgrib,
+# requests, django-countries, ...) do not need to be re-pinned here — doing so
+# risks conflicting with core's versions.

@@ -1,13 +1,12 @@
 from django.apps import AppConfig
 
-from georiva.sources.registry import data_source_registry
 
-
-class PluginNameConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
+class {{ cookiecutter.project_module|replace('_', ' ')|title|replace(' ', '') }}Config(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
     name = "{{ cookiecutter.project_module }}"
-    
-    def ready(self):
-        from .source import SourceNamePlugin
-        
-        data_source_registry.register(SourceNamePlugin())
+    verbose_name = "{{ cookiecutter.project_name }}"
+
+    # No registration is needed here. GeoRiva auto-discovers every DataFeed
+    # subclass (see models.py) and builds its admin form + setup wizard, and
+    # adds this app to INSTALLED_APPS by folder discovery. Keep this class bare
+    # unless you have signals/checks to wire up in ready().

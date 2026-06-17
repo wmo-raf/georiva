@@ -1,6 +1,9 @@
 {
-  "project_name": "My GeoRiva Plugin",
+  "project_name": "GeoRiva Source Example",
   "project_slug": "{{ cookiecutter.project_name.lower()|replace(' ', '-')|replace('_', '-')|replace('.', '-')|trim() }}",
   "project_module": "{{ cookiecutter.project_name.lower()|replace(' ', '_')|replace('-', '_')|replace('.', '_')|trim() }}",
-  "project_description": "A GeoRiva plugin for downloading and ingesting raster data."
+  "project_description": "A GeoRiva source plugin for downloading and ingesting raster data.",
+  "__prompts__": {
+    "project_name": "Plugin name. For a source plugin, follow the convention 'GeoRiva Source <Provider>' (e.g. 'GeoRiva Source CHIRPS') so the slug becomes georiva-source-<provider>."
+  }
 }
