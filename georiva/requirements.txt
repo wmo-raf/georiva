@@ -1,4 +1,4 @@
-wagtail==7.4.1
+wagtail==7.4.2
 django-task-ferry==0.1.1
 dj-database-url==3.1.2
 django-timescaledb==0.2.13
