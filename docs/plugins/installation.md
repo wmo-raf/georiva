@@ -200,11 +200,11 @@ The generated plugin is a standard Django/Wagtail app. The key files to implemen
 
 | File | Purpose |
 |------|---------|
-| `models.py` | `DataFeed` subclass — operator config, scheduling, collection factory |
-| `sources.py` | `BaseDataSource` subclass — fetch logic, file construction |
-| `collection_definitions.py` | `CollectionDefinition` list — what collections and variables the plugin creates |
-| `wagtail_hooks.py` | Wagtail admin registration |
-| `migrations/` | Django migrations for your models |
+| `models.py` | **Required.** Your `DataFeed` subclass — operator config + the `COLLECTIONS` spec (collections/variables it creates, via `parse_collection_defs`) |
+| `source.py` | **Required.** Your `BaseDataSource` subclass — what files to fetch and how to build each `FileRequest` |
+| `apps.py` | A plain `AppConfig`. **No registration code** — GeoRiva auto-discovers every `DataFeed` subclass and builds its admin form + setup wizard |
+| `migrations/` | Django migrations for your `DataFeed` model (run `makemigrations`) |
+| `wagtail_hooks.py` | Optional — extra Wagtail admin customisation only; feed registration is automatic |
 
 See the [Source Plugin Contract](../architecture/plugin-parameter-contract.md) for the full component
 specification. Reference implementations: the standalone
