@@ -1,0 +1,141 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}
+    {% trans "Installed Plugins" %}
+{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .pl-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .pl-card {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            background: var(--w-color-surface-field);
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+            transition: box-shadow 0.15s ease;
+        }
+
+        .pl-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        .pl-card-header {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            padding: 1rem 1.25rem 0.5rem;
+        }
+
+        .pl-name {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--w-color-text-label);
+        }
+
+        .pl-version {
+            font-size: 0.8rem;
+            color: var(--w-color-grey-400);
+        }
+
+        .pl-summary {
+            flex: 1 1 auto;
+            padding: 0 1.25rem 1rem;
+            color: var(--w-color-text-context);
+        }
+
+        .pl-card-footer {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem 0.75rem;
+            padding: 0.75rem 1.25rem;
+            border-top: 1px solid var(--w-color-border-furniture);
+            background: var(--w-color-surface-page);
+            font-size: 0.85rem;
+            color: var(--w-color-grey-400);
+        }
+
+        .pl-card-footer .pl-sep {
+            color: var(--w-color-border-furniture);
+        }
+
+        .pl-link {
+            margin-left: auto;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            white-space: nowrap;
+        }
+
+        .pl-link .icon {
+            height: 1rem;
+            margin: .5rem 0;
+            min-width: 1rem;
+            width: 1rem;
+        }
+
+        .pl-unavailable {
+            padding: 0 1.25rem 1rem;
+            color: var(--w-color-grey-400);
+        }
+
+        .pl-empty {
+            margin-top: 1.5rem;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    {% if not plugins %}
+        <p class="pl-empty">{% trans "No plugins are installed." %}</p>
+    {% else %}
+        <div class="pl-grid">
+            {% for plugin in plugins %}
+                <div class="pl-card">
+                    <div class="pl-card-header">
+                        <span class="pl-name">{{ plugin.name }}</span>
+                        {% if plugin.version %}
+                            <span class="pl-version">v{{ plugin.version }}</span>
+                        {% endif %}
+                    </div>
+
+                    {% if plugin.available %}
+                        {% if plugin.summary %}
+                            <div class="pl-summary">{{ plugin.summary }}</div>
+                        {% else %}
+                            <div class="pl-summary"></div>
+                        {% endif %}
+
+                        <div class="pl-card-footer">
+                            {% if plugin.author %}<span>{{ plugin.author }}</span>{% endif %}
+                            {% if plugin.author and plugin.license %}<span class="pl-sep">&middot;</span>{% endif %}
+                            {% if plugin.license %}<span>{{ plugin.license }}</span>{% endif %}
+                            {% if plugin.home_page %}
+                                <a class="pl-link" href="{{ plugin.home_page }}" target="_blank"
+                                   rel="noopener noreferrer">
+                                    {% icon name="link-external" %}
+                                    {% trans "Visit" %}
+                                </a>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="pl-unavailable">{% trans "Metadata unavailable" %}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endblock %}

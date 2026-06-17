@@ -256,3 +256,19 @@ def collection_items_list(request, collection_pk):
     }
     
     return render(request, "core/collection_items.html", context)
+
+
+def plugin_list(request):
+    """Admin page listing all installed GeoRiva plugins and their metadata."""
+    from .plugins import get_installed_plugins
+    
+    context = {
+        "header_title": _("Installed Plugins"),
+        "header_icon": "puzzle-piece",
+        "breadcrumbs_items": [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": "", "label": _("Plugins")},
+        ],
+        "plugins": get_installed_plugins(),
+    }
+    return render(request, "core/plugin_list.html", context)

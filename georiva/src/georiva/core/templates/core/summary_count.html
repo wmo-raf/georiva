@@ -1,0 +1,9 @@
+{% load i18n wagtailadmin_tags %}
+
+<li>
+    {% icon name=icon_name %}
+    <a href="{{ link }}">
+        {{ count }}
+        {% if count == 1 %}{{ label_singular }}{% else %}{{ label_plural }}{% endif %}
+    </a>
+</li>
