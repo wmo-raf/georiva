@@ -250,6 +250,8 @@ class SourceSetupService:
     
     @staticmethod
     def _get_or_create_unit(symbol: str):
+        from django.db import IntegrityError
+
         from georiva.core.models import Unit
 
         # Case-insensitive symbol match covers plugins that use e.g. "Dimensionless"
@@ -263,6 +265,13 @@ class SourceSetupService:
         if unit:
             return unit
 
-        unit = Unit.objects.create(symbol=symbol, name=symbol)
-        logger.info("Created Unit: %s", symbol)
-        return unit
+        try:
+            unit = Unit.objects.create(symbol=symbol, name=symbol)
+            logger.info("Created Unit: %s", symbol)
+            return unit
+        except IntegrityError:
+            # Concurrent ingestion worker created the same unit; re-fetch it.
+            return (
+                Unit.objects.filter(symbol__iexact=symbol).first()
+                or Unit.objects.filter(name__iexact=symbol).first()
+            )
