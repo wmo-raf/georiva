@@ -9,6 +9,7 @@ from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 
 from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
 from georiva.core.models.catalog import Topic
+from georiva.core.views import CatalogIndexView
 
 
 class BoundaryChooserViewSet(ChooserViewSet):
@@ -30,25 +31,31 @@ class TopicViewSet(ModelViewSet):
 
 class CatalogCreateView(generic.CreateView):
     def get_success_url(self):
-        url = reverse("catalog_index")
+        url = reverse("catalog:index")
         return self._set_locale_query_param(url)
 
 
 class CatalogEditView(generic.EditView):
     def get_success_url(self):
-        return reverse("catalog_index")
+        return reverse("catalog:index")
 
 
 class CatalogDeleteView(generic.DeleteView):
     def get_success_url(self):
-        return reverse("catalog_index")
+        return reverse("catalog:index")
 
 
 class CatalogViewSet(ModelViewSet):
     model = Catalog
     icon = "globe"
-    add_to_admin_menu = False
+    menu_label = _("Catalogs")
+    menu_icon = "globe"
+    menu_order = 400
+    add_to_admin_menu = True
     exclude_form_fields = ["created_at", "updated_at"]
+    index_view_class = CatalogIndexView
+    index_template_name = "core/catalog_index.html"
+    index_results_template_name = "core/catalog_index_results.html"
     add_view_class = CatalogCreateView
     edit_view_class = CatalogEditView
     delete_view_class = CatalogDeleteView
@@ -64,17 +71,17 @@ class CatalogChooserViewSet(ChooserViewSet):
 
 class CollectionCreateView(generic.CreateView):
     def get_success_url(self):
-        return reverse("catalog_index")
+        return reverse("catalog:index")
 
 
 class CollectionEditView(generic.EditView):
     def get_success_url(self):
-        return reverse("catalog_index")
+        return reverse("catalog:index")
 
 
 class CollectionDeleteView(generic.DeleteView):
     def get_success_url(self):
-        return reverse("catalog_index")
+        return reverse("catalog:index")
 
 
 class CollectionIndexView(generic.IndexView):
