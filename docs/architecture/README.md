@@ -542,9 +542,14 @@ automatically as Items accumulate, or on-demand? What chunking strategies make s
 How should source plugins and analysis plugins be distributed? Options include: bundled with the core repository, as
 separate Python packages installable via pip, or as Docker sidecar containers.
 
-> **Update (v0.2):** Partially resolved — external plugins are pulled from Git repositories listed in
-> `GEORIVA_PLUGIN_GIT_REPOS` and installed at startup (see `deploy/` install scripts). In-tree examples live in
-> `sample_plugins/`, and a cookiecutter template is provided in `source-plugin-boilerplate/`.
+> **Update (v0.3):** Resolved — plugins are distributed as standalone Python packages (Wagtail apps) and
+> installed via one of three mechanisms: (1) **build-time** — declared in `plugins.toml` and baked into the
+> Docker image; (2) **runtime** — downloaded at container startup via `GEORIVA_PLUGIN_URLS`; (3) **local
+> dev** — bind-mounted source folders installed as editable packages (`pip install -e`) by `startup_plugin_setup`.
+> Settings auto-discovers installed plugins from `GEORIVA_PLUGIN_DIRS` and adds them to `INSTALLED_APPS`.
+> In-tree examples live in `sample_plugins/`; a cookiecutter template is provided in
+> `source-plugin-boilerplate/`. See [`docs/plugins/installation.md`](../plugins/installation.md) for the
+> full installation guide.
 
 ### 9.4 Analysis Scheduling
 

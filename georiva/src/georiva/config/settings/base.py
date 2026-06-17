@@ -87,7 +87,13 @@ INSTALLED_APPS = [
     "georiva.pages.datasets",
 ]
 
-GEORIVA_PLUGIN_DIRS = env.list("GEORIVA_PLUGIN_DIRS", default=["/georiva/plugins", ])
+GEORIVA_PLUGIN_DIRS = env.list("GEORIVA_PLUGIN_DIRS", default=["/georiva/plugins"])
+
+# Automatically include the dev-plugins directory when it exists (bind-mounted in dev).
+# Mirrors the GEORIVA_DEV_PLUGIN_DIR used by startup_plugin_setup in utils.sh.
+_dev_plugin_dir = os.environ.get("GEORIVA_DEV_PLUGIN_DIR", "/georiva/dev-plugins")
+if Path(_dev_plugin_dir).exists() and _dev_plugin_dir not in GEORIVA_PLUGIN_DIRS:
+    GEORIVA_PLUGIN_DIRS.append(_dev_plugin_dir)
 
 GEORIVA_PLUGIN_FOLDERS = []
 for plugin_dir in GEORIVA_PLUGIN_DIRS:

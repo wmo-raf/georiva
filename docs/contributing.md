@@ -81,9 +81,16 @@ plugin is one of the most impactful contributions. A source plugin is a Wagtail 
 contract — see the architecture doc's [Source Plugins section](architecture/README.md#31-path-a-source-plugins) for the
 design. For reference implementations, look at the in-tree examples under
 `georiva/src/georiva/sample_plugins/` (`chirps/` and `ecmwf_opendata_source/`), and use the cookiecutter template in
-`source-plugin-boilerplate/` to scaffold a new one. The
-[Parameter Contract & Setup Wizard](architecture/plugin-parameter-contract.md) and
-[Download Deduplication](architecture/download-dedup.md) docs cover the plugin contract in depth.
+`source-plugin-boilerplate/` to scaffold a new one.
+
+Key references for plugin authors:
+
+- [Plugin Installation Guide](plugins/installation.md) — how to install plugins in production and how to set up the
+  local dev bind-mount workflow for working on a plugin against a live GeoRiva stack
+- [Parameter Contract & Setup Wizard](architecture/plugin-parameter-contract.md) — the full plugin component contract
+  (`BaseDataSource`, `DataFeed`, `CollectionDefinition`) and implementation checklist
+- [Download Deduplication](architecture/download-dedup.md) — how to avoid re-fetching data already ingested
+- [Storage Architecture](plugins/storage.md) — how to read and write files using the multi-bucket storage system
 
 ### Analysis Modules
 
