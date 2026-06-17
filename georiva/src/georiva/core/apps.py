@@ -57,6 +57,19 @@ def collection_post_save(sender, instance, created, **kwargs):
     _sync_keep_for_collection(instance)
 
 
+def reindex_catalog_for_collection(sender, instance, **kwargs):
+    """Reindex a collection's parent catalog so the admin header search stays
+    in sync with the catalog's denormalized ``get_collection_names`` field."""
+    from wagtail.search import index as search_index
+
+    catalog = getattr(instance, "catalog", None)
+    if catalog is not None:
+        try:
+            search_index.insert_or_update_object(catalog)
+        except Exception as e:  # pragma: no cover - indexing must never break saves
+            logger.warning("Could not reindex catalog %s: %s", catalog, e)
+
+
 def data_feed_collection_link_saved(sender, instance, **kwargs):
     """Fired when a DataFeedCollectionLink is created or updated."""
     _sync_keep_for_collection(instance.collection)
@@ -81,6 +94,11 @@ class CoreConfig(AppConfig):
 
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
         post_save.connect(collection_post_save, sender=Collection)
+
+        # Keep the parent catalog's search index fresh as collections change,
+        # so the admin header search can match a catalog by collection name.
+        post_save.connect(reindex_catalog_for_collection, sender=Collection)
+        post_delete.connect(reindex_catalog_for_collection, sender=Collection)
 
         # When a collection is linked/unlinked from a DataFeed:
         # keep the incoming/.keep in sync and recalculate the PeriodicTask interval.

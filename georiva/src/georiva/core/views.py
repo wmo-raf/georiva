@@ -1,132 +1,130 @@
-from django.contrib import messages
+from collections import defaultdict
+
 from django.core.paginator import InvalidPage
 from django.db.models import Count, OuterRef, Subquery
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.urls import reverse_lazy
-from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 from wagtail.admin.paginator import WagtailPaginator
 from wagtail.admin.ui.tables import ButtonsColumnMixin, TitleColumn, Table, BooleanColumn
-from wagtail.admin.widgets import ListingButton, HeaderButton, ButtonWithDropdown
+from wagtail.admin.views.generic import IndexView
+from wagtail.admin.widgets import Button, ButtonWithDropdown
 
 from georiva.core.models import Catalog
 from georiva.core.models import Collection, Item
 from .table import LinkColumnWithIcon
-from .viewsets import CatalogViewSet, CollectionViewSet
 
 
 def get_collection_items_url(collection):
     return reverse("collection_items_list", args=[collection.pk])
 
 
-def catalog_index(request):
-    catalogs = Catalog.objects.all()
-    
-    catalog_viewset = CatalogViewSet()
-    collection_viewset = CollectionViewSet()
-    
-    data = []
+def _build_collection_columns(collection_viewset):
+    """Columns for the per-catalog collections table rendered inside each
+    accordion panel."""
     
     class CollectionButtonsColumn(ButtonsColumnMixin, TitleColumn):
         def get_buttons(self, instance, parent_context):
-            more_buttons = []
-            buttons = []
-            
             edit_url = reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
             delete_url = reverse(collection_viewset.get_url_name("delete"), kwargs={"pk": instance.pk})
-            # zarr_store_url = reverse("zarr_collection_detail", args=[instance.pk])
             
-            more_buttons.append(
-                ListingButton(
+            more_buttons = [
+                Button(
                     _("Edit"),
                     url=edit_url,
                     icon_name="edit",
-                    attrs={
-                        "aria-label": _("Edit '%(title)s'") % {"title": str(instance)}
-                    },
+                    attrs={"aria-label": _("Edit '%(title)s'") % {"title": str(instance)}},
                     priority=10,
-                )
-            )
-            
-            more_buttons.append(
-                ListingButton(
+                ),
+                Button(
                     _("Delete"),
                     url=delete_url,
                     icon_name="bin",
-                    attrs={
-                        "aria-label": _("Delete '%(title)s'") % {"title": str(instance)}
-                    },
+                    attrs={"aria-label": _("Delete '%(title)s'") % {"title": str(instance)}},
                     priority=20,
+                ),
+            ]
+            
+            return [
+                ButtonWithDropdown(
+                    buttons=more_buttons,
+                    icon_name="dots-horizontal",
+                    attrs={
+                        "aria-label": _("More options for '%(title)s'") % {"title": str(instance)},
+                    },
                 )
-            )
-            
-            # more_buttons.append(
-            #     ListingButton(
-            #         _("Zarr Store"),
-            #         url=zarr_store_url,
-            #         icon_name="resubmit",
-            #         attrs={
-            #             "title": _("Queue Zarr sync for all COG assets in this collection")
-            #         },
-            #         priority=30,
-            #     )
-            # )
-            
-            if more_buttons:
-                buttons.append(
-                    ButtonWithDropdown(
-                        buttons=more_buttons,
-                        icon_name="dots-horizontal",
-                        attrs={
-                            "aria-label": _("More options for '%(title)s'")
-                                          % {"title": str(instance)},
-                        },
-                    )
-                )
-            
-            return buttons
+            ]
     
     def get_url(instance):
-        edit_url = reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
-        return edit_url
+        return reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
     
-    for catalog in catalogs:
-        columns = [
-            CollectionButtonsColumn("name", label=_("Collection "), get_url=get_url),
-            BooleanColumn("is_active", label=_("Active")),
-            LinkColumnWithIcon("Items", label=_("Items"), icon_name="view", get_url=get_collection_items_url),
-        ]
+    return [
+        CollectionButtonsColumn("name", label=_("Collection"), get_url=get_url),
+        BooleanColumn("is_active", label=_("Active")),
+        LinkColumnWithIcon("Items", label=_("Items"), icon_name="view", get_url=get_collection_items_url),
+    ]
+
+
+class CatalogIndexView(IndexView):
+    """Catalog listing rendered as an accordion of catalog panels, each
+    containing its collections. Built on Wagtail's generic IndexView so the
+    admin header search (AJAX results swap) and server-side pagination work
+    out of the box. Search matches catalog names and collection names — see
+    Catalog.search_fields."""
+    
+    model = Catalog
+    paginate_by = 20
+    page_title = _("Catalogs")
+    
+    def _build_catalog_panels(self, catalogs):
+        """For the catalogs on the current page, build the render context for
+        each accordion panel. Issues at most two queries (the page of catalogs
+        plus one batched query for all their collections) regardless of how
+        many catalogs are on the page — no N+1."""
+        # Local import to avoid a circular import (viewsets imports this view).
+        from .viewsets import CatalogViewSet, CollectionViewSet
         
-        collections = catalog.collections.all()
+        catalog_viewset = CatalogViewSet()
+        collection_viewset = CollectionViewSet()
+        columns = _build_collection_columns(collection_viewset)
+        add_collection_url = reverse(collection_viewset.get_url_name("add"))
         
-        data.append({
-            "catalog": catalog,
-            "edit_url": reverse(catalog_viewset.get_url_name("edit"), kwargs={"pk": catalog.pk}),
-            "add_collection_url": reverse(collection_viewset.get_url_name("add")),
-            "has_collections": collections.exists(),
-            "collections_table": Table(columns, collections),
-        })
+        ids = [c.pk for c in catalogs]
+        cols_by_cat = defaultdict(list)
+        if ids:
+            # select_related("catalog") because Collection.__str__ (used in the
+            # row buttons' aria-labels) dereferences self.catalog — without it
+            # rendering the tables would trigger one query per collection.
+            collections = (
+                Collection.objects
+                .filter(catalog_id__in=ids)
+                .select_related("catalog")
+                .order_by("name")
+            )
+            for col in collections:
+                cols_by_cat[col.catalog_id].append(col)
+        
+        panels = []
+        for catalog in catalogs:
+            collections = cols_by_cat.get(catalog.pk, [])
+            active_count = sum(1 for c in collections if c.is_active)
+            panels.append({
+                "catalog": catalog,
+                "edit_url": reverse(catalog_viewset.get_url_name("edit"), kwargs={"pk": catalog.pk}),
+                "delete_url": reverse(catalog_viewset.get_url_name("delete"), kwargs={"pk": catalog.pk}),
+                "add_collection_url": add_collection_url,
+                "collection_count": len(collections),
+                "active_count": active_count,
+                "has_collections": bool(collections),
+                "collections_table": Table(columns, collections),
+            })
+        return panels
     
-    catalog_add_url = reverse(catalog_viewset.get_url_name("add"))
-    context = {
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": "", "label": _("Catalogs")},
-        ],
-        "header_buttons": [
-            HeaderButton(
-                label=_('Add Catalog'),
-                url=catalog_add_url,
-                icon_name="plus",
-            ),
-        ],
-        "catalogs": data,
-        "catalog_add_url": catalog_add_url,
-    }
-    
-    return render(request, 'core/catalog_list.html', context)
+    def get_context_data(self, *args, **kwargs):
+        context = super().get_context_data(*args, **kwargs)
+        context["catalog_panels"] = self._build_catalog_panels(list(context["object_list"]))
+        return context
 
 
 def collection_items_list(request, collection_pk):
@@ -210,7 +208,7 @@ def collection_items_list(request, collection_pk):
         page_obj = paginator.page(1)
     
     elided_page_range = paginator.get_elided_page_range(page_obj.number)
-
+    
     # ------------------------------------------------------------------
     # Attach ingestion_log to each item on this page.
     # Bulk lookup by source_file (convention: "{bucket}:{file_path}") so
@@ -220,30 +218,30 @@ def collection_items_list(request, collection_pk):
     from django.db.models import F, Value
     from django.db.models.functions import Concat
     from georiva.ingestion.models import FileIngestion
-
+    
     source_files = {item.source_file for item in page_obj.object_list if item.source_file}
     fi_by_source_file = {}
     if source_files:
         for fi in (
-            FileIngestion.objects
-            .annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path")))
-            .filter(_sf__in=source_files)
-            .order_by("-created_at")
+                FileIngestion.objects
+                        .annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path")))
+                        .filter(_sf__in=source_files)
+                        .order_by("-created_at")
         ):
             key = f"{fi.bucket}:{fi.file_path}"
             if key not in fi_by_source_file:
                 fi_by_source_file[key] = fi
-
+    
     for item in page_obj.object_list:
         item.ingestion_log = fi_by_source_file.get(item.source_file)
-
+    
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
     context = {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse("catalog_index"), "label": _("Catalogs")},
+            {"url": reverse("catalog:index"), "label": _("Catalogs")},
             {"url": "", "label": collection.name},
         ],
         "collection": collection,

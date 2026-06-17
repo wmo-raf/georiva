@@ -6,9 +6,11 @@ from wagtail.admin.panels import (
     FieldPanel,
     MultiFieldPanel, TitleFieldPanel, TabbedInterface, ObjectList
 )
+from wagtail.search import index
+from wagtail.search.index import Indexed
 
 
-class Topic(TimeStampedModel):
+class Topic(Indexed, TimeStampedModel):
     """
     Thematic topic for classifying Catalogs
     """
@@ -21,6 +23,10 @@ class Topic(TimeStampedModel):
         help_text="Bootstrap Icons class e.g. bi-thermometer-half"
     )
     sort_order = models.PositiveIntegerField(default=0)
+    
+    search_fields = [
+        index.SearchField('name'),
+    ]
     
     class Meta:
         ordering = ['sort_order', 'name']
@@ -38,12 +44,12 @@ class Topic(TimeStampedModel):
     ]
 
 
-class Catalog(TimeStampedModel):
+class Catalog(Indexed, TimeStampedModel):
     """
     A data source that produces multiple collections.
-    
+
     Examples: GFS, CHIRPS, ERA5, MSG
-    
+
     This is an organizational grouping - it defines how data is ingested
     """
     name = models.CharField(max_length=255)
@@ -92,12 +98,17 @@ class Catalog(TimeStampedModel):
         help_text="How to apply boundary clipping"
     )
     
-    class Meta:
-        ordering = ['name']
-        verbose_name_plural = 'Catalogs'
-    
-    def __str__(self):
-        return self.name
+    # The admin header search uses autocomplete() (partial/as-you-type
+    # matching) whenever any AutocompleteField exists, and autocomplete()
+    # only looks at autocomplete fields — so we must declare BOTH name and
+    # collection names as AutocompleteFields for partial search to reach
+    # them. SearchFields are kept for the full-word search path.
+    search_fields = [
+        index.SearchField("name"),
+        index.AutocompleteField("name"),
+        index.SearchField("get_collection_names"),
+        index.AutocompleteField("get_collection_names"),
+    ]
     
     panels = [
         MultiFieldPanel([
@@ -131,3 +142,18 @@ class Catalog(TimeStampedModel):
         ObjectList(panels, heading='Details'),
         ObjectList(slug_panels, heading='Slug'),
     ])
+    
+    class Meta:
+        ordering = ['name']
+        verbose_name_plural = 'Catalogs'
+    
+    def __str__(self):
+        return self.name
+    
+    def get_collection_names(self):
+        """Space-joined collection names, indexed so the admin header search
+        can find a catalog by the name of any collection it contains.
+
+        Kept fresh by a post_save/post_delete signal on Collection that
+        reindexes the parent catalog (see core/apps.py)."""
+        return " ".join(self.collections.values_list("name", flat=True))

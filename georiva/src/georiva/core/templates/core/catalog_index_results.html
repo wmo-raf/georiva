@@ -1,0 +1,60 @@
+{% extends "wagtailadmin/generic/index_results.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block results %}
+    <div class="nice-padding listing">
+        <div class="ccl-container">
+            {% for panel in catalog_panels %}
+                <div class="ccl-panel{% if is_searching %} is-open{% endif %}"
+                     data-catalog-name="{{ panel.catalog.name|lower }}">
+                    <div class="ccl-header" role="button" tabindex="0"
+                         aria-expanded="{% if is_searching %}true{% else %}false{% endif %}">
+                        <span class="ccl-chevron">
+                            <svg class="icon" aria-hidden="true">
+                                <use href="#icon-arrow-right"></use>
+                            </svg>
+                        </span>
+                        <span class="ccl-catalog-icon">{% icon name="globe" %}</span>
+                        <span class="ccl-title">{{ panel.catalog.name }}</span>
+                        <span class="ccl-badge">
+                            {% blocktrans count counter=panel.collection_count trimmed %}
+                                {{ counter }} collection
+                                {% plural %}
+                                {{ counter }} collections
+                            {% endblocktrans %}
+                            &middot; {{ panel.active_count }} {% trans "active" %}
+                        </span>
+                        <span class="ccl-actions">
+                            <a href="{{ panel.add_collection_url }}" class="button button-small bicolor button--icon">
+                                <span class="icon-wrapper">
+                                    <svg class="icon icon-plus icon" aria-hidden="true">
+                                        <use href="#icon-plus"></use>
+                                    </svg>
+                                </span>
+                                {% trans "Add Collection" %}
+                            </a>
+                            {% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More catalog options") %}
+                                <a href="{{ panel.edit_url }}">{% icon name="edit" %}{% trans "Edit catalog" %}</a>
+                                <a href="{{ panel.delete_url }}">{% icon name="bin" %}{% trans "Delete catalog" %}</a>
+                            {% enddropdown %}
+                        </span>
+                    </div>
+                    <div class="ccl-body">
+                        {% if panel.has_collections %}
+                            <div class="ccl-table-scroll">
+                                {% component panel.collections_table %}
+                            </div>
+                        {% else %}
+                            <div class="ccl-empty">
+                                <p>{% trans "There are no collections to display for this catalog. Why not" %}
+                                    <a href="{{ panel.add_collection_url }}">{% trans "add one" %}</a>?
+                                </p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}

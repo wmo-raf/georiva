@@ -1,0 +1,156 @@
+{% extends "wagtailadmin/generic/index.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .ccl-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .ccl-empty {
+            color: var(--w-color-grey-400);
+        }
+
+        .ccl-panel {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .ccl-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: var(--w-color-grey-50);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .ccl-header:hover {
+            background: var(--w-color-grey-100);
+        }
+
+        .ccl-header:focus-visible {
+            outline: 2px solid var(--w-color-focus);
+            outline-offset: -2px;
+        }
+
+        .ccl-chevron {
+            display: flex;
+            align-items: center;
+            transition: transform 0.15s ease;
+            color: var(--w-color-grey-400);
+        }
+
+        .ccl-panel.is-open .ccl-chevron {
+            transform: rotate(90deg);
+        }
+
+        .ccl-chevron svg {
+            width: 0.9rem;
+            height: 0.9rem;
+        }
+
+        .ccl-catalog-icon {
+            display: flex;
+            align-items: center;
+            color: var(--w-color-text-label);
+        }
+
+        .ccl-catalog-icon svg {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
+
+        .ccl-title {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--w-color-text-label);
+        }
+
+        .ccl-badge {
+            color: var(--w-color-grey-400);
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .ccl-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-left: auto;
+        }
+
+        .ccl-body {
+            display: none;
+            padding: 1rem;
+            border-top: 1px solid var(--w-color-border-furniture);
+        }
+
+        .ccl-panel.is-open .ccl-body {
+            display: block;
+        }
+
+        .ccl-table-scroll {
+            max-height: 24rem;
+            overflow-y: auto;
+        }
+
+        .ccl-table-scroll thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--w-color-surface-page);
+        }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Listeners are delegated on document so they survive the AJAX
+            // results swap performed by the header search (w-swap replaces the
+            // #listing-results container, discarding any directly-bound handlers).
+
+            // --- Expand / collapse a catalog panel ---
+            function toggle(panel) {
+                const open = panel.classList.toggle('is-open');
+                const header = panel.querySelector('.ccl-header');
+                if (header) {
+                    header.setAttribute('aria-expanded', open ? 'true' : 'false');
+                }
+            }
+
+            document.addEventListener('click', function (event) {
+                const header = event.target.closest('.ccl-header');
+                if (!header) {
+                    return;
+                }
+                // Clicks on the action buttons / dropdown must not toggle.
+                if (event.target.closest('.ccl-actions')) {
+                    return;
+                }
+                toggle(header.closest('.ccl-panel'));
+            });
+
+            document.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter' && event.key !== ' ') {
+                    return;
+                }
+                const header = event.target.closest('.ccl-header');
+                if (!header || event.target.closest('.ccl-actions')) {
+                    return;
+                }
+                event.preventDefault();
+                toggle(header.closest('.ccl-panel'));
+            });
+        });
+    </script>
+{% endblock %}

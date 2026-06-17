@@ -1,11 +1,9 @@
 from adminboundarymanager.wagtail_hooks import AdminBoundaryViewSetGroup
-from django.urls import path, reverse
-from django.utils.translation import gettext_lazy as _
+from django.urls import path
 from wagtail import hooks
-from wagtail.admin.menu import MenuItem
 from wagtail.snippets.models import register_snippet
 
-from .views import catalog_index, collection_items_list
+from .views import collection_items_list
 from .viewsets import BoundaryChooserViewSet, admin_viewsets
 from .viewsets import ItemViewSet, AssetViewSet
 
@@ -13,16 +11,8 @@ from .viewsets import ItemViewSet, AssetViewSet
 @hooks.register('register_admin_urls')
 def urlconf_georivacore():
     return [
-        path('catalogs/', catalog_index, name="catalog_index"),
         path('collection/<int:collection_pk>/items/', collection_items_list, name="collection_items_list"),
     ]
-
-
-@hooks.register('register_admin_menu_item')
-def register_catalogs_menu():
-    list_url = reverse('catalog_index')
-    label = _("Catalogs")
-    return MenuItem(label, list_url, icon_name='globe', order=400)
 
 
 @hooks.register("register_admin_viewset")
