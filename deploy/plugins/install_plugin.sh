@@ -165,6 +165,12 @@ if [[ -n "$url" ]]; then
     folder=${dirs[0]}
 fi
 
+# Dev folder plugins may only exist at runtime (bind-mounted). Skip gracefully at build time.
+if [[ "$dev" == true && -n "${folder:-}" && ! -d "$folder" ]]; then
+    log "Dev plugin folder '$folder' not found — skipping (expected to be a runtime bind-mount)."
+    exit 0
+fi
+
 # copy the plugin at the folder location into the plugin dir if it has not been already.
 plugin_name="$(basename -- "$folder")"
 plugin_install_dir="$GEORIVA_PLUGIN_DIR/$plugin_name"

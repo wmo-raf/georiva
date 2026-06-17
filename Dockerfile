@@ -52,20 +52,34 @@ RUN /georiva/venv/bin/pip install --no-cache-dir /georiva/app/
 
 # Install plugins at build time
 COPY --chown=$UID:$GID ./deploy/plugins/*.sh /georiva/plugins/
+COPY --chown=$UID:$GID ./deploy/plugins/parse_plugins_toml.py /georiva/plugins/
 
-ARG GEORIVA_PLUGIN_GIT_REPOS=""
+# Optionally bake in a plugins.toml manifest (glob trick: no-op if file absent in build context)
+COPY --chown=$UID:$GID plugins.tom[l] /georiva/
+
+# Drop back to root so install_plugin.sh can chown + gosu
+USER root
+
+# Install any plugins declared in plugins.toml
+ARG GEORIVA_PLUGIN_LIST_FILE=""
 RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
-    if [ -n "$GEORIVA_PLUGIN_GIT_REPOS" ]; then \
-        echo "Baking in plugins: $GEORIVA_PLUGIN_GIT_REPOS"; \
-        plugin_list=$(echo "$GEORIVA_PLUGIN_GIT_REPOS" | tr ',' ' '); \
-        for repo in $plugin_list; do \
-            echo "Processing: $repo"; \
-            /bin/bash /georiva/plugins/install_plugin.sh --git "$repo" || exit 1; \
-        done \
+    manifest="${GEORIVA_PLUGIN_LIST_FILE:-/georiva/plugins.toml}"; \
+    if [ -f "$manifest" ]; then \
+        echo "Installing plugins from manifest: $manifest"; \
+        tmpfile=$(mktemp); \
+        /georiva/venv/bin/python3 /georiva/plugins/parse_plugins_toml.py "$manifest" > "$tmpfile" || { rm -f "$tmpfile"; exit 1; }; \
+        while IFS= read -r args_line; do \
+            [ -z "$args_line" ] && continue; \
+            echo "Processing: $args_line"; \
+            /bin/bash -c "/georiva/plugins/install_plugin.sh $args_line" || { rm -f "$tmpfile"; exit 1; }; \
+        done < "$tmpfile"; \
+        rm -f "$tmpfile"; \
     else \
-        echo "No plugins specified for build."; \
+        echo "No plugins manifest found at $manifest, skipping."; \
     fi
 
+# Restore non-root user for the remainder of the builder stage
+USER $UID:$GID
 
 # =============================================================================
 # Runtime base — shared between prod and dev
