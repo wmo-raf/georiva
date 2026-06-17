@@ -67,12 +67,6 @@ startup_plugin_setup(){
         /georiva/plugins/install_plugin.sh --runtime --url "$url"
       done
 
-      for repo in $(echo "${GEORIVA_PLUGIN_GIT_REPOS:-}" | tr "," "\n")
-      do
-        log "Downloading and installing the plugin found at $repo"
-        /georiva/plugins/install_plugin.sh --runtime --git "$repo"
-      done
-
       # Install dev plugins (bind-mounted at runtime) as editable installs.
       GEORIVA_DEV_PLUGIN_DIR="${GEORIVA_DEV_PLUGIN_DIR:-/georiva/dev-plugins}"
       if [[ -d "$GEORIVA_DEV_PLUGIN_DIR" ]]; then
@@ -89,7 +83,7 @@ startup_plugin_setup(){
       export GEORIVA_PLUGIN_SETUP_ALREADY_RUN="yes"
     else
       log "Not installing any plugins found in GEORIVA_PLUGIN_DIR or set in the
-      GEORIVA_PLUGIN_URLS or GEORIVA_PLUGIN_GIT_REPOS env variables as
+      GEORIVA_PLUGIN_URLS env variable as
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP is set."
     fi
   fi

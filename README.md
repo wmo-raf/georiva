@@ -144,14 +144,13 @@ The dev setup uses a compose override that mounts your source code for hot reloa
 
 Plugins can be installed at build time or at runtime.
 
-**Build time** — bake plugins into the image:
+**Build time** — declare plugins in `plugins.toml` (copy `plugins.toml.sample` and edit), then build:
 
 ```bash
-GEORIVA_PLUGIN_GIT_REPOS=https://github.com/org/plugin1.git,https://github.com/org/plugin2.git \
-  docker compose build georiva
+docker compose build georiva
 ```
 
-**Runtime** — set `GEORIVA_PLUGIN_GIT_REPOS` in your `.env` file and restart. Ensure
+**Runtime** — set `GEORIVA_PLUGIN_URLS` in your `.env` file and restart. Ensure
 `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` is not set to `"true"`.
 
 ## Project Structure

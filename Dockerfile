@@ -71,7 +71,7 @@ RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
         while IFS= read -r args_line; do \
             [ -z "$args_line" ] && continue; \
             echo "Processing: $args_line"; \
-            /bin/bash -c "/georiva/plugins/install_plugin.sh $args_line" || { rm -f "$tmpfile"; exit 1; }; \
+            echo "$args_line" | xargs /georiva/plugins/install_plugin.sh || { rm -f "$tmpfile"; exit 1; }; \
         done < "$tmpfile"; \
         rm -f "$tmpfile"; \
     else \
