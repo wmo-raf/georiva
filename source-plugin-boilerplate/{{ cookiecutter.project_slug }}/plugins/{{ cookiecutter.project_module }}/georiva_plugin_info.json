@@ -6,5 +6,6 @@
   "author_url": "TODO",
   "url": "TODO",
   "license": "TODO",
-  "contact": "TODO"
+  "contact": "TODO",
+  "requires_env": []
 }

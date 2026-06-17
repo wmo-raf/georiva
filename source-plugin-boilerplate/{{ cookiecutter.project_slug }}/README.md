@@ -2,92 +2,120 @@
 
 {{ cookiecutter.project_description }}
 
-## Getting started
+This is a **GeoRiva source plugin** — a standalone Python package (a Django/Wagtail
+app) that plugs a remote data provider into a
+[GeoRiva](https://github.com/wmo-raf/georiva) instance. It is **not a service you
+run on its own**: it is installed into a running GeoRiva stack, which provides the
+database, Redis, MinIO, Titiler, and the workers.
 
-### Prerequisites
+## What's in this plugin
 
-- Docker and Docker Compose installed on your machine.
-- Git installed on your machine.
+| File | Purpose |
+| --- | --- |
+| `src/{{ cookiecutter.project_module }}/models.py` | The `DataFeed` subclass — operator config + the `COLLECTIONS` spec (what collections/variables it creates) |
+| `src/{{ cookiecutter.project_module }}/source.py` | The `BaseDataSource` subclass — what files to fetch and how to build each `FileRequest` |
+| `src/{{ cookiecutter.project_module }}/apps.py` | Plain `AppConfig` — **no registration code needed** |
+| `src/{{ cookiecutter.project_module }}/wagtail_hooks.py` | Optional Wagtail admin customisation |
+| `georiva_plugin_info.json` | Plugin metadata (name, version, declared `requires_env`) |
 
-### Install and build the GeoRiva Core Image
+GeoRiva **auto-discovers** your `DataFeed` subclass and builds its admin form and
+setup wizard. You do not register anything by hand — just define the `DataFeed`
+and `BaseDataSource`.
 
-The {{ cookiecutter.project_name }} is a module intended to be installed in
-an [GeoRiva](https://github.com/wmo-raf/georiva) instance. This means that you need to first get the core GeoRiva system
-and build it on your local development environment.
+## The plugin contract
 
-You can follow the instructions on the [GeoRiva core repository](https://github.com/wmo-raf/georiva) to install and
-build the GeoRiva core image
+1. **`DataFeed` subclass** (`models.py`) — a Wagtail snippet holding operator
+   configuration. Implement:
+   - `get_collection_definitions()` → built from the `COLLECTIONS` dict via
+     `parse_collection_defs()`
+   - `get_catalog_defaults()` → pre-fills the wizard's catalog step
+   - `data_source_cls` → returns your `BaseDataSource` class
+   - `get_loader_config()` → feed-wide settings passed to the data source
+2. **`BaseDataSource` subclass** (`source.py`) — set `type` and `label`, accept a
+   `fetch_strategy` (e.g. the built-in `HTTPFetchStrategy`), and implement
+   `generate_requests(start_time, end_time, variables=None)` to yield one
+   `FileRequest` per file. Optionally override `get_latest_available()` and
+   `post_process_fetched_file()`.
 
-### Install {{ cookiecutter.project_name }}
+For full reference implementations, see the standalone
+[`georiva-source-chirps`](https://github.com/wmo-raf/georiva-source-chirps) (GeoTIFF /
+derived) and [`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-ecmwf)
+(GRIB / forecast) plugins, and the
+[Source Plugin Contract](https://github.com/wmo-raf/georiva/blob/main/docs/architecture/plugin-parameter-contract.md).
 
-The `dev.Dockerfile` file uses the `georiva` image as a base image. The `{{ cookiecutter.project_name }}` is
-installed during the build process. Using docker mounted volumes, the plugin is editable such that any changes made to
-the code trigger Django to reload the development server, allowing you to see the changes as you develop
+## Developing against the GeoRiva dev stack
 
-1. Clone the plugin repository:
+A plugin is developed by **bind-mounting it into the core GeoRiva dev stack** —
+that stack provides the database, Redis, MinIO and workers your plugin needs.
+There is no plugin-only Docker image to build.
 
-```bash
-git clone https://github.com/wmo-raf/{{cookiecutter.project_slug}}.git
-cd {{cookiecutter.project_slug}}
+1. **Get the core dev stack running.** Clone
+   [GeoRiva](https://github.com/wmo-raf/georiva) and build/run it per its README
+   (`make dev-build`).
+
+2. **Clone this plugin** somewhere the core stack can reach by relative path — by
+   convention, a sibling of the core repo:
+
+   ```bash
+   git clone https://github.com/wmo-raf/{{ cookiecutter.project_slug }}.git
+   ```
+
+3. **Bind-mount the package** into the core stack. In the core repo's
+   `docker-compose.override.yml` (copy it from `docker-compose.override.sample.yml`,
+   which has a commented template), add this plugin's package to the dev-plugin
+   volumes for every backend service:
+
+   ```yaml
+   - ../{{ cookiecutter.project_slug }}/plugins/{{ cookiecutter.project_module }}:/georiva/dev-plugins/{{ cookiecutter.project_module }}
+   ```
+
+   GeoRiva installs every folder under `/georiva/dev-plugins` as an editable
+   package (`pip install -e`, pulling your `requirements/base.txt`) and adds it to
+   `INSTALLED_APPS` automatically — edits hot-reload.
+
+4. **Start the stack with the override and run your migrations:**
+
+   ```bash
+   make dev-up OV=1
+   make dev-makemigrations          # generates this plugin's migrations
+   make dev-migrate
+   ```
+
+5. In the GeoRiva admin, open **Automated Sources → Set up wizard** and choose
+   your feed.
+
+## Configuration
+
+If your source needs credentials or other runtime settings, read them from the
+process environment (`os.environ` / your data source's config) and **declare the
+variable names** in `georiva_plugin_info.json`:
+
+```json
+"requires_env": [
+  {"name": "EXAMPLE_API_KEY", "required": true,
+   "description": "API key for the upstream provider (https://example.com/account)"},
+  {"name": "EXAMPLE_API_URL", "required": false,
+   "description": "Override the default endpoint"}
+]
 ```
 
-2. Create a `.env` file using the provided `.env.sample` file:
+`requires_env` is **declaration only** — it lists the variable *names* a plugin
+needs, never their values. Operators supply the actual values in the **GeoRiva
+stack's `.env`** (or the service `environment`), so they are available to the
+web and worker processes at runtime. Leave `requires_env` as `[]` if your plugin
+needs none.
 
-```bash
-cp .env.sample .env
+## Installing in production
+
+Operators install this plugin by declaring it in their GeoRiva `plugins.toml`
+(baked into the image at build time):
+
+```toml
+[[plugins]]
+name = "{{ cookiecutter.project_name }}"
+git  = "https://github.com/wmo-raf/{{ cookiecutter.project_slug }}.git"
+tag  = "1.0.0"
 ```
 
-3. Edit the `.env` file to set the required environment variables
-
-```bash
-nano .env
-```
-
-You can use the default values provided in the `.env.sample` file, but be sure to set the following correctly:
-
-- `PLUGIN_BUILD_UID`: The UID of the user that will run the plugin inside the container
-- `PLUGIN_BUILD_GID`: The GID of the user that will run the plugin inside the container
-
-You can find the UID and GID of your user by running the following command:
-
-```bash
-id -u
-id -g
-```
-
-4. Build the plugin image:
-
-```bash
-docker compose build
-```
-
-If you are getting errors like
-`failed to solve: georiva:latest: failed to resolve source metadata for docker.io/library/georiva:latest: pull access denied`,
-you might need to disable `DOCKER_BUILDKIT` when building the image.
-
-You can do this by running the following
-
-```bash
-DOCKER_BUILDKIT=0  docker compose build
-```
-
-5. Start the plugin:
-
-```bash
-docker compose up
-```
-
-If everything is set up correctly, you should see the plugin starting up and listening for incoming requests. You can
-access the plugin at `http://localhost:8000`. The port number can be changed using the `PORT` environment variable in
-the `.env`. The default port is `8000`.
-
-6. Create superuser
-
-```bash
-docker compose exec georiva georiva createsuperuser
-```
-
-The `georiva`command is shorthand for `python manage.py` command. You can use it to run any Django management command
-inside the container.
-
-
+Then they set any `requires_env` values in their stack `.env`, rebuild, and run
+this plugin's migrations.
