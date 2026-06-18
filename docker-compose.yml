@@ -271,7 +271,7 @@ services:
     restart: unless-stopped
     command: --config /config/config.yaml
     ports:
-      - "3000:3000"
+      - "3000"
     environment:
       - DATABASE_URL=postgres://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-pgbouncer:5432/${GEORIVA_DB_NAME}
     volumes:
