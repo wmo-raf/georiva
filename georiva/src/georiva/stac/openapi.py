@@ -9,11 +9,13 @@ from rest_framework.decorators import api_view
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from georiva.core.utils import get_base_stac_api_url
+
 
 def get_openapi_schema(request: Request) -> dict:
     """Generate OpenAPI 3.0 schema for STAC API."""
-    
-    base_url = request.build_absolute_uri('/api/stac/')
+
+    base_url = get_base_stac_api_url(request)
     
     return {
         "openapi": "3.0.3",
