@@ -432,8 +432,11 @@ GEORIVA_STORAGE_BACKEND = 's3'  # or 'local'
 # Internal endpoint — Docker service name, used for read/write
 AWS_S3_ENDPOINT_URL = "http://georiva-minio:9000"
 
-# Public endpoint — what browsers can reach, used for asset URLs
-MINIO_PUBLIC_ENDPOINT = "localhost:9000"  # or "minio.georiva.io" in production
+# Public endpoint — what browsers can reach, used for asset URLs.
+# In production, point this at your app domain (no port) and serve the
+# bucket through nginx at /georiva-assets/ — no separate subdomain needed.
+MINIO_PUBLIC_ENDPOINT = "localhost:9000"  # or "georiva.example.com" in production
+MINIO_PUBLIC_ENDPOINT_USE_SSL = False     # True in production (nginx terminates TLS)
 
 # Bucket definitions with per-bucket overrides
 GEORIVA_BUCKETS = {
@@ -470,6 +473,35 @@ Private buckets (internal + signed):
 Assets bucket (public + clean):
   http://localhost:9000/georiva-assets/weather-models/gfs/temperature/2025/01/15/temp.png
 ```
+
+### Serving public assets through nginx
+
+In production MinIO's S3 port is **not** published to the host — the `georiva-web-proxy`
+(nginx) is the only public entry point. Public assets are served at a `/georiva-assets/`
+route on the app domain instead of via a separate MinIO subdomain:
+
+```nginx
+# deploy/nginx/nginx.conf
+location /georiva-assets/ {
+    set $upstream georiva-minio:9000;
+    proxy_pass http://$upstream;          # no rewrite — path already carries the bucket
+    proxy_set_header Host $http_host;
+}
+```
+
+This works cleanly because of two properties:
+
+- **Path-style addressing** (`AWS_S3_ADDRESSING_STYLE=path`) puts the bucket name in the
+  first path segment, so `/georiva-assets/<key>` maps straight to MinIO with no rewrite.
+- **Unsigned URLs** (`querystring_auth=False`) mean there are no SigV4 signatures to break
+  when nginx forwards the request, and the bucket's anonymous `s3:GetObject` policy (applied
+  by `setup_minio`) is what authorizes the read.
+
+To activate, set `MINIO_PUBLIC_ENDPOINT` to the bare app domain and
+`MINIO_PUBLIC_ENDPOINT_USE_SSL=true`. Asset URLs then resolve same-origin as
+`https://georiva.example.com/georiva-assets/...`, so no CORS config or DNS/cert work is
+needed. Object reads return `200`; bucket listing stays `403` (the anonymous policy grants
+`GetObject` only).
 
 ### Management commands
 
