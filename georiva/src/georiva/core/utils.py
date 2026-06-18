@@ -6,13 +6,17 @@ from wagtail.models import Site
 
 def get_full_url_by_request(request, path):
     site = Site.find_for_request(request)
+    if site is None:
+        # No Wagtail Site matches the request host; fall back to the request.
+        return request.build_absolute_uri(path)
+
     base_url = site.root_url
-    
+
     # We only want the scheme and netloc
     base_url_parsed = urlsplit(force_str(base_url))
-    
+
     base_url = base_url_parsed.scheme + "://" + base_url_parsed.netloc
-    
+
     return base_url + path
 
 

@@ -34,6 +34,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from georiva.core.models import Catalog, Collection, Item, Variable
+from georiva.core.utils import get_full_url_by_request
 from .renderers import STACJSONRenderer, GeoJSONRenderer
 from .serializers import (
     STACRootCatalogSerializer,
@@ -811,8 +812,8 @@ class STACQueryablesView(STACAPIView):
             collection_slug: str = None,
             variable_slug: str = None,
     ) -> Response:
-        base_url = request.build_absolute_uri()
-        
+        base_url = get_full_url_by_request(request, request.get_full_path())
+
         queryables = {
             "$schema": "https://json-schema.org/draft/2019-09/schema",
             "$id": base_url,

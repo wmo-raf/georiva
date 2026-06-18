@@ -32,6 +32,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from georiva.core.models import Collection, Item
+from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 from .renderers import EDRJSONRenderer
 from .serializers import (
     EDRCollectionSerializer,
@@ -64,7 +65,7 @@ class EDRLandingPageView(EDRAPIView):
     """
     
     def get(self, request: Request) -> Response:
-        base_url = request.build_absolute_uri('/api/edr/')
+        base_url = get_full_url_by_request(request, '/api/edr/')
         
         return Response({
             "title": "GeoRiva EDR API",
@@ -93,7 +94,7 @@ class EDRLandingPageView(EDRAPIView):
                 },
                 {
                     "rel": "related",
-                    "href": request.build_absolute_uri('/api/stac/'),
+                    "href": get_base_stac_api_url(request),
                     "type": "application/json",
                     "title": "GeoRiva STAC API",
                 },
@@ -151,7 +152,7 @@ class EDRCollectionListView(EDRAPIView):
     """
     
     def get(self, request: Request) -> Response:
-        base_url = request.build_absolute_uri('/api/edr/')
+        base_url = get_full_url_by_request(request, '/api/edr/')
         
         queryset = Collection.objects.filter(
             is_active=True,

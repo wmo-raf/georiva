@@ -23,6 +23,7 @@ from itertools import groupby
 from rest_framework import serializers
 
 from georiva.core.models import Collection, Item
+from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 
 # =============================================================================
@@ -35,14 +36,12 @@ class EDRBaseURLMixin:
     def _get_base_url(self) -> str:
         request = self.context.get('request')
         if request:
-            return request.build_absolute_uri('/api/edr/')
+            return get_full_url_by_request(request, '/api/edr/')
         return '/api/edr/'
-    
+
     def _get_stac_base_url(self) -> str:
         request = self.context.get('request')
-        if request:
-            return request.build_absolute_uri('/api/stac/')
-        return '/api/stac/'
+        return get_base_stac_api_url(request)
 
 
 # =============================================================================

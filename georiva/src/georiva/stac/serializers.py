@@ -25,7 +25,7 @@ from urllib.parse import urlencode
 
 from rest_framework import serializers
 
-from georiva.core.utils import get_base_stac_api_url
+from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 
 class STACBaseURLMixin:
@@ -66,7 +66,7 @@ class STACAssetSerializer(serializers.Serializer):
         
         # Build absolute href
         if request and not data['href'].startswith('http'):
-            data['href'] = request.build_absolute_uri(instance.url)
+            data['href'] = get_full_url_by_request(request, instance.url)
         else:
             data['href'] = instance.url
         
@@ -345,7 +345,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             f"?{urlencode(params)}"
         )
         if request:
-            return request.build_absolute_uri(path)
+            return get_full_url_by_request(request, path)
         return path
     
     def get_collection(self, obj):
@@ -838,7 +838,7 @@ class STACItemCollectionSerializer(serializers.Serializer):
         links = []
         
         if request:
-            current_url = request.build_absolute_uri()
+            current_url = get_full_url_by_request(request, request.get_full_path())
             links.append({
                 "rel": "self", "href": current_url,
                 "type": "application/geo+json",
@@ -848,7 +848,7 @@ class STACItemCollectionSerializer(serializers.Serializer):
             variable = self.context.get('variable')
             collection = obj.get('collection')
             if collection and variable:
-                base_url = request.build_absolute_uri('/api/stac/')
+                base_url = get_base_stac_api_url(request)
                 collection_url = (
                     f"{base_url}collections/"
                     f"{collection.catalog.slug}/{collection.slug}/{variable.slug}/"
