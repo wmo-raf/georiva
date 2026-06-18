@@ -5,6 +5,12 @@ from wagtail.models import Site
 
 
 def get_full_url_by_request(request, path):
+    # Already an absolute URL — return as-is (mirrors build_absolute_uri,
+    # which is idempotent for absolute inputs). Prevents double-prefixing
+    # things like S3/MinIO asset URLs that are already fully qualified.
+    if path and urlsplit(force_str(path)).scheme:
+        return path
+
     site = Site.find_for_request(request)
     if site is None:
         # No Wagtail Site matches the request host; fall back to the request.
