@@ -309,7 +309,7 @@
                                     {% if not entry.multi_variable %}
                                         &nbsp;·&nbsp;
                                         {% for var in defn.variables %}
-                                            <span class="gcol-single-var-tag">{{ var.name }} ({{ var.units }})</span>
+                                            <span class="gcol-single-var-tag">{{ var.name }} ({{ var.exposed_units }})</span>
                                         {% endfor %}
                                     {% else %}
                                         &nbsp;·&nbsp;{% blocktrans count n=defn.variables|length %}{{ n }} variable
@@ -376,7 +376,7 @@
                                                             {{ var.name }}
                                                         </span>
                                                         <span class="gcol-var-units">
-                                                            ({{ var.units }})
+                                                            ({{ var.exposed_units }})
                                                         </span>
                                                     </div>
                                                 {% endfor %}

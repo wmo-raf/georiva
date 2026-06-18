@@ -291,8 +291,9 @@ dekadal at 10 days).
 class CollectionVariable:
     key: str  # Variable.slug
     name: str  # Variable.name
-    units: str  # Unit.symbol (created if absent)
-    source: SourceKey | None = None  # passthrough
+    source_units: str  # raw unit of the source data (Unit.symbol, created if absent)
+    output_units: str | None = None  # exposed unit; converted from source_units (defaults to source_units)
+    source_variable: SourceKey | None = None  # passthrough: which variable/band to read
     transform: str = 'passthrough'  # 'passthrough' | 'vector_magnitude' | 'vector_direction'
     components: dict[str, SourceKey] | None = None  # derived: {'u': SourceKey, 'v': SourceKey}
     description: str = ''
@@ -338,8 +339,8 @@ COLLECTIONS = {
             {
                 "key": "precip",
                 "name": "Precipitation",
-                "units": "mm",
-                "source": "band_1",  # string shorthand for SourceKey(name='band_1')
+                "source_units": "mm",  # raw unit; no output_units -> exposed as-is
+                "source_variable": "band_1",  # string shorthand for SourceKey(name='band_1')
                 "value_range": (0.0, 2000.0),
             }
         ],
@@ -352,15 +353,28 @@ def get_collection_definitions(cls):
     return parse_collection_defs(COLLECTIONS)
 ```
 
-**Variable source shorthand:** `"source": "band_1"` is equivalent to
+**Variable source shorthand:** `"source_variable": "band_1"` is equivalent to
 `SourceKey(name="band_1")`. For levelled sources pass a dict:
 
 ```python
-"source": {
+"source_variable": {
     "name": "2t",
     "level": {"type": "heightAboveGround", "value": 2, "dimension": "heightAboveGround", "unit": "m"}
 }
 ```
+
+**Unit conversion:** `source_units` is required (the raw unit). Add `output_units`
+only to convert — e.g. `"source_units": "K", "output_units": "degC"`. Omit
+`output_units` to expose the source unit unchanged.
+
+Conversion runs through [pint](https://pint.readthedocs.io) at ingestion time
+(`source_unit` → `unit` on the resulting `Variable`), so both units must be
+parseable by the registry in `core/unit_utils.py` (it accepts UDUNITS-style
+strings like `"kg kg-1"`, `"m2 s-2"`). Beyond simple scaling, the registry
+enables a **geopotential** context plus a `gpdam` (geopotential decametre) unit,
+so geopotential converts across dimensions to chart-faithful height — e.g.
+`"source_units": "m2 s-2", "output_units": "gpdam"` (divides by g, then by 10).
+Offset conversions (e.g. `K` → `degC`) are likewise supported.
 
 **Derived (vector) variables:**
 
@@ -368,7 +382,7 @@ def get_collection_definitions(cls):
 {
     "key": "wind_speed_10m",
     "name": "10m Wind Speed",
-    "units": "m/s",
+    "source_units": "m/s",
     "transform": "vector_magnitude",
     "components": {
         "u": {"name": "10u", "level": {"type": "heightAboveGround", "value": 10, ...}},

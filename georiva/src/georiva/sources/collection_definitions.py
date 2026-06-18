@@ -17,26 +17,39 @@ class CollectionVariable:
     """
     One variable within a CollectionDefinition.
 
-    Scalar variables use transform='passthrough' (default) and source.
+    Scalar variables use transform='passthrough' (default) and source_variable.
     Vector-derived variables (wind speed, wind direction) use
     transform='vector_magnitude' or 'vector_direction' and components instead
-    of source.
+    of source_variable.
+
+    source_units (required) is the raw unit of the data as it leaves the source
+    file (or, for transforms, as it leaves the transform). output_units is the
+    unit this variable is exposed in: when set and different from source_units,
+    the ingestion pipeline converts source_units -> output_units via pint. When
+    output_units is None it defaults to source_units, i.e. no conversion.
     """
     key: str
     name: str
-    units: str
-    source: Optional[SourceKey] = None
+    source_units: str
+    output_units: Optional[str] = None
+    source_variable: Optional[SourceKey] = None
     transform: str = 'passthrough'
     components: Optional[dict[str, SourceKey]] = None
     description: str = ''
     value_range: Optional[tuple[float, float]] = None
     palette: Optional[str] = None
-    
+
     def __post_init__(self):
-        if self.transform == 'passthrough' and self.source is None:
-            raise ValueError(f"CollectionVariable '{self.key}': passthrough transform requires 'source'")
+        if self.transform == 'passthrough' and self.source_variable is None:
+            raise ValueError(f"CollectionVariable '{self.key}': passthrough transform requires 'source_variable'")
         if self.transform != 'passthrough' and self.components is None:
             raise ValueError(f"CollectionVariable '{self.key}': derived transform requires 'components'")
+
+    @property
+    def exposed_units(self) -> str:
+        """Unit this variable is exposed in: output_units, or source_units when
+        no conversion is declared."""
+        return self.output_units or self.source_units
 
 
 @dataclass(frozen=True)
@@ -138,8 +151,9 @@ def parse_collection_defs(raw: dict) -> list['CollectionDefinition']:
                     {
                         "key": "precip",            # optional; slugified from name if absent
                         "name": "Precipitation",    # required
-                        "units": "mm",             # required
-                        "source": "band_1",        # str shorthand, OR dict with name/level
+                        "source_units": "m",       # required (raw unit of source data)
+                        "output_units": "mm",      # optional; exposed unit (defaults to source_units)
+                        "source_variable": "band_1",  # str shorthand, OR dict with name/level
                         "value_range": (0.0, 2000.0),  # optional
                         "description": "",         # optional
                         "palette": None,           # optional
@@ -153,8 +167,8 @@ def parse_collection_defs(raw: dict) -> list['CollectionDefinition']:
 
         return parse_collection_defs(COLLECTIONS)
 
-    Source shorthand: ``"source": "band_1"`` is equivalent to
-    ``"source": {"name": "band_1", "level": None}``.
+    Source shorthand: ``"source_variable": "band_1"`` is equivalent to
+    ``"source_variable": {"name": "band_1", "level": None}``.
     """
     return [_parse_collection(key, data) for key, data in raw.items()]
 
@@ -182,19 +196,21 @@ def _parse_variable(v: dict) -> CollectionVariable:
         return CollectionVariable(
             key=key,
             name=v['name'],
-            units=v['units'],
-            source=_parse_source_key(v['source']),
+            source_units=v['source_units'],
+            output_units=v.get('output_units'),
+            source_variable=_parse_source_key(v['source_variable']),
             description=v.get('description', ''),
             value_range=tuple(v['value_range']) if v.get('value_range') else None,
             palette=v.get('palette'),
         )
-    
+
     # Vector-derived variable
     components = {k: _parse_source_key(s) for k, s in v['components'].items()}
     return CollectionVariable(
         key=key,
         name=v['name'],
-        units=v['units'],
+        source_units=v['source_units'],
+        output_units=v.get('output_units'),
         transform=transform,
         components=components,
         description=v.get('description', ''),

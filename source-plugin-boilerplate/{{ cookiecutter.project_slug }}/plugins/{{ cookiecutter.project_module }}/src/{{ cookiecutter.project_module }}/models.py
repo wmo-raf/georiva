@@ -40,8 +40,9 @@ COLLECTIONS = {
             {
                 "key": "example_var",
                 "name": "Example Variable",
-                "units": "",
-                "source": "band_1",
+                "source_units": "",          # raw unit of the source data (required)
+                # "output_units": "",        # optional; exposed unit if converting
+                "source_variable": "band_1",
                 # "value_range": (0.0, 100.0),
             },
         ],
