@@ -20,6 +20,10 @@ A GeoRiva plugin is a folder named after the plugin. This must be a valid Python
 
 source /georiva/plugins/utils.sh
 
+# The builder stage doesn't export DOCKER_USER (only runtime-base does), so
+# default it to the user created in both stages.
+DOCKER_USER="${DOCKER_USER:-georiva}"
+
 # First parse the args using getopt
 VALID_ARGS=$(getopt -o u:dhf:rg:o --long hash:,url:,git:,help,dev,folder:,runtime,overwrite -- "$@")
 if [[ $? -ne 0 ]]; then
