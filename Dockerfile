@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ca-certificates \
     curl \
     git \
+    gosu \
     libgeos-dev \
     libpq-dev \
     python3-dev \
