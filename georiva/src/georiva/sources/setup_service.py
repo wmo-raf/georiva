@@ -174,20 +174,25 @@ class SourceSetupService:
         from georiva.core.models import Variable
         
         slug = slugify(var_def.key)
-        unit = self._get_or_create_unit(var_def.units)
-        
+        source_unit = self._get_or_create_unit(var_def.source_units)
+        output_unit = (
+            self._get_or_create_unit(var_def.output_units)
+            if var_def.output_units
+            else source_unit
+        )
+
         base_defaults = {
             "name": var_def.name,
             "description": var_def.description,
-            "unit": unit,
-            "source_unit": unit,
+            "unit": output_unit,
+            "source_unit": source_unit,
             "value_min": var_def.value_range[0] if var_def.value_range else 0.0,
             "value_max": var_def.value_range[1] if var_def.value_range else 1.0,
         }
         
         if var_def.transform == 'passthrough':
             transform = Variable.TransformType.PASSTHROUGH
-            sources_data = [self._source_key_to_block("primary", var_def.source)]
+            sources_data = [self._source_key_to_block("primary", var_def.source_variable)]
         elif var_def.transform == 'vector_magnitude':
             transform = Variable.TransformType.VECTOR_MAGNITUDE
             sources_data = [

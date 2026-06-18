@@ -54,7 +54,16 @@ def setup_registry(reg):
     
     # Alias geopotential meters (gpm) to just meters
     reg.define('@alias meter = gpm')
-    
+
+    # Geopotential decametre (gpdam) — the unit ECMWF charts plot geopotential
+    # height in (1 gpdam = 10 gpm). Defined explicitly because pint has no
+    # decametre alias to hang it off.
+    reg.define('gpdam = 10 * meter')
+
+    # Geopotential Φ is a specific energy (J/kg = m²/s²). Naming the dimension
+    # lets the geopotential context below bridge it to [length].
+    reg.define('[specific_enthalpy] = [energy] / [mass]')
+
     # custom contexts
     
     # Define a context for precipitation
@@ -80,7 +89,27 @@ def setup_registry(reg):
                                      lambda reg, x: x * reg('mm/h') / reg('kg/m^2/h'))
     
     reg.add_context(precipitation)
-    
+
+    # Define a context for geopotential <-> geopotential height
+    geopotential = pint.Context('geopotential')
+
+    # Geopotential height Z = Φ / g, with g = standard gravity (9.80665 m/s²).
+    # This bridges specific energy ([length]²/[time]²) to length, which pint
+    # otherwise refuses as dimensionally inconsistent. Combined with the gpdam
+    # unit, m²/s² → gpdam divides by g then by 10 in a single conversion.
+    geopotential.add_transformation('[length] ** 2 / [time] ** 2', '[length]',
+                                    lambda reg, x: x / reg('9.80665 m/s**2'))
+    geopotential.add_transformation('[length]', '[length] ** 2 / [time] ** 2',
+                                    lambda reg, x: x * reg('9.80665 m/s**2'))
+
+    reg.add_context(geopotential)
+
+    # Geopotential height conversion is physically unambiguous (it only ever
+    # fires for m²/s² <-> length), so enable it globally — callers of
+    # apply_unit_conversion need not name the context. Precipitation stays
+    # opt-in because mm <-> kg/m² is genuinely ambiguous.
+    reg.enable_contexts('geopotential')
+
     return reg
 
 
