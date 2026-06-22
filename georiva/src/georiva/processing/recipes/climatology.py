@@ -146,7 +146,22 @@ class ClimatologyRecipe(BaseRecipe):
             variable=out_var, roles=["data"], format="cog",
             array=array, bounds=si.bounds, crs=si.crs,
             width=si.width, height=si.height,
+            stats=self._array_stats(array),
         )]
+
+    @staticmethod
+    def _array_stats(array) -> dict:
+        """NaN-aware min/max/mean/std for the derived raster (empty if all-NaN)."""
+        import numpy as np
+
+        if not np.isfinite(array).any():
+            return {}
+        return {
+            "min": float(np.nanmin(array)),
+            "max": float(np.nanmax(array)),
+            "mean": float(np.nanmean(array)),
+            "std": float(np.nanstd(array)),
+        }
 
     # ---- I/O seam (mocked in tests) ----------------------------------------
 
@@ -237,7 +252,13 @@ class ClimatologyRecipe(BaseRecipe):
         )
 
     def _output_variable(self, unit, resolved):
-        """Mirror the source variable onto the output collection."""
+        """
+        Derive the output Variable from the source, adjusting metadata to the
+        quantity: ``value`` mirrors the source; ``anomaly``/``trend`` keep the
+        source unit but use a symmetric range around zero; ``relative_anomaly``
+        is dimensionless on [-1, 1]. The recipe creates these in the per-quantity
+        output collection (one Variable per collection).
+        """
         from georiva.core.models import Variable
 
         src = next(
@@ -249,11 +270,35 @@ class ClimatologyRecipe(BaseRecipe):
             )
         si = resolved["value"].items[0]
         collection = self._published_collection(unit, si.collection.catalog)
+        spec = self._variable_spec(src, unit["quantity"])
         out_var, _ = Variable.objects.get_or_create(
-            collection=collection, slug=src.slug,
-            defaults={
-                "name": src.name, "unit": src.unit,
-                "value_min": src.value_min, "value_max": src.value_max,
-            },
+            collection=collection, slug=src.slug, defaults=spec,
         )
         return out_var
+
+    def _variable_spec(self, src, quantity: str) -> dict:
+        """Quantity-specific (name, unit, value_min, value_max) for the output."""
+        span = (src.value_max - src.value_min) / 2.0
+        if quantity == "value":
+            return {"name": src.name, "unit": src.unit,
+                    "value_min": src.value_min, "value_max": src.value_max}
+        if quantity == "anomaly":
+            return {"name": f"{src.name} anomaly", "unit": src.unit,
+                    "value_min": -span, "value_max": span}
+        if quantity == "relative_anomaly":
+            return {"name": f"{src.name} relative anomaly",
+                    "unit": self._dimensionless_unit(),
+                    "value_min": -1.0, "value_max": 1.0}
+        if quantity == "trend":
+            return {"name": f"{src.name} trend (per year)", "unit": src.unit,
+                    "value_min": -span, "value_max": span}
+        raise ValueError(f"unknown quantity: {quantity!r}")
+
+    @staticmethod
+    def _dimensionless_unit():
+        from georiva.core.models import Unit
+
+        unit, _ = Unit.objects.get_or_create(
+            symbol="dimensionless", defaults={"name": "Dimensionless"},
+        )
+        return unit

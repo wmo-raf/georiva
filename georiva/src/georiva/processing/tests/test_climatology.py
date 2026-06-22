@@ -62,7 +62,7 @@ class _ClimatologyFixture(TestCase):
         )
         self.src_var = Variable.objects.create(
             collection=self.src_col, slug="tas", name="tas",
-            unit=self.unit_c, value_min=-50, value_max=50,
+            unit=self.unit_c, value_min=0, value_max=50,
         )
         self.sasset = StagingAsset.objects.create(
             item=self.sitem, href="cmip6/tas/series.nc", roles=["source"],
@@ -116,6 +116,62 @@ class ValueQuantityTests(_ClimatologyFixture):
         link = DerivationLink.objects.get(derived_item=item)
         self.assertEqual(link.source_staging_item, self.sitem)
         self.assertEqual(link.recipe_id, "climatology")
+
+
+class AssetStatsTests(_ClimatologyFixture):
+    def test_derived_asset_carries_stats_from_result(self):
+        cube = _cube([20.0] * 24)  # JJA climatology = 20.0 everywhere
+        result = self._run(self._unit(), cube)
+
+        asset = Item.objects.get(pk=result.item_id).assets.get()
+        self.assertAlmostEqual(asset.stats_min, 20.0)
+        self.assertAlmostEqual(asset.stats_max, 20.0)
+        self.assertAlmostEqual(asset.stats_mean, 20.0)
+        self.assertAlmostEqual(asset.stats_std, 0.0)
+
+
+class OutputVariableMetadataTests(_ClimatologyFixture):
+    def _out_variable(self, unit, cube):
+        result = self._run(unit, cube)
+        self.assertEqual(result.status, "completed")
+        return Item.objects.get(pk=result.item_id).assets.get().variable
+
+    def test_value_variable_mirrors_source(self):
+        var = self._out_variable(self._unit(), _cube([20.0] * 24))
+        self.assertEqual(var.unit, self.unit_c)
+        self.assertAlmostEqual(var.value_min, 0.0)
+        self.assertAlmostEqual(var.value_max, 50.0)
+
+    def test_anomaly_variable_has_symmetric_range_and_mirrors_unit(self):
+        cube = self._yearly_jja_cube({1981: 10.0, 2011: 13.0})
+        unit = self._unit(
+            season="JJA", quantity="anomaly",
+            period=[2011, 2011], baseline=[1981, 1981],
+        )
+        var = self._out_variable(unit, cube)
+        self.assertEqual(var.unit, self.unit_c)  # an anomaly keeps source units
+        self.assertAlmostEqual(var.value_min, -25.0)  # span = (50-0)/2
+        self.assertAlmostEqual(var.value_max, 25.0)
+        self.assertIn("anomaly", var.name.lower())
+
+    def test_relative_anomaly_variable_is_dimensionless(self):
+        cube = self._yearly_jja_cube({1981: 10.0, 2011: 13.0})
+        unit = self._unit(
+            season="JJA", quantity="relative_anomaly",
+            period=[2011, 2011], baseline=[1981, 1981],
+        )
+        var = self._out_variable(unit, cube)
+        self.assertNotEqual(var.unit, self.unit_c)
+        self.assertEqual(var.unit.symbol, "dimensionless")
+        self.assertAlmostEqual(var.value_min, -1.0)
+        self.assertAlmostEqual(var.value_max, 1.0)
+
+    def test_trend_variable_names_per_year_and_keeps_unit(self):
+        cube = self._yearly_jja_cube({2011: 10.0, 2012: 12.0, 2013: 14.0})
+        unit = self._unit(season="JJA", quantity="trend", period=[2011, 2013])
+        var = self._out_variable(unit, cube)
+        self.assertEqual(var.unit, self.unit_c)
+        self.assertIn("per year", var.name.lower())
 
 
 class AnomalyQuantityTests(_ClimatologyFixture):
