@@ -185,6 +185,9 @@ celery-beat)
 minio-consumer)
       exec python /georiva/app/src/georiva/manage.py minio_event_consumer "${@:2}"
     ;;
+staging-consumer)
+      exec python /georiva/app/src/georiva/manage.py staging_event_consumer "${@:2}"
+    ;;
 install-plugin)
     exec /georiva/plugins/install_plugin.sh --runtime "${@:2}"
     ;;

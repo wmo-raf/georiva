@@ -52,7 +52,23 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         verbose_name=_("Run Interval"),
         help_text=_("Minutes between runs (global default for all collections)"),
     )
-    
+
+    class TargetTier(models.TextChoices):
+        PUBLISHED = 'published', _('Published (serve directly)')
+        STAGING = 'staging', _('Staging (hold for derivation)')
+
+    target_tier = models.CharField(
+        max_length=20,
+        choices=TargetTier.choices,
+        default=TargetTier.PUBLISHED,
+        verbose_name=_("Target Tier"),
+        help_text=_(
+            "Published: fetched files are materialized into served layers. "
+            "Staging: fetched files are held as raw inputs for derivation and "
+            "are not served or auto-materialized."
+        ),
+    )
+
     # Run tracking
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_run_status = models.CharField(
@@ -78,7 +94,8 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     base_panels = [
         FieldPanel('name'),
         FieldPanel('is_active'),
-        FieldPanel('interval_minutes')
+        FieldPanel('interval_minutes'),
+        FieldPanel('target_tier'),
     ]
     
     panels = base_panels

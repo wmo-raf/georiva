@@ -135,7 +135,31 @@ class Loader:
             f"georiva.loader.{data_source.name.replace(' ', '_').lower()}"
         )
         self._temp_dir: Optional[str] = None
-    
+
+    # =========================================================================
+    # Target tier routing
+    # =========================================================================
+    @property
+    def _tier_bucket_type(self) -> str:
+        """
+        Storage bucket for this feed's target tier.
+
+        Store-only (``target_tier=staging``) feeds land in the STAGING bucket,
+        which the published ingestion consumer does not watch — so fetched
+        files are held as raw inputs for derivation, not auto-materialized.
+        Everything else lands in SOURCES (the published path).
+        """
+        from georiva.core.storage import BucketType
+
+        feed = self.data_feed
+        if feed is not None and getattr(feed, "target_tier", None) == "staging":
+            return BucketType.STAGING
+        return BucketType.SOURCES
+
+    @property
+    def _tier_bucket(self):
+        return storage.bucket(self._tier_bucket_type)
+
     # =========================================================================
     # Main Run Method
     # =========================================================================
@@ -217,7 +241,7 @@ class Loader:
                     if existing_path:
                         dest_path = storage_path
                         try:
-                            storage.sources.copy(existing_path, dest_path)
+                            self._tier_bucket.copy(existing_path, dest_path)
                             result.files_fetched += 1
                             result.stored_paths.append(dest_path)
                             self.logger.info(
@@ -321,7 +345,7 @@ class Loader:
     def _already_exists(self, request) -> bool:
         """Check if file already exists in storage for this collection."""
         storage_path = self._get_storage_path(request)
-        return storage.sources.exists(storage_path)
+        return self._tier_bucket.exists(storage_path)
     
     def _find_existing_catalog_path(self, request) -> str | None:
         """
@@ -351,7 +375,7 @@ class Loader:
         log_path = (
             FileIngestion.objects
             .filter(
-                bucket=BucketType.SOURCES,
+                bucket=self._tier_bucket_type,
                 file_path__startswith=f"{catalog_slug}/",
                 file_path__endswith=f"/{filename}",
                 status__in=[
@@ -375,7 +399,7 @@ class Loader:
             ):
                 sibling = link.collection
                 candidate = f"{sibling.catalog.slug}/{sibling.slug}/{filename}"
-                if storage.sources.exists(candidate):
+                if self._tier_bucket.exists(candidate):
                     return candidate
 
         return None
@@ -483,9 +507,9 @@ class Loader:
         return f"{self.collection.catalog.slug}/{self.collection.slug}/{filename}"
     
     def _store_file(self, local_path: Path, storage_path: str):
-        """Store file in permanent storage using storage.sources."""
+        """Store file in permanent storage for this feed's target tier."""
         with open(local_path, 'rb') as f:
-            storage.sources.save(storage_path, f)
+            self._tier_bucket.save(storage_path, f)
     
     # =========================================================================
     # Temp Directory Management

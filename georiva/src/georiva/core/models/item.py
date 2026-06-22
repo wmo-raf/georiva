@@ -5,7 +5,6 @@ Item: TimescaleDB hypertable for time-series raster data
 Asset: Individual files associated with an Item, linked to Variables
 """
 
-from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -15,13 +14,18 @@ from modelcluster.models import ClusterableModel
 from timescale.db.models.models import TimescaleModel
 from wagtail.models import Orderable
 
+from .base import AbstractAsset, AbstractSpatialItem
 
-class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
+
+class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableModel):
     """
     A single spatiotemporal entry in a Collection.
-    
+
     Uses TimescaleDB hypertable for efficient time-series queries.
     The 'time' field from TimescaleModel serves as valid_time.
+
+    Spatial/raster fields (source_file, bounds, geometry, width, height,
+    resolution_x/y, crs, properties) are inherited from AbstractSpatialItem.
     """
     
     collection = models.ForeignKey(
@@ -38,39 +42,6 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         db_index=True,
         help_text=_("When data was produced (model run time for forecasts)"),
     )
-    
-    # Source tracking — convention: "{bucket}:{file_path}" (matches
-    # FileIngestion.bucket + FileIngestion.file_path for the audit join).
-    source_file = models.CharField(
-        max_length=500,
-        blank=True,
-        db_index=True,
-        help_text=_("Original source file path"),
-    )
-    
-    # Spatial metadata
-    bounds = ArrayField(
-        models.FloatField(),
-        size=4,
-        null=True,
-        blank=True,
-        help_text=_("Bounding box [west, south, east, north]"),
-    )
-    geometry = models.JSONField(
-        null=True,
-        blank=True,
-        help_text=_("GeoJSON geometry for non-rectangular footprints"),
-    )
-    
-    # Raster dimensions
-    width = models.IntegerField(null=True, blank=True)
-    height = models.IntegerField(null=True, blank=True)
-    resolution_x = models.FloatField(null=True, blank=True)
-    resolution_y = models.FloatField(null=True, blank=True)
-    crs = models.CharField(max_length=50, default="EPSG:4326")
-    
-    # Flexible metadata
-    properties = models.JSONField(default=dict, blank=True)
     
     class Meta:
         ordering = ['-time']
@@ -185,28 +156,15 @@ class Item(TimescaleModel, TimeStampedModel, ClusterableModel):
         return self.time.strftime(fmt)
 
 
-class Asset(TimeStampedModel, Orderable):
+class Asset(AbstractAsset, TimeStampedModel, Orderable):
     """
     A stored data file for a specific Variable within an Item.
-    
+
     Links Item (when/where) to Variable (what) with the actual file (href).
+
+    File/classification/stats fields and the Role/Format enums are inherited
+    from AbstractAsset; only the tier-specific relations live here.
     """
-    
-    class Role(models.TextChoices):
-        DATA = 'data', _('Data')
-        VISUAL = 'visual', _('Visual')
-        THUMBNAIL = 'thumbnail', _('Thumbnail')
-        OVERVIEW = 'overview', _('Overview')
-        METADATA = 'metadata', _('Metadata')
-    
-    class Format(models.TextChoices):
-        COG = 'cog', _('Cloud-Optimized GeoTIFF')
-        ZARR = 'zarr', _('Zarr')
-        GEOTIFF = 'geotiff', _('GeoTIFF')
-        PNG = 'png', _('PNG')
-        WEBP = 'webp', _('WebP')
-        JPEG = 'jpeg', _('JPEG')
-        JSON = 'json', _('JSON')
     
     # Parent Item
     item = ParentalKey(
@@ -222,47 +180,6 @@ class Asset(TimeStampedModel, Orderable):
         on_delete=models.CASCADE,
         related_name='assets',
     )
-    
-    # File location
-    href = models.CharField(
-        max_length=500,
-        help_text=_("Storage path or URL"),
-    )
-    
-    media_type = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text=_("MIME type"),
-    )
-    
-    # Classification
-    roles = ArrayField(
-        models.CharField(max_length=20, choices=Role.choices),
-        default=list,
-    )
-    format = models.CharField(
-        max_length=20,
-        choices=Format.choices,
-        blank=True,
-    )
-    
-    # File metadata
-    file_size = models.BigIntegerField(null=True, blank=True)
-    checksum = models.CharField(max_length=64, blank=True)
-    
-    # Raster info (if different from Item)
-    width = models.IntegerField(null=True, blank=True)
-    height = models.IntegerField(null=True, blank=True)
-    bands = models.IntegerField(null=True, blank=True, default=1)
-    
-    # Statistics (computed during processing)
-    stats_min = models.FloatField(null=True, blank=True)
-    stats_max = models.FloatField(null=True, blank=True)
-    stats_mean = models.FloatField(null=True, blank=True)
-    stats_std = models.FloatField(null=True, blank=True)
-    
-    # Format-specific fields
-    extra_fields = models.JSONField(default=dict, blank=True)
     
     class Meta:
         ordering = ['sort_order']

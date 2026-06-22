@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     
     # georiva
     "georiva.core",
+    "georiva.staging",
     "georiva.formats",
     "georiva.ingestion",
     "georiva.virtual_zarr",
@@ -234,6 +235,16 @@ AWS_S3_SIGNATURE_VERSION = env('AWS_S3_SIGNATURE_VERSION', default='s3v4')
 AWS_S3_ADDRESSING_STYLE = env('AWS_S3_ADDRESSING_STYLE', default='path')
 
 MINIO_REDIS_ARN = env("MINIO_REDIS_ARN", default="arn:minio:sqs::primary:redis")
+
+# Staging events use a SEPARATE MinIO notification target and Redis list so the
+# published consumer's destructive blpop never steals (and drops) them.
+MINIO_STAGING_REDIS_ARN = env(
+    "MINIO_STAGING_REDIS_ARN", default="arn:minio:sqs::staging:redis"
+)
+MINIO_STAGING_REDIS_KEY = env(
+    "MINIO_STAGING_REDIS_KEY", default="georiva:minio:staging-events"
+)
+
 MINIO_PUBLIC_ENDPOINT = env.str("MINIO_PUBLIC_ENDPOINT", default="localhost:9000")
 MINIO_PUBLIC_ENDPOINT_USE_SSL = env.bool("MINIO_PUBLIC_ENDPOINT_USE_SSL", default=False)
 
@@ -247,6 +258,9 @@ GEORIVA_BUCKETS = {
     },
     "sources": {
         "name": "georiva-sources",
+    },
+    "staging": {
+        "name": "georiva-staging",
     },
     "archive": {
         "name": "georiva-archive",

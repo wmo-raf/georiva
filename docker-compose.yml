@@ -126,6 +126,11 @@ services:
       MINIO_NOTIFY_REDIS_ADDRESS_primary: "georiva-redis:6379"
       MINIO_NOTIFY_REDIS_KEY_primary: "georiva:minio:events"
       MINIO_NOTIFY_REDIS_FORMAT_primary: "access"
+      # Separate target for the STAGING bucket → its own Redis list → staging consumer.
+      MINIO_NOTIFY_REDIS_ENABLE_staging: "on"
+      MINIO_NOTIFY_REDIS_ADDRESS_staging: "georiva-redis:6379"
+      MINIO_NOTIFY_REDIS_KEY_staging: "georiva:minio:staging-events"
+      MINIO_NOTIFY_REDIS_FORMAT_staging: "access"
     volumes:
       - ${MINIO_VOLUME:-./docker/minio}:/data
 
@@ -202,6 +207,18 @@ services:
     <<: *backend-volumes
     restart: unless-stopped
     command: minio-consumer
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva
+
+  georiva-staging-consumer:
+    image: georiva
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: staging-consumer
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
