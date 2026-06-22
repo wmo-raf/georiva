@@ -30,6 +30,15 @@ services:
     volumes:
       - ./georiva:/georiva/app
 
+  georiva-celery-processing-worker:
+    build:
+      target: dev
+    command: celery-processing-worker-dev
+    environment:
+      DEBUG: "True"
+    volumes:
+      - ./georiva:/georiva/app
+
   georiva-celery-beat:
     build:
       target: dev
