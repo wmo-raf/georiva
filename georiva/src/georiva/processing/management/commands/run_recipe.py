@@ -4,7 +4,14 @@ Manually invoke a derivation recipe over a selector.
 Usage:
     georiva run_recipe promotion --collection tas-ssp245 --sync
     georiva run_recipe promotion --staging-item-id 12 --staging-item-id 13
+    georiva run_recipe climatology --sync --selector-json '{
+        "source_collection": "tas", "variable": "tas",
+        "periods": [[2011, 2040]], "seasons": ["DJF", "JJA"],
+        "quantities": ["value", "anomaly", "trend"],
+        "baselines": [[1981, 2010]]}'
 """
+import json
+
 from django.core.management.base import BaseCommand, CommandError
 
 from georiva.processing.engine import run
@@ -20,6 +27,11 @@ class Command(BaseCommand):
         parser.add_argument(
             "--staging-item-id", dest="staging_item_ids", type=int,
             action="append", default=None,
+        )
+        parser.add_argument(
+            "--selector-json", dest="selector_json", default=None,
+            help="A full selector as a JSON object (for richer recipes like "
+                 "climatology). Merged over --collection/--staging-item-id.",
         )
         parser.add_argument(
             "--sync", action="store_true",
@@ -39,6 +51,11 @@ class Command(BaseCommand):
             selector["collection_slug"] = options["collection_slug"]
         if options.get("staging_item_ids"):
             selector["staging_item_ids"] = options["staging_item_ids"]
+        if options.get("selector_json"):
+            try:
+                selector.update(json.loads(options["selector_json"]))
+            except json.JSONDecodeError as e:
+                raise CommandError(f"Invalid --selector-json: {e}")
 
         results = run(recipe, selector, dispatch=not options["sync"])
 
