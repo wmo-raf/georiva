@@ -190,6 +190,19 @@ services:
     depends_on:
       - georiva
 
+  georiva-celery-processing-worker:
+    image: georiva
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: celery-processing-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-1}
+    depends_on:
+      - georiva
+
   georiva-celery-beat:
     image: georiva
     <<: *backend-volumes

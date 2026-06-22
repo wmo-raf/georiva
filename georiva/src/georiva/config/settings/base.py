@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     # georiva
     "georiva.core",
     "georiva.staging",
+    "georiva.processing",
     "georiva.formats",
     "georiva.ingestion",
     "georiva.virtual_zarr",

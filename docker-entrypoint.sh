@@ -165,6 +165,9 @@ celery-default-worker)
 celery-ingestion-worker)
     start_celery_worker -Q georiva-ingestion -n ingestion-worker@%h "${@:2}"
     ;;
+celery-processing-worker)
+    start_celery_worker -Q georiva-processing -n processing-worker@%h "${@:2}"
+    ;;
 celery-default-worker-dev)
     startup_plugin_setup
     exec watchfiles \
@@ -177,6 +180,13 @@ celery-ingestion-worker-dev)
     exec watchfiles \
         --filter python \
         "celery -A georiva worker -Q georiva-ingestion -n ingestion-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=1" \
+        /georiva/app/src/
+    ;;
+celery-processing-worker-dev)
+    startup_plugin_setup
+    exec watchfiles \
+        --filter python \
+        "celery -A georiva worker -Q georiva-processing -n processing-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=1" \
         /georiva/app/src/
     ;;
 celery-beat)
