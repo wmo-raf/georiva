@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import rasterio
-import rasterio.mask
-from rasterio.crs import CRS as RasterioCRS
-from rasterio.io import MemoryFile
+
+from georiva.geoprocessing.zonal import zonal_stats_from_array
 
 if TYPE_CHECKING:
     from adminboundarymanager.models import AdminBoundary
@@ -17,38 +16,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_BOUNDARY_CRS = RasterioCRS.from_epsg(4326)
-_EMPTY_STATS = {
-    "mean": None, "min": None, "max": None,
-    "sum": None, "std": None, "count": None,
-}
-
 
 # ---------------------------------------------------------------------------
-# Geometry helper
-# ---------------------------------------------------------------------------
-
-def _geom_to_dict(boundary: "AdminBoundary", raster_crs: RasterioCRS) -> dict:
-    """
-    Convert a Django GEOSGeometry to a GeoJSON dict in the raster's CRS.
-
-    boundary.geom.geojson returns a JSON string — parse it to dict.
-    Reproject only if the raster CRS differs from EPSG:4326 (rare for COGs).
-    """
-    geom = json.loads(boundary.geom.geojson)
-    
-    if raster_crs != _BOUNDARY_CRS:
-        from rasterio.warp import transform_geom
-        geom = transform_geom(_BOUNDARY_CRS, raster_crs, geom)
-        # transform_geom may return a string in older rasterio versions
-        if isinstance(geom, str):
-            geom = json.loads(geom)
-    
-    return geom
-
-
-# ---------------------------------------------------------------------------
-# Core computation
+# Core computation — Django adapter over geoprocessing.zonal
 # ---------------------------------------------------------------------------
 
 def compute_stats_from_array(
@@ -60,73 +30,31 @@ def compute_stats_from_array(
     """
     Compute zonal statistics for all boundaries against one 2-D numpy array.
 
-    Opens a single in-memory rasterio dataset from the array, then masks
-    each boundary against that same open dataset.  This avoids the cost of
-    creating and destroying a MemoryFile per boundary (previously ~4s/COG
-    for 105 boundaries, now ~0.5s/COG).
+    Thin Django adapter: turns each AdminBoundary into a GeoJSON geometry
+    (EPSG:4326) and delegates the actual masking/aggregation to the shared
+    ``geoprocessing.zonal`` library. Reprojection to the raster CRS happens
+    inside the library.
 
-    Parameters
-    ----------
-    data : np.ndarray
-        2-D float32 array with NaN for nodata pixels.
-    transform : affine.Affine
-        Affine geotransform (pixel → geographic coordinates).
-    crs : str
-        Raster CRS as WKT or EPSG string.
-    boundaries : list[AdminBoundary]
-        Boundaries to compute stats for.
-
-    Returns
-    -------
-    list[dict]
-        One dict per boundary: boundary_id + six stat keys.
-        Boundaries with no pixel intersection return all-None stats.
+    Returns one dict per boundary: ``boundary_id`` + six stat keys.
+    Boundaries with no pixel intersection return all-None stats.
     """
     if not boundaries:
         return []
-    
-    height, width = data.shape
-    raster_crs = RasterioCRS.from_user_input(crs)
-    
-    # Pre-parse all boundary geometries before opening the MemoryFile
-    # so any geometry error is caught early without holding the file open.
-    geoms = {}
+
+    geometries = []
     for boundary in boundaries:
         try:
-            geoms[boundary.pk] = _geom_to_dict(boundary, raster_crs)
+            geometries.append((boundary.pk, json.loads(boundary.geom.geojson)))
         except Exception as exc:
             logger.warning(
-                "Failed to parse geometry for boundary %s: %s",
-                boundary.pk, exc,
+                "Failed to parse geometry for boundary %s: %s", boundary.pk, exc,
             )
-            geoms[boundary.pk] = None
-    
-    results = []
-    
-    # Build one MemoryFile for the full COG array, open it once,
-    # and run rasterio.mask for every boundary inside the same context.
-    with MemoryFile() as memfile:
-        with memfile.open(
-                driver="GTiff",
-                height=height,
-                width=width,
-                count=1,
-                dtype=np.float32,
-                crs=raster_crs,
-                transform=transform,
-                nodata=np.nan,
-        ) as dst:
-            dst.write(data, 1)
-        
-        # Re-open read-only for masking — keeps the buffer alive
-        with memfile.open() as dataset:
-            for boundary in boundaries:
-                geom = geoms.get(boundary.pk)
-                stats = _mask_and_aggregate(dataset, geom, boundary.pk)
-                stats["boundary_id"] = boundary.pk
-                results.append(stats)
-    
-    return results
+            geometries.append((boundary.pk, None))
+
+    rows = zonal_stats_from_array(data, transform, crs, geometries)
+    for row in rows:
+        row["boundary_id"] = row.pop("key")
+    return rows
 
 
 def compute_stats_from_cog_bytes(
@@ -143,60 +71,13 @@ def compute_stats_from_cog_bytes(
         data = src.read(1).astype(np.float32)
         transform = src.transform
         crs = src.crs.to_wkt() if src.crs else "EPSG:4326"
-        
+
         if src.nodata is not None:
             data[data == src.nodata] = np.nan
-    
+
     data[~np.isfinite(data)] = np.nan
-    
+
     return compute_stats_from_array(data, transform, crs, boundaries)
-
-
-# ---------------------------------------------------------------------------
-# Masking + aggregation
-# ---------------------------------------------------------------------------
-
-def _mask_and_aggregate(dataset, geom: dict | None, boundary_pk) -> dict:
-    """
-    Apply a GeoJSON geometry mask to an open rasterio dataset and aggregate.
-
-    Returns all-None stats if the geometry is None, empty, or does not
-    intersect the raster extent.
-    """
-    if geom is None:
-        return dict(_EMPTY_STATS)
-    
-    try:
-        masked, _ = rasterio.mask.mask(
-            dataset,
-            [geom],
-            crop=False,
-            nodata=np.nan,
-            all_touched=False,
-        )
-        arr = masked[0].astype(np.float32)
-        arr[~np.isfinite(arr)] = np.nan
-        
-        valid = arr[~np.isnan(arr)]
-        
-        if len(valid) == 0:
-            return dict(_EMPTY_STATS)
-        
-        return {
-            "mean": float(np.mean(valid)),
-            "min": float(np.min(valid)),
-            "max": float(np.max(valid)),
-            "sum": float(np.sum(valid)),
-            "std": float(np.std(valid)),
-            "count": int(len(valid)),
-        }
-    
-    except Exception as exc:
-        logger.warning(
-            "Zonal stats mask failed for boundary %s: %s",
-            boundary_pk, exc,
-        )
-        return dict(_EMPTY_STATS)
 
 
 # ---------------------------------------------------------------------------
