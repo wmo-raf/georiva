@@ -9,6 +9,7 @@ from georiva.geoprocessing.temporal import (
     climatology,
     select_season,
     temporal_aggregate,
+    trend,
 )
 
 
@@ -123,6 +124,57 @@ class ClimatologyTests(unittest.TestCase):
     def test_no_season_collapses_whole_series_like_aggregate(self):
         da = _series([1.0, 2.0, 3.0, 4.0])
         self.assertAlmostEqual(float(climatology(da)), 2.5)
+
+
+class TrendTests(unittest.TestCase):
+    def test_linear_increase_gives_slope_per_year(self):
+        # One value per year, rising 2.0/year over 2000..2003.
+        time = pd.date_range("2000-01-01", periods=4, freq="YS")
+        da = xr.DataArray(
+            [0.0, 2.0, 4.0, 6.0], coords={"time": time}, dims=["time"]
+        )
+        self.assertAlmostEqual(float(trend(da)), 2.0)
+
+    def test_flat_series_has_zero_slope(self):
+        time = pd.date_range("2000-01-01", periods=5, freq="YS")
+        da = xr.DataArray([7.0] * 5, coords={"time": time}, dims=["time"])
+        self.assertAlmostEqual(float(trend(da)), 0.0)
+
+    def test_season_aware_ignores_other_months(self):
+        # 3 years monthly. JJA rises 10->12->14 (slope 2/yr); other months are
+        # junk that would wreck the fit if season filtering didn't apply.
+        values = []
+        for t in range(36):
+            year_idx, month = t // 12, t % 12 + 1
+            values.append(10.0 + 2 * year_idx if month in (6, 7, 8) else 99999.0)
+        time = pd.date_range("2000-01-01", periods=36, freq="MS")
+        da = xr.DataArray(values, coords={"time": time}, dims=["time"])
+        self.assertAlmostEqual(float(trend(da, season="JJA")), 2.0)
+
+    def test_spatial_returns_slope_raster(self):
+        cube = _spatial_series([0.0, 2.0, 4.0, 6.0], freq="YS")
+        slope = trend(cube)
+        self.assertEqual(set(slope.dims), {"y", "x"})
+        self.assertNotIn("time", slope.dims)
+        np.testing.assert_array_almost_equal(slope.values, np.full((2, 3), 2.0))
+
+    def test_trend_on_360_day_calendar(self):
+        # JJA rises 10->12->14 over 3 years on a CMIP6 360-day calendar.
+        values = []
+        for t in range(36):
+            year_idx, month = t // 12, t % 12 + 1
+            values.append(10.0 + 2 * year_idx if month in (6, 7, 8) else 99999.0)
+        time = xr.date_range(
+            "2000-01-01", periods=36, freq="MS", calendar="360_day", use_cftime=True
+        )
+        da = xr.DataArray(values, coords={"time": time}, dims=["time"])
+        self.assertAlmostEqual(float(trend(da, season="JJA")), 2.0)
+
+    def test_unknown_how_raises(self):
+        time = pd.date_range("2000-01-01", periods=3, freq="YS")
+        da = xr.DataArray([1.0, 2.0, 3.0], coords={"time": time}, dims=["time"])
+        with self.assertRaises(ValueError):
+            trend(da, how="bogus")
 
 
 if __name__ == "__main__":

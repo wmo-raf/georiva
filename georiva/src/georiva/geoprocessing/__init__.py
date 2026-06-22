@@ -24,6 +24,7 @@ from .temporal import (
     climatology,
     select_season,
     temporal_aggregate,
+    trend,
 )
 from .zonal import mask_and_aggregate, reproject_geometry, zonal_stats_from_array
 
@@ -38,6 +39,7 @@ __all__ = [
     "climatology",
     "select_season",
     "temporal_aggregate",
+    "trend",
     "mask_and_aggregate",
     "reproject_geometry",
     "zonal_stats_from_array",
