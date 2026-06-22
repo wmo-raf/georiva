@@ -5,6 +5,83 @@ formats, and indexes it as STAC-compliant catalogs for African National Meteorol
 
 ## Language
 
+### Data tiers
+
+**Staging**:
+Fetched or uploaded raw artifacts held as STAC-shaped, **source-grained**, **not-served** data — inputs that still
+require a transform before they can be served. Mirrors the STAC *spec* (Collection/Item/Asset) but follows the
+**source/acquisition** shape, not the product shape. Lives in a dedicated `staging` data app. Raw-ness is expressed
+as the asset role `source`, not by the tier name. A `StagingItem` is **not** a TimescaleDB hypertable; it carries a
+flexible STAC temporal extent (nullable `datetime` plus optional `start_datetime`/`end_datetime`).
+_Avoid_: Raw (as a tier name), Raw tier
+
+**Published**:
+Product-grained, **served** STAC data — the existing `core` `Collection`/`Item`/`Asset`. "Served" always means
+Published. A published `Item` is a TimescaleDB hypertable (one row per timestep). Reached either directly
+(Direct → Published, for ready products needing only inline normalization) or via Derivation from Staging.
+A Published `Collection` carries a `visibility` (`public | internal`); serving exposes only `public`.
+_Avoid_: Processed tier, Analysis-ready (as a tier name — those are MinIO buckets, not tiers)
+
+**Intermediate product**:
+A derived product that is itself an input to a further Derivation (e.g. an anomaly feeding the Combined Drought
+Indicator). Lives in **Published** as a normal `core.Item`/`Collection` with `visibility=internal` — **not** in
+Staging (it is product-shaped and derived, not raw acquisition). Internal collections are read freely by the engine
+but never served.
+_Avoid_: pre-final artifact, internal staging
+
+### Derivation & lineage
+
+**Derivation**:
+The **write-side** act of transforming Staging (and/or Published) inputs into Published products and persisting the
+result. "Derivation = analysis you persist." Distinct from read-side **Analysis** (compute-on-read, not persisted).
+Performed by the Derivation Engine in the `processing` app, never in `analysis`.
+_Avoid_: processing (as a synonym for the phase), import, analysis (for the write-side act)
+
+**DerivationLink**:
+A lineage edge recording that one Published `Item` was derived from one input Item (Staging or Published). One row
+per (output, input) edge, tagged with recipe id/version and an input hash. Item-level granularity. Lives in the
+`staging` data app, written by the engine. Cross-tier and descriptive provenance — **not** an execution plan.
+_Avoid_: provenance link, lineage record (as model names), derived_from (as a model name)
+
+### Derivation engine
+
+**Derivation Engine**:
+The generic, domain-agnostic orchestrator in the `processing` app — the write-side counterpart of the Loader. Owns
+the run loop: enumerate units → resolve inputs → check readiness → compute → write asset → register Published
+items/assets → write DerivationLinks → emit events → idempotency/versioning. Knows nothing about climate semantics
+(seasons, baselines, indices). The same primitive `run(recipe, selector)` serves event-driven, scheduled/backfill,
+and manual invocation.
+_Avoid_: processing engine, pipeline engine
+
+**Recipe**:
+A declarative plugin registered against the engine that describes a single family of derivation. Declares: named
+**input selectors** (over Staging/Published, parameterized by a unit's coordinates), how to **enumerate units**,
+a **readiness** predicate, a **pure transform**, and an **outputs** descriptor. Does **not** own its run loop (the
+engine does), but may override individual steps via hooks. Recipe families (Climatology & Indices, ML/Forecast
+post-processing, Impact-based) register without editing the engine.
+_Avoid_: processor, operator, derivation (Recipe is the spec; Derivation is the act)
+
+**Production Unit**:
+The atomic, opaque, hashable coordinate the engine iterates over — one unit produces one output slice. Its
+**semantics are owned by the Recipe**, not the engine (e.g. climatology = `(variable, period, season, quantity,
+baseline)`; CDI = `(region, month)`; promotion = the staging item, 1:1). The recipe's `outputs(unit)` maps a unit
+onto the Published schema (Collection slug + Item key); the engine treats it only as an idempotency key.
+_Avoid_: target slice, slice, tile (as the model name)
+
+**DerivationRun**:
+The per-Production-Unit tracking record for one engine execution — the write-side analogue of `FileIngestion`.
+Serves three roles: distributed **lock** (prevents two workers computing the same unit), **state machine**
+(`pending → running → completed / failed`, the only record of a failed/in-progress unit since those produce no
+Published item), and **monitoring** surface. Carries `recipe_type`, `recipe_version`, serialized `unit_key`,
+`input_hash`, timing, error, and FK(s) to produced item(s). Lives in the `processing` (engine) app, **not** the data
+layer — it is engine bookkeeping and is removed with the engine, while `DerivationLink` and Items survive.
+_Avoid_: DerivationLog, RecipeRun, ProcessingRun
+
+**Promotion**:
+The degenerate identity Derivation — a ready Staging item normalized (clip/unit-convert/COG/register) into a
+Published item with no real transform. The base case proving the engine handles the 1:1 path.
+_Avoid_: copy, publish (as a verb for this), passthrough
+
 ### Pipeline phases
 
 **Fetch**:
