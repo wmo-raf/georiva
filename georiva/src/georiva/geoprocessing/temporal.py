@@ -1,9 +1,15 @@
 """
-Temporal aggregation and anomalies over an xarray time series.
+Temporal aggregation, seasonal climatologies, and anomalies over an xarray
+time series.
 
 These operate on xarray DataArrays with a ``time`` dimension. Cadence mismatch
 (e.g. dekadal inputs → monthly output) is handled here, not in the engine:
 the caller pulls all timesteps in a window and aggregates to the output cadence.
+
+Season selection reads the calendar month from the series' own time coordinate,
+so non-standard calendars (e.g. CMIP6 360-day) need no special-casing — the
+Climatology recipe family computes ``value``/``anomaly``/``relative anomaly``
+per season by composing :func:`climatology` and :func:`anomaly`.
 """
 from __future__ import annotations
 
@@ -13,6 +19,33 @@ _HOW = {
     "min": lambda g: g.min(),
     "max": lambda g: g.max(),
 }
+
+# Standard meteorological 3-month seasons, by calendar month number. ``annual``
+# (or None) selects every month. Months are read from the series' own time
+# coordinate, so this works on any calendar (Gregorian, 360-day, …).
+SEASONS = {
+    "DJF": (12, 1, 2),
+    "MAM": (3, 4, 5),
+    "JJA": (6, 7, 8),
+    "SON": (9, 10, 11),
+}
+
+
+def select_season(da, season, time_dim: str = "time"):
+    """
+    Filter a time series to the timesteps belonging to ``season``.
+
+    ``season`` is a key of :data:`SEASONS` (e.g. ``"DJF"``), or ``"annual"`` /
+    ``None`` to keep every timestep. Selection is by calendar month taken from
+    the series' time coordinate, so non-standard calendars (e.g. CMIP6 360-day)
+    are handled the same way.
+    """
+    if season is None or season == "annual":
+        return da
+    if season not in SEASONS:
+        raise ValueError(f"unknown season: {season!r}")
+    months = da[time_dim].dt.month
+    return da.sel({time_dim: months.isin(SEASONS[season])})
 
 
 def temporal_aggregate(da, freq: str | None = None, how: str = "mean", time_dim: str = "time"):
@@ -38,6 +71,19 @@ def temporal_aggregate(da, freq: str | None = None, how: str = "mean", time_dim:
 
     grouped = da.resample({time_dim: freq})
     return _HOW[how](grouped)
+
+
+def climatology(da, season=None, how: str = "mean", time_dim: str = "time"):
+    """
+    Climatological statistic of a series over a season.
+
+    Selects the timesteps in ``season`` (see :func:`select_season`) and collapses
+    the whole window to a single value with ``how``. This is the ``value``
+    quantity for the Climatology recipe family; ``anomaly`` is computed against a
+    second baseline-window climatology.
+    """
+    selected = select_season(da, season, time_dim=time_dim)
+    return temporal_aggregate(selected, freq=None, how=how, time_dim=time_dim)
 
 
 def anomaly(da, baseline, relative: bool = False, how: str = "mean", time_dim: str = "time"):

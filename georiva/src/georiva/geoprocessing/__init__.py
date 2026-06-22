@@ -18,7 +18,13 @@ conversion uses xarray + cftime, so the library adds no new dependencies.
 from .algebra import EMPTY_STATS, raster_combine, safe_divide
 from .calendar import convert_calendar
 from .regrid import regrid_array
-from .temporal import anomaly, temporal_aggregate
+from .temporal import (
+    SEASONS,
+    anomaly,
+    climatology,
+    select_season,
+    temporal_aggregate,
+)
 from .zonal import mask_and_aggregate, reproject_geometry, zonal_stats_from_array
 
 __all__ = [
@@ -27,7 +33,10 @@ __all__ = [
     "safe_divide",
     "convert_calendar",
     "regrid_array",
+    "SEASONS",
     "anomaly",
+    "climatology",
+    "select_season",
     "temporal_aggregate",
     "mask_and_aggregate",
     "reproject_geometry",
