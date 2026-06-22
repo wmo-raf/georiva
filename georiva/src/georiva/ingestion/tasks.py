@@ -73,6 +73,25 @@ def process_incoming_file(
         raise
 
 
+@app.task(
+    name="georiva.ingestion.tasks.process_staging_file",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+    queue="georiva-ingestion",
+)
+def process_staging_file(self, bucket: str, key: str):
+    """
+    Register a raw file landed in the STAGING bucket as one StagingItem.
+
+    Store-only path: this does NOT materialize any served layers — it holds
+    the file as a raw input for later derivation.
+    """
+    from georiva.ingestion.staging_consumer import register_staging_file
+
+    register_staging_file(bucket=bucket, key=key)
+
+
 @app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")
 def sweep_unprocessed(sync: bool = False):
     """

@@ -51,6 +51,14 @@ services:
     volumes:
       - ./georiva:/georiva/app
 
+  georiva-staging-consumer:
+    build:
+      target: dev
+    environment:
+      DEBUG: "True"
+    volumes:
+      - ./georiva:/georiva/app
+
   georiva-titiler-app:
     command: uvicorn-dev
     volumes:

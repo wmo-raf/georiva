@@ -34,11 +34,12 @@ class BucketType:
     
     INCOMING = "incoming"
     SOURCES = "sources"
+    STAGING = "staging"
     ARCHIVE = "archive"
     ASSETS = "assets"
     ZARR = "zarr"
 
-    ALL = [INCOMING, SOURCES, ARCHIVE, ASSETS, ZARR]
+    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR]
 
 
 def get_bucket_config() -> dict[str, str]:
@@ -279,7 +280,12 @@ class StorageManager:
     def sources(self) -> Bucket:
         """Plugin-collected data."""
         return self._get_bucket(BucketType.SOURCES)
-    
+
+    @property
+    def staging(self) -> Bucket:
+        """Raw inputs held for derivation (not served, not auto-materialized)."""
+        return self._get_bucket(BucketType.STAGING)
+
     @property
     def archive(self) -> Bucket:
         """Long-term raw data preservation."""

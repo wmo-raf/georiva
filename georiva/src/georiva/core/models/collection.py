@@ -17,6 +17,7 @@ from wagtail.admin.panels import (
 )
 
 from georiva.core.widget import ConditionalCheckbox
+from .base import AbstractCollection
 
 ADM_LEVEL_CHOICES = [
     (1, 'Level 1'),
@@ -42,10 +43,10 @@ class CollectionForm(WagtailAdminModelForm):
         return [int(v) for v in self.cleaned_data.get("boundary_stats_levels", [])]
 
 
-class Collection(TimeStampedModel, ClusterableModel):
+class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
     """
     Groups one or more Variables.
-    
+
     Examples:
         - gfs-temperature-2m (single variable)
         - gfs-wind-10m (wind_speed + wind_direction)
@@ -75,19 +76,8 @@ class Collection(TimeStampedModel, ClusterableModel):
         related_name='collections'
     )
     
-    # Identity
-    slug = models.SlugField(max_length=100)
-    name = models.CharField(max_length=200)
-    description = models.TextField(blank=True)
-    
-    # Spatial extent (auto-updated)
-    bounds = ArrayField(
-        models.FloatField(),
-        size=4,
-        null=True,
-        blank=True
-    )
-    crs = models.CharField(max_length=50, default="EPSG:4326")
+    # Identity (slug, name, description), spatial extent (bounds, crs)
+    # are inherited from AbstractCollection.
     
     # Temporal extent (auto-updated)
     time_resolution = models.CharField(

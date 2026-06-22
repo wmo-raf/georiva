@@ -30,6 +30,13 @@ BUCKET_CONFIGS = {
         "notify_on_create": True,
         "description": "Plugin-collected data",
     },
+    "staging": {
+        "public_read": False,
+        "notify_on_create": True,
+        # Separate notification target → separate Redis list → staging consumer.
+        "notify_arn_setting": "MINIO_STAGING_REDIS_ARN",
+        "description": "Raw inputs held for derivation (not served)",
+    },
     "archive": {
         "public_read": False,
         "notify_on_create": False,
@@ -103,9 +110,14 @@ class Command(BaseCommand):
             else:
                 self._set_private_policy(s3, bucket_name, dry_run)
             
-            # 3. Configure notifications
+            # 3. Configure notifications. A bucket may opt into a different
+            #    Redis target (e.g. staging → its own list) via notify_arn_setting.
             if config.get("notify_on_create"):
-                self._set_redis_notification(s3, bucket_name, redis_arn, dry_run)
+                arn = redis_arn
+                arn_setting = config.get("notify_arn_setting")
+                if arn_setting:
+                    arn = getattr(settings, arn_setting, redis_arn)
+                self._set_redis_notification(s3, bucket_name, arn, dry_run)
         
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
     
