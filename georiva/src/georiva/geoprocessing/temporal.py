@@ -1,6 +1,6 @@
 """
-Temporal aggregation, seasonal climatologies, and anomalies over an xarray
-time series.
+Temporal aggregation, seasonal climatologies, anomalies, and trends over an
+xarray time series.
 
 These operate on xarray DataArrays with a ``time`` dimension. Cadence mismatch
 (e.g. dekadal inputs → monthly output) is handled here, not in the engine:
@@ -9,7 +9,8 @@ the caller pulls all timesteps in a window and aggregates to the output cadence.
 Season selection reads the calendar month from the series' own time coordinate,
 so non-standard calendars (e.g. CMIP6 360-day) need no special-casing — the
 Climatology recipe family computes ``value``/``anomaly``/``relative anomaly``
-per season by composing :func:`climatology` and :func:`anomaly`.
+per season by composing :func:`climatology` and :func:`anomaly`, and the
+``trend`` quantity via :func:`trend`.
 """
 from __future__ import annotations
 
@@ -84,6 +85,23 @@ def climatology(da, season=None, how: str = "mean", time_dim: str = "time"):
     """
     selected = select_season(da, season, time_dim=time_dim)
     return temporal_aggregate(selected, freq=None, how=how, time_dim=time_dim)
+
+
+def trend(da, season=None, how: str = "mean", time_dim: str = "time"):
+    """
+    Inter-annual linear trend (slope **per year**) of a seasonal series.
+
+    Selects the timesteps in ``season`` (see :func:`select_season`), reduces each
+    calendar year to a single value with ``how``, then fits a degree-1 polynomial
+    of value vs. year. The slope is returned in per-year units (the year is taken
+    from the time coordinate, so any calendar works).
+    """
+    if how not in _HOW:
+        raise ValueError(f"unknown how: {how!r}")
+    selected = select_season(da, season, time_dim=time_dim)
+    yearly = _HOW[how](selected.groupby(selected[time_dim].dt.year))
+    fit = yearly.polyfit(dim="year", deg=1)
+    return fit.polyfit_coefficients.sel(degree=1, drop=True)
 
 
 def anomaly(da, baseline, relative: bool = False, how: str = "mean", time_dim: str = "time"):
