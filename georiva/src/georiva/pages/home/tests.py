@@ -1,6 +1,6 @@
-from home.models import HomePage
+from georiva.pages.home.models import HomePage
 
-from wagtail.models import Page, Site
+from wagtail.models import Page
 from wagtail.test.utils import WagtailPageTestCase
 
 
@@ -27,12 +27,10 @@ class HomeTests(WagtailPageTestCase):
 
     def setUp(self):
         """
-        Create a homepage instance for testing.
+        Use the HomePage the initial migration creates — the default Site
+        already roots "/" at it (see pages/home/migrations/0002_create_homepage).
         """
-        root_page = Page.get_first_root_node()
-        Site.objects.create(hostname="testsite", root_page=root_page, is_default_site=True)
-        self.homepage = HomePage(title="Home")
-        root_page.add_child(instance=self.homepage)
+        self.homepage = HomePage.objects.get(slug="home")
 
     def test_homepage_is_renderable(self):
         self.assertPageIsRenderable(self.homepage)

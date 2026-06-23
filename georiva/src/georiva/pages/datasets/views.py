@@ -29,6 +29,7 @@ def collection_available_dates(request, catalog_slug, collection_slug):
         catalog=catalog,
         slug=collection_slug,
         is_active=True,
+        visibility=Collection.Visibility.PUBLIC,
     )
     
     level = request.GET.get('level', 'years')

@@ -194,8 +194,9 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             catalog=catalog,
             slug=collection_slug,
             is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
         )
-        
+
         variables = list(
             collection.variables.filter(is_active=True).order_by('sort_order')
         )
@@ -313,6 +314,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             catalog=catalog,
             slug=collection_slug,
             is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
         )
         item = get_object_or_404(Item, pk=item_id, collection=collection)
         
@@ -455,7 +457,10 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .filter(is_active=True)
             .prefetch_related('topics')
             .annotate(
-                collection_count=Count('collections', filter=Q(collections__is_active=True)),
+                collection_count=Count('collections', filter=Q(
+                    collections__is_active=True,
+                    collections__visibility=Collection.Visibility.PUBLIC,
+                )),
                 latest_updated=Max('collections__time_end'),
             )
             .order_by('name')
@@ -482,14 +487,15 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             qs = qs.filter(
                 collections__time_resolution=filters['resolution'],
                 collections__is_active=True,
+                collections__visibility=Collection.Visibility.PUBLIC,
             ).distinct()
-        
+
         return qs, filters
     
     def _catalog_filter_context(self):
         active_resolutions = (
             Collection.objects
-            .filter(is_active=True)
+            .filter(is_active=True, visibility=Collection.Visibility.PUBLIC)
             .exclude(time_resolution='')
             .values_list('time_resolution', flat=True)
             .distinct()
@@ -508,7 +514,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     def _base_collections_qs(self):
         return (
             Collection.objects
-            .filter(is_active=True)
+            .filter(is_active=True, visibility=Collection.Visibility.PUBLIC)
             .select_related('catalog')
             .prefetch_related('catalog__topics', 'variables')
             .order_by('catalog__name', 'sort_order', 'name')
@@ -549,7 +555,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         """Context data needed to render the sidebar filters."""
         active_resolutions = (
             Collection.objects
-            .filter(is_active=True)
+            .filter(is_active=True, visibility=Collection.Visibility.PUBLIC)
             .exclude(time_resolution='')
             .values_list('time_resolution', flat=True)
             .distinct()
