@@ -241,9 +241,13 @@ def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="") ->
 
     ``dispatch=True`` fans out one Celery task per unit on the processing queue;
     ``dispatch=False`` runs inline (used by tests and small synchronous runs).
-    Backfill and streaming both call this — they differ only in selector width.
+    Backfill and streaming both call this — they differ only in selector width:
+    a wide range selector enumerates many units; a narrow arriving-input trigger
+    maps to just the units that input feeds. Both go through
+    ``candidate_units`` (whose default is ``enumerate_units``), so this one
+    primitive serves event-driven, scheduled/backfill, and manual invocation.
     """
-    units = list(recipe.enumerate_units(selector))
+    units = list(recipe.candidate_units(selector))
 
     if dispatch:
         from .tasks import run_unit_task

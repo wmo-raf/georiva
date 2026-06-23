@@ -85,11 +85,18 @@ def process_staging_file(self, bucket: str, key: str):
     Register a raw file landed in the STAGING bucket as one StagingItem.
 
     Store-only path: this does NOT materialize any served layers — it holds
-    the file as a raw input for later derivation.
+    the file as a raw input for later derivation, then fires the staging event
+    so derivation recipes that consume this input are triggered.
     """
     from georiva.ingestion.staging_consumer import register_staging_file
 
-    register_staging_file(bucket=bucket, key=key)
+    item = register_staging_file(bucket=bucket, key=key)
+    if item is not None:
+        from georiva.processing.invocation import (
+            dispatch_for_trigger,
+            staging_item_trigger,
+        )
+        dispatch_for_trigger(staging_item_trigger(item))
 
 
 @app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")

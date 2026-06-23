@@ -12,6 +12,27 @@ from georiva.config.celery import app
 logger = logging.getLogger(__name__)
 
 
+@app.on_after_finalize.connect
+def setup_periodic_tasks(sender, **kwargs):
+    """Register the periodic backfill sweep (mirror of sweep_unprocessed)."""
+    try:
+        from django_celery_beat.models import IntervalSchedule, PeriodicTask
+
+        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
+            every=5, period=IntervalSchedule.MINUTES,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.processing.sweep_derivations",
+            defaults={
+                "task": "georiva.processing.tasks.sweep_derivations",
+                "interval": schedule_5min,
+                "enabled": True,
+            },
+        )
+    except Exception as e:  # DB may be unavailable at import/finalize time
+        logger.debug("Skipped derivation sweep schedule setup: %s", e)
+
+
 @app.task(
     name="georiva.processing.tasks.run_unit_task",
     bind=True,
@@ -30,7 +51,37 @@ def run_unit_task(self, recipe_type: str, unit: dict):
         return
 
     worker_id = self.request.id or ""
-    run_unit(recipe, unit, worker_id=worker_id)
+    result = run_unit(recipe, unit, worker_id=worker_id)
+
+    # Completion chaining: a produced Published item is itself a derivation
+    # input, so stream a downstream trigger to its consumers (internal
+    # intermediates → their dependent products).
+    if result.status == "completed" and result.item_id:
+        from georiva.core.models import Item
+        from georiva.processing.invocation import (
+            dispatch_for_trigger,
+            published_item_trigger,
+        )
+
+        item = Item.objects.filter(pk=result.item_id).select_related("collection").first()
+        if item is not None:
+            dispatch_for_trigger(published_item_trigger(item))
+
+
+@app.task(
+    name="georiva.processing.tasks.sweep_derivations",
+    queue="georiva-default",
+)
+def sweep_derivations():
+    """
+    Periodic backfill sweep — the write-side mirror of ``sweep_unprocessed``.
+
+    Recomputes units whose inputs changed since they were last derived
+    (recorded ``input_hash`` ≠ current), without depending on an event.
+    """
+    from georiva.processing.invocation import sweep_stale_units
+
+    return sweep_stale_units()
 
 
 @app.task(

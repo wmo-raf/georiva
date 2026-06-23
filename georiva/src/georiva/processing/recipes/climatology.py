@@ -52,6 +52,18 @@ class ClimatologyRecipe(BaseRecipe):
 
     # ---- candidate generation ----------------------------------------------
 
+    def candidate_units(self, trigger) -> Iterable[ProductionUnit]:
+        """
+        Climatology is scheduled/manual, not event-driven: the product space
+        (period × season × quantity × baseline) is not derivable from a bare
+        arriving input. So a trigger lacking the explicit period config yields
+        nothing — this recipe is invoked over an explicit selector instead.
+        """
+        trigger = trigger or {}
+        if not (trigger.get("source_collection") and trigger.get("periods")):
+            return []
+        return self.enumerate_units(trigger)
+
     def enumerate_units(self, selector) -> Iterable[ProductionUnit]:
         selector = selector or {}
         source = selector["source_collection"]
