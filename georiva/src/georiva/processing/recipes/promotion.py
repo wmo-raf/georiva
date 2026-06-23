@@ -43,6 +43,24 @@ class PromotionRecipe(BaseRecipe):
         for sid in qs.values_list("pk", flat=True):
             yield {"staging_item_id": sid}
 
+    def candidate_units(self, trigger) -> Iterable[ProductionUnit]:
+        """
+        Map an arriving input back to the unit(s) it feeds.
+
+        An event trigger carries a single ``staging_item_id`` → its 1:1
+        promotion unit. Anything else is treated as a (possibly wide) selector
+        and enumerated normally, so scheduled/backfill/manual stay unchanged.
+        """
+        trigger = trigger or {}
+        if "staging_item_id" in trigger:
+            return [{"staging_item_id": trigger["staging_item_id"]}]
+        if "published_item_id" in trigger:
+            # Promotion consumes Staging inputs only — ignore Published-item
+            # (completion-chaining) triggers rather than mis-reading their
+            # collection_slug as a staging filter.
+            return []
+        return self.enumerate_units(trigger)
+
     def resolve_inputs(self, unit: ProductionUnit) -> "dict[str, ResolvedInput]":
         from georiva.staging.models import StagingItem
 
