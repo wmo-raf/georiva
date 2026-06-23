@@ -63,6 +63,7 @@ def _resolve_variable(
             collection__catalog__is_active=True,
             collection__slug=collection_slug,
             collection__is_active=True,
+            collection__visibility=Collection.Visibility.PUBLIC,
             is_active=True,
         ),
         slug=variable_slug,
@@ -210,6 +211,7 @@ class STACCollectionListView(STACAPIView):
         variables = Variable.objects.filter(
             collection__catalog=catalog,
             collection__is_active=True,
+            collection__visibility=Collection.Visibility.PUBLIC,
             is_active=True,
         ).select_related(
             'collection', 'collection__catalog'
@@ -530,6 +532,7 @@ class STACSearchView(STACGeoAPIView):
         queryset = Item.objects.filter(
             collection__is_active=True,
             collection__catalog__is_active=True,
+            collection__visibility=Collection.Visibility.PUBLIC,
         )
         queryset = queryset.select_related(
             'collection', 'collection__catalog'
@@ -622,6 +625,7 @@ class STACSearchView(STACGeoAPIView):
                         collection__slug=collection_slug,
                         slug=variable_slug,
                         collection__is_active=True,
+                        collection__visibility=Collection.Visibility.PUBLIC,
                         is_active=True,
                     )
                     q_filter |= Q(collection=var.collection)
@@ -636,6 +640,7 @@ class STACSearchView(STACGeoAPIView):
                     collection__catalog__slug=catalog_slug,
                     slug=variable_slug,
                     collection__is_active=True,
+                    collection__visibility=Collection.Visibility.PUBLIC,
                     is_active=True,
                 ).select_related('collection', 'collection__catalog')
                 for var in variables:
@@ -647,6 +652,7 @@ class STACSearchView(STACGeoAPIView):
                 variables = Variable.objects.filter(
                     slug=coll_id,
                     collection__is_active=True,
+                    collection__visibility=Collection.Visibility.PUBLIC,
                     is_active=True,
                 ).select_related('collection')
                 for var in variables:
@@ -852,6 +858,7 @@ class STACQueryablesView(STACAPIView):
             variables = Variable.objects.filter(
                 collection__catalog=catalog,
                 collection__is_active=True,
+                collection__visibility=Collection.Visibility.PUBLIC,
                 is_active=True,
             )
             queryables["properties"]["collection"]["enum"] = [

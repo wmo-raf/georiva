@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
 
-from georiva.core.models import Variable
+from georiva.core.models import Collection, Variable
 from georiva.core.palette_cache import build_variable_payload
 
 
@@ -33,6 +33,7 @@ class TileConfigView(APIView):
                     collection__slug=collection_slug,
                     slug=variable_slug,
                     is_active=True,
+                    collection__visibility=Collection.Visibility.PUBLIC,
                 )
             )
         except Variable.DoesNotExist:

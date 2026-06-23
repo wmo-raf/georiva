@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from georiva.core.models import Catalog, Collection, Item
+from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import FileIngestion
 
 User = get_user_model()
@@ -300,3 +300,58 @@ class PluginListTests(TestCase):
         meta = get_plugin_metadata("definitely_not_a_real_package_xyz")
         self.assertFalse(meta["available"])
         self.assertEqual(meta["name"], "definitely_not_a_real_package_xyz")
+
+
+class CollectionVisibilityTests(TestCase):
+    """A Collection is `public` (served) by default; `internal` intermediates
+    are never served but read freely by the derivation engine."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="Models", slug="models", file_format="grib2"
+        )
+
+    def test_defaults_to_public(self):
+        coll = Collection.objects.create(
+            catalog=self.catalog, name="Surface", slug="surface"
+        )
+        self.assertEqual(coll.visibility, Collection.Visibility.PUBLIC)
+        self.assertEqual(coll.visibility, "public")
+
+    def test_can_be_marked_internal(self):
+        coll = Collection.objects.create(
+            catalog=self.catalog, name="Anomaly", slug="anomaly",
+            visibility=Collection.Visibility.INTERNAL,
+        )
+        coll.refresh_from_db()
+        self.assertEqual(coll.visibility, "internal")
+
+
+class TileConfigVisibilityTests(TestCase):
+    """The internal tile-config endpoint must not serve internal collections."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CMIP6", slug="cmip6", file_format="geotiff"
+        )
+        self.unit = Unit.objects.create(name="Celsius", symbol="C")
+
+    def _variable(self, collection_slug, visibility):
+        coll = Collection.objects.create(
+            catalog=self.catalog, name=collection_slug, slug=collection_slug,
+            visibility=visibility,
+        )
+        return Variable.objects.create(
+            collection=coll, slug="tas", name="tas",
+            unit=self.unit, value_min=0, value_max=50,
+        )
+
+    def test_public_collection_served(self):
+        self._variable("tas", Collection.Visibility.PUBLIC)
+        url = reverse("tile_config", args=["cmip6", "tas", "tas"])
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_internal_collection_404(self):
+        self._variable("tas-anomaly", Collection.Visibility.INTERNAL)
+        url = reverse("tile_config", args=["cmip6", "tas-anomaly", "tas"])
+        self.assertEqual(self.client.get(url).status_code, 404)

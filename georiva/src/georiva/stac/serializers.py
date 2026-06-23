@@ -25,6 +25,7 @@ from urllib.parse import urlencode
 
 from rest_framework import serializers
 
+from georiva.core.models import Collection
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 
@@ -574,7 +575,9 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
         ]
     
     def get_extent(self, obj):
-        collections = obj.collections.filter(is_active=True)
+        collections = obj.collections.filter(
+            is_active=True, visibility=Collection.Visibility.PUBLIC
+        )
         
         all_bounds = [c.spatial_extent for c in collections if c.spatial_extent]
         if all_bounds:
@@ -601,7 +604,9 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
         }
     
     def get_summaries(self, obj):
-        collections = obj.collections.filter(is_active=True)
+        collections = obj.collections.filter(
+            is_active=True, visibility=Collection.Visibility.PUBLIC
+        )
         
         all_variables = set()
         for collection in collections:

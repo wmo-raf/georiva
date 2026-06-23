@@ -157,6 +157,7 @@ class EDRCollectionListView(EDRAPIView):
         queryset = Collection.objects.filter(
             is_active=True,
             catalog__is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
         ).select_related(
             'catalog',
         ).prefetch_related(
@@ -229,8 +230,9 @@ class EDRCollectionDetailView(EDRAPIView):
             slug=collection_slug,
             is_active=True,
             catalog__is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
         )
-        
+
         data = EDRCollectionSerializer(
             collection,
             context={'request': request},

@@ -55,6 +55,10 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
     
     base_form_class = CollectionForm
     
+    class Visibility(models.TextChoices):
+        PUBLIC = 'public', 'Public'      # served via STAC/EDR/pages/tiles
+        INTERNAL = 'internal', 'Internal'  # derivation intermediate — never served
+
     class TimeResolution(models.TextChoices):
         SUB_HOURLY = 'sub_hourly', 'Sub-Hourly'
         HOURLY = 'hourly', 'Hourly'
@@ -91,6 +95,16 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
     
     # Status
     is_active = models.BooleanField(default=True)
+    visibility = models.CharField(
+        max_length=10,
+        choices=Visibility.choices,
+        default=Visibility.PUBLIC,
+        help_text=(
+            "Public collections are served via STAC/EDR/pages/tiles. "
+            "Internal collections are derivation intermediates — read by the "
+            "engine as inputs but never served."
+        ),
+    )
     
     # --- Forecast config ---
     is_forecast = models.BooleanField(
@@ -145,6 +159,7 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
         ], heading="Extent"),
         MultiFieldPanel([
             FieldPanel('is_active'),
+            FieldPanel('visibility'),
             FieldPanel('sort_order'),
         ], heading="Status"),
         FieldPanel(
