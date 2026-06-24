@@ -15,6 +15,7 @@ from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.models import Orderable
+from wagtail.snippets.models import register_snippet
 
 from georiva.core.models.base import (
     AbstractAsset,
@@ -23,6 +24,7 @@ from georiva.core.models.base import (
 )
 
 
+@register_snippet
 class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
     """A source-grained grouping of staged raw artifacts."""
     
@@ -42,6 +44,7 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
         return f"{self.catalog.slug}/{self.slug} (staging)"
 
 
+@register_snippet
 class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
     """
     One staged raw file held as a STAC-shaped item.
@@ -144,7 +147,7 @@ class DerivationLink(models.Model):
     stays staging → core, keeping core dependency-free. Written by the engine.
     See docs/adr/0004-staging-tier-and-abstract-stac-models.md.
     """
-
+    
     # FKs to Item use db_constraint=False because Item is a TimescaleDB
     # hypertable with no simple unique PK to reference (same as Asset.item).
     derived_item = models.ForeignKey(
@@ -154,7 +157,7 @@ class DerivationLink(models.Model):
         db_constraint=False,
         help_text=_("The Published item this lineage edge describes"),
     )
-
+    
     source_staging_item = models.ForeignKey(
         StagingItem,
         on_delete=models.CASCADE,
@@ -170,13 +173,13 @@ class DerivationLink(models.Model):
         related_name='derived_into',
         db_constraint=False,
     )
-
+    
     recipe_id = models.CharField(max_length=100)
     recipe_version = models.CharField(max_length=50)
     input_hash = models.CharField(max_length=64)
-
+    
     created = models.DateTimeField(auto_now_add=True)
-
+    
     class Meta:
         indexes = [
             models.Index(fields=['derived_item']),
@@ -187,18 +190,18 @@ class DerivationLink(models.Model):
             models.CheckConstraint(
                 name='derivationlink_exactly_one_source',
                 condition=(
-                    models.Q(
-                        source_staging_item__isnull=False,
-                        source_published_item__isnull=True,
-                    )
-                    | models.Q(
-                        source_staging_item__isnull=True,
-                        source_published_item__isnull=False,
-                    )
+                        models.Q(
+                            source_staging_item__isnull=False,
+                            source_published_item__isnull=True,
+                        )
+                        | models.Q(
+                    source_staging_item__isnull=True,
+                    source_published_item__isnull=False,
+                )
                 ),
             ),
         ]
-
+    
     def __str__(self):
         src = self.source_staging_item or self.source_published_item
         return f"{self.derived_item} ⟵ {src} ({self.recipe_id}@{self.recipe_version})"
