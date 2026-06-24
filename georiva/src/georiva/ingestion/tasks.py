@@ -238,6 +238,47 @@ def sweep_unprocessed(sync: bool = False):
     )
 
 
+@app.task(name="georiva.ingestion.tasks.sweep_staging", queue="georiva-default")
+def sweep_staging(sync: bool = False):
+    """
+    Reconcile the STAGING bucket against StagingItems — the staging-tier mirror
+    of sweep_unprocessed.
+
+    The staging path is event-driven (MinIO PUT → Redis → register_staging_file),
+    so an object that landed while the consumer was down, or that survives a DB
+    reset with the bucket intact, has no StagingItem. This scans the bucket and
+    registers exactly those objects (no re-download), firing derivation for each.
+
+    An object is "known" if a StagingAsset already references its key as href.
+    Returns the number of files dispatched for registration.
+    """
+    from georiva.staging.models import StagingAsset
+
+    dispatch = process_staging_file.run if sync else process_staging_file.delay
+
+    bucket = storage.bucket(BucketType.STAGING)
+    known = set(StagingAsset.objects.values_list("href", flat=True))
+
+    dispatched = 0
+    for f in bucket.list_files(recursive=True):
+        key = f["path"]
+        name = Path(key).name
+        if name.startswith(".") or name == ".keep":
+            continue
+        if key in known:
+            continue
+        try:
+            validate_path(key)
+        except ValueError:
+            logger.debug("sweep_staging: skipping non-conforming path: %s", key)
+            continue
+        dispatch(bucket=BucketType.STAGING, key=key)
+        dispatched += 1
+
+    logger.info("sweep_staging: dispatched %d new staging file(s)", dispatched)
+    return dispatched
+
+
 @app.task(name="georiva.ingestion.tasks.cleanup_archives", queue="georiva-default")
 def cleanup_archives(max_age_days: int = 5):
     from georiva.core.storage import storage, BucketType
