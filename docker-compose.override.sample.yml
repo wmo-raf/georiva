@@ -16,35 +16,40 @@ x-dev-plugin-env: &dev-plugin-env
   GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ""   # re-enable editable install on startup (dev)
 
 x-dev-plugin-volumes: &dev-plugin-volumes
-  []
-  # - ../plugins/georiva-source-cds/plugins/georiva_source_cds:/georiva/dev-plugins/georiva_source_cds
-  # - ../plugins/georiva-source-chirps/plugins/georiva_source_chirps:/georiva/dev-plugins/georiva_source_chirps
+  [ ]
 
 services:
   georiva:
     environment:
-      <<: [*backend-variables, *dev-plugin-env]
+      <<: [ *backend-variables, *dev-plugin-env ]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes: *dev-plugin-volumes
 
   georiva-celery-default-worker:
     environment:
-      <<: [*backend-variables, *dev-plugin-env]
+      <<: [ *backend-variables, *dev-plugin-env ]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes: *dev-plugin-volumes
 
   georiva-celery-ingestion-worker:
     environment:
-      <<: [*backend-variables, *dev-plugin-env]
+      <<: [ *backend-variables, *dev-plugin-env ]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes: *dev-plugin-volumes
+
+  georiva-celery-processing-worker:
+    environment:
+      <<: [ *backend-variables, *dev-plugin-env ]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes: *dev-plugin-volumes
 
   georiva-celery-beat:
     environment:
-      <<: [*backend-variables, *dev-plugin-env]
+      <<: [ *backend-variables, *dev-plugin-env ]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes: *dev-plugin-volumes

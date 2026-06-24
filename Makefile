@@ -18,6 +18,7 @@ DEV_DC = docker compose $(DEV)
 APP ?= georiva
 WORKER_DEFAULT ?= georiva-celery-default-worker
 WORKER_INGESTION ?= georiva-celery-ingestion-worker
+WORKER_PROCESSING ?= georiva-celery-processing-worker
 BEAT ?= georiva-celery-beat
 TITILER ?= georiva-titiler-app
 
@@ -123,6 +124,9 @@ dev-worker-default-logs:
 dev-worker-ingestion-logs:
 	$(DEV_DC) logs -f $(WORKER_INGESTION)
 
+dev-worker-processing-logs:
+	$(DEV_DC) logs -f $(WORKER_PROCESSING)
+
 dev-beat-logs:
 	$(DEV_DC) logs -f $(BEAT) $(LOG_ARGS)
 
@@ -137,6 +141,9 @@ dev-worker-default-shell:
 
 dev-worker-ingestion-shell:
 	$(DEV_DC) exec $(WORKER_INGESTION) bash
+
+dev-worker-processing-shell:
+	$(DEV_DC) exec $(WORKER_PROCESSING) bash
 
 dev-beat-shell:
 	$(DEV_DC) exec $(BEAT) bash
