@@ -23,6 +23,8 @@ from .views import (
     wizard_step4_products,
     wizard_provision,
     derived_product_tracking,
+    derived_product_chain,
+    item_lineage,
 )
 from .viewsets import (
     admin_viewsets,
@@ -37,6 +39,8 @@ def urlconf_georivasources():
     return [
         path('data-feeds/', data_feed_list, name="data_feed_list"),
         path('data-feeds/derived-products/', derived_product_tracking, name="derived_product_tracking"),
+        path('data-feeds/<int:feed_pk>/chain/', derived_product_chain, name="derived_product_chain"),
+        path('items/<int:item_pk>/lineage/', item_lineage, name="item_lineage"),
         path('data-feeds/select/', data_feed_add_select, name="data_feed_add_select"),
         path('data-feeds/<int:pk>/', data_feed_detail, name="data_feed_detail"),
         path('data-feeds/<int:pk>/edit/', data_feed_edit, name="data_feed_edit"),

@@ -251,6 +251,15 @@
                 {% trans "Edit Details" %}
             </a>
 
+            <a href="{% url 'derived_product_chain' feed_pk=feed.pk %}" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-site icon" aria-hidden="true">
+                        <use href="#icon-site"></use>
+                    </svg>
+                </span>
+                {% trans "View Chain" %}
+            </a>
+
             {% if feed.delete_url %}
                 <a href="{{ feed.delete_url }}" class="button no">
                     {% trans "Delete" %}

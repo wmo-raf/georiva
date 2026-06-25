@@ -1076,3 +1076,52 @@ def derived_product_tracking(request):
         "rows": rows,
     }
     return render(request, "georivasources/derived_product_tracking.html", context)
+
+
+def derived_product_chain(request, feed_pk):
+    """
+    Server-rendered chain diagram (ADR-0008): the planned DAG of a feed's
+    pipeline — collections are nodes, products are edges labeled with
+    recipe / status / readiness / trigger, including configured-but-unrun
+    (blocked) edges with their reason. No interactive graph library.
+    """
+    from georiva.sources.derivation_chain import build_chain_graph
+
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    graph = build_chain_graph(feed)
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
+            {"url": "", "label": _("Chain")},
+        ],
+        "feed": feed,
+        "graph": graph,
+    }
+    return render(request, "georivasources/derived_product_chain.html", context)
+
+
+def item_lineage(request, item_pk):
+    """
+    Item-level provenance drill-down (ADR-0008): the input items a produced
+    item was derived from, read from DerivationLink. The read-side lineage view
+    for one produced Item.
+    """
+    from georiva.core.models import Item
+    from georiva.sources.derivation_chain import item_lineage as lineage_sources
+
+    item = get_object_or_404(Item, pk=item_pk)
+    sources = lineage_sources(item)
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": "", "label": _("Lineage")},
+        ],
+        "item": item,
+        "sources": sources,
+    }
+    return render(request, "georivasources/item_lineage.html", context)

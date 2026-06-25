@@ -1,0 +1,63 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Item lineage" %} — {{ item }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .glin-intro {
+            margin: 1em 0 1.5em;
+            color: var(--w-color-text-label);
+            font-size: 0.9em;
+        }
+
+        .glin-source {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            padding: 0.85em 1.1em;
+            margin-bottom: 0.75em;
+        }
+
+        .glin-collection {
+            display: inline-block;
+            padding: 0.2em 0.6em;
+            border-radius: 4px;
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            font-weight: 600;
+        }
+
+        .glin-when {
+            margin-left: 0.75em;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+
+        .glin-empty {
+            margin-top: 1.5em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=item subtitle=_("Item lineage") icon="site" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <p class="glin-intro">
+            {% trans "The input items this produced item was derived from, read from the recorded derivation links." %}
+        </p>
+
+        {% if sources %}
+            {% for source in sources %}
+                <div class="glin-source">
+                    <span class="glin-collection">{{ source.collection.slug }}</span>
+                    <span class="glin-when">{{ source }}</span>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="glin-empty">{% trans "No recorded inputs for this item." %}</p>
+        {% endif %}
+    </div>
+{% endblock %}
