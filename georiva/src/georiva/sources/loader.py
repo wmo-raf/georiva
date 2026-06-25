@@ -142,17 +142,23 @@ class Loader:
     @property
     def _tier_bucket_type(self) -> str:
         """
-        Storage bucket for this feed's target tier.
+        Storage bucket for this collection's auto-derived tier (ADR-0008).
 
-        Store-only (``target_tier=staging``) feeds land in the STAGING bucket,
-        which the published ingestion consumer does not watch — so fetched
-        files are held as raw inputs for derivation, not auto-materialized.
-        Everything else lands in SOURCES (the published path).
+        A collection lands in the STAGING bucket — held as a raw input for
+        derivation, not auto-materialized — iff some enabled DerivedProduct of
+        this feed consumes it at the staging tier. Otherwise it lands in SOURCES
+        (the published path). Tier is computed from the product declarations, not
+        a stored field, so "publish vs products" can no longer drift.
         """
         from georiva.core.storage import BucketType
+        from georiva.sources.derivation_invocation import collection_routes_to_staging
 
         feed = self.data_feed
-        if feed is not None and getattr(feed, "target_tier", None) == "staging":
+        collection = self.collection
+        if (
+            feed is not None and collection is not None
+            and collection_routes_to_staging(feed, collection.slug)
+        ):
             return BucketType.STAGING
         return BucketType.SOURCES
 
