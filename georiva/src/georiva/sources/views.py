@@ -1003,3 +1003,55 @@ def wizard_provision(request, model_name):
     except Exception as exc:
         messages.error(request, _("Provisioning failed: %s") % exc)
         return redirect("wizard_step3_collections", model_name=model_name)
+
+
+def derived_product_tracking(request):
+    """
+    Ingestion-style tracking dashboard for derived products (ADR-0008).
+
+    Lists every DerivedProduct with an aggregate run status (idle / running /
+    failed / completed) computed by joining DerivationRuns on the product's
+    origin key, plus an enable/disable toggle that pauses a product without
+    deleting its configuration.
+    """
+    from georiva.sources.derivation_tracking import product_status
+    from georiva.sources.models import DerivedProduct
+
+    if request.method == "POST" and request.POST.get("action") == "toggle":
+        product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
+        product.is_enabled = not product.is_enabled
+        product.save(update_fields=["is_enabled"])
+        messages.success(
+            request,
+            _("'%(key)s' %(state)s.") % {
+                "key": product.definition_key,
+                "state": _("enabled") if product.is_enabled else _("disabled"),
+            },
+        )
+        return redirect("derived_product_tracking")
+
+    products = (
+        DerivedProduct.objects
+        .select_related("data_feed", "data_feed__catalog")
+        .order_by("data_feed_id", "id")
+    )
+
+    rows = []
+    for product in products:
+        # Best-effort human label from the feed's declaration (falls back to key).
+        label = product.definition_key
+        for defn in product.data_feed.get_derived_products():
+            if defn.key == product.definition_key:
+                label = defn.label
+                break
+        rows.append({"product": product, "label": label, "status": product_status(product)})
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": "", "label": _("Derived Products")},
+        ],
+        "rows": rows,
+    }
+    return render(request, "georivasources/derived_product_tracking.html", context)
