@@ -38,6 +38,13 @@ class DerivationRun(TimeStampedModel):
 
     input_hash = models.CharField(max_length=64, blank=True)
 
+    # Opaque, engine-uninterpreted grouping key (ADR-0008). The invocation layer
+    # stamps it with the product/trigger identity; the tracking UI joins
+    # product -> runs by it. NULL means "no product origin" (engine-internal or
+    # manual run). The engine never reads or imports the feed layer to set this,
+    # preserving the ADR-0005 layering.
+    origin = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True,
     )
