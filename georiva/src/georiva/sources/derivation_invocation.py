@@ -45,6 +45,23 @@ def _matches(definition, collection_slug: str, tier: str) -> bool:
     )
 
 
+def collection_routes_to_staging(data_feed, collection_slug: str) -> bool:
+    """
+    Auto-derived target tier (ADR-0008): a collection routes to staging iff some
+    enabled DerivedProduct of this feed consumes it at the staging tier.
+    Otherwise it publishes directly (no StagingItems) — "no derivation, no
+    staging". Replaces the manual DataFeed.target_tier field, removing the
+    publish-vs-products drift.
+    """
+    from georiva.sources.models import DerivedProduct
+
+    for product in DerivedProduct.objects.filter(data_feed=data_feed, is_enabled=True):
+        definition = definition_for(product)
+        if definition is not None and _matches(definition, collection_slug, "staging"):
+            return True
+    return False
+
+
 def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
     """
     Route an arriving-input ``trigger`` to every enabled DerivedProduct that

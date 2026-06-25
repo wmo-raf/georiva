@@ -91,6 +91,15 @@ joins `DerivedProduct` to the engine, so the engine never imports the feed layer
 the engine is the allowed direction. Event-driven products fall out of this for free.
 _Avoid_: recipe-driven dispatch (the pre-ADR-0008 fan-out); putting product routing in `processing`
 
+**Auto-derived tier**:
+A collection's storage tier is a **computed** consequence of the configured products (ADR-0008), not a stored field. The
+Loader routes a fetched file to the STAGING bucket iff `sources.derivation_invocation.collection_routes_to_staging(feed,
+slug)` — some enabled `DerivedProduct` of the feed consumes that collection at the staging tier; otherwise it lands in
+SOURCES (published, no `StagingItem`s — "no derivation, no staging"). Replaces the manual `DataFeed.target_tier` field
+and the per-plugin `get_wizard_defaults` tier override, removing the "configured to publish but a product needs staging →
+silently skipped" drift class.
+_Avoid_: `target_tier` (removed); a manual publish/staging toggle
+
 **Origin** (`DerivationRun.origin`):
 An opaque, nullable, indexed grouping key the invocation layer stamps on each `DerivationRun` with the product identity
 (`derived_product:{pk}`). The engine stores and indexes it but never interprets it; the tracking UI joins product → runs
