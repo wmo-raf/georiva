@@ -100,6 +100,15 @@ and the per-plugin `get_wizard_defaults` tier override, removing the "configured
 silently skipped" drift class.
 _Avoid_: `target_tier` (removed); a manual publish/staging toggle
 
+**Scheduled-product beat**:
+The periodic loop (ADR-0008) that keeps scheduled derivations current with no operator action:
+`sources.derivation_invocation.dispatch_due_scheduled_products()` fires every enabled `DerivedProduct` whose declared
+`trigger_mode` is `scheduled` **and** whose `is_due()` interval has elapsed, via the same product-driven path as a
+manual run ([[run-now-backfill]]), then stamps `DerivedProduct.last_run_at`. Event-driven and manual products are never
+fired here. The Celery task `sweep_scheduled_products` runs on a short fixed cadence; each product's `is_due()`
+(`interval_minutes` or the feed's interval) gates its own period — mirroring `sweep_derivations` + the feed scheduler.
+_Avoid_: per-product Celery PeriodicTasks (one beat + is_due gating, not N timers)
+
 **Origin** (`DerivationRun.origin`):
 An opaque, nullable, indexed grouping key the invocation layer stamps on each `DerivationRun` with the product identity
 (`derived_product:{pk}`). The engine stores and indexes it but never interprets it; the tracking UI joins product → runs

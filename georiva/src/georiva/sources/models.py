@@ -450,10 +450,28 @@ class DerivedProduct(models.Model):
         verbose_name=_("Run Interval"),
         help_text=_("Minutes between runs for a scheduled product. Ignored for event/manual products."),
     )
+    # Updated by the scheduled-product beat after each dispatch, for is_due() checks.
+    last_run_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ['data_feed', 'definition_key']
         ordering = ['id']
+
+    @property
+    def effective_interval(self) -> int:
+        """Per-product interval if set, else the feed's global interval."""
+        return self.interval_minutes or self.data_feed.interval_minutes
+
+    def is_due(self) -> bool:
+        """Whether a scheduled product is due to fire (mirrors the feed
+        scheduler): never-run products are due; otherwise once the interval has
+        elapsed since the last dispatch."""
+        if not self.is_enabled:
+            return False
+        if not self.last_run_at:
+            return True
+        from django.utils import timezone
+        return timezone.now() >= self.last_run_at + timedelta(minutes=self.effective_interval)
 
     def __str__(self):
         return f"{self.data_feed_id} → {self.definition_key} ({self.recipe_type})"
