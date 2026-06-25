@@ -12,7 +12,37 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from georiva.sources.derivation_invocation import product_origin
+from georiva.sources.derivation_invocation import definition_for, product_origin
+
+
+@dataclass
+class ProductReadiness:
+    """Whether a product can run now (ADR-0008) — a coarse gate computed from the
+    declared inputs, in front of the engine's per-unit readiness."""
+    ready: bool
+    blocked_by: str | None = None     # role of the first empty required input
+    reason: str | None = None         # human reason, e.g. "normals empty"
+
+
+def product_readiness(product) -> ProductReadiness:
+    """
+    A product is ready iff every *required* declared input collection exists and
+    is non-empty — derived from the declaration, no recipe execution. Optional
+    inputs never block. When blocked, names the first empty required input.
+    """
+    from georiva.processing.recipe import resolve_declared_inputs
+
+    definition = definition_for(product)
+    if definition is None:
+        return ProductReadiness(ready=False, reason="no product definition")
+
+    resolved = resolve_declared_inputs(definition.inputs)
+    for ref in definition.inputs:
+        if ref.required and not resolved[ref.role].present:
+            return ProductReadiness(
+                ready=False, blocked_by=ref.role, reason=f"{ref.role} empty",
+            )
+    return ProductReadiness(ready=True)
 
 
 @dataclass

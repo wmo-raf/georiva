@@ -106,6 +106,20 @@ A `DerivedProduct`'s aggregate run state for the tracking view (ADR-0008), compu
 The read-side mirror of product-driven invocation; the engine stays unaware.
 _Avoid_: "failed once ever" semantics (a fixed unit's row transitions out of FAILED on re-run)
 
+**Product readiness**:
+A coarse, product-level gate (ADR-0008) computed by `sources.derivation_tracking.product_readiness` from the declared
+inputs — **no recipe execution**: a product is ready iff every *required* declared input collection exists and is
+non-empty. When blocked, names the first empty required input (`blocked_by` + `reason`, e.g. "normals empty"). Gates the
+tracking view's **Run now** button. Distinct from and **in front of** the engine's per-unit `readiness()` + min-count
+guard, which are unchanged.
+_Avoid_: confusing it with the engine's fine-grained per-unit readiness
+
+**Run now / backfill**:
+The manual overlay (ADR-0008): `sources.derivation_invocation.run_product_now(product)` triggers a product on demand
+with a *wide* selector built from its config and **no** event coordinate, so the recipe enumerates all the product's
+units (the same path as a backfill). Reuses the engine's `run()` and the [[origin]] stamping; gated on [[product-readiness]].
+_Avoid_: a bespoke backfill path (it is just a wide selector through the same `run()`)
+
 **Production Unit**:
 The atomic, opaque, hashable coordinate the engine iterates over — one unit produces one output slice. Its
 **semantics are owned by the Recipe**, not the engine (e.g. climatology = `(variable, period, season, quantity,
