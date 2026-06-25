@@ -496,8 +496,92 @@ def _global_config_form_class(model_cls, include_base=False):
         return None
     
     base_form_class = getattr(model_cls, "base_form_class", WagtailAdminModelForm)
-    
+
     return modelform_factory(model_cls, form=base_form_class, fields=fields)
+
+
+def build_product_config_form(definition):
+    """
+    Build a Django Form class for one DerivedProductDefinition's options, driven
+    by its config_schema (ADR-0008). One field per ConfigField (a ChoiceField
+    for ``choice``, typed fields otherwise), pre-filled from each field's
+    default. The form's ``clean`` runs the values back through
+    ``definition.validate_config`` — the single source of truth — and exposes
+    the validated dict as ``form.cleaned_config``. Returns None when the product
+    has no options (the wizard still shows its label/description, just no form).
+    """
+    from django import forms
+
+    schema = definition.config_schema
+    if not schema:
+        return None
+
+    field_makers = {
+        "int": forms.IntegerField,
+        "float": forms.FloatField,
+        "bool": forms.BooleanField,
+        "str": forms.CharField,
+    }
+
+    attrs = {}
+    for field in schema:
+        label = field.key.replace("_", " ").title()
+        if field.type == "choice":
+            attrs[field.key] = forms.ChoiceField(
+                label=label, required=False, initial=field.default,
+                choices=[(c, c) for c in field.choices],
+            )
+        else:
+            attrs[field.key] = field_makers[field.type](
+                label=label, required=False, initial=field.default,
+            )
+
+    keys = [f.key for f in schema]
+
+    def clean(self):
+        cleaned = forms.Form.clean(self)
+        raw = {k: cleaned[k] for k in keys if cleaned.get(k) not in (None, "")}
+        try:
+            self.cleaned_config = definition.validate_config(raw)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc))
+        return cleaned
+
+    attrs["clean"] = clean
+    return type("ProductConfigForm", (forms.Form,), attrs)
+
+
+def selected_products_from_session(data_feed, session_data) -> list:
+    """
+    Map the wizard's stored per-product config back onto the feed's declared
+    DerivedProductDefinitions, as ``(definition, config)`` pairs ready for
+    SourceSetupService.provision_derived_products. Config stored for a product
+    the feed no longer declares (a stale session) is skipped.
+    """
+    products_config = session_data.get("derived_products_config", {})
+    by_key = {d.key: d for d in data_feed.get_derived_products()}
+    return [
+        (by_key[key], config)
+        for key, config in products_config.items()
+        if key in by_key
+    ]
+
+
+def _transient_feed_for_products(model_cls, session_data):
+    """An unsaved feed instance (carrying the wizard's chosen catalog) used only
+    to ask the plugin which derived products it declares, before the feed is
+    provisioned."""
+    from georiva.core.models import Catalog
+
+    catalog = None
+    if session_data.get("catalog_mode") == "create":
+        catalog = Catalog(
+            slug=session_data.get("new_catalog_slug", ""),
+            name=session_data.get("new_catalog_name", ""),
+        )
+    elif session_data.get("catalog_id"):
+        catalog = Catalog.objects.filter(pk=session_data["catalog_id"]).first()
+    return model_cls(catalog=catalog) if catalog else model_cls()
 
 
 def setup_wizard_select(request):
@@ -753,11 +837,11 @@ def wizard_step3_collections(request, model_name):
                 },
             })
             request.session[_wizard_session_key(model_name)] = session_data
-            return redirect("wizard_provision", model_name=model_name)
-        
+            return redirect("wizard_step4_products", model_name=model_name)
+
         for e in errors:
             messages.error(request, e)
-    
+
     prefill_keys = set(session_data.get("selected_collection_keys", [k["definition"].key for k in def_entries]))
     
     return render(request, "georivasources/wizard_step3_collections.html", {
@@ -768,6 +852,70 @@ def wizard_step3_collections(request, model_name):
         "prefill_keys": prefill_keys,
         "step": 3,
         "link_form_cls": link_form_cls,
+    })
+
+
+def wizard_step4_products(request, model_name):
+    """Step 4: configure the derived products the feed declares (ADR-0008).
+
+    A feed that declares no products skips this step straight to provisioning.
+    """
+    model_cls, err = _get_model_or_redirect(request, model_name)
+    if err:
+        return err
+
+    session_data = request.session.get(_wizard_session_key(model_name), {})
+    if not session_data.get("selected_collection_keys"):
+        return redirect("wizard_step3_collections", model_name=model_name)
+
+    feed = _transient_feed_for_products(model_cls, session_data)
+    definitions = feed.get_derived_products()
+    if not definitions:
+        # Nothing to configure — don't show an empty step.
+        return redirect("wizard_provision", model_name=model_name)
+
+    verbose_name = model_cls._meta.verbose_name
+    saved = session_data.get("derived_products_config", {})
+
+    entries = []
+    for defn in definitions:
+        form_cls = build_product_config_form(defn)
+        if form_cls is None:
+            form = None
+        elif request.method == "POST":
+            form = form_cls(request.POST, prefix=defn.key)
+        else:
+            form = form_cls(initial=saved.get(defn.key, {}), prefix=defn.key)
+        entries.append({"definition": defn, "config_form": form})
+
+    if request.method == "POST":
+        errors = []
+        products_config = {}
+        for entry in entries:
+            defn, form = entry["definition"], entry["config_form"]
+            if form is None:
+                products_config[defn.key] = {}
+            elif form.is_valid():
+                products_config[defn.key] = {
+                    k: _to_json_safe(v) for k, v in form.cleaned_config.items()
+                }
+            else:
+                errors.append(f"{defn.label}: {'; '.join(form.errors.get('__all__', []))}".strip(": "))
+
+        if not errors:
+            session_data["derived_products_config"] = products_config
+            request.session[_wizard_session_key(model_name)] = session_data
+            return redirect("wizard_provision", model_name=model_name)
+
+        for e in errors:
+            messages.error(request, e)
+
+    return render(request, "georivasources/wizard_step4_products.html", {
+        "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Derived Products")),
+        "model_name": model_name,
+        "source_verbose_name": verbose_name,
+        "product_entries": entries,
+        "step": 4,
     })
 
 
@@ -836,6 +984,11 @@ def wizard_provision(request, model_name):
             feed_interval=session_data.get("new_feed_interval", 360),
             global_config=global_config,
             selected_definitions=selected_definitions,
+        )
+        # Derived products are configured against the now-saved feed's declared
+        # definitions (ADR-0008); a feed declaring none provisions nothing here.
+        service.provision_derived_products(
+            data_feed, selected_products_from_session(data_feed, session_data)
         )
         request.session.pop(_wizard_session_key(model_name), None)
         messages.success(

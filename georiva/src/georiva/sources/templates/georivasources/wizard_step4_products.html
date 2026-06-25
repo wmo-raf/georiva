@@ -1,0 +1,172 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}
+    {% trans "Setup Wizard — Derived Products" %}
+{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gwiz-progress {
+            display: flex;
+            align-items: center;
+            gap: 0.4em;
+            margin-bottom: 1.5em;
+            font-size: 0.85em;
+            flex-wrap: wrap;
+        }
+
+        .gwiz-step {
+            padding: 0.3em 0.75em;
+            border-radius: 999px;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .gwiz-step--done {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .gwiz-step--active {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .gwiz-sep {
+            color: var(--w-color-grey-400);
+            user-select: none;
+        }
+
+        .gprod-intro {
+            margin-bottom: 1.25em;
+            color: var(--w-color-text-label);
+            font-size: 0.9em;
+        }
+
+        .gprod-message {
+            margin-bottom: 1em;
+        }
+
+        .gprod-card {
+            border: 2px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            margin-bottom: 1em;
+            overflow: hidden;
+        }
+
+        .gprod-card__header {
+            padding: 0.85em 1.1em;
+            background: var(--w-color-grey-50);
+        }
+
+        .gprod-card__name {
+            font-weight: 700;
+            font-size: 1em;
+            margin: 0 0 0.2em;
+        }
+
+        .gprod-card__desc {
+            font-size: 0.82em;
+            color: var(--w-color-grey-400);
+            margin: 0;
+        }
+
+        .gprod-config-section {
+            padding: 0.85em 1.1em;
+            border-top: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gprod-config-section .w-field__wrapper {
+            margin-bottom: 0.75em;
+        }
+
+        .gprod-submit-row {
+            display: flex;
+            gap: 0.75em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=source_verbose_name subtitle=_("Step 4 — Derived Products") icon="cogs" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="gwiz-progress">
+            <span class="gwiz-step gwiz-step--done">1. {% trans "Catalog" %}</span>
+            <span class="gwiz-sep">→</span>
+            <span class="gwiz-step gwiz-step--done">2. {% trans "Feed Details" %}</span>
+            <span class="gwiz-sep">→</span>
+            <span class="gwiz-step gwiz-step--done">3. {% trans "Collections" %}</span>
+            <span class="gwiz-sep">→</span>
+            <span class="gwiz-step gwiz-step--active">4. {% trans "Derived Products" %}</span>
+        </div>
+
+        <form method="post" id="products-form">
+            {% csrf_token %}
+
+            {% if messages %}
+                {% for msg in messages %}
+                    <div class="help-block help-block--{{ msg.tags }} gprod-message">{{ msg }}</div>
+                {% endfor %}
+            {% endif %}
+
+            <p class="gprod-intro">
+                {% trans "Configure the derived products this feed produces. Each product turns the feed's data into a further derived layer." %}
+            </p>
+
+            {% for entry in product_entries %}
+                {% with defn=entry.definition form=entry.config_form %}
+                    <div class="gprod-card" id="gprod-{{ defn.key }}">
+                        <div class="gprod-card__header">
+                            <p class="gprod-card__name">{{ defn.label }}</p>
+                            {% if defn.description %}
+                                <p class="gprod-card__desc">{{ defn.description }}</p>
+                            {% endif %}
+                        </div>
+
+                        {% if form %}
+                            <div class="gprod-config-section">
+                                {% for field in form %}
+                                    <div class="w-field__wrapper">
+                                        <label class="w-field__label" for="{{ field.id_for_label }}">
+                                            {{ field.label }}
+                                        </label>
+                                        {{ field }}
+                                        {% if field.help_text %}
+                                            <p class="w-field__help-text">{{ field.help_text }}</p>
+                                        {% endif %}
+                                        {% for error in field.errors %}
+                                            <p class="error-message">{{ error }}</p>
+                                        {% endfor %}
+                                    </div>
+                                {% endfor %}
+                                {% for error in form.non_field_errors %}
+                                    <p class="error-message">{{ error }}</p>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endwith %}
+            {% endfor %}
+
+            <div class="gprod-submit-row">
+                <button type="submit" class="button bicolor button--icon">
+                    <span class="icon-wrapper">
+                        <svg class="icon icon-arrow-right icon" aria-hidden="true">
+                            <use href="#icon-arrow-right"></use>
+                        </svg>
+                    </span>
+                    {% trans "Create Feed" %}
+                </button>
+                <a href="{% url 'wizard_step3_collections' model_name=model_name %}" class="button button-secondary">
+                    {% trans "Back" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

@@ -114,6 +114,54 @@ class DerivedProductDefinitionTests(SimpleTestCase):
         )
 
 
+class ValidateConfigTests(SimpleTestCase):
+    def _definition_with_schema(self, *fields):
+        return _definition(config_schema=tuple(fields))
+
+    def test_fills_defaults_for_missing_keys(self):
+        definition = self._definition_with_schema(
+            ConfigField(key="min_years", type="int", default=30),
+            ConfigField(key="quantity", type="choice",
+                        choices=("anomaly", "value"), default="anomaly"),
+        )
+
+        cleaned = definition.validate_config({})
+
+        self.assertEqual(cleaned, {"min_years": 30, "quantity": "anomaly"})
+
+    def test_coerces_provided_values_to_the_declared_type(self):
+        definition = self._definition_with_schema(
+            ConfigField(key="min_years", type="int", default=30),
+            ConfigField(key="threshold", type="float", default=0.0),
+        )
+
+        cleaned = definition.validate_config({"min_years": "25", "threshold": "1.5"})
+
+        self.assertEqual(cleaned["min_years"], 25)
+        self.assertEqual(cleaned["threshold"], 1.5)
+
+    def test_value_outside_choices_is_rejected(self):
+        definition = self._definition_with_schema(
+            ConfigField(key="quantity", type="choice", choices=("anomaly", "value")),
+        )
+        with self.assertRaises(ValueError):
+            definition.validate_config({"quantity": "trend"})
+
+    def test_unknown_config_key_is_rejected(self):
+        definition = self._definition_with_schema(
+            ConfigField(key="min_years", type="int", default=30),
+        )
+        with self.assertRaises(ValueError):
+            definition.validate_config({"min_years": 30, "bogus": 1})
+
+    def test_value_of_wrong_type_is_rejected(self):
+        definition = self._definition_with_schema(
+            ConfigField(key="min_years", type="int", default=30),
+        )
+        with self.assertRaises(ValueError):
+            definition.validate_config({"min_years": "not-a-number"})
+
+
 class ConfigFieldTests(SimpleTestCase):
     def test_valid_field_types_are_accepted(self):
         for type_ in ("str", "int", "float", "bool"):

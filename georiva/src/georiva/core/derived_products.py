@@ -25,6 +25,24 @@ TRIGGER_MODES = ("event", "scheduled", "manual")
 CONFIG_FIELD_TYPES = ("str", "int", "float", "bool", "choice")
 TIERS = ("staging", "published")
 
+_SCALAR_COERCERS = {"str": str, "int": int, "float": float, "bool": bool}
+
+
+def _coerce(field, value):
+    """Coerce one operator-supplied value to a ConfigField's declared type."""
+    if field.type == "choice":
+        if value not in field.choices:
+            raise ValueError(
+                f"ConfigField '{field.key}': '{value}' is not among choices {field.choices}"
+            )
+        return value
+    try:
+        return _SCALAR_COERCERS[field.type](value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"ConfigField '{field.key}': '{value}' is not a valid {field.type}"
+        )
+
 
 @dataclass(frozen=True)
 class InputRef:
@@ -106,6 +124,30 @@ class DerivedProductDefinition:
                 f"DerivedProductDefinition '{self.key}': trigger_mode must be "
                 f"one of {TRIGGER_MODES}, got '{self.trigger_mode}'"
             )
+
+    def validate_config(self, config: dict) -> dict:
+        """
+        Validate an operator-supplied ``config`` against ``config_schema`` and
+        return a cleaned dict: each declared field coerced to its type (with
+        ``choice`` values constrained to ``choices``), missing fields filled
+        from their defaults. Unknown keys are rejected. Raises ``ValueError`` on
+        the first invalid value — the wizard and the setup service both call
+        this so a bad option is caught before any row is written.
+        """
+        schema = {field.key: field for field in self.config_schema}
+        unknown = set(config) - set(schema)
+        if unknown:
+            raise ValueError(
+                f"DerivedProductDefinition '{self.key}': unknown config option(s) "
+                f"{sorted(unknown)}; allowed: {sorted(schema)}"
+            )
+        cleaned = {}
+        for key, field in schema.items():
+            if key in config:
+                cleaned[key] = _coerce(field, config[key])
+            else:
+                cleaned[key] = field.default
+        return cleaned
 
     def dependency_edges(self) -> list:
         """The input collections this product consumes, as

@@ -104,6 +104,39 @@ class SourceSetupService:
                 config_values=config_values,
             )
     
+    def provision_derived_products(self, data_feed, selected_products: list) -> list:
+        """
+        Provision DerivedProduct rows for a feed from selected definitions plus
+        operator config (ADR-0008).
+
+        ``selected_products`` is a list of ``(DerivedProductDefinition, config)``
+        pairs. Each config is validated/coerced against the definition's
+        config_schema *before* any write, so an invalid option rejects the whole
+        batch atomically (nothing is half-provisioned). Idempotent: re-running
+        upserts on (data_feed, definition_key), so a wizard revisit edits rather
+        than duplicates.
+        """
+        from georiva.sources.models import DerivedProduct
+
+        with transaction.atomic():
+            products = []
+            for definition, config in selected_products:
+                cleaned = definition.validate_config(config or {})
+                product, _created = DerivedProduct.objects.update_or_create(
+                    data_feed=data_feed,
+                    definition_key=definition.key,
+                    defaults={
+                        "recipe_type": definition.recipe_type,
+                        "config": cleaned,
+                    },
+                )
+                products.append(product)
+                logger.info(
+                    "DerivedProduct %s: feed=%s product=%s",
+                    "created" if _created else "updated", data_feed.pk, definition.key,
+                )
+            return products
+
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------

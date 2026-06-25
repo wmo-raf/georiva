@@ -20,6 +20,7 @@ from .views import (
     wizard_step1_catalog,
     wizard_step2_feed,
     wizard_step3_collections,
+    wizard_step4_products,
     wizard_provision,
 )
 from .viewsets import (
@@ -42,6 +43,8 @@ def urlconf_georivasources():
         path('data-feeds/setup-wizard/<str:model_name>/feed/', wizard_step2_feed, name="wizard_step2_feed"),
         path('data-feeds/setup-wizard/<str:model_name>/collections/', wizard_step3_collections,
              name="wizard_step3_collections"),
+        path('data-feeds/setup-wizard/<str:model_name>/products/', wizard_step4_products,
+             name="wizard_step4_products"),
         path('data-feeds/setup-wizard/<str:model_name>/provision/', wizard_provision, name="wizard_provision"),
         path('data-feeds/<int:feed_pk>/collections/add/<str:definition_key>/', definition_collection_add,
              name="definition_collection_add"),
