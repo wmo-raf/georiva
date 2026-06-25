@@ -29,7 +29,7 @@ def _trigger_tier(trigger: dict) -> str:
     return "staging" if trigger.get("staging_item_id") else "published"
 
 
-def _definition_for(product):
+def definition_for(product):
     """The product's DerivedProductDefinition, looked up on its feed by key."""
     for definition in product.data_feed.get_derived_products():
         if definition.key == product.definition_key:
@@ -61,7 +61,7 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
 
     results = []
     for product in DerivedProduct.objects.filter(is_enabled=True):
-        definition = _definition_for(product)
+        definition = definition_for(product)
         if definition is None or not _matches(definition, collection_slug, tier):
             continue
         recipe = recipe_registry.get(definition.recipe_type)
@@ -73,3 +73,25 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
             run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
         )
     return results
+
+
+def run_product_now(product, *, dispatch: bool = True) -> list:
+    """
+    Manually trigger a product (ADR-0008) with a *wide* selector built from its
+    config and no event coordinate, so the recipe enumerates all of the
+    product's units — the same path as a backfill. Reuses the engine's run() and
+    the product origin stamping. The caller (the tracking view) gates this on
+    product readiness; the engine's per-unit readiness still applies underneath.
+    """
+    from georiva.processing.engine import run
+    from georiva.processing.registry import recipe_registry
+
+    definition = definition_for(product)
+    if definition is None:
+        return []
+    recipe = recipe_registry.get(definition.recipe_type)
+    if recipe is None:
+        logger.error("Product %s names unknown recipe '%s'", product.pk, definition.recipe_type)
+        return []
+    selector = dict(product.config or {})
+    return run(recipe, selector, origin=product_origin(product), dispatch=dispatch)

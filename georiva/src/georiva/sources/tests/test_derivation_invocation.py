@@ -19,7 +19,11 @@ from georiva.core.derived_products import (
 )
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.processing.models import DerivationRun
-from georiva.sources.derivation_invocation import dispatch_for_input, product_origin
+from georiva.sources.derivation_invocation import (
+    dispatch_for_input,
+    product_origin,
+    run_product_now,
+)
 from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
@@ -238,3 +242,31 @@ class StagingArrivalRoutesToProductsTests(TestCase):
             )
 
         dispatch.assert_not_called()
+
+
+class RunProductNowTests(TestCase):
+    """The manual / backfill overlay: run a product on demand with a wide
+    selector (its config), so the recipe enumerates all its units."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+        self.product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="serve-raw",
+            recipe_type="promotion", config={"baseline": "1991-2020"}, is_enabled=True,
+        )
+
+    def test_runs_recipe_with_config_selector_and_product_origin(self):
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[_definition()]),
+            patch("georiva.processing.engine.run") as run,
+        ):
+            run_product_now(self.product, dispatch=False)
+
+        run.assert_called_once()
+        selector = run.call_args.args[1]
+        # Wide selector = the product's config (no event trigger) -> backfill.
+        self.assertEqual(selector, {"baseline": "1991-2020"})
+        self.assertEqual(run.call_args.kwargs["origin"], product_origin(self.product))

@@ -6,18 +6,35 @@ product_status joins a DerivedProduct to its DerivationRuns by the opaque
 knows about products; the engine still does not (it only stored the origin).
 """
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from georiva.core.derived_products import (
+    DerivedProductDefinition,
+    InputRef,
+    OutputRef,
+)
 from georiva.core.models import Catalog
 from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import product_origin
 from georiva.sources.derivation_tracking import product_status
 from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
 User = get_user_model()
+
+
+def _anomaly_definition():
+    return DerivedProductDefinition(
+        key="anomaly", recipe_type="climatology", label="Rainfall anomaly",
+        description="", config_schema=(),
+        inputs=(InputRef(role="value", collection="rainfall", tier="staging"),),
+        outputs=(OutputRef(role="anomaly", collection="rainfall-anomaly"),),
+        trigger_mode="scheduled",
+    )
 
 
 def _run(origin, status, *, completed_at=None, unit):
@@ -129,3 +146,50 @@ class TrackingViewTests(TestCase):
         self.assertFalse(self.product.is_enabled)
         # Config row survives — pausing is not deletion.
         self.assertTrue(DerivedProduct.objects.filter(pk=self.product.pk).exists())
+
+    def _add_rainfall_staging(self):
+        scol = StagingCollection.objects.create(
+            catalog=self.catalog, slug="rainfall", name="Rainfall"
+        )
+        si = StagingItem.objects.create(
+            collection=scol, datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=4, height=4,
+        )
+        StagingAsset.objects.create(
+            item=si, href="chirps/rainfall/f.tif", roles=["source"],
+            format="geotiff", checksum="r1",
+        )
+
+    def test_blocked_product_shows_its_blocking_reason(self):
+        # The anomaly's required 'value' input (rainfall) is empty -> blocked.
+        with patch.object(DataFeed, "get_derived_products", return_value=[_anomaly_definition()]):
+            response = self.client.get(reverse("derived_product_tracking"))
+
+        self.assertContains(response, "value empty")
+
+    def test_run_now_triggers_a_ready_product(self):
+        self._add_rainfall_staging()  # required input now present -> ready
+
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[_anomaly_definition()]),
+            patch("georiva.sources.derivation_invocation.run_product_now") as run_now,
+        ):
+            self.client.post(reverse("derived_product_tracking"), {
+                "action": "run_now", "product_pk": self.product.pk,
+            })
+
+        run_now.assert_called_once()
+        self.assertEqual(run_now.call_args.args[0], self.product)
+
+    def test_run_now_refuses_a_blocked_product_and_shows_the_reason(self):
+        # No rainfall staging -> blocked.
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[_anomaly_definition()]),
+            patch("georiva.sources.derivation_invocation.run_product_now") as run_now,
+        ):
+            response = self.client.post(reverse("derived_product_tracking"), {
+                "action": "run_now", "product_pk": self.product.pk,
+            }, follow=True)
+
+        run_now.assert_not_called()
+        self.assertContains(response, "value empty")

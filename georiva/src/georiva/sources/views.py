@@ -1014,7 +1014,8 @@ def derived_product_tracking(request):
     origin key, plus an enable/disable toggle that pauses a product without
     deleting its configuration.
     """
-    from georiva.sources.derivation_tracking import product_status
+    from georiva.sources.derivation_invocation import run_product_now
+    from georiva.sources.derivation_tracking import product_readiness, product_status
     from georiva.sources.models import DerivedProduct
 
     if request.method == "POST" and request.POST.get("action") == "toggle":
@@ -1028,6 +1029,21 @@ def derived_product_tracking(request):
                 "state": _("enabled") if product.is_enabled else _("disabled"),
             },
         )
+        return redirect("derived_product_tracking")
+
+    if request.method == "POST" and request.POST.get("action") == "run_now":
+        product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
+        readiness = product_readiness(product)
+        if readiness.ready:
+            run_product_now(product)
+            messages.success(request, _("Run started for '%s'.") % product.definition_key)
+        else:
+            messages.error(
+                request,
+                _("'%(key)s' blocked: %(reason)s.") % {
+                    "key": product.definition_key, "reason": readiness.reason,
+                },
+            )
         return redirect("derived_product_tracking")
 
     products = (
@@ -1044,7 +1060,12 @@ def derived_product_tracking(request):
             if defn.key == product.definition_key:
                 label = defn.label
                 break
-        rows.append({"product": product, "label": label, "status": product_status(product)})
+        rows.append({
+            "product": product,
+            "label": label,
+            "status": product_status(product),
+            "readiness": product_readiness(product),
+        })
 
     context = {
         "breadcrumbs_items": [

@@ -78,6 +78,12 @@
             opacity: 0.55;
         }
 
+        .gdp-blocked {
+            font-size: 0.75em;
+            color: var(--w-color-critical-200);
+            margin-top: 0.25em;
+        }
+
         .gdp-empty {
             margin-top: 1.5em;
             color: var(--w-color-grey-400);
@@ -104,6 +110,7 @@
                         <th>{% trans "Status" %}</th>
                         <th>{% trans "Runs" %}</th>
                         <th>{% trans "Last completed" %}</th>
+                        <th>{% trans "Run" %}</th>
                         <th>{% trans "Enabled" %}</th>
                     </tr>
                 </thead>
@@ -133,6 +140,23 @@
                                     {{ row.status.last_completed_at }}
                                 {% else %}
                                     —
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if row.readiness.ready %}
+                                    <form method="post" action="{% url 'derived_product_tracking' %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="run_now">
+                                        <input type="hidden" name="product_pk" value="{{ row.product.pk }}">
+                                        <button type="submit" class="button button-small">
+                                            {% trans "Run now" %}
+                                        </button>
+                                    </form>
+                                {% else %}
+                                    <button type="button" class="button button-small" disabled>
+                                        {% trans "Run now" %}
+                                    </button>
+                                    <div class="gdp-blocked">{% trans "Blocked" %}: {{ row.readiness.reason }}</div>
                                 {% endif %}
                             </td>
                             <td>
