@@ -40,7 +40,7 @@ def setup_periodic_tasks(sender, **kwargs):
     acks_late=True,
     queue="georiva-processing",
 )
-def run_unit_task(self, recipe_type: str, unit: dict):
+def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None):
     """Run a single ProductionUnit for a recipe (one DerivationRun)."""
     from georiva.processing.engine import run_unit
     from georiva.processing.registry import recipe_registry
@@ -51,7 +51,7 @@ def run_unit_task(self, recipe_type: str, unit: dict):
         return
 
     worker_id = self.request.id or ""
-    result = run_unit(recipe, unit, worker_id=worker_id)
+    result = run_unit(recipe, unit, worker_id=worker_id, origin=origin)
 
     # Completion chaining: a produced Published item is itself a derivation
     # input, so stream a downstream trigger to its consumers (internal

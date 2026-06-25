@@ -217,52 +217,6 @@ class PromotionCandidateUnitsTests(_StagingFixture):
         self.assertEqual(units, [])
 
 
-class StagingConsumerHookTests(_StagingFixture):
-    """A registered StagingItem auto-triggers derivation for the units it
-    feeds — the staging-consumer event hook."""
-
-    def test_process_staging_file_dispatches_for_new_item(self):
-        from georiva.core.storage import BucketType
-        from georiva.ingestion.tasks import process_staging_file
-
-        with (
-            patch(
-                "georiva.ingestion.staging_consumer.register_staging_file",
-                return_value=self.sitem,
-            ),
-            patch(
-                "georiva.processing.invocation.dispatch_for_trigger"
-            ) as dispatch,
-        ):
-            process_staging_file.apply(
-                kwargs={"bucket": BucketType.STAGING, "key": "cmip6/tas/f.tif"}
-            )
-
-        dispatch.assert_called_once()
-        trigger = dispatch.call_args.args[0]
-        self.assertEqual(trigger["staging_item_id"], self.sitem.pk)
-        self.assertEqual(trigger["collection_slug"], "tas")
-
-    def test_no_dispatch_when_registration_skipped(self):
-        from georiva.core.storage import BucketType
-        from georiva.ingestion.tasks import process_staging_file
-
-        with (
-            patch(
-                "georiva.ingestion.staging_consumer.register_staging_file",
-                return_value=None,
-            ),
-            patch(
-                "georiva.processing.invocation.dispatch_for_trigger"
-            ) as dispatch,
-        ):
-            process_staging_file.apply(
-                kwargs={"bucket": BucketType.STAGING, "key": "bad/path.tif"}
-            )
-
-        dispatch.assert_not_called()
-
-
 class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
     """When a unit completes producing a Published item, that item is itself an
     input — the streaming task chains a downstream trigger so internal

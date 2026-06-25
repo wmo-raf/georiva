@@ -87,12 +87,17 @@ class DerivationRun(TimeStampedModel):
         return dj_timezone.now() - self.locked_at > self.LOCK_TIMEOUT
 
     @classmethod
-    def acquire(cls, *, recipe_type, recipe_version, unit_key, unit_hash, worker_id="") -> "DerivationRun | None":
+    def acquire(cls, *, recipe_type, recipe_version, unit_key, unit_hash, worker_id="", origin=None) -> "DerivationRun | None":
         """
         Atomically take the lock for (recipe_type, unit_hash).
 
         Returns the locked, RUNNING DerivationRun on success, or None if another
         worker already holds a live lock on this unit.
+
+        ``origin`` is an opaque grouping key (ADR-0008) supplied by the
+        invocation layer. It is set when the run is first created and, on a
+        re-acquire, updated only when a non-None ``origin`` is given — so an
+        engine-internal re-run (origin=None) never clobbers a product's stamp.
         """
         now = dj_timezone.now()
         run, _ = cls.objects.get_or_create(
@@ -102,21 +107,14 @@ class DerivationRun(TimeStampedModel):
                 "recipe_version": recipe_version,
                 "unit_key": unit_key,
                 "status": cls.Status.PENDING,
+                "origin": origin,
             },
         )
 
         stale_cutoff = now - cls.LOCK_TIMEOUT
 
         # Lockable when pending/failed/idempotent-noop/not-ready, or a stale run.
-        claimed = cls.objects.filter(
-            pk=run.pk,
-        ).filter(
-            models.Q(status__in=[
-                cls.Status.PENDING, cls.Status.FAILED,
-                cls.Status.SKIPPED, cls.Status.NOT_READY, cls.Status.COMPLETED,
-            ])
-            | models.Q(status=cls.Status.RUNNING, locked_at__lt=stale_cutoff)
-        ).update(
+        claim_values = dict(
             status=cls.Status.RUNNING,
             recipe_version=recipe_version,
             unit_key=unit_key,
@@ -125,6 +123,20 @@ class DerivationRun(TimeStampedModel):
             started_at=now,
             error="",
         )
+        # Only (re)stamp origin when the caller supplies one — an engine-internal
+        # re-run (origin=None) must not erase the product origin set originally.
+        if origin is not None:
+            claim_values["origin"] = origin
+
+        claimed = cls.objects.filter(
+            pk=run.pk,
+        ).filter(
+            models.Q(status__in=[
+                cls.Status.PENDING, cls.Status.FAILED,
+                cls.Status.SKIPPED, cls.Status.NOT_READY, cls.Status.COMPLETED,
+            ])
+            | models.Q(status=cls.Status.RUNNING, locked_at__lt=stale_cutoff)
+        ).update(**claim_values)
 
         if not claimed:
             return None

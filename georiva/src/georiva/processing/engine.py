@@ -161,12 +161,15 @@ def _is_current(out_item, recipe: BaseRecipe, input_hash: str) -> bool:
     return d.get("input_hash") == input_hash and d.get("version") == recipe.version
 
 
-def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id="") -> UnitResult:
+def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id="", origin=None) -> UnitResult:
     """
     Execute one ProductionUnit end to end, under the DerivationRun lock.
 
     Idempotent: an unchanged unit is a no-op; changed inputs (or recipe
     version) recompute and overwrite the Published Item in place.
+
+    ``origin`` is an opaque grouping key passed straight to the DerivationRun
+    (ADR-0008); the engine never interprets it.
     """
     from django.db import transaction
 
@@ -179,6 +182,7 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
         unit_key=unit,
         unit_hash=uhash,
         worker_id=worker_id,
+        origin=origin,
     )
     if run is None:
         logger.info("Unit already locked: %s %s", recipe.type, uhash[:8])
@@ -235,7 +239,7 @@ def _emit_event(recipe, unit, item, input_hash):
         logger.warning("Derivation event publish failed: %s", e)
 
 
-def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="") -> list:
+def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="", origin=None) -> list:
     """
     Enumerate candidate units for a selector and run each.
 
@@ -252,7 +256,7 @@ def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="") ->
     if dispatch:
         from .tasks import run_unit_task
         for unit in units:
-            run_unit_task.delay(recipe_type=recipe.type, unit=unit)
+            run_unit_task.delay(recipe_type=recipe.type, unit=unit, origin=origin)
         return [UnitResult(status="dispatched") for _ in units]
 
-    return [run_unit(recipe, unit, worker_id=worker_id) for unit in units]
+    return [run_unit(recipe, unit, worker_id=worker_id, origin=origin) for unit in units]
