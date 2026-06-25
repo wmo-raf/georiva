@@ -570,7 +570,12 @@ def selected_products_from_session(data_feed, session_data) -> list:
 def _transient_feed_for_products(model_cls, session_data):
     """An unsaved feed instance (carrying the wizard's chosen catalog) used only
     to ask the plugin which derived products it declares, before the feed is
-    provisioned."""
+    provisioned.
+
+    The feed has no collection_links yet, so the resolutions chosen in step 3 are
+    stashed on the instance as ``_wizard_selected_keys``. An instance
+    get_derived_products() reads links when the feed is saved, else this stash —
+    so the declared product set is identical at step 4 and at provisioning."""
     from georiva.core.models import Catalog
 
     catalog = None
@@ -581,7 +586,9 @@ def _transient_feed_for_products(model_cls, session_data):
         )
     elif session_data.get("catalog_id"):
         catalog = Catalog.objects.filter(pk=session_data["catalog_id"]).first()
-    return model_cls(catalog=catalog) if catalog else model_cls()
+    feed = model_cls(catalog=catalog) if catalog else model_cls()
+    feed._wizard_selected_keys = session_data.get("selected_collection_keys", [])
+    return feed
 
 
 def setup_wizard_select(request):

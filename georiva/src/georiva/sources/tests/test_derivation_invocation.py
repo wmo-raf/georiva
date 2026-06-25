@@ -87,6 +87,29 @@ class DispatchForInputTests(TestCase):
         self.assertEqual(selector["staging_item_id"], 5)
         self.assertEqual(run.call_args.kwargs["origin"], f"derived_product:{product.pk}")
 
+    def test_selector_carries_declared_inputs_and_outputs(self):
+        # The recipe must be able to read the product's declared collections
+        # from the selector (ADR-0008): a scheduled/manual recipe has no trigger
+        # to learn them from, so the invocation layer injects the declaration.
+        definition = _definition()
+        self._product(definition)
+
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
+            patch("georiva.processing.engine.run") as run,
+        ):
+            dispatch_for_input(_staging_trigger(), dispatch=False)
+
+        selector = run.call_args.args[1]
+        self.assertEqual(
+            selector["inputs"],
+            [{"role": "source", "collection": "rainfall", "tier": "staging"}],
+        )
+        self.assertEqual(
+            selector["outputs"],
+            [{"role": "served", "collection": "rainfall"}],
+        )
+
     def test_product_on_a_different_collection_is_not_dispatched(self):
         definition = _definition(inputs=(
             InputRef(role="source", collection="temperature", tier="staging"),
@@ -267,6 +290,15 @@ class RunProductNowTests(TestCase):
 
         run.assert_called_once()
         selector = run.call_args.args[1]
-        # Wide selector = the product's config (no event trigger) -> backfill.
-        self.assertEqual(selector, {"baseline": "1991-2020"})
+        # Wide selector = the product's config + declared binding (no event
+        # trigger) -> backfill that can still read its collections.
+        self.assertEqual(selector["baseline"], "1991-2020")
+        self.assertEqual(
+            selector["inputs"],
+            [{"role": "source", "collection": "rainfall", "tier": "staging"}],
+        )
+        self.assertEqual(
+            selector["outputs"],
+            [{"role": "served", "collection": "rainfall"}],
+        )
         self.assertEqual(run.call_args.kwargs["origin"], product_origin(self.product))
