@@ -1,0 +1,75 @@
+"""
+Product-driven derivation invocation (ADR-0008).
+
+The application-layer flip of derivation from *recipe-driven* to
+*DerivedProduct-driven*: an arriving input finds the enabled DerivedProducts
+whose declared inputs match its collection/tier, builds a selector from each
+product's config, and calls the engine's generic run(recipe, selector), stamping
+the run with the product origin.
+
+This is the ONLY place that joins the feed layer (DerivedProduct) to the engine,
+so the engine itself never imports DerivedProduct (ADR-0005). The feed layer
+depending on the engine is the allowed direction.
+"""
+from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def product_origin(product) -> str:
+    """The opaque DerivationRun.origin key for a product — the stable identity
+    the tracking UI groups runs by (ADR-0008)."""
+    return f"derived_product:{product.pk}"
+
+
+def _trigger_tier(trigger: dict) -> str:
+    """The tier of the arriving input: staging items vs published items."""
+    return "staging" if trigger.get("staging_item_id") else "published"
+
+
+def _definition_for(product):
+    """The product's DerivedProductDefinition, looked up on its feed by key."""
+    for definition in product.data_feed.get_derived_products():
+        if definition.key == product.definition_key:
+            return definition
+    return None
+
+
+def _matches(definition, collection_slug: str, tier: str) -> bool:
+    """True if the definition declares an input on this collection at this tier."""
+    return any(
+        ref.collection == collection_slug and ref.tier == tier
+        for ref in definition.inputs
+    )
+
+
+def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
+    """
+    Route an arriving-input ``trigger`` to every enabled DerivedProduct that
+    consumes it. For each match, build ``selector = {**config, **trigger}`` and
+    run the product's recipe, stamping the run with the product origin.
+    """
+    from georiva.processing.engine import run
+    from georiva.processing.registry import recipe_registry
+
+    from georiva.sources.models import DerivedProduct
+
+    collection_slug = trigger.get("collection_slug")
+    tier = _trigger_tier(trigger)
+
+    results = []
+    for product in DerivedProduct.objects.filter(is_enabled=True):
+        definition = _definition_for(product)
+        if definition is None or not _matches(definition, collection_slug, tier):
+            continue
+        recipe = recipe_registry.get(definition.recipe_type)
+        if recipe is None:
+            logger.error("Product %s names unknown recipe '%s'", product.pk, definition.recipe_type)
+            continue
+        selector = {**(product.config or {}), **trigger}
+        results.extend(
+            run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
+        )
+    return results

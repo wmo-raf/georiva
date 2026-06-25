@@ -92,11 +92,12 @@ def process_staging_file(self, bucket: str, key: str):
 
     item = register_staging_file(bucket=bucket, key=key)
     if item is not None:
-        from georiva.processing.invocation import (
-            dispatch_for_trigger,
-            staging_item_trigger,
-        )
-        dispatch_for_trigger(staging_item_trigger(item))
+        # Product-driven invocation (ADR-0008): route the arriving input to the
+        # enabled DerivedProducts that consume it, not to every recipe.
+        from georiva.processing.invocation import staging_item_trigger
+        from georiva.sources.derivation_invocation import dispatch_for_input
+
+        dispatch_for_input(staging_item_trigger(item))
 
 
 @app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")

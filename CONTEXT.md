@@ -82,6 +82,22 @@ JSON validated against the definition's `config_schema`, `is_enabled` (pause wit
 output `Collection`s.
 _Avoid_: DerivedCollection; treating it as the blueprint (that is the Derived Product Definition)
 
+**Product-driven invocation**:
+The application-layer flip (ADR-0008) where an arriving input is routed to the enabled `DerivedProduct`s that *declare*
+it as an input — not fanned out to every recipe. `sources.derivation_invocation.dispatch_for_input(trigger)` matches the
+trigger's `(collection_slug, tier)` against each enabled product's declared `InputRef`s, builds
+`selector = {**config, **trigger}`, and calls the engine's generic `run(recipe, selector)`. It is the **only** place that
+joins `DerivedProduct` to the engine, so the engine never imports the feed layer (ADR-0005); the feed layer depending on
+the engine is the allowed direction. Event-driven products fall out of this for free.
+_Avoid_: recipe-driven dispatch (the pre-ADR-0008 fan-out); putting product routing in `processing`
+
+**Origin** (`DerivationRun.origin`):
+An opaque, nullable, indexed grouping key the invocation layer stamps on each `DerivationRun` with the product identity
+(`derived_product:{pk}`). The engine stores and indexes it but never interprets it; the tracking UI joins product → runs
+by it. `NULL` = no product origin (engine-internal or manual run). An engine-internal re-run (sweep/invalidation) passes
+no origin, so it never clobbers the original product stamp.
+_Avoid_: a hard `FK(DerivationRun → DerivedProduct)` (would make the engine depend on the feed layer)
+
 **Production Unit**:
 The atomic, opaque, hashable coordinate the engine iterates over — one unit produces one output slice. Its
 **semantics are owned by the Recipe**, not the engine (e.g. climatology = `(variable, period, season, quantity,
