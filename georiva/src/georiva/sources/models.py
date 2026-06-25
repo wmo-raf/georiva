@@ -133,6 +133,23 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         """
         return []
 
+    def selected_definition_keys(self) -> list[str]:
+        """The collection-definition keys this feed is bound to.
+
+        Read from collection_links once the feed is saved, else from the
+        wizard's transient stash (``_wizard_selected_keys``, set by
+        ``_transient_feed_for_products`` at step 4 before any link exists). An
+        instance ``get_derived_products()`` calls this so it declares the same
+        per-resolution products at the wizard step and at provisioning (ADR-0008).
+        """
+        if self.pk:
+            return [
+                link.definition_key
+                for link in self.collection_links.all()
+                if link.definition_key
+            ]
+        return list(getattr(self, '_wizard_selected_keys', []))
+
     def get_derived_products(self) -> list['DerivedProductDefinition']:
         """
         Return the derived products this feed offers (ADR-0008).

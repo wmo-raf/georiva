@@ -15,10 +15,11 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from georiva.core.models import Catalog
-from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.core.models import Catalog, Collection
+from georiva.sources.models import DataFeed, DataFeedCollectionLink, DerivedProduct
 from georiva.sources.setup_service import SourceSetupService
 from georiva.sources.views import (
+    _transient_feed_for_products,
     build_product_config_form,
     selected_products_from_session,
 )
@@ -151,6 +152,63 @@ class BuildProductConfigFormTests(TestCase):
 
     def test_definition_without_options_has_no_form(self):
         self.assertIsNone(build_product_config_form(_definition(config_schema=())))
+
+
+class TransientFeedForProductsTests(TestCase):
+    """The wizard's step 4 declares products on an unsaved feed (no
+    collection_links yet), so the selected resolutions are stashed on the
+    transient instance for an instance get_derived_products() to read."""
+
+    def test_stashes_selected_collection_keys_from_the_session(self):
+        session = {
+            "catalog_mode": "create",
+            "new_catalog_slug": "chirps",
+            "new_catalog_name": "CHIRPS",
+            "selected_collection_keys": ["chirps-monthly", "chirps-dekadal"],
+        }
+
+        feed = _transient_feed_for_products(DataFeed, session)
+
+        self.assertIsNone(feed.pk)
+        self.assertEqual(
+            feed._wizard_selected_keys, ["chirps-monthly", "chirps-dekadal"]
+        )
+
+    def test_no_selection_stashes_an_empty_list(self):
+        feed = _transient_feed_for_products(DataFeed, {"catalog_mode": "create"})
+
+        self.assertEqual(feed._wizard_selected_keys, [])
+
+
+class SelectedDefinitionKeysTests(TestCase):
+    """A feed's active definition keys — what an instance get_derived_products()
+    binds its products to — come from collection_links once saved, or the
+    wizard's stash while still transient, and must agree across the two."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+
+    def test_saved_feed_reads_keys_from_collection_links(self):
+        feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+        collection = Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
+        )
+        DataFeedCollectionLink.objects.create(
+            data_feed=feed, collection=collection, definition_key="chirps-monthly"
+        )
+
+        self.assertEqual(feed.selected_definition_keys(), ["chirps-monthly"])
+
+    def test_transient_feed_reads_keys_from_the_wizard_stash(self):
+        feed = DataFeed(name="Feed", catalog=self.catalog)
+        feed._wizard_selected_keys = ["chirps-monthly"]
+
+        self.assertEqual(feed.selected_definition_keys(), ["chirps-monthly"])
+
+    def test_transient_feed_without_a_stash_has_no_keys(self):
+        self.assertEqual(DataFeed(name="Feed").selected_definition_keys(), [])
 
 
 class SelectedProductsFromSessionTests(TestCase):

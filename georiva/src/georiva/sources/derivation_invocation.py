@@ -37,6 +37,27 @@ def definition_for(product):
     return None
 
 
+def _binding(definition) -> dict:
+    """The product's declared collections, flattened into selector keys (ADR-0008).
+
+    Injected into every selector so a recipe can read its source/baseline/output
+    collection slugs from the declaration instead of reconstructing them — the
+    only way a scheduled/manual product (which has no trigger to learn from) can
+    know which collections it operates on. The engine still treats the selector
+    as opaque; only recipes interpret these keys.
+    """
+    return {
+        "inputs": [
+            {"role": r.role, "collection": r.collection, "tier": r.tier}
+            for r in definition.inputs
+        ],
+        "outputs": [
+            {"role": r.role, "collection": r.collection}
+            for r in definition.outputs
+        ],
+    }
+
+
 def _matches(definition, collection_slug: str, tier: str) -> bool:
     """True if the definition declares an input on this collection at this tier."""
     return any(
@@ -65,8 +86,10 @@ def collection_routes_to_staging(data_feed, collection_slug: str) -> bool:
 def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
     """
     Route an arriving-input ``trigger`` to every enabled DerivedProduct that
-    consumes it. For each match, build ``selector = {**config, **trigger}`` and
-    run the product's recipe, stamping the run with the product origin.
+    consumes it. For each match, build
+    ``selector = {**config, **binding, **trigger}`` (binding = the definition's
+    declared inputs/outputs) and run the product's recipe, stamping the run with
+    the product origin.
     """
     from georiva.processing.engine import run
     from georiva.processing.registry import recipe_registry
@@ -85,7 +108,7 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
         if recipe is None:
             logger.error("Product %s names unknown recipe '%s'", product.pk, definition.recipe_type)
             continue
-        selector = {**(product.config or {}), **trigger}
+        selector = {**(product.config or {}), **_binding(definition), **trigger}
         results.extend(
             run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
         )
@@ -95,8 +118,9 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
 def run_product_now(product, *, dispatch: bool = True) -> list:
     """
     Manually trigger a product (ADR-0008) with a *wide* selector built from its
-    config and no event coordinate, so the recipe enumerates all of the
-    product's units — the same path as a backfill. Reuses the engine's run() and
+    config plus its declared binding (inputs/outputs) and no event coordinate, so
+    the recipe enumerates all of the product's units — the same path as a
+    backfill. Reuses the engine's run() and
     the product origin stamping. The caller (the tracking view) gates this on
     product readiness; the engine's per-unit readiness still applies underneath.
     """
@@ -110,7 +134,7 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
     if recipe is None:
         logger.error("Product %s names unknown recipe '%s'", product.pk, definition.recipe_type)
         return []
-    selector = dict(product.config or {})
+    selector = {**(product.config or {}), **_binding(definition)}
     return run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
 
 
