@@ -428,6 +428,54 @@ class DataFeedCollectionLink(PolymorphicModel):
         return modelform_factory(cls, form=base_form_class, fields=all_fields)
 
 
+class DerivedProduct(models.Model):
+    """
+    An operator's persisted configuration for one derived product a feed
+    produces (ADR-0008). The blueprint is the plugin-declared
+    DerivedProductDefinition; this is the saved config the wizard writes and the
+    engine reads on every run.
+
+    A child of DataFeed (mirrors DataFeedCollectionLink), so it is inline on the
+    feed and revisitable/editable. It is NOT a Collection — one product may emit
+    several output Collections; in the chain DAG products are edges, collections
+    are nodes.
+    """
+    data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name='derived_products')
+
+    definition_key = models.CharField(
+        max_length=100,
+        help_text=_("The DerivedProductDefinition.key this config was provisioned from."),
+    )
+    recipe_type = models.CharField(
+        max_length=100,
+        help_text=_("The registered recipe this product runs."),
+    )
+    config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=_("Operator options, validated against the definition's config_schema."),
+    )
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text=_("Disable to pause this product without deleting its configuration."),
+    )
+    # Scheduled-trigger param: cadence for products whose trigger_mode is 'scheduled'.
+    interval_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(5)],
+        verbose_name=_("Run Interval"),
+        help_text=_("Minutes between runs for a scheduled product. Ignored for event/manual products."),
+    )
+
+    class Meta:
+        unique_together = ['data_feed', 'definition_key']
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.data_feed_id} → {self.definition_key} ({self.recipe_type})"
+
+
 # ---------------------------------------------------------------------------
 # Acquisition tracking models
 # ---------------------------------------------------------------------------

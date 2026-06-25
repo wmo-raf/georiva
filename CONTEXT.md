@@ -71,7 +71,16 @@ the feed layer (`sources`) and the engine (`processing`) can read it without a b
 collections); a **`Collection` is a node**. A product is **not** a `Collection`: one product may emit several output
 `Collection`s. Mirrors `CollectionDefinition`.
 _Avoid_: DerivedCollection (a product is not a collection); conflating the blueprint with the persisted `DerivedProduct`
-config (a `DataFeed` child, ADR-0008 / slice 2)
+config
+
+**DerivedProduct**:
+The operator's **persisted config** for one derived product (ADR-0008) — the saved counterpart of a Derived Product
+Definition. A `DataFeed` child (mirrors `DataFeedCollectionLink`) holding `definition_key`, `recipe_type`, a `config`
+JSON validated against the definition's `config_schema`, `is_enabled` (pause without deleting), and a scheduled-trigger
+`interval_minutes`. Written by the wizard's "Derived Products" step via `SourceSetupService.provision_derived_products`
+(upsert on `(data_feed, definition_key)`, so a revisit edits in place). Not a `Collection`: one product may emit several
+output `Collection`s.
+_Avoid_: DerivedCollection; treating it as the blueprint (that is the Derived Product Definition)
 
 **Production Unit**:
 The atomic, opaque, hashable coordinate the engine iterates over — one unit produces one output slice. Its
