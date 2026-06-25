@@ -112,3 +112,28 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
         return []
     selector = dict(product.config or {})
     return run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
+
+
+def dispatch_due_scheduled_products(*, dispatch: bool = True) -> int:
+    """
+    The scheduled-product beat (ADR-0008): fire every enabled DerivedProduct
+    whose declared trigger_mode is ``scheduled`` and whose interval has elapsed,
+    via the same product-driven path as a manual/backfill run. Event-driven and
+    manual products are never fired here. Returns the number dispatched.
+    """
+    from django.utils import timezone
+
+    from georiva.sources.models import DerivedProduct
+
+    dispatched = 0
+    for product in DerivedProduct.objects.filter(is_enabled=True):
+        definition = definition_for(product)
+        if definition is None or definition.trigger_mode != "scheduled":
+            continue
+        if not product.is_due():
+            continue
+        run_product_now(product, dispatch=dispatch)
+        product.last_run_at = timezone.now()
+        product.save(update_fields=["last_run_at"])
+        dispatched += 1
+    return dispatched

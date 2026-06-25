@@ -5,7 +5,44 @@ from celery import shared_task
 from django.db.models import Min
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
+from georiva.config.celery import app
+
 logger = logging.getLogger(__name__)
+
+
+@app.task(
+    name="georiva.sources.tasks.sweep_scheduled_products",
+    queue="georiva-default",
+)
+def sweep_scheduled_products():
+    """
+    The scheduled-product beat (ADR-0008): fire every enabled scheduled
+    DerivedProduct whose interval has elapsed, via the product-driven path. Runs
+    on a short fixed cadence; each product's own is_due() gates its interval
+    (mirrors sweep_derivations + the feed scheduler).
+    """
+    from georiva.sources.derivation_invocation import dispatch_due_scheduled_products
+
+    return dispatch_due_scheduled_products()
+
+
+@app.on_after_finalize.connect
+def setup_scheduled_product_beat(sender, **kwargs):
+    """Register the periodic scheduled-product beat (mirror of the derivation sweep)."""
+    try:
+        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
+            every=5, period=IntervalSchedule.MINUTES,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.sources.sweep_scheduled_products",
+            defaults={
+                "task": "georiva.sources.tasks.sweep_scheduled_products",
+                "interval": schedule_5min,
+                "enabled": True,
+            },
+        )
+    except Exception as e:  # DB may be unavailable at import/finalize time
+        logger.debug("Skipped scheduled-product beat setup: %s", e)
 
 
 @shared_task(
