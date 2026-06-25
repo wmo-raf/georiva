@@ -98,6 +98,14 @@ by it. `NULL` = no product origin (engine-internal or manual run). An engine-int
 no origin, so it never clobbers the original product stamp.
 _Avoid_: a hard `FK(DerivationRun → DerivedProduct)` (would make the engine depend on the feed layer)
 
+**Product status**:
+A `DerivedProduct`'s aggregate run state for the tracking view (ADR-0008), computed by
+`sources.derivation_tracking.product_status` joining its `DerivationRun`s on [[origin]]. Priority
+**`running` > `failed` > `completed` > `idle`** — meaningful because runs are per-unit and overwrite in place, so a
+`FAILED` row means a unit is *currently* stuck (not "failed once"). Carries per-status `counts` and `last_completed_at`.
+The read-side mirror of product-driven invocation; the engine stays unaware.
+_Avoid_: "failed once ever" semantics (a fixed unit's row transitions out of FAILED on re-run)
+
 **Production Unit**:
 The atomic, opaque, hashable coordinate the engine iterates over — one unit produces one output slice. Its
 **semantics are owned by the Recipe**, not the engine (e.g. climatology = `(variable, period, season, quantity,

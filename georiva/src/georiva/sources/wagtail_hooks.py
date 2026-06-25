@@ -22,6 +22,7 @@ from .views import (
     wizard_step3_collections,
     wizard_step4_products,
     wizard_provision,
+    derived_product_tracking,
 )
 from .viewsets import (
     admin_viewsets,
@@ -35,6 +36,7 @@ from .viewsets import (
 def urlconf_georivasources():
     return [
         path('data-feeds/', data_feed_list, name="data_feed_list"),
+        path('data-feeds/derived-products/', derived_product_tracking, name="derived_product_tracking"),
         path('data-feeds/select/', data_feed_add_select, name="data_feed_add_select"),
         path('data-feeds/<int:pk>/', data_feed_detail, name="data_feed_detail"),
         path('data-feeds/<int:pk>/edit/', data_feed_edit, name="data_feed_edit"),
@@ -64,6 +66,16 @@ def register_sources_menu():
         reverse('data_feed_list'),
         icon_name='file-import',
         order=800,
+    )
+
+
+@hooks.register('register_admin_menu_item')
+def register_derived_products_menu():
+    return MenuItem(
+        _("Derived Products"),
+        reverse('derived_product_tracking'),
+        icon_name='cogs',
+        order=810,
     )
 
 
