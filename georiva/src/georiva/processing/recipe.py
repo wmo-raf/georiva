@@ -59,6 +59,39 @@ class ResolvedInput:
         return [getattr(a, "checksum", "") for a in self.assets]
 
 
+def resolve_declared_inputs(inputs, *, unit=None) -> "dict[str, ResolvedInput]":
+    """
+    Resolve a product's declared ``InputRef``s into ``ResolvedInput``s by
+    querying the catalog — the StagingItem tier for ``tier="staging"`` inputs,
+    the Published Item tier for ``tier="published"`` — filtered by collection
+    slug (ADR-0008).
+
+    This is the engine-side glue that lets a recipe consume *declared* inputs
+    instead of hardcoding slugs in ``resolve_inputs``: the dependency graph and
+    product readiness become computable from the declaration. An input whose
+    collection has no rows resolves to an absent (``present=False``)
+    ``ResolvedInput`` keyed by its role, which is how readiness reports a blocked
+    product. ``unit`` is accepted for forward compatibility (per-unit time
+    narrowing arrives with product-driven invocation) and is unused here.
+    """
+    from georiva.core.models import Item
+    from georiva.staging.models import StagingItem
+
+    resolved: dict[str, ResolvedInput] = {}
+    for ref in inputs:
+        model = StagingItem if ref.tier == "staging" else Item
+        items = list(
+            model.objects
+            .filter(collection__slug=ref.collection)
+            .prefetch_related("assets")
+        )
+        assets = [a for it in items for a in it.assets.all()]
+        resolved[ref.role] = ResolvedInput(
+            ref.role, required=ref.required, items=items, assets=assets
+        )
+    return resolved
+
+
 @dataclass
 class OutputItem:
     """The Published Item a unit maps to. The recipe owns this mapping."""
@@ -110,9 +143,23 @@ class BaseRecipe(ABC):
     def enumerate_units(self, selector: Any) -> Iterable[ProductionUnit]:
         """Which ProductionUnits does this selector cover?"""
 
-    @abstractmethod
+    def declared_inputs(self, unit: ProductionUnit) -> list:
+        """
+        The ``InputRef``s this recipe consumes for one unit (ADR-0008). Default:
+        none. A declaration-driven recipe returns its product definition's
+        inputs here, so the default ``resolve_inputs`` — and the dependency
+        graph and readiness — work without a bespoke override.
+        """
+        return []
+
     def resolve_inputs(self, unit: ProductionUnit) -> "dict[str, ResolvedInput]":
-        """Resolve the named input selectors for one unit."""
+        """
+        Resolve the named input selectors for one unit. The default consumes the
+        recipe's ``declared_inputs`` (no hardcoded slugs); recipes whose
+        per-unit selection needs more than a collection/tier lookup (e.g.
+        Promotion's per-``staging_item_id`` resolution) override this.
+        """
+        return resolve_declared_inputs(self.declared_inputs(unit), unit=unit)
 
     def readiness(self, unit: ProductionUnit, resolved: "dict[str, ResolvedInput]") -> bool:
         """Default: every required input resolved to at least one item."""
