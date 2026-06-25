@@ -16,6 +16,7 @@ from wagtail.admin.panels import FieldPanel
 from .source import BaseDataSource
 
 if TYPE_CHECKING:
+    from georiva.core.derived_products import DerivedProductDefinition
     from georiva.sources.collection_definitions import CollectionDefinition
 
 
@@ -148,7 +149,20 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         selected definition.
         """
         return []
-    
+
+    def get_derived_products(self) -> list['DerivedProductDefinition']:
+        """
+        Return the derived products this feed offers (ADR-0008).
+
+        An instance method (unlike get_collection_definitions): a product's
+        declared inputs/outputs bind to this feed's actual collections, which is
+        instance state. Override in subclasses to declare every
+        DerivedProductDefinition the plugin produces. The wizard's "Derived
+        Products" step presents these; invocation, tracking, and the chain UI
+        all read from the same declarations.
+        """
+        return []
+
     # =========================================================================
     # Collection link helpers
     # =========================================================================

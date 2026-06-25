@@ -61,6 +61,18 @@ engine does), but may override individual steps via hooks. Recipe families (Clim
 post-processing, Impact-based) register without editing the engine.
 _Avoid_: processor, operator, derivation (Recipe is the spec; Derivation is the act)
 
+**Derived Product Definition**:
+The generic, plugin-agnostic blueprint (ADR-0008) declaring one derived product a feed offers: `recipe_type`, a human
+`label`/`description`, a `config_schema` (operator options), declared `inputs`/`outputs` (as `InputRef`/`OutputRef`),
+and a `trigger_mode` (`event | scheduled | manual`). Pure declaration in `core` — no DB, no engine import — so both
+the feed layer (`sources`) and the engine (`processing`) can read it without a backwards dependency. Returned by
+`DataFeed.get_derived_products()`. The dependency graph and product readiness are computed from this declaration
+**without executing the recipe**. A **product is an edge** in the chain DAG (consumes input collections, emits output
+collections); a **`Collection` is a node**. A product is **not** a `Collection`: one product may emit several output
+`Collection`s. Mirrors `CollectionDefinition`.
+_Avoid_: DerivedCollection (a product is not a collection); conflating the blueprint with the persisted `DerivedProduct`
+config (a `DataFeed` child, ADR-0008 / slice 2)
+
 **Production Unit**:
 The atomic, opaque, hashable coordinate the engine iterates over — one unit produces one output slice. Its
 **semantics are owned by the Recipe**, not the engine (e.g. climatology = `(variable, period, season, quantity,
