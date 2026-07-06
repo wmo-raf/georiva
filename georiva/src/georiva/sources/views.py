@@ -145,6 +145,17 @@ def data_feed_detail(request, pk):
             "multi_variable": len(defn.variables) > 1,
         })
     
+    # Derived-products chain panel — the primary management surface (ADR-0008).
+    # A malformed plugin declaration can't be laid out into stages; degrade to an
+    # empty panel rather than breaking the whole feed page.
+    from georiva.core.product_chain import ChainError
+    from georiva.sources.product_service import build_chain
+    try:
+        product_stage_lanes = build_chain(feed)["stages"]
+    except ChainError as exc:
+        product_stage_lanes = []
+        messages.error(request, _("Derived-product chain is invalid: %s") % exc)
+
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
@@ -155,11 +166,98 @@ def data_feed_detail(request, pk):
         "real_feed": real_feed,
         "collection_links": collection_links,
         "definition_link_pairs": definition_link_pairs,
+        "product_stage_lanes": product_stage_lanes,
         "recent_runs": recent_runs,
         "feed_type_name": type(real_feed)._meta.verbose_name,
     }
-    
+
     return render(request, "georivasources/data_feed_detail.html", context)
+
+
+def _apply_product_toggle(request, product, *, confirm_ctx, redirect_url):
+    """Shared enable/disable handling for the tracking dashboard and the feed
+    panel: enable through the structural gate, disable with the cascade
+    confirmation. ``confirm_ctx`` carries the surface-specific confirm form
+    (breadcrumbs, form_action, cancel_url, hidden_fields). Returns the confirm
+    render or a redirect to ``redirect_url``."""
+    from georiva.sources.product_service import (
+        ProductActionError,
+        disable_product,
+        enable_product,
+        enabled_dependents,
+        product_label,
+    )
+
+    if product.is_enabled:
+        dependents = enabled_dependents(product)
+        if dependents and request.POST.get("confirmed") != "1":
+            return render(request, "georivasources/product_disable_confirm.html", {
+                "product": product,
+                "product_label": product_label(product),
+                "dependent_labels": [product_label(d) for d in dependents],
+                **confirm_ctx,
+            })
+        disabled = disable_product(product)
+        messages.success(
+            request, _("Disabled: %s.") % ", ".join(product_label(d) for d in disabled)
+        )
+    else:
+        try:
+            enable_product(product)
+            messages.success(request, _("'%s' enabled.") % product_label(product))
+        except ProductActionError as exc:
+            messages.error(request, str(exc))
+    return redirect(redirect_url)
+
+
+def feed_product_toggle(request, feed_pk, product_pk):
+    """Enable/disable one derived product from the feed-detail panel, through the
+    same gate/cascade service as the tracking dashboard."""
+    from georiva.sources.models import DerivedProduct
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    detail_url = reverse("data_feed_detail", kwargs={"pk": feed_pk})
+    return _apply_product_toggle(
+        request, product,
+        confirm_ctx={
+            "breadcrumbs_items": [
+                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": detail_url, "label": product.data_feed.name},
+                {"url": "", "label": _("Disable")},
+            ],
+            "form_action": reverse(
+                "feed_product_toggle",
+                kwargs={"feed_pk": feed_pk, "product_pk": product_pk},
+            ),
+            "cancel_url": detail_url,
+            "hidden_fields": {},
+        },
+        redirect_url=detail_url,
+    )
+
+
+def feed_product_run(request, feed_pk, product_pk):
+    """Manually dispatch one derived product from the feed panel, gated on data
+    readiness (mirrors the tracking dashboard's Run now)."""
+    from georiva.sources.derivation_invocation import run_product_now
+    from georiva.sources.derivation_tracking import product_readiness
+    from georiva.sources.models import DerivedProduct
+    from georiva.sources.product_service import product_label
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    readiness = product_readiness(product)
+    if readiness.ready:
+        run_product_now(product)
+        messages.success(request, _("Run started for '%s'.") % product_label(product))
+    else:
+        messages.error(
+            request,
+            _("'%(product)s' blocked: %(reason)s.") % {
+                "product": product_label(product), "reason": readiness.reason,
+            },
+        )
+    return redirect("data_feed_detail", pk=feed_pk)
 
 
 def data_feed_edit(request, pk):
@@ -1126,47 +1224,28 @@ def derived_product_tracking(request):
     from georiva.sources.derivation_invocation import run_product_now
     from georiva.sources.derivation_tracking import product_readiness, product_status
     from georiva.sources.models import DerivedProduct
-    from georiva.sources.product_service import (
-        ProductActionError,
-        disable_product,
-        enable_product,
-        enabled_dependents,
-        product_label,
-    )
+    from georiva.sources.product_service import product_label
 
     if request.method == "POST" and request.POST.get("action") == "toggle":
         product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
-        # Enable/disable go through the product service so the dependency
-        # invariant (no enabled product with a disabled dependency) holds from
-        # this surface too — never flip is_enabled raw here.
-        if product.is_enabled:
-            dependents = enabled_dependents(product)
-            if dependents and request.POST.get("confirmed") != "1":
-                # Cascade-disable needs acknowledgement; the closure is recomputed
-                # on the confirming POST, so the listed set is advisory only.
-                return render(request, "georivasources/product_disable_confirm.html", {
-                    "breadcrumbs_items": [
-                        {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                        {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-                        {"url": reverse("derived_product_tracking"), "label": _("Derived Products")},
-                        {"url": "", "label": _("Disable")},
-                    ],
-                    "product": product,
-                    "product_label": product_label(product),
-                    "dependent_labels": [product_label(d) for d in dependents],
-                })
-            disabled = disable_product(product)
-            messages.success(
-                request,
-                _("Disabled: %s.") % ", ".join(product_label(d) for d in disabled),
-            )
-        else:
-            try:
-                enable_product(product)
-                messages.success(request, _("'%s' enabled.") % product_label(product))
-            except ProductActionError as exc:
-                messages.error(request, str(exc))
-        return redirect("derived_product_tracking")
+        # Route through the shared gate/cascade helper — the same write-path the
+        # feed panel uses — so the dependency invariant holds from every surface.
+        tracking_url = reverse("derived_product_tracking")
+        return _apply_product_toggle(
+            request, product,
+            confirm_ctx={
+                "breadcrumbs_items": [
+                    {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                    {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                    {"url": tracking_url, "label": _("Derived Products")},
+                    {"url": "", "label": _("Disable")},
+                ],
+                "form_action": tracking_url,
+                "cancel_url": tracking_url,
+                "hidden_fields": {"action": "toggle", "product_pk": product.pk},
+            },
+            redirect_url=tracking_url,
+        )
 
     if request.method == "POST" and request.POST.get("action") == "run_now":
         product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
