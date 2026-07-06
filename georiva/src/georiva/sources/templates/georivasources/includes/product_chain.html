@@ -25,16 +25,19 @@ Rendered by both surfaces so they can't drift:
                             </label>
                         {% else %}
                             <div class="gprod-card__title-row">
-                                <span class="gprod-card__name">{{ defn.label }}</span>
+                                <span class="gprod-card__name">{{ card.display_label|default:defn.label }}</span>
                                 <span class="gprod-badge gprod-badge--{% if card.enabled %}on{% else %}off{% endif %}">
                                     {% if card.enabled %}{% trans "Enabled" %}{% else %}{% trans "Disabled" %}{% endif %}
                                 </span>
                                 <span class="gprod-pill gprod-pill--{{ card.status }}">{{ card.status }}</span>
+                                <a class="gprod-card__edit" href="{% url 'feed_product_edit' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Edit" %}</a>
                             </div>
                         {% endif %}
-                        {% if defn.description %}
-                            <p class="gprod-card__desc">{{ defn.description }}</p>
-                        {% endif %}
+                        {% with card_desc=card.display_description|default:defn.description %}
+                            {% if card_desc %}
+                                <p class="gprod-card__desc">{{ card_desc }}</p>
+                            {% endif %}
+                        {% endwith %}
                         {% if card.needs %}
                             <p class="gprod-needs">
                                 <span>{% trans "needs:" %}</span>

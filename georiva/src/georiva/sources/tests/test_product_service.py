@@ -18,6 +18,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.derived_products import (
+    ConfigField,
     DerivedProductDefinition,
     InputRef,
     OutputRef,
@@ -31,21 +32,23 @@ from georiva.sources.product_service import (
     enable_product,
     enabled_dependents,
     materialise_output_collections,
+    product_label,
 )
 
 User = get_user_model()
 
 
-def _product(key, *, inputs=(), outputs=(), recipe_type="recipe"):
+def _product(key, *, inputs=(), outputs=(), recipe_type="recipe", config_schema=(),
+             trigger_mode="scheduled", description=""):
     return DerivedProductDefinition(
         key=key,
         recipe_type=recipe_type,
         label=key.replace("-", " ").title(),
-        description="",
-        config_schema=(),
+        description=description,
+        config_schema=tuple(config_schema),
         inputs=tuple(inputs),
         outputs=tuple(outputs),
-        trigger_mode="scheduled",
+        trigger_mode=trigger_mode,
     )
 
 
@@ -306,6 +309,23 @@ class BuildChainTests(ProductServiceBase):
             ["chirps-monthly-anomaly"],
         )
 
+    def test_cards_use_the_operator_display_override(self):
+        # A title/description override shows everywhere a product is named.
+        self.rows["climatology"].title = "Rainfall Normals (1991–2020)"
+        self.rows["climatology"].description = "Operator note."
+        self.rows["climatology"].save(update_fields=["title", "description"])
+
+        with self._patch_defs():
+            cards = self._cards_by_key(build_chain(self.feed))
+            self.assertEqual(product_label(self.rows["climatology"]),
+                             "Rainfall Normals (1991–2020)")
+
+        clim = cards["climatology"]
+        self.assertEqual(clim["display_label"], "Rainfall Normals (1991–2020)")
+        self.assertEqual(clim["display_description"], "Operator note.")
+        # A dependent's needs-chip uses the dependency's display label too.
+        self.assertEqual(cards["anomaly"]["needs"], ["Rainfall Normals (1991–2020)"])
+
     def test_manual_and_scheduled_products_are_runnable_event_ones_are_not(self):
         # The fixture's products are all trigger_mode="scheduled" (see _product),
         # so all can_run. Guard the flag exists and reflects trigger_mode.
@@ -391,6 +411,146 @@ class ProductChainPartialTests(ProductServiceBase):
         self.assertIn(
             f"/products/{self.rows['climatology'].pk}/run/", html
         )
+
+
+class SemanticSurvivalTests(ProductServiceBase):
+    """Operator overrides and output-collection renames must survive a
+    disable/enable cycle (materialisation is get-or-create, never update)."""
+
+    def test_title_override_and_collection_rename_survive_disable_enable(self):
+        clim = self.rows["climatology"]
+        clim.title = "Rainfall Normals (1991–2020)"
+        clim.save(update_fields=["title"])
+        renamed = Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly-climatology",
+            name="My Renamed Normals", description="Operator blurb.",
+        )
+
+        with self._patch_defs():
+            disable_product(clim)      # cascades to anomaly
+            enable_product(clim)       # re-materialises its outputs
+
+        clim.refresh_from_db()
+        renamed.refresh_from_db()
+        self.assertEqual(clim.title, "Rainfall Normals (1991–2020)")
+        self.assertEqual(renamed.name, "My Renamed Normals")
+        self.assertEqual(renamed.description, "Operator blurb.")
+
+
+class ProductEditViewTests(ProductServiceBase):
+    """The product edit view saves the three semantic sections — display
+    overrides, output-collection strings, and operator options — while leaving
+    structural identity read-only (issue #170)."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_superuser("edit", "e@t.com", "pw")
+        self.client.force_login(self.user)
+        # climatology's output collection is materialised, so the edit view can
+        # expose its catalog-facing name/description.
+        self.clim_col = Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly-climatology",
+            name="Declared clim name",
+        )
+        self.clim = self.rows["climatology"]
+
+    def _url(self, product):
+        return reverse(
+            "feed_product_edit",
+            kwargs={"feed_pk": self.feed.pk, "product_pk": product.pk},
+        )
+
+    def _clim_defs(self, config_schema=()):
+        # A climatology definition (with an optional config schema) plus the
+        # other two, so the chain resolves.
+        clim = _product(
+            "climatology", config_schema=config_schema,
+            inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="climatology",
+                               collection="chirps-monthly-climatology"),),
+        )
+        return patch.object(DataFeed, "get_derived_products", return_value=[clim])
+
+    def test_get_renders_sections_with_readonly_structural(self):
+        with self._clim_defs():
+            response = self.client.get(self._url(self.clim))
+
+        self.assertEqual(response.status_code, 200)
+        # Structural identity is shown (read-only): key, recipe, output slug.
+        self.assertContains(response, "climatology")
+        self.assertContains(response, "chirps-monthly-climatology")
+        # The options section is flagged as affecting future runs only.
+        self.assertContains(response, "future runs")
+
+    def test_saves_display_overrides(self):
+        with self._clim_defs():
+            self.client.post(self._url(self.clim), {
+                "title": "Rainfall Normals (1991–2020)",
+                "description": "Operator note.",
+                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                "col-%d-description" % self.clim_col.pk: "",
+            })
+
+        self.clim.refresh_from_db()
+        self.assertEqual(self.clim.title, "Rainfall Normals (1991–2020)")
+        self.assertEqual(self.clim.description, "Operator note.")
+
+    def test_clearing_an_override_restores_the_declared_text(self):
+        self.clim.title = "Old override"
+        self.clim.save(update_fields=["title"])
+
+        with self._clim_defs():
+            self.client.post(self._url(self.clim), {
+                "title": "", "description": "",
+                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                "col-%d-description" % self.clim_col.pk: "",
+            })
+            self.clim.refresh_from_db()
+            self.assertEqual(self.clim.title, "")
+            # Blank override -> the declared label shows again.
+            self.assertEqual(self.clim.display_label, "Climatology")
+
+    def test_saves_output_collection_name_and_description(self):
+        with self._clim_defs():
+            self.client.post(self._url(self.clim), {
+                "title": "", "description": "",
+                "col-%d-name" % self.clim_col.pk: "My Normals",
+                "col-%d-description" % self.clim_col.pk: "Catalog blurb.",
+            })
+
+        self.clim_col.refresh_from_db()
+        self.assertEqual(self.clim_col.name, "My Normals")
+        self.assertEqual(self.clim_col.description, "Catalog blurb.")
+
+    def test_saves_config_and_interval(self):
+        schema = (ConfigField(key="min_count", type="int", default=20),)
+        with self._clim_defs(config_schema=schema):
+            self.client.post(self._url(self.clim), {
+                "title": "", "description": "",
+                "config-min_count": "35",
+                "interval_minutes": "1440",
+                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                "col-%d-description" % self.clim_col.pk: "",
+            })
+
+        self.clim.refresh_from_db()
+        self.assertEqual(self.clim.config["min_count"], 35)
+        self.assertEqual(self.clim.interval_minutes, 1440)
+
+    def test_invalid_config_is_rejected_and_not_saved(self):
+        schema = (ConfigField(key="quantity", type="choice",
+                              choices=("anomaly", "value")),)
+        with self._clim_defs(config_schema=schema):
+            response = self.client.post(self._url(self.clim), {
+                "title": "", "description": "",
+                "config-quantity": "trend",   # not among choices
+                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                "col-%d-description" % self.clim_col.pk: "",
+            })
+
+        self.assertEqual(response.status_code, 200)   # re-rendered, not redirected
+        self.clim.refresh_from_db()
+        self.assertNotIn("quantity", self.clim.config)
 
 
 class FeedProductEndpointTests(ProductServiceBase):

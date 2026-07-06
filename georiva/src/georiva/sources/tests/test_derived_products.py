@@ -80,6 +80,32 @@ class DerivedProductModelTests(TestCase):
         )
         self.assertTrue(product.is_enabled)
 
+    def test_display_label_falls_back_to_the_declared_label(self):
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+        )
+        with patch.object(DataFeed, "get_derived_products", return_value=[_definition()]):
+            # No override -> the plugin's declared label (so upgrades refresh it).
+            self.assertEqual(product.display_label, "Rainfall anomaly")
+            self.assertEqual(product.display_description, "Anomaly vs a baseline.")
+
+    def test_display_label_prefers_the_operator_override(self):
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            title="Rainfall Normals (1991–2020)", description="My note.",
+        )
+        with patch.object(DataFeed, "get_derived_products", return_value=[_definition()]):
+            self.assertEqual(product.display_label, "Rainfall Normals (1991–2020)")
+            self.assertEqual(product.display_description, "My note.")
+
+    def test_display_label_falls_back_to_key_for_an_orphaned_product(self):
+        # No matching declaration (orphan) and no override -> the definition key.
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="ghost", recipe_type="climatology",
+        )
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            self.assertEqual(product.display_label, "ghost")
+
 
 class ProvisionDerivedProductsTests(TestCase):
     def setUp(self):
@@ -216,6 +242,31 @@ class ProvisionDerivedProductsTests(TestCase):
         self.assertFalse(
             Collection.objects.filter(slug="rainfall-anomaly").exists()
         )
+
+    def test_reprovisioning_preserves_overrides_and_collection_renames(self):
+        # A wizard re-run edits config but must never clobber an operator's title
+        # override or a renamed output collection.
+        defn = _definition(outputs=(
+            OutputRef(role="anomaly", collection="rainfall-anomaly",
+                      title="Declared Anomaly"),
+        ))
+        self.service.provision_derived_products(self.feed, [(defn, {"min_years": "30"}, True)])
+
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
+        product.title = "My Anomaly"
+        product.save(update_fields=["title"])
+        collection = Collection.objects.get(slug="rainfall-anomaly")
+        collection.name = "My Renamed Anomaly"
+        collection.save(update_fields=["name"])
+
+        # Re-run the wizard (new config).
+        self.service.provision_derived_products(self.feed, [(defn, {"min_years": "50"}, True)])
+
+        product.refresh_from_db()
+        collection.refresh_from_db()
+        self.assertEqual(product.title, "My Anomaly")           # override kept
+        self.assertEqual(product.config["min_years"], 50)       # config updated
+        self.assertEqual(collection.name, "My Renamed Anomaly") # rename kept
 
 
 class BuildProductConfigFormTests(TestCase):

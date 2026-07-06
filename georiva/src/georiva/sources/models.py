@@ -455,6 +455,17 @@ class DerivedProduct(models.Model):
         blank=True,
         help_text=_("Operator options, validated against the definition's config_schema."),
     )
+    # Semantic overrides — blank falls back to the plugin's declared label /
+    # description, so un-overridden text refreshes on plugin upgrades.
+    title = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=_("Optional display name. Leave blank to use the declared label."),
+    )
+    description = models.TextField(
+        blank=True,
+        help_text=_("Optional display description. Leave blank to use the declared one."),
+    )
     is_enabled = models.BooleanField(
         default=True,
         help_text=_("Disable to pause this product without deleting its configuration."),
@@ -473,6 +484,31 @@ class DerivedProduct(models.Model):
     class Meta:
         unique_together = ['data_feed', 'definition_key']
         ordering = ['id']
+
+    @property
+    def definition(self):
+        """The plugin-declared DerivedProductDefinition this row was provisioned
+        from, or None if the declaration is gone (an orphaned row)."""
+        from georiva.sources.derivation_invocation import definition_for
+        return definition_for(self)
+
+    @property
+    def display_label(self) -> str:
+        """The name to show on every surface: the operator's title override, else
+        the declared label, else the definition key (for an orphan)."""
+        if self.title:
+            return self.title
+        definition = self.definition
+        return definition.label if definition else self.definition_key
+
+    @property
+    def display_description(self) -> str:
+        """The description to show: the operator's override, else the declared
+        one (blank if neither)."""
+        if self.description:
+            return self.description
+        definition = self.definition
+        return definition.description if definition else ""
 
     @property
     def effective_interval(self) -> int:

@@ -260,6 +260,107 @@ def feed_product_run(request, feed_pk, product_pk):
     return redirect("data_feed_detail", pk=feed_pk)
 
 
+def feed_product_edit(request, feed_pk, product_pk):
+    """Edit a derived product's *semantic* properties (ADR-0008) without touching
+    its structural identity. Three sections:
+
+      1. Display — the title/description overrides (blank falls back to the
+         declared label/description).
+      2. Output collections — the catalog-facing name/description of each
+         materialised output Collection.
+      3. Options — the operator config (validated against the definition schema)
+         plus the schedule interval, flagged as affecting future runs only.
+
+    Structural fields (key, recipe, slugs, inputs/outputs, trigger mode) are
+    read-only.
+    """
+    from django.forms import modelform_factory
+
+    from georiva.core.models import Collection
+    from georiva.sources.derivation_invocation import definition_for
+    from georiva.sources.models import DerivedProduct
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    definition = definition_for(product)
+
+    display_form_cls = modelform_factory(DerivedProduct, fields=["title", "description"])
+    collection_form_cls = modelform_factory(Collection, fields=["name", "description"])
+    config_form_cls = build_product_config_form(definition) if definition else None
+    is_scheduled = definition is not None and definition.trigger_mode == "scheduled"
+
+    output_slugs = [ref.collection for ref in definition.outputs] if definition else []
+    collections = list(
+        Collection.objects.filter(catalog=product.data_feed.catalog, slug__in=output_slugs)
+    )
+
+    def _collection_form(collection, data=None):
+        return collection_form_cls(data, instance=collection, prefix=f"col-{collection.pk}")
+
+    if request.method == "POST":
+        display_form = display_form_cls(request.POST, instance=product)
+        collection_forms = [_collection_form(c, request.POST) for c in collections]
+        config_form = config_form_cls(request.POST, prefix="config") if config_form_cls else None
+
+        valid = display_form.is_valid() and all(f.is_valid() for f in collection_forms)
+        if config_form is not None:
+            valid = config_form.is_valid() and valid
+
+        interval_value = None
+        interval_error = None
+        if is_scheduled:
+            raw = request.POST.get("interval_minutes", "").strip()
+            if raw:
+                try:
+                    interval_value = int(raw)
+                except ValueError:
+                    interval_error = _("Enter a whole number of minutes.")
+                    valid = False
+
+        if valid:
+            product = display_form.save(commit=False)
+            for form in collection_forms:
+                form.save()
+            if config_form is not None:
+                product.config = {
+                    k: _to_json_safe(v) for k, v in config_form.cleaned_config.items()
+                }
+            if is_scheduled:
+                product.interval_minutes = interval_value
+            product.save()
+            messages.success(request, _("'%s' updated.") % product.display_label)
+            return redirect("data_feed_detail", pk=feed_pk)
+    else:
+        display_form = display_form_cls(instance=product)
+        collection_forms = [_collection_form(c) for c in collections]
+        config_form = (
+            config_form_cls(initial=product.config, prefix="config")
+            if config_form_cls else None
+        )
+        interval_error = None
+
+    return render(request, "georivasources/product_edit.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}),
+             "label": product.data_feed.name},
+            {"url": "", "label": product.display_label},
+        ],
+        "feed": product.data_feed,
+        "product": product,
+        "definition": definition,
+        "display_form": display_form,
+        "collection_pairs": list(zip(collections, collection_forms)),
+        "config_form": config_form,
+        "is_scheduled": is_scheduled,
+        "interval_value": (
+            request.POST.get("interval_minutes")
+            if request.method == "POST" else product.interval_minutes
+        ),
+        "interval_error": interval_error,
+    })
+
+
 def data_feed_edit(request, pk):
     """Edit feed name, interval, and global config fields inline."""
     feed = get_object_or_404(DataFeed, pk=pk)
@@ -1270,15 +1371,10 @@ def derived_product_tracking(request):
 
     rows = []
     for product in products:
-        # Best-effort human label from the feed's declaration (falls back to key).
-        label = product.definition_key
-        for defn in product.data_feed.get_derived_products():
-            if defn.key == product.definition_key:
-                label = defn.label
-                break
         rows.append({
             "product": product,
-            "label": label,
+            # Operator override -> declared label -> key (the shared fallback).
+            "label": product.display_label,
             "status": product_status(product),
             "readiness": product_readiness(product),
         })

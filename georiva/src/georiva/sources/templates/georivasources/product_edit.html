@@ -1,0 +1,226 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Edit Derived Product" %} — {{ product.display_label }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gpe-section {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            margin-bottom: 1.5em;
+            overflow: hidden;
+        }
+
+        .gpe-section__header {
+            padding: 0.85em 1.1em;
+            background: var(--w-color-grey-50);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gpe-section__title {
+            margin: 0;
+            font-size: 0.95em;
+            font-weight: 700;
+        }
+
+        .gpe-section__hint {
+            margin: 0.25em 0 0;
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gpe-section__body {
+            padding: 1.1em;
+        }
+
+        .gpe-section__body .w-field__wrapper {
+            margin-bottom: 1em;
+        }
+
+        .gpe-future-flag {
+            display: inline-block;
+            font-size: 0.72em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0.15em 0.6em;
+            border-radius: 999px;
+            background: var(--w-color-warning-100);
+            color: var(--w-color-text-label);
+            margin-left: 0.5em;
+        }
+
+        .gpe-readonly {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 0.4em 1.2em;
+            font-size: 0.85em;
+        }
+
+        .gpe-readonly dt {
+            font-weight: 600;
+            color: var(--w-color-grey-400);
+        }
+
+        .gpe-readonly dd {
+            margin: 0;
+            font-family: monospace;
+        }
+
+        .gpe-collection {
+            border-top: 1px solid var(--w-color-border-furniture);
+            padding-top: 1em;
+            margin-top: 1em;
+        }
+
+        .gpe-collection:first-child {
+            border-top: 0;
+            padding-top: 0;
+            margin-top: 0;
+        }
+
+        .gpe-collection__slug {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+            margin: 0 0 0.6em;
+        }
+
+        .gpe-actions {
+            display: flex;
+            gap: 0.75em;
+            margin-top: 1.5em;
+        }
+
+        .gpe-error {
+            color: var(--w-color-critical-200);
+            font-size: 0.82em;
+            margin: 0.3em 0 0;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=product.display_label subtitle=_("Edit Derived Product") icon="cog" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="help-block help-block--{{ msg.tags }}">{{ msg }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+
+            {# ── 1. Display overrides #}
+            <div class="gpe-section">
+                <div class="gpe-section__header">
+                    <p class="gpe-section__title">{% trans "Display" %}</p>
+                    <p class="gpe-section__hint">
+                        {% trans "How this product is named across the app. Leave a field blank to use the plugin's declared text (which then refreshes on upgrades)." %}
+                    </p>
+                </div>
+                <div class="gpe-section__body">
+                    {% for field in display_form %}
+                        <div class="w-field__wrapper">
+                            <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.help_text %}<p class="w-field__help-text">{{ field.help_text }}</p>{% endif %}
+                            {% for error in field.errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {# ── 2. Output collections #}
+            {% if collection_pairs %}
+                <div class="gpe-section">
+                    <div class="gpe-section__header">
+                        <p class="gpe-section__title">{% trans "Output collections" %}</p>
+                        <p class="gpe-section__hint">
+                            {% trans "The catalog-facing name and description of each collection this product produces." %}
+                        </p>
+                    </div>
+                    <div class="gpe-section__body">
+                        {% for collection, form in collection_pairs %}
+                            <div class="gpe-collection">
+                                <p class="gpe-collection__slug">{{ collection.catalog.slug }}/{{ collection.slug }}</p>
+                                {% for field in form %}
+                                    <div class="w-field__wrapper">
+                                        <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                        {{ field }}
+                                        {% for error in field.errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {# ── 3. Options (future runs only) #}
+            {% if config_form or is_scheduled %}
+                <div class="gpe-section">
+                    <div class="gpe-section__header">
+                        <p class="gpe-section__title">
+                            {% trans "Options" %}
+                            <span class="gpe-future-flag">{% trans "Affects future runs only" %}</span>
+                        </p>
+                        <p class="gpe-section__hint">
+                            {% trans "Changing these does not re-process already-produced data." %}
+                        </p>
+                    </div>
+                    <div class="gpe-section__body">
+                        {% if config_form %}
+                            {% for field in config_form %}
+                                <div class="w-field__wrapper">
+                                    <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                    {{ field }}
+                                </div>
+                            {% endfor %}
+                            {% for error in config_form.non_field_errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                        {% endif %}
+                        {% if is_scheduled %}
+                            <div class="w-field__wrapper">
+                                <label class="w-field__label" for="id_interval_minutes">{% trans "Run interval (minutes)" %}</label>
+                                <input type="number" name="interval_minutes" id="id_interval_minutes"
+                                       value="{{ interval_value|default_if_none:'' }}" min="5" class="w-field__input">
+                                <p class="w-field__help-text">{% trans "Leave blank to use the feed's global interval." %}</p>
+                                {% if interval_error %}<p class="gpe-error">{{ interval_error }}</p>{% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+
+            {# ── Structural identity (read-only) #}
+            <div class="gpe-section">
+                <div class="gpe-section__header">
+                    <p class="gpe-section__title">{% trans "Structure" %}</p>
+                    <p class="gpe-section__hint">{% trans "Structural identity is fixed by the plugin declaration and can't be edited here." %}</p>
+                </div>
+                <div class="gpe-section__body">
+                    <dl class="gpe-readonly">
+                        <dt>{% trans "Key" %}</dt><dd>{{ product.definition_key }}</dd>
+                        <dt>{% trans "Recipe" %}</dt><dd>{{ product.recipe_type }}</dd>
+                        {% if definition %}
+                            <dt>{% trans "Trigger" %}</dt><dd>{{ definition.trigger_mode }}</dd>
+                            <dt>{% trans "Inputs" %}</dt>
+                            <dd>{% for ref in definition.inputs %}{{ ref.collection }} ({{ ref.tier }}){% if not forloop.last %}, {% endif %}{% endfor %}</dd>
+                            <dt>{% trans "Outputs" %}</dt>
+                            <dd>{% for ref in definition.outputs %}{{ ref.collection }}{% if not forloop.last %}, {% endif %}{% endfor %}</dd>
+                        {% endif %}
+                    </dl>
+                </div>
+            </div>
+
+            <div class="gpe-actions">
+                <button type="submit" class="button">{% trans "Save" %}</button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
