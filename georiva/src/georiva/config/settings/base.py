@@ -95,22 +95,65 @@ _dev_plugin_dir = os.environ.get("GEORIVA_DEV_PLUGIN_DIR", "/georiva/dev-plugins
 if Path(_dev_plugin_dir).exists() and _dev_plugin_dir not in GEORIVA_PLUGIN_DIRS:
     GEORIVA_PLUGIN_DIRS.append(_dev_plugin_dir)
 
+def _discover_plugin_apps(plugin_folder):
+    """Resolve a plugin checkout dir into ``(sys_path_entry, [app_module_names])``.
+
+    The Django app/import name is derived from the package *contents*, not the
+    checkout folder name — so a plugin repo can live under any directory name
+    (e.g. the hyphenated git-repo name ``georiva-source-cds``) and still load as
+    its real import package (``georiva_source_cds``).
+
+    Layouts supported:
+      - src layout:  ``<folder>/src/<pkg>/__init__.py``  (path entry ``<folder>/src``)
+      - package dir: ``<folder>/<pkg>/__init__.py``       (path entry ``<folder>``)
+      - bare package: ``<folder>/__init__.py``            (path entry parent of
+                                                           ``<folder>``, app ``<folder>.name``)
+    """
+    _skip_suffixes = (".egg-info", ".dist-info")
+
+    def _packages_under(base):
+        return sorted(
+            child.name
+            for child in base.iterdir()
+            if child.is_dir()
+            and not child.name.startswith(".")
+            and not child.name.endswith(_skip_suffixes)
+            and (child / "__init__.py").exists()
+        )
+
+    src = plugin_folder / "src"
+    if src.is_dir():
+        apps = _packages_under(src)
+        if apps:
+            return str(src), apps
+    apps = _packages_under(plugin_folder)
+    if apps:
+        return str(plugin_folder), apps
+    if (plugin_folder / "__init__.py").exists():
+        return str(plugin_folder.parent), [plugin_folder.name]
+    return None, []
+
+
 GEORIVA_PLUGIN_FOLDERS = []
 for plugin_dir in GEORIVA_PLUGIN_DIRS:
     plugin_dir = Path(plugin_dir)
     if plugin_dir.exists():
-        plugin_folders = [file for file in plugin_dir.iterdir() if file.is_dir()]
-        GEORIVA_PLUGIN_FOLDERS.extend(plugin_folders)
+        # Skip hidden dirs (.idea, .git, .DS_Store…) that can sit alongside plugin
+        # packages when the whole dev-plugins folder is bind-mounted.
+        GEORIVA_PLUGIN_FOLDERS.extend(
+            f
+            for f in plugin_dir.iterdir()
+            if f.is_dir() and not f.name.startswith(".")
+        )
 
-GEORIVA_PLUGIN_NAMES = [d.name for d in GEORIVA_PLUGIN_FOLDERS]
-
-# Make plugin packages importable even when not pip-installed (e.g. dev bind-mounts).
-# Supports both flat layout (package at plugin root) and src layout (package under src/).
+# Derive each plugin's importable app module name from its contents (not its
+# folder name) and make it importable even when not pip-installed (dev bind-mounts).
+GEORIVA_PLUGIN_NAMES = []
 for _plugin_folder in GEORIVA_PLUGIN_FOLDERS:
-    _src = _plugin_folder / "src"
-    _path = str(_src) if _src.is_dir() else str(_plugin_folder.parent)
-    if _path not in sys.path:
+    _path, _apps = _discover_plugin_apps(_plugin_folder)
+    if _path and _path not in sys.path:
         sys.path.append(_path)
+    GEORIVA_PLUGIN_NAMES.extend(_apps)
 
 if GEORIVA_PLUGIN_NAMES:
     print(f"Loaded GeoRiva plugins: {','.join(GEORIVA_PLUGIN_NAMES)}")

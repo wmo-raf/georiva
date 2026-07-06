@@ -542,11 +542,14 @@ automatically as Items accumulate, or on-demand? What chunking strategies make s
 How should source plugins and analysis plugins be distributed? Options include: bundled with the core repository, as
 separate Python packages installable via pip, or as Docker sidecar containers.
 
-> **Update (v0.3):** Resolved — plugins are distributed as standalone Python packages (Wagtail apps) and
-> installed via one of three mechanisms: (1) **build-time** — declared in `plugins.toml` and baked into the
-> Docker image; (2) **runtime** — downloaded at container startup via `GEORIVA_PLUGIN_URLS`; (3) **local
-> dev** — bind-mounted source folders installed as editable packages (`pip install -e`) by `startup_plugin_setup`.
-> Settings auto-discovers installed plugins from `GEORIVA_PLUGIN_DIRS` and adds them to `INSTALLED_APPS`.
+> **Update (v0.3):** Resolved — plugins are distributed as standalone Python packages (flat PEP 621
+> repos — the repo root is the package) and installed via one of three mechanisms: (1) **build-time** —
+> declared in `plugins.toml` and baked into the Docker image; (2) **runtime** — downloaded at container
+> startup via `GEORIVA_PLUGIN_URLS`; (3) **local dev** — plugin repos checked out into `dev-plugins/`,
+> which is bind-mounted whole into the stack and editable-installed (`pip install -e --no-build-isolation`)
+> by `startup_plugin_setup`. Settings auto-discovers installed plugins from `GEORIVA_PLUGIN_DIRS`,
+> deriving each app's import name from its package (so checkout folder names are free), and adds them to
+> `INSTALLED_APPS`.
 > Example plugins are maintained as standalone packages (e.g. `georiva-source-chirps`, `georiva-source-ecmwf`,
 > `georiva-source-cds`); a cookiecutter template is provided in
 > `source-plugin-boilerplate/`. See [`docs/plugins/installation.md`](../plugins/installation.md) for the

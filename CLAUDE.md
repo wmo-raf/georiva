@@ -19,7 +19,9 @@ Meteorological Services.
 - **API**: Django REST Framework + drf-spectacular (OpenAPI)
 - **Frontend**: STAC Browser (Radiant Earth), Vue.js for dashboards
 - **Container**: Docker Compose (13 services), Nginx reverse proxy (`georiva-web-proxy`)
-- **Python**: 3.10+
+- **Package Manager**: uv — core is a standalone project (`georiva/pyproject.toml` + `georiva/uv.lock`); repo-root
+  `pyproject.toml` is a dev workspace overlay that ties in plugins
+- **Python**: 3.12+
 
 ## Project Structure
 
@@ -128,6 +130,11 @@ Defined in `api/urls.py`:
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
 - **Storage paths**: Time-partitioned: `{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
+- **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
+  `requirements.txt`). Add via `make uv-add pkg="..."`; `uv sync --all-packages` builds the local dev env
+- **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no
+  `setup.py`/`requirements/`). For dev, cloned into `dev-plugins/` (gitignored); discovery derives the Django app
+  name from the package under `src/`, not the folder name
 
 ## Existing Documentation
 

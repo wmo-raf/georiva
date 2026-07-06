@@ -14,7 +14,7 @@
 #   hash    = "..."   Optional SHA-1 hash for integrity verification (git and url)
 #   name    = "..."   Optional display label shown in installation logs
 #   enabled = false   Set to false to skip without deleting the entry (default: true)
-#   dev     = true    Editable install (pip install -e) — folder only; use for local dev hot-reload
+#   dev     = true    Editable install (pip install -e --no-build-isolation) — folder only; local dev
 #
 # ─────────────────────────────────────────────────────────────────────────────
 # Check https://github.com/wmo-raf for the list of available GeoRiva plugins and
@@ -29,25 +29,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # LOCAL DEVELOPMENT — test a plugin from source against this GeoRiva stack
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. In docker-compose.override.yml, bind-mount your plugin source into the container:
+# You do NOT need a plugins.toml entry for local dev. Copy
+# docker-compose.override.sample.yml to docker-compose.override.yml (it already
+# bind-mounts the whole dev-plugins/ folder: ./dev-plugins:/georiva/dev-plugins),
+# then clone your plugin repo(s) into dev-plugins/ and start with `make dev-up OV=1`:
 #
-#      services:
-#        georiva:
-#          volumes:
-#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
-#        georiva-celery-default-worker:
-#          volumes:
-#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
-#        georiva-celery-ingestion-worker:
-#          volumes:
-#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
-#        georiva-celery-beat:
-#          volumes:
-#            - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+#      git clone https://github.com/wmo-raf/georiva-source-cds.git \
+#          dev-plugins/georiva-source-cds
 #
-# 2. Uncomment and edit the section below — folder must be the container-side path:
-#
-# [[plugins]]
-# name    = "My Plugin (dev)"
-# folder  = "/georiva/dev-plugins/georiva_my_plugin"
-# dev     = true     # pip install -e so edits to source are reflected immediately
+# The checkout directory name doesn't matter — the app/import name is derived from
+# the package under src/. Every subdirectory of dev-plugins/ is auto-discovered and
+# editable-installed (pip install -e --no-build-isolation) at container startup.

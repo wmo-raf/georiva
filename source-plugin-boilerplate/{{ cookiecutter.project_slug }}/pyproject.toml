@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{ cookiecutter.project_slug }}"
+version = "0.0.1"
+description = "{{ cookiecutter.project_description }}"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "TODO" }]
+classifiers = []
+# NOTE: `georiva` (the core) is intentionally NOT listed here — it is provided by
+# the runtime environment (the GeoRiva Docker image, or the uv workspace where
+# core is a sibling member in the same virtualenv). List ONLY the dependencies
+# your plugin needs that core does NOT already provide. Deps already shipped by
+# core (xarray, rasterio, cfgrib, requests, django-countries, …) must not be
+# re-pinned here — that risks conflicting with core's versions.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/wmo-raf/{{ cookiecutter.project_slug }}"
+
+[dependency-groups]
+dev = ["flake8==7.0.0"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+exclude = '''
+/(
+  | migrations
+  | generated
+)/
+'''

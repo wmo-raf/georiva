@@ -1,22 +1,19 @@
 x-backend-variables: &backend-variables
   ENV_KEY: value
 
-# --- Plugin development ------------------------------------------------------
-# Develop a source plugin by bind-mounting its package into this dev stack —
-# there is no separate per-plugin image. Each folder under /georiva/dev-plugins
-# is installed editable (pip install -e, pulling its requirements) and added to
-# INSTALLED_APPS automatically, so edits hot-reload.
-#
-# To enable: add the plugin package to dev-plugin-volumes below (replace the
-# empty `[]`), pointing at <plugin-repo>/plugins/<module> on the host. Then run
-# the stack with the override (`make dev-up OV=1`) and its migrations
-# (`make dev-makemigrations && make dev-migrate`).
 x-dev-plugin-env: &dev-plugin-env
   GEORIVA_PLUGIN_DIRS: /georiva/plugins,/georiva/dev-plugins
-  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ""   # re-enable editable install on startup (dev)
+  # Re-enable install-on-startup (the base compose hardcodes it "true" for
+  # production, where plugins are baked into the image at build time). Empty
+  # string is treated as "not set" by the entrypoint, so dev plugins
+  # bind-mounted into /georiva/dev-plugins get `pip install -e`'d — pulling
+  # their declared dependencies (e.g. cdsapi) into the container.
+  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ""
 
 x-dev-plugin-volumes: &dev-plugin-volumes
-  [ ]
+  # Mount the whole dev-plugins folder; each subdir is a flat plugin package.
+  # Drop a new plugin repo into dev-plugins/ and it's picked up — no per-plugin mount.
+  - ./dev-plugins:/georiva/dev-plugins
 
 services:
   georiva:

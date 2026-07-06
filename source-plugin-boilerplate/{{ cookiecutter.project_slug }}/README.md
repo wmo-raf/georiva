@@ -53,27 +53,28 @@ There is no plugin-only Docker image to build.
    [GeoRiva](https://github.com/wmo-raf/georiva) and build/run it per its README
    (`make dev-build`).
 
-2. **Clone this plugin** somewhere the core stack can reach by relative path — by
-   convention, a sibling of the core repo:
+2. **Clone this plugin into the core repo's `dev-plugins/` folder.** The dev stack
+   bind-mounts that whole folder and installs every plugin inside it, so there is
+   nothing to wire up per plugin:
 
    ```bash
+   cd georiva/dev-plugins
    git clone https://github.com/wmo-raf/{{ cookiecutter.project_slug }}.git
    ```
 
-3. **Bind-mount the package** into the core stack. In the core repo's
-   `docker-compose.override.yml` (copy it from `docker-compose.override.sample.yml`,
-   which has a commented template), add this plugin's package to the dev-plugin
-   volumes for every backend service:
+   The checkout directory name does not matter — GeoRiva derives the import/app
+   name from the package itself. It installs every folder under
+   `/georiva/dev-plugins` as an editable package (`pip install -e`, pulling the
+   dependencies declared in your `pyproject.toml`) and adds it to `INSTALLED_APPS`
+   automatically — edits hot-reload.
 
-   ```yaml
-   - ../{{ cookiecutter.project_slug }}/plugins/{{ cookiecutter.project_module }}:/georiva/dev-plugins/{{ cookiecutter.project_module }}
-   ```
+   > For local (non-Docker) work — IDE autocomplete, linting, running tests — the
+   > plugin is also picked up automatically as a
+   > [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) member
+   > of the core repo: run `uv sync --all-packages` in `georiva/` and the plugin is
+   > installed editable into the shared virtualenv alongside core.
 
-   GeoRiva installs every folder under `/georiva/dev-plugins` as an editable
-   package (`pip install -e`, pulling your `requirements/base.txt`) and adds it to
-   `INSTALLED_APPS` automatically — edits hot-reload.
-
-4. **Start the stack with the override and run your migrations:**
+3. **Start the stack with the override and run your migrations:**
 
    ```bash
    make dev-up OV=1
@@ -81,7 +82,7 @@ There is no plugin-only Docker image to build.
    make dev-migrate
    ```
 
-5. In the GeoRiva admin, open **Automated Sources → Set up wizard** and choose
+4. In the GeoRiva admin, open **Automated Sources → Set up wizard** and choose
    your feed.
 
 ## Configuration

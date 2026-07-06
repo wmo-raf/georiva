@@ -28,9 +28,10 @@ the Python code importable. It is handled by `deploy/plugins/install_plugin.sh` 
 
 **Discovery phase** — Django needs to know the app label so it can load models, migrations, signals,
 and admin hooks. `settings/base.py` scans the directories listed in `GEORIVA_PLUGIN_DIRS` (default:
-`/georiva/plugins`) and automatically adds every subdirectory name to `INSTALLED_APPS`. The dev
-plugin directory (`GEORIVA_DEV_PLUGIN_DIR`, default `/georiva/dev-plugins`) is also scanned
-automatically when it exists.
+`/georiva/plugins`) and, for each plugin folder, derives the app's import name from the package it
+contains (the package under `src/`) rather than from the folder name — so a plugin checkout can use
+any directory name. The derived names are added to `INSTALLED_APPS`. The dev plugin directory
+(`GEORIVA_DEV_PLUGIN_DIR`, default `/georiva/dev-plugins`) is also scanned automatically when it exists.
 
 ---
 
@@ -114,86 +115,63 @@ docker compose restart georiva georiva-celery-default-worker georiva-celery-inge
 
 ## Local development
 
-The dev workflow lets you work on plugin source code with hot-reload, without rebuilding the image.
-Plugin source is bind-mounted into the container and installed as an editable package.
+The dev workflow lets you work on plugin source with hot-reload, without rebuilding the image. Your
+plugin repos are checked out into `dev-plugins/`, the whole folder is bind-mounted into the stack, and
+every plugin inside it is installed as an editable package at container startup.
 
-**Step 1** — copy the override template:
+**Step 1** — copy the dev override template (it already mounts the whole `dev-plugins/` folder):
 
 ```bash
 cp docker-compose.override.sample.yml docker-compose.override.yml
 ```
 
-**Step 2** — edit `docker-compose.override.yml` to bind-mount your plugin source. Mount the same
-path into every backend service so workers and the beat scheduler also see the plugin:
+The template bind-mounts `./dev-plugins:/georiva/dev-plugins` into every backend service — there are
+no per-plugin mount lines to add.
 
-```yaml
-services:
-  georiva:
-    volumes:
-      - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+**Step 2** — clone the plugin repos you want to work on into `dev-plugins/`:
 
-  georiva-celery-default-worker:
-    volumes:
-      - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
-
-  georiva-celery-ingestion-worker:
-    volumes:
-      - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
-
-  georiva-celery-beat:
-    volumes:
-      - ../georiva-my-plugin/plugins/georiva_my_plugin:/georiva/dev-plugins/georiva_my_plugin
+```bash
+mkdir -p dev-plugins
+git clone https://github.com/wmo-raf/georiva-source-cds.git dev-plugins/georiva-source-cds
 ```
 
-**Step 3** — declare the plugin in `plugins.toml` with `dev = true`:
+The checkout directory name does not matter — discovery derives the import/app name from the package
+under `src/`. `dev-plugins/` is gitignored, so these checkouts stay out of the core repo. You do **not**
+need to declare dev plugins in `plugins.toml`; every subdirectory of `dev-plugins/` is auto-discovered.
 
-```toml
-[[plugins]]
-name   = "My Plugin (dev)"
-folder = "/georiva/dev-plugins/georiva_my_plugin"
-dev    = true
-```
-
-The `dev = true` flag tells `install_plugin.sh` to use `pip install -e` (editable install). If the
-folder is absent at build time (which it will be — it's a bind-mount), the script skips gracefully.
-At container startup, `startup_plugin_setup` runs `pip install -e` against the live bind-mount, so
-changes to the plugin source are reflected immediately.
-
-Settings auto-discovers plugins in `/georiva/dev-plugins/` and adds them to `INSTALLED_APPS` — no
-manual configuration needed.
-
-**Step 4** — start the stack with the override:
+**Step 3** — start the stack with the override:
 
 ```bash
 make dev-up OV=1
+# or: docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 ```
 
-Or without the Makefile:
+At startup, `startup_plugin_setup` runs `pip install -e --no-build-isolation` against each plugin in
+the live bind-mount (building with the setuptools already in the image — no network needed for the
+build itself, only to fetch a plugin's own new dependencies). Settings auto-discovers the plugins and
+adds them to `INSTALLED_APPS`, so edits to plugin source are reflected immediately.
+
+**Step 4** — run migrations for your plugin's models:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
+make dev-makemigrations   # create migration files for new models
+make dev-migrate          # apply them
 ```
 
-**Step 5** — run migrations for your plugin's models:
-
-```bash
-make dev-migrate
-# or: docker compose exec georiva georiva migrate
-```
-
-> **Tip:** After adding new models to your plugin, run `make dev-makemigrations` inside the container
-> to create the migration files, then `make dev-migrate` to apply them.
+> **Local (non-Docker) tooling:** a plugin checked out under `dev-plugins/` is also a member of the
+> repo's uv workspace overlay. Run `uv sync --all-packages` at the repo root to install core and every
+> checked-out plugin editable into one shared virtualenv — handy for IDE autocomplete, type-checking,
+> and running tests outside Docker.
 
 ---
 
 ## Creating a new plugin
 
-Use the cookiecutter template in `source-plugin-boilerplate/` to scaffold a new plugin:
+Use the cookiecutter template in `source-plugin-boilerplate/` to scaffold a new plugin. It generates a
+flat repo (`georiva-source-<provider>/` with `pyproject.toml` + `src/<module>/` at its root):
 
 ```bash
-cd source-plugin-boilerplate
-pip install cookiecutter
-cookiecutter .
+uvx cookiecutter source-plugin-boilerplate
 ```
 
 The generated plugin is a standard Django/Wagtail app. The key files to implement:
@@ -213,33 +191,29 @@ specification. Reference implementations: the standalone
 
 ### Plugin package layout
 
-GeoRiva supports two layouts:
+A plugin is a flat Python package: its repository root **is** the package project. `pyproject.toml`
+(PEP 621) and `src/<module>/` live at the repo root — there is no nested `plugins/<module>` directory,
+no `setup.py`, and no `requirements/` directory.
 
-**Flat layout** (package at repo root's `plugins/` subdirectory):
 ```
-georiva-my-plugin/
-└── plugins/
-    └── georiva_my_plugin/       ← the Python package (also the Django app label)
+georiva-my-plugin/            ← git repo root = package project
+├── pyproject.toml            ← [project] metadata + [project.dependencies]
+├── georiva_plugin_info.json
+└── src/
+    └── georiva_my_plugin/    ← the Python package (the Django app)
         ├── __init__.py
         ├── apps.py
         ├── models.py
         └── ...
 ```
 
-**Src layout** (package under `src/`):
-```
-georiva-my-plugin/
-└── plugins/
-    └── georiva_my_plugin/
-        └── src/
-            └── georiva_my_plugin/
-                ├── __init__.py
-                └── ...
-```
+The import/app name is the package directory under `src/` (`georiva_my_plugin` above) — a valid Python
+identifier (lowercase, underscores, no hyphens). The **checkout directory** name is free: discovery
+reads the name from the package, not the folder, so cloning the repo under its natural
+`georiva-my-plugin` name works fine.
 
-`install_plugin.sh` expects exactly one subdirectory under `plugins/` in the repo. The subdirectory
-name becomes the Django app label and must be a valid Python identifier (lowercase, underscores only
-— no hyphens).
+A plugin declares only its own extra dependencies in `[project.dependencies]`; it does **not** depend on
+`georiva` — the core package is provided by the runtime environment (the image, or the dev workspace).
 
 ### Distributing your plugin
 

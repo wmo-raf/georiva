@@ -32,7 +32,8 @@ LOG_ARGS ?= --tail 100
 	dev-up dev-up-d dev-down dev-stop dev-restart dev-build dev-ps dev-config dev-logs \
 	dev-app-logs dev-worker-default-logs dev-worker-ingestion-logs dev-beat-logs dev-titiler-logs \
 	dev-shell dev-worker-default-shell dev-worker-ingestion-shell dev-beat-shell dev-titiler-shell \
-	dev-migrate dev-makemigrations dev-test
+	dev-migrate dev-makemigrations dev-test \
+	uv-add uv-add-dev uv-remove uv-lock uv-sync
 
 # ======================
 # PROD (default)
@@ -166,3 +167,44 @@ dev-test:
 	$(DEV_DC) exec \
 	  -e "DATABASE_URL=timescalegis://$$GEORIVA_DB_USER:$$GEORIVA_DB_PASSWORD@georiva-db:5432/$$GEORIVA_DB_NAME" \
 	  $(APP) georiva test --keepdb $(TEST_ARGS)
+
+
+# ======================
+# Core dependencies (uv, on the host — not in Docker)
+# ======================
+# Core's deps live in georiva/pyproject.toml + georiva/uv.lock (a standalone uv
+# project). These targets manage them from the core dir, then refresh the
+# integrated dev venv (core + any plugins under dev-plugins/).
+# Commit georiva/pyproject.toml + georiva/uv.lock afterwards (the root uv.lock is
+# gitignored). Quote pkg when it has a version specifier or extras.
+
+CORE_DIR ?= georiva
+
+# Add a runtime package.  Usage: make uv-add pkg="wagtail-foo>=1.2"
+# --no-sync updates georiva/pyproject.toml + georiva/uv.lock without creating a
+# separate core venv; the overlay `uv sync --all-packages` below is the env.
+uv-add:
+	@test -n "$(pkg)" || { echo 'Usage: make uv-add pkg="<package>[==version]"'; exit 1; }
+	cd $(CORE_DIR) && uv add --no-sync "$(pkg)"
+	uv sync --all-packages
+
+# Add a dev-only package.  Usage: make uv-add-dev pkg=pytest
+uv-add-dev:
+	@test -n "$(pkg)" || { echo 'Usage: make uv-add-dev pkg="<package>"'; exit 1; }
+	cd $(CORE_DIR) && uv add --dev --no-sync "$(pkg)"
+	uv sync --all-packages
+
+# Remove a package.  Usage: make uv-remove pkg=wagtail-foo
+uv-remove:
+	@test -n "$(pkg)" || { echo 'Usage: make uv-remove pkg="<package>"'; exit 1; }
+	cd $(CORE_DIR) && uv remove --no-sync "$(pkg)"
+	uv sync --all-packages
+
+# Re-lock core (e.g. after hand-editing georiva/pyproject.toml), then refresh.
+uv-lock:
+	cd $(CORE_DIR) && uv lock
+	uv sync --all-packages
+
+# Refresh the integrated dev venv (core + all checked-out plugins).
+uv-sync:
+	uv sync --all-packages
