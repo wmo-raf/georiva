@@ -872,6 +872,48 @@ def wizard_step3_collections(request, model_name):
     })
 
 
+def _product_chain_context(definitions, label_by_key):
+    """The product-chain read-model the wizard step renders from: topological
+    stage lanes, each product's direct dependencies (for "needs" chips), and the
+    transitive closures both directions (the server-side gate and the client-side
+    cascade adjacency).
+
+    A malformed declaration (duplicate keys, unknown ``depends_on``, a cycle)
+    can't be laid out into stages; rather than 500, fall back to a single lane
+    and return the error string so the step still renders and names the problem.
+    """
+    from georiva.core.product_chain import (
+        ChainError,
+        dependencies_closure,
+        dependents_closure,
+        product_dependencies,
+        topological_stages,
+    )
+
+    keys = list(label_by_key)
+    try:
+        stages = topological_stages(definitions)
+        direct = {k: sorted(v) for k, v in product_dependencies(definitions).items()}
+        dep_closures = {k: dependencies_closure(definitions, k) for k in keys}
+        dependent_closures = {k: dependents_closure(definitions, k) for k in keys}
+        error = None
+    except ChainError as exc:
+        stages = [list(definitions)]
+        direct = {k: [] for k in keys}
+        dep_closures = {k: set() for k in keys}
+        dependent_closures = {k: set() for k in keys}
+        error = str(exc)
+
+    return {
+        "stages": stages,
+        "direct_deps": direct,
+        "dep_closures": dep_closures,
+        "dep_closures_json": {k: sorted(v) for k, v in dep_closures.items()},
+        "dependent_closures_json": {k: sorted(v) for k, v in dependent_closures.items()},
+        "error": error,
+    }
+
+
 def wizard_step4_products(request, model_name):
     """Step 4: configure the derived products the feed declares (ADR-0008).
 
@@ -898,7 +940,12 @@ def wizard_step4_products(request, model_name):
     session_selected = session_data.get("selected_product_keys")
     posted_selected = set(request.POST.getlist("products")) if request.method == "POST" else None
 
-    entries = []
+    label_by_key = {d.key: d.label for d in definitions}
+    chain = _product_chain_context(definitions, label_by_key)
+    if chain["error"]:
+        messages.error(request, chain["error"])
+
+    entries = {}
     for defn in definitions:
         form_cls = build_product_config_form(defn)
         if form_cls is None:
@@ -915,13 +962,23 @@ def wizard_step4_products(request, model_name):
         else:
             checked = defn.default_enabled
 
-        entries.append({"definition": defn, "config_form": form, "checked": checked})
+        entries[defn.key] = {
+            "definition": defn,
+            "config_form": form,
+            "checked": checked,
+            # Direct-dependency labels, for the card's "needs: X" chips.
+            "needs": [label_by_key[dep] for dep in chain["direct_deps"].get(defn.key, [])],
+        }
+
+    # Entries grouped into topological stage lanes (single lane on a broken chain).
+    stage_lanes = [[entries[d.key] for d in stage] for stage in chain["stages"]]
 
     if request.method == "POST":
         errors = []
         products_config = {}
-        for entry in entries:
-            defn, form = entry["definition"], entry["config_form"]
+        for defn in definitions:
+            entry = entries[defn.key]
+            form = entry["config_form"]
             # Config is validated only for ticked products; an unticked product
             # (or a ticked one with no options) provisions with schema defaults
             # (empty config), so a bad value on a product the operator opted out
@@ -935,10 +992,24 @@ def wizard_step4_products(request, model_name):
             else:
                 errors.append(f"{defn.label}: {'; '.join(form.errors.get('__all__', []))}".strip(": "))
 
+        # Enforce the chain server-side: every ticked product must have its whole
+        # dependency closure ticked too. JS cascade is advisory — this is the
+        # authoritative gate, so a hand-crafted POST can't smuggle in an orphan.
+        selected_keys = {k for k, e in entries.items() if e["checked"]}
+        for key in selected_keys:
+            missing = chain["dep_closures"].get(key, set()) - selected_keys
+            if missing:
+                errors.append(
+                    _("%(product)s needs %(deps)s to be enabled too.") % {
+                        "product": label_by_key[key],
+                        "deps": ", ".join(sorted(label_by_key.get(m, m) for m in missing)),
+                    }
+                )
+
         if not errors:
             session_data["derived_products_config"] = products_config
             session_data["selected_product_keys"] = [
-                e["definition"].key for e in entries if e["checked"]
+                k for k in label_by_key if entries[k]["checked"]
             ]
             request.session[_wizard_session_key(model_name)] = session_data
             return redirect("wizard_provision", model_name=model_name)
@@ -950,7 +1021,9 @@ def wizard_step4_products(request, model_name):
         "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Derived Products")),
         "model_name": model_name,
         "source_verbose_name": verbose_name,
-        "product_entries": entries,
+        "stage_lanes": stage_lanes,
+        "dependencies_closure_json": chain["dep_closures_json"],
+        "dependents_closure_json": chain["dependent_closures_json"],
         "step": 4,
     })
 

@@ -54,6 +54,31 @@ def _definition(**overrides):
     return DerivedProductDefinition(**kwargs)
 
 
+def _chain_defs():
+    """A CHIRPS-shaped pair with the one real edge: anomaly depends on
+    climatology (its required published baseline names climatology's output)."""
+    clim = _definition(
+        key="climatology",
+        label="Climatology",
+        config_schema=(),
+        inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+        outputs=(OutputRef(role="climatology",
+                           collection="chirps-monthly-climatology"),),
+    )
+    anomaly = _definition(
+        key="anomaly",
+        label="Rainfall anomaly",
+        config_schema=(),
+        inputs=(
+            InputRef(role="value", collection="chirps-monthly", tier="staging"),
+            InputRef(role="baseline",
+                     collection="chirps-monthly-climatology", tier="published"),
+        ),
+        outputs=(OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),),
+    )
+    return [clim, anomaly]
+
+
 def _checkbox_is_checked(html, key):
     """Whether the enable checkbox for ``key`` is rendered ``checked``."""
     match = re.search(
@@ -169,6 +194,65 @@ class Step4PostTests(WizardStepBase):
         # Re-renders the step (no redirect) because a ticked product is invalid.
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("selected_product_keys", self.client.session.get(SESSION_KEY, {}))
+
+
+class Step4DependencyTests(WizardStepBase):
+    """The wizard enforces the chain server-side: a selection that enables a
+    product without its dependencies is rejected, JS cascade or not."""
+
+    def test_post_rejects_a_product_selected_without_its_dependency(self):
+        self._set_session()
+
+        with (
+            patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
+            patch.object(DataFeed, "get_derived_products", return_value=_chain_defs()),
+        ):
+            response = self.client.post(self._step4_url(), {
+                "products": ["anomaly"],   # climatology missing
+            })
+
+        # Re-renders (no redirect) and names the missing dependency.
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Climatology")
+        self.assertNotIn("selected_product_keys", self.client.session.get(SESSION_KEY, {}))
+
+    def test_post_accepts_a_product_with_its_dependency_selected(self):
+        self._set_session()
+
+        with (
+            patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
+            patch.object(DataFeed, "get_derived_products", return_value=_chain_defs()),
+        ):
+            response = self.client.post(self._step4_url(), {
+                "products": ["anomaly", "climatology"],
+            })
+
+        self.assertRedirects(
+            response,
+            reverse("wizard_provision", kwargs={"model_name": MODEL_NAME}),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(
+            set(self.client.session[SESSION_KEY]["selected_product_keys"]),
+            {"anomaly", "climatology"},
+        )
+
+    def test_get_renders_stage_lanes_with_a_needs_chip_and_adjacency_data(self):
+        self._set_session()
+
+        with (
+            patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
+            patch.object(DataFeed, "get_derived_products", return_value=_chain_defs()),
+        ):
+            response = self.client.get(self._step4_url())
+
+        html = response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        # The dependent product advertises what it needs...
+        self.assertIn("needs", html.lower())
+        self.assertContains(response, "Climatology")
+        # ...and the client-side cascade adjacency is emitted for the JS.
+        self.assertContains(response, "product-chain-dependencies")
 
 
 class WizardProvisionSeamTests(WizardStepBase):

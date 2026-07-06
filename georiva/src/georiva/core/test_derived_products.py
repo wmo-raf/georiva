@@ -104,6 +104,24 @@ class DerivedProductDefinitionTests(SimpleTestCase):
     def test_default_enabled_can_be_declared_false(self):
         self.assertFalse(_definition(default_enabled=False).default_enabled)
 
+    def test_depends_on_defaults_to_empty(self):
+        self.assertEqual(_definition().depends_on, ())
+
+    def test_depends_on_accepts_declared_extras(self):
+        # Non-data-flow dependencies the tier-aware rule can't infer are declared
+        # explicitly; the chain module unions them with the inferred edges.
+        self.assertEqual(
+            _definition(depends_on=("climatology",)).depends_on, ("climatology",)
+        )
+
+    def test_empty_depends_on_entry_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _definition(depends_on=("",))
+
+    def test_self_referential_depends_on_is_rejected(self):
+        with self.assertRaises(ValueError):
+            _definition(key="anomaly", depends_on=("anomaly",))
+
     def test_dependency_edges_derived_from_declared_inputs(self):
         # The dependency graph is computable from the declaration alone — no DB,
         # no recipe execution — so the chain UI and readiness can be built ahead

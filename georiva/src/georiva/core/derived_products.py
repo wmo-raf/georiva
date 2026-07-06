@@ -113,6 +113,11 @@ class DerivedProductDefinition:
     outputs: tuple
     trigger_mode: str
     default_enabled: bool = True
+    # Explicit product-level dependencies the tier-aware data-flow rule can't
+    # infer (a product needing another's side effect, not its output collection).
+    # The chain module unions these with the inferred edges; unknown targets are
+    # caught there, where the full definition set is available.
+    depends_on: tuple = ()
 
     def __post_init__(self):
         for field in ("key", "recipe_type", "label"):
@@ -125,6 +130,16 @@ class DerivedProductDefinition:
                 f"DerivedProductDefinition '{self.key}': trigger_mode must be "
                 f"one of {TRIGGER_MODES}, got '{self.trigger_mode}'"
             )
+        for dep in self.depends_on:
+            if not dep:
+                raise ValueError(
+                    f"DerivedProductDefinition '{self.key}': depends_on entries "
+                    f"must be non-empty"
+                )
+            if dep == self.key:
+                raise ValueError(
+                    f"DerivedProductDefinition '{self.key}': cannot depend on itself"
+                )
 
     def validate_config(self, config: dict) -> dict:
         """
