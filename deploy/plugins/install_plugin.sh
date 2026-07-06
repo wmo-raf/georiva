@@ -241,10 +241,14 @@ if [[ -d "$folder" ]]; then
 
       VENV_PIP="/georiva/venv/bin/pip"
 
+      # --no-build-isolation: build the plugin using the setuptools/wheel already
+      # in the venv instead of an isolated build env that re-downloads them from
+      # PyPI (needs network; breaks offline / on DNS issues). The venv is seeded
+      # with pip/setuptools/wheel at image build.
       if [[ "$dev" == true ]]; then
-          run_as_docker_user "$VENV_PIP" install -e "$folder"
+          run_as_docker_user "$VENV_PIP" install --no-build-isolation -e "$folder"
       else
-          run_as_docker_user "$VENV_PIP" install "$folder"
+          run_as_docker_user "$VENV_PIP" install --no-build-isolation "$folder"
       fi
 
       check_and_run_script "$folder" build.sh

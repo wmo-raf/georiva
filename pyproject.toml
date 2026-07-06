@@ -1,0 +1,37 @@
+# Local development overlay — NOT a package, NOT published, NOT used by Docker.
+#
+# Ties the core `georiva` package together with any plugin repos checked out
+# under `dev-plugins/` into a single editable virtualenv for local work:
+#
+#     uv sync --all-packages
+#
+# Architecture:
+#   - Core (./georiva) is a STANDALONE uv project with its own pyproject.toml and
+#     its own uv.lock — independently lockable and publishable, and what the
+#     Docker image builds from. It is deliberately EXCLUDED from this workspace
+#     and pulled in here only as an editable path dependency.
+#   - Plugins (./dev-plugins/*) are workspace members, so `uv sync --all-packages`
+#     installs them editable alongside core.
+#
+# This overlay's lockfile (./uv.lock) is local-only (gitignored) — it varies with
+# which plugins you have checked out. Core's committed lock lives at
+# ./georiva/uv.lock.
+[project]
+name = "georiva-dev"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "georiva",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["dev-plugins/*"]
+# Core is its own standalone project (own uv.lock); keep it out of this overlay.
+# Also skip IDE/OS cruft sitting beside the plugin repos (.idea, .DS_Store…).
+exclude = ["georiva", "dev-plugins/.*"]
+
+[tool.uv.sources]
+georiva = { path = "georiva", editable = true }

@@ -21,7 +21,7 @@ RUN if getent group $GID > /dev/null; then \
     fi && \
     useradd --shell /bin/bash -u $UID -g $GID -o -c "" -m georiva -l || exit 0
 
-# Install build-time dependencies (includes compilers, headers, etc.)
+# Install build-time dependencies
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -36,20 +36,41 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     python3-pip \
     python3-venv
 
-USER $UID:$GID
+# uv — pinned
+COPY --from=ghcr.io/astral-sh/uv:0.11.25 /uv /usr/local/bin/uv
 
-# Create venv and install Python dependencies
-COPY --chown=$UID:$GID ./georiva/requirements.txt /georiva/requirements.txt
+# Create /georiva owned by the build user before dropping privileges.
+RUN mkdir -p /georiva/app && chown -R $UID:$GID /georiva
+
+USER $UID:$GID
+WORKDIR /georiva/app
+
+# Seed the venv with pip/setuptools/wheel. uv installs into this venv via
+# UV_PROJECT_ENVIRONMENT, and `uv sync --inexact` below preserves these tools —
+# the plugin installer (deploy/plugins/install_plugin.sh) relies on venv/bin/pip.
 RUN python3 -m venv /georiva/venv \
     && /georiva/venv/bin/pip install --upgrade pip setuptools wheel
 
-ENV PIP_CACHE_DIR=/tmp/georiva_pip_cache
-RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
-    /georiva/venv/bin/pip install -r /georiva/requirements.txt
+ENV PIP_CACHE_DIR=/tmp/georiva_pip_cache \
+    UV_CACHE_DIR=/tmp/georiva_uv_cache \
+    UV_PROJECT_ENVIRONMENT=/georiva/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0
 
-# Copy app code and install the package
+# Install ONLY core's locked dependencies first, reproducibly
+# from georiva/uv.lock. Bind-mounting lock+pyproject keeps this expensive layer
+# cached until dependencies actually change.
+RUN --mount=type=cache,mode=777,target=$UV_CACHE_DIR,uid=$UID,gid=$GID \
+    --mount=type=bind,source=georiva/uv.lock,target=/georiva/app/uv.lock \
+    --mount=type=bind,source=georiva/pyproject.toml,target=/georiva/app/pyproject.toml \
+    uv sync --frozen --no-dev --no-install-project --inexact
+
+# Copy core source and install core itself (deps already satisfied), still frozen
+# to the lock. --no-editable installs it as a regular package into the venv.
 COPY --chown=$UID:$GID ./georiva /georiva/app
-RUN /georiva/venv/bin/pip install --no-cache-dir /georiva/app/
+RUN --mount=type=cache,mode=777,target=$UV_CACHE_DIR,uid=$UID,gid=$GID \
+    uv sync --frozen --no-dev --inexact --no-editable
 
 # Install plugins at build time
 COPY --chown=$UID:$GID ./deploy/plugins/*.sh /georiva/plugins/

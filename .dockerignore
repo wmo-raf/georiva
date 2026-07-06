@@ -181,3 +181,24 @@ backup/
 georiva_data/
 .vscode
 data/
+
+# Local dev plugin manifest (gitignored). Dev plugins load at runtime via the
+# dev-plugins bind-mount; do not bake folder-based dev plugins into the image.
+plugins.toml
+
+# ---------------------------------------------------------------------------
+# Build-context hygiene. .dockerignore matches paths from the context ROOT, so
+# (unlike .gitignore) a bare name like `.venv` does NOT match nested dirs — use
+# **/ to exclude these at any depth. Keeps the build context small and prevents
+# COPY from baking dev artifacts into the image.
+# ---------------------------------------------------------------------------
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+.git
+/dev-plugins

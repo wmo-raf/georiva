@@ -184,3 +184,9 @@ georiva_data/
 data/
 node_modules/
 .claude/settings.local.json
+# Locally checked-out plugin repos (independent git repos, workspace members)
+/dev-plugins/
+
+# Dev overlay lockfile (varies with which plugins are checked out). Core has its
+# own committed lock at georiva/uv.lock.
+/uv.lock
