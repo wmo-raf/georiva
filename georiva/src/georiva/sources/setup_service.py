@@ -106,34 +106,42 @@ class SourceSetupService:
     
     def provision_derived_products(self, data_feed, selected_products: list) -> list:
         """
-        Provision DerivedProduct rows for a feed from selected definitions plus
-        operator config (ADR-0008).
+        Provision DerivedProduct rows for a feed from its declared definitions
+        plus operator config and per-product enablement (ADR-0008).
 
-        ``selected_products`` is a list of ``(DerivedProductDefinition, config)``
-        pairs. Each config is validated/coerced against the definition's
-        config_schema *before* any write, so an invalid option rejects the whole
-        batch atomically (nothing is half-provisioned). Idempotent: re-running
-        upserts on (data_feed, definition_key), so a wizard revisit edits rather
-        than duplicates.
+        ``selected_products`` is a list of ``(DerivedProductDefinition, config,
+        enabled)`` triples — one per *declared* definition, whether the operator
+        ticked it or not. Each config is validated/coerced against the
+        definition's config_schema *before* any write, so an invalid option
+        rejects the whole batch atomically (nothing is half-provisioned).
+
+        Idempotent: re-running upserts on (data_feed, definition_key), so a
+        wizard revisit edits config rather than duplicating. ``is_enabled`` is
+        set via ``create_defaults`` — only on row creation — so a re-run never
+        clobbers an enable/disable toggle an operator changed after setup.
         """
         from georiva.sources.models import DerivedProduct
 
         with transaction.atomic():
             products = []
-            for definition, config in selected_products:
+            for definition, config, enabled in selected_products:
                 cleaned = definition.validate_config(config or {})
+                # ``defaults`` drives the update path (config edits on a wizard
+                # re-run); ``create_defaults`` drives the create path and is a
+                # superset that also seeds is_enabled — so is_enabled is written
+                # once at creation and a re-run never flips an operator's toggle.
+                shared = {"recipe_type": definition.recipe_type, "config": cleaned}
                 product, _created = DerivedProduct.objects.update_or_create(
                     data_feed=data_feed,
                     definition_key=definition.key,
-                    defaults={
-                        "recipe_type": definition.recipe_type,
-                        "config": cleaned,
-                    },
+                    defaults=shared,
+                    create_defaults={**shared, "is_enabled": bool(enabled)},
                 )
                 products.append(product)
                 logger.info(
-                    "DerivedProduct %s: feed=%s product=%s",
-                    "created" if _created else "updated", data_feed.pk, definition.key,
+                    "DerivedProduct %s: feed=%s product=%s enabled=%s",
+                    "created" if _created else "updated",
+                    data_feed.pk, definition.key, product.is_enabled,
                 )
             return products
 

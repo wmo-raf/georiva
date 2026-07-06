@@ -553,18 +553,28 @@ def build_product_config_form(definition):
 
 def selected_products_from_session(data_feed, session_data) -> list:
     """
-    Map the wizard's stored per-product config back onto the feed's declared
-    DerivedProductDefinitions, as ``(definition, config)`` pairs ready for
-    SourceSetupService.provision_derived_products. Config stored for a product
-    the feed no longer declares (a stale session) is skipped.
+    Map the wizard session onto the feed's declared DerivedProductDefinitions as
+    ``(definition, config, enabled)`` triples ready for
+    SourceSetupService.provision_derived_products.
+
+    A triple is produced for *every* declared definition — provisioning always
+    writes a full row set, with an operator's opt-out carried as ``enabled``
+    rather than a missing row. ``enabled`` comes from the step-4 tick selection
+    (``selected_product_keys``); if no selection was stored (a short-circuit or
+    stale path) each product falls back to its declared ``default_enabled``. An
+    empty selection list is honoured as "all unticked", not "no selection".
+    Config stored for a product the feed no longer declares is ignored.
     """
     products_config = session_data.get("derived_products_config", {})
-    by_key = {d.key: d for d in data_feed.get_derived_products()}
-    return [
-        (by_key[key], config)
-        for key, config in products_config.items()
-        if key in by_key
-    ]
+    selected_keys = session_data.get("selected_product_keys")
+    triples = []
+    for defn in data_feed.get_derived_products():
+        if selected_keys is None:
+            enabled = defn.default_enabled
+        else:
+            enabled = defn.key in selected_keys
+        triples.append((defn, products_config.get(defn.key, {}), enabled))
+    return triples
 
 
 def _transient_feed_for_products(model_cls, session_data):
@@ -883,6 +893,10 @@ def wizard_step4_products(request, model_name):
 
     verbose_name = model_cls._meta.verbose_name
     saved = session_data.get("derived_products_config", {})
+    # Prior tick selection, if the operator has visited this step before (a
+    # back-navigation); None means "not chosen yet" -> fall back to default_enabled.
+    session_selected = session_data.get("selected_product_keys")
+    posted_selected = set(request.POST.getlist("products")) if request.method == "POST" else None
 
     entries = []
     for defn in definitions:
@@ -893,14 +907,26 @@ def wizard_step4_products(request, model_name):
             form = form_cls(request.POST, prefix=defn.key)
         else:
             form = form_cls(initial=saved.get(defn.key, {}), prefix=defn.key)
-        entries.append({"definition": defn, "config_form": form})
+
+        if posted_selected is not None:
+            checked = defn.key in posted_selected
+        elif session_selected is not None:
+            checked = defn.key in session_selected
+        else:
+            checked = defn.default_enabled
+
+        entries.append({"definition": defn, "config_form": form, "checked": checked})
 
     if request.method == "POST":
         errors = []
         products_config = {}
         for entry in entries:
             defn, form = entry["definition"], entry["config_form"]
-            if form is None:
+            # Config is validated only for ticked products; an unticked product
+            # (or a ticked one with no options) provisions with schema defaults
+            # (empty config), so a bad value on a product the operator opted out
+            # of never blocks the wizard.
+            if not entry["checked"] or form is None:
                 products_config[defn.key] = {}
             elif form.is_valid():
                 products_config[defn.key] = {
@@ -911,6 +937,9 @@ def wizard_step4_products(request, model_name):
 
         if not errors:
             session_data["derived_products_config"] = products_config
+            session_data["selected_product_keys"] = [
+                e["definition"].key for e in entries if e["checked"]
+            ]
             request.session[_wizard_session_key(model_name)] = session_data
             return redirect("wizard_provision", model_name=model_name)
 

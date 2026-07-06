@@ -127,6 +127,12 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
     from georiva.processing.engine import run
     from georiva.processing.registry import recipe_registry
 
+    # A disabled product is inert on every path — the event and scheduled paths
+    # filter on is_enabled upstream, and this manual/backfill overlay is the one
+    # entry they don't pre-filter, so it must gate here too.
+    if not product.is_enabled:
+        return []
+
     definition = definition_for(product)
     if definition is None:
         return []

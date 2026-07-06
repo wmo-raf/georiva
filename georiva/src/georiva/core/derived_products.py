@@ -112,6 +112,7 @@ class DerivedProductDefinition:
     inputs: tuple
     outputs: tuple
     trigger_mode: str
+    default_enabled: bool = True
 
     def __post_init__(self):
         for field in ("key", "recipe_type", "label"):

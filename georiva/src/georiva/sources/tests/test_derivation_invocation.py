@@ -302,3 +302,19 @@ class RunProductNowTests(TestCase):
             [{"role": "served", "collection": "rainfall"}],
         )
         self.assertEqual(run.call_args.kwargs["origin"], product_origin(self.product))
+
+    def test_disabled_product_dispatches_nothing(self):
+        # A disabled product is inert on every path: event and scheduled already
+        # filter on is_enabled, and the manual/backfill overlay must refuse it
+        # too, so an unticked product fires no run when data arrives or on demand.
+        self.product.is_enabled = False
+        self.product.save(update_fields=["is_enabled"])
+
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[_definition()]),
+            patch("georiva.processing.engine.run") as run,
+        ):
+            result = run_product_now(self.product, dispatch=False)
+
+        run.assert_not_called()
+        self.assertEqual(result, [])
