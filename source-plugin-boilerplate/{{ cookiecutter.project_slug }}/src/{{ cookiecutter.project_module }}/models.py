@@ -11,6 +11,14 @@ The plugin contract a DataFeed must satisfy:
   * get_catalog_defaults() — pre-fills the wizard's catalog step.
   * data_source_cls — the BaseDataSource (source.py) that fetches the data.
   * get_loader_config() — feed-wide settings merged into the source's config.
+
+Optionally, a feed can declare **derived products** — layers computed from its
+collections by a registered recipe (anomaly, climatology, promotion, …):
+  * get_derived_products() — the list of DerivedProductDefinitions this feed
+    offers (ADR-0008/0009). It is an *instance* method (a product's inputs bind
+    to this feed's actual collections). See the commented skeleton at the bottom
+    of the DataFeed below, and docs/plugins/derived-products.md for the full
+    contract. In the chain DAG, products are edges and collections are nodes.
 """
 
 from django.db import models
@@ -94,3 +102,60 @@ class {{ cookiecutter.project_module|replace('_', ' ')|title|replace(' ', '') }}
     def get_loader_config(self) -> dict:
         """Feed-wide settings merged into the data source's config dict."""
         return {}
+
+    # -- derived products (optional) ----------------------------------------
+    #
+    # Uncomment and adapt to declare layers computed from this feed's
+    # collections by a registered recipe. Delete this block if the plugin only
+    # ingests raw data. Full guide: docs/plugins/derived-products.md.
+    #
+    # get_derived_products() is an *instance* method: a product's InputRef /
+    # OutputRef bind to this feed's actual collection slugs. Return one
+    # DerivedProductDefinition per product the feed offers.
+    #
+    # def get_derived_products(self):
+    #     from georiva.core.derived_products import (
+    #         ConfigField, DerivedProductDefinition, InputRef, OutputRef,
+    #     )
+    #     return [
+    #         DerivedProductDefinition(
+    #             key="example-anomaly",          # unique per feed; the origin/config key
+    #             recipe_type="my-anomaly",       # a recipe registered via @recipe_registry.register
+    #             label="Example anomaly",        # shown in the wizard + chain panel
+    #             description="Departure from the climatological normal.",
+    #             # Operator options -> the wizard form + validation. Types:
+    #             # str | int | float | bool | choice (choice requires `choices`).
+    #             config_schema=(
+    #                 ConfigField(key="min_years", type="int", default=30),
+    #                 ConfigField(key="quantity", type="choice",
+    #                             choices=("anomaly", "value"), default="anomaly"),
+    #             ),
+    #             # Declared inputs (not buried in the recipe). tier is "staging"
+    #             # (loader-fed, pre-publish) or "published". A required input at
+    #             # the *published* tier that names another product's output creates
+    #             # a dependency edge (anomaly -> climatology).
+    #             inputs=(
+    #                 InputRef(role="value", collection="example-collection", tier="staging"),
+    #                 InputRef(role="baseline", collection="example-collection-climatology",
+    #                          tier="published", required=True),
+    #             ),
+    #             # Output collections this product materialises. title/description/
+    #             # visibility drive the catalog Collection created on enable
+    #             # (get-or-create only, so operator renames survive). visibility is
+    #             # "public" (served) or "internal" (a derivation intermediate).
+    #             outputs=(
+    #                 OutputRef(role="anomaly", collection="example-collection-anomaly",
+    #                           title="Example anomaly",
+    #                           description="Absolute departure from the normal.",
+    #                           visibility="public"),
+    #             ),
+    #             # "event" (fire on each arriving input), "scheduled" (interval), or
+    #             # "manual" (operator-triggered only).
+    #             trigger_mode="event",
+    #             # Pre-ticked in the wizard's opt-in step (default True).
+    #             default_enabled=True,
+    #             # Extra non-data-flow dependencies the tier rule can't infer
+    #             # (usually unnecessary — a published-tier input gives the edge).
+    #             depends_on=(),
+    #         ),
+    #     ]
