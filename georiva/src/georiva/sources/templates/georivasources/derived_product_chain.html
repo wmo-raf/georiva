@@ -1,0 +1,115 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Derivation Chain" %} — {{ feed.name }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gchain-intro {
+            margin: 1em 0 1.5em;
+            color: var(--w-color-text-label);
+            font-size: 0.9em;
+        }
+
+        .gchain-edge {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            padding: 0.85em 1.1em;
+            margin-bottom: 1em;
+        }
+
+        .gchain-edge--blocked {
+            border-color: var(--w-color-critical-200);
+        }
+
+        .gchain-flow {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5em;
+            font-size: 0.9em;
+        }
+
+        .gchain-node {
+            display: inline-block;
+            padding: 0.2em 0.6em;
+            border-radius: 4px;
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            font-weight: 600;
+        }
+
+        .gchain-arrow {
+            color: var(--w-color-grey-400);
+            user-select: none;
+        }
+
+        .gchain-product {
+            display: inline-block;
+            padding: 0.2em 0.6em;
+            border-radius: 999px;
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            font-weight: 600;
+        }
+
+        .gchain-meta {
+            margin-top: 0.5em;
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+            display: flex;
+            gap: 1em;
+            flex-wrap: wrap;
+        }
+
+        .gchain-reason {
+            color: var(--w-color-critical-200);
+        }
+
+        .gchain-empty {
+            margin-top: 1.5em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Derivation chain") icon="site" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <p class="gchain-intro">
+            {% trans "How this feed's products interconnect — collections are nodes, products are edges. Configured-but-unrun (blocked) edges show why." %}
+        </p>
+
+        {% if graph.edges %}
+            {% for edge in graph.edges %}
+                <div class="gchain-edge {% if not edge.ready %}gchain-edge--blocked{% endif %}">
+                    <div class="gchain-flow">
+                        {% for slug in edge.inputs %}
+                            <span class="gchain-node">{{ slug }}</span>
+                        {% endfor %}
+                        <span class="gchain-arrow">→</span>
+                        <span class="gchain-product">{{ edge.label }}</span>
+                        <span class="gchain-arrow">→</span>
+                        {% for slug in edge.outputs %}
+                            <span class="gchain-node">{{ slug }}</span>
+                        {% endfor %}
+                    </div>
+                    <div class="gchain-meta">
+                        <span>{% trans "Recipe" %}: {{ edge.recipe_type }}</span>
+                        <span>{% trans "Trigger" %}: {{ edge.trigger_mode }}</span>
+                        <span>{% trans "Status" %}: {{ edge.status }}</span>
+                        {% if edge.ready %}
+                            <span>{% trans "Ready" %}</span>
+                        {% else %}
+                            <span class="gchain-reason">{% trans "Blocked" %}: {{ edge.reason }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="gchain-empty">{% trans "This feed declares no derived products." %}</p>
+        {% endif %}
+    </div>
+{% endblock %}
