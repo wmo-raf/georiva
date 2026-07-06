@@ -63,10 +63,28 @@
             background: var(--w-color-grey-50);
         }
 
+        .gprod-card__toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.55em;
+            margin: 0 0 0.2em;
+            cursor: pointer;
+        }
+
+        .gprod-card__enable {
+            width: 1.05em;
+            height: 1.05em;
+            flex: 0 0 auto;
+        }
+
         .gprod-card__name {
             font-weight: 700;
             font-size: 1em;
-            margin: 0 0 0.2em;
+            margin: 0;
+        }
+
+        .gprod-card--disabled {
+            opacity: 0.6;
         }
 
         .gprod-card__desc {
@@ -121,9 +139,14 @@
 
             {% for entry in product_entries %}
                 {% with defn=entry.definition form=entry.config_form %}
-                    <div class="gprod-card" id="gprod-{{ defn.key }}">
+                    <div class="gprod-card{% if not entry.checked %} gprod-card--disabled{% endif %}" id="gprod-{{ defn.key }}">
                         <div class="gprod-card__header">
-                            <p class="gprod-card__name">{{ defn.label }}</p>
+                            <label class="gprod-card__toggle">
+                                <input type="checkbox" class="gprod-card__enable"
+                                       name="products" value="{{ defn.key }}"
+                                       {% if entry.checked %}checked{% endif %}>
+                                <span class="gprod-card__name">{{ defn.label }}</span>
+                            </label>
                             {% if defn.description %}
                                 <p class="gprod-card__desc">{{ defn.description }}</p>
                             {% endif %}
@@ -169,4 +192,28 @@
             </div>
         </form>
     </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const cards = document.querySelectorAll('.gprod-card');
+            cards.forEach(function (card) {
+                const checkbox = card.querySelector('.gprod-card__enable');
+                const config = card.querySelector('.gprod-config-section');
+                if (!checkbox) {
+                    return;
+                }
+                const sync = function () {
+                    card.classList.toggle('gprod-card--disabled', !checkbox.checked);
+                    if (config) {
+                        config.hidden = !checkbox.checked;
+                    }
+                };
+                checkbox.addEventListener('change', sync);
+                sync();
+            });
+        });
+    </script>
 {% endblock %}

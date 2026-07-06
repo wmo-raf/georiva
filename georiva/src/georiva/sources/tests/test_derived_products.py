@@ -92,7 +92,7 @@ class ProvisionDerivedProductsTests(TestCase):
     def test_creates_a_row_per_selected_definition(self):
         self.service.provision_derived_products(
             self.feed,
-            [(_definition(), {"quantity": "anomaly", "min_years": "25"})],
+            [(_definition(), {"quantity": "anomaly", "min_years": "25"}, True)],
         )
 
         product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
@@ -100,6 +100,17 @@ class ProvisionDerivedProductsTests(TestCase):
         # Config is validated/coerced through the definition's config_schema.
         self.assertEqual(product.config, {"quantity": "anomaly", "min_years": 25})
         self.assertTrue(product.is_enabled)
+
+    def test_unticked_definition_provisions_a_disabled_row(self):
+        # Every declared product gets a row; an operator's opt-out is recorded as
+        # is_enabled=False, not as a missing row — so it stays visible and
+        # re-enablable later.
+        self.service.provision_derived_products(
+            self.feed, [(_definition(), {}, False)]
+        )
+
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
+        self.assertFalse(product.is_enabled)
 
     def test_invalid_config_rejects_the_batch_without_writing_any_rows(self):
         good = _definition(key="promotion", recipe_type="promotion", config_schema=())
@@ -109,8 +120,8 @@ class ProvisionDerivedProductsTests(TestCase):
             self.service.provision_derived_products(
                 self.feed,
                 [
-                    (good, {}),
-                    (bad, {"quantity": "not-a-choice"}),
+                    (good, {}, True),
+                    (bad, {"quantity": "not-a-choice"}, True),
                 ],
             )
 
@@ -119,15 +130,63 @@ class ProvisionDerivedProductsTests(TestCase):
 
     def test_reprovisioning_updates_in_place_rather_than_duplicating(self):
         self.service.provision_derived_products(
-            self.feed, [(_definition(), {"min_years": "30"})]
+            self.feed, [(_definition(), {"min_years": "30"}, True)]
         )
         self.service.provision_derived_products(
-            self.feed, [(_definition(), {"min_years": "50"})]
+            self.feed, [(_definition(), {"min_years": "50"}, True)]
         )
 
         products = DerivedProduct.objects.filter(data_feed=self.feed, definition_key="anomaly")
         self.assertEqual(products.count(), 1)
         self.assertEqual(products.get().config["min_years"], 50)
+
+    def test_creates_a_row_for_every_declared_definition_ticked_or_not(self):
+        # Provisioning is "a row per declared definition", not "rows for what's
+        # ticked" — the opt-out lives in is_enabled, not in row presence.
+        anomaly = _definition(key="anomaly")
+        promotion = _definition(key="promotion", recipe_type="promotion", config_schema=())
+
+        self.service.provision_derived_products(
+            self.feed,
+            [(anomaly, {}, True), (promotion, {}, False)],
+        )
+
+        rows = DerivedProduct.objects.filter(data_feed=self.feed).order_by("definition_key")
+        self.assertEqual(
+            [(r.definition_key, r.is_enabled) for r in rows],
+            [("anomaly", True), ("promotion", False)],
+        )
+
+    def test_reprovisioning_never_flips_an_existing_is_enabled(self):
+        # is_enabled is a create-time default: once a row exists, re-running the
+        # wizard edits config but must not clobber a toggle the operator changed
+        # after setup.
+        self.service.provision_derived_products(
+            self.feed, [(_definition(), {"min_years": "30"}, True)]
+        )
+        # Operator later disables it out-of-band.
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
+        product.is_enabled = False
+        product.save(update_fields=["is_enabled"])
+
+        # Wizard re-run arrives with enabled=True again.
+        self.service.provision_derived_products(
+            self.feed, [(_definition(), {"min_years": "50"}, True)]
+        )
+
+        product.refresh_from_db()
+        self.assertFalse(product.is_enabled)      # toggle preserved
+        self.assertEqual(product.config["min_years"], 50)   # config still updated
+
+    def test_unticked_product_provisions_with_schema_defaults(self):
+        # An unticked product is validated with an empty config, so it lands with
+        # its declared schema defaults filled in — ready to run if enabled later.
+        self.service.provision_derived_products(
+            self.feed, [(_definition(), {}, False)]
+        )
+
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
+        self.assertEqual(product.config, {"quantity": "anomaly", "min_years": 30})
 
 
 class BuildProductConfigFormTests(TestCase):
@@ -212,30 +271,69 @@ class SelectedDefinitionKeysTests(TestCase):
 
 
 class SelectedProductsFromSessionTests(TestCase):
+    """The wizard hands provisioning a triple for *every* declared definition —
+    enablement from the operator's tick selection, config from the step-4 form —
+    so provisioning always writes a full row set with the opt-out in is_enabled."""
+
     def setUp(self):
         self.catalog = Catalog.objects.create(
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
-    def test_pairs_each_stored_config_with_its_declared_definition(self):
+    def test_yields_a_triple_for_every_declared_definition(self):
+        anomaly = _definition(key="anomaly")
+        promotion = _definition(key="promotion")
+        session = {
+            "derived_products_config": {"anomaly": {"min_years": 25}},
+            "selected_product_keys": ["anomaly"],
+        }
+
+        with patch.object(DataFeed, "get_derived_products",
+                          return_value=[anomaly, promotion]):
+            triples = selected_products_from_session(self.feed, session)
+
+        # A triple per declared definition; enabled reflects the tick selection,
+        # config comes from the step-4 form (or {} for an unticked product).
+        self.assertEqual(
+            triples,
+            [(anomaly, {"min_years": 25}, True), (promotion, {}, False)],
+        )
+
+    def test_empty_selection_disables_every_product(self):
+        # Unticking all is a real choice — an empty list is honoured, not
+        # treated as "no selection made".
         defn = _definition()
-        session = {"derived_products_config": {"anomaly": {"min_years": 25}}}
+        session = {"selected_product_keys": []}
 
         with patch.object(DataFeed, "get_derived_products", return_value=[defn]):
-            pairs = selected_products_from_session(self.feed, session)
+            triples = selected_products_from_session(self.feed, session)
 
-        self.assertEqual(pairs, [(defn, {"min_years": 25})])
+        self.assertEqual(triples, [(defn, {}, False)])
+
+    def test_absent_selection_falls_back_to_default_enabled(self):
+        # No selection stored (e.g. a stale/short-circuit path) → the plugin's
+        # declared default_enabled decides, so nothing regresses to disabled.
+        on = _definition(key="on", default_enabled=True)
+        off = _definition(key="off", default_enabled=False)
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[on, off]):
+            triples = selected_products_from_session(self.feed, {})
+
+        self.assertEqual(triples, [(on, {}, True), (off, {}, False)])
 
     def test_ignores_config_for_undeclared_products(self):
         defn = _definition()
-        session = {"derived_products_config": {"ghost": {}}}
+        session = {
+            "derived_products_config": {"anomaly": {}, "ghost": {"x": 1}},
+            "selected_product_keys": ["anomaly", "ghost"],
+        }
 
         with patch.object(DataFeed, "get_derived_products", return_value=[defn]):
-            pairs = selected_products_from_session(self.feed, session)
+            triples = selected_products_from_session(self.feed, session)
 
-        self.assertEqual(pairs, [])
+        self.assertEqual(triples, [(defn, {}, True)])
 
-    def test_no_products_section_yields_nothing(self):
+    def test_no_declared_products_yields_nothing(self):
         with patch.object(DataFeed, "get_derived_products", return_value=[]):
             self.assertEqual(selected_products_from_session(self.feed, {}), [])

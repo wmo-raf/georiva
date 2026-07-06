@@ -95,6 +95,15 @@ class DerivedProductDefinitionTests(SimpleTestCase):
                 with self.assertRaises(ValueError):
                     _definition(**{field: ""})
 
+    def test_default_enabled_defaults_to_true(self):
+        # An operator sees each product pre-ticked in the wizard unless the
+        # plugin declares otherwise, so existing declarations keep provisioning
+        # everything without change.
+        self.assertTrue(_definition().default_enabled)
+
+    def test_default_enabled_can_be_declared_false(self):
+        self.assertFalse(_definition(default_enabled=False).default_enabled)
+
     def test_dependency_edges_derived_from_declared_inputs(self):
         # The dependency graph is computable from the declaration alone — no DB,
         # no recipe execution — so the chain UI and readiness can be built ahead
