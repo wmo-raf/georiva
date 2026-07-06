@@ -26,13 +26,13 @@ class ProductActionError(Exception):
 
 
 def _chain(product):
-    """Resolve a product's feed chain: (declarations, rows_by_key). Declarations
-    come from an *instance* ``get_derived_products()`` on the real feed
-    subclass (it binds products to the feed's collections)."""
+    """Resolve a product's feed chain: (feed, declarations, rows_by_key).
+    Declarations come from an *instance* ``get_derived_products()`` on the real
+    feed subclass (it binds products to the feed's collections)."""
     feed = product.data_feed.get_real_instance()
     definitions = feed.get_derived_products()
     rows_by_key = {row.definition_key: row for row in feed.derived_products.all()}
-    return definitions, rows_by_key
+    return feed, definitions, rows_by_key
 
 
 def _label_of(key, definitions):
@@ -42,11 +42,48 @@ def _label_of(key, definitions):
     return key
 
 
+def _definition_of(key, definitions):
+    for defn in definitions:
+        if defn.key == key:
+            return defn
+    return None
+
+
 def product_label(product):
     """The product's display label from its feed declaration, falling back to
     its definition key (e.g. an orphaned row whose definition is gone)."""
-    definitions, _ = _chain(product)
+    _feed, definitions, _rows = _chain(product)
     return _label_of(product.definition_key, definitions)
+
+
+def materialise_output_collections(feed, definition):
+    """
+    Get-or-create the catalog Collections a product declares as outputs, from
+    each ``OutputRef``'s display metadata (name = title, slug fallback;
+    description; visibility). Called when a product is enabled — including at
+    provision time — so its outputs appear in the catalog with proper titles
+    *before* any recipe run.
+
+    Get-or-create **only**, never update: an operator's later rename, description
+    or visibility edit survives every subsequent enable, upgrade, or run. The
+    recipes' own lazy get_or_create then finds this pre-materialised row and
+    becomes an inert fallback. Returns the Collections (created or pre-existing).
+    """
+    from georiva.core.models import Collection
+
+    collections = []
+    for ref in definition.outputs:
+        collection, _created = Collection.objects.get_or_create(
+            catalog=feed.catalog,
+            slug=ref.collection,
+            defaults={
+                "name": ref.title or ref.collection,
+                "description": ref.description,
+                "visibility": ref.visibility,
+            },
+        )
+        collections.append(collection)
+    return collections
 
 
 def enable_product(product):
@@ -57,7 +94,7 @@ def enable_product(product):
     """
     from georiva.core.product_chain import dependencies_closure
 
-    definitions, rows = _chain(product)
+    feed, definitions, rows = _chain(product)
     needed = dependencies_closure(definitions, product.definition_key)
     missing = [
         _label_of(key, definitions)
@@ -71,7 +108,12 @@ def enable_product(product):
                 "deps": ", ".join(missing),
             }
         )
+    definition = _definition_of(product.definition_key, definitions)
     with transaction.atomic():
+        # Output collections materialise at enable-time, so they appear in the
+        # catalog with declared titles before any run.
+        if definition is not None:
+            materialise_output_collections(feed, definition)
         product.is_enabled = True
         product.save(update_fields=["is_enabled"])
     return product
@@ -83,7 +125,7 @@ def enabled_dependents(product):
     list). Excludes ``product`` itself."""
     from georiva.core.product_chain import dependents_closure
 
-    definitions, rows = _chain(product)
+    _feed, definitions, rows = _chain(product)
     downstream = dependents_closure(definitions, product.definition_key)
     return [
         rows[defn.key]

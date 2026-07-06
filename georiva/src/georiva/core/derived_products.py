@@ -24,6 +24,10 @@ from dataclasses import dataclass
 TRIGGER_MODES = ("event", "scheduled", "manual")
 CONFIG_FIELD_TYPES = ("str", "int", "float", "bool", "choice")
 TIERS = ("staging", "published")
+# Output-collection visibility (mirrors core.Collection.Visibility): a "public"
+# output is served via STAC/EDR/tiles; an "internal" one is a derivation
+# intermediate — read by the engine but never served.
+VISIBILITIES = ("public", "internal")
 
 _SCALAR_COERCERS = {"str": str, "int": int, "float": float, "bool": bool}
 
@@ -65,15 +69,29 @@ class InputRef:
 
 @dataclass(frozen=True)
 class OutputRef:
-    """One collection a product produces."""
+    """One collection a product produces.
+
+    The display metadata (``title``/``description``/``visibility``) is the single
+    source of truth for the output Collection materialised in the catalog when
+    the product is enabled — it is *not* injected into recipe selectors, which
+    stay keyed on ``role``/``collection`` only.
+    """
     role: str
     collection: str
+    title: str = ""
+    description: str = ""
+    visibility: str = "public"
 
     def __post_init__(self):
         if not self.role:
             raise ValueError("OutputRef: 'role' is required and must be non-empty")
         if not self.collection:
             raise ValueError("OutputRef: 'collection' is required and must be non-empty")
+        if self.visibility not in VISIBILITIES:
+            raise ValueError(
+                f"OutputRef '{self.role}': visibility must be one of "
+                f"{VISIBILITIES}, got '{self.visibility}'"
+            )
 
 
 @dataclass(frozen=True)

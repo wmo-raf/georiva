@@ -21,13 +21,14 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from georiva.core.models import Catalog
+from georiva.core.models import Catalog, Collection
 from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.sources.product_service import (
     ProductActionError,
     disable_product,
     enable_product,
     enabled_dependents,
+    materialise_output_collections,
 )
 
 User = get_user_model()
@@ -131,6 +132,24 @@ class EnableGateTests(ProductServiceBase):
         self.rows["promotion"].refresh_from_db()
         self.assertTrue(self.rows["promotion"].is_enabled)
 
+    def test_enable_materialises_the_products_output_collections(self):
+        # Enabling makes the output collection appear in the catalog immediately,
+        # before any recipe run.
+        self.rows["anomaly"].is_enabled = False
+        self.rows["anomaly"].save(update_fields=["is_enabled"])
+        self.assertFalse(
+            Collection.objects.filter(slug="chirps-monthly-anomaly").exists()
+        )
+
+        with self._patch_defs():
+            enable_product(self.rows["anomaly"])
+
+        self.assertTrue(
+            Collection.objects.filter(
+                catalog=self.catalog, slug="chirps-monthly-anomaly"
+            ).exists()
+        )
+
 
 class DisableCascadeTests(ProductServiceBase):
     def test_enabled_dependents_lists_the_transitive_downstream_set(self):
@@ -184,6 +203,68 @@ class DisableCascadeTests(ProductServiceBase):
             row.refresh_from_db()
         self.assertTrue(self.rows["climatology"].is_enabled)
         self.assertTrue(self.rows["anomaly"].is_enabled)
+
+
+class MaterialiseOutputCollectionsTests(TestCase):
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
+
+    def _definition(self, outputs):
+        return _product("anomaly", outputs=outputs)
+
+    def test_creates_a_collection_per_output_with_declared_metadata(self):
+        definition = self._definition((
+            OutputRef(role="anomaly", collection="chirps-monthly-anomaly",
+                      title="CHIRPS Monthly Anomaly",
+                      description="Absolute rainfall anomaly."),
+            OutputRef(role="climatology", collection="chirps-monthly-climatology",
+                      title="CHIRPS Monthly Climatology", visibility="internal"),
+        ))
+
+        materialise_output_collections(self.feed, definition)
+
+        anomaly = Collection.objects.get(catalog=self.catalog, slug="chirps-monthly-anomaly")
+        self.assertEqual(anomaly.name, "CHIRPS Monthly Anomaly")
+        self.assertEqual(anomaly.description, "Absolute rainfall anomaly.")
+        self.assertEqual(anomaly.visibility, Collection.Visibility.PUBLIC)
+
+        clim = Collection.objects.get(catalog=self.catalog, slug="chirps-monthly-climatology")
+        self.assertEqual(clim.visibility, Collection.Visibility.INTERNAL)
+
+    def test_name_falls_back_to_slug_when_no_title_declared(self):
+        definition = self._definition((
+            OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),
+        ))
+
+        materialise_output_collections(self.feed, definition)
+
+        collection = Collection.objects.get(slug="chirps-monthly-anomaly")
+        self.assertEqual(collection.name, "chirps-monthly-anomaly")
+
+    def test_never_overwrites_an_operators_edits(self):
+        # The operator renamed the collection and flipped its visibility after the
+        # first materialisation; a subsequent enable/upgrade must not clobber that.
+        Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly-anomaly",
+            name="My Renamed Anomaly", description="Operator note.",
+            visibility=Collection.Visibility.INTERNAL,
+        )
+        definition = self._definition((
+            OutputRef(role="anomaly", collection="chirps-monthly-anomaly",
+                      title="CHIRPS Monthly Anomaly", description="Declared.",
+                      visibility="public"),
+        ))
+
+        materialise_output_collections(self.feed, definition)
+
+        collection = Collection.objects.get(slug="chirps-monthly-anomaly")
+        self.assertEqual(collection.name, "My Renamed Anomaly")
+        self.assertEqual(collection.description, "Operator note.")
+        self.assertEqual(collection.visibility, Collection.Visibility.INTERNAL)
+        self.assertEqual(Collection.objects.filter(slug="chirps-monthly-anomaly").count(), 1)
 
 
 class TrackingToggleFlowTests(ProductServiceBase):

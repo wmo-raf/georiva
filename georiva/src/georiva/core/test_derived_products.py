@@ -53,6 +53,29 @@ class OutputRefTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             OutputRef(role="anomaly", collection="")
 
+    def test_display_metadata_defaults_keep_bare_declarations_valid(self):
+        # An OutputRef declared with only role+collection still compiles: the
+        # catalog-facing metadata is optional and defaults sensibly.
+        ref = OutputRef(role="anomaly", collection="rainfall-anomaly")
+        self.assertEqual(ref.title, "")
+        self.assertEqual(ref.description, "")
+        self.assertEqual(ref.visibility, "public")
+
+    def test_display_metadata_is_settable(self):
+        ref = OutputRef(
+            role="climatology", collection="rainfall-normals",
+            title="Rainfall normals", description="1991–2020 baseline.",
+            visibility="internal",
+        )
+        self.assertEqual(ref.title, "Rainfall normals")
+        self.assertEqual(ref.description, "1991–2020 baseline.")
+        self.assertEqual(ref.visibility, "internal")
+
+    def test_unknown_visibility_is_rejected(self):
+        with self.assertRaises(ValueError):
+            OutputRef(role="anomaly", collection="rainfall-anomaly",
+                      visibility="secret")
+
 
 def _definition(**overrides):
     """A minimal valid DerivedProductDefinition, overridable per-test."""

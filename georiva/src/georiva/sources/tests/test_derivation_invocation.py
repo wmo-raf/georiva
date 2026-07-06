@@ -110,6 +110,28 @@ class DispatchForInputTests(TestCase):
             [{"role": "served", "collection": "rainfall"}],
         )
 
+    def test_selector_binding_omits_output_display_metadata(self):
+        # OutputRef's title/description/visibility drive catalog materialisation,
+        # NOT recipe behaviour — they must never enter the selector, or a display
+        # edit would change a recipe's unit identity.
+        definition = _definition(outputs=(
+            OutputRef(role="served", collection="rainfall",
+                      title="Served rainfall", description="Raw, promoted.",
+                      visibility="internal"),
+        ))
+        self._product(definition)
+
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
+            patch("georiva.processing.engine.run") as run,
+        ):
+            dispatch_for_input(_staging_trigger(), dispatch=False)
+
+        self.assertEqual(
+            run.call_args.args[1]["outputs"],
+            [{"role": "served", "collection": "rainfall"}],
+        )
+
     def test_product_on_a_different_collection_is_not_dispatched(self):
         definition = _definition(inputs=(
             InputRef(role="source", collection="temperature", tier="staging"),
