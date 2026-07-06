@@ -188,6 +188,35 @@ class ProvisionDerivedProductsTests(TestCase):
         product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
         self.assertEqual(product.config, {"quantity": "anomaly", "min_years": 30})
 
+    def test_provisioning_enabled_product_materialises_its_output_collections(self):
+        # A product enabled in the wizard has its outputs materialised at
+        # provision time, with the declared metadata.
+        defn = _definition(outputs=(
+            OutputRef(role="anomaly", collection="rainfall-anomaly",
+                      title="Rainfall Anomaly", visibility="internal"),
+        ))
+
+        self.service.provision_derived_products(self.feed, [(defn, {}, True)])
+
+        collection = Collection.objects.get(
+            catalog=self.catalog, slug="rainfall-anomaly"
+        )
+        self.assertEqual(collection.name, "Rainfall Anomaly")
+        self.assertEqual(collection.visibility, Collection.Visibility.INTERNAL)
+
+    def test_provisioning_disabled_product_does_not_materialise_outputs(self):
+        # An unticked product's outputs stay latent — they materialise only when
+        # it is enabled later.
+        defn = _definition(outputs=(
+            OutputRef(role="anomaly", collection="rainfall-anomaly"),
+        ))
+
+        self.service.provision_derived_products(self.feed, [(defn, {}, False)])
+
+        self.assertFalse(
+            Collection.objects.filter(slug="rainfall-anomaly").exists()
+        )
+
 
 class BuildProductConfigFormTests(TestCase):
     def test_form_has_a_field_per_config_option_with_defaults(self):
