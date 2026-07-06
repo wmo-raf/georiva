@@ -18,7 +18,8 @@ good starting point if you're looking for areas where input is especially valuab
 ### Prerequisites
 
 - Docker and Docker Compose (v2+)
-- Python 3.10+ (the package declares `requires-python = ">=3.10"`; the app normally runs inside Docker)
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/) (core declares `requires-python = ">=3.12"`; the app runs
+  inside Docker, and uv manages dependencies + the local dev virtualenv)
 - Node.js 20+ (for frontend tooling, if applicable)
 - Git
 
@@ -43,6 +44,28 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 Once up, the app is at http://localhost and the STAC Browser at http://localhost/stac-browser/. See the project
 [README](../README.md#development-setup) for the full quick-start.
+
+### Managing Python dependencies (uv)
+
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). The core package is a standalone uv project: its
+dependencies live in `georiva/pyproject.toml` (`[project.dependencies]`) and are pinned in `georiva/uv.lock` (both
+committed — there is no `requirements.txt`). The Docker image installs from that lockfile.
+
+Add or remove core dependencies with the Make targets — they edit `georiva/pyproject.toml` + `georiva/uv.lock`, then
+refresh the local venv:
+
+```bash
+make uv-add pkg="some-package>=1.2"    # add a runtime dependency
+make uv-add-dev pkg=pytest             # add a dev-only dependency
+make uv-remove pkg=some-package        # remove one
+```
+
+Commit `georiva/pyproject.toml` and `georiva/uv.lock` together, then rebuild the image (`make dev-build`) so the
+container picks up the change.
+
+For local (non-Docker) work — IDE autocomplete, type-checking, running tests outside Docker — `uv sync --all-packages`
+at the repo root creates one virtualenv with core and every plugin checked out under `dev-plugins/` installed editable.
+See the [Plugin Installation Guide](plugins/installation.md#local-development) for the plugin dev workflow.
 
 ### Common management commands
 

@@ -48,6 +48,7 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 | Data Formats     | COG, virtual Zarr (kerchunk), Encoded PNG             |
 | Event Bus        | MinIO → Redis list → `minio-consumer`                 |
 | Containerization | Docker Compose                                        |
+| Package Manager  | uv (`pyproject.toml` + `uv.lock`)                     |
 
 ---
 
@@ -140,6 +141,11 @@ The dev setup uses a compose override that mounts your source code for hot reloa
    docker compose restart georiva-celery-worker
    ```
 
+**Managing dependencies:** GeoRiva uses [uv](https://docs.astral.sh/uv/). Core dependencies live in
+`georiva/pyproject.toml` and are locked in `georiva/uv.lock` (there is no `requirements.txt`). Add packages with
+`make uv-add pkg="<package>"`, then rebuild. For local IDE/test tooling outside Docker, run `uv sync --all-packages`
+at the repo root. See [docs/contributing.md](docs/contributing.md#managing-python-dependencies-uv) for details.
+
 ### Installing Plugins
 
 Plugins can be installed at build time or at runtime.
@@ -152,6 +158,10 @@ docker compose build georiva
 
 **Runtime** — set `GEORIVA_PLUGIN_URLS` in your `.env` file and restart. Ensure
 `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` is not set to `"true"`.
+
+**Local development** — clone plugin repos into `dev-plugins/` and run with the dev override
+(`make dev-up OV=1`); each subdirectory is auto-discovered and editable-installed. See the
+[Plugin Installation Guide](docs/plugins/installation.md#local-development).
 
 ## Project Structure
 
