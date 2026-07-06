@@ -135,6 +135,15 @@ class TrackingViewTests(TestCase):
         self.assertContains(response, "anomaly")   # the product is listed
         self.assertContains(response, "idle")      # no runs yet
 
+    def test_orphaned_product_shows_an_orphan_badge_linking_to_the_feed(self):
+        # The base feed declares no products, so this row is an orphan.
+        response = self.client.get(reverse("derived_product_tracking"))
+
+        self.assertContains(response, "Orphaned")
+        self.assertContains(
+            response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
+        )
+
     def test_toggle_pauses_a_product_without_deleting_it(self):
         self.assertTrue(self.product.is_enabled)
 

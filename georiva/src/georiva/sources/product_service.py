@@ -62,11 +62,19 @@ def build_chain(feed):
     to its ``DerivedProduct`` row plus run status, readiness, and the catalog
     Collections its outputs have materialised into.
 
-    Returns ``{"stages": [[card, ...], ...]}`` where a card is a dict of:
-    ``definition``, ``product`` (row), ``enabled``, ``needs`` (direct-dependency
-    labels for chips), ``status`` / ``last_activity`` (run aggregate),
-    ``readiness`` and ``readiness_hint`` (the staging-gap backfill nudge), the
-    materialised ``output_collections``, and ``can_run`` (manual/scheduled only).
+    Truthful across plugin upgrades by merging the live declaration with DB
+    state. Returns ``{"stages": [[card, ...], ...], "orphans": [card, ...]}``:
+
+    - a declared definition **with** a row is a normal card;
+    - a declared definition **without** a row (added by an upgrade) is a card
+      with ``is_new=True`` and ``product=None``;
+    - a row whose definition key is **no longer declared** (removed/renamed) is
+      an ``orphaned=True`` card in the trailing orphan lane.
+
+    Card keys: ``definition``, ``product``, ``enabled``, ``is_new``,
+    ``orphaned``, ``display_label`` / ``display_description``, ``needs``
+    (dependency chip labels), ``status`` / ``last_activity``, ``readiness`` /
+    ``readiness_hint``, ``output_collections``, ``can_run``.
     """
     from georiva.core.models import Collection
     from georiva.core.product_chain import product_dependencies, topological_stages
@@ -75,6 +83,7 @@ def build_chain(feed):
     real_feed = feed.get_real_instance()
     definitions = real_feed.get_derived_products()
     rows = {row.definition_key: row for row in real_feed.derived_products.all()}
+    declared_keys = {d.key for d in definitions}
     # Chips and card names use each product's display label (override -> declared
     # -> key), so a rename shows on every dependent too.
     label_by_key = {
@@ -83,37 +92,57 @@ def build_chain(feed):
     }
     deps = product_dependencies(definitions)
 
-    stages = []
-    for stage in topological_stages(definitions):
-        lane = []
-        for definition in stage:
-            product = rows.get(definition.key)
-            if product is None:
-                continue
-            status = product_status(product)
-            readiness = product_readiness(product)
-            output_slugs = [ref.collection for ref in definition.outputs]
-            lane.append({
-                "definition": definition,
-                "product": product,
-                "enabled": product.is_enabled,
-                "display_label": product.display_label,
-                "display_description": product.display_description,
-                "needs": [label_by_key[k] for k in sorted(deps.get(definition.key, ()))],
-                "status": status.status,
-                "last_activity": status.last_completed_at,
-                "readiness": readiness,
-                "readiness_hint": _readiness_hint(definition, readiness),
-                "output_collections": list(
-                    Collection.objects.filter(
-                        catalog=real_feed.catalog, slug__in=output_slugs
-                    )
-                ),
-                "can_run": definition.trigger_mode in ("manual", "scheduled"),
-            })
-        if lane:
-            stages.append(lane)
-    return {"stages": stages}
+    def _declared_card(definition):
+        product = rows.get(definition.key)
+        needs = [label_by_key[k] for k in sorted(deps.get(definition.key, ()))]
+        if product is None:
+            # A new definition an upgrade added, not yet provisioned.
+            return {
+                "definition": definition, "product": None, "enabled": False,
+                "is_new": True, "orphaned": False,
+                "display_label": definition.label,
+                "display_description": definition.description,
+                "needs": needs, "status": None, "last_activity": None,
+                "readiness": None, "readiness_hint": None,
+                "output_collections": [], "can_run": False,
+            }
+        status = product_status(product)
+        readiness = product_readiness(product)
+        output_slugs = [ref.collection for ref in definition.outputs]
+        return {
+            "definition": definition, "product": product,
+            "enabled": product.is_enabled, "is_new": False, "orphaned": False,
+            "display_label": product.display_label,
+            "display_description": product.display_description,
+            "needs": needs,
+            "status": status.status, "last_activity": status.last_completed_at,
+            "readiness": readiness,
+            "readiness_hint": _readiness_hint(definition, readiness),
+            "output_collections": list(
+                Collection.objects.filter(
+                    catalog=real_feed.catalog, slug__in=output_slugs
+                )
+            ),
+            "can_run": definition.trigger_mode in ("manual", "scheduled"),
+        }
+
+    stages = [
+        [_declared_card(defn) for defn in stage]
+        for stage in topological_stages(definitions)
+    ]
+
+    orphans = [
+        {
+            "definition": None, "product": row, "enabled": row.is_enabled,
+            "is_new": False, "orphaned": True,
+            "display_label": row.display_label, "display_description": "",
+            "needs": [], "status": product_status(row).status,
+            "last_activity": None, "readiness": None, "readiness_hint": None,
+            "output_collections": [], "can_run": False,
+        }
+        for row in rows.values() if row.definition_key not in declared_keys
+    ]
+    return {"stages": stages, "orphans": orphans}
 
 
 def _readiness_hint(definition, readiness):
@@ -161,6 +190,53 @@ def materialise_output_collections(feed, definition):
         )
         collections.append(collection)
     return collections
+
+
+def is_orphaned(product) -> bool:
+    """True if the plugin no longer declares this row's definition key (removed
+    or renamed by an upgrade). Orphans are inert — every dispatch path already
+    skips a product whose ``definition_for`` is None."""
+    return product.definition is None
+
+
+def enable_new_definition(feed, definition, config):
+    """
+    Inline-provision a declared-but-rowless product (added by a plugin upgrade)
+    and enable it — the chain panel's "New — not enabled" action, without a
+    wizard re-run. Validates config, writes the row (disabled), then enables it
+    through the structural gate (which materialises its output collections). The
+    config is validated *before* the row is written, and the enable is atomic, so
+    a gate failure leaves no half-enabled row. Returns the enabled product.
+    """
+    from georiva.sources.models import DerivedProduct
+
+    cleaned = definition.validate_config(config or {})
+    with transaction.atomic():
+        product, _created = DerivedProduct.objects.update_or_create(
+            data_feed=feed,
+            definition_key=definition.key,
+            defaults={"recipe_type": definition.recipe_type, "config": cleaned},
+            create_defaults={
+                "recipe_type": definition.recipe_type,
+                "config": cleaned,
+                "is_enabled": False,
+            },
+        )
+        enable_product(product)
+    return product
+
+
+def delete_orphan(product):
+    """Delete an orphaned product's configuration row. Guarded: only a row whose
+    definition is gone may be deleted this way. Removes *only* the row — the
+    output Collections it once materialised and their published items are kept
+    (a DerivedProduct owns no catalog data)."""
+    if not is_orphaned(product):
+        raise ProductActionError(
+            _("'%s' is still declared by the plugin and can't be deleted here.")
+            % product.display_label
+        )
+    product.delete()
 
 
 def enable_product(product):

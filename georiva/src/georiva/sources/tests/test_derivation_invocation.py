@@ -20,6 +20,8 @@ from georiva.core.derived_products import (
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import (
+    collection_routes_to_staging,
+    dispatch_due_scheduled_products,
     dispatch_for_input,
     product_origin,
     run_product_now,
@@ -340,3 +342,46 @@ class RunProductNowTests(TestCase):
 
         run.assert_not_called()
         self.assertEqual(result, [])
+
+
+class OrphanExclusionTests(TestCase):
+    """A row whose definition key the plugin no longer declares (removed/renamed
+    by an upgrade) is inert on every path — definition_for returns None and each
+    dispatcher skips it. This locks that in (issue #171)."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+        # An enabled row for a definition the (patched-empty) declaration omits.
+        self.orphan = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="serve-raw",
+            recipe_type="promotion", is_enabled=True,
+        )
+
+    def _orphaned(self):
+        return patch.object(DataFeed, "get_derived_products", return_value=[])
+
+    def test_orphan_is_excluded_from_event_dispatch(self):
+        with self._orphaned(), patch("georiva.processing.engine.run") as run:
+            result = dispatch_for_input(_staging_trigger(), dispatch=False)
+        run.assert_not_called()
+        self.assertEqual(result, [])
+
+    def test_orphan_is_excluded_from_scheduled_dispatch(self):
+        with self._orphaned(), patch("georiva.processing.engine.run") as run:
+            dispatched = dispatch_due_scheduled_products(dispatch=False)
+        run.assert_not_called()
+        self.assertEqual(dispatched, 0)
+
+    def test_orphan_is_excluded_from_manual_run(self):
+        with self._orphaned(), patch("georiva.processing.engine.run") as run:
+            result = run_product_now(self.orphan, dispatch=False)
+        run.assert_not_called()
+        self.assertEqual(result, [])
+
+    def test_orphan_does_not_route_its_collection_to_staging(self):
+        # Its (absent) declaration can't opt any collection into staging.
+        with self._orphaned():
+            self.assertFalse(collection_routes_to_staging(self.feed, "rainfall"))

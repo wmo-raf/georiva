@@ -1,0 +1,69 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Enable Derived Product" %} — {{ definition.label }}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gen-intro {
+            font-size: 0.9em;
+            color: var(--w-color-text-label);
+            margin-bottom: 1.25em;
+        }
+
+        .gen-section {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            padding: 1.1em;
+            margin-bottom: 1.5em;
+        }
+
+        .gen-section .w-field__wrapper {
+            margin-bottom: 1em;
+        }
+
+        .gen-actions {
+            display: flex;
+            gap: 0.75em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=definition.label subtitle=_("Enable Derived Product") icon="plus" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="help-block help-block--{{ msg.tags }}">{{ msg }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <p class="gen-intro">
+            {% blocktrans %}This product was added by a plugin update. Enabling it provisions its configuration, checks its dependencies are on, and creates its output collections.{% endblocktrans %}
+            {% if definition.description %}<br>{{ definition.description }}{% endif %}
+        </p>
+
+        <form method="post">
+            {% csrf_token %}
+            {% if config_form %}
+                <div class="gen-section">
+                    {% for field in config_form %}
+                        <div class="w-field__wrapper">
+                            <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                        </div>
+                    {% endfor %}
+                    {% for error in config_form.non_field_errors %}
+                        <p class="error-message">{{ error }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <div class="gen-actions">
+                <button type="submit" class="button">{% trans "Enable" %}</button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

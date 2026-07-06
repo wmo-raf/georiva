@@ -151,9 +151,12 @@ def data_feed_detail(request, pk):
     from georiva.core.product_chain import ChainError
     from georiva.sources.product_service import build_chain
     try:
-        product_stage_lanes = build_chain(feed)["stages"]
+        chain = build_chain(feed)
+        product_stage_lanes = chain["stages"]
+        product_orphans = chain["orphans"]
     except ChainError as exc:
         product_stage_lanes = []
+        product_orphans = []
         messages.error(request, _("Derived-product chain is invalid: %s") % exc)
 
     context = {
@@ -167,6 +170,7 @@ def data_feed_detail(request, pk):
         "collection_links": collection_links,
         "definition_link_pairs": definition_link_pairs,
         "product_stage_lanes": product_stage_lanes,
+        "product_orphans": product_orphans,
         "recent_runs": recent_runs,
         "feed_type_name": type(real_feed)._meta.verbose_name,
     }
@@ -358,6 +362,84 @@ def feed_product_edit(request, feed_pk, product_pk):
             if request.method == "POST" else product.interval_minutes
         ),
         "interval_error": interval_error,
+    })
+
+
+def feed_product_enable_new(request, feed_pk, definition_key):
+    """Inline-enable a declared-but-unprovisioned product (added by a plugin
+    upgrade) from the chain panel's "New — not enabled" card. Shows its config
+    form, then provisions + enables through the structural gate (materialising
+    outputs) — no wizard re-run."""
+    from georiva.sources.product_service import ProductActionError, enable_new_definition
+
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    real_feed = feed.get_real_instance()
+    definition = next(
+        (d for d in real_feed.get_derived_products() if d.key == definition_key), None
+    )
+    if definition is None:
+        messages.error(request, _("Unknown derived product: %s") % definition_key)
+        return redirect("data_feed_detail", pk=feed_pk)
+
+    form_cls = build_product_config_form(definition)
+
+    if request.method == "POST":
+        form = form_cls(request.POST, prefix="config") if form_cls else None
+        if form is None or form.is_valid():
+            config = form.cleaned_config if form is not None else {}
+            try:
+                enable_new_definition(real_feed, definition, config)
+                messages.success(request, _("'%s' enabled.") % definition.label)
+            except ProductActionError as exc:
+                messages.error(request, str(exc))
+            return redirect("data_feed_detail", pk=feed_pk)
+    else:
+        form = form_cls(prefix="config") if form_cls else None
+
+    return render(request, "georivasources/product_enable_new.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
+            {"url": "", "label": _("Enable %s") % definition.label},
+        ],
+        "feed": feed,
+        "definition": definition,
+        "config_form": form,
+    })
+
+
+def feed_product_delete_orphan(request, feed_pk, product_pk):
+    """Delete an orphaned product's configuration row from the chain panel. The
+    confirmation states that its already-published collections and data are kept
+    — only the row is removed."""
+    from georiva.sources.models import DerivedProduct
+    from georiva.sources.product_service import ProductActionError, delete_orphan
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+
+    if request.method == "POST":
+        label = product.display_label
+        try:
+            delete_orphan(product)
+            messages.success(
+                request,
+                _("Deleted '%s'. Its collections and data were kept.") % label,
+            )
+        except ProductActionError as exc:
+            messages.error(request, str(exc))
+        return redirect("data_feed_detail", pk=feed_pk)
+
+    return render(request, "georivasources/product_delete_orphan_confirm.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": product.data_feed.name},
+            {"url": "", "label": _("Delete")},
+        ],
+        "feed": product.data_feed,
+        "product": product,
+        "product_label": product.display_label,
     })
 
 
@@ -1377,6 +1459,9 @@ def derived_product_tracking(request):
             "label": product.display_label,
             "status": product_status(product),
             "readiness": product_readiness(product),
+            # Flagged when the plugin no longer declares this row (an orphan).
+            "orphaned": product.definition is None,
+            "feed_url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}),
         })
 
     context = {

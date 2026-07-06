@@ -78,6 +78,20 @@
             opacity: 0.55;
         }
 
+        .gdp-orphan-badge {
+            display: inline-block;
+            margin-left: 0.5em;
+            font-size: 0.68em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0.1em 0.5em;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--w-color-critical-200) 15%, transparent);
+            color: var(--w-color-critical-200);
+            text-decoration: none;
+        }
+
         .gdp-blocked {
             font-size: 0.75em;
             color: var(--w-color-critical-200);
@@ -118,12 +132,17 @@
                     {% for row in rows %}
                         <tr class="{% if not row.product.is_enabled %}gdp-disabled{% endif %}">
                             <td>
-                                <div class="gdp-product__label">{{ row.label }}</div>
+                                <div class="gdp-product__label">
+                                    {{ row.label }}
+                                    {% if row.orphaned %}
+                                        <a class="gdp-orphan-badge" href="{{ row.feed_url }}">{% trans "Orphaned" %}</a>
+                                    {% endif %}
+                                </div>
                                 <div class="gdp-product__meta">
                                     {{ row.product.definition_key }} · {{ row.product.recipe_type }}
                                 </div>
                             </td>
-                            <td>{{ row.product.data_feed.name }}</td>
+                            <td><a href="{{ row.feed_url }}">{{ row.product.data_feed.name }}</a></td>
                             <td>
                                 <span class="gdp-badge gdp-badge--{{ row.status.status }}">
                                     {{ row.status.status }}

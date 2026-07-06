@@ -417,13 +417,13 @@
         </div>
 
         {# ── Derived products chain panel #}
-        {% if product_stage_lanes %}
+        {% if product_stage_lanes or product_orphans %}
             <div class="gfeed-card">
                 <div class="gfeed-card__header">
                     <h3 class="gfeed-card__title">{% trans "Derived Products" %}</h3>
                 </div>
                 <div class="gfeed-card__body">
-                    {% include "georivasources/includes/product_chain.html" with stage_lanes=product_stage_lanes mode="manage" %}
+                    {% include "georivasources/includes/product_chain.html" with stage_lanes=product_stage_lanes orphans=product_orphans mode="manage" %}
                 </div>
             </div>
         {% endif %}
