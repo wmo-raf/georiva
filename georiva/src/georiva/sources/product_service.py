@@ -50,10 +50,9 @@ def _definition_of(key, definitions):
 
 
 def product_label(product):
-    """The product's display label from its feed declaration, falling back to
-    its definition key (e.g. an orphaned row whose definition is gone)."""
-    _feed, definitions, _rows = _chain(product)
-    return _label_of(product.definition_key, definitions)
+    """The product's display name for every surface — the operator override, else
+    the declared label, else the definition key (an orphan)."""
+    return product.display_label
 
 
 def build_chain(feed):
@@ -76,7 +75,12 @@ def build_chain(feed):
     real_feed = feed.get_real_instance()
     definitions = real_feed.get_derived_products()
     rows = {row.definition_key: row for row in real_feed.derived_products.all()}
-    label_by_key = {d.key: d.label for d in definitions}
+    # Chips and card names use each product's display label (override -> declared
+    # -> key), so a rename shows on every dependent too.
+    label_by_key = {
+        d.key: rows[d.key].display_label if d.key in rows else d.label
+        for d in definitions
+    }
     deps = product_dependencies(definitions)
 
     stages = []
@@ -93,6 +97,8 @@ def build_chain(feed):
                 "definition": definition,
                 "product": product,
                 "enabled": product.is_enabled,
+                "display_label": product.display_label,
+                "display_description": product.display_description,
                 "needs": [label_by_key[k] for k in sorted(deps.get(definition.key, ()))],
                 "status": status.status,
                 "last_activity": status.last_completed_at,
