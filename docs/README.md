@@ -29,10 +29,16 @@ reading order. If you're new, start at the top and work down.
 7. **[Source Plugin Parameter Contract & Setup Wizard](architecture/plugin-parameter-contract.md)** — *(RFC, draft)* a
    proposed declarative `describe_parameters()` contract so plugins can provision their Catalog/Collection/Variable
    hierarchy automatically.
+8. **[Derived Products](plugins/derived-products.md)** — the contract for declaring layers a feed computes from its own
+   collections (anomaly, climatology, promotion…): `get_derived_products()`, the full `DerivedProductDefinition` /
+   `InputRef` / `OutputRef` / `ConfigField` reference, how the tier-aware chain and stages are computed, what core
+   materialises versus what recipes create, and a worked CHIRPS example. Decisions recorded in
+   [ADR-0008](adr/0008-configurable-derivation-products.md) and
+   [ADR-0009](adr/0009-derived-product-chain-and-lifecycle.md).
 
 ## Contributing
 
-8. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
+9. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
    conventions.
 
 ## Cross-cutting patterns (for maintainers)

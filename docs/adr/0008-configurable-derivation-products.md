@@ -140,4 +140,6 @@ button overlays all modes.
   declarations + `DerivedProduct`s) removes the `target_tier`-vs-products drift
   class entirely.
 
-See ADR-0005 (engine), ADR-0006/0007 (plugin recipe families).
+See ADR-0005 (engine), ADR-0006/0007 (plugin recipe families), and **ADR-0009**
+(the chain computation, enablement/readiness gates, always-provision +
+materialise-on-enable, and the orphan/upgrade lifecycle built on this contract).
