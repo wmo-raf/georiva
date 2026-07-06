@@ -1126,18 +1126,46 @@ def derived_product_tracking(request):
     from georiva.sources.derivation_invocation import run_product_now
     from georiva.sources.derivation_tracking import product_readiness, product_status
     from georiva.sources.models import DerivedProduct
+    from georiva.sources.product_service import (
+        ProductActionError,
+        disable_product,
+        enable_product,
+        enabled_dependents,
+        product_label,
+    )
 
     if request.method == "POST" and request.POST.get("action") == "toggle":
         product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
-        product.is_enabled = not product.is_enabled
-        product.save(update_fields=["is_enabled"])
-        messages.success(
-            request,
-            _("'%(key)s' %(state)s.") % {
-                "key": product.definition_key,
-                "state": _("enabled") if product.is_enabled else _("disabled"),
-            },
-        )
+        # Enable/disable go through the product service so the dependency
+        # invariant (no enabled product with a disabled dependency) holds from
+        # this surface too — never flip is_enabled raw here.
+        if product.is_enabled:
+            dependents = enabled_dependents(product)
+            if dependents and request.POST.get("confirmed") != "1":
+                # Cascade-disable needs acknowledgement; the closure is recomputed
+                # on the confirming POST, so the listed set is advisory only.
+                return render(request, "georivasources/product_disable_confirm.html", {
+                    "breadcrumbs_items": [
+                        {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                        {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                        {"url": reverse("derived_product_tracking"), "label": _("Derived Products")},
+                        {"url": "", "label": _("Disable")},
+                    ],
+                    "product": product,
+                    "product_label": product_label(product),
+                    "dependent_labels": [product_label(d) for d in dependents],
+                })
+            disabled = disable_product(product)
+            messages.success(
+                request,
+                _("Disabled: %s.") % ", ".join(product_label(d) for d in disabled),
+            )
+        else:
+            try:
+                enable_product(product)
+                messages.success(request, _("'%s' enabled.") % product_label(product))
+            except ProductActionError as exc:
+                messages.error(request, str(exc))
         return redirect("derived_product_tracking")
 
     if request.method == "POST" and request.POST.get("action") == "run_now":

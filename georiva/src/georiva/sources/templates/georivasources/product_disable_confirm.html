@@ -1,0 +1,77 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Disable Derived Product" %} — {{ product_label }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .pdc-warning-box {
+            background: color-mix(in srgb, var(--w-color-warning-100) 12%, transparent);
+            border: 1px solid color-mix(in srgb, var(--w-color-warning-100) 45%, transparent);
+            border-radius: 6px;
+            padding: 1.1em 1.25em;
+            margin-bottom: 1.5em;
+        }
+
+        .pdc-warning-title {
+            font-weight: 700;
+            color: var(--w-color-text-label);
+            margin: 0 0 0.5em;
+            font-size: 0.95em;
+        }
+
+        .pdc-warning-intro {
+            font-size: 0.9em;
+            margin: 0 0 0.6em;
+            color: var(--w-color-text-label);
+        }
+
+        .pdc-dependent-list {
+            margin: 0.5em 0 0 1.2em;
+            padding: 0;
+            font-size: 0.9em;
+            line-height: 1.8;
+        }
+
+        .pdc-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Disable Derived Product") subtitle=product_label icon="warning" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="pdc-warning-box">
+            <p class="pdc-warning-title">
+                {% blocktrans %}Disabling “{{ product_label }}” will also disable the products that depend on it:{% endblocktrans %}
+            </p>
+            <ul class="pdc-dependent-list">
+                {% for label in dependent_labels %}
+                    <li><strong>{{ label }}</strong></li>
+                {% endfor %}
+            </ul>
+            <p class="pdc-warning-intro">
+                {% trans "Their configuration is kept — they can be re-enabled later once their dependencies are on again." %}
+            </p>
+        </div>
+
+        <form method="post" action="{% url 'derived_product_tracking' %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="toggle">
+            <input type="hidden" name="product_pk" value="{{ product.pk }}">
+            <input type="hidden" name="confirmed" value="1">
+            <div class="pdc-actions">
+                <button type="submit" class="button no">
+                    {% trans "Yes, disable all" %}
+                </button>
+                <a href="{% url 'derived_product_tracking' %}" class="button button-secondary">
+                    {% trans "Cancel" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}
