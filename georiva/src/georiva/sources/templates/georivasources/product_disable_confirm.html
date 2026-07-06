@@ -59,16 +59,17 @@
             </p>
         </div>
 
-        <form method="post" action="{% url 'derived_product_tracking' %}">
+        <form method="post" action="{{ form_action }}">
             {% csrf_token %}
-            <input type="hidden" name="action" value="toggle">
-            <input type="hidden" name="product_pk" value="{{ product.pk }}">
+            {% for name, value in hidden_fields.items %}
+                <input type="hidden" name="{{ name }}" value="{{ value }}">
+            {% endfor %}
             <input type="hidden" name="confirmed" value="1">
             <div class="pdc-actions">
                 <button type="submit" class="button no">
                     {% trans "Yes, disable all" %}
                 </button>
-                <a href="{% url 'derived_product_tracking' %}" class="button button-secondary">
+                <a href="{{ cancel_url }}" class="button button-secondary">
                     {% trans "Cancel" %}
                 </a>
             </div>

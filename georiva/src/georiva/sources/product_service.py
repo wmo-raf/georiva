@@ -56,6 +56,77 @@ def product_label(product):
     return _label_of(product.definition_key, definitions)
 
 
+def build_chain(feed):
+    """
+    Read-model for the feed-detail chain panel (and the wizard's manage view):
+    the feed's declared products laid out in topological stage lanes, each bound
+    to its ``DerivedProduct`` row plus run status, readiness, and the catalog
+    Collections its outputs have materialised into.
+
+    Returns ``{"stages": [[card, ...], ...]}`` where a card is a dict of:
+    ``definition``, ``product`` (row), ``enabled``, ``needs`` (direct-dependency
+    labels for chips), ``status`` / ``last_activity`` (run aggregate),
+    ``readiness`` and ``readiness_hint`` (the staging-gap backfill nudge), the
+    materialised ``output_collections``, and ``can_run`` (manual/scheduled only).
+    """
+    from georiva.core.models import Collection
+    from georiva.core.product_chain import product_dependencies, topological_stages
+    from georiva.sources.derivation_tracking import product_readiness, product_status
+
+    real_feed = feed.get_real_instance()
+    definitions = real_feed.get_derived_products()
+    rows = {row.definition_key: row for row in real_feed.derived_products.all()}
+    label_by_key = {d.key: d.label for d in definitions}
+    deps = product_dependencies(definitions)
+
+    stages = []
+    for stage in topological_stages(definitions):
+        lane = []
+        for definition in stage:
+            product = rows.get(definition.key)
+            if product is None:
+                continue
+            status = product_status(product)
+            readiness = product_readiness(product)
+            output_slugs = [ref.collection for ref in definition.outputs]
+            lane.append({
+                "definition": definition,
+                "product": product,
+                "enabled": product.is_enabled,
+                "needs": [label_by_key[k] for k in sorted(deps.get(definition.key, ()))],
+                "status": status.status,
+                "last_activity": status.last_completed_at,
+                "readiness": readiness,
+                "readiness_hint": _readiness_hint(definition, readiness),
+                "output_collections": list(
+                    Collection.objects.filter(
+                        catalog=real_feed.catalog, slug__in=output_slugs
+                    )
+                ),
+                "can_run": definition.trigger_mode in ("manual", "scheduled"),
+            })
+        if lane:
+            stages.append(lane)
+    return {"stages": stages}
+
+
+def _readiness_hint(definition, readiness):
+    """A human nudge when a product is blocked. If the empty required input is a
+    staging-tier one, the data was likely fetched while the product was disabled
+    (so it went to sources, not staging) — point the operator at re-running the
+    feed to backfill."""
+    if readiness.ready or not readiness.blocked_by:
+        return None
+    blocked_ref = next(
+        (r for r in definition.inputs if r.role == readiness.blocked_by), None
+    )
+    if blocked_ref is not None and blocked_ref.tier == "staging":
+        return _(
+            "No staged data yet — re-run the feed to backfill this product's input."
+        )
+    return None
+
+
 def materialise_output_collections(feed, definition):
     """
     Get-or-create the catalog Collections a product declares as outputs, from

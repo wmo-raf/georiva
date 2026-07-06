@@ -51,105 +51,13 @@
             margin-bottom: 1em;
         }
 
-        .gprod-card {
-            border: 2px solid var(--w-color-border-furniture);
-            border-radius: 8px;
-            margin-bottom: 1em;
-            overflow: hidden;
-        }
-
-        .gprod-card__header {
-            padding: 0.85em 1.1em;
-            background: var(--w-color-grey-50);
-        }
-
-        .gprod-card__toggle {
-            display: flex;
-            align-items: center;
-            gap: 0.55em;
-            margin: 0 0 0.2em;
-            cursor: pointer;
-        }
-
-        .gprod-card__enable {
-            width: 1.05em;
-            height: 1.05em;
-            flex: 0 0 auto;
-        }
-
-        .gprod-card__name {
-            font-weight: 700;
-            font-size: 1em;
-            margin: 0;
-        }
-
-        .gprod-card--disabled {
-            opacity: 0.6;
-        }
-
-        .gprod-card__desc {
-            font-size: 0.82em;
-            color: var(--w-color-grey-400);
-            margin: 0;
-        }
-
-        .gprod-config-section {
-            padding: 0.85em 1.1em;
-            border-top: 1px solid var(--w-color-border-furniture);
-        }
-
-        .gprod-config-section .w-field__wrapper {
-            margin-bottom: 0.75em;
-        }
-
         .gprod-submit-row {
             display: flex;
             gap: 0.75em;
             margin-top: 1.5em;
         }
-
-        .gprod-stage {
-            margin-bottom: 1.5em;
-        }
-
-        .gprod-stage__label {
-            display: flex;
-            align-items: center;
-            gap: 0.5em;
-            font-size: 0.75em;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: var(--w-color-grey-400);
-            margin: 0 0 0.6em;
-        }
-
-        .gprod-stage__label::after {
-            content: "";
-            flex: 1 1 auto;
-            height: 1px;
-            background: var(--w-color-border-furniture);
-        }
-
-        .gprod-needs {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.4em;
-            margin: 0.5em 0 0;
-            font-size: 0.78em;
-            color: var(--w-color-grey-400);
-        }
-
-        .gprod-needs__chip {
-            padding: 0.15em 0.6em;
-            border-radius: 999px;
-            background: var(--w-color-surface-field);
-            border: 1px solid var(--w-color-border-furniture);
-            color: var(--w-color-text-label);
-            font-weight: 600;
-        }
     </style>
+    {% include "georivasources/includes/product_chain_styles.html" %}
 {% endblock %}
 
 {% block content %}
@@ -179,59 +87,7 @@
                 {% trans "Configure the derived products this feed produces. Each product turns the feed's data into a further derived layer. Products are grouped by dependency stage — enabling one that needs another turns its prerequisites on automatically." %}
             </p>
 
-            {% for lane in stage_lanes %}
-                <div class="gprod-stage">
-                    <p class="gprod-stage__label">{% blocktrans with n=forloop.counter %}Stage {{ n }}{% endblocktrans %}</p>
-                    {% for entry in lane %}
-                        {% with defn=entry.definition form=entry.config_form %}
-                            <div class="gprod-card{% if not entry.checked %} gprod-card--disabled{% endif %}"
-                                 id="gprod-{{ defn.key }}" data-product-key="{{ defn.key }}">
-                                <div class="gprod-card__header">
-                                    <label class="gprod-card__toggle">
-                                        <input type="checkbox" class="gprod-card__enable"
-                                               name="products" value="{{ defn.key }}"
-                                               {% if entry.checked %}checked{% endif %}>
-                                        <span class="gprod-card__name">{{ defn.label }}</span>
-                                    </label>
-                                    {% if defn.description %}
-                                        <p class="gprod-card__desc">{{ defn.description }}</p>
-                                    {% endif %}
-                                    {% if entry.needs %}
-                                        <p class="gprod-needs">
-                                            <span>{% trans "needs:" %}</span>
-                                            {% for need in entry.needs %}
-                                                <span class="gprod-needs__chip">{{ need }}</span>
-                                            {% endfor %}
-                                        </p>
-                                    {% endif %}
-                                </div>
-
-                                {% if form %}
-                                    <div class="gprod-config-section">
-                                        {% for field in form %}
-                                            <div class="w-field__wrapper">
-                                                <label class="w-field__label" for="{{ field.id_for_label }}">
-                                                    {{ field.label }}
-                                                </label>
-                                                {{ field }}
-                                                {% if field.help_text %}
-                                                    <p class="w-field__help-text">{{ field.help_text }}</p>
-                                                {% endif %}
-                                                {% for error in field.errors %}
-                                                    <p class="error-message">{{ error }}</p>
-                                                {% endfor %}
-                                            </div>
-                                        {% endfor %}
-                                        {% for error in form.non_field_errors %}
-                                            <p class="error-message">{{ error }}</p>
-                                        {% endfor %}
-                                    </div>
-                                {% endif %}
-                            </div>
-                        {% endwith %}
-                    {% endfor %}
-                </div>
-            {% endfor %}
+            {% include "georivasources/includes/product_chain.html" with mode="wizard" %}
 
             {{ dependencies_closure_json|json_script:"product-chain-dependencies" }}
             {{ dependents_closure_json|json_script:"product-chain-dependents" }}

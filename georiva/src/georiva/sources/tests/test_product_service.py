@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 
@@ -25,6 +26,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.sources.product_service import (
     ProductActionError,
+    build_chain,
     disable_product,
     enable_product,
     enabled_dependents,
@@ -265,6 +267,209 @@ class MaterialiseOutputCollectionsTests(TestCase):
         self.assertEqual(collection.description, "Operator note.")
         self.assertEqual(collection.visibility, Collection.Visibility.INTERNAL)
         self.assertEqual(Collection.objects.filter(slug="chirps-monthly-anomaly").count(), 1)
+
+
+class BuildChainTests(ProductServiceBase):
+    def _cards_by_key(self, chain):
+        return {c["product"].definition_key: c for lane in chain["stages"] for c in lane}
+
+    def test_stages_are_topological_with_dependency_chips(self):
+        with self._patch_defs():
+            chain = build_chain(self.feed)
+
+        keys_by_stage = [
+            [c["product"].definition_key for c in lane] for lane in chain["stages"]
+        ]
+        # promotion + climatology have no dependencies -> stage 1; anomaly -> 2.
+        self.assertEqual(keys_by_stage, [["promotion", "climatology"], ["anomaly"]])
+
+        cards = self._cards_by_key(chain)
+        self.assertEqual(cards["anomaly"]["needs"], ["Climatology"])
+        self.assertEqual(cards["climatology"]["needs"], [])
+
+    def test_card_carries_row_state_status_and_outputs(self):
+        # anomaly's output collection is materialised -> the card links it.
+        Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly-anomaly",
+            name="CHIRPS Monthly Anomaly",
+        )
+
+        with self._patch_defs():
+            cards = self._cards_by_key(build_chain(self.feed))
+
+        anomaly = cards["anomaly"]
+        self.assertTrue(anomaly["enabled"])
+        self.assertEqual(anomaly["status"], "idle")          # no runs yet
+        self.assertEqual(anomaly["definition"].label, "Anomaly")
+        self.assertEqual(
+            [c.slug for c in anomaly["output_collections"]],
+            ["chirps-monthly-anomaly"],
+        )
+
+    def test_manual_and_scheduled_products_are_runnable_event_ones_are_not(self):
+        # The fixture's products are all trigger_mode="scheduled" (see _product),
+        # so all can_run. Guard the flag exists and reflects trigger_mode.
+        with self._patch_defs():
+            cards = self._cards_by_key(build_chain(self.feed))
+
+        self.assertTrue(cards["climatology"]["can_run"])
+
+
+class BuildChainReadinessTests(TestCase):
+    """Readiness reason + the staging-gap hint on a blocked card."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
+        self.definition = _product(
+            "climatology",
+            inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="climatology",
+                               collection="chirps-monthly-climatology"),),
+        )
+        self.product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="climatology",
+            recipe_type="recipe", is_enabled=True,
+        )
+
+    def test_blocked_on_staging_input_shows_the_backfill_hint(self):
+        # No staging data for the required staging input -> blocked, and because
+        # the empty input is a staging-tier one, the hint points at re-running the
+        # feed (data fetched while disabled went to sources, not staging).
+        with patch.object(DataFeed, "get_derived_products", return_value=[self.definition]):
+            cards = [c for lane in build_chain(self.feed)["stages"] for c in lane]
+
+        card = cards[0]
+        self.assertFalse(card["readiness"].ready)
+        self.assertTrue(card["readiness_hint"])
+        self.assertIn("re-run", card["readiness_hint"].lower())
+
+
+class ProductChainPartialTests(ProductServiceBase):
+    """The shared stage-lane partial in manage mode renders the panel the feed
+    detail page shows (issue #169). Rendered directly because a full feed-detail
+    page needs a registered plugin feed; the wizard HTTP tests exercise the same
+    partial in wizard mode, so the two modes can't drift."""
+
+    def _render(self, ready=False):
+        with self._patch_defs():
+            if ready:
+                with patch(
+                    "georiva.sources.derivation_tracking.product_readiness"
+                ) as readiness:
+                    readiness.return_value.ready = True
+                    chain = build_chain(self.feed)
+            else:
+                chain = build_chain(self.feed)
+        return render_to_string(
+            "georivasources/includes/product_chain.html",
+            {"stage_lanes": chain["stages"], "mode": "manage", "feed": self.feed},
+        )
+
+    def test_renders_labels_dependency_chips_and_outputs(self):
+        Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly-anomaly",
+            name="CHIRPS Monthly Anomaly",
+        )
+
+        html = self._render()
+
+        self.assertIn("Anomaly", html)                     # card label
+        self.assertIn("Climatology", html)                 # needs chip
+        self.assertIn("CHIRPS Monthly Anomaly", html)      # output collection
+
+    def test_renders_per_product_toggle_and_run_actions(self):
+        # Toggle is always available; the Run-now form appears only for a ready
+        # product (a blocked one shows a disabled button instead).
+        html = self._render(ready=True)
+
+        self.assertIn(
+            f"/products/{self.rows['anomaly'].pk}/toggle/", html
+        )
+        self.assertIn(
+            f"/products/{self.rows['climatology'].pk}/run/", html
+        )
+
+
+class FeedProductEndpointTests(ProductServiceBase):
+    """The feed-detail panel's per-product actions (toggle / run) route through
+    the same gate/cascade service as the tracking dashboard (issue #169)."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_superuser("feed", "f@test.com", "pw")
+        self.client.force_login(self.user)
+
+    def _url(self, name, product):
+        return reverse(name, kwargs={"feed_pk": self.feed.pk, "product_pk": product.pk})
+
+    def test_run_dispatches_a_ready_product(self):
+        with (
+            self._patch_defs(),
+            patch("georiva.sources.derivation_tracking.product_readiness") as readiness,
+            patch("georiva.sources.derivation_invocation.run_product_now") as run_now,
+        ):
+            readiness.return_value.ready = True
+            self.client.post(self._url("feed_product_run", self.rows["climatology"]))
+
+        run_now.assert_called_once_with(self.rows["climatology"])
+
+    def test_run_refuses_a_blocked_product_with_its_reason(self):
+        with (
+            self._patch_defs(),
+            patch("georiva.sources.derivation_tracking.product_readiness") as readiness,
+            patch("georiva.sources.derivation_invocation.run_product_now") as run_now,
+        ):
+            readiness.return_value.ready = False
+            readiness.return_value.reason = "value empty"
+            response = self.client.post(
+                self._url("feed_product_run", self.rows["climatology"])
+            )
+
+        run_now.assert_not_called()
+        msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn("value empty", msgs)
+
+    def test_toggle_enable_enforces_the_dependency_gate(self):
+        self.rows["climatology"].is_enabled = False
+        self.rows["climatology"].save(update_fields=["is_enabled"])
+        self.rows["anomaly"].is_enabled = False
+        self.rows["anomaly"].save(update_fields=["is_enabled"])
+
+        with self._patch_defs():
+            response = self.client.post(
+                self._url("feed_product_toggle", self.rows["anomaly"])
+            )
+
+        self.rows["anomaly"].refresh_from_db()
+        self.assertFalse(self.rows["anomaly"].is_enabled)
+        msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn("Climatology", msgs)
+
+    def test_toggle_disable_with_dependents_shows_confirmation(self):
+        with self._patch_defs():
+            response = self.client.post(
+                self._url("feed_product_toggle", self.rows["climatology"])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Anomaly")
+        self.rows["climatology"].refresh_from_db()
+        self.assertTrue(self.rows["climatology"].is_enabled)
+
+    def test_toggle_disable_confirmed_cascades(self):
+        with self._patch_defs():
+            self.client.post(
+                self._url("feed_product_toggle", self.rows["climatology"]),
+                {"confirmed": "1"},
+            )
+
+        self.rows["climatology"].refresh_from_db()
+        self.rows["anomaly"].refresh_from_db()
+        self.assertFalse(self.rows["climatology"].is_enabled)
+        self.assertFalse(self.rows["anomaly"].is_enabled)
 
 
 class TrackingToggleFlowTests(ProductServiceBase):
