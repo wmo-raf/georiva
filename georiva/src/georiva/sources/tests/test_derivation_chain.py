@@ -98,15 +98,57 @@ class BuildChainGraphTests(TestCase):
         self.assertFalse(edge.ready)              # required input empty
         self.assertIn("value", edge.reason)       # blocking reason named
 
-    def test_disabled_product_is_not_an_edge(self):
+    def test_enabled_product_edge_is_tagged_enabled(self):
+        definition = _definition()
+        self._product(definition)
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[definition]):
+            graph = build_chain_graph(self.feed)
+
+        self.assertEqual(graph.edges[0].state, "enabled")
+
+    def test_disabled_product_is_a_configured_off_edge(self):
+        # The diagram now agrees with the management panel: a disabled product is
+        # a configured-but-off edge, not omitted.
         definition = _definition()
         self._product(definition, is_enabled=False)
 
         with patch.object(DataFeed, "get_derived_products", return_value=[definition]):
             graph = build_chain_graph(self.feed)
 
-        self.assertEqual(graph.edges, [])
-        self.assertEqual(graph.nodes, [])
+        self.assertEqual(len(graph.edges), 1)
+        self.assertEqual(graph.edges[0].state, "disabled")
+        # Its collections are still nodes in the topology.
+        self.assertEqual(
+            {n.collection for n in graph.nodes}, {"rainfall", "rainfall-anomaly"}
+        )
+
+    def test_declared_definition_without_a_row_is_a_new_edge(self):
+        # A plugin update added a product; no row yet.
+        definition = _definition()
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[definition]):
+            graph = build_chain_graph(self.feed)
+
+        self.assertEqual(len(graph.edges), 1)
+        edge = graph.edges[0]
+        self.assertEqual(edge.state, "new")
+        self.assertIsNone(edge.product_id)
+        self.assertEqual(edge.inputs, ["rainfall"])
+        self.assertEqual(edge.outputs, ["rainfall-anomaly"])
+
+    def test_orphaned_row_is_a_flagged_edge(self):
+        # A row the declaration no longer includes -> orphan edge.
+        definition = _definition()
+        self._product(definition)
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            graph = build_chain_graph(self.feed)
+
+        self.assertEqual(len(graph.edges), 1)
+        edge = graph.edges[0]
+        self.assertEqual(edge.state, "orphaned")
+        self.assertEqual(edge.label, "anomaly")  # no declaration -> key fallback
 
 
 class ItemLineageTests(TestCase):
@@ -175,6 +217,25 @@ class ChainViewTests(TestCase):
         self.assertContains(response, "rainfall")           # an input node
         self.assertContains(response, "rainfall-anomaly")   # an output node
         self.assertContains(response, "Rainfall anomaly")   # the product edge label
+
+    def test_chain_page_labels_the_product_states(self):
+        from django.urls import reverse
+
+        # anomaly has a row (enabled); a second declared 'promotion' has no row
+        # (new); the diagram should label both, consistent with the panel.
+        promotion = _definition(
+            key="promotion", label="Serve raw",
+            inputs=(InputRef(role="source", collection="rainfall", tier="staging"),),
+            outputs=(OutputRef(role="served", collection="rainfall"),),
+        )
+        with patch.object(DataFeed, "get_derived_products",
+                          return_value=[_definition(), promotion]):
+            response = self.client.get(
+                reverse("derived_product_chain", kwargs={"feed_pk": self.feed.pk})
+            )
+
+        self.assertContains(response, "Enabled")
+        self.assertContains(response, "New — not enabled")
 
 
 class ItemLineageViewTests(TestCase):

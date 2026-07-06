@@ -24,8 +24,14 @@ class ChainNode:
 
 @dataclass
 class ChainEdge:
-    """A product: a hyperedge from its input collections to its output ones."""
-    product_id: int
+    """A product: a hyperedge from its input collections to its output ones.
+
+    ``state`` mirrors the management panel's vocabulary so the two agree:
+    ``enabled`` (configured and on), ``disabled`` (configured but off), ``new``
+    (a declared definition with no row yet), or ``orphaned`` (a row the plugin no
+    longer declares). ``product_id`` is None for a ``new`` edge.
+    """
+    product_id: int | None
     label: str
     recipe_type: str
     trigger_mode: str
@@ -34,6 +40,7 @@ class ChainEdge:
     status: str = "idle"
     ready: bool = True
     reason: str | None = None
+    state: str = "enabled"
 
 
 @dataclass
@@ -43,33 +50,62 @@ class ChainGraph:
 
 
 def build_chain_graph(data_feed) -> ChainGraph:
-    """Turn a feed's enabled products + their declarations into a planned DAG."""
+    """Turn a feed's declarations + configured products into a planned DAG that
+    agrees with the management panel: every declared product is an edge tagged
+    with its state (enabled / disabled / new), plus a flagged orphan edge for any
+    row the plugin no longer declares. Enabled edges keep the status/readiness
+    overlay."""
     from georiva.sources.derivation_tracking import product_readiness, product_status
     from georiva.sources.models import DerivedProduct
 
+    real_feed = data_feed.get_real_instance()
+    definitions = real_feed.get_derived_products()
+    rows = {row.definition_key: row for row in DerivedProduct.objects.filter(data_feed=data_feed)}
+    declared_keys = {d.key for d in definitions}
+
     edges = []
     node_slugs = []
-    for product in DerivedProduct.objects.filter(data_feed=data_feed, is_enabled=True):
-        definition = definition_for(product)
-        if definition is None:
-            continue
-        inputs = [ref.collection for ref in definition.inputs]
-        outputs = [ref.collection for ref in definition.outputs]
-        for slug in inputs + outputs:
+
+    def _add_nodes(slugs):
+        for slug in slugs:
             if slug not in node_slugs:
                 node_slugs.append(slug)
-        readiness = product_readiness(product)
+
+    for definition in definitions:
+        inputs = [ref.collection for ref in definition.inputs]
+        outputs = [ref.collection for ref in definition.outputs]
+        _add_nodes(inputs + outputs)
+        row = rows.get(definition.key)
+        if row is None:
+            # A declared definition an upgrade added, not yet provisioned.
+            edges.append(ChainEdge(
+                product_id=None, label=definition.label,
+                recipe_type=definition.recipe_type,
+                trigger_mode=definition.trigger_mode,
+                inputs=inputs, outputs=outputs, state="new",
+            ))
+            continue
+        readiness = product_readiness(row)
         edges.append(ChainEdge(
-            product_id=product.pk,
-            label=definition.label,
+            product_id=row.pk, label=row.display_label,
             recipe_type=definition.recipe_type,
             trigger_mode=definition.trigger_mode,
-            inputs=inputs,
-            outputs=outputs,
-            status=product_status(product).status,
-            ready=readiness.ready,
-            reason=readiness.reason,
+            inputs=inputs, outputs=outputs,
+            status=product_status(row).status,
+            ready=readiness.ready, reason=readiness.reason,
+            state="enabled" if row.is_enabled else "disabled",
         ))
+
+    # Orphaned rows: no declaration, so no inputs/outputs to draw — a flagged,
+    # collection-less edge listed after the topology.
+    for row in rows.values():
+        if row.definition_key not in declared_keys:
+            edges.append(ChainEdge(
+                product_id=row.pk, label=row.display_label,
+                recipe_type=row.recipe_type, trigger_mode="",
+                inputs=[], outputs=[],
+                status=product_status(row).status, state="orphaned",
+            ))
 
     return ChainGraph(nodes=[ChainNode(slug) for slug in node_slugs], edges=edges)
 
