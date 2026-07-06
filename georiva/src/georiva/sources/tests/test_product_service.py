@@ -28,9 +28,12 @@ from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.sources.product_service import (
     ProductActionError,
     build_chain,
+    delete_orphan,
     disable_product,
+    enable_new_definition,
     enable_product,
     enabled_dependents,
+    is_orphaned,
     materialise_output_collections,
     product_label,
 )
@@ -335,6 +338,120 @@ class BuildChainTests(ProductServiceBase):
         self.assertTrue(cards["climatology"]["can_run"])
 
 
+class UpgradeLifecycleServiceTests(ProductServiceBase):
+    """Across a plugin upgrade the chain merges live declaration with DB state:
+    a declared definition with no row is 'new', a row with no declaration is an
+    'orphan' (issue #171)."""
+
+    def _cards(self, chain):
+        return {c["definition"].key: c
+                for lane in chain["stages"] for c in lane if c["definition"]}
+
+    def test_declared_definition_without_a_row_is_a_new_card(self):
+        # A plugin update added 'anomaly' — drop its row to simulate the pre-run
+        # state; it should still appear in its stage, flagged new.
+        self.rows["anomaly"].delete()
+
+        with self._patch_defs():
+            chain = build_chain(self.feed)
+
+        cards = self._cards(chain)
+        self.assertTrue(cards["anomaly"]["is_new"])
+        self.assertIsNone(cards["anomaly"]["product"])
+        self.assertFalse(cards["anomaly"]["enabled"])
+        # The still-provisioned products are not flagged new.
+        self.assertFalse(cards["climatology"]["is_new"])
+
+    def test_row_without_a_declaration_is_an_orphan_lane(self):
+        # A plugin update removed 'promotion' from the declaration; its row
+        # survives as an orphan.
+        clim = _product(
+            "climatology",
+            inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="climatology", collection="chirps-monthly-climatology"),),
+        )
+        anomaly = _product(
+            "anomaly",
+            inputs=(
+                InputRef(role="value", collection="chirps-monthly", tier="staging"),
+                InputRef(role="baseline", collection="chirps-monthly-climatology", tier="published"),
+            ),
+            outputs=(OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),),
+        )
+        with patch.object(DataFeed, "get_derived_products", return_value=[clim, anomaly]):
+            chain = build_chain(self.feed)
+
+        orphan_keys = [c["product"].definition_key for c in chain["orphans"]]
+        self.assertEqual(orphan_keys, ["promotion"])
+        self.assertTrue(chain["orphans"][0]["orphaned"])
+        # The orphan does not leak into the topological stages.
+        self.assertNotIn("promotion", self._cards(chain))
+
+    def test_is_orphaned_reflects_a_missing_declaration(self):
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            self.assertTrue(is_orphaned(self.rows["promotion"]))
+        with self._patch_defs():
+            self.assertFalse(is_orphaned(self.rows["promotion"]))
+
+
+class EnableNewDefinitionTests(ProductServiceBase):
+    def test_provisions_the_row_enforces_the_gate_and_materialises(self):
+        self.rows["anomaly"].delete()   # 'anomaly' is a new (rowless) definition
+        definition = next(d for d in _chirps_defs() if d.key == "anomaly")
+
+        with self._patch_defs():
+            product = enable_new_definition(self.feed, definition, {})
+
+        self.assertTrue(product.is_enabled)
+        self.assertEqual(product.definition_key, "anomaly")
+        # Its declared output collection materialised on enable.
+        self.assertTrue(
+            Collection.objects.filter(
+                catalog=self.catalog, slug="chirps-monthly-anomaly"
+            ).exists()
+        )
+
+    def test_is_gated_on_dependencies_being_enabled(self):
+        self.rows["anomaly"].delete()
+        self.rows["climatology"].is_enabled = False
+        self.rows["climatology"].save(update_fields=["is_enabled"])
+        definition = next(d for d in _chirps_defs() if d.key == "anomaly")
+
+        with self._patch_defs():
+            with self.assertRaises(ProductActionError):
+                enable_new_definition(self.feed, definition, {})
+
+        # No half-provisioned enabled row left behind.
+        self.assertFalse(
+            DerivedProduct.objects.filter(
+                data_feed=self.feed, definition_key="anomaly", is_enabled=True
+            ).exists()
+        )
+
+
+class DeleteOrphanTests(ProductServiceBase):
+    def test_deletes_only_the_row_keeping_collections(self):
+        # 'promotion' orphaned; its output collection already published.
+        Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
+        )
+        promotion = self.rows["promotion"]
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            delete_orphan(promotion)
+
+        self.assertFalse(DerivedProduct.objects.filter(pk=promotion.pk).exists())
+        # The published collection and its data are untouched.
+        self.assertTrue(Collection.objects.filter(slug="chirps-monthly").exists())
+
+    def test_refuses_to_delete_a_still_declared_product(self):
+        with self._patch_defs():
+            with self.assertRaises(ProductActionError):
+                delete_orphan(self.rows["promotion"])
+
+        self.assertTrue(DerivedProduct.objects.filter(pk=self.rows["promotion"].pk).exists())
+
+
 class BuildChainReadinessTests(TestCase):
     """Readiness reason + the staging-gap hint on a blocked card."""
 
@@ -411,6 +528,37 @@ class ProductChainPartialTests(ProductServiceBase):
         self.assertIn(
             f"/products/{self.rows['climatology'].pk}/run/", html
         )
+
+    def test_renders_new_card_and_orphan_lane(self):
+        # anomaly's row deleted -> "new"; promotion dropped from the declaration
+        # -> orphan.
+        promotion_pk = self.rows["promotion"].pk
+        self.rows["anomaly"].delete()
+        clim = _product(
+            "climatology",
+            inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="climatology", collection="chirps-monthly-climatology"),),
+        )
+        anomaly = _product(
+            "anomaly",
+            inputs=(
+                InputRef(role="value", collection="chirps-monthly", tier="staging"),
+                InputRef(role="baseline", collection="chirps-monthly-climatology", tier="published"),
+            ),
+            outputs=(OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),),
+        )
+        with patch.object(DataFeed, "get_derived_products", return_value=[clim, anomaly]):
+            chain = build_chain(self.feed)
+        html = render_to_string(
+            "georivasources/includes/product_chain.html",
+            {"stage_lanes": chain["stages"], "orphans": chain["orphans"],
+             "mode": "manage", "feed": self.feed},
+        )
+
+        self.assertIn("New — not enabled", html)
+        self.assertIn("/products/enable/anomaly/", html)     # inline enable link
+        self.assertIn("No longer provided", html)
+        self.assertIn(f"/products/{promotion_pk}/delete/", html)  # orphan delete link
 
 
 class SemanticSurvivalTests(ProductServiceBase):
@@ -551,6 +699,80 @@ class ProductEditViewTests(ProductServiceBase):
         self.assertEqual(response.status_code, 200)   # re-rendered, not redirected
         self.clim.refresh_from_db()
         self.assertNotIn("quantity", self.clim.config)
+
+
+class UpgradeLifecycleEndpointTests(ProductServiceBase):
+    """Inline enable of a new (rowless) definition and delete of an orphan row,
+    from the feed panel (issue #171)."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_superuser("up", "u@t.com", "pw")
+        self.client.force_login(self.user)
+
+    def test_enable_new_get_shows_the_config_form(self):
+        self.rows["anomaly"].delete()
+        url = reverse("feed_product_enable_new",
+                      kwargs={"feed_pk": self.feed.pk, "definition_key": "anomaly"})
+
+        with self._patch_defs():
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Anomaly")
+
+    def test_enable_new_post_provisions_enables_and_materialises(self):
+        self.rows["anomaly"].delete()
+        url = reverse("feed_product_enable_new",
+                      kwargs={"feed_pk": self.feed.pk, "definition_key": "anomaly"})
+
+        with self._patch_defs():
+            self.client.post(url, {})
+
+        product = DerivedProduct.objects.get(
+            data_feed=self.feed, definition_key="anomaly"
+        )
+        self.assertTrue(product.is_enabled)
+        self.assertTrue(
+            Collection.objects.filter(slug="chirps-monthly-anomaly").exists()
+        )
+
+    def test_delete_orphan_get_shows_data_kept_confirmation(self):
+        url = reverse("feed_product_delete_orphan",
+                      kwargs={"feed_pk": self.feed.pk, "product_pk": self.rows["promotion"].pk})
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        # The confirmation states data is kept.
+        self.assertContains(response, "kept")
+
+    def test_delete_orphan_post_removes_only_the_row(self):
+        Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
+        )
+        promotion_pk = self.rows["promotion"].pk
+        url = reverse("feed_product_delete_orphan",
+                      kwargs={"feed_pk": self.feed.pk, "product_pk": promotion_pk})
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            self.client.post(url)
+
+        self.assertFalse(DerivedProduct.objects.filter(pk=promotion_pk).exists())
+        self.assertTrue(Collection.objects.filter(slug="chirps-monthly").exists())
+
+    def test_delete_orphan_refuses_a_still_declared_product(self):
+        url = reverse("feed_product_delete_orphan",
+                      kwargs={"feed_pk": self.feed.pk, "product_pk": self.rows["promotion"].pk})
+
+        with self._patch_defs():
+            self.client.post(url)
+
+        # Still declared -> not deleted.
+        self.assertTrue(
+            DerivedProduct.objects.filter(pk=self.rows["promotion"].pk).exists()
+        )
 
 
 class FeedProductEndpointTests(ProductServiceBase):

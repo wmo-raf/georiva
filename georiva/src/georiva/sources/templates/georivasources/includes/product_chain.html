@@ -1,120 +1,24 @@
 {% load i18n %}
 {% comment %}
-Shared stage-lane / product-card partial for the derived-products chain.
-
-Rendered by both surfaces so they can't drift:
-  - mode="wizard": each card carries an enable checkbox + config form
-    (context: stage_lanes of entries {definition, config_form, checked, needs}).
-  - mode="manage": each card shows enabled/status/readiness/outputs + toggle and
-    Run-now actions (context: stage_lanes of build_chain cards; requires `feed`).
+Shared stage-lane partial for the derived-products chain, delegating each card
+to _product_card.html so the wizard and feed panel can't drift:
+  - mode="wizard": stage_lanes of entries {definition, config_form, checked, needs}.
+  - mode="manage": stage_lanes of build_chain cards + optional `orphans` lane
+    (context requires `feed`).
 {% endcomment %}
 {% for lane in stage_lanes %}
     <div class="gprod-stage">
         <p class="gprod-stage__label">{% blocktrans with n=forloop.counter %}Stage {{ n }}{% endblocktrans %}</p>
         {% for card in lane %}
-            {% with defn=card.definition %}
-                <div class="gprod-card{% if mode == 'wizard' and not card.checked %} gprod-card--disabled{% elif mode == 'manage' and not card.enabled %} gprod-card--disabled{% endif %}"
-                     id="gprod-{{ defn.key }}" data-product-key="{{ defn.key }}">
-                    <div class="gprod-card__header">
-                        {% if mode == "wizard" %}
-                            <label class="gprod-card__toggle">
-                                <input type="checkbox" class="gprod-card__enable"
-                                       name="products" value="{{ defn.key }}"
-                                       {% if card.checked %}checked{% endif %}>
-                                <span class="gprod-card__name">{{ defn.label }}</span>
-                            </label>
-                        {% else %}
-                            <div class="gprod-card__title-row">
-                                <span class="gprod-card__name">{{ card.display_label|default:defn.label }}</span>
-                                <span class="gprod-badge gprod-badge--{% if card.enabled %}on{% else %}off{% endif %}">
-                                    {% if card.enabled %}{% trans "Enabled" %}{% else %}{% trans "Disabled" %}{% endif %}
-                                </span>
-                                <span class="gprod-pill gprod-pill--{{ card.status }}">{{ card.status }}</span>
-                                <a class="gprod-card__edit" href="{% url 'feed_product_edit' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Edit" %}</a>
-                            </div>
-                        {% endif %}
-                        {% with card_desc=card.display_description|default:defn.description %}
-                            {% if card_desc %}
-                                <p class="gprod-card__desc">{{ card_desc }}</p>
-                            {% endif %}
-                        {% endwith %}
-                        {% if card.needs %}
-                            <p class="gprod-needs">
-                                <span>{% trans "needs:" %}</span>
-                                {% for need in card.needs %}
-                                    <span class="gprod-needs__chip">{{ need }}</span>
-                                {% endfor %}
-                            </p>
-                        {% endif %}
-                    </div>
-
-                    {% if mode == "wizard" %}
-                        {% if card.config_form %}
-                            <div class="gprod-config-section">
-                                {% for field in card.config_form %}
-                                    <div class="w-field__wrapper">
-                                        <label class="w-field__label" for="{{ field.id_for_label }}">
-                                            {{ field.label }}
-                                        </label>
-                                        {{ field }}
-                                        {% if field.help_text %}
-                                            <p class="w-field__help-text">{{ field.help_text }}</p>
-                                        {% endif %}
-                                        {% for error in field.errors %}
-                                            <p class="error-message">{{ error }}</p>
-                                        {% endfor %}
-                                    </div>
-                                {% endfor %}
-                                {% for error in card.config_form.non_field_errors %}
-                                    <p class="error-message">{{ error }}</p>
-                                {% endfor %}
-                            </div>
-                        {% endif %}
-                    {% else %}
-                        <div class="gprod-manage-body">
-                            {% if card.output_collections %}
-                                <div class="gprod-outputs">
-                                    <span class="gprod-outputs__label">{% trans "Outputs:" %}</span>
-                                    {% for col in card.output_collections %}
-                                        <span class="gprod-outputs__item">
-                                            {{ col.name }}{% if col.visibility == "internal" %} · {% trans "internal" %}{% endif %}
-                                        </span>
-                                    {% endfor %}
-                                </div>
-                            {% endif %}
-                            {% if not card.readiness.ready %}
-                                <p class="gprod-readiness">
-                                    {% trans "Blocked" %}: {{ card.readiness.reason }}
-                                    {% if card.readiness_hint %}
-                                        <span class="gprod-readiness__hint">{{ card.readiness_hint }}</span>
-                                    {% endif %}
-                                </p>
-                            {% endif %}
-                            <div class="gprod-actions">
-                                <form method="post" action="{% url 'feed_product_toggle' feed_pk=feed.pk product_pk=card.product.pk %}">
-                                    {% csrf_token %}
-                                    <button type="submit" class="button button-small button-secondary">
-                                        {% if card.enabled %}{% trans "Disable" %}{% else %}{% trans "Enable" %}{% endif %}
-                                    </button>
-                                </form>
-                                {% if card.can_run %}
-                                    {% if card.readiness.ready %}
-                                        <form method="post" action="{% url 'feed_product_run' feed_pk=feed.pk product_pk=card.product.pk %}">
-                                            {% csrf_token %}
-                                            <button type="submit" class="button button-small">{% trans "Run now" %}</button>
-                                        </form>
-                                    {% else %}
-                                        <button type="button" class="button button-small" disabled
-                                                title="{{ card.readiness.reason }}">
-                                            {% trans "Run now" %}
-                                        </button>
-                                    {% endif %}
-                                {% endif %}
-                            </div>
-                        </div>
-                    {% endif %}
-                </div>
-            {% endwith %}
+            {% include "georivasources/includes/_product_card.html" %}
         {% endfor %}
     </div>
 {% endfor %}
+{% if orphans %}
+    <div class="gprod-stage gprod-stage--orphans">
+        <p class="gprod-stage__label">{% trans "No longer provided by this plugin" %}</p>
+        {% for card in orphans %}
+            {% include "georivasources/includes/_product_card.html" %}
+        {% endfor %}
+    </div>
+{% endif %}
