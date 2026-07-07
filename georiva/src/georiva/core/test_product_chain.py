@@ -200,6 +200,55 @@ class ValidateChainTests(SimpleTestCase):
         with self.assertRaises(ChainCycleError):
             validate_chain([loop])
 
+    def test_two_products_declaring_the_same_output_key_are_rejected(self):
+        # An output collection may have exactly one producer — two products
+        # claiming the same output key is ambiguous provenance (ADR-0010 §1).
+        a = _product("a", outputs=(OutputRef(role="o", collection="shared-out"),))
+        b = _product("b", outputs=(OutputRef(role="o", collection="shared-out"),))
+        with self.assertRaises(ChainError) as ctx:
+            validate_chain([a, b])
+        self.assertIn("shared-out", str(ctx.exception))
+
+    def test_input_key_outside_the_feed_namespace_is_rejected(self):
+        # When collection_keys is supplied, every input must resolve to either a
+        # raw collection-definition key or a sibling product's output key
+        # (ADR-0010 §1). A key that is neither is a plugin bug.
+        product = _product(
+            "clim",
+            inputs=(InputRef(role="value", collection="ghost-raw", tier="staging"),),
+            outputs=(OutputRef(role="o", collection="clim-out"),),
+        )
+        with self.assertRaises(ChainError) as ctx:
+            validate_chain([product], collection_keys={"chirps-monthly"})
+        self.assertIn("ghost-raw", str(ctx.exception))
+
+    def test_raw_input_resolving_only_via_a_collection_key_validates(self):
+        # A staging input whose collection is a raw definition key (not any
+        # product's output — e.g. a feed with no promotion) resolves through the
+        # collection namespace and validates silently.
+        product = _product(
+            "clim",
+            inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="o", collection="chirps-monthly-climatology"),),
+        )
+        self.assertIsNone(
+            validate_chain([product], collection_keys={"chirps-monthly"})
+        )
+
+    def test_promotion_output_may_reuse_the_raw_collection_key(self):
+        # A promotion serves the raw collection 1:1, so its output key *equals*
+        # the raw collection-definition key by design (ADR-0010 §1, softened).
+        # This must validate even with the raw collection namespace supplied —
+        # the collision rule is output-vs-output only, never output-vs-raw-key.
+        promotion = _product(
+            "promotion",
+            inputs=(InputRef(role="source", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="served", collection="chirps-monthly"),),
+        )
+        self.assertIsNone(
+            validate_chain([promotion], collection_keys={"chirps-monthly"})
+        )
+
 
 class TopologicalStagesTests(SimpleTestCase):
     def test_dependencies_land_in_an_earlier_stage_than_dependents(self):

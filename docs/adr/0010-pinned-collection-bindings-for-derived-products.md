@@ -83,9 +83,14 @@ output key), so plugin churn is minimal.
 
 `core.product_chain.validate_chain` is extended: every `InputRef` key must
 resolve within the feed namespace (a definition key, or a sibling product's
-output key), and output keys must not collide with definition keys or each
-other. An unresolvable key is a plugin bug that **fails loudly** at declaration
-time — this check alone would have caught failure class 1.
+output key), and no two distinct products may declare the same output key
+(ambiguous provenance). An output key that *equals* a raw definition key is
+**allowed** — a promotion serving the raw collection 1:1 reuses the raw key as
+its own served output by design, and after §5's unified slug scheme the two
+resolve to the same `core.Collection`; the collision rule is therefore
+output-vs-output only, never output-vs-definition-key. An unresolvable key is a
+plugin bug that **fails loudly** at declaration time — this check alone would
+have caught failure class 1.
 
 ### 2. Bindings are resolved and pinned at provision/enable time
 

@@ -6,7 +6,11 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.core.unit_utils import ureg
-from georiva.sources.collection_definitions import CollectionVariable
+from georiva.sources.collection_definitions import (
+    CollectionDefinition,
+    CollectionVariable,
+)
+from georiva.sources.models import DataFeed
 from georiva.sources.parameters import SourceKey
 from georiva.sources.setup_service import SourceSetupService
 
@@ -14,6 +18,35 @@ from georiva.sources.setup_service import SourceSetupService
 def _collection():
     catalog = Catalog.objects.create(name="Cat", slug="cat", file_format="grib2")
     return Collection.objects.create(name="Col", slug="col", catalog=catalog)
+
+
+class ProvisionCollectionSlugTests(TestCase):
+    """The provisioned raw collection's slug is derived from the definition key
+    alone — no catalog prefix (ADR-0010 §5), so the slug matches the key the
+    derived-product declarations reference."""
+
+    def test_slug_is_the_definition_key_without_a_catalog_prefix(self):
+        service = SourceSetupService()
+        catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        feed = DataFeed.objects.create(name="Rain Feed", catalog=catalog)
+        definition = CollectionDefinition(
+            key="chirps-monthly",
+            name="CHIRPS Monthly",
+            time_resolution="monthly",
+            variables=(CollectionVariable(
+                key="precip", name="Precipitation", source_units="mm",
+                source_variable=SourceKey(name="band_1"),
+            ),),
+        )
+
+        collection = service.provision_collection(
+            catalog=catalog, definition=definition, data_feed=feed,
+            config_values={},
+        )
+
+        self.assertEqual(collection.slug, "chirps-monthly")
 
 
 class UpsertVariableUnitsTests(TestCase):

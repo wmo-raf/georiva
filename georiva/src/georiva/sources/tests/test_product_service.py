@@ -140,6 +140,29 @@ class EnableGateTests(ProductServiceBase):
         self.rows["promotion"].refresh_from_db()
         self.assertTrue(self.rows["promotion"].is_enabled)
 
+    def test_enable_is_refused_when_an_input_key_does_not_resolve(self):
+        # A product whose declared input names a collection the feed neither
+        # provides (no CollectionDefinition / link) nor produces (no sibling
+        # output) can't be pinned — enabling it fails loudly, naming the key,
+        # and leaves the row disabled (ADR-0010 §2).
+        broken = _product(
+            "broken",
+            inputs=(InputRef(role="value", collection="ghost-raw", tier="staging"),),
+            outputs=(OutputRef(role="o", collection="broken-out"),),
+        )
+        row = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="broken",
+            recipe_type="recipe", is_enabled=False,
+        )
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[broken]):
+            with self.assertRaises(ProductActionError) as ctx:
+                enable_product(row)
+
+        self.assertIn("ghost-raw", str(ctx.exception))
+        row.refresh_from_db()
+        self.assertFalse(row.is_enabled)
+
     def test_enable_materialises_the_products_output_collections(self):
         # Enabling makes the output collection appear in the catalog immediately,
         # before any recipe run.
