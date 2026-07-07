@@ -24,10 +24,28 @@ from georiva.processing.recipe import (
 from georiva.processing.registry import RecipeRegistry
 
 
+def _array_stats(data) -> dict:
+    """min/max/mean/std over the finite pixels of a raster band."""
+    import numpy as np
+
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        return {}
+    return {
+        "min": float(np.min(finite)),
+        "max": float(np.max(finite)),
+        "mean": float(np.mean(finite)),
+        "std": float(np.std(finite)),
+    }
+
+
 @RecipeRegistry.register
 class PromotionRecipe(BaseRecipe):
     type = "promotion"
-    version = "1"
+    # v2: promotion now materialises a COG + a visual PNG (was a raw-GeoTIFF
+    # passthrough), so the served item is tile-servable and shows in the catalog.
+    # Bumping the version re-derives already-promoted items on the next sweep.
+    version = "2"
 
     # ---- declarative surface ------------------------------------------------
 
@@ -115,18 +133,45 @@ class PromotionRecipe(BaseRecipe):
                     f"Promotion: no Variable for staging asset {asset.pk}; "
                     f"set one on the asset or on collection '{collection.slug}'"
                 )
+            data, bounds, crs, width, height = self.read_raster(
+                BucketType.STAGING, asset.href
+            )
+            stats = _array_stats(data)
+            # A served COG (data) + a visual PNG (encoded by the engine), the
+            # same pair ingestion writes — so promotion output is tile-servable
+            # and shows in the public catalog (which is COG-gated).
             out.append(OutputAsset(
-                variable=variable,
-                roles=["data"],
-                format=asset.format or "geotiff",
-                passthrough=(BucketType.STAGING, asset.href),
-                bounds=si.bounds,
-                crs=si.crs,
-                width=si.width,
-                height=si.height,
-                checksum=asset.checksum,
+                variable=variable, roles=["data"], format="cog", array=data,
+                bounds=bounds, crs=crs, width=width, height=height,
+                stats=stats, checksum=asset.checksum,
+            ))
+            out.append(OutputAsset(
+                variable=variable, roles=["visual"], format="png", array=data,
+                bounds=bounds, crs=crs, width=width, height=height,
             ))
         return out
+
+    # ---- I/O seam (mocked in tests) -----------------------------------------
+
+    def read_raster(self, bucket_type, href):
+        """Read a stored single-band raster into
+        ``(data, bounds, crs, width, height)`` — the recipe's only real I/O,
+        patched in unit tests. Nodata is mapped to NaN so the COG stats and the
+        PNG alpha both skip it."""
+        import numpy as np
+        import rasterio
+        from rasterio.io import MemoryFile
+
+        from georiva.core.storage import storage
+
+        raw = storage.bucket(bucket_type).read_bytes(href)
+        with MemoryFile(raw) as memfile, memfile.open() as src:
+            data = src.read(1).astype("float32")
+            if src.nodata is not None:
+                data = np.where(data == src.nodata, np.nan, data)
+            bounds = list(src.bounds)
+            crs = src.crs.to_string() if src.crs else "EPSG:4326"
+            return data, bounds, crs, src.width, src.height
 
     # ---- helpers ------------------------------------------------------------
 

@@ -34,6 +34,7 @@ def _mock_writer():
     w = MagicMock()
     w.bucket.save.side_effect = lambda path, data: path
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
+    w.write_png.side_effect = lambda rgba, path, *a, **k: path
     return w
 
 
@@ -254,15 +255,26 @@ class EndToEndPromotionTests(TestCase):
             "collection_slug": "rainfall",
         }
 
+        import numpy as np
+
+        from georiva.processing.recipes.promotion import PromotionRecipe
+
+        data = np.full((10, 10), 5.0, dtype="float32")
         with (
-            patch("georiva.core.storage.storage") as st,
+            patch("georiva.core.storage.storage"),
             patch("georiva.ingestion.asset_writer.AssetWriter", return_value=_mock_writer()),
+            patch.object(
+                PromotionRecipe, "read_raster",
+                return_value=(data, [0, 0, 1, 1], "EPSG:4326", 10, 10),
+            ),
         ):
-            st.bucket.return_value.read_bytes.return_value = b"GEOTIFFBYTES"
             dispatch_for_input(trigger, dispatch=False)
 
         item = Item.objects.get(collection=self.pub_col)
         self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
+        # Promotion now emits a served COG + a visual PNG.
+        self.assertTrue(item.assets.filter(format="cog").exists())
+        self.assertTrue(item.assets.filter(format="png").exists())
 
         run_rec = DerivationRun.objects.get(recipe_type="promotion")
         self.assertEqual(run_rec.status, DerivationRun.Status.COMPLETED)
