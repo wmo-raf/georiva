@@ -77,12 +77,23 @@ each supplied option to its declared type, fills missing options from their
 defaults, constrains `choice` values, and rejects unknown keys — so a bad option
 is caught before any row is written.
 
+> **`collection` is a feed-local key, not a catalog slug (ADR-0010).** In an
+> `InputRef`/`OutputRef`, `collection` names a key within *this feed's* namespace:
+> one of your `CollectionDefinition.key`s (a raw collection) or an output key of
+> one of your own products (a sibling output). It is **not** a global catalog
+> slug. `validate_chain` rejects an input key that resolves to neither, and two
+> products may not declare the same output key (a promotion serving the raw
+> collection 1:1 may reuse the raw key as its output). At enable time each key is
+> resolved once to a `Collection` and **pinned** as a binding row; every runtime
+> joint then matches by FK, so an operator renaming a collection's slug never
+> breaks routing, dispatch, or resolution.
+
 ### `InputRef`
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `role` | str | — | The recipe's name for this input (e.g. `value`, `baseline`). |
-| `collection` | str | — | The collection slug consumed. |
+| `collection` | str | — | Feed-local collection **key** consumed: a `CollectionDefinition.key` or a sibling product's output key (not a catalog slug). |
 | `tier` | str | — | `staging` or `published`. Determines both routing and dependency edges (below). |
 | `required` | bool | `True` | An optional input never blocks readiness and never creates a dependency edge. |
 
@@ -91,7 +102,7 @@ is caught before any row is written.
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `role` | str | — | The recipe's name for this output. |
-| `collection` | str | — | The output collection slug. |
+| `collection` | str | — | Feed-local output collection **key** (not a catalog slug); it materialises as a `Collection` with `slug = slugify(key)`. |
 | `title` | str | `""` | Catalog display name of the materialised collection. Blank → the slug. |
 | `description` | str | `""` | Catalog description of the collection. |
 | `visibility` | str | `"public"` | `public` (served) or `internal` (a derivation intermediate — read by the engine, never served). |

@@ -4,7 +4,7 @@ One product card, shared across the wizard (wizard mode) and the feed panel
 (manage mode). Expects `card`, `mode`, and (in manage mode) `feed` in context.
 {% endcomment %}
 {% with defn=card.definition %}
-    <div class="gprod-card{% if mode == 'wizard' and not card.checked %} gprod-card--disabled{% elif mode == 'manage' and not card.enabled %} gprod-card--disabled{% endif %}{% if card.orphaned %} gprod-card--orphan{% endif %}"
+    <div class="gprod-card{% if mode == 'wizard' and not card.checked %} gprod-card--disabled{% elif mode == 'manage' and not card.enabled %} gprod-card--disabled{% endif %}{% if card.orphaned %} gprod-card--orphan{% endif %}{% if card.unbound %} gprod-card--unbound{% endif %}"
          id="gprod-{{ defn.key }}" data-product-key="{{ defn.key }}">
         <div class="gprod-card__header">
             {% if mode == "wizard" %}
@@ -21,6 +21,8 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                         <span class="gprod-badge gprod-badge--new">{% trans "New — not enabled" %}</span>
                     {% elif card.orphaned %}
                         <span class="gprod-badge gprod-badge--orphan">{% trans "No longer provided" %}</span>
+                    {% elif card.unbound %}
+                        <span class="gprod-badge gprod-badge--unbound">{% trans "Unbound" %}</span>
                     {% else %}
                         <span class="gprod-badge gprod-badge--{% if card.enabled %}on{% else %}off{% endif %}">
                             {% if card.enabled %}{% trans "Enabled" %}{% else %}{% trans "Disabled" %}{% endif %}
@@ -78,6 +80,14 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                     <p class="gprod-readiness">{% trans "This product is no longer declared by the plugin. It dispatches nothing." %}</p>
                     <div class="gprod-actions">
                         <a class="button button-small no" href="{% url 'feed_product_delete_orphan' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Delete row…" %}</a>
+                    </div>
+                {% elif card.unbound %}
+                    <p class="gprod-readiness">{% trans "A collection this product is bound to was deleted, so it dispatches nothing. Re-bind to restore its collections and start producing again." %}</p>
+                    <div class="gprod-actions">
+                        <form method="post" action="{% url 'feed_product_rebind' feed_pk=feed.pk product_pk=card.product.pk %}">
+                            {% csrf_token %}
+                            <button type="submit" class="button button-small">{% trans "Re-bind" %}</button>
+                        </form>
                     </div>
                 {% else %}
                     {% if card.output_collections %}

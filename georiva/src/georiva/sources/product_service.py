@@ -98,7 +98,7 @@ def build_chain(feed):
             # A new definition an upgrade added, not yet provisioned.
             return {
                 "definition": definition, "product": None, "enabled": False,
-                "is_new": True, "orphaned": False,
+                "is_new": True, "orphaned": False, "unbound": False,
                 "display_label": definition.label,
                 "display_description": definition.description,
                 "needs": needs, "status": None, "last_activity": None,
@@ -110,6 +110,7 @@ def build_chain(feed):
         return {
             "definition": definition, "product": product,
             "enabled": product.is_enabled, "is_new": False, "orphaned": False,
+            "unbound": _is_unbound(product, definition),
             "display_label": product.display_label,
             "display_description": product.display_description,
             "needs": needs,
@@ -133,7 +134,7 @@ def build_chain(feed):
     orphans = [
         {
             "definition": None, "product": row, "enabled": row.is_enabled,
-            "is_new": False, "orphaned": True,
+            "is_new": False, "orphaned": True, "unbound": False,
             "display_label": row.display_label, "display_description": "",
             "needs": [], "status": product_status(row).status,
             "last_activity": None, "readiness": None, "readiness_hint": None,
@@ -196,6 +197,39 @@ def is_orphaned(product) -> bool:
     or renamed by an upgrade). Orphans are inert — every dispatch path already
     skips a product whose ``definition_for`` is None."""
     return product.definition is None
+
+
+def _is_unbound(product, definition) -> bool:
+    """True if an enabled, still-declared product has lost binding coverage — its
+    declared inputs/outputs aren't all pinned to a Collection (ADR-0010 §6). The
+    usual cause is a bound Collection deleted outside the feed lifecycle: the
+    binding row cascades away, leaving the product inert on dispatch (slice 4
+    matches by binding row) until it is re-bound.
+
+    Gated on the product having *some* binding row: a row that has never been
+    through enable-time pinning (only an artificial or pre-backfill state) has
+    zero rows and is not flagged, while a real product — always materialised with
+    output bindings at enable — is flagged the moment any row goes missing."""
+    if not product.is_enabled:
+        return False
+    input_roles = set(product.input_bindings.values_list("role", flat=True))
+    output_roles = set(product.output_bindings.values_list("role", flat=True))
+    if not input_roles and not output_roles:
+        return False
+    missing_input = any(r.role not in input_roles for r in definition.inputs)
+    missing_output = any(r.role not in output_roles for r in definition.outputs)
+    return missing_input or missing_output
+
+
+def is_unbound(product) -> bool:
+    """Public predicate mirroring ``is_orphaned`` for the panel/view: an enabled,
+    declared product whose binding rows no longer cover its declaration (ADR-0010
+    §6). A row with no live definition (an orphan) is not unbound — orphan is the
+    other, distinct drift state."""
+    definition = product.definition
+    if definition is None:
+        return False
+    return _is_unbound(product, definition)
 
 
 def enable_new_definition(feed, definition, config):
@@ -307,6 +341,38 @@ def enable_product(product):
             materialise_and_pin(product, definition, feed)
         product.is_enabled = True
         product.save(update_fields=["is_enabled"])
+    return product
+
+
+def rebind_product(product):
+    """Re-run enable-time resolution for an unbound product, restoring its binding
+    rows (ADR-0010 §6) — the chain panel's "re-bind" action. Re-materialises a
+    deleted output collection and re-pins every input/output that resolves. Raises
+    ``ProductActionError`` if a *required* input still can't be resolved (its
+    collection is gone and un-recreatable here), atomically — a failed re-bind
+    leaves no partial rows. Only meaningful for an enabled, declared product."""
+    feed, definitions, rows = _chain(product)
+    definition = _definition_of(product.definition_key, definitions)
+    if definition is None:
+        raise ProductActionError(
+            _("'%s' is no longer declared by the plugin and can't be re-bound.")
+            % product.display_label
+        )
+    with transaction.atomic():
+        materialise_and_pin(product, definition, feed)
+        bound = set(product.input_bindings.values_list("role", flat=True))
+        missing = [
+            ref.role for ref in definition.inputs
+            if ref.required and ref.role not in bound
+        ]
+        if missing:
+            raise ProductActionError(
+                _("%(product)s can't be re-bound: required input(s) %(roles)s "
+                  "have no collection — provision or re-create it first.") % {
+                    "product": _label_of(definition.key, definitions),
+                    "roles": ", ".join(sorted(missing)),
+                }
+            )
     return product
 
 

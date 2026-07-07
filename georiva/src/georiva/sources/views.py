@@ -443,6 +443,27 @@ def feed_product_delete_orphan(request, feed_pk, product_pk):
     })
 
 
+def feed_product_rebind(request, feed_pk, product_pk):
+    """Re-bind an unbound product from the chain panel (ADR-0010 §6): re-run
+    enable-time resolution to restore its binding rows (and re-materialise a
+    deleted output collection). Reports success, or the ProductActionError when a
+    required input still can't be resolved."""
+    from georiva.sources.models import DerivedProduct
+    from georiva.sources.product_service import ProductActionError, rebind_product
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+
+    if request.method == "POST":
+        try:
+            rebind_product(product)
+            messages.success(
+                request, _("Re-bound '%s'.") % product.display_label
+            )
+        except ProductActionError as exc:
+            messages.error(request, str(exc))
+    return redirect("data_feed_detail", pk=feed_pk)
+
+
 def data_feed_edit(request, pk):
     """Edit feed name, interval, and global config fields inline."""
     feed = get_object_or_404(DataFeed, pk=pk)
