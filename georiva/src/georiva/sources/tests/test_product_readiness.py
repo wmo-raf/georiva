@@ -18,7 +18,11 @@ from georiva.core.derived_products import (
 )
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.sources.derivation_tracking import product_readiness
-from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.sources.models import (
+    DataFeed,
+    DerivedProduct,
+    DerivedProductInput,
+)
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -49,9 +53,16 @@ class ProductReadinessTests(TestCase):
             data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
         )
 
+    def _core(self, slug):
+        col, _ = Collection.objects.get_or_create(
+            catalog=self.catalog, slug=slug, defaults={"name": slug}
+        )
+        return col
+
     def _add_staging(self, slug="rainfall"):
+        """A staged item in a staging collection linked to its core Collection."""
         scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug=slug, name=slug
+            catalog=self.catalog, slug=slug, name=slug, collection=self._core(slug)
         )
         si = StagingItem.objects.create(
             collection=scol, datetime=_TIME,
@@ -63,7 +74,20 @@ class ProductReadinessTests(TestCase):
         )
         return si
 
+    def _pin(self, definition):
+        """Pin the product's input bindings to core Collections, as the enable
+        path would — readiness now resolves through these rows."""
+        for ref in definition.inputs:
+            DerivedProductInput.objects.update_or_create(
+                product=self.product, role=ref.role,
+                defaults={
+                    "tier": ref.tier, "required": ref.required,
+                    "source_key": ref.collection, "collection": self._core(ref.collection),
+                },
+            )
+
     def _readiness(self, definition):
+        self._pin(definition)
         with patch.object(DataFeed, "get_derived_products", return_value=[definition]):
             return product_readiness(self.product)
 
@@ -98,3 +122,38 @@ class ProductReadinessTests(TestCase):
         verdict = self._readiness(definition)
 
         self.assertTrue(verdict.ready)
+
+    def test_readiness_is_scoped_to_the_bound_collection_not_the_slug(self):
+        # Another catalog has the same 'rainfall' slug WITH data; this product's
+        # own catalog has none. Readiness must resolve through the pinned
+        # collection_id, so it stays blocked (ADR-0010 §5) — no cross-catalog leak.
+        other_cat = Catalog.objects.create(
+            name="Other", slug="other", file_format="geotiff"
+        )
+        other_core = Collection.objects.create(
+            catalog=other_cat, slug="rainfall", name="Rainfall"
+        )
+        other_staging = StagingCollection.objects.create(
+            catalog=other_cat, slug="rainfall", name="Rainfall", collection=other_core
+        )
+        StagingItem.objects.create(
+            collection=other_staging, datetime=_TIME,
+            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=4, height=4,
+        )
+        # This product's own 'rainfall' core Collection exists but has no items.
+        self._core("rainfall")
+
+        verdict = self._readiness(_definition())
+
+        self.assertFalse(verdict.ready)
+        self.assertEqual(verdict.blocked_by, "value")
+
+    def test_unbound_required_input_blocks(self):
+        # An enabled product whose required input was never pinned (no binding
+        # row) is blocked — there is no collection to resolve.
+        self._add_staging("rainfall")
+        with patch.object(DataFeed, "get_derived_products", return_value=[_definition()]):
+            verdict = product_readiness(self.product)   # note: no _pin()
+
+        self.assertFalse(verdict.ready)
+        self.assertEqual(verdict.blocked_by, "value")

@@ -110,6 +110,63 @@ class ResolveDeclaredInputsTests(TestCase):
         self.assertIn("value", resolved)
         self.assertFalse(resolved["value"].present)
 
+    def test_input_carrying_a_collection_id_resolves_by_identity_not_slug(self):
+        # A binding-shaped input (with a resolved collection_id) resolves the
+        # staging tier through the StagingCollection -> core Collection link,
+        # scoped to that exact collection — not every catalog sharing the slug
+        # (ADR-0010 §5). A second catalog with the same slug must not leak in.
+        from collections import namedtuple
+
+        Spec = namedtuple("Spec", "role collection tier required collection_id")
+
+        self.staging_col.collection = self.pub_col  # link staging -> a core col
+        self.staging_col.save(update_fields=["collection"])
+        mine = self._add_staging()
+
+        # A different catalog, same 'rainfall' slug, with its own staged item.
+        other_cat = Catalog.objects.create(
+            name="Other", slug="other", file_format="geotiff"
+        )
+        other_core = Collection.objects.create(
+            catalog=other_cat, slug="rainfall", name="Rainfall"
+        )
+        other_staging = StagingCollection.objects.create(
+            catalog=other_cat, slug="rainfall", name="Rainfall", collection=other_core
+        )
+        StagingItem.objects.create(
+            collection=other_staging, datetime=_TIME,
+            bounds=[0, 0, 8, 8], crs="EPSG:4326", width=4, height=4,
+        )
+
+        resolved = resolve_declared_inputs([
+            Spec(role="value", collection="rainfall", tier="staging",
+                 required=True, collection_id=self.pub_col.pk),
+        ])
+
+        self.assertEqual([it.pk for it in resolved["value"].items], [mine.pk])
+
+    def test_published_input_with_collection_id_resolves_by_identity(self):
+        from collections import namedtuple
+
+        Spec = namedtuple("Spec", "role collection tier required collection_id")
+        item = self._add_published()
+
+        # Another catalog's collection with the same slug and its own item.
+        other_cat = Catalog.objects.create(
+            name="Other", slug="other", file_format="geotiff"
+        )
+        other = Collection.objects.create(
+            catalog=other_cat, slug="rainfall-normals", name="Normals"
+        )
+        Item.objects.create(collection=other, time=_TIME)
+
+        resolved = resolve_declared_inputs([
+            Spec(role="normals", collection="rainfall-normals", tier="published",
+                 required=True, collection_id=self.pub_col.pk),
+        ])
+
+        self.assertEqual([it.pk for it in resolved["normals"].items], [item.pk])
+
     def test_recipe_declaring_inputs_resolves_them_without_an_override(self):
         # A declaration-driven recipe sets declared_inputs and inherits the
         # default resolve_inputs — no hardcoded slugs in a bespoke override.

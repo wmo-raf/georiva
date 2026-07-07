@@ -32,13 +32,19 @@ class PromotionRecipe(BaseRecipe):
     # ---- declarative surface ------------------------------------------------
 
     def enumerate_units(self, selector) -> Iterable[ProductionUnit]:
+        from georiva.processing.recipe import binding_input_collection_id
         from georiva.staging.models import StagingItem
 
         selector = selector or {}
         qs = StagingItem.objects.all()
         if selector.get("staging_item_ids"):
             qs = qs.filter(pk__in=selector["staging_item_ids"])
-        if selector.get("collection_slug"):
+        # Prefer the pinned collection FK (catalog-scoped, rename-safe); fall
+        # back to a slug filter for the CLI/backfill convenience path.
+        collection_id = binding_input_collection_id(selector, "staging")
+        if collection_id is not None:
+            qs = qs.filter(collection__collection_id=collection_id)
+        elif selector.get("collection_slug"):
             qs = qs.filter(collection__slug=selector["collection_slug"])
         for sid in qs.values_list("pk", flat=True):
             yield {"staging_item_id": sid}
@@ -126,9 +132,16 @@ class PromotionRecipe(BaseRecipe):
 
     @staticmethod
     def _published_collection(staging_item):
+        """The served core Collection this staging item promotes into. Resolved
+        by the StagingCollection -> core Collection FK (ADR-0010 §3/§5) when
+        linked, so an operator slug rename never misroutes it or spawns a
+        duplicate; falls back to a catalog+slug get-or-create for a staging
+        collection registered before the link existed."""
         from georiva.core.models import Collection
 
         sc = staging_item.collection
+        if sc.collection_id is not None:
+            return sc.collection
         collection, _ = Collection.objects.get_or_create(
             catalog=sc.catalog,
             slug=sc.slug,

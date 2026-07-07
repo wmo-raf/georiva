@@ -152,6 +152,24 @@ class PromotionThroughEngineTests(_PromotionFixture):
         _, kwargs = task.delay.call_args
         self.assertEqual(kwargs["recipe_type"], "promotion")
 
+    def test_promotion_targets_the_linked_core_collection_after_a_slug_rename(self):
+        # The staging collection is linked to its core Collection (ADR-0010 §3).
+        # Promotion resolves the output by that FK, so renaming the core
+        # collection's slug afterwards doesn't spawn a second collection (§5 AC4).
+        self.scol.collection = self.pub_col
+        self.scol.save(update_fields=["collection"])
+        self.pub_col.slug = "tas-renamed-by-operator"
+        self.pub_col.save(update_fields=["slug"])
+
+        result = self._run_promotion()
+
+        item = Item.objects.get(pk=result.item_id)
+        self.assertEqual(item.collection, self.pub_col)
+        # No stray collection created from the old slug.
+        self.assertEqual(
+            Collection.objects.filter(catalog=self.catalog).count(), 1
+        )
+
 
 class DerivationLinkConstraintTests(_PromotionFixture):
     def _item(self):
