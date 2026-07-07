@@ -6,7 +6,7 @@
 |-------------|--------------------------|
 | **Status**  | Implemented              |
 | **Version** | 1.0                      |
-| **Date**    | 2026-06-04               |
+| **Date**    | 2026-06-04               |  
 | **Author**  | Erick Otenyo, WMO Africa |
 
 > **Note:** This document supersedes the v0.1 RFC (2026-05-29) which proposed a `ParameterManifest` /
@@ -399,14 +399,16 @@ Offset conversions (e.g. `K` → `degC`) are likewise supported.
 
 ### 3.4 Reference: CHIRPS plugin
 
-The CHIRPS plugin (the standalone [`georiva-source-chirps`](https://github.com/wmo-raf/georiva-source-chirps) package) is the canonical reference implementation:
+The CHIRPS plugin (the standalone [`georiva-source-chirps`](https://github.com/wmo-raf/georiva-source-chirps) package)
+is the canonical reference implementation:
 
 - `models.py` — `CHIRPSDataFeed` + `CHIRPSDataFeedCollectionLink` with `period` and `default_start_date`
 - `source.py` — `CHIRPSDataSource` with `advance_start_from_latest()` override (skips to next dekad/pentad/month)
 - Three collections declared via `parse_collection_defs()`: monthly, dekadal, pentadal, each with its own
   `default_interval_minutes`
 
-The ECMWF AIFS plugin (the standalone [`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-ecmwf) package) is the reference for **forecast data**:
+The ECMWF AIFS plugin (the standalone [`georiva-source-ecmwf`](https://github.com/wmo-raf/georiva-source-ecmwf) package)
+is the reference for **forecast data**:
 multi-collection (surface + pressure levels), variable groups, no custom `CollectionLink` subclass.
 
 ---
@@ -554,6 +556,8 @@ Collections run **sequentially within one task** to keep cross-collection file d
 
 - [ ] Register the plugin — choose one:
     - **In-tree / built-in**: add the app label to `INSTALLED_APPS` in `settings/base.py`
-    - **External (production)**: declare in `plugins.toml` and rebuild the image; settings auto-discovers it from `GEORIVA_PLUGIN_DIRS`
-    - **Local dev**: bind-mount source into the container and declare in `plugins.toml` with `dev = true`; see [`docs/plugins/installation.md`](../plugins/installation.md#local-development)
+    - **External (production)**: declare in `plugins.toml` and rebuild the image; settings auto-discovers it from
+      `GEORIVA_PLUGIN_DIRS`
+    - **Local dev**: bind-mount source into the container and declare in `plugins.toml` with `dev = true`; see [
+      `docs/plugins/installation.md`](../plugins/installation.md#local-development)
 - [ ] Run `makemigrations` and `migrate`
