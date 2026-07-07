@@ -121,7 +121,7 @@ class SourceSetupService:
         clobbers an enable/disable toggle an operator changed after setup.
         """
         from georiva.sources.models import DerivedProduct
-        from georiva.sources.product_service import materialise_output_collections
+        from georiva.sources.product_service import materialise_and_pin
 
         with transaction.atomic():
             products = []
@@ -141,9 +141,10 @@ class SourceSetupService:
                 # An enabled product materialises its output collections now, so
                 # they appear in the catalog with declared titles before any run
                 # (keyed on the row's actual state, not the wizard arg, so a
-                # re-run never materialises for a product the operator disabled).
+                # re-run never materialises for a product the operator disabled),
+                # then pins its input/output bindings to those collections.
                 if product.is_enabled:
-                    materialise_output_collections(data_feed, definition)
+                    materialise_and_pin(product, definition, data_feed)
                 products.append(product)
                 logger.info(
                     "DerivedProduct %s: feed=%s product=%s enabled=%s",

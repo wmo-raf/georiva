@@ -76,7 +76,6 @@ def build_chain(feed):
     (dependency chip labels), ``status`` / ``last_activity``, ``readiness`` /
     ``readiness_hint``, ``output_collections``, ``can_run``.
     """
-    from georiva.core.models import Collection
     from georiva.core.product_chain import product_dependencies, topological_stages
     from georiva.sources.derivation_tracking import product_readiness, product_status
 
@@ -108,7 +107,6 @@ def build_chain(feed):
             }
         status = product_status(product)
         readiness = product_readiness(product)
-        output_slugs = [ref.collection for ref in definition.outputs]
         return {
             "definition": definition, "product": product,
             "enabled": product.is_enabled, "is_new": False, "orphaned": False,
@@ -118,11 +116,12 @@ def build_chain(feed):
             "status": status.status, "last_activity": status.last_completed_at,
             "readiness": readiness,
             "readiness_hint": _readiness_hint(definition, readiness),
-            "output_collections": list(
-                Collection.objects.filter(
-                    catalog=real_feed.catalog, slug__in=output_slugs
-                )
-            ),
+            # Output collections are read from the pinned DerivedProductOutput
+            # rows (ADR-0010 §2), so an operator slug rename can't drop them.
+            "output_collections": [
+                b.collection
+                for b in product.output_bindings.select_related("collection")
+            ],
             "can_run": definition.trigger_mode in ("manual", "scheduled"),
         }
 
@@ -239,6 +238,18 @@ def delete_orphan(product):
     product.delete()
 
 
+def _feed_collection_keys(feed) -> set:
+    """The raw collection keys this feed can resolve an input to: the keys the
+    plugin declares (``get_collection_definitions``) unioned with the
+    ``definition_key``s of the collections actually provisioned on this feed (its
+    ``DataFeedCollectionLink``s). The latter is what a raw input pins through, so
+    a provisioned-but-not-declared link still counts."""
+    keys = {d.key for d in type(feed).get_collection_definitions()}
+    keys |= set(feed.collection_links.values_list("definition_key", flat=True))
+    keys.discard("")
+    return keys
+
+
 def _resolve_inputs_or_raise(feed, definition, definitions):
     """Every declared input of ``definition`` must resolve within the feed's
     collection-key namespace — a raw ``CollectionDefinition`` key or a sibling
@@ -248,8 +259,7 @@ def _resolve_inputs_or_raise(feed, definition, definitions):
     resolved ``Collection`` as rows)."""
     from georiva.core.product_chain import collection_namespace
 
-    collection_keys = {d.key for d in type(feed).get_collection_definitions()}
-    namespace = collection_namespace(definitions, collection_keys)
+    namespace = collection_namespace(definitions, _feed_collection_keys(feed))
     for ref in definition.inputs:
         if ref.collection not in namespace:
             raise ProductActionError(
@@ -294,10 +304,94 @@ def enable_product(product):
         # Output collections materialise at enable-time, so they appear in the
         # catalog with declared titles before any run.
         if definition is not None:
-            materialise_output_collections(feed, definition)
+            materialise_and_pin(product, definition, feed)
         product.is_enabled = True
         product.save(update_fields=["is_enabled"])
     return product
+
+
+def materialise_and_pin(product, definition, feed):
+    """Materialise a product's output collections (get-or-create) and pin its
+    input/output bindings to the resolved catalog Collections — the two coupled
+    writes every enable path performs (ADR-0010 §2). Idempotent."""
+    collections = materialise_output_collections(feed, definition)
+    pin_bindings(product, definition, feed, collections)
+
+
+def pin_bindings(product, definition, feed, output_collections):
+    """Resolve ``definition``'s declared inputs/outputs to catalog ``Collection``s
+    and pin them as ``DerivedProductInput`` / ``DerivedProductOutput`` rows,
+    upserting on ``(product, role)`` (ADR-0010 §2). Idempotent — a re-enable or
+    upgrade re-resolves and re-pins in place. ``output_collections`` are the rows
+    ``materialise_output_collections`` just get-or-created, in declaration order.
+
+    Output roles always resolve (we just materialised them). An input resolves to
+    the raw collection its ``CollectionDefinition`` link points at, or the sibling
+    product's materialised output collection; an input that can't resolve yet
+    (its collection not provisioned) is left unpinned and re-pins on a later
+    enable — surfaced as an *unbound* product in a later slice, never a hard
+    failure here."""
+    from georiva.sources.models import DerivedProductInput, DerivedProductOutput
+
+    for ref, collection in zip(definition.outputs, output_collections):
+        DerivedProductOutput.objects.update_or_create(
+            product=product, role=ref.role,
+            defaults={"output_key": ref.collection, "collection": collection},
+        )
+
+    for ref in definition.inputs:
+        collection = _resolve_input_collection(feed, ref)
+        if collection is None:
+            continue
+        DerivedProductInput.objects.update_or_create(
+            product=product, role=ref.role,
+            defaults={
+                "tier": ref.tier,
+                "required": ref.required,
+                "source_key": ref.collection,
+                "collection": collection,
+            },
+        )
+
+
+def backfill_bindings() -> int:
+    """Pin bindings for every enabled ``DerivedProduct`` that predates pinning —
+    the one-time ADR-0010 §2 backfill, called from the data migration. Re-runs
+    the enable-time resolution (materialise get-or-creates the output collections,
+    then pin upserts), so it is idempotent and safe to run more than once. Orphans
+    (declaration gone) and products whose inputs aren't provisioned are skipped
+    without error. Returns the number of products pinned."""
+    from georiva.sources.models import DerivedProduct
+
+    pinned = 0
+    for product in DerivedProduct.objects.filter(is_enabled=True):
+        feed = product.data_feed.get_real_instance()
+        definition = _definition_of(
+            product.definition_key, feed.get_derived_products()
+        )
+        if definition is None:
+            continue
+        materialise_and_pin(product, definition, feed)
+        pinned += 1
+    return pinned
+
+
+def _resolve_input_collection(feed, ref):
+    """The catalog ``Collection`` an input key resolves to, or ``None`` if not yet
+    provisioned. A raw key resolves through its ``DataFeedCollectionLink``
+    (``definition_key`` → the raw collection); any other key resolves as a
+    sibling product's materialised output collection (slug == output key)."""
+    from georiva.core.models import Collection
+    from georiva.sources.models import DataFeedCollectionLink
+
+    link = DataFeedCollectionLink.objects.filter(
+        data_feed=feed, definition_key=ref.collection
+    ).select_related("collection").first()
+    if link is not None:
+        return link.collection
+    return Collection.objects.filter(
+        catalog=feed.catalog, slug=ref.collection
+    ).first()
 
 
 def enabled_dependents(product):

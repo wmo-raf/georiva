@@ -530,6 +530,72 @@ class DerivedProduct(models.Model):
         return f"{self.data_feed_id} → {self.definition_key} ({self.recipe_type})"
 
 
+class DerivedProductInput(models.Model):
+    """One declared input of a `DerivedProduct`, resolved to the catalog
+    `Collection` it consumes and pinned (ADR-0010 §2).
+
+    The declaration's `InputRef` names a *key* (a raw `CollectionDefinition` key
+    or a sibling product's output key); this row is that key resolved once — at
+    enable/provision time — to the actual `Collection`, so every runtime joint
+    (tier routing, dispatch, input resolution) matches by FK rather than
+    re-matching a slug on each event. `source_key` keeps the declared key for
+    re-resolution across upgrades and for diagnostics. Deleting the bound
+    `Collection` cascades this row away (surfaced as an *unbound* product in a
+    later slice)."""
+    product = models.ForeignKey(
+        DerivedProduct, on_delete=models.CASCADE, related_name='input_bindings'
+    )
+    role = models.CharField(max_length=100)
+    tier = models.CharField(max_length=20)
+    required = models.BooleanField(default=True)
+    source_key = models.CharField(
+        max_length=100,
+        help_text=_("The declared collection key this binding resolved from."),
+    )
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        on_delete=models.CASCADE,
+        related_name='derived_product_inputs',
+    )
+
+    class Meta:
+        unique_together = ['product', 'role']
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.product_id}:{self.role} ← {self.collection_id} ({self.tier})"
+
+
+class DerivedProductOutput(models.Model):
+    """One declared output of a `DerivedProduct`, resolved to the catalog
+    `Collection` it materialises into and pinned (ADR-0010 §2).
+
+    Written from the `Collection`s `materialise_output_collections` get-or-creates
+    when the product is enabled, so the chain panel and downstream resolution read
+    a product's served/internal collections by FK instead of a catalog+slug query.
+    `output_key` keeps the declared key for re-resolution and diagnostics."""
+    product = models.ForeignKey(
+        DerivedProduct, on_delete=models.CASCADE, related_name='output_bindings'
+    )
+    role = models.CharField(max_length=100)
+    output_key = models.CharField(
+        max_length=100,
+        help_text=_("The declared output collection key this binding resolved from."),
+    )
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        on_delete=models.CASCADE,
+        related_name='derived_product_outputs',
+    )
+
+    class Meta:
+        unique_together = ['product', 'role']
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.product_id}:{self.role} → {self.collection_id}"
+
+
 # ---------------------------------------------------------------------------
 # Acquisition tracking models
 # ---------------------------------------------------------------------------
