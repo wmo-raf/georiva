@@ -52,8 +52,41 @@ def _definition(**overrides):
     return DerivedProductDefinition(**kwargs)
 
 
-def _staging_trigger(collection_slug="rainfall", staging_item_id=5):
-    return {"staging_item_id": staging_item_id, "collection_slug": collection_slug}
+def _staging_trigger(collection_slug="rainfall", staging_item_id=5, collection_id=None):
+    return {
+        "staging_item_id": staging_item_id,
+        "collection_id": collection_id,
+        "collection_slug": collection_slug,
+    }
+
+
+def _pin(product, definition, catalog):
+    """Pin binding rows for a product the way the enable path would (ADR-0010
+    §2): a core Collection per referenced key, plus DerivedProductInput /
+    DerivedProductOutput rows carrying the resolved collection FK. Dispatch now
+    matches these rows by collection_id, so a test product must be bound to be
+    dispatched."""
+    from georiva.sources.models import DerivedProductInput, DerivedProductOutput
+
+    def _col(slug):
+        col, _ = Collection.objects.get_or_create(
+            catalog=catalog, slug=slug, defaults={"name": slug}
+        )
+        return col
+
+    for ref in definition.inputs:
+        DerivedProductInput.objects.update_or_create(
+            product=product, role=ref.role,
+            defaults={
+                "tier": ref.tier, "required": ref.required,
+                "source_key": ref.collection, "collection": _col(ref.collection),
+            },
+        )
+    for ref in definition.outputs:
+        DerivedProductOutput.objects.update_or_create(
+            product=product, role=ref.role,
+            defaults={"output_key": ref.collection, "collection": _col(ref.collection)},
+        )
 
 
 class DispatchForInputTests(TestCase):
@@ -64,23 +97,31 @@ class DispatchForInputTests(TestCase):
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
     def _product(self, definition, **overrides):
-        return DerivedProduct.objects.create(
+        product = DerivedProduct.objects.create(
             data_feed=self.feed,
             definition_key=definition.key,
             recipe_type=definition.recipe_type,
             config=overrides.get("config", {}),
             is_enabled=overrides.get("is_enabled", True),
         )
+        _pin(product, definition, self.catalog)
+        return product
+
+    def _trigger(self, collection_slug="rainfall", staging_item_id=5):
+        col, _ = Collection.objects.get_or_create(
+            catalog=self.catalog, slug=collection_slug, defaults={"name": collection_slug}
+        )
+        return _staging_trigger(
+            collection_slug=collection_slug, staging_item_id=staging_item_id,
+            collection_id=col.pk,
+        )
 
     def test_matching_enabled_product_runs_with_selector_and_origin(self):
         definition = _definition()
         product = self._product(definition, config={"baseline": "1991-2020"})
 
-        with (
-            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
-            patch("georiva.processing.engine.run") as run,
-        ):
-            dispatch_for_input(_staging_trigger(), dispatch=False)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(self._trigger(), dispatch=False)
 
         run.assert_called_once()
         selector = run.call_args.args[1]
@@ -90,26 +131,25 @@ class DispatchForInputTests(TestCase):
         self.assertEqual(run.call_args.kwargs["origin"], f"derived_product:{product.pk}")
 
     def test_selector_carries_declared_inputs_and_outputs(self):
-        # The recipe must be able to read the product's declared collections
-        # from the selector (ADR-0008): a scheduled/manual recipe has no trigger
-        # to learn them from, so the invocation layer injects the declaration.
+        # The recipe reads the product's collections from the selector — now from
+        # the pinned binding rows, so each entry also carries a resolved
+        # collection_id (ADR-0010 §4) alongside the declared key + tier.
         definition = _definition()
         self._product(definition)
 
-        with (
-            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
-            patch("georiva.processing.engine.run") as run,
-        ):
-            dispatch_for_input(_staging_trigger(), dispatch=False)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(self._trigger(), dispatch=False)
 
+        rain = Collection.objects.get(catalog=self.catalog, slug="rainfall")
         selector = run.call_args.args[1]
         self.assertEqual(
             selector["inputs"],
-            [{"role": "source", "collection": "rainfall", "tier": "staging"}],
+            [{"role": "source", "collection": "rainfall", "tier": "staging",
+              "collection_id": rain.pk}],
         )
         self.assertEqual(
             selector["outputs"],
-            [{"role": "served", "collection": "rainfall"}],
+            [{"role": "served", "collection": "rainfall", "collection_id": rain.pk}],
         )
 
     def test_selector_binding_omits_output_display_metadata(self):
@@ -123,28 +163,25 @@ class DispatchForInputTests(TestCase):
         ))
         self._product(definition)
 
-        with (
-            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
-            patch("georiva.processing.engine.run") as run,
-        ):
-            dispatch_for_input(_staging_trigger(), dispatch=False)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(self._trigger(), dispatch=False)
 
+        rain = Collection.objects.get(catalog=self.catalog, slug="rainfall")
         self.assertEqual(
             run.call_args.args[1]["outputs"],
-            [{"role": "served", "collection": "rainfall"}],
+            [{"role": "served", "collection": "rainfall", "collection_id": rain.pk}],
         )
 
     def test_product_on_a_different_collection_is_not_dispatched(self):
+        # The product consumes 'temperature'; a 'rainfall' arrival (a distinct,
+        # existing collection) must not match its binding.
         definition = _definition(inputs=(
             InputRef(role="source", collection="temperature", tier="staging"),
         ))
         self._product(definition)
 
-        with (
-            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
-            patch("georiva.processing.engine.run") as run,
-        ):
-            dispatch_for_input(_staging_trigger(collection_slug="rainfall"), dispatch=False)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(self._trigger(collection_slug="rainfall"), dispatch=False)
 
         run.assert_not_called()
 
@@ -152,11 +189,8 @@ class DispatchForInputTests(TestCase):
         definition = _definition()
         self._product(definition, is_enabled=False)
 
-        with (
-            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
-            patch("georiva.processing.engine.run") as run,
-        ):
-            dispatch_for_input(_staging_trigger(), dispatch=False)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(self._trigger(), dispatch=False)
 
         run.assert_not_called()
 
@@ -168,11 +202,8 @@ class DispatchForInputTests(TestCase):
         ))
         self._product(definition)
 
-        with (
-            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
-            patch("georiva.processing.engine.run") as run,
-        ):
-            dispatch_for_input(_staging_trigger(), dispatch=False)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(self._trigger(), dispatch=False)
 
         run.assert_not_called()
 
@@ -197,7 +228,8 @@ class EndToEndPromotionTests(TestCase):
             unit=self.unit_dim, value_min=0, value_max=2000,
         )
         self.scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall"
+            catalog=self.catalog, slug="rainfall", name="Rainfall",
+            collection=self.pub_col,
         )
         self.sitem = StagingItem.objects.create(
             collection=self.scol, datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
@@ -213,12 +245,16 @@ class EndToEndPromotionTests(TestCase):
             data_feed=self.feed, definition_key=self.definition.key,
             recipe_type="promotion", config={}, is_enabled=True,
         )
+        _pin(self.product, self.definition, self.catalog)
 
     def test_staging_arrival_promotes_and_stamps_product_origin(self):
-        trigger = {"staging_item_id": self.sitem.pk, "collection_slug": "rainfall"}
+        trigger = {
+            "staging_item_id": self.sitem.pk,
+            "collection_id": self.pub_col.pk,
+            "collection_slug": "rainfall",
+        }
 
         with (
-            patch.object(DataFeed, "get_derived_products", return_value=[self.definition]),
             patch("georiva.core.storage.storage") as st,
             patch("georiva.ingestion.asset_writer.AssetWriter", return_value=_mock_writer()),
         ):
@@ -300,30 +336,34 @@ class RunProductNowTests(TestCase):
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+        self.definition = _definition()
         self.product = DerivedProduct.objects.create(
             data_feed=self.feed, definition_key="serve-raw",
             recipe_type="promotion", config={"baseline": "1991-2020"}, is_enabled=True,
         )
+        _pin(self.product, self.definition, self.catalog)
 
     def test_runs_recipe_with_config_selector_and_product_origin(self):
         with (
-            patch.object(DataFeed, "get_derived_products", return_value=[_definition()]),
+            patch.object(DataFeed, "get_derived_products", return_value=[self.definition]),
             patch("georiva.processing.engine.run") as run,
         ):
             run_product_now(self.product, dispatch=False)
 
         run.assert_called_once()
         selector = run.call_args.args[1]
-        # Wide selector = the product's config + declared binding (no event
-        # trigger) -> backfill that can still read its collections.
+        rain = Collection.objects.get(catalog=self.catalog, slug="rainfall")
+        # Wide selector = the product's config + pinned binding (no event
+        # trigger) -> backfill that can still read its collections, now by FK.
         self.assertEqual(selector["baseline"], "1991-2020")
         self.assertEqual(
             selector["inputs"],
-            [{"role": "source", "collection": "rainfall", "tier": "staging"}],
+            [{"role": "source", "collection": "rainfall", "tier": "staging",
+              "collection_id": rain.pk}],
         )
         self.assertEqual(
             selector["outputs"],
-            [{"role": "served", "collection": "rainfall"}],
+            [{"role": "served", "collection": "rainfall", "collection_id": rain.pk}],
         )
         self.assertEqual(run.call_args.kwargs["origin"], product_origin(self.product))
 
@@ -335,7 +375,7 @@ class RunProductNowTests(TestCase):
         self.product.save(update_fields=["is_enabled"])
 
         with (
-            patch.object(DataFeed, "get_derived_products", return_value=[_definition()]),
+            patch.object(DataFeed, "get_derived_products", return_value=[self.definition]),
             patch("georiva.processing.engine.run") as run,
         ):
             result = run_product_now(self.product, dispatch=False)
@@ -364,8 +404,14 @@ class OrphanExclusionTests(TestCase):
         return patch.object(DataFeed, "get_derived_products", return_value=[])
 
     def test_orphan_is_excluded_from_event_dispatch(self):
+        # A real, existing collection — the orphan is skipped because it has no
+        # binding row on it (unbound), not because the trigger is empty.
+        col = Collection.objects.create(
+            catalog=self.catalog, slug="rainfall", name="Rainfall"
+        )
+        trigger = _staging_trigger(collection_id=col.pk)
         with self._orphaned(), patch("georiva.processing.engine.run") as run:
-            result = dispatch_for_input(_staging_trigger(), dispatch=False)
+            result = dispatch_for_input(trigger, dispatch=False)
         run.assert_not_called()
         self.assertEqual(result, [])
 
@@ -385,3 +431,70 @@ class OrphanExclusionTests(TestCase):
         # Its (absent) declaration can't opt any collection into staging.
         with self._orphaned():
             self.assertFalse(collection_routes_to_staging(self.feed, "rainfall"))
+
+
+class CrossCatalogIsolationTests(TestCase):
+    """Two feeds of the same shape in different catalogs share a collection slug;
+    an arriving item in one catalog must trigger only its own feed's product,
+    because dispatch matches the collection FK, not the slug (ADR-0010 §4 AC2)."""
+
+    def _feed_with_product(self, catalog_slug):
+        catalog = Catalog.objects.create(
+            name=catalog_slug, slug=catalog_slug, file_format="geotiff"
+        )
+        feed = DataFeed.objects.create(name=f"Feed {catalog_slug}", catalog=catalog)
+        definition = _definition()
+        product = DerivedProduct.objects.create(
+            data_feed=feed, definition_key=definition.key,
+            recipe_type=definition.recipe_type, is_enabled=True,
+        )
+        _pin(product, definition, catalog)
+        rainfall = Collection.objects.get(catalog=catalog, slug="rainfall")
+        return product, rainfall
+
+    def test_arrival_in_one_catalog_triggers_only_its_own_product(self):
+        product_a, rainfall_a = self._feed_with_product("cat-a")
+        product_b, rainfall_b = self._feed_with_product("cat-b")
+
+        # An arrival for catalog A's rainfall collection (same slug as B's).
+        trigger = _staging_trigger(collection_id=rainfall_a.pk)
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(trigger, dispatch=False)
+
+        run.assert_called_once()
+        self.assertEqual(
+            run.call_args.kwargs["origin"], product_origin(product_a)
+        )
+
+
+class UnboundProductSkippedTests(TestCase):
+    """An enabled, still-declared product with no binding rows (e.g. its input
+    collection was deleted) is inert on the event path — it simply never matches
+    (ADR-0010 §4 AC4)."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+        self.rainfall = Collection.objects.create(
+            catalog=self.catalog, slug="rainfall", name="Rainfall"
+        )
+
+    def test_enabled_product_without_bindings_is_not_dispatched(self):
+        definition = _definition()
+        # Enabled + declared, but never pinned -> no DerivedProductInput rows.
+        DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key=definition.key,
+            recipe_type=definition.recipe_type, is_enabled=True,
+        )
+
+        trigger = _staging_trigger(collection_id=self.rainfall.pk)
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[definition]),
+            patch("georiva.processing.engine.run") as run,
+        ):
+            result = dispatch_for_input(trigger, dispatch=False)
+
+        run.assert_not_called()
+        self.assertEqual(result, [])

@@ -37,78 +37,97 @@ def definition_for(product):
     return None
 
 
-def _binding(definition) -> dict:
-    """The product's declared collections, flattened into selector keys (ADR-0008).
-
-    Injected into every selector so a recipe can read its source/baseline/output
-    collection slugs from the declaration instead of reconstructing them — the
-    only way a scheduled/manual product (which has no trigger to learn from) can
-    know which collections it operates on. The engine still treats the selector
-    as opaque; only recipes interpret these keys.
+def _binding(product) -> dict:
+    """The product's *pinned* collections, flattened into selector keys (ADR-0008/
+    0010 §4). Read from the ``DerivedProductInput`` / ``DerivedProductOutput``
+    binding rows — so every entry carries a resolved ``collection_id`` (an FK,
+    rename-safe) alongside the declared ``collection`` key and ``tier`` a recipe
+    reads. Injected into every selector so a recipe can read its source/baseline/
+    output collections without reconstructing slugs — the only way a scheduled/
+    manual product (no trigger to learn from) knows which collections it operates
+    on. The engine still treats the selector as opaque; only recipes interpret it.
     """
     return {
         "inputs": [
-            {"role": r.role, "collection": r.collection, "tier": r.tier}
-            for r in definition.inputs
+            {"role": b.role, "collection": b.source_key, "tier": b.tier,
+             "collection_id": b.collection_id}
+            for b in product.input_bindings.all()
         ],
         "outputs": [
-            {"role": r.role, "collection": r.collection}
-            for r in definition.outputs
+            {"role": b.role, "collection": b.output_key,
+             "collection_id": b.collection_id}
+            for b in product.output_bindings.all()
         ],
     }
 
 
-def _matches(definition, collection_slug: str, tier: str) -> bool:
-    """True if the definition declares an input on this collection at this tier."""
-    return any(
-        ref.collection == collection_slug and ref.tier == tier
-        for ref in definition.inputs
-    )
-
-
 def collection_routes_to_staging(data_feed, collection_slug: str) -> bool:
     """
-    Auto-derived target tier (ADR-0008): a collection routes to staging iff some
-    enabled DerivedProduct of this feed consumes it at the staging tier.
-    Otherwise it publishes directly (no StagingItems) — "no derivation, no
-    staging". Replaces the manual DataFeed.target_tier field, removing the
-    publish-vs-products drift.
+    Auto-derived target tier (ADR-0008; ADR-0010 §4): a collection routes to
+    staging iff some enabled DerivedProduct of this feed has a *pinned* staging
+    input on it. Otherwise it publishes directly (no StagingItems) — "no
+    derivation, no staging". Matched by the input binding's ``Collection`` FK
+    (resolved from this feed's catalog + slug), not by re-matching declarations,
+    so there are no ``get_derived_products()`` calls on this path.
     """
-    from georiva.sources.models import DerivedProduct
+    from georiva.core.models import Collection
+    from georiva.sources.models import DerivedProductInput
 
-    for product in DerivedProduct.objects.filter(data_feed=data_feed, is_enabled=True):
-        definition = definition_for(product)
-        if definition is not None and _matches(definition, collection_slug, "staging"):
-            return True
-    return False
+    if data_feed.catalog_id is None:
+        return False
+    collection = Collection.objects.filter(
+        catalog_id=data_feed.catalog_id, slug=collection_slug
+    ).first()
+    if collection is None:
+        return False
+    return DerivedProductInput.objects.filter(
+        product__data_feed=data_feed,
+        product__is_enabled=True,
+        tier="staging",
+        collection=collection,
+    ).exists()
 
 
 def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
     """
-    Route an arriving-input ``trigger`` to every enabled DerivedProduct that
-    consumes it. For each match, build
-    ``selector = {**config, **binding, **trigger}`` (binding = the definition's
-    declared inputs/outputs) and run the product's recipe, stamping the run with
-    the product origin.
+    Route an arriving-input ``trigger`` to every enabled DerivedProduct with a
+    *pinned* input on the trigger's collection at its tier (ADR-0010 §4). Matched
+    by ``collection_id`` + tier against ``DerivedProductInput`` rows in one
+    indexed query — feed/catalog scoping falls out of the FK, so an item in one
+    catalog can't trigger another catalog's products even with a shared slug, and
+    an unbound product (no rows) simply never matches. For each match, build
+    ``selector = {**config, **binding, **trigger}`` and run the product's recipe,
+    stamping the run with the product origin. No ``get_derived_products()`` here:
+    the recipe comes from the stored ``recipe_type`` and the binding from the
+    pinned rows.
     """
     from georiva.processing.engine import run
     from georiva.processing.registry import recipe_registry
 
-    from georiva.sources.models import DerivedProduct
+    from georiva.sources.models import DerivedProduct, DerivedProductInput
 
-    collection_slug = trigger.get("collection_slug")
+    collection_id = trigger.get("collection_id")
     tier = _trigger_tier(trigger)
+    if collection_id is None:
+        return []
+
+    product_ids = (
+        DerivedProductInput.objects.filter(
+            collection_id=collection_id, tier=tier, product__is_enabled=True
+        )
+        .values_list("product_id", flat=True)
+        .distinct()
+    )
 
     results = []
-    for product in DerivedProduct.objects.filter(is_enabled=True):
-        definition = definition_for(product)
-        if definition is None or not _matches(definition, collection_slug, tier):
-            continue
-        recipe = recipe_registry.get(definition.recipe_type)
+    for product in DerivedProduct.objects.filter(pk__in=list(product_ids)):
+        recipe = recipe_registry.get(product.recipe_type)
         if recipe is None:
-            logger.error("Product %s names unknown recipe '%s'", product.pk, definition.recipe_type)
+            logger.error(
+                "Product %s names unknown recipe '%s'", product.pk, product.recipe_type
+            )
             continue
-        selector = {**(product.config or {}), **_binding(definition), **trigger}
+        selector = {**(product.config or {}), **_binding(product), **trigger}
         results.extend(
             run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
         )
@@ -118,11 +137,11 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
 def run_product_now(product, *, dispatch: bool = True) -> list:
     """
     Manually trigger a product (ADR-0008) with a *wide* selector built from its
-    config plus its declared binding (inputs/outputs) and no event coordinate, so
-    the recipe enumerates all of the product's units — the same path as a
-    backfill. Reuses the engine's run() and
-    the product origin stamping. The caller (the tracking view) gates this on
-    product readiness; the engine's per-unit readiness still applies underneath.
+    config plus its pinned binding (inputs/outputs, with collection_id) and no
+    event coordinate, so the recipe enumerates all of the product's units — the
+    same path as a backfill. Reuses the engine's run() and the product origin
+    stamping. The caller (the tracking view) gates this on product readiness; the
+    engine's per-unit readiness still applies underneath.
     """
     from georiva.processing.engine import run
     from georiva.processing.registry import recipe_registry
@@ -133,14 +152,21 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
     if not product.is_enabled:
         return []
 
-    definition = definition_for(product)
-    if definition is None:
+    # An orphan (definition the plugin no longer declares) is inert too. The
+    # event path excludes it structurally — an orphan has no matching binding row
+    # — but the manual/scheduled overlay isn't collection-triggered, so it guards
+    # explicitly here (this is not the event dispatch path ADR-0010 §4 keeps
+    # get_derived_products-free).
+    if definition_for(product) is None:
         return []
-    recipe = recipe_registry.get(definition.recipe_type)
+
+    recipe = recipe_registry.get(product.recipe_type)
     if recipe is None:
-        logger.error("Product %s names unknown recipe '%s'", product.pk, definition.recipe_type)
+        logger.error(
+            "Product %s names unknown recipe '%s'", product.pk, product.recipe_type
+        )
         return []
-    selector = {**(product.config or {}), **_binding(definition)}
+    selector = {**(product.config or {}), **_binding(product)}
     return run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
 
 

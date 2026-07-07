@@ -20,7 +20,7 @@ from georiva.core.derived_products import (
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.sources.loader import Loader
-from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductInput
 
 
 def _staging_definition(collection_slug="tas"):
@@ -50,9 +50,15 @@ class TargetTierRoutingTests(TestCase):
         return Loader(data_source=ds, collection=self.collection, data_feed=feed)
 
     def _enable_staging_product(self):
-        DerivedProduct.objects.create(
+        # Routing is driven by the pinned staging-input binding (ADR-0010 §4),
+        # so create the product and pin its input to the 'tas' collection.
+        product = DerivedProduct.objects.create(
             data_feed=self.feed, definition_key="anomaly",
             recipe_type="climatology", is_enabled=True,
+        )
+        DerivedProductInput.objects.create(
+            product=product, role="value", tier="staging", source_key="tas",
+            collection=self.collection,
         )
 
     def test_collection_consumed_at_staging_routes_to_staging_bucket(self):
