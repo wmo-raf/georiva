@@ -26,9 +26,11 @@ class ProductReadiness:
 
 def product_readiness(product) -> ProductReadiness:
     """
-    A product is ready iff every *required* declared input collection exists and
-    is non-empty — derived from the declaration, no recipe execution. Optional
-    inputs never block. When blocked, names the first empty required input.
+    A product is ready iff every *required* declared input is pinned to a
+    collection that exists and is non-empty — resolved from the product's binding
+    rows by collection identity (ADR-0010 §5), no recipe execution. A required
+    input with no binding row (unbound) blocks, as does one whose collection has
+    no items. Optional inputs never block. When blocked, names the first offender.
     """
     from georiva.processing.recipe import resolve_declared_inputs
 
@@ -36,9 +38,12 @@ def product_readiness(product) -> ProductReadiness:
     if definition is None:
         return ProductReadiness(ready=False, reason="no product definition")
 
-    resolved = resolve_declared_inputs(definition.inputs)
+    bindings = {b.role: b for b in product.input_bindings.all()}
+    resolved = resolve_declared_inputs(list(bindings.values()))
     for ref in definition.inputs:
-        if ref.required and not resolved[ref.role].present:
+        if not ref.required:
+            continue
+        if ref.role not in bindings or not resolved[ref.role].present:
             return ProductReadiness(
                 ready=False, blocked_by=ref.role, reason=f"{ref.role} empty",
             )

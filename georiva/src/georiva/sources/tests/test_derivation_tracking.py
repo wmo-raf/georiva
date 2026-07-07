@@ -17,11 +17,11 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from georiva.core.models import Catalog
+from georiva.core.models import Catalog, Collection
 from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import product_origin
 from georiva.sources.derivation_tracking import product_status
-from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductInput
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
 User = get_user_model()
@@ -157,8 +157,14 @@ class TrackingViewTests(TestCase):
         self.assertTrue(DerivedProduct.objects.filter(pk=self.product.pk).exists())
 
     def _add_rainfall_staging(self):
-        scol = StagingCollection.objects.create(
+        # Readiness now resolves through the product's binding rows by collection
+        # identity (ADR-0010 §5), so link the staging collection to its core
+        # Collection and pin the product's 'value' input to it.
+        core = Collection.objects.create(
             catalog=self.catalog, slug="rainfall", name="Rainfall"
+        )
+        scol = StagingCollection.objects.create(
+            catalog=self.catalog, slug="rainfall", name="Rainfall", collection=core
         )
         si = StagingItem.objects.create(
             collection=scol, datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
@@ -167,6 +173,13 @@ class TrackingViewTests(TestCase):
         StagingAsset.objects.create(
             item=si, href="chirps/rainfall/f.tif", roles=["source"],
             format="geotiff", checksum="r1",
+        )
+        DerivedProductInput.objects.update_or_create(
+            product=self.product, role="value",
+            defaults={
+                "tier": "staging", "required": True, "source_key": "rainfall",
+                "collection": core,
+            },
         )
 
     def test_blocked_product_shows_its_blocking_reason(self):

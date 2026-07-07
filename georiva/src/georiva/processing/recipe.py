@@ -61,35 +61,67 @@ class ResolvedInput:
 
 def resolve_declared_inputs(inputs, *, unit=None) -> "dict[str, ResolvedInput]":
     """
-    Resolve a product's declared ``InputRef``s into ``ResolvedInput``s by
-    querying the catalog — the StagingItem tier for ``tier="staging"`` inputs,
-    the Published Item tier for ``tier="published"`` — filtered by collection
-    slug (ADR-0008).
+    Resolve a product's declared inputs into ``ResolvedInput``s by querying the
+    catalog — the StagingItem tier for ``tier="staging"`` inputs, the Published
+    Item tier for ``tier="published"``.
 
-    This is the engine-side glue that lets a recipe consume *declared* inputs
-    instead of hardcoding slugs in ``resolve_inputs``: the dependency graph and
-    product readiness become computable from the declaration. An input whose
-    collection has no rows resolves to an absent (``present=False``)
-    ``ResolvedInput`` keyed by its role, which is how readiness reports a blocked
-    product. ``unit`` is accepted for forward compatibility (per-unit time
-    narrowing arrives with product-driven invocation) and is unused here.
+    Each input is resolved by its **collection identity** when it carries a
+    ``collection_id`` (the pinned binding rows do — ADR-0010 §5): the staging
+    tier through the ``StagingCollection -> core Collection`` link
+    (``collection__collection_id``), the published tier directly
+    (``collection_id``). This scopes resolution to one catalog's collection, so
+    two catalogs sharing a slug never cross-contaminate, and an operator slug
+    rename can't misroute it. An input without a ``collection_id`` (a bare
+    ``InputRef`` from the generic declaration contract) falls back to a slug
+    match.
+
+    An input whose collection has no rows resolves to an absent
+    (``present=False``) ``ResolvedInput`` keyed by its role, which is how product
+    readiness reports a blocked product. ``unit`` is accepted for forward
+    compatibility and is unused here.
     """
     from georiva.core.models import Item
     from georiva.staging.models import StagingItem
 
     resolved: dict[str, ResolvedInput] = {}
     for ref in inputs:
-        model = StagingItem if ref.tier == "staging" else Item
-        items = list(
-            model.objects
-            .filter(collection__slug=ref.collection)
-            .prefetch_related("assets")
-        )
+        staging = ref.tier == "staging"
+        model = StagingItem if staging else Item
+        collection_id = getattr(ref, "collection_id", None)
+        if collection_id is not None:
+            # Resolve by identity (FK), not slug. Staging items reach the core
+            # Collection through their StagingCollection's link.
+            field = "collection__collection_id" if staging else "collection_id"
+            qs = model.objects.filter(**{field: collection_id})
+        else:
+            qs = model.objects.filter(collection__slug=ref.collection)
+        items = list(qs.prefetch_related("assets"))
         assets = [a for it in items for a in it.assets.all()]
         resolved[ref.role] = ResolvedInput(
             ref.role, required=ref.required, items=items, assets=assets
         )
     return resolved
+
+
+def binding_input_collection_id(selector, tier):
+    """The pinned ``collection_id`` of the first selector-binding input at
+    ``tier`` (ADR-0010 §5), or ``None``. Recipes query the catalog by this FK
+    instead of the declared slug, so resolution is catalog-scoped and rename-safe.
+    """
+    for ref in (selector or {}).get("inputs", []):
+        if ref.get("tier") == tier:
+            return ref.get("collection_id")
+    return None
+
+
+def binding_output_collection_id(selector, role):
+    """The pinned ``collection_id`` of the selector-binding output with ``role``
+    (ADR-0010 §5), or ``None`` — the materialised output collection a recipe
+    writes into, resolved by FK rather than by rebuilding its slug."""
+    for ref in (selector or {}).get("outputs", []):
+        if ref.get("role") == role:
+            return ref.get("collection_id")
+    return None
 
 
 @dataclass
