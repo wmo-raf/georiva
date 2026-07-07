@@ -31,6 +31,7 @@ def _mock_writer():
     w = MagicMock()
     w.bucket.save.side_effect = lambda path, data: path
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
+    w.write_png.side_effect = lambda rgba, path, *a, **k: path
     return w
 
 
@@ -64,14 +65,21 @@ class _PromotionFixture(TestCase):
         return {"staging_item_id": self.sitem.pk}
 
     def _run_promotion(self):
+        import numpy as np
+
         recipe = PromotionRecipe()
-        with patch("georiva.core.storage.storage") as st:
-            st.bucket.return_value.read_bytes.return_value = b"GEOTIFFBYTES"
+        data = np.full((10, 10), 5.0, dtype="float32")
+        with patch.object(
+            PromotionRecipe, "read_raster",
+            return_value=(data, [0, 0, 1, 1], "EPSG:4326", 10, 10),
+        ):
             return run_unit(recipe, self._unit(), writer=_mock_writer())
 
 
 class PromotionThroughEngineTests(_PromotionFixture):
-    def test_promotion_produces_item_asset_and_link(self):
+    def test_promotion_produces_cog_and_png_assets_and_link(self):
+        from georiva.core.models import Asset
+
         result = self._run_promotion()
 
         self.assertEqual(result.status, "completed")
@@ -79,15 +87,18 @@ class PromotionThroughEngineTests(_PromotionFixture):
         self.assertEqual(item.collection, self.pub_col)
         self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
 
-        asset = item.assets.get()
-        self.assertEqual(asset.variable, self.variable)
-        self.assertIn("data", asset.roles)
+        # A served COG (data role) + a visual PNG — the pair the catalog needs.
+        cog = item.assets.get(format=Asset.Format.COG)
+        self.assertEqual(cog.variable, self.variable)
+        self.assertEqual(cog.roles, ["data"])
+        png = item.assets.get(format=Asset.Format.PNG)
+        self.assertEqual(png.roles, ["visual"])
 
         link = DerivationLink.objects.get(derived_item=item)
         self.assertEqual(link.source_staging_item, self.sitem)
         self.assertIsNone(link.source_published_item)
         self.assertEqual(link.recipe_id, "promotion")
-        self.assertEqual(link.recipe_version, "1")
+        self.assertEqual(link.recipe_version, "2")
         self.assertEqual(link.input_hash, result.input_hash)
 
     def test_derivation_run_records_lifecycle(self):
@@ -241,3 +252,39 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
             DerivationRun.objects.get(recipe_type="fake").status,
             DerivationRun.Status.COMPLETED,
         )
+
+
+class RegisterPngAssetTests(_PromotionFixture):
+    """The engine writes a PNG (encoded RGBA) for an array OutputAsset declared
+    with format='png', alongside the COG path for format='cog' (ADR: derived
+    products emit COG + PNG like ingestion)."""
+
+    def test_png_output_asset_is_encoded_and_written_as_png(self):
+        import numpy as np
+
+        from georiva.core.models import Asset
+        from georiva.processing.engine import _register_asset
+        from georiva.processing.recipe import OutputAsset
+
+        writer = _mock_writer()
+        item = Item.objects.create(
+            collection=self.pub_col,
+            time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
+        data = np.full((3, 2), 12.0, dtype="float32")
+
+        asset = _register_asset(
+            item,
+            OutputAsset(variable=self.variable, roles=["visual"], format="png",
+                        array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
+                        width=2, height=3),
+            writer,
+        )
+
+        writer.write_png.assert_called_once()
+        # The encoder turned the 2D data into an (H, W, 4) RGBA array.
+        rgba = writer.write_png.call_args.args[0]
+        self.assertEqual(rgba.shape, (3, 2, 4))
+        self.assertEqual(asset.format, Asset.Format.PNG)
+        self.assertEqual(asset.roles, ["visual"])
+        writer.write_cog.assert_not_called()

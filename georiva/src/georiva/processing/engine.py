@@ -85,9 +85,16 @@ def _register_asset(item, oa, writer):
     path = _asset_output_path(item, oa.variable, oa.format)
 
     if oa.array is not None:
-        href = writer.write_cog(
-            oa.array, path, tuple(oa.bounds) if oa.bounds else None, oa.crs,
-        )
+        if oa.format == "png":
+            # Encode the data array to RGBA and write a PNG (the visual asset),
+            # mirroring ingestion's COG+PNG output for served items.
+            from georiva.ingestion.encoder import VariableEncoder
+            rgba = VariableEncoder().encode_to_rgba(oa.array, oa.variable)
+            href = writer.write_png(rgba, path)
+        else:
+            href = writer.write_cog(
+                oa.array, path, tuple(oa.bounds) if oa.bounds else None, oa.crs,
+            )
     elif oa.passthrough is not None:
         src_bucket_type, src_href = oa.passthrough
         data = storage.bucket(src_bucket_type).read_bytes(src_href)

@@ -143,9 +143,12 @@ class OutputAsset:
     One asset the engine should write + register under the output Item.
 
     Exactly one production mode:
-      - ``array`` set        → engine writes a COG via AssetWriter.write_cog
-      - ``passthrough`` set  → engine copies an existing object (bucket, href)
-                               into the assets bucket as-is (e.g. Promotion)
+      - ``array`` + ``format="cog"`` (default) → engine writes a COG via
+                               AssetWriter.write_cog
+      - ``array`` + ``format="png"``           → engine encodes the array to RGBA
+                               (VariableEncoder) and writes a visual PNG
+      - ``passthrough`` set    → engine copies an existing object (bucket, href)
+                               into the assets bucket as-is
     """
     variable: Any                         # core.Variable
     roles: list = field(default_factory=lambda: ["data"])
