@@ -548,6 +548,18 @@ class ProductChainPartialTests(ProductServiceBase):
             product=self.rows["anomaly"], role="anomaly",
             output_key="chirps-monthly-anomaly", collection=collection,
         )
+        # Fully bind anomaly's inputs so it renders as a normal (not unbound) card.
+        for role, slug, tier in (
+            ("value", "chirps-monthly", "staging"),
+            ("baseline", "chirps-monthly-climatology", "published"),
+        ):
+            col, _ = Collection.objects.get_or_create(
+                catalog=self.catalog, slug=slug, defaults={"name": slug}
+            )
+            DerivedProductInput.objects.create(
+                product=self.rows["anomaly"], role=role, tier=tier,
+                required=True, source_key=slug, collection=col,
+            )
 
         html = self._render()
 
@@ -1239,3 +1251,168 @@ class EnableFailureLeavesNoBindingsTests(PinBindingsBase):
         self.assertFalse(row.is_enabled)
         self.assertFalse(DerivedProductInput.objects.filter(product=row).exists())
         self.assertFalse(DerivedProductOutput.objects.filter(product=row).exists())
+
+
+class UnboundStateTests(PinBindingsBase):
+    """A bound Collection deleted outside the feed lifecycle cascades its binding
+    row away, leaving the product 'unbound' — a distinct, loud, inert drift state
+    (ADR-0010 §6), separate from 'orphaned' (definition gone)."""
+
+    def _card(self, chain, key):
+        for lane in chain["stages"]:
+            for c in lane:
+                if c["product"] and c["product"].definition_key == key:
+                    return c
+        return None
+
+    def test_deleting_a_bound_output_collection_marks_the_product_unbound(self):
+        from georiva.sources.product_service import is_unbound
+
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+            Collection.objects.get(slug="chirps-monthly-climatology").delete()
+            self.assertTrue(is_unbound(clim))
+            card = self._card(build_chain(self.feed), "climatology")
+        self.assertTrue(card["unbound"])
+        self.assertFalse(card["orphaned"])
+
+    def test_unbound_card_renders_a_distinct_state_and_rebind_action(self):
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+            Collection.objects.get(slug="chirps-monthly-climatology").delete()
+            chain = build_chain(self.feed)
+            html = render_to_string(
+                "georivasources/includes/product_chain.html",
+                {"stage_lanes": chain["stages"], "mode": "manage", "feed": self.feed},
+            )
+
+        self.assertIn("Unbound", html)
+        self.assertIn(f"/products/{clim.pk}/rebind/", html)
+
+    def test_unbound_is_not_the_same_as_orphaned(self):
+        # An orphan (no live definition) is not reported unbound — the two drift
+        # states are distinct.
+        from georiva.sources.product_service import is_orphaned, is_unbound
+
+        clim = self.rows["climatology"]
+        with patch.object(DataFeed, "get_derived_products", return_value=[]):
+            self.assertTrue(is_orphaned(clim))
+            self.assertFalse(is_unbound(clim))
+
+    def test_unbound_product_does_not_dispatch(self):
+        # Its input binding is gone, so the FK-matched event dispatch skips it.
+        from georiva.sources.derivation_invocation import dispatch_for_input
+
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+        self.raw.delete()   # deletes the raw collection + its input binding + link
+
+        trigger = {
+            "staging_item_id": 1, "collection_id": self.raw.pk,
+            "collection_slug": "chirps-monthly",
+        }
+        with patch("georiva.processing.engine.run") as run:
+            dispatch_for_input(trigger, dispatch=False)
+        run.assert_not_called()
+
+
+class RebindProductTests(PinBindingsBase):
+    def test_rebind_restores_a_deleted_output_collection_and_its_binding(self):
+        from georiva.sources.product_service import is_unbound, rebind_product
+
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+            Collection.objects.get(slug="chirps-monthly-climatology").delete()
+            self.assertTrue(is_unbound(clim))
+            rebind_product(clim)
+            self.assertFalse(is_unbound(clim))
+        # Output collection re-materialised and the binding restored.
+        self.assertTrue(
+            Collection.objects.filter(
+                catalog=self.catalog, slug="chirps-monthly-climatology"
+            ).exists()
+        )
+
+    def test_rebind_raises_when_a_required_input_cannot_resolve(self):
+        from georiva.sources.product_service import rebind_product
+
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+            # Delete the raw input collection: its link + input binding cascade
+            # away and nothing can re-resolve it here.
+            self.raw.delete()
+            with self.assertRaises(ProductActionError):
+                rebind_product(clim)
+
+
+class RebindEndpointTests(PinBindingsBase):
+    """The chain panel's re-bind action routes through the service (ADR-0010 §6)."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_superuser("rebind", "rb@test.com", "pw")
+        self.client.force_login(self.user)
+
+    def test_rebind_endpoint_restores_bindings_and_confirms(self):
+        from django.contrib.messages import get_messages
+
+        from georiva.sources.product_service import is_unbound
+
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+            Collection.objects.get(slug="chirps-monthly-climatology").delete()
+            url = reverse(
+                "feed_product_rebind",
+                kwargs={"feed_pk": self.feed.pk, "product_pk": clim.pk},
+            )
+            response = self.client.post(url)
+            self.assertFalse(is_unbound(clim))
+
+        msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn("Re-bound", msgs)
+
+    def test_rebind_endpoint_surfaces_the_error_when_it_cannot(self):
+        from django.contrib.messages import get_messages
+
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+            self.raw.delete()   # raw input collection gone -> can't re-resolve
+            url = reverse(
+                "feed_product_rebind",
+                kwargs={"feed_pk": self.feed.pk, "product_pk": clim.pk},
+            )
+            response = self.client.post(url)
+
+        msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
+        self.assertIn("can't be re-bound", msgs)
+
+
+class UpgradeRepinTests(PinBindingsBase):
+    """Upgrade paths re-pin bindings so a changed/new declaration binds without
+    manual cleanup (ADR-0010 §6 / AC: re-pin on upgrade)."""
+
+    def test_inline_enable_new_definition_pins_its_bindings(self):
+        # A plugin upgrade adds climatology (drop its row to simulate rowless);
+        # enabling it inline provisions + pins in one step.
+        self.rows["climatology"].delete()
+        definition = next(d for d in _chirps_defs() if d.key == "climatology")
+
+        with self._patch_defs():
+            product = enable_new_definition(self.feed, definition, {})
+
+        self.assertEqual(
+            DerivedProductInput.objects.get(product=product, role="value").collection,
+            self.raw,
+        )
+        self.assertTrue(
+            DerivedProductOutput.objects.filter(
+                product=product, role="climatology"
+            ).exists()
+        )

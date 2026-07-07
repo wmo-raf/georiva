@@ -82,23 +82,51 @@ JSON validated against the definition's `config_schema`, `is_enabled` (pause wit
 output `Collection`s.
 _Avoid_: DerivedCollection; treating it as the blueprint (that is the Derived Product Definition)
 
+**Feed-local collection key**:
+The namespace a Derived Product Definition's `InputRef`/`OutputRef` `collection` names live in (ADR-0010): a raw
+`CollectionDefinition.key` of the feed **or** an output key of one of the feed's own products — *not* a global catalog
+slug. `core.product_chain.validate_chain` rejects an input key outside this namespace, and two distinct products may not
+declare the same output key (a promotion serving the raw collection 1:1 may reuse the raw key as its output). Products are
+feed-local: every input a product declares resolves within its own feed. The provisioned `Collection.slug` is
+`slugify(definition.key)` (no catalog prefix), so the key and the slug coincide for a raw collection.
+_Avoid_: catalog slug (as the reference); cross-feed inputs (deferred)
+
+**Pinned binding** (`DerivedProductInput` / `DerivedProductOutput`):
+The resolved, persisted link from a `DerivedProduct` to the catalog `Collection`s it consumes and produces (ADR-0010) —
+each a row with a `collection` FK, the declared `source_key`/`output_key`, `role`, and (inputs) `tier`. Written by
+`product_service.pin_bindings` inside the enable transaction, once, so every runtime joint (auto-derived tier, dispatch,
+input resolution, readiness) matches by **FK** rather than re-matching a slug on each event — catalog-scoped and
+rename-safe. Deleting a bound `Collection` cascades the row away. Replaces the per-event slug reconstruction of ADR-0008.
+_Avoid_: re-resolving the declared slug at dispatch time; treating the slug as identity
+
 **Product-driven invocation**:
-The application-layer flip (ADR-0008) where an arriving input is routed to the enabled `DerivedProduct`s that *declare*
-it as an input — not fanned out to every recipe. `sources.derivation_invocation.dispatch_for_input(trigger)` matches the
-trigger's `(collection_slug, tier)` against each enabled product's declared `InputRef`s, builds
-`selector = {**config, **trigger}`, and calls the engine's generic `run(recipe, selector)`. It is the **only** place that
-joins `DerivedProduct` to the engine, so the engine never imports the feed layer (ADR-0005); the feed layer depending on
-the engine is the allowed direction. Event-driven products fall out of this for free.
-_Avoid_: recipe-driven dispatch (the pre-ADR-0008 fan-out); putting product routing in `processing`
+The application-layer flip (ADR-0008; FK-matched in ADR-0010) where an arriving input is routed to the enabled
+`DerivedProduct`s that consume it. `sources.derivation_invocation.dispatch_for_input(trigger)` matches the trigger's
+`(collection_id, tier)` against the pinned `DerivedProductInput` rows in one indexed query — feed/catalog scoping falls
+out of the FK, so an item in one catalog can't trigger another's products even under a shared slug. It builds
+`selector = {**config, **binding, **trigger}` (binding = the pinned rows, each carrying a `collection_id`) and calls the
+engine's generic `run(recipe, selector)`. It is the **only** place that joins `DerivedProduct` to the engine, so the
+engine never imports the feed layer (ADR-0005). No `get_derived_products()` on this path.
+_Avoid_: recipe-driven dispatch (the pre-ADR-0008 fan-out); slug matching (the pre-ADR-0010 dispatch); putting product
+routing in `processing`
 
 **Auto-derived tier**:
 A collection's storage tier is a **computed** consequence of the configured products (ADR-0008), not a stored field. The
 Loader routes a fetched file to the STAGING bucket iff `sources.derivation_invocation.collection_routes_to_staging(feed,
-slug)` — some enabled `DerivedProduct` of the feed consumes that collection at the staging tier; otherwise it lands in
-SOURCES (published, no `StagingItem`s — "no derivation, no staging"). Replaces the manual `DataFeed.target_tier` field
-and the per-plugin `get_wizard_defaults` tier override, removing the "configured to publish but a product needs staging →
-silently skipped" drift class.
+slug)` — some enabled `DerivedProduct` of the feed has a **pinned** staging-tier input on that collection (an indexed
+`DerivedProductInput` query, ADR-0010); otherwise it lands in SOURCES (published, no `StagingItem`s — "no derivation, no
+staging"). Replaces the manual `DataFeed.target_tier` field and the per-plugin `get_wizard_defaults` tier override,
+removing the "configured to publish but a product needs staging → silently skipped" drift class.
 _Avoid_: `target_tier` (removed); a manual publish/staging toggle
+
+**Unbound**:
+An enabled, still-declared `DerivedProduct` whose pinned bindings no longer cover its declaration (ADR-0010) — usually a
+bound `Collection` was deleted outside the feed lifecycle, cascading its binding row away. Inert on dispatch (no binding
+row to match) and surfaced as a distinct, loud card state in the feed-detail chain panel, with a **re-bind** action
+(`product_service.rebind_product`) that re-runs enable-time resolution to restore the rows, or raises `ProductActionError`
+if a required input still can't resolve. The sibling drift state to **orphaned** (definition gone, not collection gone);
+both are loud and inert.
+_Avoid_: conflating unbound (collection gone) with orphaned (definition gone)
 
 **Scheduled-product beat**:
 The periodic loop (ADR-0008) that keeps scheduled derivations current with no operator action:

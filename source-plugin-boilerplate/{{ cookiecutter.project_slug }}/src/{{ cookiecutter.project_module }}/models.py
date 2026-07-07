@@ -110,8 +110,12 @@ class {{ cookiecutter.project_module|replace('_', ' ')|title|replace(' ', '') }}
     # ingests raw data. Full guide: docs/plugins/derived-products.md.
     #
     # get_derived_products() is an *instance* method: a product's InputRef /
-    # OutputRef bind to this feed's actual collection slugs. Return one
-    # DerivedProductDefinition per product the feed offers.
+    # OutputRef `collection` is a FEED-LOCAL KEY (ADR-0010) — one of this feed's
+    # CollectionDefinition keys (a raw collection) or an output key of one of its
+    # own products (a sibling output), NOT a global catalog slug. At enable time
+    # each key is resolved once to a Collection and pinned, so a later slug rename
+    # never breaks routing/dispatch/resolution. Return one DerivedProductDefinition
+    # per product the feed offers.
     #
     # def get_derived_products(self):
     #     from georiva.core.derived_products import (
@@ -130,10 +134,12 @@ class {{ cookiecutter.project_module|replace('_', ' ')|title|replace(' ', '') }}
     #                 ConfigField(key="quantity", type="choice",
     #                             choices=("anomaly", "value"), default="anomaly"),
     #             ),
-    #             # Declared inputs (not buried in the recipe). tier is "staging"
-    #             # (loader-fed, pre-publish) or "published". A required input at
-    #             # the *published* tier that names another product's output creates
-    #             # a dependency edge (anomaly -> climatology).
+    #             # Declared inputs (not buried in the recipe). `collection` is a
+    #             # feed-local key (a CollectionDefinition key or a sibling output
+    #             # key), not a catalog slug. tier is "staging" (loader-fed,
+    #             # pre-publish) or "published". A required input at the *published*
+    #             # tier naming another product's output key creates a dependency
+    #             # edge (anomaly -> climatology).
     #             inputs=(
     #                 InputRef(role="value", collection="example-collection", tier="staging"),
     #                 InputRef(role="baseline", collection="example-collection-climatology",
