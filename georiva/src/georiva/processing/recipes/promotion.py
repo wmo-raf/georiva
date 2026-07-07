@@ -42,10 +42,13 @@ def _array_stats(data) -> dict:
 @RecipeRegistry.register
 class PromotionRecipe(BaseRecipe):
     type = "promotion"
-    # v2: promotion now materialises a COG + a visual PNG (was a raw-GeoTIFF
-    # passthrough), so the served item is tile-servable and shows in the catalog.
+    # v2: promotion materialises a COG + a visual PNG (was a raw-GeoTIFF
+    #     passthrough), so the served item is tile-servable and shows in the catalog.
+    # v3: those assets now use the shared ingestion path scheme
+    #     ({variable}_{HHMMSS}) instead of the divergent {variable}_{YYYYMMDDTHHMMSS},
+    #     so href-agnostic consumers resolve them.
     # Bumping the version re-derives already-promoted items on the next sweep.
-    version = "2"
+    version = "3"
 
     # ---- declarative surface ------------------------------------------------
 

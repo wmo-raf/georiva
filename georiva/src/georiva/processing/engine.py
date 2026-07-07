@@ -32,11 +32,28 @@ class UnitResult:
 
 
 def _asset_output_path(item, variable, fmt: str) -> str:
+    """The stored path for a derived asset — the *same* scheme ingestion writes
+    (``ingestion.handlers.asset_handler``): a time-partitioned directory from the
+    shared ``storage.build_asset_path`` plus a ``{variable}_{HHMMSS}`` filename
+    (the date lives in the path), suffixed ``__ref{reftime}`` for a forecast item.
+    Reusing the shared builder keeps derived and ingested assets resolvable by the
+    same href-agnostic consumers (map layers, Titiler), instead of the divergent
+    ``{variable}_{YYYYMMDDTHHMMSS}`` this used to emit."""
+    from georiva.core.storage import storage
+
     ext = {"cog": "tif", "geotiff": "tif", "png": "png"}.get(fmt, "tif")
     t = item.time
-    return (
-        f"{item.collection.catalog.slug}/{item.collection.slug}/{variable.slug}/"
-        f"{t:%Y/%m/%d}/{variable.slug}_{t:%Y%m%dT%H%M%S}.{ext}"
+    if item.reference_time:
+        ref_str = item.reference_time.strftime("%Y%m%dT%H%M%S")
+        name = f"{variable.slug}_{t:%H%M%S}__ref{ref_str}.{ext}"
+    else:
+        name = f"{variable.slug}_{t:%H%M%S}.{ext}"
+    return storage.build_asset_path(
+        catalog=item.collection.catalog.slug,
+        collection=item.collection.slug,
+        variable=variable.slug,
+        timestamp=t,
+        filename=name,
     )
 
 
