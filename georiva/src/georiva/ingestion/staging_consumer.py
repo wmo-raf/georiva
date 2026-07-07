@@ -135,11 +135,25 @@ def register_staging_file(bucket: str, key: str):
 
     dt, start_dt, end_dt = _temporal_extent(timestamps)
 
-    collection, _ = StagingCollection.objects.get_or_create(
+    # Pin the published-tier core Collection (same catalog + slug) so the
+    # arriving-input trigger can carry a collection_id (ADR-0010 §3). Nullable:
+    # if the core Collection isn't provisioned yet, registration still proceeds.
+    from georiva.core.models import Collection
+
+    core_collection = Collection.objects.filter(
+        catalog=catalog, slug=collection_slug
+    ).first()
+
+    collection, _created = StagingCollection.objects.get_or_create(
         catalog=catalog,
         slug=collection_slug,
-        defaults={"name": collection_slug},
+        defaults={"name": collection_slug, "collection": core_collection},
     )
+    # Backfill the link on a pre-existing staging collection registered before
+    # its core Collection was provisioned.
+    if collection.collection_id is None and core_collection is not None:
+        collection.collection = core_collection
+        collection.save(update_fields=["collection"])
 
     item = StagingItem.objects.create(
         collection=collection,

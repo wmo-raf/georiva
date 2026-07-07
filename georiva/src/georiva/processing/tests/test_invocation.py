@@ -515,3 +515,64 @@ class ClimatologyCandidateUnitsTests(TestCase):
         }
         units = list(ClimatologyRecipe().candidate_units(selector))
         self.assertEqual(len(units), 1)
+
+
+class TriggerBuilderTests(TestCase):
+    """Arriving-input triggers carry the collection's *identity* (collection_id)
+    alongside its slug (ADR-0010 §3), so dispatch can match binding rows by FK
+    instead of by slug. The slug stays for display and unmigrated recipes."""
+
+    def test_published_item_trigger_carries_collection_id_and_slug(self):
+        from datetime import datetime, timezone
+
+        from georiva.core.models import Catalog, Collection, Item
+        from georiva.processing.invocation import published_item_trigger
+
+        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
+        item = Item.objects.create(
+            collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc)
+        )
+
+        trigger = published_item_trigger(item)
+
+        self.assertEqual(trigger["collection_id"], col.pk)
+        self.assertEqual(trigger["collection_slug"], "anom")
+        self.assertEqual(trigger["published_item_id"], item.pk)
+
+    def test_staging_item_trigger_carries_the_linked_core_collection_id(self):
+        from georiva.core.models import Catalog, Collection
+        from georiva.processing.invocation import staging_item_trigger
+        from georiva.staging.models import StagingCollection, StagingItem
+
+        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        core = Collection.objects.create(catalog=catalog, slug="rain", name="Rain")
+        sc = StagingCollection.objects.create(
+            catalog=catalog, slug="rain", name="Rain", collection=core
+        )
+        item = StagingItem.objects.create(collection=sc)
+
+        trigger = staging_item_trigger(item)
+
+        self.assertEqual(trigger["collection_id"], core.pk)
+        self.assertEqual(trigger["collection_slug"], "rain")
+        self.assertEqual(trigger["staging_item_id"], item.pk)
+
+    def test_staging_item_trigger_collection_id_is_none_when_unlinked(self):
+        # A staging collection registered before its core Collection existed has
+        # a null link — the trigger carries collection_id=None, and dispatch
+        # simply matches nothing (inert, not an error).
+        from georiva.core.models import Catalog
+        from georiva.processing.invocation import staging_item_trigger
+        from georiva.staging.models import StagingCollection, StagingItem
+
+        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        sc = StagingCollection.objects.create(
+            catalog=catalog, slug="rain", name="Rain"
+        )
+        item = StagingItem.objects.create(collection=sc)
+
+        trigger = staging_item_trigger(item)
+
+        self.assertIsNone(trigger["collection_id"])
+        self.assertEqual(trigger["collection_slug"], "rain")
