@@ -4,6 +4,12 @@
 
 proposed
 
+> **Extended by [ADR-0010](0010-pinned-collection-bindings-for-derived-products.md).**
+> This ADR's orphan/upgrade lifecycle gains a sibling drift state — **unbound** (a
+> bound `Collection` was deleted, so a pinned binding row cascaded away) — with a
+> re-bind action, and materialise-on-enable now also *pins* the resolved
+> collections as binding rows. The chain read-model and gates here are unchanged.
+
 ## Context
 
 ADR-0008 introduced the declarative derived-product contract

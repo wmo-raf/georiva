@@ -144,11 +144,12 @@ Draw a clear line between the two:
   run. Declare the catalog-facing strings and visibility on the `OutputRef`; do
   **not** set them in the recipe.
 - **Your recipe computes the data** — items and assets — into those collections.
-  Its own lazy `get_or_create` for a collection should be a bare fallback
-  (`defaults={"name": slug}` at most); it will normally find the collection core
-  already materialised. The recipe selector binding carries only
-  `role`/`collection`/`tier`, never the display fields, so a title edit can't
-  change a recipe's unit identity.
+  Prefer resolving a collection by the `collection_id` the selector binding
+  carries for each input/output (catalog-scoped, rename-safe, ADR-0010); any lazy
+  `get_or_create` should be a bare fallback (`defaults={"name": slug}` at most)
+  that normally finds the collection core already materialised. The binding
+  carries `role`/`collection`/`tier`/`collection_id` — never the display fields —
+  so a title edit can't change a recipe's unit identity.
 
 ## `default_enabled` and `depends_on`
 

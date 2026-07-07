@@ -269,7 +269,10 @@ class CollectionDefinition:
     default_interval_minutes: int | None = None  # pre-fills link.interval_minutes
 ```
 
-**`Collection.slug`** is derived as `slugify(f"{catalog.slug}-{definition.key}")`.
+**`Collection.slug`** is derived as `slugify(definition.key)` — the definition key
+alone, no catalog prefix (ADR-0010 §5), so it coincides with the feed-local key a
+derived product's `InputRef`/`OutputRef` references and the storage-path segment
+already carries the catalog.
 
 **Per-collection config fields** (e.g. `default_start_date`) live on the
 `DataFeedCollectionLink` subclass, declared via `get_panels()`. The wizard renders
@@ -455,7 +458,7 @@ data_feed, collections = service.provision(
 
 For each `(definition, config_values)` pair the service:
 
-1. Upserts a `Collection` (slug = `slugify(f"{catalog.slug}-{definition.key}")`)
+1. Upserts a `Collection` (slug = `slugify(definition.key)` — no catalog prefix, ADR-0010 §5)
 2. Upserts each `Variable` in `definition.variables` (respecting `selected_variable_keys` from wizard)
 3. Upserts a `DataFeedCollectionLink` with:
     - `definition_key` — stable reference back to the definition

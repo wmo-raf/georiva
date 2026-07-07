@@ -32,9 +32,12 @@ reading order. If you're new, start at the top and work down.
 8. **[Derived Products](plugins/derived-products.md)** — the contract for declaring layers a feed computes from its own
    collections (anomaly, climatology, promotion…): `get_derived_products()`, the full `DerivedProductDefinition` /
    `InputRef` / `OutputRef` / `ConfigField` reference, how the tier-aware chain and stages are computed, what core
-   materialises versus what recipes create, and a worked CHIRPS example. Decisions recorded in
-   [ADR-0008](adr/0008-configurable-derivation-products.md) and
-   [ADR-0009](adr/0009-derived-product-chain-and-lifecycle.md).
+   materialises versus what recipes create, and a worked CHIRPS example. A product's collection references are
+   **feed-local keys** resolved once to catalog `Collection`s and **pinned** as binding rows, so routing, dispatch, and
+   resolution match by FK (catalog-scoped, rename-safe). Decisions recorded in
+   [ADR-0008](adr/0008-configurable-derivation-products.md),
+   [ADR-0009](adr/0009-derived-product-chain-and-lifecycle.md), and
+   [ADR-0010](adr/0010-pinned-collection-bindings-for-derived-products.md).
 
 ## Contributing
 
