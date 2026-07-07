@@ -33,9 +33,23 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
         on_delete=models.CASCADE,
         related_name='staging_collections',
     )
-    
+
+    # The published-tier core Collection this staging collection corresponds to
+    # (same catalog + slug). Pinned at registration so the arriving-input trigger
+    # can carry a collection_id and dispatch can match binding rows by FK
+    # (ADR-0010 §3/§4). Nullable: a staged file whose core Collection isn't
+    # provisioned yet still registers; SET_NULL keeps staging data if the core
+    # Collection is later deleted.
+    collection = models.ForeignKey(
+        'georivacore.Collection',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='staging_collections',
+    )
+
     is_active = models.BooleanField(default=True)
-    
+
     class Meta:
         unique_together = ['catalog', 'slug']
         ordering = ['catalog', 'name']

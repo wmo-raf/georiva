@@ -98,7 +98,61 @@ class RegisterStagingFileTests(TestCase):
         self.assertEqual(sc.slug, "tas-ssp245")
         self.assertEqual(sc.catalog, self.catalog)
 
+    def test_links_staging_collection_to_its_core_collection(self):
+        # The core (published-tier) Collection with the same catalog + slug is
+        # pinned on the StagingCollection at registration (ADR-0010 §3).
+        from georiva.core.models import Collection
+
+        core = Collection.objects.create(
+            catalog=self.catalog, slug="tas-ssp245", name="Tas SSP245"
+        )
+        self._register(_ts(1))
+
+        sc = StagingCollection.objects.get()
+        self.assertEqual(sc.collection, core)
+
+    def test_staging_collection_link_is_null_when_no_core_collection(self):
+        # No matching core Collection yet -> the FK stays null; registration
+        # still succeeds (the collection may be provisioned later).
+        self._register(_ts(1))
+        sc = StagingCollection.objects.get()
+        self.assertIsNone(sc.collection)
+
     def test_unknown_catalog_is_skipped(self):
         item = self._register(_ts(1), key="nope/coll/file.nc")
         self.assertIsNone(item)
         self.assertEqual(StagingItem.objects.count(), 0)
+
+
+class BackfillStagingLinkTests(TestCase):
+    """The data migration links pre-existing StagingCollections to their core
+    Collection by (catalog, slug), leaving unmatched rows null (ADR-0010 §3)."""
+
+    def test_backfill_links_matching_rows_and_leaves_others_null(self):
+        import importlib
+
+        from django.apps import apps as global_apps
+
+        from georiva.core.models import Catalog, Collection
+        from georiva.staging.models import StagingCollection
+
+        migration = importlib.import_module(
+            "georiva.staging.migrations.0004_backfill_staging_collection_link"
+        )
+        backfill_staging_links = migration.backfill_staging_links
+
+        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        core = Collection.objects.create(catalog=catalog, slug="rain", name="Rain")
+        matched = StagingCollection.objects.create(
+            catalog=catalog, slug="rain", name="Rain"
+        )
+        orphan = StagingCollection.objects.create(
+            catalog=catalog, slug="no-core", name="No Core"
+        )
+
+        backfill_staging_links(global_apps, None)
+
+        matched.refresh_from_db()
+        orphan.refresh_from_db()
+        self.assertEqual(matched.collection, core)
+        self.assertIsNone(orphan.collection)

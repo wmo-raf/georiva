@@ -23,18 +23,24 @@ logger = logging.getLogger(__name__)
 
 
 def staging_item_trigger(staging_item) -> dict:
-    """The arriving-input trigger for a newly registered StagingItem."""
+    """The arriving-input trigger for a newly registered StagingItem. Carries the
+    linked published-tier ``collection_id`` (the StagingCollection's core
+    Collection FK) alongside the slug (ADR-0010 §3); ``collection_id`` is ``None``
+    when the staging collection isn't linked yet, so dispatch matches nothing."""
     return {
         "staging_item_id": staging_item.pk,
+        "collection_id": staging_item.collection.collection_id,
         "collection_slug": staging_item.collection.slug,
     }
 
 
 def published_item_trigger(item) -> dict:
     """The arriving-input trigger for a Published item produced by a derivation
-    (an intermediate that may itself feed a further derivation)."""
+    (an intermediate that may itself feed a further derivation). Carries the
+    collection's ``collection_id`` (its own pk) alongside the slug (ADR-0010 §3)."""
     return {
         "published_item_id": item.pk,
+        "collection_id": item.collection_id,
         "collection_slug": item.collection.slug,
     }
 
