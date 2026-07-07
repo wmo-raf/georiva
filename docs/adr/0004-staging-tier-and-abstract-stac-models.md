@@ -1,5 +1,11 @@
 # Staging Tier and Abstract STAC Models
 
+> **Amended by [ADR-0010](0010-pinned-collection-bindings-for-derived-products.md).**
+> `StagingCollection` gains a nullable `collection` FK to its published-tier
+> `core.Collection` (same catalog + slug), set at registration, so an arriving
+> `StagingItem`'s derivation trigger can carry a `collection_id` and dispatch can
+> match pinned binding rows by FK rather than by slug.
+
 ## Context
 
 GeoRiva's current data flow couples acquisition to materialization: a `DataFeed` fetch lands a file in the

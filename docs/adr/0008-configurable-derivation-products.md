@@ -4,6 +4,14 @@
 
 proposed
 
+> **Amended by [ADR-0010](0010-pinned-collection-bindings-for-derived-products.md).**
+> The declared-inputs-by-slug design here (an `InputRef`/`OutputRef` `collection`
+> is a catalog slug; `dispatch_for_input` and `collection_routes_to_staging` match
+> on `(collection_slug, tier)`) is superseded: a `collection` is now a *feed-local
+> key* resolved once at enable time and *pinned* as a binding row, and every
+> runtime joint matches by the `Collection` FK. This section records the original
+> decision; read ADR-0010 for the binding mechanics as built.
+
 ## Context
 
 The generic Derivation Engine (ADR-0005) runs recipes over a *selector*, and
