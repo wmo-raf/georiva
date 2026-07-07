@@ -24,7 +24,13 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection
-from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.sources.models import (
+    DataFeed,
+    DataFeedCollectionLink,
+    DerivedProduct,
+    DerivedProductInput,
+    DerivedProductOutput,
+)
 from georiva.sources.product_service import (
     ProductActionError,
     build_chain,
@@ -317,10 +323,15 @@ class BuildChainTests(ProductServiceBase):
         self.assertEqual(cards["climatology"]["needs"], [])
 
     def test_card_carries_row_state_status_and_outputs(self):
-        # anomaly's output collection is materialised -> the card links it.
-        Collection.objects.create(
+        # anomaly's output collection is materialised and pinned -> the card
+        # links it via its DerivedProductOutput binding (ADR-0010 §2).
+        collection = Collection.objects.create(
             catalog=self.catalog, slug="chirps-monthly-anomaly",
             name="CHIRPS Monthly Anomaly",
+        )
+        DerivedProductOutput.objects.create(
+            product=self.rows["anomaly"], role="anomaly",
+            output_key="chirps-monthly-anomaly", collection=collection,
         )
 
         with self._patch_defs():
@@ -529,9 +540,13 @@ class ProductChainPartialTests(ProductServiceBase):
         )
 
     def test_renders_labels_dependency_chips_and_outputs(self):
-        Collection.objects.create(
+        collection = Collection.objects.create(
             catalog=self.catalog, slug="chirps-monthly-anomaly",
             name="CHIRPS Monthly Anomaly",
+        )
+        DerivedProductOutput.objects.create(
+            product=self.rows["anomaly"], role="anomaly",
+            output_key="chirps-monthly-anomaly", collection=collection,
         )
 
         html = self._render()
@@ -940,3 +955,287 @@ class TrackingToggleFlowTests(ProductServiceBase):
         self.assertFalse(self.rows["anomaly"].is_enabled)
         msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
         self.assertIn("Climatology", msgs)
+
+
+class PinBindingsBase(TestCase):
+    """A properly provisioned feed: the raw collection exists with a
+    DataFeedCollectionLink (as the collections wizard step would create), so a
+    product's declared input/output keys resolve to real Collections. The bare
+    gate fixtures above deliberately skip this — here we exercise the pinning."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
+        # Raw collection + link, keyed on the definition key the declarations use.
+        self.raw = Collection.objects.create(
+            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
+        )
+        DataFeedCollectionLink.objects.create(
+            data_feed=self.feed, collection=self.raw,
+            definition_key="chirps-monthly",
+        )
+        self.rows = {}
+        for defn in _chirps_defs():
+            self.rows[defn.key] = DerivedProduct.objects.create(
+                data_feed=self.feed, definition_key=defn.key,
+                recipe_type=defn.recipe_type, is_enabled=True,
+            )
+
+    def _patch_defs(self):
+        return patch.object(
+            DataFeed, "get_derived_products", return_value=_chirps_defs()
+        )
+
+
+class PinOutputBindingsTests(PinBindingsBase):
+    def test_enable_pins_an_output_binding_per_declared_output(self):
+        # Enabling climatology materialises its output collection and pins a
+        # DerivedProductOutput row (role, key) → that Collection (ADR-0010 §2).
+        clim = self.rows["climatology"]
+        clim.is_enabled = False
+        clim.save(update_fields=["is_enabled"])
+
+        with self._patch_defs():
+            enable_product(clim)
+
+        binding = DerivedProductOutput.objects.get(product=clim, role="climatology")
+        self.assertEqual(binding.output_key, "chirps-monthly-climatology")
+        self.assertEqual(binding.collection.slug, "chirps-monthly-climatology")
+        self.assertEqual(binding.collection.catalog, self.catalog)
+
+
+class PinInputBindingsTests(PinBindingsBase):
+    def test_enable_pins_a_raw_staging_input_to_the_linked_collection(self):
+        # climatology's staging input resolves through the DataFeedCollectionLink
+        # to the raw collection (ADR-0010 §2).
+        clim = self.rows["climatology"]
+        clim.is_enabled = False
+        clim.save(update_fields=["is_enabled"])
+
+        with self._patch_defs():
+            enable_product(clim)
+
+        binding = DerivedProductInput.objects.get(product=clim, role="value")
+        self.assertEqual(binding.tier, "staging")
+        self.assertEqual(binding.source_key, "chirps-monthly")
+        self.assertEqual(binding.collection, self.raw)
+        self.assertTrue(binding.required)
+
+    def test_enable_pins_a_published_input_to_the_sibling_output_collection(self):
+        # anomaly's published baseline resolves to the climatology product's
+        # materialised output collection. The dependency gate enables climatology
+        # first (materialising its output), so anomaly's binding resolves.
+        anomaly = self.rows["anomaly"]
+        anomaly.is_enabled = False
+        anomaly.save(update_fields=["is_enabled"])
+
+        with self._patch_defs():
+            enable_product(self.rows["climatology"])  # materialises clim output
+            enable_product(anomaly)
+
+        clim_collection = Collection.objects.get(
+            catalog=self.catalog, slug="chirps-monthly-climatology"
+        )
+        baseline = DerivedProductInput.objects.get(product=anomaly, role="baseline")
+        self.assertEqual(baseline.tier, "published")
+        self.assertEqual(baseline.collection, clim_collection)
+
+
+class PinBindingsIdempotencyTests(PinBindingsBase):
+    def test_re_enabling_upserts_rather_than_duplicating(self):
+        clim = self.rows["climatology"]
+
+        with self._patch_defs():
+            enable_product(clim)
+            enable_product(clim)   # re-run (e.g. a wizard revisit / upgrade)
+
+        self.assertEqual(
+            DerivedProductOutput.objects.filter(product=clim).count(), 1
+        )
+        self.assertEqual(
+            DerivedProductInput.objects.filter(product=clim).count(), 1
+        )
+
+    def test_a_changed_declaration_re_pins_the_same_role_in_place(self):
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+
+        # A plugin upgrade re-keys climatology's output collection.
+        upgraded = _product(
+            "climatology",
+            inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
+            outputs=(OutputRef(role="climatology",
+                               collection="chirps-monthly-climatology-v2"),),
+        )
+        with patch.object(DataFeed, "get_derived_products", return_value=[upgraded]):
+            enable_product(clim)
+
+        bindings = DerivedProductOutput.objects.filter(product=clim, role="climatology")
+        self.assertEqual(bindings.count(), 1)          # same role row, updated
+        self.assertEqual(bindings.first().output_key, "chirps-monthly-climatology-v2")
+
+
+class BuildChainOutputBindingTests(PinBindingsBase):
+    def test_card_output_collections_come_from_bindings_not_a_slug_query(self):
+        # Enabling pins climatology's output binding. Renaming the collection's
+        # slug afterwards must not drop it from the card — the card reads the
+        # DerivedProductOutput FK, not a catalog+slug lookup (ADR-0010 §2/§3).
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+
+        collection = Collection.objects.get(slug="chirps-monthly-climatology")
+        collection.slug = "operator-renamed-normals"
+        collection.save(update_fields=["slug"])
+
+        with self._patch_defs():
+            chain = build_chain(self.feed)
+
+        card = next(
+            c for lane in chain["stages"] for c in lane
+            if c["product"] and c["product"].definition_key == "climatology"
+        )
+        self.assertEqual(
+            [c.pk for c in card["output_collections"]], [collection.pk]
+        )
+
+
+class BindingCascadeTests(PinBindingsBase):
+    def test_deleting_a_bound_collection_removes_its_binding_rows(self):
+        clim = self.rows["climatology"]
+        with self._patch_defs():
+            enable_product(clim)
+        collection = Collection.objects.get(slug="chirps-monthly-climatology")
+        self.assertTrue(
+            DerivedProductOutput.objects.filter(collection=collection).exists()
+        )
+
+        collection.delete()
+
+        self.assertFalse(
+            DerivedProductOutput.objects.filter(product=clim, role="climatology").exists()
+        )
+        # The product row itself survives — only the binding cascaded.
+        self.assertTrue(DerivedProduct.objects.filter(pk=clim.pk).exists())
+
+    def test_feed_deletion_still_works_with_bindings_present(self):
+        with self._patch_defs():
+            enable_product(self.rows["climatology"])
+            enable_product(self.rows["promotion"])
+        feed_pk = self.feed.pk
+        self.assertTrue(
+            DerivedProductInput.objects.filter(product__data_feed_id=feed_pk).exists()
+        )
+
+        self.feed.delete()
+
+        self.assertFalse(DerivedProduct.objects.filter(data_feed_id=feed_pk).exists())
+        self.assertFalse(
+            DerivedProductInput.objects.filter(product__data_feed_id=feed_pk).exists()
+        )
+
+
+class ProvisionPinsBindingsTests(PinBindingsBase):
+    def test_provisioning_an_enabled_product_pins_its_bindings(self):
+        # The wizard's provisioning path pins bindings for enabled products, the
+        # same as the enable path (ADR-0010 §2).
+        from georiva.sources.setup_service import SourceSetupService
+
+        DerivedProduct.objects.filter(data_feed=self.feed).delete()
+        clim_def = next(d for d in _chirps_defs() if d.key == "climatology")
+
+        with self._patch_defs():
+            SourceSetupService().provision_derived_products(
+                self.feed, [(clim_def, {}, True)]
+            )
+
+        product = DerivedProduct.objects.get(
+            data_feed=self.feed, definition_key="climatology"
+        )
+        self.assertTrue(
+            DerivedProductOutput.objects.filter(product=product, role="climatology").exists()
+        )
+        self.assertEqual(
+            DerivedProductInput.objects.get(product=product, role="value").collection,
+            self.raw,
+        )
+
+    def test_provisioning_a_disabled_product_pins_nothing(self):
+        from georiva.sources.setup_service import SourceSetupService
+
+        DerivedProduct.objects.filter(data_feed=self.feed).delete()
+        clim_def = next(d for d in _chirps_defs() if d.key == "climatology")
+
+        with self._patch_defs():
+            SourceSetupService().provision_derived_products(
+                self.feed, [(clim_def, {}, False)]
+            )
+
+        product = DerivedProduct.objects.get(
+            data_feed=self.feed, definition_key="climatology"
+        )
+        self.assertFalse(DerivedProductOutput.objects.filter(product=product).exists())
+        self.assertFalse(DerivedProductInput.objects.filter(product=product).exists())
+
+
+class BackfillBindingsTests(PinBindingsBase):
+    def test_backfill_pins_bindings_for_existing_enabled_products(self):
+        # Feeds enabled before pinning existed have no binding rows; the one-time
+        # backfill resolves and pins them (ADR-0010 §2). setUp created enabled
+        # rows directly (no bindings).
+        from georiva.sources.product_service import backfill_bindings
+
+        self.assertFalse(DerivedProductOutput.objects.exists())
+
+        with self._patch_defs():
+            backfill_bindings()
+
+        clim = self.rows["climatology"]
+        self.assertTrue(
+            DerivedProductOutput.objects.filter(product=clim, role="climatology").exists()
+        )
+        self.assertEqual(
+            DerivedProductInput.objects.get(product=clim, role="value").collection,
+            self.raw,
+        )
+
+    def test_backfill_is_idempotent(self):
+        from georiva.sources.product_service import backfill_bindings
+
+        with self._patch_defs():
+            backfill_bindings()
+            backfill_bindings()
+
+        self.assertEqual(
+            DerivedProductOutput.objects.filter(
+                product=self.rows["climatology"]
+            ).count(),
+            1,
+        )
+
+
+class EnableFailureLeavesNoBindingsTests(PinBindingsBase):
+    def test_unresolvable_enable_writes_no_binding_rows(self):
+        # ADR-0010 §2 AC: a failed enable leaves neither is_enabled nor any
+        # binding rows behind.
+        broken = _product(
+            "broken",
+            inputs=(InputRef(role="value", collection="ghost-raw", tier="staging"),),
+            outputs=(OutputRef(role="o", collection="broken-out"),),
+        )
+        row = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="broken",
+            recipe_type="recipe", is_enabled=False,
+        )
+
+        with patch.object(DataFeed, "get_derived_products", return_value=[broken]):
+            with self.assertRaises(ProductActionError):
+                enable_product(row)
+
+        row.refresh_from_db()
+        self.assertFalse(row.is_enabled)
+        self.assertFalse(DerivedProductInput.objects.filter(product=row).exists())
+        self.assertFalse(DerivedProductOutput.objects.filter(product=row).exists())
