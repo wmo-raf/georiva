@@ -239,15 +239,44 @@ def delete_orphan(product):
     product.delete()
 
 
+def _resolve_inputs_or_raise(feed, definition, definitions):
+    """Every declared input of ``definition`` must resolve within the feed's
+    collection-key namespace — a raw ``CollectionDefinition`` key or a sibling
+    product's output key (ADR-0010 §2). Raises ``ProductActionError`` naming the
+    first key that doesn't, so a mis-declared product fails loudly at enable time
+    rather than sitting inert (this slice checks resolvability; the next pins the
+    resolved ``Collection`` as rows)."""
+    from georiva.core.product_chain import collection_namespace
+
+    collection_keys = {d.key for d in type(feed).get_collection_definitions()}
+    namespace = collection_namespace(definitions, collection_keys)
+    for ref in definition.inputs:
+        if ref.collection not in namespace:
+            raise ProductActionError(
+                _("%(product)s input '%(role)s' names collection "
+                  "'%(collection)s', which this feed neither provides nor "
+                  "produces.") % {
+                    "product": _label_of(definition.key, definitions),
+                    "role": ref.role,
+                    "collection": ref.collection,
+                }
+            )
+
+
 def enable_product(product):
     """
-    Enable ``product`` after checking every transitive dependency exists and is
-    enabled. Raises ``ProductActionError`` (naming the missing dependencies by
-    display label) otherwise. Atomic.
+    Enable ``product`` after checking (a) every declared input resolves within
+    the feed namespace and (b) every transitive dependency exists and is
+    enabled. Raises ``ProductActionError`` (naming the unresolved input key, or
+    the missing dependencies by display label) otherwise. Atomic — a gate
+    failure leaves the row unchanged.
     """
     from georiva.core.product_chain import dependencies_closure
 
     feed, definitions, rows = _chain(product)
+    definition = _definition_of(product.definition_key, definitions)
+    if definition is not None:
+        _resolve_inputs_or_raise(feed, definition, definitions)
     needed = dependencies_closure(definitions, product.definition_key)
     missing = [
         _label_of(key, definitions)
@@ -261,7 +290,6 @@ def enable_product(product):
                 "deps": ", ".join(missing),
             }
         )
-    definition = _definition_of(product.definition_key, definitions)
     with transaction.atomic():
         # Output collections materialise at enable-time, so they appear in the
         # catalog with declared titles before any run.

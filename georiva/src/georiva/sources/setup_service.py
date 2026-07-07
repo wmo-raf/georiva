@@ -171,7 +171,11 @@ class SourceSetupService:
     
     def _provision_collection(self, *, catalog, definition: CollectionDefinition, data_feed, config_values: dict):
         """Create/update Collection + Variables + Link for one CollectionDefinition."""
-        slug = slugify(f"{catalog.slug}-{definition.key}")
+        # Slug is the definition key alone — no catalog prefix (ADR-0010 §5) — so
+        # it matches the key the derived-product InputRef/OutputRef declarations
+        # reference and the output collections materialise under. The bucket path
+        # already carries the catalog segment, so the prefix was redundant.
+        slug = slugify(definition.key)
         
         # selected_variable_keys is a wizard-only field, not stored on the link
         config_for_link = dict(config_values)

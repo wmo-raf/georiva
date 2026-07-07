@@ -99,15 +99,37 @@ def dependents_closure(defs, key) -> set:
     return _closure(product_dependents(defs), key)
 
 
-def validate_chain(defs) -> None:
+def output_keys(defs) -> set:
+    """Every collection key produced by some product in ``defs``."""
+    return {ref.collection for defn in defs for ref in defn.outputs}
+
+
+def collection_namespace(defs, collection_keys) -> set:
+    """The feed-local collection-key namespace an input may reference (ADR-0010
+    §1): the feed's raw ``CollectionDefinition`` keys unioned with every product
+    output key. A ``None`` ``collection_keys`` means "raw keys unknown here" —
+    only the output keys are namespaced (used by the pure structural callers that
+    don't have the collection definitions to hand)."""
+    return set(collection_keys or ()) | output_keys(defs)
+
+
+def validate_chain(defs, collection_keys=None) -> None:
     """
     Raise loudly on a malformed chain so a broken plugin fails at first
     render/provision, never silently mid-sweep:
 
     - duplicate product keys -> ``ChainError``
     - a ``depends_on`` naming a product that isn't declared -> ``ChainError``
+    - an output collection declared by more than one product -> ``ChainError``
     - a dependency cycle, whether inferred from data flow or declared via
       ``depends_on`` (a self-loop is the degenerate 1-cycle) -> ``ChainCycleError``
+
+    When ``collection_keys`` is supplied (the feed's raw ``CollectionDefinition``
+    keys), every input is additionally required to resolve within the feed-local
+    namespace — a raw collection key or a sibling product's output key (ADR-0010
+    §1) — else ``ChainError``. Omitting ``collection_keys`` skips only this input
+    check; an output key that *equals* a raw collection key is always allowed (a
+    promotion serving the raw collection 1:1 reuses its key by design).
     """
     seen: set[str] = set()
     for defn in defs:
@@ -121,6 +143,17 @@ def validate_chain(defs) -> None:
                 raise ChainError(
                     f"product '{defn.key}' depends on unknown product '{dep}'"
                 )
+
+    producers: dict[str, str] = {}
+    for defn in defs:
+        for ref in defn.outputs:
+            if ref.collection in producers:
+                raise ChainError(
+                    f"output collection '{ref.collection}' is declared by more "
+                    f"than one product ('{producers[ref.collection]}' and "
+                    f"'{defn.key}')"
+                )
+            producers[ref.collection] = defn.key
 
     graph = _raw_dependencies(defs)
     # Three-colour DFS: WHITE=unseen, GREY=on the current path, BLACK=done.
@@ -142,6 +175,17 @@ def validate_chain(defs) -> None:
     for key in graph:
         if colour[key] == WHITE:
             visit(key)
+
+    if collection_keys is not None:
+        namespace = collection_namespace(defs, collection_keys)
+        for defn in defs:
+            for ref in defn.inputs:
+                if ref.collection not in namespace:
+                    raise ChainError(
+                        f"product '{defn.key}' input '{ref.role}' names "
+                        f"collection '{ref.collection}', which is neither a feed "
+                        f"collection nor a product output"
+                    )
 
 
 def topological_stages(defs) -> list:
