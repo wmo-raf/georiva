@@ -261,7 +261,6 @@ class EndToEndPromotionTests(TestCase):
 
         data = np.full((10, 10), 5.0, dtype="float32")
         with (
-            patch("georiva.core.storage.storage"),
             patch("georiva.ingestion.asset_writer.AssetWriter", return_value=_mock_writer()),
             patch.object(
                 PromotionRecipe, "read_raster",
@@ -272,9 +271,12 @@ class EndToEndPromotionTests(TestCase):
 
         item = Item.objects.get(collection=self.pub_col)
         self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
-        # Promotion now emits a served COG + a visual PNG.
-        self.assertTrue(item.assets.filter(format="cog").exists())
-        self.assertTrue(item.assets.filter(format="png").exists())
+        # Promotion emits a served COG + a visual PNG under the shared ingestion
+        # path scheme ({variable}_{HHMMSS}).
+        cog = item.assets.get(format="cog")
+        self.assertTrue(cog.href.endswith("/precip_000000.tif"), cog.href)
+        png = item.assets.get(format="png")
+        self.assertTrue(png.href.endswith("/precip_000000.png"), png.href)
 
         run_rec = DerivationRun.objects.get(recipe_type="promotion")
         self.assertEqual(run_rec.status, DerivationRun.Status.COMPLETED)

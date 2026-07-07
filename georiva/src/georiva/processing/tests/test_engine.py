@@ -98,7 +98,7 @@ class PromotionThroughEngineTests(_PromotionFixture):
         self.assertEqual(link.source_staging_item, self.sitem)
         self.assertIsNone(link.source_published_item)
         self.assertEqual(link.recipe_id, "promotion")
-        self.assertEqual(link.recipe_version, "2")
+        self.assertEqual(link.recipe_version, "3")
         self.assertEqual(link.input_hash, result.input_hash)
 
     def test_derivation_run_records_lifecycle(self):
@@ -288,3 +288,43 @@ class RegisterPngAssetTests(_PromotionFixture):
         self.assertEqual(asset.format, Asset.Format.PNG)
         self.assertEqual(asset.roles, ["visual"])
         writer.write_cog.assert_not_called()
+
+
+class AssetOutputPathTests(_PromotionFixture):
+    """Derived assets use the SAME path scheme as ingestion (ADR follow-up):
+    {cat}/{coll}/{var}/{Y}/{MM}/{DD}/{var}_{HHMMSS}[__ref{...}].{ext} — the date
+    lives in the path, the filename carries only the time (plus a forecast ref).
+    Previously the engine wrote {var}_{YYYYMMDDTHHMMSS}, which no href-agnostic
+    consumer (built for the ingestion scheme) could resolve."""
+
+    def test_non_forecast_asset_path_matches_the_ingestion_scheme(self):
+        from datetime import datetime, timezone
+
+        from georiva.core.models import Item
+        from georiva.processing.engine import _asset_output_path
+
+        item = Item.objects.create(
+            collection=self.pub_col,
+            time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+        )
+        path = _asset_output_path(item, self.variable, "cog")
+        self.assertEqual(path, "cmip6/tas/tas/2026/05/01/tas_000000.tif")
+
+        png = _asset_output_path(item, self.variable, "png")
+        self.assertEqual(png, "cmip6/tas/tas/2026/05/01/tas_000000.png")
+
+    def test_forecast_asset_path_carries_the_reference_time(self):
+        from datetime import datetime, timezone
+
+        from georiva.core.models import Item
+        from georiva.processing.engine import _asset_output_path
+
+        item = Item.objects.create(
+            collection=self.pub_col,
+            time=datetime(2026, 5, 1, 6, 0, 0, tzinfo=timezone.utc),
+            reference_time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+        )
+        path = _asset_output_path(item, self.variable, "cog")
+        self.assertEqual(
+            path, "cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif"
+        )
