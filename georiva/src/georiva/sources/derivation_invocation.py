@@ -30,8 +30,20 @@ def _trigger_tier(trigger: dict) -> str:
 
 
 def definition_for(product):
-    """The product's DerivedProductDefinition, looked up on its feed by key."""
-    for definition in product.data_feed.get_derived_products():
+    """The product's DerivedProductDefinition, looked up on its feed by key.
+
+    ``DataFeed`` is a django-polymorphic model. Resolve the *real* subclass
+    instance before calling ``get_derived_products()``: a caller that fetched the
+    product via ``select_related("data_feed")`` gets the **base** ``DataFeed``
+    back (select_related can't join the unknown child table), whose base
+    ``get_derived_products()`` returns ``[]`` — which would mislabel every product
+    as orphaned. ``get_real_instance()`` downcasts to e.g. ``CHIRPSDataFeed`` so
+    the declarations are found regardless of how the product was queried.
+    """
+    feed = product.data_feed
+    if hasattr(feed, "get_real_instance"):
+        feed = feed.get_real_instance()
+    for definition in feed.get_derived_products():
         if definition.key == product.definition_key:
             return definition
     return None
