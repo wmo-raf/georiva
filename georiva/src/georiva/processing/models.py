@@ -16,9 +16,15 @@ from django.db import models
 from django.utils import timezone as dj_timezone
 from django_extensions.db.models import TimeStampedModel
 
+from georiva.processing.constants import DERIVATION_LOCK_TIMEOUT_SECONDS
+
 
 class DerivationRun(TimeStampedModel):
-    LOCK_TIMEOUT = timedelta(hours=2)
+    # Aligned with the run_unit_task hard time limit (see processing/constants):
+    # the lock only becomes stealable strictly after Celery would have killed a
+    # runaway task, so a live task's lock is never stolen, and a dead worker's
+    # unit recovers in ~20 min rather than the old fixed 2h.
+    LOCK_TIMEOUT = timedelta(seconds=DERIVATION_LOCK_TIMEOUT_SECONDS)
 
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
