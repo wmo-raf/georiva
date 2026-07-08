@@ -100,6 +100,50 @@ def sweep_stale_units(*, dispatch: bool = True) -> int:
     return stale
 
 
+def reclaim_stale_running(*, dispatch: bool = True) -> int:
+    """
+    Re-dispatch units stuck in RUNNING past the lock timeout.
+
+    A worker that dies mid-unit (crash, OOM, hard time-limit kill, or a dev
+    auto-reload) leaves its ``DerivationRun`` in RUNNING with no live task to
+    finish it. ``sweep_stale_units`` only inspects *terminal*
+    (completed/skipped) runs, so without this pass such a unit is reclaimed only
+    when that exact unit happens to be re-triggered by hand or a new input — it
+    otherwise sits stuck indefinitely.
+
+    Reclaiming just re-dispatches through the same per-unit primitive: when the
+    new task runs, ``run_unit`` → ``DerivationRun.acquire`` atomically steals the
+    stale lock (its claim query re-checks the timeout, so a still-live lock is
+    never stolen) and recomputes. No ``origin`` is passed, so ``acquire`` keeps
+    the run's existing product-origin stamp. Returns the number re-dispatched.
+    """
+    from django.utils import timezone
+
+    from .models import DerivationRun
+
+    cutoff = timezone.now() - DerivationRun.LOCK_TIMEOUT
+    stale_runs = DerivationRun.objects.filter(
+        status=DerivationRun.Status.RUNNING, locked_at__lt=cutoff,
+    )
+    reclaimed = 0
+    for run_rec in stale_runs:
+        if _recipe_for(run_rec.recipe_type) is None:
+            logger.warning(
+                "Sweep: stale RUNNING unit %s names unknown recipe '%s' — leaving as-is",
+                run_rec, run_rec.recipe_type,
+            )
+            continue
+        logger.warning(
+            "Sweep: reclaiming stale RUNNING unit %s (locked_by=%s at %s, past %s) — re-dispatching",
+            run_rec, run_rec.locked_by or "-", run_rec.locked_at, DerivationRun.LOCK_TIMEOUT,
+        )
+        _dispatch_unit(run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch)
+        reclaimed += 1
+    if reclaimed:
+        logger.info("Sweep: reclaimed %d stale RUNNING unit(s)", reclaimed)
+    return reclaimed
+
+
 def _recipe_for(recipe_type: str):
     from .registry import recipe_registry
 

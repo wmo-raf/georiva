@@ -414,6 +414,59 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
         self.assertIn(("recipe_c", (("id", "C"),)), dispatched)  # propagated downstream
 
 
+class ReclaimStaleRunningTests(_RegistryIsolationMixin, TestCase):
+    """A worker that dies mid-unit leaves a RUNNING DerivationRun with no live
+    task; the sweep's second pass re-dispatches it once the lock has timed out,
+    while a still-fresh RUNNING lock is left alone."""
+
+    fake_recipes = [_SweepRecipe]
+
+    def _running_run(self, *, unit, age):
+        from django.utils import timezone
+
+        from georiva.processing.models import DerivationRun
+        from georiva.processing.recipe import unit_hash
+
+        return DerivationRun.objects.create(
+            recipe_type="sweep_fake", recipe_version="1",
+            unit_key=unit, unit_hash=unit_hash(unit),
+            status=DerivationRun.Status.RUNNING,
+            locked_by="dead-worker", locked_at=timezone.now() - age,
+        )
+
+    def test_stale_running_unit_is_reclaimed(self):
+        from datetime import timedelta
+
+        from georiva.processing.models import DerivationRun
+        from georiva.processing.tasks import sweep_derivations
+
+        self._running_run(
+            unit={"n": 1}, age=DerivationRun.LOCK_TIMEOUT + timedelta(minutes=1),
+        )
+
+        with patch("georiva.processing.tasks.run_unit_task") as task:
+            result = sweep_derivations.apply().get()
+
+        task.delay.assert_called_once()
+        self.assertEqual(task.delay.call_args.kwargs["recipe_type"], "sweep_fake")
+        self.assertEqual(task.delay.call_args.kwargs["unit"], {"n": 1})
+        self.assertEqual(result["reclaimed"], 1)
+
+    def test_fresh_running_unit_is_not_reclaimed(self):
+        from datetime import timedelta
+
+        from georiva.processing.tasks import sweep_derivations
+
+        # Locked a minute ago — well within the 20-min timeout, so a live task
+        # may still own it. Must not be stolen.
+        self._running_run(unit={"n": 2}, age=timedelta(minutes=1))
+
+        with patch("georiva.processing.tasks.run_unit_task") as task:
+            sweep_derivations.apply()
+
+        task.delay.assert_not_called()
+
+
 class ForwardInvalidationTests(TestCase):
     """A changed input invalidates its derived items transitively — walking
     DerivationLink forward through internal intermediates (A → B → C)."""

@@ -102,12 +102,24 @@ def sweep_derivations():
     """
     Periodic backfill sweep — the write-side mirror of ``sweep_unprocessed``.
 
-    Recomputes units whose inputs changed since they were last derived
-    (recorded ``input_hash`` ≠ current), without depending on an event.
+    Two independent recovery passes, neither depending on an event:
+      1. ``sweep_stale_units`` — recomputes units whose inputs changed since they
+         were last derived (recorded ``input_hash`` ≠ current).
+      2. ``reclaim_stale_running`` — re-dispatches units stuck in RUNNING past the
+         lock timeout (a worker died mid-unit), which pass 1 never inspects.
     """
-    from georiva.processing.invocation import sweep_stale_units
+    from georiva.processing.invocation import (
+        reclaim_stale_running,
+        sweep_stale_units,
+    )
 
-    return sweep_stale_units()
+    input_stale = sweep_stale_units()
+    reclaimed = reclaim_stale_running()
+    logger.info(
+        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING reclaimed",
+        input_stale, reclaimed,
+    )
+    return {"input_stale": input_stale, "reclaimed": reclaimed}
 
 
 @app.task(
