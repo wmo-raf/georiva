@@ -177,16 +177,21 @@ celery-default-worker-dev)
     ;;
 celery-ingestion-worker-dev)
     startup_plugin_setup
+    # GRIB/raster ingestion is very memory-heavy — default stays conservative (1),
+    # overridable via the same env var the prod compose maps (see docker-compose).
     exec watchfiles \
         --filter python \
-        "celery -A georiva worker -Q georiva-ingestion -n ingestion-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=1" \
+        "celery -A georiva worker -Q georiva-ingestion -n ingestion-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=${GEORIVA_CELERY_INGESTION_WORKER_CONCURRENCY:-1}" \
         /georiva/app/src/
     ;;
 celery-processing-worker-dev)
     startup_plugin_setup
+    # Derivation units do a 2-pass COG encode (CPU+memory heavy). Default to 4 —
+    # enough to keep a backfill moving without oversubscribing a typical dev box
+    # (was a hardcoded 1). Override with GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY.
     exec watchfiles \
         --filter python \
-        "celery -A georiva worker -Q georiva-processing -n processing-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=1" \
+        "celery -A georiva worker -Q georiva-processing -n processing-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-4}" \
         /georiva/app/src/
     ;;
 celery-beat)
