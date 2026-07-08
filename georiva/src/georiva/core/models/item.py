@@ -27,7 +27,14 @@ class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableMod
     Spatial/raster fields (source_file, bounds, geometry, width, height,
     resolution_x/y, crs, properties) are inherited from AbstractSpatialItem.
     """
-    
+
+    # Excluded from Wagtail's reference index: an Item is machine-generated data
+    # written on every ingestion/derivation, not editorial content whose usage or
+    # delete-protection matters. Snippet registration would otherwise enrol it,
+    # making every save run update_reference_index_task inline in the pipeline
+    # workers. See core/test_reference_index_exclusion.py.
+    wagtail_reference_index_ignore = True
+
     collection = models.ForeignKey(
         'georivacore.Collection',
         on_delete=models.CASCADE,

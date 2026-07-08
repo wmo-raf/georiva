@@ -27,7 +27,11 @@ from georiva.core.models.base import (
 @register_snippet
 class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
     """A source-grained grouping of staged raw artifacts."""
-    
+
+    # Machine-generated data, not editorial content — kept out of Wagtail's
+    # reference index (see core/test_reference_index_exclusion.py).
+    wagtail_reference_index_ignore = True
+
     catalog = models.ForeignKey(
         'georivacore.Catalog',
         on_delete=models.CASCADE,
@@ -69,7 +73,11 @@ class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
     Gregorian index bounds for selection only — the authoritative time and
     calendar are read from file content at derivation time.
     """
-    
+
+    # Machine-generated data written on every staged file — kept out of Wagtail's
+    # reference index (see core/test_reference_index_exclusion.py).
+    wagtail_reference_index_ignore = True
+
     collection = models.ForeignKey(
         StagingCollection,
         on_delete=models.CASCADE,

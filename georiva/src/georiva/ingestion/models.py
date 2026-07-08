@@ -580,6 +580,10 @@ class FileIngestionJob(Job):
     invocation; when the run succeeds the FileIngestion FK is populated.
     """
 
+    # Machine-written job/telemetry record — kept out of Wagtail's reference
+    # index (see core/test_reference_index_exclusion.py).
+    wagtail_reference_index_ignore = True
+
     file_path = models.CharField(
         max_length=500,
         help_text="Path relative to bucket root.",
