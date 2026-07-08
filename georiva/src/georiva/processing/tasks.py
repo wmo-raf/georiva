@@ -50,8 +50,14 @@ def setup_periodic_tasks(sender, **kwargs):
     soft_time_limit=RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
     time_limit=RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
 )
-def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None):
-    """Run a single ProductionUnit for a recipe (one DerivationRun)."""
+def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
+                  unit_index: int = None, unit_total: int = None):
+    """Run a single ProductionUnit for a recipe (one DerivationRun).
+
+    ``unit_index``/``unit_total`` are the batch ordinal stamped at dispatch
+    (``engine.run``) so each task's logs read ``[unit i/N]`` even though units
+    run in independent worker processes.
+    """
     from georiva.processing.engine import run_unit
     from georiva.processing.registry import recipe_registry
 
@@ -61,7 +67,17 @@ def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None):
         return
 
     worker_id = self.request.id or ""
-    result = run_unit(recipe, unit, worker_id=worker_id, origin=origin)
+    pos = f"{unit_index}/{unit_total}" if unit_index and unit_total else "?"
+    logger.info(
+        "[task %s] run_unit_task received recipe=%s origin=%s (celery_id=%s)",
+        pos, recipe_type, origin, worker_id or "-",
+    )
+    result = run_unit(
+        recipe, unit, worker_id=worker_id, origin=origin,
+        unit_index=unit_index, unit_total=unit_total,
+    )
+    logger.info("[task %s] run_unit_task finished recipe=%s → %s",
+                pos, recipe_type, result.status)
 
     # Completion chaining: a produced Published item is itself a derivation
     # input, so stream a downstream trigger to its consumers (internal

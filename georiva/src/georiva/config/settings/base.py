@@ -476,6 +476,10 @@ TASK_FERRY = {
 
 GEORIVA_LOG_LEVEL = env.str("GEORIVA_LOG_LEVEL", "INFO")
 GEORIVA_DATABASE_LOG_LEVEL = env.str("GEORIVA_DATABASE_LOG_LEVEL", "ERROR")
+# The derivation engine emits verbose step-by-step + progress logs at INFO;
+# set this to DEBUG to also see per-unit input_hash / output routing detail,
+# independently of the rest of the app's level.
+GEORIVA_PROCESSING_LOG_LEVEL = env.str("GEORIVA_PROCESSING_LOG_LEVEL", "INFO")
 
 LOGGING = {
     "version": 1,
@@ -497,6 +501,18 @@ LOGGING = {
             "handlers": ["console"],
             "level": GEORIVA_DATABASE_LOG_LEVEL,
             "propagate": True,
+        },
+        # Derivation engine (Run-now / backfill / event-driven). Dedicated level
+        # so the step-by-step + progress logs can be turned up on their own.
+        "georiva.processing": {
+            "handlers": ["console"],
+            "level": GEORIVA_PROCESSING_LOG_LEVEL,
+            "propagate": False,
+        },
+        "georiva.sources.derivation_invocation": {
+            "handlers": ["console"],
+            "level": GEORIVA_PROCESSING_LOG_LEVEL,
+            "propagate": False,
         },
     },
     "root": {
