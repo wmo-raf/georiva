@@ -11,6 +11,7 @@ semantics. See docs/adr/0005-generic-derivation-engine.md.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from .recipe import (
@@ -185,7 +186,54 @@ def _is_current(out_item, recipe: BaseRecipe, input_hash: str) -> bool:
     return d.get("input_hash") == input_hash and d.get("version") == recipe.version
 
 
-def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id="", origin=None) -> UnitResult:
+def _pos(unit_index, unit_total) -> str:
+    """A compact ``i/N`` ordinal for logs (``?`` when unknown, e.g. inline runs)."""
+    if unit_index and unit_total:
+        return f"{unit_index}/{unit_total}"
+    if unit_index:
+        return str(unit_index)
+    return "?"
+
+
+def _log_progress(origin, unit_total) -> None:
+    """Emit a live 'X of N remaining' summary for a product/origin batch.
+
+    Units fan out to independent Celery tasks across worker processes, so no
+    single process can count progress in memory. This aggregates the batch's
+    ``DerivationRun`` rows by ``origin`` instead — committed DB state, so the
+    tally is correct across every concurrent worker. Skipped when there is no
+    origin (engine-internal/manual reruns aren't a tracked batch).
+    """
+    if not origin:
+        return
+    from django.db.models import Count
+
+    from .models import DerivationRun
+
+    counts = {
+        row["status"]: row["n"]
+        for row in DerivationRun.objects.filter(origin=origin)
+        .values("status")
+        .annotate(n=Count("id"))
+    }
+    completed = counts.get("completed", 0)
+    skipped = counts.get("skipped", 0)
+    failed = counts.get("failed", 0)
+    not_ready = counts.get("not_ready", 0)
+    running = counts.get("running", 0)
+    pending = counts.get("pending", 0)
+    total = unit_total or sum(counts.values())
+    done = completed + skipped
+    remaining = max(total - done - failed, 0)
+    logger.info(
+        "[progress] origin=%s — %d/%d done, %d remaining "
+        "(completed=%d skipped=%d failed=%d not_ready=%d running=%d pending=%d)",
+        origin, done, total, remaining,
+        completed, skipped, failed, not_ready, running, pending,
+    )
+
+
+def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id="", origin=None, unit_index=None, unit_total=None) -> UnitResult:
     """
     Execute one ProductionUnit end to end, under the DerivationRun lock.
 
@@ -200,6 +248,14 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
     from .models import DerivationRun
 
     uhash = unit_hash(unit)
+    pos = _pos(unit_index, unit_total)
+    tag = f"{recipe.type}[{uhash[:8]}]"
+    t_start = time.monotonic()
+    logger.info(
+        "[unit %s] %s START — recipe=%s v%s origin=%s unit=%s",
+        pos, tag, recipe.type, recipe.version, origin, unit_to_canonical_json(unit),
+    )
+
     run = DerivationRun.acquire(
         recipe_type=recipe.type,
         recipe_version=recipe.version,
@@ -209,20 +265,50 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
         origin=origin,
     )
     if run is None:
-        logger.info("Unit already locked: %s %s", recipe.type, uhash[:8])
+        logger.info(
+            "[unit %s] %s LOCKED by another worker — another task holds this unit, skipping",
+            pos, tag,
+        )
         return UnitResult(status="locked")
+    logger.info("[unit %s] %s lock acquired (run_id=%s worker=%s)", pos, tag, run.pk, worker_id or "-")
 
     try:
+        logger.info("[unit %s] %s step 1/6 — resolving inputs…", pos, tag)
         resolved = recipe.resolve_inputs(unit)
+        n_roles = len(resolved)
+        n_items = sum(len(ri.items) for ri in resolved.values())
+        n_assets = sum(len(ri.assets) for ri in resolved.values())
+        logger.info(
+            "[unit %s] %s resolved %d input role(s): %d source item(s), %d asset(s) [%s]",
+            pos, tag, n_roles, n_items, n_assets,
+            ", ".join(f"{ri.name}={len(ri.items)}" for ri in resolved.values()) or "none",
+        )
+
         ihash = compute_input_hash(resolved, recipe.version)
         out_item = recipe.outputs(unit)
+        logger.debug("[unit %s] %s input_hash=%s output→%s@%s", pos, tag, ihash[:12],
+                     getattr(out_item.collection, "slug", "?"), out_item.time)
 
+        logger.info("[unit %s] %s step 2/6 — idempotency check…", pos, tag)
         if _is_current(out_item, recipe, ihash):
+            logger.info(
+                "[unit %s] %s SKIP — output already current for this input_hash (no recompute)",
+                pos, tag,
+            )
             run.mark_skipped(input_hash=ihash)
+            _log_progress(origin, unit_total)
             return UnitResult(status="skipped", input_hash=ihash)
 
+        logger.info("[unit %s] %s step 3/6 — readiness check…", pos, tag)
         if not recipe.readiness(unit, resolved):
+            missing = [ri.name for ri in resolved.values() if ri.required and not ri.present]
+            logger.info(
+                "[unit %s] %s NOT READY — required input(s) absent: %s "
+                "(will retry via the 5-min sweep when inputs arrive)",
+                pos, tag, ", ".join(missing) or "unknown",
+            )
             run.mark_not_ready()
+            _log_progress(origin, unit_total)
             return UnitResult(status="not_ready")
 
         if writer is None:
@@ -230,21 +316,47 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
             from georiva.ingestion.asset_writer import AssetWriter
             writer = AssetWriter(storage.assets)
 
+        logger.info("[unit %s] %s step 4/6 — computing (recipe.transform)…", pos, tag)
+        t_tx = time.monotonic()
         out_assets = recipe.transform(unit, resolved)
+        logger.info(
+            "[unit %s] %s transform produced %d output asset(s) in %.1fs",
+            pos, tag, len(out_assets), time.monotonic() - t_tx,
+        )
 
+        logger.info("[unit %s] %s step 5/6 — writing %d asset(s) + registering item…",
+                    pos, tag, len(out_assets))
         with transaction.atomic():
             item = _register_item(out_item, recipe, ihash)
-            for oa in out_assets:
+            for j, oa in enumerate(out_assets, 1):
+                logger.info(
+                    "[unit %s] %s   asset %d/%d — variable=%s format=%s roles=%s",
+                    pos, tag, j, len(out_assets),
+                    getattr(oa.variable, "slug", "?"), oa.format, ",".join(oa.roles),
+                )
                 _register_asset(item, oa, writer)
             _write_links(item, resolved, recipe, ihash)
             run.mark_completed(produced_item=item, input_hash=ihash)
+        logger.info("[unit %s] %s registered item id=%s + %d asset(s), lineage links written",
+                    pos, tag, item.pk, len(out_assets))
 
+        logger.info("[unit %s] %s step 6/6 — emitting completion event…", pos, tag)
         _emit_event(recipe, unit, item, ihash)
+
+        logger.info(
+            "[unit %s] %s COMPLETED — item id=%s in %.1fs total",
+            pos, tag, item.pk, time.monotonic() - t_start,
+        )
+        _log_progress(origin, unit_total)
         return UnitResult(status="completed", item_id=item.pk, input_hash=ihash)
 
     except Exception as exc:
-        logger.exception("Derivation failed: %s %s", recipe.type, uhash[:8])
+        logger.exception(
+            "[unit %s] %s FAILED after %.1fs — %s",
+            pos, tag, time.monotonic() - t_start, exc,
+        )
         run.mark_failed(str(exc))
+        _log_progress(origin, unit_total)
         raise
 
 
@@ -276,11 +388,38 @@ def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="", or
     primitive serves event-driven, scheduled/backfill, and manual invocation.
     """
     units = list(recipe.candidate_units(selector))
+    total = len(units)
+    logger.info(
+        "[run] recipe=%s v%s origin=%s — enumerated %d unit(s) (mode=%s)",
+        recipe.type, recipe.version, origin, total,
+        "dispatch→celery" if dispatch else "inline",
+    )
+    if total == 0:
+        logger.info(
+            "[run] recipe=%s origin=%s — no candidate units for this selector; nothing to do",
+            recipe.type, origin,
+        )
 
     if dispatch:
         from .tasks import run_unit_task
-        for unit in units:
-            run_unit_task.delay(recipe_type=recipe.type, unit=unit, origin=origin)
+        for i, unit in enumerate(units, 1):
+            logger.info(
+                "[run] recipe=%s origin=%s — queuing unit %d/%d hash=%s to georiva-processing",
+                recipe.type, origin, i, total, unit_hash(unit)[:8],
+            )
+            run_unit_task.delay(
+                recipe_type=recipe.type, unit=unit, origin=origin,
+                unit_index=i, unit_total=total,
+            )
+        logger.info(
+            "[run] recipe=%s origin=%s — dispatched %d unit task(s); watch '[unit i/%d]' "
+            "and '[progress]' lines in the processing-worker logs",
+            recipe.type, origin, total, total,
+        )
         return [UnitResult(status="dispatched") for _ in units]
 
-    return [run_unit(recipe, unit, worker_id=worker_id, origin=origin) for unit in units]
+    return [
+        run_unit(recipe, unit, worker_id=worker_id, origin=origin,
+                 unit_index=i, unit_total=total)
+        for i, unit in enumerate(units, 1)
+    ]

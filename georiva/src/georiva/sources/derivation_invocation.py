@@ -166,8 +166,13 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
             "Product %s names unknown recipe '%s'", product.pk, product.recipe_type
         )
         return []
+    origin = product_origin(product)
+    logger.info(
+        "[run-now] manual run for product %s (key=%s recipe=%s) → origin=%s",
+        product.pk, product.definition_key, product.recipe_type, origin,
+    )
     selector = {**(product.config or {}), **_binding(product)}
-    return run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
+    return run(recipe, selector, origin=origin, dispatch=dispatch)
 
 
 def dispatch_due_scheduled_products(*, dispatch: bool = True) -> int:
