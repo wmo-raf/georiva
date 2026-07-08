@@ -8,6 +8,10 @@ backfill cannot starve live ingestion. Recovery is via the backfill sweep
 import logging
 
 from georiva.config.celery import app
+from georiva.processing.constants import (
+    RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
+    RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,12 @@ def setup_periodic_tasks(sender, **kwargs):
     max_retries=2,
     acks_late=True,
     queue="georiva-processing",
+    # Bound a single unit so a hung/thrashing task can't run indefinitely: the
+    # soft limit raises inside the task (run_unit catches it → mark_failed →
+    # releases the lock immediately); the hard limit force-kills as a backstop.
+    # DerivationRun.LOCK_TIMEOUT is aligned just above the hard limit.
+    soft_time_limit=RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
+    time_limit=RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
 )
 def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None):
     """Run a single ProductionUnit for a recipe (one DerivationRun)."""

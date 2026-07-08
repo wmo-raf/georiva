@@ -328,3 +328,31 @@ class AssetOutputPathTests(_PromotionFixture):
         self.assertEqual(
             path, "cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif"
         )
+
+
+class SoftTimeLimitReleasesLockTests(_PromotionFixture):
+    """When a unit hits the Celery soft time limit, SoftTimeLimitExceeded is
+    raised inside run_unit; it's caught, the run is marked FAILED, and the lock
+    is released immediately — so a slow/hung unit recovers at once rather than
+    holding its lock until LOCK_TIMEOUT."""
+
+    def test_soft_time_limit_marks_the_run_failed_and_frees_the_lock(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        from georiva.processing.engine import run_unit
+        from georiva.processing.models import DerivationRun
+
+        recipe = PromotionRecipe()
+        # The soft limit fires mid-read; run_unit's `except Exception` catches it.
+        with patch.object(
+            PromotionRecipe, "read_raster", side_effect=SoftTimeLimitExceeded()
+        ):
+            with self.assertRaises(SoftTimeLimitExceeded):
+                run_unit(recipe, self._unit(), writer=_mock_writer())
+
+        run = DerivationRun.objects.get(recipe_type="promotion")
+        self.assertEqual(run.status, DerivationRun.Status.FAILED)
+        # FAILED is immediately reclaimable — the lock isn't held to LOCK_TIMEOUT
+        # (it's not RUNNING; is_stale is a property, False for a non-RUNNING run).
+        self.assertNotEqual(run.status, DerivationRun.Status.RUNNING)
+        self.assertFalse(run.is_stale)
