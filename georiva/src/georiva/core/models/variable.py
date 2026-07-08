@@ -223,6 +223,12 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     ]
     
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['collection', 'slug'],
+                name='unique_variable_slug_per_collection',
+            ),
+        ]
         indexes = [
             models.Index(
                 fields=['slug', 'is_active'],
