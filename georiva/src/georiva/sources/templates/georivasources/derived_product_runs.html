@@ -148,7 +148,8 @@
                                 <span class="gdr-badge gdr-badge--{{ row.run.status }}">{{ row.run.status }}</span>
                             </td>
                             <td>
-                                <span class="gdr-unit">{{ row.run.recipe_type }}[{{ row.run.unit_hash|slice:":8" }}]</span>
+                                <a class="gdr-unit"
+                                   href="{% url 'derived_product_run_detail' product_pk=product.pk run_pk=row.run.pk %}">{{ row.run.recipe_type }}[{{ row.run.unit_hash|slice:":8" }}]</a>
                             </td>
                             <td class="gdr-meta">{{ row.run.started_at|default:"—" }}</td>
                             <td class="gdr-meta">{{ row.run.completed_at|default:"—" }}</td>

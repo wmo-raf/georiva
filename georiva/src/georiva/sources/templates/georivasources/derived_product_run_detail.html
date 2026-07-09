@@ -1,0 +1,164 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with label=product.display_label %}Run — {{ label }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .grd-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+            max-width: 60em;
+        }
+
+        .grd-grid th,
+        .grd-grid td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .grd-grid th {
+            width: 12em;
+            font-size: 0.78em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+            font-weight: 600;
+        }
+
+        .grd-badge {
+            display: inline-block;
+            padding: 0.15em 0.6em;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .grd-badge--running {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .grd-badge--completed {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .grd-badge--failed {
+            background: var(--w-color-critical-200);
+            color: var(--w-color-white);
+            border-color: var(--w-color-critical-200);
+        }
+
+        .grd-badge--skipped,
+        .grd-badge--not_ready,
+        .grd-badge--pending {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .grd-mono {
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        .grd-error {
+            font-family: monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--w-color-critical-200);
+            background: color-mix(in srgb, var(--w-color-critical-200) 6%, transparent);
+            padding: 0.8em;
+            border-radius: 4px;
+            margin: 0;
+        }
+
+        .grd-muted {
+            color: var(--w-color-grey-400);
+        }
+
+        .grd-links a {
+            margin-right: 1em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=product.display_label subtitle=_("Run detail") icon="cogs" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <table class="grd-grid">
+            <tbody>
+                <tr>
+                    <th>{% trans "Status" %}</th>
+                    <td><span class="grd-badge grd-badge--{{ run.status }}">{{ run.get_status_display }}</span></td>
+                </tr>
+                <tr>
+                    <th>{% trans "Unit" %}</th>
+                    <td>
+                        <span class="grd-mono">{{ run.recipe_type }} v{{ run.recipe_version }}</span>
+                        <div class="grd-mono grd-muted">{{ run.unit_hash }}</div>
+                        <div class="grd-mono grd-muted">{{ run.unit_key }}</div>
+                    </td>
+                </tr>
+                <tr>
+                    <th>{% trans "Started" %}</th>
+                    <td class="grd-muted">{{ run.started_at|default:"—" }}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Completed" %}</th>
+                    <td class="grd-muted">{{ run.completed_at|default:"—" }}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Duration" %}</th>
+                    <td class="grd-muted">{% if duration is not None %}{{ duration|floatformat:1 }}s{% else %}—{% endif %}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Attempts" %}</th>
+                    <td>{{ run.attempts }}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Last retry reason" %}</th>
+                    <td>
+                        {{ run.get_last_retry_reason_display }}
+                        {% if run.last_retry_at %}
+                            <span class="grd-muted">· {{ run.last_retry_at }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <th>{% trans "Output" %}</th>
+                    <td class="grd-links">
+                        {% if run.produced_item_id %}
+                            <a href="{% url 'item_preview' item_id=run.produced_item_id %}">{% trans "Produced item" %}</a>
+                            <a href="{% url 'item_lineage' item_pk=run.produced_item_id %}">{% trans "Lineage" %}</a>
+                        {% else %}
+                            <span class="grd-muted">{% trans "No output yet" %}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr>
+                    <th>{% trans "Error" %}</th>
+                    <td>
+                        {% if run.error %}
+                            <pre class="grd-error">{{ run.error }}</pre>
+                        {% else %}
+                            <span class="grd-muted">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p><a href="{{ runs_url }}">← {% trans "Back to runs" %}</a></p>
+    </div>
+{% endblock %}
