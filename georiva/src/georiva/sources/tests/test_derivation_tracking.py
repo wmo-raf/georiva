@@ -103,6 +103,19 @@ class ProductStatusTests(TestCase):
         self.assertEqual(status.counts.get("completed"), 2)
         self.assertEqual(status.counts.get("failed"), 1)
 
+    def test_done_tallies_completed_plus_skipped(self):
+        # "Done" mirrors the engine's [progress] line (#205): terminal successes
+        # are completed + idempotent skips.
+        _run(self._origin(), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        _run(self._origin(), DerivationRun.Status.SKIPPED, unit={"n": 2})
+        _run(self._origin(), DerivationRun.Status.FAILED, unit={"n": 3})
+        _run(self._origin(), DerivationRun.Status.RUNNING, unit={"n": 4})
+
+        status = product_status(self.product)
+
+        self.assertEqual(status.done, 2)
+        self.assertEqual(status.total, 4)
+
     def test_another_products_runs_do_not_bleed_in(self):
         other = DerivedProduct.objects.create(
             data_feed=self.feed, definition_key="normals", recipe_type="climatology",
@@ -134,6 +147,26 @@ class TrackingViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "anomaly")   # the product is listed
         self.assertContains(response, "idle")      # no runs yet
+
+    def test_row_shows_enriched_done_failed_running_counts(self):
+        _run(product_origin(self.product), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        _run(product_origin(self.product), DerivationRun.Status.COMPLETED, unit={"n": 2})
+        _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 3})
+        _run(product_origin(self.product), DerivationRun.Status.RUNNING, unit={"n": 4})
+
+        response = self.client.get(reverse("derived_product_tracking"))
+
+        self.assertContains(response, "2/4 done")
+        self.assertContains(response, "1 failed")
+        self.assertContains(response, "1 running")
+
+    def test_row_with_no_runs_shows_a_clear_empty_state(self):
+        # The setUp product has no runs — it must read as "nothing has happened",
+        # not as an ambiguous "0/0 done".
+        response = self.client.get(reverse("derived_product_tracking"))
+
+        self.assertContains(response, "No runs yet")
+        self.assertNotContains(response, "0/0 done")
 
     def test_orphaned_product_shows_an_orphan_badge_linking_to_the_feed(self):
         # The base feed declares no products, so this row is an orphan.

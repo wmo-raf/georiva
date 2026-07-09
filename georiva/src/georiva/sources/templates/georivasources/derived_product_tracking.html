@@ -149,9 +149,19 @@
                                 </span>
                             </td>
                             <td class="gdp-counts">
-                                {% blocktrans with n=row.status.total %}{{ n }} total{% endblocktrans %}
-                                {% if row.status.counts.failed %}
-                                    · {% blocktrans with n=row.status.counts.failed %}{{ n }} failed{% endblocktrans %}
+                                {% if row.status.total %}
+                                    {% blocktrans with done=row.status.done total=row.status.total %}{{ done }}/{{ total }} done{% endblocktrans %}
+                                    {% if row.status.counts.failed %}
+                                        · {% blocktrans with n=row.status.counts.failed %}{{ n }} failed{% endblocktrans %}
+                                    {% endif %}
+                                    {% if row.status.counts.running %}
+                                        · {% blocktrans with n=row.status.counts.running %}{{ n }} running{% endblocktrans %}
+                                    {% endif %}
+                                    {% if row.status.counts.not_ready %}
+                                        · {% blocktrans with n=row.status.counts.not_ready %}{{ n }} not ready{% endblocktrans %}
+                                    {% endif %}
+                                {% else %}
+                                    {% trans "No runs yet" %}
                                 {% endif %}
                             </td>
                             <td>
