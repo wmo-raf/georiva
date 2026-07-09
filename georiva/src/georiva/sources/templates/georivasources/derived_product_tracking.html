@@ -133,7 +133,7 @@
                         <tr class="{% if not row.product.is_enabled %}gdp-disabled{% endif %}">
                             <td>
                                 <div class="gdp-product__label">
-                                    {{ row.label }}
+                                    <a href="{% url 'derived_product_runs' product_pk=row.product.pk %}">{{ row.label }}</a>
                                     {% if row.orphaned %}
                                         <a class="gdp-orphan-badge" href="{{ row.feed_url }}">{% trans "Orphaned" %}</a>
                                     {% endif %}

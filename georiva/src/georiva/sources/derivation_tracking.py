@@ -59,6 +59,22 @@ class ProductStatus:
     last_completed_at: datetime | None = None
 
 
+def product_runs(product, *, status=None):
+    """The product's DerivationRuns for the run-list drill-down (#211).
+
+    Joined by the opaque `origin` key (like `product_status`), ordered most-
+    recently-modified first so in-flight and just-failed units surface on top.
+    An optional `status` narrows to a single run status. Query logic lives here,
+    keeping the view dumb; the engine is not involved (ADR-0005).
+    """
+    from georiva.processing.models import DerivationRun
+
+    runs = DerivationRun.objects.filter(origin=product_origin(product))
+    if status:
+        runs = runs.filter(status=status)
+    return runs.order_by("-modified")
+
+
 def product_status(product) -> ProductStatus:
     """Aggregate a product's DerivationRuns (joined by origin) into one status."""
     from georiva.processing.models import DerivationRun

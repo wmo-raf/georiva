@@ -1496,6 +1496,49 @@ def derived_product_tracking(request):
     return render(request, "georivasources/derived_product_tracking.html", context)
 
 
+def derived_product_runs(request, product_pk):
+    """
+    Run-list drill-down (ADR-0008, issue #211): one DerivedProduct's individual
+    DerivationRuns, joined by origin, most-recent first, with a status filter and
+    pagination. The read-side query lives in product_runs(); this view only
+    paginates and shapes rows (unit label, duration, error snippet) for display —
+    the engine is not involved.
+    """
+    from django.core.paginator import Paginator
+
+    from georiva.processing.models import DerivationRun
+    from georiva.sources.derivation_tracking import product_runs
+    from georiva.sources.models import DerivedProduct
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk)
+    status = request.GET.get("status") or None
+
+    paginator = Paginator(product_runs(product, status=status), 25)
+    page = paginator.get_page(request.GET.get("page"))
+
+    rows = []
+    for run in page:
+        duration = None
+        if run.started_at and run.completed_at:
+            duration = (run.completed_at - run.started_at).total_seconds()
+        rows.append({"run": run, "duration": duration})
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("derived_product_tracking"), "label": _("Derived Products")},
+            {"url": "", "label": product.display_label},
+        ],
+        "product": product,
+        "rows": rows,
+        "page": page,
+        "statuses": DerivationRun.Status.choices,
+        "current_status": status or "",
+    }
+    return render(request, "georivasources/derived_product_runs.html", context)
+
+
 def derived_product_chain(request, feed_pk):
     """
     Server-rendered chain diagram (ADR-0008): the planned DAG of a feed's
