@@ -34,6 +34,17 @@ class DerivationRun(TimeStampedModel):
         SKIPPED = 'skipped', 'Skipped (idempotent no-op)'
         NOT_READY = 'not_ready', 'Not ready'
 
+    class RetryReason(models.TextChoices):
+        # Why the most recent RUNNING transition fired. Recorded so an operator
+        # can tell a code failure (celery_retry) from an infrastructure reclaim
+        # (stale_running_reclaim) from a legitimate freshness recompute
+        # (input_stale) from a hand-triggered rerun (manual_rerun).
+        INITIAL = 'initial', 'Initial run'
+        CELERY_RETRY = 'celery_retry', 'Celery auto-retry'
+        STALE_RUNNING_RECLAIM = 'stale_running_reclaim', 'Stale RUNNING reclaimed'
+        INPUT_STALE = 'input_stale', 'Input changed (recompute)'
+        MANUAL_RERUN = 'manual_rerun', 'Manual re-run'
+
     recipe_type = models.CharField(max_length=100, db_index=True)
     recipe_version = models.CharField(max_length=50)
 
@@ -61,6 +72,16 @@ class DerivationRun(TimeStampedModel):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     error = models.TextField(blank=True)
+
+    # Retry story (#209). `attempts` counts every RUNNING transition (bumped in
+    # acquire's atomic claim, so a refused lock never increments); the reason
+    # records why the latest attempt fired. No per-attempt history is kept — only
+    # the count and the most recent trigger.
+    attempts = models.PositiveIntegerField(default=0)
+    last_retry_reason = models.CharField(
+        max_length=32, choices=RetryReason.choices, default=RetryReason.INITIAL,
+    )
+    last_retry_at = models.DateTimeField(null=True, blank=True)
 
     produced_item = models.ForeignKey(
         'georivacore.Item',
@@ -93,7 +114,7 @@ class DerivationRun(TimeStampedModel):
         return dj_timezone.now() - self.locked_at > self.LOCK_TIMEOUT
 
     @classmethod
-    def acquire(cls, *, recipe_type, recipe_version, unit_key, unit_hash, worker_id="", origin=None) -> "DerivationRun | None":
+    def acquire(cls, *, recipe_type, recipe_version, unit_key, unit_hash, worker_id="", origin=None, reason=RetryReason.INITIAL) -> "DerivationRun | None":
         """
         Atomically take the lock for (recipe_type, unit_hash).
 
@@ -120,6 +141,8 @@ class DerivationRun(TimeStampedModel):
         stale_cutoff = now - cls.LOCK_TIMEOUT
 
         # Lockable when pending/failed/idempotent-noop/not-ready, or a stale run.
+        # The attempts bump and retry-reason stamp ride this same conditional
+        # UPDATE, so they land iff the claim wins — a refused lock never counts.
         claim_values = dict(
             status=cls.Status.RUNNING,
             recipe_version=recipe_version,
@@ -128,6 +151,9 @@ class DerivationRun(TimeStampedModel):
             locked_by=worker_id,
             started_at=now,
             error="",
+            attempts=models.F("attempts") + 1,
+            last_retry_reason=reason,
+            last_retry_at=now,
         )
         # Only (re)stamp origin when the caller supplies one — an engine-internal
         # re-run (origin=None) must not erase the product origin set originally.

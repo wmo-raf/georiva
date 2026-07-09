@@ -184,7 +184,12 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
         product.pk, product.definition_key, product.recipe_type, origin,
     )
     selector = {**(product.config or {}), **_binding(product)}
-    return run(recipe, selector, origin=origin, dispatch=dispatch)
+    from georiva.processing.models import DerivationRun
+
+    return run(
+        recipe, selector, origin=origin, dispatch=dispatch,
+        reason=DerivationRun.RetryReason.MANUAL_RERUN,
+    )
 
 
 def dispatch_due_scheduled_products(*, dispatch: bool = True) -> int:
