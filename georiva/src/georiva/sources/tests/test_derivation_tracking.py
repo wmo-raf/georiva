@@ -342,3 +342,96 @@ class RunListViewTests(TestCase):
         response = self.client.get(self._url())
 
         self.assertContains(response, reverse("derived_product_tracking"))
+
+    def test_each_run_row_links_to_its_detail_page(self):
+        run = self._failed_run()
+
+        response = self.client.get(self._url())
+
+        self.assertContains(response, reverse(
+            "derived_product_run_detail",
+            kwargs={"product_pk": self.product.pk, "run_pk": run.pk},
+        ))
+
+
+class RunDetailViewTests(TestCase):
+    """The run-detail leaf (issue #212): exactly what happened for one run —
+    the screen that answers 'why did this fail'."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_rd", "d@test.com", "pw")
+        self.client.force_login(self.user)
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
+        self.product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+        )
+
+    def _run_rec(self, **overrides):
+        run = _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 1})
+        if overrides:
+            DerivationRun.objects.filter(pk=run.pk).update(**overrides)
+            run.refresh_from_db()
+        return run
+
+    def _url(self, run):
+        return reverse(
+            "derived_product_run_detail",
+            kwargs={"product_pk": self.product.pk, "run_pk": run.pk},
+        )
+
+    def test_shows_full_error_and_status(self):
+        run = self._run_rec(error="Traceback: ValueError deep in the transform, full text")
+
+        response = self.client.get(self._url(run))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Traceback: ValueError deep in the transform, full text")
+        self.assertContains(response, "failed")
+
+    def test_shows_unit_identity(self):
+        from georiva.processing.recipe import unit_hash
+
+        run = self._run_rec()
+
+        response = self.client.get(self._url(run))
+
+        self.assertContains(response, "climatology")            # recipe type
+        self.assertContains(response, unit_hash({"n": 1}))      # full unit hash
+
+    def test_shows_attempts_and_retry_reason(self):
+        run = self._run_rec(
+            attempts=4,
+            last_retry_reason=DerivationRun.RetryReason.STALE_RUNNING_RECLAIM,
+        )
+
+        response = self.client.get(self._url(run))
+
+        self.assertContains(response, "4")                       # attempts
+        self.assertContains(response, "Stale RUNNING reclaimed")  # reason label
+
+    def test_completed_run_links_to_produced_item_and_lineage(self):
+        from datetime import datetime, timezone
+
+        from georiva.core.models import Item
+
+        col = Collection.objects.create(catalog=self.catalog, slug="out", name="out")
+        item = Item.objects.create(
+            collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc)
+        )
+        run = self._run_rec(status=DerivationRun.Status.COMPLETED, produced_item=item)
+
+        response = self.client.get(self._url(run))
+
+        self.assertContains(response, reverse("item_preview", kwargs={"item_id": item.pk}))
+        self.assertContains(response, reverse("item_lineage", kwargs={"item_pk": item.pk}))
+
+    def test_run_without_output_shows_no_output_state_not_a_broken_link(self):
+        run = self._run_rec()  # failed, no produced_item
+
+        response = self.client.get(self._url(run))
+
+        self.assertContains(response, "No output yet")
+        self.assertNotContains(response, "/lineage/")

@@ -1507,7 +1507,7 @@ def derived_product_runs(request, product_pk):
     from django.core.paginator import Paginator
 
     from georiva.processing.models import DerivationRun
-    from georiva.sources.derivation_tracking import product_runs
+    from georiva.sources.derivation_tracking import product_runs, run_duration_seconds
     from georiva.sources.models import DerivedProduct
 
     product = get_object_or_404(DerivedProduct, pk=product_pk)
@@ -1516,12 +1516,10 @@ def derived_product_runs(request, product_pk):
     paginator = Paginator(product_runs(product, status=status), 25)
     page = paginator.get_page(request.GET.get("page"))
 
-    rows = []
-    for run in page:
-        duration = None
-        if run.started_at and run.completed_at:
-            duration = (run.completed_at - run.started_at).total_seconds()
-        rows.append({"run": run, "duration": duration})
+    rows = [
+        {"run": run, "duration": run_duration_seconds(run)}
+        for run in page
+    ]
 
     context = {
         "breadcrumbs_items": [
@@ -1537,6 +1535,42 @@ def derived_product_runs(request, product_pk):
         "current_status": status or "",
     }
     return render(request, "georivasources/derived_product_runs.html", context)
+
+
+def derived_product_run_detail(request, product_pk, run_pk):
+    """
+    Run-detail leaf (ADR-0008, issue #212): exactly what happened for one
+    DerivationRun — full error, status, timings, unit identity, the retry story
+    (attempts + last_retry_reason), and links to the produced Item and its
+    lineage. Static (reflects current DB state on load); the engine is not
+    touched. The run is scoped to the product by its origin key.
+    """
+    from georiva.processing.models import DerivationRun
+    from georiva.sources.derivation_invocation import product_origin
+    from georiva.sources.derivation_tracking import run_duration_seconds
+    from georiva.sources.models import DerivedProduct
+
+    product = get_object_or_404(DerivedProduct, pk=product_pk)
+    run = get_object_or_404(
+        DerivationRun, pk=run_pk, origin=product_origin(product),
+    )
+
+    duration = run_duration_seconds(run)
+    runs_url = reverse("derived_product_runs", kwargs={"product_pk": product.pk})
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("derived_product_tracking"), "label": _("Derived Products")},
+            {"url": runs_url, "label": product.display_label},
+            {"url": "", "label": _("Run")},
+        ],
+        "product": product,
+        "run": run,
+        "duration": duration,
+        "runs_url": runs_url,
+    }
+    return render(request, "georivasources/derived_product_run_detail.html", context)
 
 
 def derived_product_chain(request, feed_pk):

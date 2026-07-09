@@ -75,6 +75,14 @@ def product_runs(product, *, status=None):
     return runs.order_by("-modified")
 
 
+def run_duration_seconds(run):
+    """A run's wall-clock duration in seconds, or None if it never finished —
+    the display helper the run-list and run-detail views share."""
+    if run.started_at and run.completed_at:
+        return (run.completed_at - run.started_at).total_seconds()
+    return None
+
+
 def product_status(product) -> ProductStatus:
     """Aggregate a product's DerivationRuns (joined by origin) into one status."""
     from georiva.processing.models import DerivationRun
