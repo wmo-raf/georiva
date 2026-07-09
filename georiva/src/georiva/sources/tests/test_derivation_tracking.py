@@ -20,7 +20,7 @@ from georiva.core.derived_products import (
 from georiva.core.models import Catalog, Collection
 from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import product_origin
-from georiva.sources.derivation_tracking import product_status
+from georiva.sources.derivation_tracking import product_runs, product_status
 from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductInput
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
@@ -215,3 +215,130 @@ class TrackingViewTests(TestCase):
 
         run_now.assert_not_called()
         self.assertContains(response, "value empty")
+
+
+def _touch_modified(run, when):
+    """Pin a run's `modified` (auto_now) deterministically for ordering tests."""
+    DerivationRun.objects.filter(pk=run.pk).update(modified=when)
+
+
+class ProductRunsTests(TestCase):
+    """product_runs is the per-product run list the drill-down renders (issue
+    #211): the product's DerivationRuns joined by origin, most-recent first."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+        self.product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+        )
+
+    def _origin(self):
+        return product_origin(self.product)
+
+    def test_returns_the_products_runs_most_recently_modified_first(self):
+        older = _run(self._origin(), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        newer = _run(self._origin(), DerivationRun.Status.FAILED, unit={"n": 2})
+        _touch_modified(older, datetime(2026, 1, 1, tzinfo=timezone.utc))
+        _touch_modified(newer, datetime(2026, 6, 1, tzinfo=timezone.utc))
+
+        runs = list(product_runs(self.product))
+
+        self.assertEqual([r.pk for r in runs], [newer.pk, older.pk])
+
+    def test_excludes_runs_belonging_to_another_product(self):
+        other = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="normals", recipe_type="climatology",
+        )
+        mine = _run(self._origin(), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        _run(product_origin(other), DerivationRun.Status.FAILED, unit={"n": 9})
+
+        runs = list(product_runs(self.product))
+
+        self.assertEqual([r.pk for r in runs], [mine.pk])
+
+    def test_status_filter_narrows_to_a_single_status(self):
+        _run(self._origin(), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        failed = _run(self._origin(), DerivationRun.Status.FAILED, unit={"n": 2})
+
+        runs = list(product_runs(self.product, status=DerivationRun.Status.FAILED))
+
+        self.assertEqual([r.pk for r in runs], [failed.pk])
+
+
+class RunListViewTests(TestCase):
+    """The run-list drill-down page (issue #211): a thin view over product_runs,
+    reached from the Derived Products dashboard."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_runs", "r@test.com", "pw")
+        self.client.force_login(self.user)
+        self.catalog = Catalog.objects.create(
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
+        self.product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+        )
+
+    def _url(self):
+        return reverse("derived_product_runs", kwargs={"product_pk": self.product.pk})
+
+    def _failed_run(self):
+        run = _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 1})
+        DerivationRun.objects.filter(pk=run.pk).update(
+            error="boom: the transform blew up", attempts=3,
+        )
+        return run
+
+    def test_lists_a_products_runs_with_status_unit_attempts_and_error(self):
+        self._failed_run()
+
+        response = self.client.get(self._url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "failed")                     # status
+        self.assertContains(response, "climatology")                # unit recipe type
+        self.assertContains(response, "boom: the transform blew up")  # error snippet
+        self.assertContains(response, "3")                          # attempts
+
+    def test_status_filter_querystring_narrows_the_list(self):
+        from georiva.processing.recipe import unit_hash
+
+        completed = _run(product_origin(self.product), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        failed = _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 2})
+        completed_tag = unit_hash({"n": 1})[:8]
+        failed_tag = unit_hash({"n": 2})[:8]
+
+        # Default (no filter) shows both.
+        both = self.client.get(self._url())
+        self.assertContains(both, completed_tag)
+        self.assertContains(both, failed_tag)
+
+        # ?status=failed shows only the failed run.
+        only_failed = self.client.get(self._url(), {"status": DerivationRun.Status.FAILED})
+        self.assertContains(only_failed, failed_tag)
+        self.assertNotContains(only_failed, completed_tag)
+
+    def test_run_list_is_paginated(self):
+        for i in range(26):
+            _run(product_origin(self.product), DerivationRun.Status.COMPLETED, unit={"n": i})
+
+        first = self.client.get(self._url())
+        self.assertEqual(first.context["page"].paginator.num_pages, 2)
+        self.assertEqual(len(first.context["rows"]), 25)
+
+        second = self.client.get(self._url(), {"page": 2})
+        self.assertEqual(len(second.context["rows"]), 1)
+
+    def test_dashboard_row_links_to_the_run_list(self):
+        response = self.client.get(reverse("derived_product_tracking"))
+
+        self.assertContains(response, self._url())
+
+    def test_run_list_breadcrumbs_back_to_the_dashboard(self):
+        response = self.client.get(self._url())
+
+        self.assertContains(response, reverse("derived_product_tracking"))

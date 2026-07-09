@@ -1,0 +1,186 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with label=product.display_label %}Runs — {{ label }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gdr-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }
+
+        .gdr-table th,
+        .gdr-table td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .gdr-table th {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gdr-badge {
+            display: inline-block;
+            padding: 0.15em 0.6em;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .gdr-badge--running {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .gdr-badge--completed {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .gdr-badge--failed {
+            background: var(--w-color-critical-200);
+            color: var(--w-color-white);
+            border-color: var(--w-color-critical-200);
+        }
+
+        .gdr-badge--skipped,
+        .gdr-badge--not_ready,
+        .gdr-badge--pending {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .gdr-unit {
+            font-family: monospace;
+            font-size: 0.85em;
+        }
+
+        .gdr-meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gdr-error {
+            font-size: 0.82em;
+            color: var(--w-color-critical-200);
+            max-width: 32em;
+        }
+
+        .gdr-filters {
+            margin-top: 1em;
+            display: flex;
+            gap: 0.4em;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .gdr-filter {
+            font-size: 0.8em;
+            padding: 0.2em 0.7em;
+            border-radius: 999px;
+            border: 1px solid var(--w-color-border-furniture);
+            color: var(--w-color-text-label);
+            text-decoration: none;
+        }
+
+        .gdr-filter--active {
+            background: var(--w-color-surface-menus);
+            color: var(--w-color-white);
+            border-color: var(--w-color-surface-menus);
+        }
+
+        .gdr-empty {
+            margin-top: 1.5em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gdr-pagination {
+            margin-top: 1.2em;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=product.display_label subtitle=_("Derivation runs") icon="cogs" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="gdr-filters">
+            <span class="gdr-meta">{% trans "Filter" %}:</span>
+            <a class="gdr-filter {% if not current_status %}gdr-filter--active{% endif %}"
+               href="{% url 'derived_product_runs' product_pk=product.pk %}">{% trans "All" %}</a>
+            {% for value, label in statuses %}
+                <a class="gdr-filter {% if current_status == value %}gdr-filter--active{% endif %}"
+                   href="{% url 'derived_product_runs' product_pk=product.pk %}?status={{ value }}">{{ label }}</a>
+            {% endfor %}
+        </div>
+
+        {% if rows %}
+            <table class="gdr-table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "Unit" %}</th>
+                        <th>{% trans "Started" %}</th>
+                        <th>{% trans "Completed" %}</th>
+                        <th>{% trans "Duration" %}</th>
+                        <th>{% trans "Attempts" %}</th>
+                        <th>{% trans "Error" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>
+                                <span class="gdr-badge gdr-badge--{{ row.run.status }}">{{ row.run.status }}</span>
+                            </td>
+                            <td>
+                                <span class="gdr-unit">{{ row.run.recipe_type }}[{{ row.run.unit_hash|slice:":8" }}]</span>
+                            </td>
+                            <td class="gdr-meta">{{ row.run.started_at|default:"—" }}</td>
+                            <td class="gdr-meta">{{ row.run.completed_at|default:"—" }}</td>
+                            <td class="gdr-meta">
+                                {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
+                            </td>
+                            <td>{{ row.run.attempts }}</td>
+                            <td>
+                                {% if row.run.error %}
+                                    <div class="gdr-error">{{ row.run.error|truncatechars:200 }}</div>
+                                {% else %}
+                                    <span class="gdr-meta">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            {% if page.paginator.num_pages > 1 %}
+                <div class="gdr-pagination">
+                    {% if page.has_previous %}
+                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                    {% endif %}
+                    {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                    {% if page.has_next %}
+                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% else %}
+            <p class="gdr-empty">{% trans "No runs yet for this product." %}</p>
+        {% endif %}
+    </div>
+{% endblock %}
