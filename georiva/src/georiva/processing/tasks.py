@@ -51,14 +51,21 @@ def setup_periodic_tasks(sender, **kwargs):
     time_limit=RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
 )
 def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
-                  unit_index: int = None, unit_total: int = None):
+                  unit_index: int = None, unit_total: int = None,
+                  reason: str = "initial"):
     """Run a single ProductionUnit for a recipe (one DerivationRun).
 
     ``unit_index``/``unit_total`` are the batch ordinal stamped at dispatch
     (``engine.run``) so each task's logs read ``[unit i/N]`` even though units
     run in independent worker processes.
+
+    ``reason`` records why this run fired (recorded on the DerivationRun). A
+    Celery auto-retry (``self.request.retries > 0``) overrides it — from the
+    operator's view the most recent trigger is the retry itself, not whatever
+    originally dispatched the unit.
     """
     from georiva.processing.engine import run_unit
+    from georiva.processing.models import DerivationRun
     from georiva.processing.registry import recipe_registry
 
     recipe = recipe_registry.get(recipe_type)
@@ -66,15 +73,18 @@ def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
         logger.error("Unknown recipe '%s' — dropping unit", recipe_type)
         return
 
+    if self.request.retries:
+        reason = DerivationRun.RetryReason.CELERY_RETRY
+
     worker_id = self.request.id or ""
     pos = f"{unit_index}/{unit_total}" if unit_index and unit_total else "?"
     logger.info(
-        "[task %s] run_unit_task received recipe=%s origin=%s (celery_id=%s)",
-        pos, recipe_type, origin, worker_id or "-",
+        "[task %s] run_unit_task received recipe=%s origin=%s reason=%s (celery_id=%s)",
+        pos, recipe_type, origin, reason, worker_id or "-",
     )
     result = run_unit(
         recipe, unit, worker_id=worker_id, origin=origin,
-        unit_index=unit_index, unit_total=unit_total,
+        unit_index=unit_index, unit_total=unit_total, reason=reason,
     )
     logger.info("[task %s] run_unit_task finished recipe=%s → %s",
                 pos, recipe_type, result.status)

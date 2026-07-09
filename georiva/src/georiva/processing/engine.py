@@ -233,7 +233,7 @@ def _log_progress(origin, unit_total) -> None:
     )
 
 
-def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id="", origin=None, unit_index=None, unit_total=None) -> UnitResult:
+def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id="", origin=None, unit_index=None, unit_total=None, reason="initial") -> UnitResult:
     """
     Execute one ProductionUnit end to end, under the DerivationRun lock.
 
@@ -263,6 +263,7 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
         unit_hash=uhash,
         worker_id=worker_id,
         origin=origin,
+        reason=reason,
     )
     if run is None:
         logger.info(
@@ -375,7 +376,7 @@ def _emit_event(recipe, unit, item, input_hash):
         logger.warning("Derivation event publish failed: %s", e)
 
 
-def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="", origin=None) -> list:
+def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="", origin=None, reason="initial") -> list:
     """
     Enumerate candidate units for a selector and run each.
 
@@ -409,7 +410,7 @@ def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="", or
             )
             run_unit_task.delay(
                 recipe_type=recipe.type, unit=unit, origin=origin,
-                unit_index=i, unit_total=total,
+                unit_index=i, unit_total=total, reason=reason,
             )
         logger.info(
             "[run] recipe=%s origin=%s — dispatched %d unit task(s); watch '[unit i/%d]' "
@@ -420,6 +421,6 @@ def run(recipe: BaseRecipe, selector, *, dispatch: bool = True, worker_id="", or
 
     return [
         run_unit(recipe, unit, worker_id=worker_id, origin=origin,
-                 unit_index=i, unit_total=total)
+                 unit_index=i, unit_total=total, reason=reason)
         for i, unit in enumerate(units, 1)
     ]

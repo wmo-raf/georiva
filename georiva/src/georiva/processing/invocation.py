@@ -45,18 +45,19 @@ def published_item_trigger(item) -> dict:
     }
 
 
-def _dispatch_unit(recipe_type: str, unit: dict, *, dispatch: bool = True) -> None:
+def _dispatch_unit(recipe_type: str, unit: dict, *, dispatch: bool = True, reason="initial") -> None:
     """Re-run one known ProductionUnit via the same per-unit primitive ``run``
-    fans out to — no enumeration/orchestration is duplicated."""
+    fans out to — no enumeration/orchestration is duplicated. ``reason`` records
+    why this re-dispatch fired (recorded on the DerivationRun by ``acquire``)."""
     if dispatch:
         from .tasks import run_unit_task
-        run_unit_task.delay(recipe_type=recipe_type, unit=unit)
+        run_unit_task.delay(recipe_type=recipe_type, unit=unit, reason=reason)
     else:
         from .engine import run_unit
         from .registry import recipe_registry
         recipe = recipe_registry.get(recipe_type)
         if recipe is not None:
-            run_unit(recipe, unit)
+            run_unit(recipe, unit, reason=reason)
 
 
 def current_input_hash(recipe, unit: dict) -> str:
@@ -87,7 +88,10 @@ def sweep_stale_units(*, dispatch: bool = True) -> int:
             logger.warning("Sweep: cannot hash %s: %s", run_rec, e)
             continue
         if current != run_rec.input_hash:
-            _dispatch_unit(run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch)
+            _dispatch_unit(
+                run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+                reason=DerivationRun.RetryReason.INPUT_STALE,
+            )
             stale += 1
             # Recomputing this unit will change its output, so anything derived
             # from it is stale too — propagate forward in this same pass (the
@@ -137,7 +141,10 @@ def reclaim_stale_running(*, dispatch: bool = True) -> int:
             "Sweep: reclaiming stale RUNNING unit %s (locked_by=%s at %s, past %s) — re-dispatching",
             run_rec, run_rec.locked_by or "-", run_rec.locked_at, DerivationRun.LOCK_TIMEOUT,
         )
-        _dispatch_unit(run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch)
+        _dispatch_unit(
+            run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+            reason=DerivationRun.RetryReason.STALE_RUNNING_RECLAIM,
+        )
         reclaimed += 1
     if reclaimed:
         logger.info("Sweep: reclaimed %d stale RUNNING unit(s)", reclaimed)
@@ -180,7 +187,10 @@ def invalidate_downstream(changed_item, *, dispatch: bool = True) -> int:
                 continue
             seen.add(key)
             for run_rec in DerivationRun.objects.filter(produced_item=derived):
-                _dispatch_unit(run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch)
+                _dispatch_unit(
+                    run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+                    reason=DerivationRun.RetryReason.INPUT_STALE,
+                )
                 count += 1
             frontier.append(derived)  # continue forward through intermediates
     return count

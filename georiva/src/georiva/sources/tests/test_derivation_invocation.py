@@ -381,6 +381,17 @@ class RunProductNowTests(TestCase):
         )
         self.assertEqual(run.call_args.kwargs["origin"], product_origin(self.product))
 
+    def test_manual_run_stamps_the_manual_rerun_reason(self):
+        with (
+            patch.object(DataFeed, "get_derived_products", return_value=[self.definition]),
+            patch("georiva.processing.engine.run") as run,
+        ):
+            run_product_now(self.product, dispatch=False)
+
+        self.assertEqual(
+            run.call_args.kwargs["reason"], DerivationRun.RetryReason.MANUAL_RERUN,
+        )
+
     def test_disabled_product_dispatches_nothing(self):
         # A disabled product is inert on every path: event and scheduled already
         # filter on is_enabled, and the manual/backfill overlay must refuse it
