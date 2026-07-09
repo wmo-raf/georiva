@@ -58,6 +58,12 @@ class ProductStatus:
     counts: dict = field(default_factory=dict)
     last_completed_at: datetime | None = None
 
+    @property
+    def done(self) -> int:
+        """Terminal successes, mirroring the engine's [progress] line (#205):
+        completed units plus idempotent skips."""
+        return self.counts.get("completed", 0) + self.counts.get("skipped", 0)
+
 
 def product_runs(product, *, status=None):
     """The product's DerivationRuns for the run-list drill-down (#211).
