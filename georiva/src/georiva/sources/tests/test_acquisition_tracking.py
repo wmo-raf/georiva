@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from georiva.core.models import Catalog
 from georiva.sources.acquisition_tracking import feed_fetch_runs
-from georiva.sources.models import DataFeed, FetchRun
+from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
 User = get_user_model()
 
@@ -110,6 +110,19 @@ class FetchRunListViewTests(TestCase):
         )
         self.assertContains(response, reverse("data_feed_list"))
 
+    def test_each_run_row_links_to_its_detail_page(self):
+        run = _run(self.feed)
+
+        response = self.client.get(self._url())
+
+        self.assertContains(
+            response,
+            reverse(
+                "data_feed_fetch_run_detail",
+                kwargs={"feed_pk": self.feed.pk, "run_pk": run.pk},
+            ),
+        )
+
     def test_run_list_is_paginated_at_25(self):
         for i in range(26):
             _run(self.feed, started_ago=i)
@@ -120,6 +133,90 @@ class FetchRunListViewTests(TestCase):
 
         second = self.client.get(self._url(), {"page": 2})
         self.assertEqual(len(second.context["rows"]), 1)
+
+    def test_requires_admin_login(self):
+        self.client.logout()
+
+        response = self.client.get(self._url())
+
+        self.assertEqual(response.status_code, 302)
+
+
+class FetchRunDetailViewTests(TestCase):
+    """The FetchRun detail page (issue #221): one run's summary and its
+    FetchedFile drill-down, scoped to the feed. Read-only in this slice."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_run", "d@test.com", "pw")
+        self.client.force_login(self.user)
+        self.feed = _feed()
+        self.run = _run(
+            self.feed,
+            FetchRun.Status.COMPLETED,
+            files_requested=3,
+            files_fetched=1,
+            files_skipped=1,
+            files_failed=1,
+        )
+
+    def _url(self, run=None):
+        return reverse(
+            "data_feed_fetch_run_detail",
+            kwargs={"feed_pk": self.feed.pk, "run_pk": (run or self.run).pk},
+        )
+
+    def test_shows_run_summary_and_per_file_status_error_and_skip_reason(self):
+        FetchedFile.objects.create(
+            fetch_run=self.run,
+            file_path="chirps/rainfall/GR--20260714T0600--precip.tif",
+            status=FetchedFile.Status.STORED,
+            bytes_transferred=4096,
+        )
+        FetchedFile.objects.create(
+            fetch_run=self.run,
+            file_path="chirps/rainfall/GR--20260714T0600--precip2.tif",
+            status=FetchedFile.Status.SKIPPED,
+            skip_reason="already exists",
+        )
+        FetchedFile.objects.create(
+            fetch_run=self.run,
+            file_path="chirps/rainfall/GR--20260714T0600--precip3.tif",
+            status=FetchedFile.Status.FAILED,
+            error="read timed out after 30s",
+        )
+
+        response = self.client.get(self._url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "GR--20260714T0600--precip.tif")
+        self.assertContains(response, "already exists")
+        self.assertContains(response, "read timed out after 30s")
+        self.assertContains(response, "Stored")
+        self.assertContains(response, "Skipped")
+        self.assertContains(response, "Failed")
+
+    def test_breadcrumbs_chain_back_through_the_run_list(self):
+        response = self.client.get(self._url())
+
+        self.assertContains(
+            response, reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk})
+        )
+        self.assertContains(
+            response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
+        )
+
+    def test_run_of_another_feed_is_not_reachable(self):
+        other_feed = _feed(name="Other", slug="other")
+        foreign_run = _run(other_feed)
+
+        response = self.client.get(
+            reverse(
+                "data_feed_fetch_run_detail",
+                kwargs={"feed_pk": self.feed.pk, "run_pk": foreign_run.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_requires_admin_login(self):
         self.client.logout()
