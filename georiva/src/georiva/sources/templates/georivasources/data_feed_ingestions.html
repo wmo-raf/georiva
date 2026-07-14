@@ -109,6 +109,43 @@
             color: var(--w-color-grey-400);
         }
 
+        .ging-actions {
+            display: flex;
+            gap: 0.6em;
+            align-items: center;
+        }
+
+        .ging-actions form {
+            margin: 0;
+        }
+
+        .ging-check {
+            margin-top: 1.2em;
+            padding: 1em 1.25em;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            background: var(--w-color-grey-50);
+        }
+
+        .ging-check__title {
+            font-size: 0.85em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--w-color-grey-400);
+            margin: 0 0 0.6em;
+        }
+
+        .ging-check__files {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .ging-check__files li {
+            padding: 0.25em 0;
+        }
+
         .ging-pagination {
             margin-top: 1.2em;
             font-size: 0.85em;
@@ -121,6 +158,37 @@
     {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Ingestion Activity") icon="cogs" breadcrumbs=breadcrumbs_items %}
 
     <div class="nice-padding">
+        <div class="ging-actions">
+            <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="check_unprocessed">
+                <button class="button button-secondary" type="submit">{% trans "Check unprocessed files" %}</button>
+            </form>
+            <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="ingest_now">
+                <button class="button" type="submit">{% trans "Ingest now" %}</button>
+            </form>
+        </div>
+
+        {% if check_results is not None %}
+            <div class="ging-check">
+                <h2 class="ging-check__title">{% trans "Unprocessed files in MinIO" %}</h2>
+                {% if check_results %}
+                    <ul class="ging-check__files">
+                        {% for found in check_results %}
+                            <li>
+                                <span class="ging-mono">{{ found.bucket }}/{{ found.file_path }}</span>
+                                <span class="ging-badge ging-badge--pending">{{ found.reason }}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="ging-meta">{% trans "No unprocessed files under this feed's catalog." %}</p>
+                {% endif %}
+            </div>
+        {% endif %}
+
         <div class="ging-filters">
             <span class="ging-meta">{% trans "Status" %}:</span>
             <a class="ging-filter {% if not current_status %}ging-filter--active{% endif %}"

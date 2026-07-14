@@ -567,6 +567,14 @@
             <div class="gfeed-card__header">
                 <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
                 <div class="gfeed-card__actions">
+                    <form class="gfeed-runs-form" method="post"
+                          action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="check_unprocessed">
+                        <button class="button button-small button-secondary" type="submit">
+                            {% trans "Check unprocessed files" %}
+                        </button>
+                    </form>
                     <a class="button button-small button-secondary"
                        href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">{% trans "View all" %}</a>
                 </div>

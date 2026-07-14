@@ -1617,6 +1617,24 @@ def data_feed_ingestions(request, feed_pk):
     from georiva.ingestion.models import FileIngestion
 
     feed = get_object_or_404(DataFeed, pk=feed_pk)
+
+    # Synchronous, ephemeral dry run (PRD #217): scan MinIO under the feed's
+    # catalog prefix; results render on this POST response, nothing persists.
+    check_results = None
+    if request.method == "POST" and request.POST.get("action") == "check_unprocessed":
+        from georiva.ingestion import unprocessed
+        check_results = unprocessed.find_unprocessed(prefix=f"{feed.catalog.slug}/")
+
+    if request.method == "POST" and request.POST.get("action") == "ingest_now":
+        from georiva.ingestion import unprocessed
+        found = unprocessed.find_unprocessed(prefix=f"{feed.catalog.slug}/")
+        if found:
+            queued = unprocessed.ingest_unprocessed(found)
+            messages.success(request, _("%d file(s) queued for ingestion.") % queued)
+        else:
+            messages.info(request, _("No unprocessed files under this feed's catalog."))
+        return redirect("data_feed_ingestions", feed_pk=feed.pk)
+
     status = request.GET.get("status") or None
 
     collections = Collection.objects.filter(catalog=feed.catalog).order_by("name")
@@ -1646,6 +1664,7 @@ def data_feed_ingestions(request, feed_pk):
         "collections": collections,
         "current_collection": raw_collection or "",
         "no_collection_value": NO_COLLECTION,
+        "check_results": check_results,
     }
     return render(request, "georivasources/data_feed_ingestions.html", context)
 
