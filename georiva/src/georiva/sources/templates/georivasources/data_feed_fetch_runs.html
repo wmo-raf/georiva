@@ -103,6 +103,54 @@
             color: var(--w-color-grey-400);
         }
 
+        .gaq-actions {
+            display: flex;
+            gap: 0.6em;
+            align-items: center;
+        }
+
+        .gaq-actions form {
+            margin: 0;
+        }
+
+        .gaq-mono {
+            font-family: monospace;
+            font-size: 0.85em;
+            word-break: break-all;
+        }
+
+        .gaq-check {
+            margin-top: 1.2em;
+            padding: 1em 1.25em;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            background: var(--w-color-grey-50);
+        }
+
+        .gaq-check__title {
+            font-size: 0.85em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--w-color-grey-400);
+            margin: 0;
+        }
+
+        .gaq-check__collection {
+            font-size: 0.95em;
+            margin: 1em 0 0.3em;
+        }
+
+        .gaq-check__files {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .gaq-check__files li {
+            padding: 0.25em 0;
+        }
+
         .gaq-pagination {
             margin-top: 1.2em;
             font-size: 0.85em;
@@ -115,6 +163,53 @@
     {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Acquisition Activity") icon="download" breadcrumbs=breadcrumbs_items %}
 
     <div class="nice-padding">
+        <div class="gaq-actions">
+            <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="check_new_files">
+                <button class="button button-secondary" type="submit">{% trans "Check for new files" %}</button>
+            </form>
+            <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="fetch_now">
+                <button class="button" type="submit">{% trans "Fetch now" %}</button>
+            </form>
+        </div>
+
+        {% if check_results is not None %}
+            <div class="gaq-check">
+                <h2 class="gaq-check__title">{% trans "Check results" %}</h2>
+                {% for entry in check_results %}
+                    <div class="gaq-check__group">
+                        <h3 class="gaq-check__collection">
+                            {{ entry.collection.name }}
+                            <span class="gaq-meta">
+                                — {% blocktrans with new=entry.new_count existing=entry.existing_count %}{{ new }} new · {{ existing }} existing{% endblocktrans %}
+                            </span>
+                        </h3>
+                        {% if entry.error %}
+                            <div class="gaq-error">{{ entry.error }}</div>
+                        {% elif entry.candidates %}
+                            <ul class="gaq-check__files">
+                                {% for candidate in entry.candidates %}
+                                    <li>
+                                        <span class="gaq-mono">{{ candidate.filename }}</span>
+                                        {% if candidate.exists %}
+                                            <span class="gaq-badge gaq-badge--cancelled">{% trans "already exists" %}</span>
+                                        {% else %}
+                                            <span class="gaq-badge gaq-badge--completed">{% trans "new" %}</span>
+                                        {% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="gaq-meta">{% trans "Source offered no files." %}</p>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
         <div class="gaq-filters">
             <span class="gaq-meta">{% trans "Filter" %}:</span>
             <a class="gaq-filter {% if not current_status %}gaq-filter--active{% endif %}"

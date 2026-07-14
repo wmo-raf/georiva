@@ -440,6 +440,16 @@
                 <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
                 <div class="gfeed-card__actions">
                     {% if feed.collection_links.exists %}
+                        <form class="gfeed-runs-form" method="post"
+                              action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="check_new_files">
+                            <button class="button button-small button-secondary" type="submit">
+                                {% trans "Check for new files" %}
+                            </button>
+                        </form>
+                    {% endif %}
+                    {% if feed.collection_links.exists %}
                         <form class="gfeed-runs-form" method="post" action="{% url 'data_feed_detail' pk=feed.pk %}">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="run_now">
