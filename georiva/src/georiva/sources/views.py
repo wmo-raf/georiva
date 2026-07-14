@@ -1598,16 +1598,59 @@ def data_feed_fetch_runs(request, feed_pk):
 
 def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     """
-    FetchRun detail leaf (PRD #217, issue #221): one run's summary and its
-    FetchedFile drill-down — per file: status, path, skip reason, error,
-    bytes, timing. Read-only in this slice; per-file retry lands separately.
-    The run is scoped to the feed in the URL.
+    FetchRun detail leaf (PRD #217, issues #221/#225): one run's summary and
+    its FetchedFile drill-down — per file: status, path, skip reason, error,
+    bytes, timing — with per-file and bulk retry for failed files that carry
+    a stored request. The run is scoped to the feed in the URL.
     """
     from georiva.sources.acquisition_tracking import run_duration_seconds
-    from georiva.sources.models import FetchRun
+    from georiva.sources.models import FetchedFile, FetchRun
 
     feed = get_object_or_404(DataFeed, pk=feed_pk)
     run = get_object_or_404(FetchRun, pk=run_pk, data_feed=feed)
+
+    def retryable_files(pks):
+        """Only failed files of THIS run that carry a stored request may be
+        retried — crafted POSTs for anything else select nothing."""
+        return run.fetched_files.filter(
+            pk__in=pks,
+            status=FetchedFile.Status.FAILED,
+            request_payload__isnull=False,
+        )
+
+    is_bulk = request.POST.get("action") == "retry_selected"
+    if request.method == "POST" and (request.POST.get("retry_file_id") or is_bulk):
+        from georiva.sources.tasks import retry_fetched_file
+
+        if is_bulk:
+            raw_pks = request.POST.getlist("file_ids")
+        else:
+            raw_pks = [request.POST["retry_file_id"]]
+        pks = [pk for pk in raw_pks if str(pk).isdigit()]
+
+        if not pks:
+            messages.info(request, _("No files selected."))
+        else:
+            targets = retryable_files(pks)
+            for f in targets:
+                retry_fetched_file.delay(f.pk)
+            if targets:
+                messages.success(
+                    request, _("Retry queued for %d file(s).") % len(targets)
+                )
+            else:
+                messages.warning(request, _("Selected file(s) cannot be retried."))
+        return redirect("data_feed_fetch_run_detail", feed_pk=feed.pk, run_pk=run.pk)
+
+    files = [
+        {
+            "file": f,
+            "retryable": (
+                f.status == FetchedFile.Status.FAILED and bool(f.request_payload)
+            ),
+        }
+        for f in run.fetched_files.all()
+    ]
 
     runs_url = reverse("data_feed_fetch_runs", kwargs={"feed_pk": feed.pk})
     context = {
@@ -1621,7 +1664,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
         "feed": feed,
         "run": run,
         "duration": run_duration_seconds(run),
-        "files": run.fetched_files.all(),
+        "files": files,
         "runs_url": runs_url,
     }
     return render(request, "georivasources/data_feed_fetch_run_detail.html", context)

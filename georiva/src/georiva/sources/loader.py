@@ -179,6 +179,17 @@ class Loader:
     # Main Run Method
     # =========================================================================
 
+    @staticmethod
+    def _request_payload(request):
+        """JSON-safe request dict for FetchedFile.request_payload, or None if
+        the source's request can't be serialized — a null payload disables
+        per-file retry for that record instead of failing the run."""
+        try:
+            payload = request.to_dict()
+        except Exception:
+            return None
+        return payload if isinstance(payload, dict) else None
+
     def check_new_files(self) -> list[CandidateFile]:
         """
         Read-only dry run (PRD #217): ask the source what it would fetch for
@@ -195,6 +206,22 @@ class Loader:
             )
             for request in requests
         ]
+
+    def fetch_one(self, request) -> FetchResult:
+        """
+        Fetch and store a single file, unconditionally (no skip-existing
+        shortcut) — the execution primitive behind per-file retry (PRD #217).
+        Owns strategy connect/disconnect and temp cleanup; records nothing.
+        """
+        self.fetch_strategy.connect()
+        try:
+            return self._fetch_and_store(request)
+        finally:
+            try:
+                self.fetch_strategy.disconnect()
+            except Exception:
+                self.logger.debug("Fetch strategy disconnect failed", exc_info=True)
+            self._cleanup_temp()
 
     def run(
             self,
@@ -264,7 +291,8 @@ class Loader:
                     self.logger.debug(f"Skipping (exists): {request.filename}")
                     if fetch_run:
                         ff = FetchedFile.objects.create(
-                            fetch_run=fetch_run, file_path=storage_path)
+                            fetch_run=fetch_run, file_path=storage_path,
+                            request_payload=self._request_payload(request))
                         ff.mark_skipped(reason="already exists")
                     continue
 
@@ -281,7 +309,8 @@ class Loader:
                             )
                             if fetch_run:
                                 ff = FetchedFile.objects.create(
-                                    fetch_run=fetch_run, file_path=dest_path)
+                                    fetch_run=fetch_run, file_path=dest_path,
+                                    request_payload=self._request_payload(request))
                                 ff.mark_fetching()
                                 ff.mark_stored(bytes_transferred=0)
                         except Exception as e:
@@ -312,6 +341,7 @@ class Loader:
                     ff = FetchedFile.objects.create(
                         fetch_run=fetch_run,
                         file_path=self._get_storage_path(request),
+                        request_payload=self._request_payload(request),
                     )
                     ff.mark_fetching()
 
