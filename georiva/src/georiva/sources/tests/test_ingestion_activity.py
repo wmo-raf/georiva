@@ -164,6 +164,106 @@ class IngestionActivityViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
 
+class CheckUnprocessedViewTests(TestCase):
+    """The check/ingest actions on the Ingestion Activity page (issue #223)."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_chk", "k@test.com", "pw")
+        self.client.force_login(self.user)
+        self.feed = _feed()
+
+    def _url(self):
+        return reverse("data_feed_ingestions", kwargs={"feed_pk": self.feed.pk})
+
+    def _found(self, *paths, reason="untracked"):
+        from georiva.ingestion.unprocessed import UnprocessedFile
+        return [
+            UnprocessedFile(bucket="sources", file_path=p, reason=reason)
+            for p in paths
+        ]
+
+    def test_check_renders_the_scoped_scan_results(self):
+        from unittest.mock import patch
+
+        with patch(
+            "georiva.ingestion.unprocessed.find_unprocessed",
+            return_value=self._found("chirps/rainfall/stuck.grib"),
+        ) as find:
+            response = self.client.post(self._url(), {"action": "check_unprocessed"})
+
+        find.assert_called_once_with(prefix="chirps/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "chirps/rainfall/stuck.grib")
+        self.assertContains(response, "untracked")
+
+    def test_check_with_a_clean_bucket_shows_a_clear_empty_state(self):
+        from unittest.mock import patch
+
+        with patch(
+            "georiva.ingestion.unprocessed.find_unprocessed", return_value=[]
+        ):
+            response = self.client.post(self._url(), {"action": "check_unprocessed"})
+
+        self.assertContains(response, "No unprocessed files")
+
+    def test_ingest_now_registers_resets_and_dispatches_per_file(self):
+        from unittest.mock import patch
+
+        FileIngestion.objects.create(
+            bucket="sources", file_path="chirps/rainfall/pending.grib",
+            status=FileIngestion.Status.PENDING,
+        )
+        FileIngestion.objects.create(
+            bucket="sources", file_path="chirps/rainfall/dead.grib",
+            status=FileIngestion.Status.COMPLETED, force_reingest=True,
+        )
+        found = (
+            self._found("chirps/rainfall/new.grib", reason="untracked")
+            + self._found("chirps/rainfall/pending.grib", reason="pending")
+            + self._found("chirps/rainfall/dead.grib", reason="reingest")
+        )
+
+        with (
+            patch("georiva.ingestion.unprocessed.find_unprocessed",
+                  return_value=found),
+            patch("georiva.ingestion.tasks.process_incoming_file") as task,
+        ):
+            response = self.client.post(
+                self._url(), {"action": "ingest_now"}, follow=True
+            )
+
+        dispatched = {c.kwargs["file_path"] for c in task.delay.call_args_list}
+        self.assertEqual(dispatched, {
+            "chirps/rainfall/new.grib",
+            "chirps/rainfall/pending.grib",
+            "chirps/rainfall/dead.grib",
+        })
+        # The untracked file now has a FileIngestion; the dead one was reset.
+        self.assertTrue(FileIngestion.objects.filter(
+            file_path="chirps/rainfall/new.grib").exists())
+        self.assertEqual(
+            FileIngestion.objects.get(file_path="chirps/rainfall/dead.grib").status,
+            FileIngestion.Status.PENDING,
+        )
+        self.assertRedirects(response, self._url())
+        self.assertContains(response, "3 file(s) queued for ingestion")
+
+    def test_ingest_now_with_nothing_found_explains_itself(self):
+        from unittest.mock import patch
+
+        with (
+            patch("georiva.ingestion.unprocessed.find_unprocessed",
+                  return_value=[]),
+            patch("georiva.ingestion.tasks.process_incoming_file") as task,
+        ):
+            response = self.client.post(
+                self._url(), {"action": "ingest_now"}, follow=True
+            )
+
+        task.delay.assert_not_called()
+        self.assertContains(response, "No unprocessed files")
+
+
 class DataFeedDetailIngestionPanelTests(TestCase):
     """The compact ingestion panel on the feed detail page: recent records +
     a "View all" link to the Ingestion Activity page."""
@@ -193,3 +293,11 @@ class DataFeedDetailIngestionPanelTests(TestCase):
             reverse("data_feed_ingestions", kwargs={"feed_pk": self.feed.pk}),
         )
         self.assertContains(response, "recent-orphan.grib")
+
+    def test_panel_offers_the_check_unprocessed_action(self):
+        response = self.client.get(
+            reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
+        )
+
+        self.assertContains(response, 'value="check_unprocessed"')
+        self.assertContains(response, "Check unprocessed files")

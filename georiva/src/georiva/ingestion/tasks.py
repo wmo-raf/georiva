@@ -126,72 +126,45 @@ def sweep_unprocessed(sync: bool = False):
     # -----------------------------------------------------------------
     
     new_files = 0
-    
-    dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
-    
-    for bucket_type in [BucketType.INCOMING, BucketType.SOURCES]:
-        bucket = storage.bucket(bucket_type)
-        files = bucket.list_files(recursive=True)
-        
-        logger.info("Found %d untracked files", len(files))
-        
-        for f in files:
-            path = f['path']
-            filename = Path(path).name
-            
-            # Skip placeholder and hidden files
-            if filename.startswith('.') or filename == '.keep':
-                continue
-            
-            # Skip if path doesn't match convention
-            try:
-                meta = validate_path(path)
-            except ValueError:
-                logger.debug("Skipping non-conforming path: %s", path)
-                continue
-            
-            # Skip if already tracked
-            if FileIngestion.is_known(bucket_type, path):
-                log = FileIngestion.objects.filter(
-                    bucket=bucket_type, file_path=path
-                ).first()
-                if log and (
-                        log.force_reingest or
-                        (log.status == FileIngestion.Status.COMPLETED and not log.has_live_data)
-                ):
-                    logger.warning(
-                        "Re-ingesting %s/%s (force=%s, live_data=%s)",
-                        bucket_type, path, log.force_reingest, log.has_live_data,
-                    )
-                    FileIngestion.reset_for_reingest(bucket_type, path)
-                    dispatch(
-                        file_path=path,
-                        origin_bucket=bucket_type,
-                        reference_time=(
-                            meta['reference_time'].isoformat()
-                            if meta.get('reference_time') else None
-                        ),
-                    )
-                continue
-            
-            logger.info("Found untracked file: %s/%s", bucket_type, path)
 
-            FileIngestion.register(
-                bucket=bucket_type,
-                file_path=path,
-                reference_time=meta.get('reference_time'),
+    dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+
+    from georiva.ingestion.unprocessed import find_unprocessed
+
+    for unprocessed in find_unprocessed():
+        reference_time_iso = (
+            unprocessed.reference_time.isoformat()
+            if unprocessed.reference_time else None
+        )
+
+        if unprocessed.reason == "reingest":
+            logger.warning(
+                "Re-ingesting %s/%s", unprocessed.bucket, unprocessed.file_path,
             )
-            
-            # Queue for processing
+            FileIngestion.reset_for_reingest(unprocessed.bucket, unprocessed.file_path)
             dispatch(
-                file_path=path,
-                origin_bucket=bucket_type,
-                reference_time=(
-                    meta['reference_time'].isoformat()
-                    if meta.get('reference_time') else None
-                ),
+                file_path=unprocessed.file_path,
+                origin_bucket=unprocessed.bucket,
+                reference_time=reference_time_iso,
+            )
+        elif unprocessed.reason == "untracked":
+            logger.info(
+                "Found untracked file: %s/%s",
+                unprocessed.bucket, unprocessed.file_path,
+            )
+            FileIngestion.register(
+                bucket=unprocessed.bucket,
+                file_path=unprocessed.file_path,
+                reference_time=unprocessed.reference_time,
+            )
+            dispatch(
+                file_path=unprocessed.file_path,
+                origin_bucket=unprocessed.bucket,
+                reference_time=reference_time_iso,
             )
             new_files += 1
+        # 'pending' records already await a dispatched task — the sweep
+        # leaves them alone (unchanged behavior).
     
     if new_files:
         logger.info("Queued %d untracked files", new_files)

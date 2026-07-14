@@ -75,9 +75,11 @@ class SweepDirectFileIngestionTests(TestCase):
         def _bucket_side_effect(bucket_type):
             return sources_bucket if bucket_type == BT.SOURCES else incoming_bucket
 
+        # The bucket scan lives in ingestion.unprocessed (issue #223); the
+        # storage boundary is mocked there.
         with (
-            patch("georiva.ingestion.tasks.storage") as mock_storage,
-            patch("georiva.ingestion.tasks.validate_path") as mock_vp,
+            patch("georiva.ingestion.unprocessed.storage") as mock_storage,
+            patch("georiva.ingestion.unprocessed.validate_path") as mock_vp,
             patch("georiva.ingestion.tasks.process_incoming_file") as mock_task,
         ):
             mock_storage.bucket.side_effect = _bucket_side_effect
