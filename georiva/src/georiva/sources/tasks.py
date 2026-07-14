@@ -26,6 +26,36 @@ def sweep_scheduled_products():
     return dispatch_due_scheduled_products()
 
 
+@app.task(
+    name="georiva.sources.tasks.retry_fetched_file",
+    queue="georiva-ingestion",
+    bind=True,
+    acks_late=True,
+    max_retries=0,
+)
+def retry_fetched_file(self, fetched_file_id):
+    """
+    Per-file re-fetch (PRD #217): re-fetch one FetchedFile in place. An
+    impossible retry (record gone, no stored request) is logged and dropped —
+    max_retries=0 per the ingestion-task convention.
+    """
+    from georiva.sources.acquisition_retry import RetryNotPossible, retry_fetch
+    from georiva.sources.models import FetchedFile
+
+    try:
+        fetched_file = FetchedFile.objects.get(pk=fetched_file_id)
+    except FetchedFile.DoesNotExist:
+        logger.warning("retry_fetched_file: record %s gone", fetched_file_id)
+        return
+
+    try:
+        retry_fetch(fetched_file)
+    except RetryNotPossible as exc:
+        logger.warning(
+            "retry_fetched_file: %s not retried: %s", fetched_file_id, exc
+        )
+
+
 @app.on_after_finalize.connect
 def setup_scheduled_product_beat(sender, **kwargs):
     """Register the periodic scheduled-product beat (mirror of the derivation sweep)."""

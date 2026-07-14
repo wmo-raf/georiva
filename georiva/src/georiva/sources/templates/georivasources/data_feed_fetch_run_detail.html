@@ -137,6 +137,14 @@
             margin-top: 1em;
             color: var(--w-color-grey-400);
         }
+
+        .gaqd-select {
+            width: 2em;
+        }
+
+        .gaqd-bulk {
+            margin-top: 1em;
+        }
     </style>
 {% endblock %}
 
@@ -189,44 +197,90 @@
 
         <h2 class="gaqd-section-title">{% trans "Files" %}</h2>
         {% if files %}
-            <table class="gaqd-table">
-                <thead>
-                    <tr>
-                        <th>{% trans "Status" %}</th>
-                        <th>{% trans "File" %}</th>
-                        <th>{% trans "Started" %}</th>
-                        <th>{% trans "Completed" %}</th>
-                        <th class="gaqd-num">{% trans "Bytes" %}</th>
-                        <th>{% trans "Detail" %}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for file in files %}
+            <form method="post"
+                  action="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=run.pk %}">
+                {% csrf_token %}
+                <table class="gaqd-table">
+                    <thead>
                         <tr>
-                            <td>
-                                <span class="gaqd-badge gaqd-badge--{{ file.status }}">{{ file.get_status_display }}</span>
-                            </td>
-                            <td><span class="gaqd-mono">{{ file.file_path }}</span></td>
-                            <td class="gaqd-meta">{{ file.started_at|default:"—" }}</td>
-                            <td class="gaqd-meta">{{ file.completed_at|default:"—" }}</td>
-                            <td class="gaqd-num">{{ file.bytes_transferred|filesizeformat }}</td>
-                            <td>
-                                {% if file.error %}
-                                    <div class="gaqd-error">{{ file.error|truncatechars:300 }}</div>
-                                {% elif file.skip_reason %}
-                                    <span class="gaqd-meta">{{ file.skip_reason }}</span>
-                                {% else %}
-                                    <span class="gaqd-meta">—</span>
-                                {% endif %}
-                            </td>
+                            <th class="gaqd-select">
+                                <input type="checkbox" id="gaqd-select-all"
+                                       aria-label="{% trans 'Select all retryable files' %}">
+                            </th>
+                            <th>{% trans "Status" %}</th>
+                            <th>{% trans "File" %}</th>
+                            <th>{% trans "Started" %}</th>
+                            <th>{% trans "Completed" %}</th>
+                            <th class="gaqd-num">{% trans "Bytes" %}</th>
+                            <th>{% trans "Detail" %}</th>
+                            <th></th>
                         </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {% for row in files %}
+                            <tr>
+                                <td class="gaqd-select">
+                                    {% if row.retryable %}
+                                        <input type="checkbox" name="file_ids"
+                                               value="{{ row.file.pk }}"
+                                               aria-label="{% trans 'Select file for retry' %}">
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="gaqd-badge gaqd-badge--{{ row.file.status }}">{{ row.file.get_status_display }}</span>
+                                </td>
+                                <td><span class="gaqd-mono">{{ row.file.file_path }}</span></td>
+                                <td class="gaqd-meta">{{ row.file.started_at|default:"—" }}</td>
+                                <td class="gaqd-meta">{{ row.file.completed_at|default:"—" }}</td>
+                                <td class="gaqd-num">{{ row.file.bytes_transferred|filesizeformat }}</td>
+                                <td>
+                                    {% if row.file.error %}
+                                        <div class="gaqd-error">{{ row.file.error|truncatechars:300 }}</div>
+                                    {% elif row.file.skip_reason %}
+                                        <span class="gaqd-meta">{{ row.file.skip_reason }}</span>
+                                    {% else %}
+                                        <span class="gaqd-meta">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if row.retryable %}
+                                        <button class="button button-small button-secondary"
+                                                type="submit" name="retry_file_id"
+                                                value="{{ row.file.pk }}">{% trans "Retry" %}</button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="gaqd-bulk">
+                    <button class="button" type="submit" name="action" value="retry_selected">
+                        {% trans "Retry selected" %}
+                    </button>
+                </div>
+            </form>
         {% else %}
             <p class="gaqd-empty">{% trans "No file records for this run." %}</p>
         {% endif %}
 
         <p><a href="{{ runs_url }}">← {% trans "Back to Acquisition Activity" %}</a></p>
     </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const selectAll = document.getElementById('gaqd-select-all');
+            if (!selectAll) {
+                return;
+            }
+            const boxes = document.querySelectorAll('input[name="file_ids"]');
+            selectAll.addEventListener('change', function () {
+                for (const box of boxes) {
+                    box.checked = selectAll.checked;
+                }
+            });
+        });
+    </script>
 {% endblock %}

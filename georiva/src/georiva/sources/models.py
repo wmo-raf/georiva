@@ -673,6 +673,25 @@ class FetchRun(models.Model):
     def mark_cancelled(self):
         self._finish(self.Status.CANCELLED)
 
+    def recompute_counters(self):
+        """Re-derive fetched/skipped/failed/bytes from this run's FetchedFiles —
+        called after a per-file retry so the run reflects current truth."""
+        from django.db.models import Count, Q, Sum
+
+        agg = self.fetched_files.aggregate(
+            fetched=Count('id', filter=Q(status=FetchedFile.Status.STORED)),
+            skipped=Count('id', filter=Q(status=FetchedFile.Status.SKIPPED)),
+            failed=Count('id', filter=Q(status=FetchedFile.Status.FAILED)),
+            bytes=Sum('bytes_transferred'),
+        )
+        self.files_fetched = agg['fetched']
+        self.files_skipped = agg['skipped']
+        self.files_failed = agg['failed']
+        self.bytes_transferred = agg['bytes'] or 0
+        self.save(update_fields=[
+            'files_fetched', 'files_skipped', 'files_failed', 'bytes_transferred',
+        ])
+
 
 class FetchedFile(models.Model):
     """Per-file record within a FetchRun."""
@@ -691,6 +710,12 @@ class FetchedFile(models.Model):
     )
     file_path = models.CharField(max_length=500)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    request_payload = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Serialized FileRequest that produced this file, enabling "
+                  "per-file re-fetch. Null on records that predate the feature.",
+    )
     skip_reason = models.CharField(max_length=255, blank=True)
     error = models.TextField(blank=True)
     bytes_transferred = models.BigIntegerField(default=0)

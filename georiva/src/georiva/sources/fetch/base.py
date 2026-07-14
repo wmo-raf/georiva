@@ -31,6 +31,26 @@ class FileRequest:
     expected_format: Optional[str] = None  # 'grib', 'netcdf', etc.
     variables: list[str] = field(default_factory=list)  # Variables in this file
     
+    def to_dict(self) -> dict:
+        """JSON-safe representation, persisted on FetchedFile so a single
+        file can be re-fetched later (PRD #217). Datetimes become ISO strings."""
+        from dataclasses import asdict
+
+        payload = asdict(self)
+        for key in ("valid_time", "reference_time"):
+            if payload[key] is not None:
+                payload[key] = payload[key].isoformat()
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "FileRequest":
+        """Rebuild a request from to_dict() output."""
+        data = dict(payload)
+        for key in ("valid_time", "reference_time"):
+            if data.get(key) is not None:
+                data[key] = datetime.fromisoformat(data[key])
+        return cls(**data)
+
     @property
     def is_forecast(self) -> bool:
         return self.reference_time is not None
