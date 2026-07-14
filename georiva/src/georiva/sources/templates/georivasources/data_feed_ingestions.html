@@ -1,0 +1,204 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with label=feed.name %}Ingestion Activity — {{ label }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .ging-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }
+
+        .ging-table th,
+        .ging-table td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .ging-table th {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .ging-num {
+            text-align: right;
+        }
+
+        .ging-badge {
+            display: inline-block;
+            padding: 0.15em 0.6em;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .ging-badge--processing {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .ging-badge--completed {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .ging-badge--failed {
+            background: var(--w-color-critical-200);
+            color: var(--w-color-white);
+            border-color: var(--w-color-critical-200);
+        }
+
+        .ging-badge--pending {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .ging-mono {
+            font-family: monospace;
+            font-size: 0.85em;
+            word-break: break-all;
+        }
+
+        .ging-meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .ging-error {
+            font-size: 0.82em;
+            color: var(--w-color-critical-200);
+            max-width: 32em;
+        }
+
+        .ging-filters {
+            margin-top: 1em;
+            display: flex;
+            gap: 0.4em;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .ging-filter {
+            font-size: 0.8em;
+            padding: 0.2em 0.7em;
+            border-radius: 999px;
+            border: 1px solid var(--w-color-border-furniture);
+            color: var(--w-color-text-label);
+            text-decoration: none;
+        }
+
+        .ging-filter--active {
+            background: var(--w-color-surface-menus);
+            color: var(--w-color-white);
+            border-color: var(--w-color-surface-menus);
+        }
+
+        .ging-empty {
+            margin-top: 1.5em;
+            color: var(--w-color-grey-400);
+        }
+
+        .ging-pagination {
+            margin-top: 1.2em;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Ingestion Activity") icon="cogs" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="ging-filters">
+            <span class="ging-meta">{% trans "Status" %}:</span>
+            <a class="ging-filter {% if not current_status %}ging-filter--active{% endif %}"
+               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if current_collection %}?collection={{ current_collection }}{% endif %}">{% trans "All" %}</a>
+            {% for value, label in statuses %}
+                <a class="ging-filter {% if current_status == value %}ging-filter--active{% endif %}"
+                   href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?status={{ value }}{% if current_collection %}&amp;collection={{ current_collection }}{% endif %}">{{ label }}</a>
+            {% endfor %}
+        </div>
+        <div class="ging-filters">
+            <span class="ging-meta">{% trans "Collection" %}:</span>
+            <a class="ging-filter {% if not current_collection %}ging-filter--active{% endif %}"
+               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if current_status %}?status={{ current_status }}{% endif %}">{% trans "All" %}</a>
+            {% for collection in collections %}
+                <a class="ging-filter {% if current_collection == collection.pk|stringformat:'s' %}ging-filter--active{% endif %}"
+                   href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?collection={{ collection.pk }}{% if current_status %}&amp;status={{ current_status }}{% endif %}">{{ collection.name }}</a>
+            {% endfor %}
+            <a class="ging-filter {% if current_collection == no_collection_value %}ging-filter--active{% endif %}"
+               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?collection={{ no_collection_value }}{% if current_status %}&amp;status={{ current_status }}{% endif %}">{% trans "No collection" %}</a>
+        </div>
+
+        {% if records %}
+            <table class="ging-table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "File" %}</th>
+                        <th>{% trans "Collections" %}</th>
+                        <th class="ging-num">{% trans "Retries" %}</th>
+                        <th class="ging-num">{% trans "Items" %}</th>
+                        <th class="ging-num">{% trans "Assets" %}</th>
+                        <th>{% trans "Updated" %}</th>
+                        <th>{% trans "Error" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in records %}
+                        <tr>
+                            <td>
+                                <span class="ging-badge ging-badge--{{ record.status }}">{{ record.get_status_display }}</span>
+                            </td>
+                            <td><span class="ging-mono">{{ record.file_path }}</span></td>
+                            <td>
+                                {% for collection in record.collections.all %}
+                                    {{ collection.name }}{% if not forloop.last %}, {% endif %}
+                                {% empty %}
+                                    <span class="ging-meta">—</span>
+                                {% endfor %}
+                            </td>
+                            <td class="ging-num">{{ record.retry_count }}</td>
+                            <td class="ging-num">{{ record.items_created }}</td>
+                            <td class="ging-num">{{ record.assets_created }}</td>
+                            <td class="ging-meta">{{ record.updated_at|default:"—" }}</td>
+                            <td>
+                                {% if record.error %}
+                                    <div class="ging-error">{{ record.error|truncatechars:200 }}</div>
+                                {% else %}
+                                    <span class="ging-meta">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            {% if page.paginator.num_pages > 1 %}
+                <div class="ging-pagination">
+                    {% if page.has_previous %}
+                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}{% if current_collection %}collection={{ current_collection }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                    {% endif %}
+                    {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                    {% if page.has_next %}
+                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}{% if current_collection %}collection={{ current_collection }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% else %}
+            <p class="ging-empty">{% trans "No ingestion records yet for this feed." %}</p>
+        {% endif %}
+    </div>
+{% endblock %}
