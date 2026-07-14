@@ -233,24 +233,9 @@ class DataFeedDetailAcquisitionPanelTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # The detail page resolves edit/delete URLs through the viewset
-        # registry, which production populates per plugin child model. The
-        # base DataFeed used in tests needs the same registration.
         super().setUpClass()
-        from georiva.sources.registry import data_feed_viewset_registry
-
-        class _BaseDataFeedViewSet:
-            type = "datafeed"
-            model = DataFeed
-
-            @staticmethod
-            def get_url_name(action):
-                # Any admin URL taking a pk works; the panel tests only need
-                # the page to render, not real edit/delete endpoints.
-                return "data_feed_detail"
-
-        if "datafeed" not in data_feed_viewset_registry._viewsets:
-            data_feed_viewset_registry.register(_BaseDataFeedViewSet)
+        from georiva.sources.tests.support import ensure_base_datafeed_viewset
+        ensure_base_datafeed_viewset()
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_panel", "p@test.com", "pw")

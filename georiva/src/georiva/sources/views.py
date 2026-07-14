@@ -115,6 +115,11 @@ def data_feed_detail(request, pk):
         {"run": run, "duration": run_duration_seconds(run)}
         for run in feed_fetch_runs(feed)[:5]
     ]
+
+    from georiva.ingestion.ingestion_tracking import feed_file_ingestions
+    recent_ingestions = list(
+        feed_file_ingestions(feed).prefetch_related("collections")[:5]
+    )
     
     raw_links = feed.collection_links.select_related("collection__catalog").all()
     collection_links = [link.get_real_instance() for link in raw_links]
@@ -171,6 +176,7 @@ def data_feed_detail(request, pk):
         "product_stage_lanes": product_stage_lanes,
         "product_orphans": product_orphans,
         "recent_fetch_runs": recent_fetch_runs,
+        "recent_ingestions": recent_ingestions,
         "feed_type_name": type(real_feed)._meta.verbose_name,
     }
 
@@ -1594,6 +1600,54 @@ def data_feed_fetch_runs(request, feed_pk):
         "check_results": check_results,
     }
     return render(request, "georivasources/data_feed_fetch_runs.html", context)
+
+
+def data_feed_ingestions(request, feed_pk):
+    """
+    Ingestion Activity list (PRD #217, issue #219): one DataFeed's
+    FileIngestions, scoped by the catalog path prefix (ADR-0003) so failed
+    Ingestions never linked to any Collection still appear. Status and
+    collection filters (incl. the "none" orphan view), paginated. The
+    read-side query lives in ingestion_tracking; this view shapes display.
+    """
+    from django.core.paginator import Paginator
+
+    from georiva.core.models import Collection
+    from georiva.ingestion.ingestion_tracking import NO_COLLECTION, feed_file_ingestions
+    from georiva.ingestion.models import FileIngestion
+
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    status = request.GET.get("status") or None
+
+    collections = Collection.objects.filter(catalog=feed.catalog).order_by("name")
+    raw_collection = request.GET.get("collection") or None
+    collection = None
+    if raw_collection == NO_COLLECTION:
+        collection = NO_COLLECTION
+    elif raw_collection and raw_collection.isdigit():
+        collection = collections.filter(pk=raw_collection).first()
+
+    records = feed_file_ingestions(feed, status=status, collection=collection)
+    paginator = Paginator(records.prefetch_related("collections"), 25)
+    page = paginator.get_page(request.GET.get("page"))
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
+            {"url": "", "label": _("Ingestion Activity")},
+        ],
+        "feed": feed,
+        "page": page,
+        "records": list(page),
+        "statuses": FileIngestion.Status.choices,
+        "current_status": status or "",
+        "collections": collections,
+        "current_collection": raw_collection or "",
+        "no_collection_value": NO_COLLECTION,
+    }
+    return render(request, "georivasources/data_feed_ingestions.html", context)
 
 
 def data_feed_fetch_run_detail(request, feed_pk, run_pk):
