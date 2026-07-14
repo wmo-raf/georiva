@@ -1549,6 +1549,26 @@ def data_feed_fetch_runs(request, feed_pk):
     from georiva.sources.models import FetchRun
 
     feed = get_object_or_404(DataFeed, pk=feed_pk)
+
+    # Synchronous, ephemeral dry run (PRD #217): results render on this POST
+    # response and are never persisted. Re-POSTing on refresh is harmless —
+    # the check is read-only.
+    if request.method == "POST" and request.POST.get("action") == "fetch_now":
+        feed.run_now(user=request.user)
+        messages.success(request, _("Fetch started for '%s'.") % feed.name)
+        return redirect("data_feed_fetch_runs", feed_pk=feed.pk)
+
+    check_results = None
+    if request.method == "POST" and request.POST.get("action") == "check_new_files":
+        check_results = [
+            {
+                **entry,
+                "new_count": sum(1 for c in entry["candidates"] if not c.exists),
+                "existing_count": sum(1 for c in entry["candidates"] if c.exists),
+            }
+            for entry in feed.get_real_instance().check_new_files()
+        ]
+
     status = request.GET.get("status") or None
 
     paginator = Paginator(feed_fetch_runs(feed, status=status), 25)
@@ -1571,6 +1591,7 @@ def data_feed_fetch_runs(request, feed_pk):
         "page": page,
         "statuses": FetchRun.Status.choices,
         "current_status": status or "",
+        "check_results": check_results,
     }
     return render(request, "georivasources/data_feed_fetch_runs.html", context)
 

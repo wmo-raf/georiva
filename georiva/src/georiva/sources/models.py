@@ -257,6 +257,27 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run
     
+    def check_new_files(self):
+        """
+        Synchronous "check for new files" dry run (PRD #217): ask the source
+        what it would fetch for each linked collection, classified against
+        storage. Purely informational — persists nothing and touches no feed
+        stats; fetching stays run_now's job.
+
+        Returns one dict per collection link:
+        {"collection", "candidates" (list of CandidateFile), "error"}.
+        """
+        results = []
+        for link in self.collection_links.select_related('collection'):
+            entry = {"collection": link.collection, "candidates": [], "error": None}
+            try:
+                loader = self.get_loader(link.collection)
+                entry["candidates"] = loader.check_new_files()
+            except Exception as exc:
+                entry["error"] = str(exc)
+            results.append(entry)
+        return results
+
     def run_now(self, collection=None, *, user=None, async_run: bool = True):
         """
         Dispatch a loader run.

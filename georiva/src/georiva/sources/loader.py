@@ -22,6 +22,15 @@ from django.conf import settings
 
 
 @dataclass
+class CandidateFile:
+    """One file the source offers right now, classified against storage —
+    the unit of the read-only "check for new files" dry run (PRD #217)."""
+    filename: str
+    storage_path: str
+    exists: bool
+
+
+@dataclass
 class LoaderRunResult:
     """Result of a complete loader run."""
     started_at: datetime = field(default_factory=timezone.now)
@@ -169,7 +178,24 @@ class Loader:
     # =========================================================================
     # Main Run Method
     # =========================================================================
-    
+
+    def check_new_files(self) -> list[CandidateFile]:
+        """
+        Read-only dry run (PRD #217): ask the source what it would fetch for
+        this collection and classify each candidate against storage. Persists
+        nothing — no FetchRun/FetchedFile, no counters — and never connects
+        the fetch strategy.
+        """
+        requests = self.data_source.generate_requests_for_collection(self.collection)
+        return [
+            CandidateFile(
+                filename=request.filename,
+                storage_path=self._get_storage_path(request),
+                exists=self._already_exists(request),
+            )
+            for request in requests
+        ]
+
     def run(
             self,
             *,

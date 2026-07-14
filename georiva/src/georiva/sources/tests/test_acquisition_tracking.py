@@ -274,3 +274,19 @@ class DataFeedDetailAcquisitionPanelTests(TestCase):
 
         self.assertContains(response, "90210")
         self.assertContains(response, "48151")
+
+    def test_panel_offers_the_check_for_new_files_action(self):
+        from georiva.core.models import Collection
+        from georiva.sources.models import DataFeedCollectionLink
+
+        collection = Collection.objects.create(
+            name="Rainfall", slug="rainfall", catalog=self.feed.catalog
+        )
+        DataFeedCollectionLink.objects.create(
+            data_feed=self.feed, collection=collection
+        )
+
+        response = self.client.get(self._detail_url())
+
+        self.assertContains(response, 'value="check_new_files"')
+        self.assertContains(response, "Check for new files")
