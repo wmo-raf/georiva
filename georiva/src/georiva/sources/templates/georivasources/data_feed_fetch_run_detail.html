@@ -1,0 +1,232 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with label=feed.name %}Fetch run — {{ label }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gaqd-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+            max-width: 60em;
+        }
+
+        .gaqd-grid th,
+        .gaqd-grid td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .gaqd-grid th {
+            width: 12em;
+            font-size: 0.78em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+            font-weight: 600;
+        }
+
+        .gaqd-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }
+
+        .gaqd-table th,
+        .gaqd-table td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .gaqd-table th {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gaqd-num {
+            text-align: right;
+        }
+
+        .gaqd-badge {
+            display: inline-block;
+            padding: 0.15em 0.6em;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .gaqd-badge--running,
+        .gaqd-badge--fetching {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .gaqd-badge--completed,
+        .gaqd-badge--stored {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .gaqd-badge--failed {
+            background: var(--w-color-critical-200);
+            color: var(--w-color-white);
+            border-color: var(--w-color-critical-200);
+        }
+
+        .gaqd-badge--cancelled,
+        .gaqd-badge--skipped,
+        .gaqd-badge--pending {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .gaqd-mono {
+            font-family: monospace;
+            font-size: 0.85em;
+            word-break: break-all;
+        }
+
+        .gaqd-meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gaqd-error {
+            font-family: monospace;
+            font-size: 0.82em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--w-color-critical-200);
+            max-width: 32em;
+        }
+
+        .gaqd-run-error {
+            font-family: monospace;
+            font-size: 0.85em;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--w-color-critical-200);
+            background: color-mix(in srgb, var(--w-color-critical-200) 6%, transparent);
+            padding: 0.8em;
+            border-radius: 4px;
+            margin: 0;
+        }
+
+        .gaqd-section-title {
+            margin-top: 2em;
+            font-size: 0.9em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gaqd-empty {
+            margin-top: 1em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Fetch run detail") icon="download" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <table class="gaqd-grid">
+            <tbody>
+                <tr>
+                    <th>{% trans "Status" %}</th>
+                    <td><span class="gaqd-badge gaqd-badge--{{ run.status }}">{{ run.get_status_display }}</span></td>
+                </tr>
+                <tr>
+                    <th>{% trans "Started" %}</th>
+                    <td class="gaqd-meta">{{ run.started_at|default:"—" }}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Finished" %}</th>
+                    <td class="gaqd-meta">{{ run.finished_at|default:"—" }}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Duration" %}</th>
+                    <td class="gaqd-meta">{% if duration is not None %}{{ duration|floatformat:1 }}s{% else %}—{% endif %}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Files" %}</th>
+                    <td>
+                        {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
+                            {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
+                        {% endblocktrans %}
+                    </td>
+                </tr>
+                <tr>
+                    <th>{% trans "Bytes" %}</th>
+                    <td>{{ run.bytes_transferred|filesizeformat }}</td>
+                </tr>
+                <tr>
+                    <th>{% trans "Error" %}</th>
+                    <td>
+                        {% if run.error_message %}
+                            <pre class="gaqd-run-error">{{ run.error_message }}</pre>
+                        {% else %}
+                            <span class="gaqd-meta">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2 class="gaqd-section-title">{% trans "Files" %}</h2>
+        {% if files %}
+            <table class="gaqd-table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "File" %}</th>
+                        <th>{% trans "Started" %}</th>
+                        <th>{% trans "Completed" %}</th>
+                        <th class="gaqd-num">{% trans "Bytes" %}</th>
+                        <th>{% trans "Detail" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for file in files %}
+                        <tr>
+                            <td>
+                                <span class="gaqd-badge gaqd-badge--{{ file.status }}">{{ file.get_status_display }}</span>
+                            </td>
+                            <td><span class="gaqd-mono">{{ file.file_path }}</span></td>
+                            <td class="gaqd-meta">{{ file.started_at|default:"—" }}</td>
+                            <td class="gaqd-meta">{{ file.completed_at|default:"—" }}</td>
+                            <td class="gaqd-num">{{ file.bytes_transferred|filesizeformat }}</td>
+                            <td>
+                                {% if file.error %}
+                                    <div class="gaqd-error">{{ file.error|truncatechars:300 }}</div>
+                                {% elif file.skip_reason %}
+                                    <span class="gaqd-meta">{{ file.skip_reason }}</span>
+                                {% else %}
+                                    <span class="gaqd-meta">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="gaqd-empty">{% trans "No file records for this run." %}</p>
+        {% endif %}
+
+        <p><a href="{{ runs_url }}">← {% trans "Back to Acquisition Activity" %}</a></p>
+    </div>
+{% endblock %}

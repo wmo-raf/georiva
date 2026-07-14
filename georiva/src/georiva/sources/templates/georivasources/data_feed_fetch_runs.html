@@ -147,7 +147,9 @@
                             <td>
                                 <span class="gaq-badge gaq-badge--{{ row.run.status }}">{{ row.run.get_status_display }}</span>
                             </td>
-                            <td class="gaq-meta">{{ row.run.started_at|default:"—" }}</td>
+                            <td>
+                                <a href="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=row.run.pk %}">{{ row.run.started_at|default:"—" }}</a>
+                            </td>
                             <td class="gaq-meta">{{ row.run.finished_at|default:"—" }}</td>
                             <td class="gaq-meta">
                                 {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}

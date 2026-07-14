@@ -1575,6 +1575,37 @@ def data_feed_fetch_runs(request, feed_pk):
     return render(request, "georivasources/data_feed_fetch_runs.html", context)
 
 
+def data_feed_fetch_run_detail(request, feed_pk, run_pk):
+    """
+    FetchRun detail leaf (PRD #217, issue #221): one run's summary and its
+    FetchedFile drill-down — per file: status, path, skip reason, error,
+    bytes, timing. Read-only in this slice; per-file retry lands separately.
+    The run is scoped to the feed in the URL.
+    """
+    from georiva.sources.acquisition_tracking import run_duration_seconds
+    from georiva.sources.models import FetchRun
+
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    run = get_object_or_404(FetchRun, pk=run_pk, data_feed=feed)
+
+    runs_url = reverse("data_feed_fetch_runs", kwargs={"feed_pk": feed.pk})
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
+            {"url": runs_url, "label": _("Acquisition Activity")},
+            {"url": "", "label": _("Run")},
+        ],
+        "feed": feed,
+        "run": run,
+        "duration": run_duration_seconds(run),
+        "files": run.fetched_files.all(),
+        "runs_url": runs_url,
+    }
+    return render(request, "georivasources/data_feed_fetch_run_detail.html", context)
+
+
 def derived_product_run_detail(request, product_pk, run_pk):
     """
     Run-detail leaf (ADR-0008, issue #212): exactly what happened for one
