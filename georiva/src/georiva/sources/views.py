@@ -110,12 +110,11 @@ def data_feed_detail(request, pk):
         messages.success(request, _("Run started for '%s'.") % feed.name)
         return redirect("data_feed_detail", pk=pk)
 
-    from georiva.sources.models import FetchRun  # noqa: keep import next to use
-    recent_runs = (
-        FetchRun.objects
-        .filter(data_feed=feed)
-        .order_by("-started_at")[:20]
-    )
+    from georiva.sources.acquisition_tracking import feed_fetch_runs, run_duration_seconds
+    recent_fetch_runs = [
+        {"run": run, "duration": run_duration_seconds(run)}
+        for run in feed_fetch_runs(feed)[:5]
+    ]
     
     raw_links = feed.collection_links.select_related("collection__catalog").all()
     collection_links = [link.get_real_instance() for link in raw_links]
@@ -171,7 +170,7 @@ def data_feed_detail(request, pk):
         "definition_link_pairs": definition_link_pairs,
         "product_stage_lanes": product_stage_lanes,
         "product_orphans": product_orphans,
-        "recent_runs": recent_runs,
+        "recent_fetch_runs": recent_fetch_runs,
         "feed_type_name": type(real_feed)._meta.verbose_name,
     }
 
@@ -1535,6 +1534,45 @@ def derived_product_runs(request, product_pk):
         "current_status": status or "",
     }
     return render(request, "georivasources/derived_product_runs.html", context)
+
+
+def data_feed_fetch_runs(request, feed_pk):
+    """
+    Acquisition Activity run list (PRD #217, issue #218): one DataFeed's
+    FetchRuns, newest first, with a status filter and pagination. The read-side
+    query lives in feed_fetch_runs(); this view only paginates and shapes rows
+    (duration, error snippet) for display. Collection-agnostic (ADR-0003).
+    """
+    from django.core.paginator import Paginator
+
+    from georiva.sources.acquisition_tracking import feed_fetch_runs, run_duration_seconds
+    from georiva.sources.models import FetchRun
+
+    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    status = request.GET.get("status") or None
+
+    paginator = Paginator(feed_fetch_runs(feed, status=status), 25)
+    page = paginator.get_page(request.GET.get("page"))
+
+    rows = [
+        {"run": run, "duration": run_duration_seconds(run)}
+        for run in page
+    ]
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
+            {"url": "", "label": _("Acquisition Activity")},
+        ],
+        "feed": feed,
+        "rows": rows,
+        "page": page,
+        "statuses": FetchRun.Status.choices,
+        "current_status": status or "",
+    }
+    return render(request, "georivasources/data_feed_fetch_runs.html", context)
 
 
 def derived_product_run_detail(request, product_pk, run_pk):

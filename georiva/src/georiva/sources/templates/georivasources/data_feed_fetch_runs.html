@@ -1,0 +1,187 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with label=feed.name %}Acquisition Activity — {{ label }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gaq-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }
+
+        .gaq-table th,
+        .gaq-table td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .gaq-table th {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gaq-num {
+            text-align: right;
+        }
+
+        .gaq-badge {
+            display: inline-block;
+            padding: 0.15em 0.6em;
+            border-radius: 999px;
+            font-size: 0.78em;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .gaq-badge--running {
+            background: var(--w-color-info-100);
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .gaq-badge--completed {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .gaq-badge--failed {
+            background: var(--w-color-critical-200);
+            color: var(--w-color-white);
+            border-color: var(--w-color-critical-200);
+        }
+
+        .gaq-badge--cancelled {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .gaq-meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gaq-error {
+            font-size: 0.82em;
+            color: var(--w-color-critical-200);
+            max-width: 32em;
+        }
+
+        .gaq-filters {
+            margin-top: 1em;
+            display: flex;
+            gap: 0.4em;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .gaq-filter {
+            font-size: 0.8em;
+            padding: 0.2em 0.7em;
+            border-radius: 999px;
+            border: 1px solid var(--w-color-border-furniture);
+            color: var(--w-color-text-label);
+            text-decoration: none;
+        }
+
+        .gaq-filter--active {
+            background: var(--w-color-surface-menus);
+            color: var(--w-color-white);
+            border-color: var(--w-color-surface-menus);
+        }
+
+        .gaq-empty {
+            margin-top: 1.5em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gaq-pagination {
+            margin-top: 1.2em;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Acquisition Activity") icon="download" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="gaq-filters">
+            <span class="gaq-meta">{% trans "Filter" %}:</span>
+            <a class="gaq-filter {% if not current_status %}gaq-filter--active{% endif %}"
+               href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "All" %}</a>
+            {% for value, label in statuses %}
+                <a class="gaq-filter {% if current_status == value %}gaq-filter--active{% endif %}"
+                   href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}?status={{ value }}">{{ label }}</a>
+            {% endfor %}
+        </div>
+
+        {% if rows %}
+            <table class="gaq-table">
+                <thead>
+                    <tr>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "Started" %}</th>
+                        <th>{% trans "Finished" %}</th>
+                        <th>{% trans "Duration" %}</th>
+                        <th class="gaq-num">{% trans "Requested" %}</th>
+                        <th class="gaq-num">{% trans "Fetched" %}</th>
+                        <th class="gaq-num">{% trans "Skipped" %}</th>
+                        <th class="gaq-num">{% trans "Failed" %}</th>
+                        <th class="gaq-num">{% trans "Bytes" %}</th>
+                        <th>{% trans "Error" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td>
+                                <span class="gaq-badge gaq-badge--{{ row.run.status }}">{{ row.run.get_status_display }}</span>
+                            </td>
+                            <td class="gaq-meta">{{ row.run.started_at|default:"—" }}</td>
+                            <td class="gaq-meta">{{ row.run.finished_at|default:"—" }}</td>
+                            <td class="gaq-meta">
+                                {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
+                            </td>
+                            <td class="gaq-num">{{ row.run.files_requested }}</td>
+                            <td class="gaq-num">{{ row.run.files_fetched }}</td>
+                            <td class="gaq-num">{{ row.run.files_skipped }}</td>
+                            <td class="gaq-num">{{ row.run.files_failed }}</td>
+                            <td class="gaq-num">{{ row.run.bytes_transferred|filesizeformat }}</td>
+                            <td>
+                                {% if row.run.error_message %}
+                                    <div class="gaq-error">{{ row.run.error_message|truncatechars:200 }}</div>
+                                {% else %}
+                                    <span class="gaq-meta">—</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            {% if page.paginator.num_pages > 1 %}
+                <div class="gaq-pagination">
+                    {% if page.has_previous %}
+                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                    {% endif %}
+                    {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                    {% if page.has_next %}
+                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% else %}
+            <p class="gaq-empty">{% trans "No fetch runs yet for this feed." %}</p>
+        {% endif %}
+    </div>
+{% endblock %}
