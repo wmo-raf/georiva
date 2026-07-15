@@ -13,6 +13,22 @@ from __future__ import annotations
 NO_COLLECTION = "none"
 
 
+def feed_ingestion_status_counts(feed) -> dict:
+    """Status → count over the feed's FileIngestions (all four statuses
+    always present, zero-filled) — the Ingestion Activity stat card."""
+    from django.db.models import Count
+
+    from georiva.ingestion.models import FileIngestion
+
+    counted = dict(
+        feed_file_ingestions(feed)
+        .order_by()
+        .values_list("status")
+        .annotate(n=Count("id"))
+    )
+    return {value: counted.get(value, 0) for value, _ in FileIngestion.Status.choices}
+
+
 def feed_file_ingestions(feed, *, status=None, collection=None):
     """A feed's FileIngestions, newest activity first.
 

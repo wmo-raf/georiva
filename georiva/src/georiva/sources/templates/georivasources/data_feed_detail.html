@@ -54,13 +54,50 @@
 
         .gfeed-stats {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             gap: 1em;
             margin-bottom: 1.5em;
         }
 
         .gfeed-stats .gfeed-card {
             margin-bottom: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .gfeed-activity-card__body {
+            padding: 1em 1.25em;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5em;
+            flex: 1;
+        }
+
+        .gfeed-activity-card__row {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5em;
+            flex-wrap: wrap;
+        }
+
+        .gfeed-activity-card__link {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .gfeed-activity-counts {
+            display: flex;
+            gap: 1.25em;
+            flex-wrap: wrap;
+        }
+
+        .gfeed-activity-counts a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .gfeed-activity-count--failed .gfeed-stat__value {
+            color: var(--w-color-critical-200);
         }
 
         .gfeed-stat__value {
@@ -164,26 +201,11 @@
             flex-wrap: wrap;
         }
 
-        /* Runs table */
-        .gfeed-runs-form {
-            margin: 0;
-        }
-
-        .gfeed-card__actions {
-            display: flex;
-            align-items: center;
-            gap: 0.5em;
-        }
-
         .gfeed-empty-state {
             padding: 1.5em;
             color: var(--w-color-grey-400);
             font-size: 0.9em;
             text-align: center;
-        }
-
-        .gfeed-num {
-            text-align: right;
         }
 
         .gfeed-status {
@@ -205,10 +227,6 @@
             background: var(--w-color-positive-100);
         }
 
-        .gfeed-dot--partial {
-            background: var(--w-color-warning-100);
-        }
-
         .gfeed-dot--failed {
             background: var(--w-color-critical-200);
         }
@@ -217,18 +235,8 @@
             background: var(--w-color-info-100);
         }
 
-        .gfeed-dot--empty, .gfeed-dot--default {
+        .gfeed-dot--default {
             background: var(--w-color-grey-400);
-        }
-
-        .gfeed-failed-count {
-            color: var(--w-color-critical-200);
-        }
-
-        .gfeed-error-cell {
-            font-size: 0.8em;
-            color: var(--w-color-grey-400);
-            max-width: 300px;
         }
 
         .gfeed-status-active {
@@ -290,34 +298,70 @@
             </div>
         </div>
 
-        {# ── Stat cards #}
+        {# ── Activity stat cards (PRD #217 follow-up) #}
         <div class="gfeed-stats">
-            <div class="gfeed-card gfeed-card__body">
-                <div class="gfeed-stat__value">
-                    {{ feed.total_runs }}
+            <div class="gfeed-card">
+                <div class="gfeed-card__header">
+                    <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
+                    <a class="button button-small button-secondary"
+                       href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "View all" %}</a>
                 </div>
-                <div class="gfeed-stat__label">
-                    {% trans "Total Runs" %}
+                <div class="gfeed-activity-card__body">
+                    <div class="gfeed-activity-card__row">
+                        <span class="gfeed-stat__value">{{ acquisition_summary.total_runs }}</span>
+                        <span class="gfeed-stat__label">{% trans "Total Runs" %}</span>
+                    </div>
+                    {% with last=acquisition_summary.last_run %}
+                        {% if last %}
+                            <a class="gfeed-activity-card__link"
+                               href="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=last.pk %}">
+                                <span class="gfeed-activity-card__row">
+                                    <span class="gfeed-stat__label">{% trans "Last run" %}</span>
+                                    <span class="gfeed-status">
+                                        {% if last.status == "completed" %}
+                                            <span class="gfeed-dot gfeed-dot--success"></span>
+                                        {% elif last.status == "failed" %}
+                                            <span class="gfeed-dot gfeed-dot--failed"></span>
+                                        {% elif last.status == "running" %}
+                                            <span class="gfeed-dot gfeed-dot--running"></span>
+                                        {% else %}
+                                            <span class="gfeed-dot gfeed-dot--default"></span>
+                                        {% endif %}
+                                        {{ last.get_status_display }}
+                                    </span>
+                                    <span class="gfeed-meta">{{ last.started_at|timesince }} {% trans "ago" %}</span>
+                                </span>
+                                <span class="gfeed-activity-card__row">
+                                    <span class="gfeed-meta">
+                                        {% blocktrans with requested=last.files_requested failed=last.files_failed %}
+                                            {{ requested }} requested · {{ failed }} failed
+                                        {% endblocktrans %}
+                                    </span>
+                                </span>
+                            </a>
+                        {% else %}
+                            <span class="gfeed-meta">{% trans "No runs yet." %}</span>
+                        {% endif %}
+                    {% endwith %}
                 </div>
             </div>
-            <div class="gfeed-card gfeed-card__body">
-                <div class="gfeed-stat__value">
-                    {% if feed.last_run_at %}
-                        {{ feed.last_run_at|timesince }}
-                    {% else %}
-                        —
-                    {% endif %}
+
+            <div class="gfeed-card">
+                <div class="gfeed-card__header">
+                    <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
+                    <a class="button button-small button-secondary"
+                       href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">{% trans "View all" %}</a>
                 </div>
-                <div class="gfeed-stat__label">
-                    {% trans "Last Run" %}
-                </div>
-            </div>
-            <div class="gfeed-card gfeed-card__body">
-                <div class="gfeed-stat__value">
-                    {{ feed.total_files_fetched }}
-                </div>
-                <div class="gfeed-stat__label">
-                    {% trans "Files Fetched" %}
+                <div class="gfeed-activity-card__body">
+                    <div class="gfeed-activity-counts">
+                        {% for value, label, count in ingestion_count_rows %}
+                            <a class="gfeed-activity-count gfeed-activity-count--{{ value }}"
+                               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?status={{ value }}">
+                                <span class="gfeed-stat__value">{{ count }}</span>
+                                <span class="gfeed-stat__label">{{ label }}</span>
+                            </a>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
         </div>
@@ -434,219 +478,5 @@
             </div>
         {% endif %}
 
-        {# ── Acquisition Activity card (PRD #217, issue #218) #}
-        <div class="gfeed-card">
-            <div class="gfeed-card__header">
-                <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
-                <div class="gfeed-card__actions">
-                    {% if feed.collection_links.exists %}
-                        <form class="gfeed-runs-form" method="post"
-                              action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="check_new_files">
-                            <button class="button button-small button-secondary" type="submit">
-                                {% trans "Check for new files" %}
-                            </button>
-                        </form>
-                    {% endif %}
-                    {% if feed.collection_links.exists %}
-                        <form class="gfeed-runs-form" method="post" action="{% url 'data_feed_detail' pk=feed.pk %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="action" value="run_now">
-                            <button class="button bicolor button--icon button-small" type="submit">
-                                <span class="icon-wrapper">
-                                    <svg class="icon icon-rotate icon" aria-hidden="true">
-                                        <use href="#icon-rotate"></use>
-                                    </svg>
-                                </span>
-                                {% trans "Run Now" %}
-                            </button>
-                        </form>
-                    {% endif %}
-                    <a class="button button-small button-secondary"
-                       href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "View all" %}</a>
-                </div>
-            </div>
-            {% if recent_fetch_runs %}
-                <table class="listing">
-                    <thead>
-                    <tr>
-                        <th>
-                            {% trans "Status" %}
-                        </th>
-                        <th>
-                            {% trans "Started" %}
-                        </th>
-                        <th>
-                            {% trans "Duration" %}
-                        </th>
-                        <th class="gfeed-num">
-                            {% trans "Requested" %}
-                        </th>
-                        <th class="gfeed-num">
-                            {% trans "Fetched" %}
-                        </th>
-                        <th class="gfeed-num">
-                            {% trans "Skipped" %}
-                        </th>
-                        <th class="gfeed-num">
-                            {% trans "Failed" %}
-                        </th>
-                        <th>
-                            {% trans "Error" %}
-                        </th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {% for row in recent_fetch_runs %}
-                        <tr>
-                            <td>
-                                <span class="gfeed-status">
-                                    {% if row.run.status == "completed" %}
-                                        <span class="gfeed-dot gfeed-dot--success"></span>
-                                        {% trans "Completed" %}
-                                    {% elif row.run.status == "failed" %}
-                                        <span class="gfeed-dot gfeed-dot--failed"></span>
-                                        {% trans "Failed" %}
-                                    {% elif row.run.status == "running" %}
-                                        <span class="gfeed-dot gfeed-dot--running"></span>
-                                        {% trans "Running" %}
-                                    {% else %}
-                                        <span class="gfeed-dot gfeed-dot--default"></span>
-                                        {{ row.run.get_status_display }}
-                                    {% endif %}
-                                </span>
-                            </td>
-                            <td>
-                                {{ row.run.started_at|timesince }} {% trans "ago" %}
-                            </td>
-                            <td>
-                                {% if row.duration is not None %}
-                                    {{ row.duration|floatformat:0 }}s
-                                {% else %}
-                                    —
-                                {% endif %}</td>
-                            <td class="gfeed-num">
-                                {{ row.run.files_requested }}
-                            </td>
-                            <td class="gfeed-num">
-                                {{ row.run.files_fetched }}
-                            </td>
-                            <td class="gfeed-num">
-                                {{ row.run.files_skipped }}
-                            </td>
-                            <td class="gfeed-num">
-                                {% if row.run.files_failed %}
-                                    <span class="gfeed-failed-count">
-                                        {{ row.run.files_failed }}
-                                    </span>
-                                {% else %}
-                                    0
-                                {% endif %}
-                            </td>
-                            <td class="gfeed-error-cell">
-                                {% if row.run.error_message %}
-                                    {{ row.run.error_message|truncatechars:120 }}
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p class="gfeed-empty-state">
-                    {% trans "No fetch runs recorded yet." %}
-                </p>
-            {% endif %}
-        </div>
-
-        {# ── Ingestion Activity card (PRD #217, issue #219) #}
-        <div class="gfeed-card">
-            <div class="gfeed-card__header">
-                <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
-                <div class="gfeed-card__actions">
-                    <form class="gfeed-runs-form" method="post"
-                          action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="check_unprocessed">
-                        <button class="button button-small button-secondary" type="submit">
-                            {% trans "Check unprocessed files" %}
-                        </button>
-                    </form>
-                    <a class="button button-small button-secondary"
-                       href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">{% trans "View all" %}</a>
-                </div>
-            </div>
-            {% if recent_ingestions %}
-                <table class="listing">
-                    <thead>
-                    <tr>
-                        <th>
-                            {% trans "Status" %}
-                        </th>
-                        <th>
-                            {% trans "File" %}
-                        </th>
-                        <th>
-                            {% trans "Collections" %}
-                        </th>
-                        <th>
-                            {% trans "Updated" %}
-                        </th>
-                        <th>
-                            {% trans "Error" %}
-                        </th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {% for record in recent_ingestions %}
-                        <tr>
-                            <td>
-                                <span class="gfeed-status">
-                                    {% if record.status == "completed" %}
-                                        <span class="gfeed-dot gfeed-dot--success"></span>
-                                        {% trans "Completed" %}
-                                    {% elif record.status == "failed" %}
-                                        <span class="gfeed-dot gfeed-dot--failed"></span>
-                                        {% trans "Failed" %}
-                                    {% elif record.status == "processing" %}
-                                        <span class="gfeed-dot gfeed-dot--running"></span>
-                                        {% trans "Processing" %}
-                                    {% else %}
-                                        <span class="gfeed-dot gfeed-dot--default"></span>
-                                        {{ record.get_status_display }}
-                                    {% endif %}
-                                </span>
-                            </td>
-                            <td>{{ record.file_path }}</td>
-                            <td>
-                                {% for collection in record.collections.all %}
-                                    {{ collection.name }}{% if not forloop.last %}, {% endif %}
-                                {% empty %}
-                                    —
-                                {% endfor %}
-                            </td>
-                            <td>
-                                {{ record.updated_at|timesince }} {% trans "ago" %}
-                            </td>
-                            <td class="gfeed-error-cell">
-                                {% if record.error %}
-                                    {{ record.error|truncatechars:120 }}
-                                {% else %}
-                                    —
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            {% else %}
-                <p class="gfeed-empty-state">
-                    {% trans "No ingestion records yet." %}
-                </p>
-            {% endif %}
-        </div>
     </div>
 {% endblock %}

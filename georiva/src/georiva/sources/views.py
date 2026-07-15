@@ -105,21 +105,19 @@ def data_feed_detail(request, pk):
     """Dashboard view for a single DataFeed."""
     feed = get_object_or_404(DataFeed, pk=pk)
 
-    if request.method == "POST" and request.POST.get("action") == "run_now":
-        feed.run_now(user=request.user)
-        messages.success(request, _("Run started for '%s'.") % feed.name)
-        return redirect("data_feed_detail", pk=pk)
+    # Activity stat cards (PRD #217 follow-up): pure summaries — actions
+    # (Fetch now, checks, retries) live on the linked activity pages.
+    from georiva.sources.acquisition_tracking import feed_fetch_runs
+    runs = feed_fetch_runs(feed)
+    acquisition_summary = {"total_runs": runs.count(), "last_run": runs.first()}
 
-    from georiva.sources.acquisition_tracking import feed_fetch_runs, run_duration_seconds
-    recent_fetch_runs = [
-        {"run": run, "duration": run_duration_seconds(run)}
-        for run in feed_fetch_runs(feed)[:5]
+    from georiva.ingestion.ingestion_tracking import feed_ingestion_status_counts
+    from georiva.ingestion.models import FileIngestion
+    ingestion_counts = feed_ingestion_status_counts(feed)
+    ingestion_count_rows = [
+        (value, label, ingestion_counts[value])
+        for value, label in FileIngestion.Status.choices
     ]
-
-    from georiva.ingestion.ingestion_tracking import feed_file_ingestions
-    recent_ingestions = list(
-        feed_file_ingestions(feed).prefetch_related("collections")[:5]
-    )
     
     raw_links = feed.collection_links.select_related("collection__catalog").all()
     collection_links = [link.get_real_instance() for link in raw_links]
@@ -175,8 +173,9 @@ def data_feed_detail(request, pk):
         "definition_link_pairs": definition_link_pairs,
         "product_stage_lanes": product_stage_lanes,
         "product_orphans": product_orphans,
-        "recent_fetch_runs": recent_fetch_runs,
-        "recent_ingestions": recent_ingestions,
+        "acquisition_summary": acquisition_summary,
+        "ingestion_counts": ingestion_counts,
+        "ingestion_count_rows": ingestion_count_rows,
         "feed_type_name": type(real_feed)._meta.verbose_name,
     }
 

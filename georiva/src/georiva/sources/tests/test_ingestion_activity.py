@@ -372,9 +372,10 @@ class ReingestUITests(TestCase):
         self.assertContains(response, "DOMContentLoaded")
 
 
-class DataFeedDetailIngestionPanelTests(TestCase):
-    """The compact ingestion panel on the feed detail page: recent records +
-    a "View all" link to the Ingestion Activity page."""
+class DataFeedDetailIngestionCardTests(TestCase):
+    """The Ingestion Activity stat card at the top of the feed detail page:
+    all-time status counts, each linking to the pre-filtered list, plus a
+    "View all" link. No actions here — those live on the list page."""
 
     @classmethod
     def setUpClass(cls):
@@ -387,25 +388,34 @@ class DataFeedDetailIngestionPanelTests(TestCase):
         self.client.force_login(self.user)
         self.feed = _feed()
 
-    def test_panel_shows_recent_records_and_links_to_the_full_page(self):
-        _ingestion(
-            self.feed, "recent-orphan.grib", status=FileIngestion.Status.FAILED,
-        )
+    def _detail_url(self):
+        return reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
 
-        response = self.client.get(
-            reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
-        )
+    def test_card_counts_ingestions_by_status_with_filtered_links(self):
+        for i in range(3):
+            _ingestion(self.feed, f"done-{i}.grib")
+        _ingestion(self.feed, "stuck.grib", status=FileIngestion.Status.PENDING)
+        _ingestion(self.feed, "broken.grib", status=FileIngestion.Status.FAILED)
+        # Another catalog's records must not leak into the counts.
+        other = _feed(name="Other", slug="other")
+        _ingestion(other, "foreign.grib", status=FileIngestion.Status.FAILED)
 
-        self.assertContains(
-            response,
-            reverse("data_feed_ingestions", kwargs={"feed_pk": self.feed.pk}),
-        )
-        self.assertContains(response, "recent-orphan.grib")
+        response = self.client.get(self._detail_url())
 
-    def test_panel_offers_the_check_unprocessed_action(self):
-        response = self.client.get(
-            reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
+        self.assertEqual(response.context["ingestion_counts"], {
+            "pending": 1, "processing": 0, "completed": 3, "failed": 1,
+        })
+        list_url = reverse(
+            "data_feed_ingestions", kwargs={"feed_pk": self.feed.pk}
         )
+        for status in ("completed", "pending", "processing", "failed"):
+            self.assertContains(response, f"{list_url}?status={status}")
+        self.assertContains(response, list_url)  # View all
 
-        self.assertContains(response, 'value="check_unprocessed"')
-        self.assertContains(response, "Check unprocessed files")
+    def test_card_renders_zero_counts_for_a_quiet_feed(self):
+        response = self.client.get(self._detail_url())
+
+        self.assertEqual(
+            set(response.context["ingestion_counts"].values()), {0}
+        )
+        self.assertEqual(response.status_code, 200)

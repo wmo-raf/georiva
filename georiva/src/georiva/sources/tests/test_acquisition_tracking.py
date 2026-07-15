@@ -226,10 +226,10 @@ class FetchRunDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
 
-class DataFeedDetailAcquisitionPanelTests(TestCase):
-    """The compact acquisition panel on the feed detail page (replacing the
-    stale Recent Runs panel): recent runs + a "View all" link to the
-    Acquisition Activity page."""
+class DataFeedDetailAcquisitionCardTests(TestCase):
+    """The Acquisition Activity stat card at the top of the feed detail page:
+    total runs, a last-run summary linking to that run, and a "View all"
+    link. Actions (Run Now, checks) live on the list pages, not here."""
 
     @classmethod
     def setUpClass(cls):
@@ -245,33 +245,43 @@ class DataFeedDetailAcquisitionPanelTests(TestCase):
     def _detail_url(self):
         return reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
 
-    def test_links_to_the_acquisition_activity_page(self):
+    def test_card_shows_total_runs_and_last_run_summary(self):
+        _run(self.feed, started_ago=60)
+        _run(self.feed, started_ago=30)
+        last = _run(
+            self.feed, FetchRun.Status.FAILED, started_ago=1,
+            files_requested=90210, files_failed=48151,
+        )
+
         response = self.client.get(self._detail_url())
 
-        self.assertContains(
+        self.assertEqual(
+            response.context["acquisition_summary"]["total_runs"], 3
+        )
+        self.assertContains(response, "90210")  # last run requested
+        self.assertContains(response, "48151")  # last run failed
+        self.assertContains(response, "Failed")  # status badge
+        self.assertContains(  # summary links to the run's detail page
+            response,
+            reverse(
+                "data_feed_fetch_run_detail",
+                kwargs={"feed_pk": self.feed.pk, "run_pk": last.pk},
+            ),
+        )
+        self.assertContains(  # View all
             response, reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk})
         )
 
-    def test_shows_recent_run_counters(self):
-        _run(self.feed, files_requested=90210, files_fetched=48151)
+    def test_card_with_no_runs_shows_an_empty_state(self):
+        response = self.client.get(self._detail_url())
+
+        self.assertContains(response, "No runs yet")
+
+    def test_detail_page_carries_no_activity_actions_or_tables(self):
+        _run(self.feed, files_requested=7)
 
         response = self.client.get(self._detail_url())
 
-        self.assertContains(response, "90210")
-        self.assertContains(response, "48151")
-
-    def test_panel_offers_the_check_for_new_files_action(self):
-        from georiva.core.models import Collection
-        from georiva.sources.models import DataFeedCollectionLink
-
-        collection = Collection.objects.create(
-            name="Rainfall", slug="rainfall", catalog=self.feed.catalog
-        )
-        DataFeedCollectionLink.objects.create(
-            data_feed=self.feed, collection=collection
-        )
-
-        response = self.client.get(self._detail_url())
-
-        self.assertContains(response, 'value="check_new_files"')
-        self.assertContains(response, "Check for new files")
+        self.assertNotContains(response, 'value="run_now"')
+        self.assertNotContains(response, 'value="check_new_files"')
+        self.assertNotContains(response, 'value="check_unprocessed"')
