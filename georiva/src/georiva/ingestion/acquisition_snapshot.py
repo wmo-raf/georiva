@@ -8,7 +8,7 @@ def _build_fetch_run_dict(run) -> dict:
     files = [
         {
             "id": ff.pk,
-            "filename": ff.filename,
+            "file_path": ff.file_path,
             "status": ff.status,
             "bytes_transferred": ff.bytes_transferred,
             "error": ff.error or "",
