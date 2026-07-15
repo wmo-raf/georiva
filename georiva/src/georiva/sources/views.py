@@ -1635,6 +1635,38 @@ def data_feed_ingestions(request, feed_pk):
             messages.info(request, _("No unprocessed files under this feed's catalog."))
         return redirect("data_feed_ingestions", feed_pk=feed.pk)
 
+    is_bulk_reingest = request.POST.get("action") == "reingest_selected"
+    if request.method == "POST" and (request.POST.get("reingest_id") or is_bulk_reingest):
+        from georiva.ingestion import unprocessed
+        from georiva.ingestion.models import FileIngestion as FI
+
+        if is_bulk_reingest:
+            raw_pks = request.POST.getlist("record_ids")
+        else:
+            raw_pks = [request.POST["reingest_id"]]
+        pks = [pk for pk in raw_pks if str(pk).isdigit()]
+
+        if not pks:
+            messages.info(request, _("No files selected."))
+        else:
+            # Only failed records of THIS feed's catalog may be reingested —
+            # crafted POSTs for anything else select nothing.
+            targets = FI.objects.filter(
+                pk__in=pks,
+                status=FI.Status.FAILED,
+                file_path__startswith=f"{feed.catalog.slug}/",
+            )
+            queued = unprocessed.reingest_records(targets)
+            if queued:
+                messages.success(
+                    request, _("Reingestion queued for %d file(s).") % queued
+                )
+            else:
+                messages.warning(
+                    request, _("Selected record(s) cannot be reingested.")
+                )
+        return redirect("data_feed_ingestions", feed_pk=feed.pk)
+
     status = request.GET.get("status") or None
 
     collections = Collection.objects.filter(catalog=feed.catalog).order_by("name")
