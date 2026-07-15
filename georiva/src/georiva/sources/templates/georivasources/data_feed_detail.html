@@ -65,6 +65,12 @@
             flex-direction: column;
         }
 
+        .gfeed-card__explainer {
+            margin: 0.25em 0 0;
+            font-size: 0.78em;
+            color: var(--w-color-grey-400);
+        }
+
         .gfeed-activity-card__body {
             padding: 1em 1.25em;
             display: flex;
@@ -302,7 +308,10 @@
         <div class="gfeed-stats">
             <div class="gfeed-card">
                 <div class="gfeed-card__header">
-                    <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
+                    <div>
+                        <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
+                        <p class="gfeed-card__explainer">{% trans "Fetch runs pulling files from the source into storage." %}</p>
+                    </div>
                     <a class="button button-small button-secondary"
                        href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "View all" %}</a>
                 </div>
@@ -348,7 +357,10 @@
 
             <div class="gfeed-card">
                 <div class="gfeed-card__header">
-                    <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
+                    <div>
+                        <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
+                        <p class="gfeed-card__explainer">{% trans "Processing of stored files into STAC items and assets." %}</p>
+                    </div>
                     <a class="button button-small button-secondary"
                        href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">{% trans "View all" %}</a>
                 </div>
