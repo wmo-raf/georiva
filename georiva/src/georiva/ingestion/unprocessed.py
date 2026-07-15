@@ -60,6 +60,28 @@ def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
     return len(found)
 
 
+def reingest_records(records) -> int:
+    """Queue reingestion for FileIngestion records: reset each (state,
+    retries, results) and dispatch one processing task per file — the same
+    plumbing the MinIO consumer and upload views use (PRD #217, #224)."""
+    from georiva.ingestion import tasks
+    from georiva.ingestion.models import FileIngestion
+
+    count = 0
+    for record in records:
+        FileIngestion.reset_for_reingest(record.bucket, record.file_path)
+        tasks.process_incoming_file.delay(
+            file_path=record.file_path,
+            origin_bucket=record.bucket,
+            reference_time=(
+                record.reference_time.isoformat()
+                if record.reference_time else None
+            ),
+        )
+        count += 1
+    return count
+
+
 def find_unprocessed(prefix: str | None = None) -> list[UnprocessedFile]:
     """Scan the incoming and sources buckets (optionally under a path
     prefix) and classify files needing Ingestion. Read-only: registers

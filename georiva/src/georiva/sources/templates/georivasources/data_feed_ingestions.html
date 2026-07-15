@@ -146,6 +146,14 @@
             padding: 0.25em 0;
         }
 
+        .ging-select {
+            width: 2em;
+        }
+
+        .ging-bulk {
+            margin-top: 1em;
+        }
+
         .ging-pagination {
             margin-top: 1.2em;
             font-size: 0.85em;
@@ -211,48 +219,75 @@
         </div>
 
         {% if records %}
-            <table class="ging-table">
-                <thead>
-                    <tr>
-                        <th>{% trans "Status" %}</th>
-                        <th>{% trans "File" %}</th>
-                        <th>{% trans "Collections" %}</th>
-                        <th class="ging-num">{% trans "Retries" %}</th>
-                        <th class="ging-num">{% trans "Items" %}</th>
-                        <th class="ging-num">{% trans "Assets" %}</th>
-                        <th>{% trans "Updated" %}</th>
-                        <th>{% trans "Error" %}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for record in records %}
+            <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">
+                {% csrf_token %}
+                <table class="ging-table">
+                    <thead>
                         <tr>
-                            <td>
-                                <span class="ging-badge ging-badge--{{ record.status }}">{{ record.get_status_display }}</span>
-                            </td>
-                            <td><span class="ging-mono">{{ record.file_path }}</span></td>
-                            <td>
-                                {% for collection in record.collections.all %}
-                                    {{ collection.name }}{% if not forloop.last %}, {% endif %}
-                                {% empty %}
-                                    <span class="ging-meta">—</span>
-                                {% endfor %}
-                            </td>
-                            <td class="ging-num">{{ record.retry_count }}</td>
-                            <td class="ging-num">{{ record.items_created }}</td>
-                            <td class="ging-num">{{ record.assets_created }}</td>
-                            <td class="ging-meta">{{ record.updated_at|default:"—" }}</td>
-                            <td>
-                                {% if record.error %}
-                                    <div class="ging-error">{{ record.error|truncatechars:200 }}</div>
-                                {% else %}
-                                    <span class="ging-meta">—</span>
-                                {% endif %}
-                            </td>
+                            <th class="ging-select">
+                                <input type="checkbox" id="ging-select-all"
+                                       aria-label="{% trans 'Select all failed records' %}">
+                            </th>
+                            <th>{% trans "Status" %}</th>
+                            <th>{% trans "File" %}</th>
+                            <th>{% trans "Collections" %}</th>
+                            <th class="ging-num">{% trans "Retries" %}</th>
+                            <th class="ging-num">{% trans "Items" %}</th>
+                            <th class="ging-num">{% trans "Assets" %}</th>
+                            <th>{% trans "Updated" %}</th>
+                            <th>{% trans "Error" %}</th>
+                            <th></th>
                         </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {% for record in records %}
+                            <tr>
+                                <td class="ging-select">
+                                    {% if record.status == "failed" %}
+                                        <input type="checkbox" name="record_ids"
+                                               value="{{ record.pk }}"
+                                               aria-label="{% trans 'Select record for reingestion' %}">
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="ging-badge ging-badge--{{ record.status }}">{{ record.get_status_display }}</span>
+                                </td>
+                                <td><span class="ging-mono">{{ record.file_path }}</span></td>
+                                <td>
+                                    {% for collection in record.collections.all %}
+                                        {{ collection.name }}{% if not forloop.last %}, {% endif %}
+                                    {% empty %}
+                                        <span class="ging-meta">—</span>
+                                    {% endfor %}
+                                </td>
+                                <td class="ging-num">{{ record.retry_count }}</td>
+                                <td class="ging-num">{{ record.items_created }}</td>
+                                <td class="ging-num">{{ record.assets_created }}</td>
+                                <td class="ging-meta">{{ record.updated_at|default:"—" }}</td>
+                                <td>
+                                    {% if record.error %}
+                                        <div class="ging-error">{{ record.error|truncatechars:200 }}</div>
+                                    {% else %}
+                                        <span class="ging-meta">—</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if record.status == "failed" %}
+                                        <button class="button button-small button-secondary"
+                                                type="submit" name="reingest_id"
+                                                value="{{ record.pk }}">{% trans "Reingest" %}</button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <div class="ging-bulk">
+                    <button class="button" type="submit" name="action" value="reingest_selected">
+                        {% trans "Reingest selected" %}
+                    </button>
+                </div>
+            </form>
 
             {% if page.paginator.num_pages > 1 %}
                 <div class="ging-pagination">
@@ -269,4 +304,22 @@
             <p class="ging-empty">{% trans "No ingestion records yet for this feed." %}</p>
         {% endif %}
     </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const selectAll = document.getElementById('ging-select-all');
+            if (!selectAll) {
+                return;
+            }
+            const boxes = document.querySelectorAll('input[name="record_ids"]');
+            selectAll.addEventListener('change', function () {
+                for (const box of boxes) {
+                    box.checked = selectAll.checked;
+                }
+            });
+        });
+    </script>
 {% endblock %}

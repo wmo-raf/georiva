@@ -264,6 +264,114 @@ class CheckUnprocessedViewTests(TestCase):
         self.assertContains(response, "No unprocessed files")
 
 
+class ReingestUITests(TestCase):
+    """Reingest affordances on the Ingestion Activity page (issue #224):
+    per-row buttons and bulk checkboxes on failed rows only."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_rei", "re@test.com", "pw")
+        self.client.force_login(self.user)
+        self.feed = _feed()
+
+    def _url(self):
+        return reverse("data_feed_ingestions", kwargs={"feed_pk": self.feed.pk})
+
+    def test_only_failed_rows_offer_reingest(self):
+        failed = _ingestion(
+            self.feed, "bad.grib", status=FileIngestion.Status.FAILED,
+        )
+        _ingestion(self.feed, "good.grib")  # completed
+        _ingestion(self.feed, "busy.grib", status=FileIngestion.Status.PROCESSING)
+
+        response = self.client.get(self._url())
+
+        self.assertContains(response, 'name="reingest_id"', count=1)
+        self.assertContains(response, 'type="checkbox" name="record_ids"', count=1)
+        self.assertContains(response, f'value="{failed.pk}"', count=2)  # button + box
+
+    def test_single_reingest_resets_the_record_and_queues_processing(self):
+        from unittest.mock import patch
+
+        failed = _ingestion(
+            self.feed, "bad.grib",
+            status=FileIngestion.Status.FAILED,
+            error="boom", retry_count=3,
+        )
+
+        with patch("georiva.ingestion.tasks.process_incoming_file") as task:
+            response = self.client.post(
+                self._url(), {"reingest_id": failed.pk}, follow=True
+            )
+
+        failed.refresh_from_db()
+        self.assertEqual(failed.status, FileIngestion.Status.PENDING)
+        self.assertEqual(failed.error, "")
+        task.delay.assert_called_once()
+        self.assertEqual(
+            task.delay.call_args.kwargs["file_path"], failed.file_path
+        )
+        self.assertRedirects(response, self._url())
+        self.assertContains(response, "Reingestion queued for 1 file(s)")
+
+    def test_bulk_reingest_queues_each_selected_failed_record(self):
+        from unittest.mock import patch
+
+        first = _ingestion(
+            self.feed, "one.grib", status=FileIngestion.Status.FAILED,
+        )
+        second = _ingestion(
+            self.feed, "two.grib", status=FileIngestion.Status.FAILED,
+        )
+        completed = _ingestion(self.feed, "fine.grib")
+
+        with patch("georiva.ingestion.tasks.process_incoming_file") as task:
+            response = self.client.post(
+                self._url(),
+                {"action": "reingest_selected",
+                 "record_ids": [first.pk, second.pk, completed.pk, "junk"]},
+                follow=True,
+            )
+
+        dispatched = {c.kwargs["file_path"] for c in task.delay.call_args_list}
+        self.assertEqual(
+            dispatched, {first.file_path, second.file_path}
+        )
+        completed.refresh_from_db()
+        self.assertEqual(completed.status, FileIngestion.Status.COMPLETED)
+        self.assertContains(response, "Reingestion queued for 2 file(s)")
+
+    def test_crafted_reingest_outside_the_feed_or_unselected_queues_nothing(self):
+        from unittest.mock import patch
+
+        other_feed = _feed(name="Other", slug="other")
+        foreign = _ingestion(
+            other_feed, "foreign.grib", status=FileIngestion.Status.FAILED,
+        )
+
+        with patch("georiva.ingestion.tasks.process_incoming_file") as task:
+            crafted = self.client.post(
+                self._url(), {"reingest_id": foreign.pk}, follow=True
+            )
+            empty = self.client.post(
+                self._url(), {"action": "reingest_selected"}, follow=True
+            )
+
+        task.delay.assert_not_called()
+        foreign.refresh_from_db()
+        self.assertEqual(foreign.status, FileIngestion.Status.FAILED)
+        self.assertContains(crafted, "cannot be reingested")
+        self.assertContains(empty, "No files selected")
+
+    def test_page_wires_a_select_all_checkbox(self):
+        _ingestion(self.feed, "bad.grib", status=FileIngestion.Status.FAILED)
+
+        response = self.client.get(self._url())
+
+        self.assertContains(response, 'id="ging-select-all"')
+        self.assertContains(response, "getElementById('ging-select-all')")
+        self.assertContains(response, "DOMContentLoaded")
+
+
 class DataFeedDetailIngestionPanelTests(TestCase):
     """The compact ingestion panel on the feed detail page: recent records +
     a "View all" link to the Ingestion Activity page."""
