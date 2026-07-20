@@ -20,20 +20,18 @@ def urlconf_georivacore():
     ]
 
 
-# The single "Data" menu group: creation (Add Data) first, then the management
-# surfaces. These items were previously separate top-level menu entries; the
-# corresponding registrations in sources/ingestion hooks and the Catalog
-# viewset's add_to_admin_menu are disabled in favour of this group.
+# The "Data" menu group: creation (Add Data) first, then the acquisition
+# surfaces. Catalogs sits above this group as a top-level entry (the Catalog
+# viewset's add_to_admin_menu, order 390); derived products are reached from
+# each Data Feed's dashboard, not from a menu item.
 @hooks.register("register_admin_menu_item")
 def register_data_menu():
     return SubmenuMenuItem(
         _("Data"),
         Menu(items=[
             MenuItem(_("Add Data"), reverse_lazy("add_data"), icon_name="plus", order=10),
-            MenuItem(_("Catalogs"), reverse_lazy("catalog:index"), icon_name="globe", order=20),
             MenuItem(_("Automated Sources"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
             MenuItem(_("Manual Uploads"), reverse_lazy("manual_upload_config_list"), icon_name="upload", order=40),
-            MenuItem(_("Derived Products"), reverse_lazy("derived_product_tracking"), icon_name="cogs", order=50),
         ]),
         icon_name="folder-open-inverse",
         order=400,

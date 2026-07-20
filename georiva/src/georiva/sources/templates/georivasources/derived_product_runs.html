@@ -183,5 +183,7 @@
         {% else %}
             <p class="gdr-empty">{% trans "No runs yet for this product." %}</p>
         {% endif %}
+
+        <p><a href="{% url 'data_feed_detail' pk=product.data_feed_id %}">← {% blocktrans with feed=product.data_feed.name %}Back to {{ feed }}{% endblocktrans %}</a></p>
     </div>
 {% endblock %}

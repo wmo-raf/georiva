@@ -258,7 +258,7 @@ class Step4DependencyTests(WizardStepBase):
 class WizardProvisionSeamTests(WizardStepBase):
     """The end of the seam: a completed wizard session provisions a row for every
     declared definition, with the opt-out landing as is_enabled=False and staying
-    visible (disabled) in the tracking dashboard."""
+    visible (disabled) on the feed dashboard."""
 
     def _complete_session(self, **extra):
         session = self.client.session
@@ -294,7 +294,7 @@ class WizardProvisionSeamTests(WizardStepBase):
         self.assertTrue(rows["anomaly"].is_enabled)
         self.assertFalse(rows["promotion"].is_enabled)
 
-    def test_disabled_product_appears_in_the_tracking_dashboard(self):
+    def test_disabled_product_appears_on_the_feed_dashboard(self):
         anomaly = _definition(key="anomaly", config_schema=())
         promotion = _definition(key="promotion", recipe_type="promotion", config_schema=())
         self._complete_session(
@@ -309,7 +309,10 @@ class WizardProvisionSeamTests(WizardStepBase):
             self.client.get(
                 reverse("wizard_provision", kwargs={"model_name": MODEL_NAME})
             )
-            response = self.client.get(reverse("derived_product_tracking"))
+            feed = DerivedProduct.objects.get(definition_key="promotion").data_feed
+            response = self.client.get(
+                reverse("data_feed_detail", kwargs={"pk": feed.pk})
+            )
 
         # The opted-out product is inert but still listed (disabled), ready to be
         # enabled later with one toggle.

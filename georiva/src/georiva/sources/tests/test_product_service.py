@@ -827,7 +827,7 @@ class UpgradeLifecycleEndpointTests(ProductServiceBase):
 
 class FeedProductEndpointTests(ProductServiceBase):
     """The feed-detail panel's per-product actions (toggle / run) route through
-    the same gate/cascade service as the tracking dashboard (issue #169)."""
+    the shared gate/cascade service (issues #167, #169)."""
 
     def setUp(self):
         super().setUp()
@@ -893,48 +893,10 @@ class FeedProductEndpointTests(ProductServiceBase):
 
     def test_toggle_disable_confirmed_cascades(self):
         with self._patch_defs():
-            self.client.post(
+            response = self.client.post(
                 self._url("feed_product_toggle", self.rows["climatology"]),
                 {"confirmed": "1"},
             )
-
-        self.rows["climatology"].refresh_from_db()
-        self.rows["anomaly"].refresh_from_db()
-        self.assertFalse(self.rows["climatology"].is_enabled)
-        self.assertFalse(self.rows["anomaly"].is_enabled)
-
-
-class TrackingToggleFlowTests(ProductServiceBase):
-    """The tracking dashboard's Disable/Enable button routes through the service,
-    so the dependency gate and cascade-disable confirmation hold from that
-    surface too (issue #167)."""
-
-    def setUp(self):
-        super().setUp()
-        self.user = User.objects.create_superuser("dash", "d@test.com", "pw")
-        self.client.force_login(self.user)
-
-    def _toggle(self, product, **extra):
-        return self.client.post(reverse("derived_product_tracking"), {
-            "action": "toggle", "product_pk": product.pk, **extra,
-        })
-
-    def test_disabling_a_product_with_enabled_dependents_asks_to_confirm(self):
-        with self._patch_defs():
-            response = self._toggle(self.rows["climatology"])
-
-        # A confirmation page listing the transitive downstream set — nothing
-        # disabled yet.
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Anomaly")
-        self.rows["climatology"].refresh_from_db()
-        self.rows["anomaly"].refresh_from_db()
-        self.assertTrue(self.rows["climatology"].is_enabled)
-        self.assertTrue(self.rows["anomaly"].is_enabled)
-
-    def test_confirming_disables_the_whole_downstream_set(self):
-        with self._patch_defs():
-            response = self._toggle(self.rows["climatology"], confirmed="1")
 
         self.rows["climatology"].refresh_from_db()
         self.rows["anomaly"].refresh_from_db()
@@ -945,28 +907,14 @@ class TrackingToggleFlowTests(ProductServiceBase):
         self.assertIn("Climatology", msgs)
         self.assertIn("Anomaly", msgs)
 
-    def test_disabling_a_leaf_proceeds_without_confirmation(self):
+    def test_toggle_disable_of_a_leaf_proceeds_without_confirmation(self):
         with self._patch_defs():
-            self._toggle(self.rows["anomaly"])
+            self.client.post(self._url("feed_product_toggle", self.rows["anomaly"]))
 
         self.rows["anomaly"].refresh_from_db()
         self.rows["climatology"].refresh_from_db()
         self.assertFalse(self.rows["anomaly"].is_enabled)
         self.assertTrue(self.rows["climatology"].is_enabled)
-
-    def test_enabling_a_product_with_a_disabled_dependency_is_blocked(self):
-        self.rows["climatology"].is_enabled = False
-        self.rows["climatology"].save(update_fields=["is_enabled"])
-        self.rows["anomaly"].is_enabled = False
-        self.rows["anomaly"].save(update_fields=["is_enabled"])
-
-        with self._patch_defs():
-            response = self._toggle(self.rows["anomaly"])
-
-        self.rows["anomaly"].refresh_from_db()
-        self.assertFalse(self.rows["anomaly"].is_enabled)
-        msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
-        self.assertIn("Climatology", msgs)
 
 
 class PinBindingsBase(TestCase):

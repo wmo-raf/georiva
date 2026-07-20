@@ -183,11 +183,11 @@ def data_feed_detail(request, pk):
 
 
 def _apply_product_toggle(request, product, *, confirm_ctx, redirect_url):
-    """Shared enable/disable handling for the tracking dashboard and the feed
-    panel: enable through the structural gate, disable with the cascade
-    confirmation. ``confirm_ctx`` carries the surface-specific confirm form
-    (breadcrumbs, form_action, cancel_url, hidden_fields). Returns the confirm
-    render or a redirect to ``redirect_url``."""
+    """Enable/disable handling for the feed panel: enable through the
+    structural gate, disable with the cascade confirmation. ``confirm_ctx``
+    carries the confirm form context (breadcrumbs, form_action, cancel_url,
+    hidden_fields). Returns the confirm render or a redirect to
+    ``redirect_url``."""
     from georiva.sources.product_service import (
         ProductActionError,
         disable_product,
@@ -219,8 +219,8 @@ def _apply_product_toggle(request, product, *, confirm_ctx, redirect_url):
 
 
 def feed_product_toggle(request, feed_pk, product_pk):
-    """Enable/disable one derived product from the feed-detail panel, through the
-    same gate/cascade service as the tracking dashboard."""
+    """Enable/disable one derived product from the feed-detail panel, through
+    the shared gate/cascade service."""
     from georiva.sources.models import DerivedProduct
 
     product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
@@ -1480,86 +1480,6 @@ def wizard_provision(request, model_name):
         return redirect("wizard_step3_collections", model_name=model_name)
 
 
-def derived_product_tracking(request):
-    """
-    Ingestion-style tracking dashboard for derived products (ADR-0008).
-
-    Lists every DerivedProduct with an aggregate run status (idle / running /
-    failed / completed) computed by joining DerivationRuns on the product's
-    origin key, plus an enable/disable toggle that pauses a product without
-    deleting its configuration.
-    """
-    from georiva.sources.derivation_invocation import run_product_now
-    from georiva.sources.derivation_tracking import product_readiness, product_status
-    from georiva.sources.models import DerivedProduct
-    from georiva.sources.product_service import product_label
-
-    if request.method == "POST" and request.POST.get("action") == "toggle":
-        product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
-        # Route through the shared gate/cascade helper — the same write-path the
-        # feed panel uses — so the dependency invariant holds from every surface.
-        tracking_url = reverse("derived_product_tracking")
-        return _apply_product_toggle(
-            request, product,
-            confirm_ctx={
-                "breadcrumbs_items": [
-                    {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                    {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-                    {"url": tracking_url, "label": _("Derived Products")},
-                    {"url": "", "label": _("Disable")},
-                ],
-                "form_action": tracking_url,
-                "cancel_url": tracking_url,
-                "hidden_fields": {"action": "toggle", "product_pk": product.pk},
-            },
-            redirect_url=tracking_url,
-        )
-
-    if request.method == "POST" and request.POST.get("action") == "run_now":
-        product = get_object_or_404(DerivedProduct, pk=request.POST.get("product_pk"))
-        readiness = product_readiness(product)
-        if readiness.ready:
-            run_product_now(product)
-            messages.success(request, _("Run started for '%s'.") % product.definition_key)
-        else:
-            messages.error(
-                request,
-                _("'%(key)s' blocked: %(reason)s.") % {
-                    "key": product.definition_key, "reason": readiness.reason,
-                },
-            )
-        return redirect("derived_product_tracking")
-
-    products = (
-        DerivedProduct.objects
-        .select_related("data_feed", "data_feed__catalog")
-        .order_by("data_feed_id", "id")
-    )
-
-    rows = []
-    for product in products:
-        rows.append({
-            "product": product,
-            # Operator override -> declared label -> key (the shared fallback).
-            "label": product.display_label,
-            "status": product_status(product),
-            "readiness": product_readiness(product),
-            # Flagged when the plugin no longer declares this row (an orphan).
-            "orphaned": product.definition is None,
-            "feed_url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}),
-        })
-
-    context = {
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-            {"url": "", "label": _("Derived Products")},
-        ],
-        "rows": rows,
-    }
-    return render(request, "georivasources/derived_product_tracking.html", context)
-
-
 def derived_product_runs(request, product_pk):
     """
     Run-list drill-down (ADR-0008, issue #211): one DerivedProduct's individual
@@ -1589,7 +1509,8 @@ def derived_product_runs(request, product_pk):
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-            {"url": reverse("derived_product_tracking"), "label": _("Derived Products")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}),
+             "label": product.data_feed.name},
             {"url": "", "label": product.display_label},
         ],
         "product": product,
@@ -1858,7 +1779,8 @@ def derived_product_run_detail(request, product_pk, run_pk):
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-            {"url": reverse("derived_product_tracking"), "label": _("Derived Products")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}),
+             "label": product.data_feed.name},
             {"url": runs_url, "label": product.display_label},
             {"url": "", "label": _("Run")},
         ],
