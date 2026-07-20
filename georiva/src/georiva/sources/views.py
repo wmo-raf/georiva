@@ -497,6 +497,66 @@ def data_feed_edit(request, pk):
     })
 
 
+def data_feed_delete(request, pk):
+    """Confirmation page enumerating the cascade before deleting a DataFeed.
+
+    Deleting a feed also deletes its claimed Catalog and, through it, every
+    Collection, Item and Asset inside (issue #243) — so the page lists those
+    victims plus any other feeds' derived products bound to the doomed
+    collections, and only deletes on an explicit POST.
+    """
+    from django.db.models import Count, Q
+    from wagtail.admin.auth import permission_denied
+    from wagtail.permissions import ModelPermissionPolicy
+    from georiva.sources.models import DerivedProduct
+
+    feed = get_object_or_404(DataFeed, pk=pk)
+
+    # Same gate the per-subclass viewset DeleteView enforced: delete permission
+    # on the concrete feed model (base DataFeed for rows whose plugin is gone).
+    real_cls = feed.get_real_instance_class() or DataFeed
+    if not ModelPermissionPolicy(real_cls).user_has_permission(request.user, "delete"):
+        return permission_denied(request)
+
+    catalog = feed.catalog
+
+    if request.method == "POST":
+        feed_name = feed.name
+        feed.delete()  # cascades: Catalog → Collections → Variables → Items → Assets
+        messages.success(request, _("Data feed '%s' and all its data have been deleted.") % feed_name)
+        return redirect("data_feed_list")
+
+    collections = []
+    external_products = []
+    if catalog:
+        collections = list(
+            catalog.collections.annotate(live_item_count=Count("items")).order_by("name")
+        )
+        external_products = list(
+            DerivedProduct.objects.filter(
+                Q(input_bindings__collection__catalog=catalog)
+                | Q(output_bindings__collection__catalog=catalog)
+            )
+            .exclude(data_feed=feed)
+            .select_related("data_feed")
+            .distinct()
+        )
+
+    return render(request, "georivasources/data_feed_confirm_delete.html", {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": pk}), "label": feed.name},
+            {"url": "", "label": _("Delete")},
+        ],
+        "feed": feed,
+        "catalog": catalog,
+        "collections": collections,
+        "own_products": list(feed.derived_products.all()),
+        "external_products": external_products,
+    })
+
+
 def definition_collection_add(request, feed_pk, definition_key):
     """
     Enable a CollectionDefinition for an existing DataFeed.

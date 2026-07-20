@@ -1,3 +1,4 @@
+from django.shortcuts import redirect
 from django.urls import reverse
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
@@ -19,7 +20,14 @@ class DataFeedEditView(DataFeedSuccessUrlMixin, generic.EditView):
 
 
 class DataFeedDeleteView(DataFeedSuccessUrlMixin, generic.DeleteView):
-    pass
+    # Wagtail's bare confirmation doesn't show what the delete cascades to;
+    # route every request to the cascade-aware confirmation page instead, so
+    # deletion only ever happens through its POST (issue #243).
+    def get(self, request, *args, **kwargs):
+        return redirect("data_feed_delete", pk=self.object.pk)
+
+    def post(self, request, *args, **kwargs):
+        return redirect("data_feed_delete", pk=self.object.pk)
 
 
 class DataFeedChooserViewSet(ChooserViewSet):
