@@ -1,1 +1,199 @@
 {% extends "wagtailadmin/generic/index.html" %}
+{% load i18n %}
+
+{% comment %}
+Outer shell: page chrome plus the row styles. Rendered once per full page
+load; the rows themselves live in data_feed_list_results.html, which the
+search box re-renders on its own. Styles belong here because a stylesheet
+only needs loading once -- re-sending it on every search swap would be waste.
+{% endcomment %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gfeed-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .gfeed-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .gfeed-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.15rem 0.6rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 999px;
+            font-size: 0.8rem;
+            color: var(--w-color-text-label);
+        }
+
+        .gfeed-filter--on {
+            border-color: var(--w-color-secondary);
+            font-weight: 600;
+        }
+
+        .gfeed-filter__n { color: var(--w-color-grey-400); }
+        .gfeed-filter--on .gfeed-filter__n { color: inherit; }
+
+        .gfeed-sort {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.85rem;
+        }
+
+        .gfeed-rows {
+            list-style: none;
+            /* Bottom margin separates the last row from Wagtail's pagination
+               bar, which otherwise butts straight up against it. */
+            margin: 1rem 0 2rem;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        /* The row is the scan unit: one column, one left edge to track. */
+        .gfeed-row {
+            position: relative;
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 0.85rem 1rem 0.85rem 1.35rem;
+            background: var(--w-color-surface-page);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+        }
+
+        /* Status rail -- the thing the eye tracks down the page. */
+        .gfeed-row::before {
+            content: "";
+            position: absolute;
+            inset-block: 0;
+            inset-inline-start: 0;
+            width: 5px;
+            border-start-start-radius: 4px;
+            border-end-start-radius: 4px;
+            background: var(--w-color-grey-400);
+        }
+
+        .gfeed-row--critical::before { background: var(--w-color-critical-200); }
+        .gfeed-row--warning::before  { background: var(--w-color-warning-100); }
+        .gfeed-row--positive::before { background: var(--w-color-positive-100); }
+        .gfeed-row--info::before     { background: var(--w-color-info-100); }
+        .gfeed-row--grey::before     { background: var(--w-color-grey-400); }
+
+        .gfeed-row__main { flex: 1 1 auto; min-width: 0; }
+
+        .gfeed-row__title { font-weight: 600; }
+
+        /* Stretched link: the whole row is clickable without nesting the action
+           buttons inside an <a>, which would be invalid HTML and would break
+           keyboard navigation. */
+        .gfeed-row__link::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+        }
+
+        .gfeed-row__identity,
+        .gfeed-row__health {
+            margin: 0.15rem 0 0;
+            font-size: 0.85rem;
+            color: var(--w-color-grey-400);
+        }
+
+        .gfeed-row__health {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .gfeed-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.05rem 0.45rem;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            color: var(--w-color-white);
+        }
+
+        .gfeed-chip--critical { background: var(--w-color-critical-200); }
+        .gfeed-chip--warning  { background: var(--w-color-warning-100); color: var(--w-color-text-label); }
+        .gfeed-chip--positive { background: var(--w-color-positive-100); }
+        .gfeed-chip--info     { background: var(--w-color-info-100); }
+        .gfeed-chip--grey     { background: var(--w-color-grey-400); }
+
+        .gfeed-chip__icon { width: 0.8rem; height: 0.8rem; }
+
+        /* Raised above the stretched link so the error text stays selectable --
+           it is the thing an operator wants to copy into a ticket. */
+        .gfeed-row__reason {
+            position: relative;
+            z-index: 2;
+            color: var(--w-color-text-label);
+        }
+
+        /* Second scan column: present and comparable, but out of the left-edge
+           path where the rail and health line live. */
+        .gfeed-row__totals {
+            flex: 0 0 auto;
+            font-size: 0.8rem;
+            color: var(--w-color-grey-400);
+            text-align: end;
+            white-space: nowrap;
+        }
+
+        .gfeed-row__actions {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Narrow screens: totals drop under the health line rather than
+           squeezing the identity text. */
+        @media (max-width: 50rem) {
+            .gfeed-row { flex-wrap: wrap; }
+            .gfeed-row__main { flex: 1 1 100%; }
+            .gfeed-row__totals { text-align: start; }
+        }
+    </style>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Delegated on document so it survives the AJAX results swap, which
+            // replaces the controls on every search keystroke.
+            //
+            // The overflow menus need no JS here: Wagtail's dropdown component
+            // is Stimulus-backed, so its controller re-attaches to swapped-in
+            // markup and brings its own outside-click and Escape handling.
+            document.addEventListener('change', function (event) {
+                if (event.target.matches('[data-gfeed-sort]')) {
+                    event.target.closest('form').submit();
+                }
+            });
+        });
+    </script>
+{% endblock %}

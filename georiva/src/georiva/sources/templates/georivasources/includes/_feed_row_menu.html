@@ -1,0 +1,21 @@
+{% load i18n wagtailadmin_tags %}
+
+{% comment %}
+Overflow menu for one status row. The listing is read-only: everything here
+navigates or opens a confirmation page, nothing mutates on click.
+
+Uses Wagtail's {% dropdown %} rather than a hand-rolled <details>: it is
+Stimulus-backed, so its controller re-attaches itself when the search box
+swaps this fragment in, and it brings focus management and Escape handling
+that a bespoke menu has to reimplement (and forget).
+{% endcomment %}
+{% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More feed options") %}
+    {% if row.edit_url %}
+        <a href="{{ row.edit_url }}">{% icon name="edit" %}{% trans "Edit details" %}</a>
+    {% endif %}
+    <a href="{{ row.ingestions_url }}">{% icon name="download" %}{% trans "Ingestions" %}</a>
+    <a href="{{ row.chain_url }}">{% icon name="link" %}{% trans "Product chain" %}</a>
+    {% if row.delete_url %}
+        <a href="{{ row.delete_url }}">{% icon name="bin" %}{% trans "Delete" %}</a>
+    {% endif %}
+{% enddropdown %}

@@ -1,0 +1,120 @@
+{% extends "wagtailadmin/generic/index_results.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% comment %}
+Results-only fragment. The header search box swaps this in via AJAX, so the
+rows live here rather than in data_feed_list.html -- anything in the outer
+template is not re-rendered on search. Styles live in the outer template
+because a stylesheet only needs loading once.
+{% endcomment %}
+
+{% comment %}
+The controls go in before_results, NOT results: Wagtail's listing_results.html
+wraps {% block results %} in {% if object_list %}, so anything inside it
+disappears when a filter matches nothing -- stranding the operator with no chip
+to click back to All. before_results renders either way.
+{% endcomment %}
+{% block before_results %}
+    {{ block.super }}
+    <div class="nice-padding">
+        <div class="gfeed-controls">
+            <ul class="gfeed-chips">
+                <li>
+                    <a class="gfeed-filter{% if active_health is None %} gfeed-filter--on{% endif %}"
+                       href="{{ all_chip_url }}">
+                        {% trans "All" %} <span class="gfeed-filter__n">{{ total_count }}</span>
+                    </a>
+                </li>
+                {% for chip in health_chips %}
+                    <li>
+                        <a class="gfeed-filter{% if active_health == chip.state.rank %} gfeed-filter--on{% endif %}"
+                           href="{{ chip.url }}">
+                            {{ chip.state.label }} <span class="gfeed-filter__n">{{ chip.count }}</span>
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+
+            <form class="gfeed-sort" method="get" action="">
+                {% if search_form.q.value %}<input type="hidden" name="q" value="{{ search_form.q.value }}">{% endif %}
+                {% if active_health is not None %}<input type="hidden" name="health" value="{{ active_health }}">{% endif %}
+                <label for="gfeed-sort-select">{% trans "Sort" %}</label>
+                <select id="gfeed-sort-select" name="sort" data-gfeed-sort>
+                    {% for option in sort_options %}
+                        <option value="{{ option.value }}"{% if option.value == active_sort %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+                <noscript><button type="submit" class="button button-small">{% trans "Apply" %}</button></noscript>
+            </form>
+        </div>
+    </div>
+{% endblock %}
+
+{% block no_results_message %}
+    {% if is_searching %}
+        <p>{% blocktrans with query=search_form.q.value %}No data feeds match &ldquo;{{ query }}&rdquo;.{% endblocktrans %}</p>
+    {% elif is_filtering or active_health is not None %}
+        <p>{% trans "No data feeds in this state." %}</p>
+    {% else %}
+        <p>{% trans "No data feeds yet." %}</p>
+    {% endif %}
+{% endblock %}
+
+{% block results %}
+    <div class="nice-padding">
+        <ul class="gfeed-rows">
+            {% for row in feed_rows %}
+                <li class="gfeed-row gfeed-row--{{ row.health.color }}">
+                    <div class="gfeed-row__main">
+                        <div class="gfeed-row__title">
+                            <a class="gfeed-row__link" href="{{ row.detail_url }}">{{ row.feed.name }}</a>
+                        </div>
+
+                        <p class="gfeed-row__identity">
+                            {% if row.source_label %}{{ row.source_label }} &middot; {% endif %}
+                            {% if row.feed.catalog %}{{ row.feed.catalog.slug }} &middot; {% endif %}
+                            {% blocktrans with interval=row.interval_label %}every {{ interval }}{% endblocktrans %}
+                            &middot; {% blocktrans count counter=row.feed.collection_count %}{{ counter }} collection{% plural %}{{ counter }} collections{% endblocktrans %}
+                            {% if row.feed.product_count %}
+                                &middot; {% blocktrans count counter=row.feed.product_count %}{{ counter }} product{% plural %}{{ counter }} products{% endblocktrans %}
+                            {% endif %}
+                        </p>
+
+                        <p class="gfeed-row__health">
+                            <span class="gfeed-chip gfeed-chip--{{ row.health.color }}">
+                                {% icon name=row.health.icon classname="gfeed-chip__icon" %}
+                                {{ row.health.label }}
+                            </span>
+                            {% if row.feed.last_run_at %}
+                                <span class="gfeed-row__when">
+                                    {% blocktrans with when=row.last_run_label %}ran {{ when }} ago{% endblocktrans %}
+                                </span>
+                            {% endif %}
+                            {% if row.failure_reason %}
+                                {% comment %}Raised above the stretched link so the error stays selectable.{% endcomment %}
+                                <span class="gfeed-row__reason" title="{{ row.failure_reason }}">
+                                    &mdash; {{ row.failure_reason|truncatechars:90 }}
+                                </span>
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    <div class="gfeed-row__totals">
+                        {% blocktrans count counter=row.feed.total_runs %}{{ counter }} run{% plural %}{{ counter }} runs{% endblocktrans %}
+                        {% if row.feed.total_files_fetched %}
+                            &middot; {% blocktrans count counter=row.feed.total_files_fetched with n=row.feed.total_files_fetched|intcomma %}{{ n }} file{% plural %}{{ n }} files{% endblocktrans %}
+                        {% endif %}
+                        {% if row.feed.total_bytes_transferred %}
+                            &middot; {{ row.feed.total_bytes_transferred|filesizeformat }}
+                        {% endif %}
+                    </div>
+
+                    <div class="gfeed-row__actions">
+                        <a class="button button-small button-secondary" href="{{ row.runs_url }}">{% trans "Runs" %}</a>
+                        {% include "georivasources/includes/_feed_row_menu.html" with row=row %}
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}

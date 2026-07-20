@@ -13,6 +13,7 @@ from polymorphic.models import PolymorphicModel
 from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import FieldPanel
 
+from .health import DataFeedManager
 from .source import BaseDataSource
 
 if TYPE_CHECKING:
@@ -76,14 +77,16 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     total_files_fetched = models.PositiveIntegerField(default=0)
     total_bytes_transferred = models.BigIntegerField(default=0)
     
+    objects = DataFeedManager()
+
     base_panels = [
         FieldPanel('name'),
         FieldPanel('is_active'),
         FieldPanel('interval_minutes'),
     ]
-    
+
     panels = base_panels
-    
+
     class Meta:
         verbose_name = _("Data Feed")
         verbose_name_plural = _("Data Feeds")

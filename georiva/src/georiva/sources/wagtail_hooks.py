@@ -7,6 +7,7 @@ from .registry import data_feed_viewset_registry
 from .utils import get_all_child_models
 from .views import (
     data_feed_list,
+    data_feed_list_results,
     data_feed_add_select,
     data_feed_detail,
     data_feed_edit,
@@ -47,6 +48,8 @@ from .viewsets import (
 def urlconf_georivasources():
     return [
         path('data-feeds/', data_feed_list, name="data_feed_list"),
+        # Results-only fragment the search box swaps in via AJAX.
+        path('data-feeds/results/', data_feed_list_results, name="data_feed_list_results"),
         path('data-feeds/derived-products/<int:product_pk>/runs/', derived_product_runs,
              name="derived_product_runs"),
         path('data-feeds/derived-products/<int:product_pk>/runs/<int:run_pk>/',
