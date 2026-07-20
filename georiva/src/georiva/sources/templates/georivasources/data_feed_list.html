@@ -57,7 +57,9 @@ only needs loading once -- re-sending it on every search swap would be waste.
 
         .gfeed-rows {
             list-style: none;
-            margin: 1rem 0 0;
+            /* Bottom margin separates the last row from Wagtail's pagination
+               bar, which otherwise butts straight up against it. */
+            margin: 1rem 0 2rem;
             padding: 0;
             display: flex;
             flex-direction: column;
