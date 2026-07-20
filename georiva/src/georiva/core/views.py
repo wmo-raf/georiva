@@ -272,3 +272,11 @@ def plugin_list(request):
         "plugins": get_installed_plugins(),
     }
     return render(request, "core/plugin_list.html", context)
+
+
+def add_data_select(request):
+    """The Add Data front door: route to the setup wizard matching how the data arrives."""
+    return render(request, "core/add_data.html", {
+        "automated_url": reverse("data_feed_add_select"),
+        "upload_url": reverse("upload_wizard_step1"),
+    })

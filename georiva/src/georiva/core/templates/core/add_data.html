@@ -1,0 +1,82 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Add Data" %}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .add-data-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(18rem, 24rem));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .add-data-card {
+            display: block;
+            padding: 1.75rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 0.5rem;
+            background: var(--w-color-surface-page);
+            text-decoration: none;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .add-data-card:hover,
+        .add-data-card:focus {
+            border-color: var(--w-color-secondary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            text-decoration: none;
+        }
+
+        .add-data-card-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0 0 0.5rem;
+            color: var(--w-color-text-label);
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .add-data-card-title .icon {
+            width: 1.25rem;
+            height: 1.25rem;
+            color: var(--w-color-secondary);
+        }
+
+        .add-data-card-text {
+            margin: 0;
+            color: var(--w-color-grey-400);
+            line-height: 1.5;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Add Data") subtitle=_("How does this data arrive?") icon="plus" %}
+
+    <div class="nice-padding">
+        <div class="add-data-cards">
+            <a class="add-data-card" href="{{ automated_url }}">
+                <h2 class="add-data-card-title">
+                    {% icon name="file-import" %}
+                    {% trans "Fetched automatically from a provider" %}
+                </h2>
+                <p class="add-data-card-text">
+                    {% trans "The data is downloaded on a schedule from an external provider, such as CHIRPS, ECMWF or the Copernicus Climate Data Store. You choose what to fetch and how often; new data then arrives on its own." %}
+                </p>
+            </a>
+
+            <a class="add-data-card" href="{{ upload_url }}">
+                <h2 class="add-data-card-title">
+                    {% icon name="upload" %}
+                    {% trans "I will upload files" %}
+                </h2>
+                <p class="add-data-card-text">
+                    {% trans "You have the files yourself and will upload them from your computer, for example local model output or gridded station data. A sample file helps set everything up." %}
+                </p>
+            </a>
+        </div>
+    </div>
+{% endblock %}
