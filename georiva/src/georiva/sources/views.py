@@ -1506,13 +1506,16 @@ def derived_product_runs(request, product_pk):
     ]
 
     context = {
+        # Rendered by the slim header via wagtailadmin/generic/base.html.
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}),
              "label": product.data_feed.name},
-            {"url": "", "label": product.display_label},
+            {"url": None, "label": product.display_label},
         ],
+        "header_title": _("Runs — %s") % product.display_label,
+        "header_icon": "cogs",
         "product": product,
         "rows": rows,
         "page": page,
@@ -1776,14 +1779,17 @@ def derived_product_run_detail(request, product_pk, run_pk):
     duration = run_duration_seconds(run)
     runs_url = reverse("derived_product_runs", kwargs={"product_pk": product.pk})
     context = {
+        # Rendered by the slim header via wagtailadmin/generic/base.html.
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}),
              "label": product.data_feed.name},
             {"url": runs_url, "label": product.display_label},
-            {"url": "", "label": _("Run")},
+            {"url": None, "label": _("Run")},
         ],
+        "header_title": _("Run — %s") % product.display_label,
+        "header_icon": "cogs",
         "product": product,
         "run": run,
         "duration": duration,

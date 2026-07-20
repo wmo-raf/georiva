@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% blocktrans with label=product.display_label %}Runs — {{ label }}{% endblocktrans %}{% endblock %}
@@ -114,76 +114,70 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=product.display_label subtitle=_("Derivation runs") icon="cogs" breadcrumbs=breadcrumbs_items %}
-
-    <div class="nice-padding">
-        <div class="gdr-filters">
-            <span class="gdr-meta">{% trans "Filter" %}:</span>
-            <a class="gdr-filter {% if not current_status %}gdr-filter--active{% endif %}"
-               href="{% url 'derived_product_runs' product_pk=product.pk %}">{% trans "All" %}</a>
-            {% for value, label in statuses %}
-                <a class="gdr-filter {% if current_status == value %}gdr-filter--active{% endif %}"
-                   href="{% url 'derived_product_runs' product_pk=product.pk %}?status={{ value }}">{{ label }}</a>
-            {% endfor %}
-        </div>
-
-        {% if rows %}
-            <table class="gdr-table">
-                <thead>
-                    <tr>
-                        <th>{% trans "Status" %}</th>
-                        <th>{% trans "Unit" %}</th>
-                        <th>{% trans "Started" %}</th>
-                        <th>{% trans "Completed" %}</th>
-                        <th>{% trans "Duration" %}</th>
-                        <th>{% trans "Attempts" %}</th>
-                        <th>{% trans "Error" %}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in rows %}
-                        <tr>
-                            <td>
-                                <span class="gdr-badge gdr-badge--{{ row.run.status }}">{{ row.run.status }}</span>
-                            </td>
-                            <td>
-                                <a class="gdr-unit"
-                                   href="{% url 'derived_product_run_detail' product_pk=product.pk run_pk=row.run.pk %}">{{ row.run.recipe_type }}[{{ row.run.unit_hash|slice:":8" }}]</a>
-                            </td>
-                            <td class="gdr-meta">{{ row.run.started_at|default:"—" }}</td>
-                            <td class="gdr-meta">{{ row.run.completed_at|default:"—" }}</td>
-                            <td class="gdr-meta">
-                                {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
-                            </td>
-                            <td>{{ row.run.attempts }}</td>
-                            <td>
-                                {% if row.run.error %}
-                                    <div class="gdr-error">{{ row.run.error|truncatechars:200 }}</div>
-                                {% else %}
-                                    <span class="gdr-meta">—</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-
-            {% if page.paginator.num_pages > 1 %}
-                <div class="gdr-pagination">
-                    {% if page.has_previous %}
-                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
-                    {% endif %}
-                    {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
-                    {% if page.has_next %}
-                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
-                    {% endif %}
-                </div>
-            {% endif %}
-        {% else %}
-            <p class="gdr-empty">{% trans "No runs yet for this product." %}</p>
-        {% endif %}
-
-        <p><a href="{% url 'data_feed_detail' pk=product.data_feed_id %}">← {% blocktrans with feed=product.data_feed.name %}Back to {{ feed }}{% endblocktrans %}</a></p>
+{% block main_content %}
+    <div class="gdr-filters">
+        <span class="gdr-meta">{% trans "Filter" %}:</span>
+        <a class="gdr-filter {% if not current_status %}gdr-filter--active{% endif %}"
+           href="{% url 'derived_product_runs' product_pk=product.pk %}">{% trans "All" %}</a>
+        {% for value, label in statuses %}
+            <a class="gdr-filter {% if current_status == value %}gdr-filter--active{% endif %}"
+               href="{% url 'derived_product_runs' product_pk=product.pk %}?status={{ value }}">{{ label }}</a>
+        {% endfor %}
     </div>
+
+    {% if rows %}
+        <table class="gdr-table">
+            <thead>
+                <tr>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Unit" %}</th>
+                    <th>{% trans "Started" %}</th>
+                    <th>{% trans "Completed" %}</th>
+                    <th>{% trans "Duration" %}</th>
+                    <th>{% trans "Attempts" %}</th>
+                    <th>{% trans "Error" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>
+                            <span class="gdr-badge gdr-badge--{{ row.run.status }}">{{ row.run.status }}</span>
+                        </td>
+                        <td>
+                            <a class="gdr-unit"
+                               href="{% url 'derived_product_run_detail' product_pk=product.pk run_pk=row.run.pk %}">{{ row.run.recipe_type }}[{{ row.run.unit_hash|slice:":8" }}]</a>
+                        </td>
+                        <td class="gdr-meta">{{ row.run.started_at|default:"—" }}</td>
+                        <td class="gdr-meta">{{ row.run.completed_at|default:"—" }}</td>
+                        <td class="gdr-meta">
+                            {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
+                        </td>
+                        <td>{{ row.run.attempts }}</td>
+                        <td>
+                            {% if row.run.error %}
+                                <div class="gdr-error">{{ row.run.error|truncatechars:200 }}</div>
+                            {% else %}
+                                <span class="gdr-meta">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if page.paginator.num_pages > 1 %}
+            <div class="gdr-pagination">
+                {% if page.has_previous %}
+                    <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                {% endif %}
+                {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                {% if page.has_next %}
+                    <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% else %}
+        <p class="gdr-empty">{% trans "No runs yet for this product." %}</p>
+    {% endif %}
 {% endblock %}
