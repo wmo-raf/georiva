@@ -51,7 +51,8 @@ class CatalogViewSet(ModelViewSet):
     menu_label = _("Catalogs")
     menu_icon = "globe"
     menu_order = 400
-    add_to_admin_menu = True
+    # Reached via the "Data" menu group (core/wagtail_hooks.py), not a top-level item.
+    add_to_admin_menu = False
     exclude_form_fields = ["created_at", "updated_at"]
     index_view_class = CatalogIndexView
     index_template_name = "core/catalog_index.html"

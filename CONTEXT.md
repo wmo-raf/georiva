@@ -255,10 +255,22 @@ _Avoid_: sweep arrival, sweep ingestion
 
 ### Manual upload setup
 
+**Data Menu**:
+The single Wagtail admin sidebar group holding every data surface, in order: "Add Data" (the Add Data Front Door),
+"Catalogs", "Automated Sources", "Manual Uploads", and "Derived Products". None of these exist as separate top-level
+sidebar items.
+_Avoid_: data submenu, sources menu
+
+**Add Data Front Door**:
+The single entry point for defining new data, at the top of the Data Menu. One screen asking "How does this data
+arrive?" with two cards — "Fetched automatically from a provider" (routes to the DataFeed setup wizard) and "I will
+upload files" (routes to the Manual Upload Setup Wizard). Copy uses the data manager's language; "plugin", "feed"
+and "config" never appear on it.
+_Avoid_: add data wizard, data entry screen
+
 **Manual Uploads Menu**:
-A top-level Wagtail admin sidebar item ("Manual Uploads") ordered after "Data Feeds". Links to the
-`ManualUploadConfig` list page, which shows all configs across all Catalogs, each with an "Upload" button that
-navigates to that config's Upload Page.
+The "Manual Uploads" item in the Data Menu. Links to the `ManualUploadConfig` list page, which shows all configs
+across all Catalogs, each with an "Upload" button that navigates to that config's Upload Page.
 
 **ManualUploadConfig**:
 A one-time operator-created configuration that enables manual file uploads for a Catalog. Many configs can exist per

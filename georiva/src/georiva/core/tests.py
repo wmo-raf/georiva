@@ -355,3 +355,60 @@ class TileConfigVisibilityTests(TestCase):
         self._variable("tas-anomaly", Collection.Visibility.INTERNAL)
         url = reverse("tile_config", args=["cmip6", "tas-anomaly", "tas"])
         self.assertEqual(self.client.get(url).status_code, 404)
+
+
+class AddDataFrontDoorTests(TestCase):
+    """The Add Data front door routes data managers to the right setup wizard."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@a.com", "pw")
+        self.client.force_login(self.user)
+
+    def test_front_door_offers_both_arrival_scenarios(self):
+        response = self.client.get(reverse("add_data"))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        # Routes to the DataFeed setup wizard and the Manual Upload Setup Wizard
+        self.assertIn(reverse("data_feed_add_select"), html)
+        self.assertIn(reverse("upload_wizard_step1"), html)
+
+    def test_front_door_speaks_data_manager_language(self):
+        html = self.client.get(reverse("add_data")).content.decode()
+        self.assertIn("automatically", html.lower())
+        self.assertIn("upload", html.lower())
+
+    def test_front_door_requires_admin_access(self):
+        self.client.logout()
+        response = self.client.get(reverse("add_data"))
+        # Wagtail admin auth redirects anonymous users to login
+        self.assertEqual(response.status_code, 302)
+
+
+class DataMenuTests(TestCase):
+    """All data surfaces live under one "Data" menu group."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@a.com", "pw")
+
+    def _request(self):
+        from django.test import RequestFactory
+        request = RequestFactory().get("/admin/")
+        request.user = self.user
+        return request
+
+    def test_data_group_contains_all_data_surfaces_in_order(self):
+        from wagtail.admin.menu import admin_menu
+        request = self._request()
+        items = admin_menu.menu_items_for_request(request)
+        data_item = next((i for i in items if str(i.label) == "Data"), None)
+        self.assertIsNotNone(data_item, "No top-level 'Data' menu group found")
+        sub_labels = [str(i.label) for i in data_item.menu.menu_items_for_request(request)]
+        self.assertEqual(sub_labels, [
+            "Add Data", "Catalogs", "Automated Sources", "Manual Uploads", "Derived Products",
+        ])
+
+    def test_data_surfaces_are_not_top_level_items(self):
+        from wagtail.admin.menu import admin_menu
+        labels = [str(i.label) for i in admin_menu.menu_items_for_request(self._request())]
+        for old in ("Catalogs", "Automated Sources", "Manual Uploads", "Derived Products"):
+            self.assertNotIn(old, labels)

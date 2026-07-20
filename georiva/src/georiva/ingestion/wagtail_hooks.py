@@ -58,15 +58,8 @@ def register_ingestion_dashboard_urls():
     ]
 
 
-@hooks.register("register_admin_menu_item")
-def register_manual_uploads_menu():
-    from django.utils.translation import gettext as _
-    return MenuItem(
-        _("Manual Uploads"),
-        reverse_lazy("manual_upload_config_list"),
-        icon_name="upload",
-        order=850,
-    )
+# "Manual Uploads" is reached via the "Data" menu group registered in
+# core/wagtail_hooks.py, not a top-level menu item.
 
 
 @hooks.register("register_admin_urls")

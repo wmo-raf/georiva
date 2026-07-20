@@ -1,7 +1,5 @@
-from django.urls import path, reverse
-from django.utils.translation import gettext_lazy as _
+from django.urls import path
 from wagtail import hooks
-from wagtail.admin.menu import MenuItem
 from wagtail.admin.viewsets.model import ModelViewSet
 
 from .models import DataFeed
@@ -95,24 +93,8 @@ def urlconf_georivasources():
     ]
 
 
-@hooks.register('register_admin_menu_item')
-def register_sources_menu():
-    return MenuItem(
-        _("Automated Sources"),
-        reverse('data_feed_list'),
-        icon_name='file-import',
-        order=800,
-    )
-
-
-@hooks.register('register_admin_menu_item')
-def register_derived_products_menu():
-    return MenuItem(
-        _("Derived Products"),
-        reverse('derived_product_tracking'),
-        icon_name='cogs',
-        order=810,
-    )
+# "Automated Sources" and "Derived Products" are reached via the "Data" menu
+# group registered in core/wagtail_hooks.py, not top-level menu items.
 
 
 def get_data_feed_viewsets():
