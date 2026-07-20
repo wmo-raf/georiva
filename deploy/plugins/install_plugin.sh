@@ -14,11 +14,51 @@ Usage: install_plugin.sh [-d] [-f <plugin folder>]
   -o, --overwrite                     If provided any existing plugin of the same name will be overwritten and force re-installed, built and/or setup.
   -h, --help                          Show this help message and exit.
 
-A GeoRiva plugin is a folder named after the plugin. This must be a valid Python package.
+A GeoRiva plugin is a flat PEP 621 package: a pyproject.toml at its root with the
+Python package under src/<module>/.
 """
 }
 
 source /georiva/plugins/utils.sh
+
+# Resolve the canonical name of a flat PEP 621 plugin from the package under src/.
+#
+# Django discovery (config/settings/base.py) derives the app name from the package
+# *contents* under src/, never from the checkout folder name — and for --git/--url
+# installs the checkout folder is a mktemp dir, so its basename is meaningless. Use
+# the src/<module> name for the install dir and container markers too, so the two
+# agree.
+#
+# Sets the global `resolved_plugin_name`. Returns non-zero on failure — note that
+# error() in utils.sh writes to stdout, so this must NOT be called in a command
+# substitution or the message would be swallowed into the captured value.
+resolve_plugin_name(){
+    local plugin_dir="$1"
+    local source_desc="$2"
+    local pkgs=() pkg
+
+    if [[ ! -f "$plugin_dir/pyproject.toml" ]]; then
+        error "$source_desc does not look like a GeoRiva plugin: no pyproject.toml at its root."
+        return 1
+    fi
+
+    # nullglob is set in utils.sh, so this expands to nothing when src/ is absent.
+    for pkg in "$plugin_dir"/src/*/; do
+        pkg="$(basename -- "$pkg")"
+        case "$pkg" in
+            __pycache__|*.egg-info|*.dist-info|.*) continue ;;
+        esac
+        [[ -f "$plugin_dir/src/$pkg/__init__.py" ]] || continue
+        pkgs+=("$pkg")
+    done
+
+    if [[ "${#pkgs[@]}" -ne 1 ]]; then
+        error "$source_desc does not look like a GeoRiva plugin: src/ must contain exactly one Python package, found ${#pkgs[@]}."
+        return 1
+    fi
+
+    resolved_plugin_name="${pkgs[0]}"
+}
 
 # The builder stage doesn't export DOCKER_USER (only runtime-base does), so
 # default it to the user created in both stages.
@@ -48,6 +88,7 @@ git=
 exclusive_flag_count=0
 runtime=
 overwrite=
+resolved_plugin_name=
 # shellcheck disable=SC2078
 while [ : ]; do
   case "$1" in
@@ -143,14 +184,13 @@ if [[ -n "$git" ]]; then
         git clone "$repo_url" "$temp_work_dir"
     fi
 
-    # Expect exactly one plugin directory at plugins/*
-    dirs=("$temp_work_dir"/plugins/*/)
-    num_dirs=${#dirs[@]}
-    if [[ "$num_dirs" -ne 1 ]]; then
-        error "$git does not look like a GeoRiva plugin. The plugins/ subdirectory must contain exactly one sub-directory."
-        exit 1;
-    fi
-    folder=${dirs[0]}
+    # The repo root IS the plugin (flat PEP 621 layout).
+    folder="$temp_work_dir"
+    resolve_plugin_name "$folder" "$git" || exit 1
+
+    # Don't bake the git checkout into the image — the whole repo root gets copied
+    # into GEORIVA_PLUGIN_DIR below.
+    rm -rf "${folder:?}/.git"
 fi
 
 # --url was set, download the url, untar it to a temp dir, and verify it only has one
@@ -160,13 +200,16 @@ if [[ -n "$url" ]]; then
     temp_work_dir=$(mktemp -d)
     curl -Ls "$url" | tar xz -C "$temp_work_dir"
 
-    dirs=("$temp_work_dir"/*/plugins/*/)
+    # A source tarball unpacks to a single top-level directory which is the plugin
+    # root (flat PEP 621 layout).
+    dirs=("$temp_work_dir"/*/)
     num_dirs=${#dirs[@]}
     if [[ "$num_dirs" -ne 1 ]]; then
-        error "$url does not look like an GeoRiva plugin. The plugin archive must contain a plugins/ sub-directory itself containing exactly one sub-directory for the plugin."
+        error "$url does not look like a GeoRiva plugin. The archive must contain exactly one top-level directory, found $num_dirs."
         exit 1;
     fi
     folder=${dirs[0]}
+    resolve_plugin_name "$folder" "$url" || exit 1
 fi
 
 # Dev folder plugins may only exist at runtime (bind-mounted). Skip gracefully at build time.
@@ -176,7 +219,9 @@ if [[ "$dev" == true && -n "${folder:-}" && ! -d "$folder" ]]; then
 fi
 
 # copy the plugin at the folder location into the plugin dir if it has not been already.
-plugin_name="$(basename -- "$folder")"
+# --git/--url resolved the name from src/<module>; --folder installs keep using the
+# folder's own name, which is already meaningful for a bind-mounted dev checkout.
+plugin_name="${resolved_plugin_name:-$(basename -- "$folder")}"
 plugin_install_dir="$GEORIVA_PLUGIN_DIR/$plugin_name"
 if [[ ! "$folder" -ef "$plugin_install_dir" ]]; then
   if [[ ! -d "$plugin_install_dir" || "$overwrite" == "true" ]]; then
