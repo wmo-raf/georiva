@@ -460,3 +460,42 @@ class DataManagersGatingTests(TestCase):
         request.user = self._data_manager()
         labels = [str(i.label) for i in admin_menu.menu_items_for_request(request)]
         self.assertIn("Data", labels)
+
+
+class CatalogIndexAffordanceTests(TestCase):
+    """The catalog accordion only shows affordances the user can actually use."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(name="Models", slug="models-idx", file_format="grib2")
+        self.collection = Collection.objects.create(
+            catalog=self.catalog, name="Surface", slug="surface-idx"
+        )
+        self.empty_catalog = Catalog.objects.create(name="Empty", slug="empty-idx", file_format="grib2")
+
+    def _get_index_as(self, user):
+        self.client.force_login(user)
+        return self.client.get(reverse("catalog:index")).content.decode()
+
+    def test_data_manager_sees_a_read_only_accordion(self):
+        from django.contrib.auth.models import Group
+        user = User.objects.create_user("dm-idx", "dmi@x.com", "pw")
+        user.groups.add(Group.objects.get(name="Data Managers"))
+        html = self._get_index_as(user)
+
+        self.assertNotIn(reverse("catalog:edit", args=[self.catalog.pk]), html)
+        self.assertNotIn(reverse("catalog:delete", args=[self.catalog.pk]), html)
+        self.assertNotIn(reverse("collection:add"), html)
+        self.assertNotIn(reverse("collection:edit", args=[self.collection.pk]), html)
+        self.assertNotIn(reverse("collection:delete", args=[self.collection.pk]), html)
+        # The collection name stays useful: it links to the items list instead
+        self.assertIn(reverse("collection_items_list", args=[self.collection.pk]), html)
+
+    def test_advanced_user_sees_all_affordances(self):
+        user = User.objects.create_superuser("root-idx", "ri@x.com", "pw")
+        html = self._get_index_as(user)
+
+        self.assertIn(reverse("catalog:edit", args=[self.catalog.pk]), html)
+        self.assertIn(reverse("catalog:delete", args=[self.catalog.pk]), html)
+        self.assertIn(reverse("collection:add"), html)
+        self.assertIn(reverse("collection:edit", args=[self.collection.pk]), html)
+        self.assertIn(reverse("collection:delete", args=[self.collection.pk]), html)

@@ -20,32 +20,37 @@ def get_collection_items_url(collection):
     return reverse("collection_items_list", args=[collection.pk])
 
 
-def _build_collection_columns(collection_viewset):
+def _build_collection_columns(collection_viewset, perms):
     """Columns for the per-catalog collections table rendered inside each
-    accordion panel."""
-    
+    accordion panel. Affordances the user cannot use are not rendered —
+    ``perms`` carries the booleans computed from the viewset permission
+    policies (the same objects that enforce server-side)."""
+
     class CollectionButtonsColumn(ButtonsColumnMixin, TitleColumn):
         def get_buttons(self, instance, parent_context):
-            edit_url = reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
-            delete_url = reverse(collection_viewset.get_url_name("delete"), kwargs={"pk": instance.pk})
-            
-            more_buttons = [
-                Button(
+            more_buttons = []
+            if perms["can_change_collection"]:
+                edit_url = reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
+                more_buttons.append(Button(
                     _("Edit"),
                     url=edit_url,
                     icon_name="edit",
                     attrs={"aria-label": _("Edit '%(title)s'") % {"title": str(instance)}},
                     priority=10,
-                ),
-                Button(
+                ))
+            if perms["can_delete_collection"]:
+                delete_url = reverse(collection_viewset.get_url_name("delete"), kwargs={"pk": instance.pk})
+                more_buttons.append(Button(
                     _("Delete"),
                     url=delete_url,
                     icon_name="bin",
                     attrs={"aria-label": _("Delete '%(title)s'") % {"title": str(instance)}},
                     priority=20,
-                ),
-            ]
-            
+                ))
+
+            if not more_buttons:
+                return []
+
             return [
                 ButtonWithDropdown(
                     buttons=more_buttons,
@@ -55,10 +60,13 @@ def _build_collection_columns(collection_viewset):
                     },
                 )
             ]
-    
+
     def get_url(instance):
-        return reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
-    
+        # View-only users get a useful destination instead of the gated edit form.
+        if perms["can_change_collection"]:
+            return reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
+        return get_collection_items_url(instance)
+
     return [
         CollectionButtonsColumn("name", label=_("Collection"), get_url=get_url),
         BooleanColumn("is_active", label=_("Active")),
@@ -87,8 +95,25 @@ class CatalogIndexView(IndexView):
         
         catalog_viewset = CatalogViewSet()
         collection_viewset = CollectionViewSet()
-        columns = _build_collection_columns(collection_viewset)
-        add_collection_url = reverse(collection_viewset.get_url_name("add"))
+
+        # Computed once per request from the same permission policies that
+        # enforce server-side, so visibility and enforcement cannot drift.
+        user = self.request.user
+        catalog_policy = catalog_viewset.permission_policy
+        collection_policy = collection_viewset.permission_policy
+        perms = {
+            "can_change_catalog": catalog_policy.user_has_permission(user, "change"),
+            "can_delete_catalog": catalog_policy.user_has_permission(user, "delete"),
+            "can_add_collection": collection_policy.user_has_permission(user, "add"),
+            "can_change_collection": collection_policy.user_has_permission(user, "change"),
+            "can_delete_collection": collection_policy.user_has_permission(user, "delete"),
+        }
+
+        columns = _build_collection_columns(collection_viewset, perms)
+        add_collection_url = (
+            reverse(collection_viewset.get_url_name("add"))
+            if perms["can_add_collection"] else None
+        )
         
         ids = [c.pk for c in catalogs]
         cols_by_cat = defaultdict(list)
@@ -111,8 +136,14 @@ class CatalogIndexView(IndexView):
             active_count = sum(1 for c in collections if c.is_active)
             panels.append({
                 "catalog": catalog,
-                "edit_url": reverse(catalog_viewset.get_url_name("edit"), kwargs={"pk": catalog.pk}),
-                "delete_url": reverse(catalog_viewset.get_url_name("delete"), kwargs={"pk": catalog.pk}),
+                "edit_url": (
+                    reverse(catalog_viewset.get_url_name("edit"), kwargs={"pk": catalog.pk})
+                    if perms["can_change_catalog"] else None
+                ),
+                "delete_url": (
+                    reverse(catalog_viewset.get_url_name("delete"), kwargs={"pk": catalog.pk})
+                    if perms["can_delete_catalog"] else None
+                ),
                 "add_collection_url": add_collection_url,
                 "collection_count": len(collections),
                 "active_count": active_count,
