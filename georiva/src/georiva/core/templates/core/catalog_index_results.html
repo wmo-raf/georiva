@@ -26,18 +26,26 @@
                             &middot; {{ panel.active_count }} {% trans "active" %}
                         </span>
                         <span class="ccl-actions">
-                            <a href="{{ panel.add_collection_url }}" class="button button-small bicolor button--icon">
-                                <span class="icon-wrapper">
-                                    <svg class="icon icon-plus icon" aria-hidden="true">
-                                        <use href="#icon-plus"></use>
-                                    </svg>
-                                </span>
-                                {% trans "Add Collection" %}
-                            </a>
-                            {% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More catalog options") %}
-                                <a href="{{ panel.edit_url }}">{% icon name="edit" %}{% trans "Edit catalog" %}</a>
-                                <a href="{{ panel.delete_url }}">{% icon name="bin" %}{% trans "Delete catalog" %}</a>
-                            {% enddropdown %}
+                            {% if panel.add_collection_url %}
+                                <a href="{{ panel.add_collection_url }}" class="button button-small bicolor button--icon">
+                                    <span class="icon-wrapper">
+                                        <svg class="icon icon-plus icon" aria-hidden="true">
+                                            <use href="#icon-plus"></use>
+                                        </svg>
+                                    </span>
+                                    {% trans "Add Collection" %}
+                                </a>
+                            {% endif %}
+                            {% if panel.edit_url or panel.delete_url %}
+                                {% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More catalog options") %}
+                                    {% if panel.edit_url %}
+                                        <a href="{{ panel.edit_url }}">{% icon name="edit" %}{% trans "Edit catalog" %}</a>
+                                    {% endif %}
+                                    {% if panel.delete_url %}
+                                        <a href="{{ panel.delete_url }}">{% icon name="bin" %}{% trans "Delete catalog" %}</a>
+                                    {% endif %}
+                                {% enddropdown %}
+                            {% endif %}
                         </span>
                     </div>
                     <div class="ccl-body">
@@ -47,9 +55,13 @@
                             </div>
                         {% else %}
                             <div class="ccl-empty">
-                                <p>{% trans "There are no collections to display for this catalog. Why not" %}
-                                    <a href="{{ panel.add_collection_url }}">{% trans "add one" %}</a>?
-                                </p>
+                                {% if panel.add_collection_url %}
+                                    <p>{% trans "There are no collections to display for this catalog. Why not" %}
+                                        <a href="{{ panel.add_collection_url }}">{% trans "add one" %}</a>?
+                                    </p>
+                                {% else %}
+                                    <p>{% trans "There are no collections to display for this catalog." %}</p>
+                                {% endif %}
                             </div>
                         {% endif %}
                     </div>
