@@ -611,8 +611,9 @@ def upload_wizard_step5(request):
 # =============================================================================
 
 def _unit_for_assignment(assignment: dict):
-    """Resolve the Unit for an assignment: existing pk or get_or_create from symbol."""
+    """Resolve the Unit for an assignment: existing pk or resolve/create from symbol."""
     from georiva.core.models import Unit
+    from georiva.core.provisioning import resolve_unit
 
     if assignment.get("unit_id"):
         return Unit.objects.get(pk=assignment["unit_id"])
@@ -622,12 +623,12 @@ def _unit_for_assignment(assignment: dict):
             _("Variable '%s' has no unit — please revisit Collection Setup.")
             % assignment.get("variable_name", "?")
         )
-    unit, _created = Unit.objects.get_or_create(symbol=symbol, defaults={"name": symbol})
-    return unit
+    return resolve_unit(symbol)
 
 
 def upload_wizard_provision(request):
     from georiva.core.models import Catalog, Collection, Variable
+    from georiva.core.provisioning import passthrough_sources
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
 
     if request.method != "POST":
@@ -708,7 +709,7 @@ def upload_wizard_provision(request):
                         "unit": unit,
                         "value_min": assignment["value_min"],
                         "value_max": assignment["value_max"],
-                        "sources": [("primary", {"source_name": variable_name})],
+                        "sources": passthrough_sources(variable_name),
                     },
                 )
 
