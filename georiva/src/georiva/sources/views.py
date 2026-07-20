@@ -1,16 +1,19 @@
 import json
 
 from django.contrib import messages
+from django.db.models import Count
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
 from django.utils.functional import cached_property
+from django.utils.timesince import timesince
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy
+from django.utils.translation import gettext_lazy, ngettext
 from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.views.generic import IndexView
 from wagtail.admin.ui.tables import TitleColumn, ButtonsColumnMixin, BooleanColumn
 from wagtail.admin.widgets import HeaderButton, ButtonWithDropdown, Button
 
+from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
 from georiva.sources.registry import data_feed_viewset_registry
 from georiva.sources.utils import get_all_child_models, get_child_model_by_name
@@ -25,6 +28,17 @@ def _to_json_safe(value):
         return value
     except (TypeError, ValueError):
         return str(value)
+
+
+def _humanize_minutes(minutes):
+    """Render an interval the way an operator says it: 6h, not 360 min."""
+    if minutes and minutes % 1440 == 0:
+        return ngettext("%(n)d day", "%(n)d days", minutes // 1440) % {"n": minutes // 1440}
+    if minutes and minutes % 60 == 0:
+        return ngettext("%(n)d hour", "%(n)d hours", minutes // 60) % {"n": minutes // 60}
+    # Not ngettext: English has no distinct plural for the "min" abbreviation,
+    # and passing identical forms just adds a duplicate catalogue entry.
+    return _("%(n)d min") % {"n": minutes}
 
 
 class DataFeedButtonsColumn(ButtonsColumnMixin, TitleColumn):
@@ -98,15 +112,156 @@ class DataFeedIndexView(IndexView):
     results_template_name = "georivasources/data_feed_list_results.html"
 
     def get_base_queryset(self):
-        return DataFeed.objects.with_health()
+        # select_related: the identity line renders the catalog name.
+        # distinct=True: counting across two joins otherwise multiplies the rows.
+        return (
+            DataFeed.objects.with_health()
+            .select_related("catalog")
+            .annotate(
+                collection_count=Count("collection_links", distinct=True),
+                product_count=Count("derived_products", distinct=True),
+            )
+        )
+
+    def _build_row(self, feed):
+        """Everything one status row renders, resolved once per feed.
+
+        Built here rather than in the template so the template stays free of
+        logic, and so the per-row work is visible in one place when tuning
+        queries.
+        """
+        health = Health.from_rank(feed.health_rank)
+        source_label = str(feed.get_real_instance_class()._meta.verbose_name)
+        return {
+            "feed": feed,
+            "health": health,
+            "detail_url": reverse("data_feed_detail", kwargs={"pk": feed.pk}),
+            "runs_url": reverse("data_feed_fetch_runs", kwargs={"feed_pk": feed.pk}),
+            "ingestions_url": reverse("data_feed_ingestions", kwargs={"feed_pk": feed.pk}),
+            "chain_url": reverse("derived_product_chain", kwargs={"feed_pk": feed.pk}),
+            "edit_url": feed.edit_url,
+            "delete_url": feed.delete_url,
+            # Only surfaced where it is current: last_run_message survives a
+            # later success, so showing it unconditionally would report a fixed
+            # failure as an ongoing one.
+            "failure_reason": (
+                feed.last_run_message
+                if health in (Health.FAILED, Health.PARTIAL) and feed.last_run_message
+                else ""
+            ),
+            # Suppressed when it merely repeats the name: operators often name a
+            # feed after its plugin, and "CHIRPS Data Feed · CHIRPS Data Feed"
+            # is noise on a line meant to disambiguate similar feeds.
+            "source_label": (
+                "" if source_label.casefold() == feed.name.casefold() else source_label
+            ),
+            "interval_label": _humanize_minutes(feed.interval_minutes),
+            # timesince returns "1 week, 5 days"; on a scan surface the leading
+            # unit is the whole signal and the rest is noise.
+            "last_run_label": (
+                timesince(feed.last_run_at).split(",")[0] if feed.last_run_at else ""
+            ),
+        }
+
+    def _health_chips(self):
+        """Per-state counts for the filter chips.
+
+        Deliberately computed over the *unfiltered* queryset: once a filter is
+        applied the chips must still show the whole picture, otherwise the one
+        you clicked reads as the only state that exists. One GROUP BY.
+        """
+        # Deliberately NOT get_base_queryset(): its collection/product Count
+        # annotations join, and a feed with 3 products would then be counted
+        # three times by this GROUP BY. with_health() carries no joins.
+        counts = dict(
+            DataFeed.objects.with_health()
+            .values_list("health_rank")
+            .annotate(n=Count("pk"))
+            .values_list("health_rank", "n")
+        )
+        return [
+            {
+                "state": state,
+                "count": counts.get(state.rank, 0),
+                "url": self._listing_url(health=state.rank),
+            }
+            for state in sorted(Health, key=lambda s: s.rank)
+            # Zero-count states are hidden to keep the bar short -- except the
+            # one currently selected, which must stay visible so you can see
+            # what you filtered to and click away from it.
+            if counts.get(state.rank, 0) or state.rank == self.active_health
+        ]
+
+    def _listing_url(self, health=None):
+        """A listing URL preserving search and sort, with pagination reset.
+
+        Built here rather than in the template so the params that must survive
+        (q, sort) and the one that must not (p) are stated once.
+        """
+        params = self.request.GET.copy()
+        params.pop(self.page_kwarg, None)
+        if health is None:
+            params.pop("health", None)
+        else:
+            params["health"] = health
+        encoded = params.urlencode()
+        return f"?{encoded}" if encoded else "?"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["feed_rows"] = [self._build_row(f) for f in context["object_list"]]
+        chips = self._health_chips()
+        context["health_chips"] = chips
+        # The All chip must show the whole picture; paginator.count is the
+        # filtered total and would collapse to the current selection.
+        context["total_count"] = sum(chip["count"] for chip in chips)
+        context["all_chip_url"] = self._listing_url(health=None)
+        context["active_health"] = self.active_health
+        context["active_sort"] = self.active_sort
+        context["sort_options"] = [
+            {"value": value, "label": label}
+            for value, (label, _ordering) in self.SORT_OPTIONS.items()
+        ]
+        return context
+
+    #: Sort options offered by the selector, keyed by the ?sort= value.
+    #: Every ordering ends in "pk": names are not unique and last_run_at can tie,
+    #: and an unstable sort lets rows repeat or vanish across page boundaries
+    #: (Wagtail only appends -pk for querysets that are otherwise unordered).
+    SORT_OPTIONS = {
+        "health": (gettext_lazy("Health"), ("health_rank", "name", "pk")),
+        "name": (gettext_lazy("Name A–Z"), ("name", "pk")),
+        "last_run": (gettext_lazy("Last run"), ("-last_run_at", "pk")),
+    }
+    DEFAULT_SORT = "health"
+
+    @cached_property
+    def active_sort(self):
+        requested = self.request.GET.get("sort")
+        return requested if requested in self.SORT_OPTIONS else self.DEFAULT_SORT
+
+    @cached_property
+    def active_health(self):
+        """The requested health rank, or None. Unknown values are ignored
+        rather than 404ing -- a stale bookmark should show the board, not
+        an error."""
+        raw = self.request.GET.get("health")
+        try:
+            rank = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return rank if rank in {state.rank for state in Health} else None
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if self.active_health is not None:
+            queryset = queryset.filter(health_rank=self.active_health)
+        return queryset
 
     def order_queryset(self, queryset):
-        # "pk" is the tiebreak, not decoration: names are not unique, and an
-        # unstable sort lets rows repeat or vanish across page boundaries.
-        # Wagtail only appends -pk for querysets that are otherwise unordered.
         if self.ordering:
             return super().order_queryset(queryset)
-        return queryset.order_by("health_rank", "name", "pk")
+        return queryset.order_by(*self.SORT_OPTIONS[self.active_sort][1])
 
     @cached_property
     def columns(self):

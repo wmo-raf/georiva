@@ -1,0 +1,24 @@
+{% load i18n wagtailadmin_tags %}
+
+{% comment %}
+Overflow menu for one status row. The listing is read-only: everything here
+navigates or opens a confirmation page, nothing mutates on click.
+
+Note: Django's {# #} only comments a SINGLE line. A multi-line one renders
+as visible text on the page, so block comments must use this tag.
+{% endcomment %}
+<details class="gfeed-menu">
+    <summary class="gfeed-menu__toggle" aria-label="{% blocktrans with name=row.feed.name %}More options for {{ name }}{% endblocktrans %}">
+        {% icon name="dots-horizontal" classname="gfeed-menu__icon" %}
+    </summary>
+    <ul class="gfeed-menu__list">
+        {% if row.edit_url %}
+            <li><a href="{{ row.edit_url }}">{% trans "Edit details" %}</a></li>
+        {% endif %}
+        <li><a href="{{ row.ingestions_url }}">{% trans "Ingestions" %}</a></li>
+        <li><a href="{{ row.chain_url }}">{% trans "Product chain" %}</a></li>
+        {% if row.delete_url %}
+            <li class="gfeed-menu__sep"><a href="{{ row.delete_url }}">{% trans "Delete" %}</a></li>
+        {% endif %}
+    </ul>
+</details>
