@@ -781,3 +781,22 @@ class CatalogOwnershipTests(TestCase):
         self.client.post(PROVISION_URL)
 
         self.assertTrue(ManualUploadConfig.objects.filter(catalog=self.unclaimed).exists())
+
+
+class DataManagerWizardAccessTests(TestCase):
+    """The guided flows must work without raw model add/change permissions."""
+
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.user = User.objects.create_user("dm2", "dm2@x.com", "pw")
+        self.user.groups.add(Group.objects.get(name="Data Managers"))
+        self.client.force_login(self.user)
+
+    def test_data_manager_can_provision_via_the_wizard(self):
+        _seed_session(self.client, _full_session())
+        self.client.post(PROVISION_URL)
+        self.assertTrue(Catalog.objects.filter(slug="weather-models").exists())
+        self.assertTrue(ManualUploadConfig.objects.exists())
+
+    def test_data_manager_can_reach_wizard_step1(self):
+        self.assertEqual(self.client.get(STEP1_URL).status_code, 200)
