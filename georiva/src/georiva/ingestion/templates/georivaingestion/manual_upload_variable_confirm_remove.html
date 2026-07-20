@@ -1,0 +1,32 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Remove variable" %} — {{ mcv.variable_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .muv-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+    .muv-warning { color: var(--w-color-text-label); }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=mcv.variable_name subtitle=_("Remove variable") icon="bin" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <p class="muv-warning">
+        {% blocktrans trimmed with name=mcv.variable_name collection=mcv.collection.name %}
+            Remove <strong>{{ name }}</strong> from the <strong>{{ collection }}</strong> collection?
+            Future uploads will no longer read this variable, and its definition
+            (unit, value range, palette) is deleted.
+        {% endblocktrans %}
+    </p>
+    <form method="post" action="">
+        {% csrf_token %}
+        <div class="muv-actions">
+            <button type="submit" class="button serious-action no">{% trans "Remove" %}</button>
+            <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

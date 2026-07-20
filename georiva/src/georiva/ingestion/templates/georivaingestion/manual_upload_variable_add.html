@@ -1,0 +1,34 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Add variable" %} — {{ config.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .muv-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=_("Add variable") subtitle=config.name icon="plus" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <form method="post" action="">
+        {% csrf_token %}
+        {% for field in form %}
+            {% if field.is_hidden %}
+                {{ field }}
+            {% else %}
+                {% include "wagtailadmin/shared/field.html" %}
+            {% endif %}
+        {% endfor %}
+        <div class="muv-actions">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+                {% trans "Add variable" %}
+            </button>
+            <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

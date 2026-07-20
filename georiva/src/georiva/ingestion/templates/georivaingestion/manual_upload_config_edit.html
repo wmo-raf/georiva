@@ -13,6 +13,12 @@
     .muc-vars-title { font-weight: 700; color: var(--w-color-text-label); margin-bottom: 0.25em; }
     .muc-vars-help { color: var(--w-color-grey-400); font-size: 0.9em; margin-bottom: 0.75em; }
     .muc-vars-table { width: 100%; }
+    .muc-vars-header {
+        display: flex; justify-content: space-between; align-items: flex-start;
+        gap: 1em; margin-bottom: 0.5em;
+    }
+    .muc-vars-actions a { margin-right: 0.75em; }
+    .muc-vars-remove { color: var(--w-color-critical-200); }
 </style>
 {% endblock %}
 
@@ -39,10 +45,18 @@
     </form>
 
     <div class="muc-vars-section">
-        <div class="muc-vars-title">{% trans "Variables" %}</div>
-        <p class="muc-vars-help">
-            {% trans "Variables are defined when the configuration is created. To tune palettes, value ranges, or transforms, edit the variable in its collection." %}
-        </p>
+        <div class="muc-vars-header">
+            <div>
+                <div class="muc-vars-title">{% trans "Variables" %}</div>
+                <p class="muc-vars-help">
+                    {% trans "Tune a variable's display name, unit, value range, or palette — or add and remove variables." %}
+                </p>
+            </div>
+            <a href="{% url 'manual_upload_variable_add' config.pk %}" class="button bicolor button--icon">
+                <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+                {% trans "Add variable" %}
+            </a>
+        </div>
         <table class="listing muc-vars-table">
             <thead>
                 <tr>
@@ -50,6 +64,7 @@
                     <th>{% trans "Display name" %}</th>
                     <th>{% trans "Units" %}</th>
                     <th>{% trans "Collection" %}</th>
+                    <th>{% trans "Actions" %}</th>
                 </tr>
             </thead>
             <tbody>
@@ -58,12 +73,14 @@
                     <td><code>{{ var.variable_name }}</code></td>
                     <td>{{ var.long_name|default:"—" }}</td>
                     <td>{{ var.units|default:"—" }}</td>
-                    <td>
-                        <a href="{% url 'collection:edit' var.collection_id %}">{{ var.collection.name }}</a>
+                    <td>{{ var.collection.name }}</td>
+                    <td class="muc-vars-actions">
+                        <a href="{% url 'manual_upload_variable_edit' config.pk var.pk %}">{% trans "Edit" %}</a>
+                        <a href="{% url 'manual_upload_variable_remove' config.pk var.pk %}" class="muc-vars-remove">{% trans "Remove" %}</a>
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="4">{% trans "No variables configured." %}</td></tr>
+                <tr><td colspan="5">{% trans "No variables configured." %}</td></tr>
                 {% endfor %}
             </tbody>
         </table>

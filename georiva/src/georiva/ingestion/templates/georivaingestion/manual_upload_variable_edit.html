@@ -1,0 +1,47 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Edit variable" %} — {{ mcv.variable_name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .muv-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+    .muv-source-note { color: var(--w-color-grey-400); margin-bottom: 1em; }
+    .muv-source-note code {
+        background: var(--w-color-grey-50);
+        padding: 0.1em 0.35em;
+        border-radius: 3px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+{% include "wagtailadmin/shared/header.html" with title=mcv.variable_name subtitle=_("Edit variable") icon="edit" breadcrumbs=breadcrumbs_items %}
+
+<div class="nice-padding">
+    <p class="muv-source-note">
+        {% blocktrans trimmed with source=mcv.variable_name collection=mcv.collection.name %}
+            Reads <code>{{ source }}</code> from uploaded files into the
+            <strong>{{ collection }}</strong> collection.
+        {% endblocktrans %}
+    </p>
+
+    <form method="post" action="">
+        {% csrf_token %}
+        {% for field in form %}
+            {% if field.is_hidden %}
+                {{ field }}
+            {% else %}
+                {% include "wagtailadmin/shared/field.html" %}
+            {% endif %}
+        {% endfor %}
+        <div class="muv-actions">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+                {% trans "Save" %}
+            </button>
+            <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
