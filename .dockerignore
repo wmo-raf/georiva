@@ -182,9 +182,11 @@ georiva_data/
 .vscode
 data/
 
-# Local dev plugin manifest (gitignored). Dev plugins load at runtime via the
-# dev-plugins bind-mount; do not bake folder-based dev plugins into the image.
-plugins.toml
+# NOTE: plugins.toml is deliberately NOT ignored. It is gitignored (per-deployment
+# manifest), but the build needs it in the context — Dockerfile bakes git-based
+# plugins into the image from it. Ignoring it here makes `COPY plugins.tom[l]`
+# silently no-op, and the image ships with no plugins. Folder-based dev plugins
+# never go in this manifest; they load at runtime via the dev-plugins bind-mount.
 
 # ---------------------------------------------------------------------------
 # Build-context hygiene. .dockerignore matches paths from the context ROOT, so

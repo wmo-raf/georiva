@@ -77,8 +77,10 @@ RUN --mount=type=cache,mode=777,target=$UV_CACHE_DIR,uid=$UID,gid=$GID \
 COPY --chown=$UID:$GID ./deploy/plugins/*.sh /georiva/plugins/
 COPY --chown=$UID:$GID ./deploy/plugins/parse_plugins_toml.py /georiva/plugins/
 
-# Optionally bake in a plugins.toml manifest (glob trick: no-op if file absent in build context)
-COPY --chown=$UID:$GID plugins.toml[l] /georiva/
+# Optionally bake in a plugins.toml manifest. The `[l]` character class makes this
+# a glob — it still matches plugins.toml, but an absent file is a no-op rather than
+# a build error. Do NOT "correct" it to plugins.toml[l]; that matches nothing.
+COPY --chown=$UID:$GID plugins.tom[l] /georiva/
 
 # Drop back to root so install_plugin.sh can chown + gosu
 USER root
