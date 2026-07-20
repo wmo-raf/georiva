@@ -1,0 +1,177 @@
+{% extends "wagtailadmin/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Delete Data Feed" %} — {{ feed.name }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .dfd-feed-meta {
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 6px;
+            padding: 1em 1.25em;
+            margin-bottom: 1.5em;
+            font-size: 0.9em;
+        }
+
+        .dfd-feed-meta strong {
+            display: block;
+            margin-bottom: 0.2em;
+        }
+
+        .dfd-catalog-slug {
+            font-family: monospace;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+
+        .dfd-warning-box {
+            background: color-mix(in srgb, var(--w-color-critical-200) 8%, transparent);
+            border: 1px solid color-mix(in srgb, var(--w-color-critical-200) 40%, transparent);
+            border-radius: 6px;
+            padding: 1.1em 1.25em;
+            margin-bottom: 1.5em;
+        }
+
+        .dfd-warning-title {
+            font-weight: 700;
+            color: var(--w-color-critical-200);
+            margin: 0 0 0.5em;
+            font-size: 0.95em;
+        }
+
+        .dfd-warning-list {
+            margin: 0.5em 0 0 1.2em;
+            padding: 0;
+            font-size: 0.9em;
+            line-height: 1.8;
+        }
+
+        .dfd-collection-list {
+            margin: 0.25em 0 0 1.2em;
+            padding: 0;
+        }
+
+        .dfd-item-count {
+            color: var(--w-color-grey-400);
+        }
+
+        .dfd-warning-note {
+            margin-top: 0.75em;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .dfd-external-box {
+            background: color-mix(in srgb, var(--w-color-warning-100) 25%, transparent);
+            border: 1px solid color-mix(in srgb, var(--w-color-warning-100) 80%, transparent);
+            border-radius: 6px;
+            padding: 1.1em 1.25em;
+            margin-bottom: 1.5em;
+            font-size: 0.9em;
+        }
+
+        .dfd-external-title {
+            font-weight: 700;
+            margin: 0 0 0.5em;
+            font-size: 0.95em;
+        }
+
+        .dfd-external-list {
+            margin: 0.5em 0 0 1.2em;
+            padding: 0;
+            line-height: 1.8;
+        }
+
+        .dfd-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    {% include "wagtailadmin/shared/header.html" with title=_("Delete Data Feed") subtitle=feed.name icon="warning" breadcrumbs=breadcrumbs_items %}
+
+    <div class="nice-padding">
+        <div class="dfd-feed-meta">
+            <strong>{{ feed.name }}</strong>
+            {% if catalog %}
+                <span class="dfd-catalog-slug">{{ catalog.slug }}</span>
+            {% endif %}
+        </div>
+
+        <div class="dfd-warning-box">
+            <p class="dfd-warning-title">{% trans "This action will permanently delete:" %}</p>
+            <ul class="dfd-warning-list">
+                <li>
+                    {% trans "The data feed" %} <strong>{{ feed.name }}</strong>
+                    {% trans "and its fetch/run history" %}
+                </li>
+                {% if catalog %}
+                    <li>
+                        {% trans "The catalog" %} <strong>{{ catalog.name }}</strong>
+                    </li>
+                    {% if collections %}
+                        <li>
+                            {% blocktrans count n=collections|length %}Its {{ n }} collection, with all variables, items and raster/visual assets:{% plural %}Its {{ n }} collections, with all variables, items and raster/visual assets:{% endblocktrans %}
+                            <ul class="dfd-collection-list">
+                                {% for collection in collections %}
+                                    <li>
+                                        <strong>{{ collection.name }}</strong>
+                                        <span class="dfd-item-count">
+                                            — {% blocktrans count n=collection.live_item_count %}{{ n }} item{% plural %}{{ n }} items{% endblocktrans %}
+                                        </span>
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </li>
+                    {% endif %}
+                {% endif %}
+                {% if own_products %}
+                    <li>
+                        {% trans "Its derived products:" %}
+                        <ul class="dfd-collection-list">
+                            {% for product in own_products %}
+                                <li><strong>{{ product.display_label }}</strong></li>
+                            {% endfor %}
+                        </ul>
+                    </li>
+                {% endif %}
+            </ul>
+            <p class="dfd-warning-note">
+                {% trans "This cannot be undone." %}
+            </p>
+        </div>
+
+        {% if external_products %}
+            <div class="dfd-external-box">
+                <p class="dfd-external-title">{% trans "Derived products in other feeds will stop working" %}</p>
+                <p>
+                    {% trans "These products read from collections that will be deleted. They will not be removed, but they will lose those bindings and stop updating:" %}
+                </p>
+                <ul class="dfd-external-list">
+                    {% for product in external_products %}
+                        <li>
+                            <strong>{{ product.display_label }}</strong>
+                            ({{ product.data_feed.name }})
+                        </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="dfd-actions">
+                <button type="submit" class="button no">
+                    {% trans "Yes, delete data feed" %}
+                </button>
+                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                    {% trans "Cancel" %}
+                </a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

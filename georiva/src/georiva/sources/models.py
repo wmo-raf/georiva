@@ -326,9 +326,9 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     
     @property
     def delete_url(self):
-        if self.viewset:
-            return reverse(self.viewset.get_url_name("delete"), kwargs={"pk": self.pk})
-        return None
+        # The cascade-aware confirmation page (issue #243), not the per-subclass
+        # viewset DeleteView — its GET redirects here too.
+        return reverse("data_feed_delete", kwargs={"pk": self.pk})
     
     def delete(self, *args, **kwargs):
         """Delete this feed and its linked Catalog (which cascades to Collections/Variables/Items)."""
