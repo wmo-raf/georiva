@@ -4,21 +4,18 @@
 Overflow menu for one status row. The listing is read-only: everything here
 navigates or opens a confirmation page, nothing mutates on click.
 
-Note: Django's {# #} only comments a SINGLE line. A multi-line one renders
-as visible text on the page, so block comments must use this tag.
+Uses Wagtail's {% dropdown %} rather than a hand-rolled <details>: it is
+Stimulus-backed, so its controller re-attaches itself when the search box
+swaps this fragment in, and it brings focus management and Escape handling
+that a bespoke menu has to reimplement (and forget).
 {% endcomment %}
-<details class="gfeed-menu">
-    <summary class="gfeed-menu__toggle" aria-label="{% blocktrans with name=row.feed.name %}More options for {{ name }}{% endblocktrans %}">
-        {% icon name="dots-horizontal" classname="gfeed-menu__icon" %}
-    </summary>
-    <ul class="gfeed-menu__list">
-        {% if row.edit_url %}
-            <li><a href="{{ row.edit_url }}">{% trans "Edit details" %}</a></li>
-        {% endif %}
-        <li><a href="{{ row.ingestions_url }}">{% trans "Ingestions" %}</a></li>
-        <li><a href="{{ row.chain_url }}">{% trans "Product chain" %}</a></li>
-        {% if row.delete_url %}
-            <li class="gfeed-menu__sep"><a href="{{ row.delete_url }}">{% trans "Delete" %}</a></li>
-        {% endif %}
-    </ul>
-</details>
+{% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More feed options") %}
+    {% if row.edit_url %}
+        <a href="{{ row.edit_url }}">{% icon name="edit" %}{% trans "Edit details" %}</a>
+    {% endif %}
+    <a href="{{ row.ingestions_url }}">{% icon name="download" %}{% trans "Ingestions" %}</a>
+    <a href="{{ row.chain_url }}">{% icon name="link" %}{% trans "Product chain" %}</a>
+    {% if row.delete_url %}
+        <a href="{{ row.delete_url }}">{% icon name="bin" %}{% trans "Delete" %}</a>
+    {% endif %}
+{% enddropdown %}

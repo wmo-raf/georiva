@@ -167,45 +167,6 @@ only needs loading once -- re-sending it on every search swap would be waste.
             z-index: 2;
         }
 
-        .gfeed-menu { position: relative; }
-
-        .gfeed-menu__toggle {
-            cursor: pointer;
-            list-style: none;
-            padding: 0.25rem;
-        }
-
-        .gfeed-menu__toggle::-webkit-details-marker { display: none; }
-
-        /* Wagtail's icon template carries no intrinsic size; without this the
-           SVG expands to fill the flex line. */
-        .gfeed-menu__icon {
-            width: 1rem;
-            height: 1rem;
-            fill: currentColor;
-        }
-
-        .gfeed-menu__list {
-            position: absolute;
-            inset-inline-end: 0;
-            z-index: 3;
-            min-width: 12rem;
-            margin: 0.25rem 0 0;
-            padding: 0.25rem 0;
-            list-style: none;
-            background: var(--w-color-surface-menus);
-            border: 1px solid var(--w-color-border-furniture);
-            border-radius: 4px;
-        }
-
-        .gfeed-menu__list a { display: block; padding: 0.35rem 0.75rem; }
-
-        .gfeed-menu__sep {
-            border-top: 1px solid var(--w-color-border-furniture);
-            margin-top: 0.25rem;
-            padding-top: 0.25rem;
-        }
-
         /* Narrow screens: totals drop under the health line rather than
            squeezing the identity text. */
         @media (max-width: 50rem) {
@@ -220,33 +181,12 @@ only needs loading once -- re-sending it on every search swap would be waste.
     {{ block.super }}
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            // Both handlers are delegated on document so they survive the AJAX
-            // results swap, which replaces the controls and rows wholesale on
-            // every search keystroke.
-            document.addEventListener('click', function (event) {
-                const openMenus = document.querySelectorAll('.gfeed-menu[open]');
-                openMenus.forEach(function (menu) {
-                    if (!menu.contains(event.target)) {
-                        menu.removeAttribute('open');
-                    }
-                });
-            });
-
-            // Escape closes an open menu and returns focus to its toggle --
-            // without this a keyboard user can open the menu but not dismiss it.
-            document.addEventListener('keydown', function (event) {
-                if (event.key !== 'Escape') {
-                    return;
-                }
-                const openMenu = document.querySelector('.gfeed-menu[open]');
-                if (openMenu) {
-                    openMenu.removeAttribute('open');
-                    openMenu.querySelector('.gfeed-menu__toggle').focus();
-                }
-            });
-
-            // Submit the sort form on change so the selector needs no Apply
-            // button. The <noscript> fallback keeps it usable without JS.
+            // Delegated on document so it survives the AJAX results swap, which
+            // replaces the controls on every search keystroke.
+            //
+            // The overflow menus need no JS here: Wagtail's dropdown component
+            // is Stimulus-backed, so its controller re-attaches to swapped-in
+            // markup and brings its own outside-click and Escape handling.
             document.addEventListener('change', function (event) {
                 if (event.target.matches('[data-gfeed-sort]')) {
                     event.target.closest('form').submit();
