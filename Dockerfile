@@ -78,7 +78,7 @@ COPY --chown=$UID:$GID ./deploy/plugins/*.sh /georiva/plugins/
 COPY --chown=$UID:$GID ./deploy/plugins/parse_plugins_toml.py /georiva/plugins/
 
 # Optionally bake in a plugins.toml manifest (glob trick: no-op if file absent in build context)
-COPY --chown=$UID:$GID plugins.tom[l] /georiva/
+COPY --chown=$UID:$GID plugins.toml[l] /georiva/
 
 # Drop back to root so install_plugin.sh can chown + gosu
 USER root
