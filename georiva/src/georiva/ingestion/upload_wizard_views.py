@@ -99,7 +99,10 @@ def _save_session(request, data):
 def upload_wizard_step1(request):
     from georiva.core.models import Catalog
 
-    all_catalogs = Catalog.objects.order_by("name")
+    # A Catalog is either feed-managed or manually-managed, never both: a
+    # DataFeed's deletion cascades to its Catalog, which would silently destroy
+    # any manual Collections placed inside it. Only offer unclaimed Catalogs.
+    all_catalogs = Catalog.objects.filter(data_feed__isnull=True).order_by("name")
     file_format_choices = Catalog.FileFormat.choices
 
     if request.method == "POST":
@@ -113,6 +116,8 @@ def upload_wizard_step1(request):
         errors = []
         if catalog_mode == "select" and not catalog_id:
             errors.append(_("Please choose a catalog."))
+        if catalog_mode == "select" and catalog_id and not all_catalogs.filter(pk=catalog_id).exists():
+            errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
@@ -650,6 +655,18 @@ def upload_wizard_provision(request):
                 except Catalog.DoesNotExist:
                     messages.error(request, _("Selected catalog no longer exists."))
                     return redirect("upload_wizard_step1")
+
+            # Re-validate ownership at provision time: the step-1 queryset already
+            # excludes feed-claimed Catalogs, but the session may be stale (a feed
+            # claimed the Catalog since) or the POST crafted. In create mode the
+            # get_or_create above may also have fetched an existing claimed
+            # Catalog by slug rather than creating one.
+            if getattr(catalog, "data_feed", None) is not None:
+                messages.error(
+                    request,
+                    _("This catalog is managed by an automated source and cannot receive manual uploads."),
+                )
+                return redirect("upload_wizard_step1")
 
             created_collections = {}
             for idx, coll_data in enumerate(session.get("collections", [])):

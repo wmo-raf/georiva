@@ -729,3 +729,55 @@ class ProvisionTests(TestCase):
         self.assertFalse(Catalog.objects.filter(slug="weather-models").exists())
         self.assertFalse(ManualUploadConfig.objects.exists())
         self.assertFalse(Variable.objects.exists())
+
+
+class CatalogOwnershipTests(TestCase):
+    """A Catalog is either feed-managed or manually-managed, never both.
+
+    Manual uploads must not target a feed-claimed Catalog: DataFeed deletion
+    cascades to its Catalog, which would silently destroy manual Collections.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin7", "o@o.com", "pw")
+        self.client.force_login(self.user)
+        from georiva.sources.models import DataFeed
+        self.claimed = _make_catalog(slug="chirps")
+        self.unclaimed = _make_catalog(slug="local-models")
+        DataFeed.objects.create(name="CHIRPS", catalog=self.claimed)
+
+    def test_step1_dropdown_excludes_feed_claimed_catalogs(self):
+        html = self.client.get(STEP1_URL).content.decode()
+        self.assertIn("local-models", html)
+        self.assertNotIn("chirps", html)
+
+    def test_step1_select_post_rejects_feed_claimed_catalog(self):
+        response = self.client.post(STEP1_URL, {
+            "catalog_mode": "select",
+            "catalog_id": str(self.claimed.pk),
+        })
+        self.assertEqual(response.status_code, 200)  # re-rendered with error
+        self.assertNotIn(SESSION_KEY, self.client.session)
+
+    def test_provision_rejects_feed_claimed_catalog(self):
+        session = _full_session()
+        session["catalog_mode"] = "select"
+        session["catalog_id"] = self.claimed.pk
+        _seed_session(self.client, session)
+
+        response = self.client.post(PROVISION_URL)
+
+        self.assertRedirects(response, STEP1_URL, fetch_redirect_response=False)
+        self.assertFalse(ManualUploadConfig.objects.exists())
+        self.assertFalse(Variable.objects.exists())
+        self.assertFalse(self.claimed.collections.exists())
+
+    def test_provision_still_works_against_unclaimed_catalog(self):
+        session = _full_session()
+        session["catalog_mode"] = "select"
+        session["catalog_id"] = self.unclaimed.pk
+        _seed_session(self.client, session)
+
+        self.client.post(PROVISION_URL)
+
+        self.assertTrue(ManualUploadConfig.objects.filter(catalog=self.unclaimed).exists())
