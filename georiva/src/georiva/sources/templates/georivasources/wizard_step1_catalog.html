@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}
@@ -60,135 +60,131 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=source_verbose_name subtitle=_("Step 1 of 3 — Catalog") icon="folder-open-inverse" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <div class="gwiz-progress">
+        <span class="gwiz-step gwiz-step--active">
+            1. {% trans "Catalog" %}
+        </span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--pending">
+            2. {% trans "Feed Details" %}
+        </span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--pending">
+            3. {% trans "Collections" %}
+        </span>
+    </div>
 
-    <div class="nice-padding">
-        <div class="gwiz-progress">
-            <span class="gwiz-step gwiz-step--active">
-                1. {% trans "Catalog" %}
-            </span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--pending">
-                2. {% trans "Feed Details" %}
-            </span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--pending">
-                3. {% trans "Collections" %}
-            </span>
+    <form method="post" action="">
+        {% csrf_token %}
+        {% if unclaimed_catalogs %}
+            <div class="w-field__wrapper gwiz-field--lg">
+                <label class="w-field__label" for="catalog_mode">{% trans "Catalog" %}</label>
+                <select name="catalog_mode" id="catalog_mode" class="w-field__input" onchange="
+                    const v = this.value;
+                    document.getElementById('section-create').classList.toggle('gwiz-hidden', v !== 'create');
+                    document.getElementById('section-select').classList.toggle('gwiz-hidden', v !== 'select');
+                ">
+                    <option value="create" {% if session.catalog_mode != "select" %}selected{% endif %}>
+                        {% trans "Create New Catalog" %}
+                    </option>
+                    <option value="select" {% if session.catalog_mode == "select" %}selected{% endif %}>
+                        {% trans "Use Existing Catalog" %}
+                    </option>
+                </select>
+            </div>
+        {% else %}
+            <input type="hidden" name="catalog_mode" value="create">
+        {% endif %}
+
+        {# Create new catalog #}
+        <div id="section-create" {% if session.catalog_mode == "select" %}class="gwiz-hidden"{% endif %}>
+            <div class="w-field__wrapper gwiz-field">
+                <label class="w-field__label" for="new_catalog_name">
+                    {% trans "Name" %} <sup>*</sup>
+                </label>
+                <input type="text" name="new_catalog_name" id="new_catalog_name" class="w-field__input"
+                       value="{{ session.new_catalog_name|default:catalog_defaults.name }}"
+                       oninput="
+                       document.getElementById('new_catalog_slug').value =
+                           this.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                   ">
+            </div>
+            <div class="w-field__wrapper gwiz-field">
+                <label class="w-field__label" for="new_catalog_slug">
+                    {% trans "Slug" %} <sup>*</sup>
+                </label>
+                <input type="text" name="new_catalog_slug" id="new_catalog_slug" class="w-field__input"
+                       value="{{ session.new_catalog_slug|default:catalog_defaults.name|lower|slugify }}"
+                       pattern="[a-z0-9\-]+">
+                <p class="w-field__help-text">
+                    {% trans "Lowercase letters, digits, and hyphens. Cannot be changed after data is ingested." %}
+                </p>
+            </div>
+            <div class="w-field__wrapper gwiz-field">
+                <label class="w-field__label" for="new_catalog_format">
+                    {% trans "Source file format" %} <sup>*</sup>
+                </label>
+                <select name="new_catalog_format" id="new_catalog_format" class="w-field__input">
+                    <option value="">—
+                        {% trans "Choose" %} —
+                    </option>
+                    {% for value, label in file_format_choices %}
+                        <option value="{{ value }}" {% if session.new_catalog_format == value %}selected
+                                {% elif not session.new_catalog_format and catalog_defaults.file_format == value %}selected
+                        {% endif %}>{{ label }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="w-field__wrapper gwiz-field">
+                <label class="w-field__label" for="new_catalog_description">
+                    {% trans "Description" %}
+                </label>
+                <textarea name="new_catalog_description" id="new_catalog_description" class="w-field__input"
+                          rows="2">
+                    {{ session.new_catalog_description|default:catalog_defaults.description }}
+                </textarea>
+            </div>
         </div>
 
-        <form method="post" action="">
-            {% csrf_token %}
-            {% if unclaimed_catalogs %}
-                <div class="w-field__wrapper gwiz-field--lg">
-                    <label class="w-field__label" for="catalog_mode">{% trans "Catalog" %}</label>
-                    <select name="catalog_mode" id="catalog_mode" class="w-field__input" onchange="
-                        const v = this.value;
-                        document.getElementById('section-create').classList.toggle('gwiz-hidden', v !== 'create');
-                        document.getElementById('section-select').classList.toggle('gwiz-hidden', v !== 'select');
-                    ">
-                        <option value="create" {% if session.catalog_mode != "select" %}selected{% endif %}>
-                            {% trans "Create New Catalog" %}
-                        </option>
-                        <option value="select" {% if session.catalog_mode == "select" %}selected{% endif %}>
-                            {% trans "Use Existing Catalog" %}
-                        </option>
-                    </select>
-                </div>
-            {% else %}
-                <input type="hidden" name="catalog_mode" value="create">
-            {% endif %}
-
-            {# Create new catalog #}
-            <div id="section-create" {% if session.catalog_mode == "select" %}class="gwiz-hidden"{% endif %}>
+        {# Select existing (unclaimed) catalog #}
+        {% if unclaimed_catalogs %}
+            <div id="section-select" {% if session.catalog_mode != "select" %}class="gwiz-hidden"{% endif %}>
                 <div class="w-field__wrapper gwiz-field">
-                    <label class="w-field__label" for="new_catalog_name">
-                        {% trans "Name" %} <sup>*</sup>
+                    <label class="w-field__label" for="catalog_id">
+                        {% trans "Catalog" %}
                     </label>
-                    <input type="text" name="new_catalog_name" id="new_catalog_name" class="w-field__input"
-                           value="{{ session.new_catalog_name|default:catalog_defaults.name }}"
-                           oninput="
-                           document.getElementById('new_catalog_slug').value =
-                               this.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                       ">
-                </div>
-                <div class="w-field__wrapper gwiz-field">
-                    <label class="w-field__label" for="new_catalog_slug">
-                        {% trans "Slug" %} <sup>*</sup>
-                    </label>
-                    <input type="text" name="new_catalog_slug" id="new_catalog_slug" class="w-field__input"
-                           value="{{ session.new_catalog_slug|default:catalog_defaults.name|lower|slugify }}"
-                           pattern="[a-z0-9\-]+">
-                    <p class="w-field__help-text">
-                        {% trans "Lowercase letters, digits, and hyphens. Cannot be changed after data is ingested." %}
-                    </p>
-                </div>
-                <div class="w-field__wrapper gwiz-field">
-                    <label class="w-field__label" for="new_catalog_format">
-                        {% trans "Source file format" %} <sup>*</sup>
-                    </label>
-                    <select name="new_catalog_format" id="new_catalog_format" class="w-field__input">
+                    <select name="catalog_id" id="catalog_id" class="w-field__input">
                         <option value="">—
-                            {% trans "Choose" %} —
+                            {% trans "Choose a catalog" %} —
                         </option>
-                        {% for value, label in file_format_choices %}
-                            <option value="{{ value }}" {% if session.new_catalog_format == value %}selected
-                                    {% elif not session.new_catalog_format and catalog_defaults.file_format == value %}selected
-                            {% endif %}>{{ label }}
+                        {% for catalog in unclaimed_catalogs %}
+                            <option value="{{ catalog.pk }}"
+                                    {% if session.catalog_id == catalog.pk %}selected{% endif %}>
+                                {{ catalog.name }} ({{ catalog.slug }})
                             </option>
                         {% endfor %}
                     </select>
-                </div>
-                <div class="w-field__wrapper gwiz-field">
-                    <label class="w-field__label" for="new_catalog_description">
-                        {% trans "Description" %}
-                    </label>
-                    <textarea name="new_catalog_description" id="new_catalog_description" class="w-field__input"
-                              rows="2">
-                        {{ session.new_catalog_description|default:catalog_defaults.description }}
-                    </textarea>
+                    <p class="w-field__help-text">
+                        {% trans "Only catalogs not yet linked to a Data Feed are shown." %}
+                    </p>
                 </div>
             </div>
+        {% endif %}
 
-            {# Select existing (unclaimed) catalog #}
-            {% if unclaimed_catalogs %}
-                <div id="section-select" {% if session.catalog_mode != "select" %}class="gwiz-hidden"{% endif %}>
-                    <div class="w-field__wrapper gwiz-field">
-                        <label class="w-field__label" for="catalog_id">
-                            {% trans "Catalog" %}
-                        </label>
-                        <select name="catalog_id" id="catalog_id" class="w-field__input">
-                            <option value="">—
-                                {% trans "Choose a catalog" %} —
-                            </option>
-                            {% for catalog in unclaimed_catalogs %}
-                                <option value="{{ catalog.pk }}"
-                                        {% if session.catalog_id == catalog.pk %}selected{% endif %}>
-                                    {{ catalog.name }} ({{ catalog.slug }})
-                                </option>
-                            {% endfor %}
-                        </select>
-                        <p class="w-field__help-text">
-                            {% trans "Only catalogs not yet linked to a Data Feed are shown." %}
-                        </p>
-                    </div>
-                </div>
-            {% endif %}
-
-            <div class="gwiz-actions">
-                <button type="submit" class="button bicolor button--icon">
-                    <span class="icon-wrapper">
-                        <svg class="icon icon-arrow-right icon" aria-hidden="true">
-                            <use href="#icon-arrow-right"></use>
-                        </svg>
-                    </span>
-                    {% trans "Next: Feed Details" %}
-                </button>
-                <a href="{% url 'setup_wizard_select' %}" class="button button-secondary">
-                    {% trans "Back" %}
-                </a>
-            </div>
-        </form>
-    </div>
+        <div class="gwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-arrow-right icon" aria-hidden="true">
+                        <use href="#icon-arrow-right"></use>
+                    </svg>
+                </span>
+                {% trans "Next: Feed Details" %}
+            </button>
+            <a href="{% url 'setup_wizard_select' %}" class="button button-secondary">
+                {% trans "Back" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}

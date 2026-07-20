@@ -273,7 +273,7 @@ def collection_items_list(request, collection_pk):
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse("catalog:index"), "label": _("Catalogs")},
-            {"url": "", "label": collection.name},
+            {"url": None, "label": collection.name},
         ],
         "collection": collection,
         "catalog": collection.catalog,
@@ -298,7 +298,7 @@ def plugin_list(request):
         "header_icon": "puzzle-piece",
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-            {"url": "", "label": _("Plugins")},
+            {"url": None, "label": _("Plugins")},
         ],
         "plugins": get_installed_plugins(),
     }
@@ -308,6 +308,13 @@ def plugin_list(request):
 def add_data_select(request):
     """The Add Data front door: route to the setup wizard matching how the data arrives."""
     return render(request, "core/add_data.html", {
+        # Rendered by the slim header via wagtailadmin/generic/base.html.
+        "breadcrumbs_items": [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": None, "label": _("Add Data")},
+        ],
+        "header_title": _("Add Data"),
+        "header_icon": "plus",
         "automated_url": reverse("data_feed_add_select"),
         "upload_url": reverse("upload_wizard_step1"),
     })

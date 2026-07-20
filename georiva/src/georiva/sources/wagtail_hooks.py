@@ -30,7 +30,6 @@ from .views import (
     data_feed_fetch_runs,
     data_feed_fetch_run_detail,
     data_feed_ingestions,
-    derived_product_tracking,
     derived_product_runs,
     derived_product_run_detail,
     derived_product_chain,
@@ -48,7 +47,6 @@ from .viewsets import (
 def urlconf_georivasources():
     return [
         path('data-feeds/', data_feed_list, name="data_feed_list"),
-        path('data-feeds/derived-products/', derived_product_tracking, name="derived_product_tracking"),
         path('data-feeds/derived-products/<int:product_pk>/runs/', derived_product_runs,
              name="derived_product_runs"),
         path('data-feeds/derived-products/<int:product_pk>/runs/<int:run_pk>/',
@@ -95,8 +93,10 @@ def urlconf_georivasources():
     ]
 
 
-# "Automated Sources" and "Derived Products" are reached via the "Data" menu
-# group registered in core/wagtail_hooks.py, not top-level menu items.
+# "Automated Sources" is reached via the "Data" menu group registered in
+# core/wagtail_hooks.py, not a top-level menu item. Derived products have no
+# menu surface at all — each feed's dashboard is their single home, with
+# per-product Runs links drilling into run history.
 
 
 def get_data_feed_viewsets():

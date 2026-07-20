@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% blocktrans with label=feed.name %}Ingestion Activity — {{ label }}{% endblocktrans %}{% endblock %}
@@ -162,148 +162,144 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Ingestion Activity") icon="cogs" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <div class="ging-actions">
+        <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="check_unprocessed">
+            <button class="button button-secondary" type="submit">{% trans "Check unprocessed files" %}</button>
+        </form>
+        <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="ingest_now">
+            <button class="button" type="submit">{% trans "Ingest now" %}</button>
+        </form>
+    </div>
 
-    <div class="nice-padding">
-        <div class="ging-actions">
-            <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="check_unprocessed">
-                <button class="button button-secondary" type="submit">{% trans "Check unprocessed files" %}</button>
-            </form>
-            <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="ingest_now">
-                <button class="button" type="submit">{% trans "Ingest now" %}</button>
-            </form>
+    {% if check_results is not None %}
+        <div class="ging-check">
+            <h2 class="ging-check__title">{% trans "Unprocessed files in MinIO" %}</h2>
+            {% if check_results %}
+                <ul class="ging-check__files">
+                    {% for found in check_results %}
+                        <li>
+                            <span class="ging-mono">{{ found.bucket }}/{{ found.file_path }}</span>
+                            <span class="ging-badge ging-badge--pending">{{ found.reason }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="ging-meta">{% trans "No unprocessed files under this feed's catalog." %}</p>
+            {% endif %}
         </div>
+    {% endif %}
 
-        {% if check_results is not None %}
-            <div class="ging-check">
-                <h2 class="ging-check__title">{% trans "Unprocessed files in MinIO" %}</h2>
-                {% if check_results %}
-                    <ul class="ging-check__files">
-                        {% for found in check_results %}
-                            <li>
-                                <span class="ging-mono">{{ found.bucket }}/{{ found.file_path }}</span>
-                                <span class="ging-badge ging-badge--pending">{{ found.reason }}</span>
-                            </li>
-                        {% endfor %}
-                    </ul>
-                {% else %}
-                    <p class="ging-meta">{% trans "No unprocessed files under this feed's catalog." %}</p>
+    <div class="ging-filters">
+        <span class="ging-meta">{% trans "Status" %}:</span>
+        <a class="ging-filter {% if not current_status %}ging-filter--active{% endif %}"
+           href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if current_collection %}?collection={{ current_collection }}{% endif %}">{% trans "All" %}</a>
+        {% for value, label in statuses %}
+            <a class="ging-filter {% if current_status == value %}ging-filter--active{% endif %}"
+               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?status={{ value }}{% if current_collection %}&amp;collection={{ current_collection }}{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </div>
+    <div class="ging-filters">
+        <span class="ging-meta">{% trans "Collection" %}:</span>
+        <a class="ging-filter {% if not current_collection %}ging-filter--active{% endif %}"
+           href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if current_status %}?status={{ current_status }}{% endif %}">{% trans "All" %}</a>
+        {% for collection in collections %}
+            <a class="ging-filter {% if current_collection == collection.pk|stringformat:'s' %}ging-filter--active{% endif %}"
+               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?collection={{ collection.pk }}{% if current_status %}&amp;status={{ current_status }}{% endif %}">{{ collection.name }}</a>
+        {% endfor %}
+        <a class="ging-filter {% if current_collection == no_collection_value %}ging-filter--active{% endif %}"
+           href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?collection={{ no_collection_value }}{% if current_status %}&amp;status={{ current_status }}{% endif %}">{% trans "No collection" %}</a>
+    </div>
+
+    {% if records %}
+        <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">
+            {% csrf_token %}
+            <table class="ging-table">
+                <thead>
+                    <tr>
+                        <th class="ging-select">
+                            <input type="checkbox" id="ging-select-all"
+                                   aria-label="{% trans 'Select all failed records' %}">
+                        </th>
+                        <th>{% trans "Status" %}</th>
+                        <th>{% trans "File" %}</th>
+                        <th>{% trans "Collections" %}</th>
+                        <th class="ging-num">{% trans "Retries" %}</th>
+                        <th class="ging-num">{% trans "Items" %}</th>
+                        <th class="ging-num">{% trans "Assets" %}</th>
+                        <th>{% trans "Updated" %}</th>
+                        <th>{% trans "Error" %}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in records %}
+                        <tr>
+                            <td class="ging-select">
+                                {% if record.status == "failed" %}
+                                    <input type="checkbox" name="record_ids"
+                                           value="{{ record.pk }}"
+                                           aria-label="{% trans 'Select record for reingestion' %}">
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="ging-badge ging-badge--{{ record.status }}">{{ record.get_status_display }}</span>
+                            </td>
+                            <td><span class="ging-mono">{{ record.file_path }}</span></td>
+                            <td>
+                                {% for collection in record.collections.all %}
+                                    {{ collection.name }}{% if not forloop.last %}, {% endif %}
+                                {% empty %}
+                                    <span class="ging-meta">—</span>
+                                {% endfor %}
+                            </td>
+                            <td class="ging-num">{{ record.retry_count }}</td>
+                            <td class="ging-num">{{ record.items_created }}</td>
+                            <td class="ging-num">{{ record.assets_created }}</td>
+                            <td class="ging-meta">{{ record.updated_at|default:"—" }}</td>
+                            <td>
+                                {% if record.error %}
+                                    <div class="ging-error">{{ record.error|truncatechars:200 }}</div>
+                                {% else %}
+                                    <span class="ging-meta">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if record.status == "failed" %}
+                                    <button class="button button-small button-secondary"
+                                            type="submit" name="reingest_id"
+                                            value="{{ record.pk }}">{% trans "Reingest" %}</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="ging-bulk">
+                <button class="button" type="submit" name="action" value="reingest_selected">
+                    {% trans "Reingest selected" %}
+                </button>
+            </div>
+        </form>
+
+        {% if page.paginator.num_pages > 1 %}
+            <div class="ging-pagination">
+                {% if page.has_previous %}
+                    <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}{% if current_collection %}collection={{ current_collection }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                {% endif %}
+                {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                {% if page.has_next %}
+                    <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}{% if current_collection %}collection={{ current_collection }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
                 {% endif %}
             </div>
         {% endif %}
-
-        <div class="ging-filters">
-            <span class="ging-meta">{% trans "Status" %}:</span>
-            <a class="ging-filter {% if not current_status %}ging-filter--active{% endif %}"
-               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if current_collection %}?collection={{ current_collection }}{% endif %}">{% trans "All" %}</a>
-            {% for value, label in statuses %}
-                <a class="ging-filter {% if current_status == value %}ging-filter--active{% endif %}"
-                   href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?status={{ value }}{% if current_collection %}&amp;collection={{ current_collection }}{% endif %}">{{ label }}</a>
-            {% endfor %}
-        </div>
-        <div class="ging-filters">
-            <span class="ging-meta">{% trans "Collection" %}:</span>
-            <a class="ging-filter {% if not current_collection %}ging-filter--active{% endif %}"
-               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if current_status %}?status={{ current_status }}{% endif %}">{% trans "All" %}</a>
-            {% for collection in collections %}
-                <a class="ging-filter {% if current_collection == collection.pk|stringformat:'s' %}ging-filter--active{% endif %}"
-                   href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?collection={{ collection.pk }}{% if current_status %}&amp;status={{ current_status }}{% endif %}">{{ collection.name }}</a>
-            {% endfor %}
-            <a class="ging-filter {% if current_collection == no_collection_value %}ging-filter--active{% endif %}"
-               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?collection={{ no_collection_value }}{% if current_status %}&amp;status={{ current_status }}{% endif %}">{% trans "No collection" %}</a>
-        </div>
-
-        {% if records %}
-            <form method="post" action="{% url 'data_feed_ingestions' feed_pk=feed.pk %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">
-                {% csrf_token %}
-                <table class="ging-table">
-                    <thead>
-                        <tr>
-                            <th class="ging-select">
-                                <input type="checkbox" id="ging-select-all"
-                                       aria-label="{% trans 'Select all failed records' %}">
-                            </th>
-                            <th>{% trans "Status" %}</th>
-                            <th>{% trans "File" %}</th>
-                            <th>{% trans "Collections" %}</th>
-                            <th class="ging-num">{% trans "Retries" %}</th>
-                            <th class="ging-num">{% trans "Items" %}</th>
-                            <th class="ging-num">{% trans "Assets" %}</th>
-                            <th>{% trans "Updated" %}</th>
-                            <th>{% trans "Error" %}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for record in records %}
-                            <tr>
-                                <td class="ging-select">
-                                    {% if record.status == "failed" %}
-                                        <input type="checkbox" name="record_ids"
-                                               value="{{ record.pk }}"
-                                               aria-label="{% trans 'Select record for reingestion' %}">
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <span class="ging-badge ging-badge--{{ record.status }}">{{ record.get_status_display }}</span>
-                                </td>
-                                <td><span class="ging-mono">{{ record.file_path }}</span></td>
-                                <td>
-                                    {% for collection in record.collections.all %}
-                                        {{ collection.name }}{% if not forloop.last %}, {% endif %}
-                                    {% empty %}
-                                        <span class="ging-meta">—</span>
-                                    {% endfor %}
-                                </td>
-                                <td class="ging-num">{{ record.retry_count }}</td>
-                                <td class="ging-num">{{ record.items_created }}</td>
-                                <td class="ging-num">{{ record.assets_created }}</td>
-                                <td class="ging-meta">{{ record.updated_at|default:"—" }}</td>
-                                <td>
-                                    {% if record.error %}
-                                        <div class="ging-error">{{ record.error|truncatechars:200 }}</div>
-                                    {% else %}
-                                        <span class="ging-meta">—</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if record.status == "failed" %}
-                                        <button class="button button-small button-secondary"
-                                                type="submit" name="reingest_id"
-                                                value="{{ record.pk }}">{% trans "Reingest" %}</button>
-                                    {% endif %}
-                                </td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                <div class="ging-bulk">
-                    <button class="button" type="submit" name="action" value="reingest_selected">
-                        {% trans "Reingest selected" %}
-                    </button>
-                </div>
-            </form>
-
-            {% if page.paginator.num_pages > 1 %}
-                <div class="ging-pagination">
-                    {% if page.has_previous %}
-                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}{% if current_collection %}collection={{ current_collection }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
-                    {% endif %}
-                    {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
-                    {% if page.has_next %}
-                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}{% if current_collection %}collection={{ current_collection }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
-                    {% endif %}
-                </div>
-            {% endif %}
-        {% else %}
-            <p class="ging-empty">{% trans "No ingestion records yet for this feed." %}</p>
-        {% endif %}
-    </div>
+    {% else %}
+        <p class="ging-empty">{% trans "No ingestion records yet for this feed." %}</p>
+    {% endif %}
 {% endblock %}
 
 {% block extra_js %}

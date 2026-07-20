@@ -12,10 +12,13 @@ def manual_upload_config_list(request):
     )
 
     return render(request, "georivaingestion/manual_upload_config_list.html", {
+        # Rendered by the slim header via wagtailadmin/generic/base.html.
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": "", "label": _("Manual Uploads")},
+            {"url": None, "label": _("Manual Uploads")},
         ],
+        "header_title": _("Manual Uploads"),
+        "header_icon": "upload",
         "add_url": reverse("upload_wizard_step1"),
         "configs": configs,
     })
@@ -49,8 +52,10 @@ def manual_upload_config_edit(request, pk):
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": "", "label": config.name},
+            {"url": None, "label": config.name},
         ],
+        "header_title": _("Edit configuration — %s") % config.name,
+        "header_icon": "edit",
         "config": config,
         "form": form,
         "variables": variables,
@@ -72,8 +77,10 @@ def manual_upload_config_delete(request, pk):
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": "", "label": _("Delete")},
+            {"url": None, "label": _("Delete")},
         ],
+        "header_title": _("Delete configuration — %s") % config.name,
+        "header_icon": "bin",
         "config": config,
     })
 
@@ -100,7 +107,7 @@ def _variable_breadcrumbs(config, leaf):
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
         {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
         {"url": reverse("manual_upload_config_edit", args=[config.pk]), "label": config.name},
-        {"url": "", "label": leaf},
+        {"url": None, "label": leaf},
     ]
 
 
@@ -143,6 +150,8 @@ def manual_upload_variable_edit(request, pk, var_pk):
 
     return render(request, "georivaingestion/manual_upload_variable_edit.html", {
         "breadcrumbs_items": _variable_breadcrumbs(config, mcv.variable_name),
+        "header_title": _("Edit variable — %s") % mcv.variable_name,
+        "header_icon": "edit",
         "config": config,
         "mcv": mcv,
         "variable": variable,
@@ -228,6 +237,8 @@ def manual_upload_variable_add(request, pk):
 
     return render(request, "georivaingestion/manual_upload_variable_add.html", {
         "breadcrumbs_items": _variable_breadcrumbs(config, _("Add variable")),
+        "header_title": _("Add variable — %s") % config.name,
+        "header_icon": "plus",
         "config": config,
         "form": form,
     })
@@ -250,6 +261,8 @@ def manual_upload_variable_remove(request, pk, var_pk):
 
     return render(request, "georivaingestion/manual_upload_variable_confirm_remove.html", {
         "breadcrumbs_items": _variable_breadcrumbs(config, _("Remove variable")),
+        "header_title": _("Remove variable — %s") % mcv.variable_name,
+        "header_icon": "bin",
         "config": config,
         "mcv": mcv,
     })

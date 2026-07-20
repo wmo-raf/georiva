@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Derivation Chain" %} — {{ feed.name }}{% endblock %}
@@ -121,53 +121,49 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Derivation chain") icon="site" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <p class="gchain-intro">
+        {% trans "How this feed's products interconnect — collections are nodes, products are edges. Each edge is tagged with its state (enabled, disabled, new, or no longer provided), matching the management panel; blocked enabled edges show why." %}
+    </p>
 
-    <div class="nice-padding">
-        <p class="gchain-intro">
-            {% trans "How this feed's products interconnect — collections are nodes, products are edges. Each edge is tagged with its state (enabled, disabled, new, or no longer provided), matching the management panel; blocked enabled edges show why." %}
-        </p>
-
-        {% if graph.edges %}
-            {% for edge in graph.edges %}
-                <div class="gchain-edge gchain-edge--{{ edge.state }}{% if edge.state == 'enabled' and not edge.ready %} gchain-edge--blocked{% endif %}">
-                    <div class="gchain-flow{% if edge.state == 'orphaned' %} gchain-flow--orphan{% endif %}">
-                        {% for slug in edge.inputs %}
-                            <span class="gchain-node">{{ slug }}</span>
-                        {% endfor %}
-                        {% if edge.inputs %}<span class="gchain-arrow">→</span>{% endif %}
-                        <span class="gchain-product">{{ edge.label }}</span>
-                        {% if edge.outputs %}<span class="gchain-arrow">→</span>{% endif %}
-                        {% for slug in edge.outputs %}
-                            <span class="gchain-node">{{ slug }}</span>
-                        {% endfor %}
-                        <span class="gchain-state gchain-state--{{ edge.state }}">
-                            {% if edge.state == "enabled" %}{% trans "Enabled" %}
-                            {% elif edge.state == "disabled" %}{% trans "Disabled" %}
-                            {% elif edge.state == "new" %}{% trans "New — not enabled" %}
-                            {% elif edge.state == "orphaned" %}{% trans "No longer provided" %}
-                            {% endif %}
-                        </span>
-                    </div>
-                    <div class="gchain-meta">
-                        <span>{% trans "Recipe" %}: {{ edge.recipe_type }}</span>
-                        {% if edge.trigger_mode %}<span>{% trans "Trigger" %}: {{ edge.trigger_mode }}</span>{% endif %}
-                        {% if edge.state == "enabled" or edge.state == "disabled" %}
-                            <span>{% trans "Status" %}: {{ edge.status }}</span>
+    {% if graph.edges %}
+        {% for edge in graph.edges %}
+            <div class="gchain-edge gchain-edge--{{ edge.state }}{% if edge.state == 'enabled' and not edge.ready %} gchain-edge--blocked{% endif %}">
+                <div class="gchain-flow{% if edge.state == 'orphaned' %} gchain-flow--orphan{% endif %}">
+                    {% for slug in edge.inputs %}
+                        <span class="gchain-node">{{ slug }}</span>
+                    {% endfor %}
+                    {% if edge.inputs %}<span class="gchain-arrow">→</span>{% endif %}
+                    <span class="gchain-product">{{ edge.label }}</span>
+                    {% if edge.outputs %}<span class="gchain-arrow">→</span>{% endif %}
+                    {% for slug in edge.outputs %}
+                        <span class="gchain-node">{{ slug }}</span>
+                    {% endfor %}
+                    <span class="gchain-state gchain-state--{{ edge.state }}">
+                        {% if edge.state == "enabled" %}{% trans "Enabled" %}
+                        {% elif edge.state == "disabled" %}{% trans "Disabled" %}
+                        {% elif edge.state == "new" %}{% trans "New — not enabled" %}
+                        {% elif edge.state == "orphaned" %}{% trans "No longer provided" %}
                         {% endif %}
-                        {% if edge.state == "enabled" %}
-                            {% if edge.ready %}
-                                <span>{% trans "Ready" %}</span>
-                            {% else %}
-                                <span class="gchain-reason">{% trans "Blocked" %}: {{ edge.reason }}</span>
-                            {% endif %}
-                        {% endif %}
-                    </div>
+                    </span>
                 </div>
-            {% endfor %}
-        {% else %}
-            <p class="gchain-empty">{% trans "This feed declares no derived products." %}</p>
-        {% endif %}
-    </div>
+                <div class="gchain-meta">
+                    <span>{% trans "Recipe" %}: {{ edge.recipe_type }}</span>
+                    {% if edge.trigger_mode %}<span>{% trans "Trigger" %}: {{ edge.trigger_mode }}</span>{% endif %}
+                    {% if edge.state == "enabled" or edge.state == "disabled" %}
+                        <span>{% trans "Status" %}: {{ edge.status }}</span>
+                    {% endif %}
+                    {% if edge.state == "enabled" %}
+                        {% if edge.ready %}
+                            <span>{% trans "Ready" %}</span>
+                        {% else %}
+                            <span class="gchain-reason">{% trans "Blocked" %}: {{ edge.reason }}</span>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="gchain-empty">{% trans "This feed declares no derived products." %}</p>
+    {% endif %}
 {% endblock %}

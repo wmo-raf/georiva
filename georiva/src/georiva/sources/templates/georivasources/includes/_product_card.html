@@ -1,7 +1,7 @@
 {% load i18n %}
 {% comment %}
-One product card, shared across the wizard (wizard mode) and the feed panel
-(manage mode). Expects `card`, `mode`, and (in manage mode) `feed` in context.
+    One product card, shared across the wizard (wizard mode) and the feed panel
+    (manage mode). Expects `card`, `mode`, and (in manage mode) `feed` in context.
 {% endcomment %}
 {% with defn=card.definition %}
     <div class="gprod-card{% if mode == 'wizard' and not card.checked %} gprod-card--disabled{% elif mode == 'manage' and not card.enabled %} gprod-card--disabled{% endif %}{% if card.orphaned %} gprod-card--orphan{% endif %}{% if card.unbound %} gprod-card--unbound{% endif %}"
@@ -19,16 +19,25 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                     <span class="gprod-card__name">{{ card.display_label }}</span>
                     {% if card.is_new %}
                         <span class="gprod-badge gprod-badge--new">{% trans "New — not enabled" %}</span>
-                    {% elif card.orphaned %}
+                        {% elif card.orphaned %}
                         <span class="gprod-badge gprod-badge--orphan">{% trans "No longer provided" %}</span>
-                    {% elif card.unbound %}
+                        {% elif card.unbound %}
                         <span class="gprod-badge gprod-badge--unbound">{% trans "Unbound" %}</span>
                     {% else %}
                         <span class="gprod-badge gprod-badge--{% if card.enabled %}on{% else %}off{% endif %}">
                             {% if card.enabled %}{% trans "Enabled" %}{% else %}{% trans "Disabled" %}{% endif %}
                         </span>
                         <span class="gprod-pill gprod-pill--{{ card.status }}">{{ card.status }}</span>
-                        <a class="gprod-card__edit" href="{% url 'feed_product_edit' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Edit" %}</a>
+                    {% endif %}
+                    {% if card.product %}
+                        <span class="gprod-card__links">
+                            {% if not card.orphaned and not card.unbound %}
+                                <a class="gprod-card__link"
+                                   href="{% url 'feed_product_edit' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Edit" %}</a>
+                            {% endif %}
+                            <a class="gprod-card__link"
+                               href="{% url 'derived_product_runs' product_pk=card.product.pk %}">{% trans "View Runs" %}</a>
+                        </span>
                     {% endif %}
                 </div>
             {% endif %}
@@ -74,17 +83,20 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                 {% if card.is_new %}
                     <p class="gprod-card__desc">{% trans "Added by a plugin update. Enable it to provision and start producing." %}</p>
                     <div class="gprod-actions">
-                        <a class="button button-small" href="{% url 'feed_product_enable_new' feed_pk=feed.pk definition_key=defn.key %}">{% trans "Enable…" %}</a>
+                        <a class="button button-small"
+                           href="{% url 'feed_product_enable_new' feed_pk=feed.pk definition_key=defn.key %}">{% trans "Enable…" %}</a>
                     </div>
-                {% elif card.orphaned %}
+                    {% elif card.orphaned %}
                     <p class="gprod-readiness">{% trans "This product is no longer declared by the plugin. It dispatches nothing." %}</p>
                     <div class="gprod-actions">
-                        <a class="button button-small no" href="{% url 'feed_product_delete_orphan' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Delete row…" %}</a>
+                        <a class="button button-small no"
+                           href="{% url 'feed_product_delete_orphan' feed_pk=feed.pk product_pk=card.product.pk %}">{% trans "Delete row…" %}</a>
                     </div>
-                {% elif card.unbound %}
+                    {% elif card.unbound %}
                     <p class="gprod-readiness">{% trans "A collection this product is bound to was deleted, so it dispatches nothing. Re-bind to restore its collections and start producing again." %}</p>
                     <div class="gprod-actions">
-                        <form method="post" action="{% url 'feed_product_rebind' feed_pk=feed.pk product_pk=card.product.pk %}">
+                        <form method="post"
+                              action="{% url 'feed_product_rebind' feed_pk=feed.pk product_pk=card.product.pk %}">
                             {% csrf_token %}
                             <button type="submit" class="button button-small">{% trans "Re-bind" %}</button>
                         </form>
@@ -95,7 +107,8 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                             <span class="gprod-outputs__label">{% trans "Outputs:" %}</span>
                             {% for col in card.output_collections %}
                                 <span class="gprod-outputs__item">
-                                    {{ col.name }}{% if col.visibility == "internal" %} · {% trans "internal" %}{% endif %}
+                                    {{ col.name }}{% if col.visibility == "internal" %} ·
+                                        {% trans "internal" %}{% endif %}
                                 </span>
                             {% endfor %}
                         </div>
@@ -109,7 +122,8 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                         </p>
                     {% endif %}
                     <div class="gprod-actions">
-                        <form method="post" action="{% url 'feed_product_toggle' feed_pk=feed.pk product_pk=card.product.pk %}">
+                        <form method="post"
+                              action="{% url 'feed_product_toggle' feed_pk=feed.pk product_pk=card.product.pk %}">
                             {% csrf_token %}
                             <button type="submit" class="button button-small button-secondary">
                                 {% if card.enabled %}{% trans "Disable" %}{% else %}{% trans "Enable" %}{% endif %}
@@ -117,7 +131,8 @@ One product card, shared across the wizard (wizard mode) and the feed panel
                         </form>
                         {% if card.can_run %}
                             {% if card.readiness.ready %}
-                                <form method="post" action="{% url 'feed_product_run' feed_pk=feed.pk product_pk=card.product.pk %}">
+                                <form method="post"
+                                      action="{% url 'feed_product_run' feed_pk=feed.pk product_pk=card.product.pk %}">
                                     {% csrf_token %}
                                     <button type="submit" class="button button-small">{% trans "Run now" %}</button>
                                 </form>

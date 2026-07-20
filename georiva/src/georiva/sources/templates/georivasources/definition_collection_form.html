@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}
@@ -132,94 +132,90 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=definition.name subtitle=feed.name icon="file-import" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
 
-    <div class="nice-padding">
+    {% if definition %}
+        <div class="dcf-def-info">
+            <strong>{{ definition.name }}</strong>
+            &nbsp;·&nbsp; {{ definition.time_resolution }}
+            &nbsp;·&nbsp;
+            {% blocktrans count n=definition.variables|length %}{{ n }} variable{% plural %}{{ n }}
+                variables{% endblocktrans %}
+            {% if definition.description %}
+                <span class="dcf-def-description">{{ definition.description }}</span>
+            {% endif %}
+        </div>
+    {% endif %}
 
-        {% if definition %}
-            <div class="dcf-def-info">
-                <strong>{{ definition.name }}</strong>
-                &nbsp;·&nbsp; {{ definition.time_resolution }}
-                &nbsp;·&nbsp;
-                {% blocktrans count n=definition.variables|length %}{{ n }} variable{% plural %}{{ n }}
-                    variables{% endblocktrans %}
-                {% if definition.description %}
-                    <span class="dcf-def-description">{{ definition.description }}</span>
-                {% endif %}
+    <form method="post">
+        {% csrf_token %}
+
+        {% if multi_variable and not is_edit %}
+            <div class="dcf-vars-section">
+                <div class="dcf-vars-header">
+                    <p class="dcf-vars-label">{% trans "Variables" %}</p>
+                    <label class="dcf-select-all-label">
+                        <input type="checkbox" id="add-select-all" checked>
+                        {% trans "Select all" %}
+                    </label>
+                </div>
+
+                {% for grp in variable_groups %}
+                    <div class="dcf-group">
+                        <div class="dcf-group-header">
+                            <input type="checkbox" class="add-group-cb" data-group="{{ grp.key }}" checked>
+                            <span class="dcf-group-name">
+                    {% if grp.type == "ungrouped" and grp.name %}{{ grp.name }}
+                        {% elif grp.type == "ungrouped" %}{% trans "Other" %}
+                    {% else %}{{ grp.name }}{% endif %}
+                </span>
+                            <span class="dcf-group-count">{{ grp.variables|length }}</span>
+                        </div>
+                        <div class="dcf-var-list">
+                            {% for var in grp.variables %}
+                                <div class="dcf-var-row">
+                                    <input type="checkbox" class="add-var-cb" name="variables"
+                                           value="{{ var.key }}" data-group="{{ grp.key }}" checked>
+                                    <span class="dcf-var-name">{{ var.name }}</span>
+                                    <span class="dcf-var-units">({{ var.exposed_units }})</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
             </div>
         {% endif %}
 
-        <form method="post">
-            {% csrf_token %}
+        {% if config_form %}
+            {% for field in config_form %}
+                {% if field.is_hidden %}
+                    {{ field }}
+                {% else %}
+                    {% include "wagtailadmin/shared/field.html" %}
+                {% endif %}
+            {% endfor %}
+        {% else %}
+            <p class="dcf-empty-msg">{% trans "No configuration fields required for this collection." %}</p>
+        {% endif %}
 
-            {% if multi_variable and not is_edit %}
-                <div class="dcf-vars-section">
-                    <div class="dcf-vars-header">
-                        <p class="dcf-vars-label">{% trans "Variables" %}</p>
-                        <label class="dcf-select-all-label">
-                            <input type="checkbox" id="add-select-all" checked>
-                            {% trans "Select all" %}
-                        </label>
-                    </div>
-
-                    {% for grp in variable_groups %}
-                        <div class="dcf-group">
-                            <div class="dcf-group-header">
-                                <input type="checkbox" class="add-group-cb" data-group="{{ grp.key }}" checked>
-                                <span class="dcf-group-name">
-                        {% if grp.type == "ungrouped" and grp.name %}{{ grp.name }}
-                            {% elif grp.type == "ungrouped" %}{% trans "Other" %}
-                        {% else %}{{ grp.name }}{% endif %}
-                    </span>
-                                <span class="dcf-group-count">{{ grp.variables|length }}</span>
-                            </div>
-                            <div class="dcf-var-list">
-                                {% for var in grp.variables %}
-                                    <div class="dcf-var-row">
-                                        <input type="checkbox" class="add-var-cb" name="variables"
-                                               value="{{ var.key }}" data-group="{{ grp.key }}" checked>
-                                        <span class="dcf-var-name">{{ var.name }}</span>
-                                        <span class="dcf-var-units">({{ var.exposed_units }})</span>
-                                    </div>
-                                {% endfor %}
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-
-            {% if config_form %}
-                {% for field in config_form %}
-                    {% if field.is_hidden %}
-                        {{ field }}
-                    {% else %}
-                        {% include "wagtailadmin/shared/field.html" %}
-                    {% endif %}
-                {% endfor %}
-            {% else %}
-                <p class="dcf-empty-msg">{% trans "No configuration fields required for this collection." %}</p>
-            {% endif %}
-
-            <div class="dcf-form-actions">
-                <button type="submit" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-save icon" aria-hidden="true">
-                        <use href="#icon-save"></use>
-                    </svg>
-                </span>
-                    {% if is_edit %}
-                        {% trans "Save Changes" %}
-                    {% else %}
-                        {% trans "Add Collection" %}
-                    {% endif %}
-                </button>
-                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
-                    {% trans "Cancel" %}
-                </a>
-            </div>
-        </form>
-    </div>
+        <div class="dcf-form-actions">
+            <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper">
+                <svg class="icon icon-save icon" aria-hidden="true">
+                    <use href="#icon-save"></use>
+                </svg>
+            </span>
+                {% if is_edit %}
+                    {% trans "Save Changes" %}
+                {% else %}
+                    {% trans "Add Collection" %}
+                {% endif %}
+            </button>
+            <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                {% trans "Cancel" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}
 
 {% block extra_js %}

@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Acquisition Feed" %}{% endblock %}
@@ -88,15 +88,11 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=_("Acquisition Feed") icon="download" %}
-
-    <div class="nice-padding">
-        <div id="acquisition-feed"></div>
-        <p id="feed-empty" class="acq-empty" style="display:none">
-            {% trans "No acquisition activity yet." %}
-        </p>
-    </div>
+{% block main_content %}
+    <div id="acquisition-feed"></div>
+    <p id="feed-empty" class="acq-empty" style="display:none">
+        {% trans "No acquisition activity yet." %}
+    </p>
 {% endblock %}
 
 {% block extra_js %}

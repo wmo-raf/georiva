@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}
@@ -252,183 +252,179 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=source_verbose_name subtitle=_("Step 3 of 3 — Collections") icon="file-import" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <div class="gwiz-progress">
+        <span class="gwiz-step gwiz-step--done">
+            1. {% trans "Catalog" %}
+        </span>
+        <span class="gwiz-sep">→</span>
 
-    <div class="nice-padding">
-        <div class="gwiz-progress">
-            <span class="gwiz-step gwiz-step--done">
-                1. {% trans "Catalog" %}
-            </span>
-            <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--done">
+            2. {% trans "Feed Details" %}
+        </span>
+        <span class="gwiz-sep">→</span>
 
-            <span class="gwiz-step gwiz-step--done">
-                2. {% trans "Feed Details" %}
-            </span>
-            <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--active">
+            3. {% trans "Collections" %}
+        </span>
+    </div>
 
-            <span class="gwiz-step gwiz-step--active">
-                3. {% trans "Collections" %}
-            </span>
-        </div>
+    <form method="post" id="collections-form">
+        {% csrf_token %}
 
-        <form method="post" id="collections-form">
-            {% csrf_token %}
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="help-block help-block--{{ msg.tags }} gcol-message">{{ msg }}</div>
+            {% endfor %}
+        {% endif %}
 
-            {% if messages %}
-                {% for msg in messages %}
-                    <div class="help-block help-block--{{ msg.tags }} gcol-message">{{ msg }}</div>
-                {% endfor %}
-            {% endif %}
+        <p class="gcol-intro">
+            {% trans "Select which collections to create. Uncheck variables you don't need." %}
+        </p>
 
-            <p class="gcol-intro">
-                {% trans "Select which collections to create. Uncheck variables you don't need." %}
-            </p>
-
-            {% for entry in def_entries %}
-                {% with defn=entry.definition form=entry.config_form %}
-                    <div class="gcol-card {% if defn.key in prefill_keys %}gcol-card--selected{% endif %}"
-                         id="gcol-{{ defn.key }}">
-                        {# ── Header: toggle checkbox + title (no nested form controls) ── #}
-                        <div class="gcol-card__header">
-                            <div class="gcol-toggle-wrap">
-                                <input type="checkbox"
-                                       class="gcol-collection-cb"
-                                       name="collections"
-                                       value="{{ defn.key }}"
-                                       id="chk-{{ defn.key }}"
-                                       data-defn="{{ defn.key }}"
-                                       {% if defn.key in prefill_keys %}checked{% endif %}>
-                            </div>
-                            <div class="gcol-card__info">
-                                <label for="chk-{{ defn.key }}" class="gcol-toggle-label">
-                                    <p class="gcol-card__name">{{ defn.name }}</p>
-                                </label>
-                                <div class="gcol-card__meta">
-                                    {{ defn.time_resolution }}
-                                    {% if not entry.multi_variable %}
-                                        &nbsp;·&nbsp;
-                                        {% for var in defn.variables %}
-                                            <span class="gcol-single-var-tag">{{ var.name }} ({{ var.exposed_units }})</span>
-                                        {% endfor %}
-                                    {% else %}
-                                        &nbsp;·&nbsp;{% blocktrans count n=defn.variables|length %}{{ n }} variable
-                                        {% plural %}{{ n }}
-                                        variables{% endblocktrans %}
-                                    {% endif %}
-                                    {% if entry.definition.default_interval_minutes %}
-                                        &nbsp;·&nbsp; {% blocktrans with m=entry.definition.default_interval_minutes %}
-                                        every {{ m }}
-                                        min{% endblocktrans %}
-                                    {% endif %}
-                                </div>
-                            </div>
+        {% for entry in def_entries %}
+            {% with defn=entry.definition form=entry.config_form %}
+                <div class="gcol-card {% if defn.key in prefill_keys %}gcol-card--selected{% endif %}"
+                     id="gcol-{{ defn.key }}">
+                    {# ── Header: toggle checkbox + title (no nested form controls) ── #}
+                    <div class="gcol-card__header">
+                        <div class="gcol-toggle-wrap">
+                            <input type="checkbox"
+                                   class="gcol-collection-cb"
+                                   name="collections"
+                                   value="{{ defn.key }}"
+                                   id="chk-{{ defn.key }}"
+                                   data-defn="{{ defn.key }}"
+                                   {% if defn.key in prefill_keys %}checked{% endif %}>
                         </div>
-
-                        {# ── Body: variables + config ── #}
-                        <div class="gcol-card__body {% if defn.key in prefill_keys %}gcol-card__body--visible{% endif %}"
-                             id="gcol-body-{{ defn.key }}">
-                            {% if entry.multi_variable %}
-                                <div class="gcol-vars-section">
-                                    <div class="gcol-vars-header">
-                                        <label class="gcol-select-all-label">
-                                            <input type="checkbox"
-                                                   class="gcol-select-all"
-                                                   data-defn="{{ defn.key }}"
-                                                   checked>
-                                        </label>
-                                        <span class="gcol-vars-label">
-                                            {% trans "Variables" %}
-                                        </span>
-                                    </div>
-                                    {% for grp in entry.variable_groups %}
-                                        <div class="gcol-group">
-                                            <div class="gcol-group-header">
-                                                <input type="checkbox"
-                                                       class="gcol-group-cb"
-                                                       data-defn="{{ defn.key }}"
-                                                       data-group="{{ grp.key }}"
-                                                       checked>
-                                                <span class="gcol-group-name">
-                                                    {% if grp.type == "ungrouped" and grp.name %}
-                                                        {{ grp.name }}
-                                                    {% elif grp.type == "ungrouped" %}
-                                                        {% trans "Other" %}
-                                                    {% else %}
-                                                        {{ grp.name }}
-                                                    {% endif %}
-                                                </span>
-                                                <span class="gcol-group-count">
-                                                    {{ grp.variables|length }}
-                                                </span>
-                                            </div>
-                                            <div class="gcol-var-list">
-                                                {% for var in grp.variables %}
-                                                    <div class="gcol-var-row">
-                                                        <input type="checkbox"
-                                                               class="gcol-var-cb"
-                                                               name="vars_{{ defn.key }}"
-                                                               value="{{ var.key }}"
-                                                               data-defn="{{ defn.key }}"
-                                                               data-group="{{ grp.key }}"
-                                                               checked>
-                                                        <span class="gcol-var-name">
-                                                            {{ var.name }}
-                                                        </span>
-                                                        <span class="gcol-var-units">
-                                                            ({{ var.exposed_units }})
-                                                        </span>
-                                                    </div>
-                                                {% endfor %}
-                                            </div>
-                                        </div>
+                        <div class="gcol-card__info">
+                            <label for="chk-{{ defn.key }}" class="gcol-toggle-label">
+                                <p class="gcol-card__name">{{ defn.name }}</p>
+                            </label>
+                            <div class="gcol-card__meta">
+                                {{ defn.time_resolution }}
+                                {% if not entry.multi_variable %}
+                                    &nbsp;·&nbsp;
+                                    {% for var in defn.variables %}
+                                        <span class="gcol-single-var-tag">{{ var.name }} ({{ var.exposed_units }})</span>
                                     {% endfor %}
-                                </div>
-                            {% endif %}
-
-                            {% if form %}
-                                <div class="gcol-config-section">
-                                    <p class="gcol-config-label">{% trans "Collection Settings" %}</p>
-                                    {% for field in form %}
-                                        <div class="w-field__wrapper">
-                                            <label class="w-field__label" for="{{ field.id_for_label }}">
-                                                {{ field.label }}{% if field.field.required %} *{% endif %}
-                                            </label>
-                                            {{ field }}
-                                            {% if field.help_text %}
-                                                <p class="w-field__help-text">{{ field.help_text }}</p>{% endif %}
-                                            {% if field.errors %}
-                                                {% for error in field.errors %}
-                                                    <p class="error-message">
-                                                        {{ error }}
-                                                    </p>
-                                                {% endfor %}
-                                            {% endif %}
-                                        </div>
-                                    {% endfor %}
-                                </div>
-                            {% endif %}
-
+                                {% else %}
+                                    &nbsp;·&nbsp;{% blocktrans count n=defn.variables|length %}{{ n }} variable
+                                    {% plural %}{{ n }}
+                                    variables{% endblocktrans %}
+                                {% endif %}
+                                {% if entry.definition.default_interval_minutes %}
+                                    &nbsp;·&nbsp; {% blocktrans with m=entry.definition.default_interval_minutes %}
+                                    every {{ m }}
+                                    min{% endblocktrans %}
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
-                {% endwith %}
-            {% endfor %}
 
-            <div class="gcol-submit-row">
-                <button type="submit" class="button bicolor button--icon">
-                    <span class="icon-wrapper">
-                        <svg class="icon icon-arrow-right icon" aria-hidden="true">
-                            <use href="#icon-arrow-right"></use>
-                        </svg>
-                    </span>
-                    {% trans "Create Feed" %}
-                </button>
-                <a href="{% url 'wizard_step2_feed' model_name=model_name %}" class="button button-secondary">
-                    {% trans "Back" %}
-                </a>
-            </div>
-        </form>
-    </div>
+                    {# ── Body: variables + config ── #}
+                    <div class="gcol-card__body {% if defn.key in prefill_keys %}gcol-card__body--visible{% endif %}"
+                         id="gcol-body-{{ defn.key }}">
+                        {% if entry.multi_variable %}
+                            <div class="gcol-vars-section">
+                                <div class="gcol-vars-header">
+                                    <label class="gcol-select-all-label">
+                                        <input type="checkbox"
+                                               class="gcol-select-all"
+                                               data-defn="{{ defn.key }}"
+                                               checked>
+                                    </label>
+                                    <span class="gcol-vars-label">
+                                        {% trans "Variables" %}
+                                    </span>
+                                </div>
+                                {% for grp in entry.variable_groups %}
+                                    <div class="gcol-group">
+                                        <div class="gcol-group-header">
+                                            <input type="checkbox"
+                                                   class="gcol-group-cb"
+                                                   data-defn="{{ defn.key }}"
+                                                   data-group="{{ grp.key }}"
+                                                   checked>
+                                            <span class="gcol-group-name">
+                                                {% if grp.type == "ungrouped" and grp.name %}
+                                                    {{ grp.name }}
+                                                {% elif grp.type == "ungrouped" %}
+                                                    {% trans "Other" %}
+                                                {% else %}
+                                                    {{ grp.name }}
+                                                {% endif %}
+                                            </span>
+                                            <span class="gcol-group-count">
+                                                {{ grp.variables|length }}
+                                            </span>
+                                        </div>
+                                        <div class="gcol-var-list">
+                                            {% for var in grp.variables %}
+                                                <div class="gcol-var-row">
+                                                    <input type="checkbox"
+                                                           class="gcol-var-cb"
+                                                           name="vars_{{ defn.key }}"
+                                                           value="{{ var.key }}"
+                                                           data-defn="{{ defn.key }}"
+                                                           data-group="{{ grp.key }}"
+                                                           checked>
+                                                    <span class="gcol-var-name">
+                                                        {{ var.name }}
+                                                    </span>
+                                                    <span class="gcol-var-units">
+                                                        ({{ var.exposed_units }})
+                                                    </span>
+                                                </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                        {% if form %}
+                            <div class="gcol-config-section">
+                                <p class="gcol-config-label">{% trans "Collection Settings" %}</p>
+                                {% for field in form %}
+                                    <div class="w-field__wrapper">
+                                        <label class="w-field__label" for="{{ field.id_for_label }}">
+                                            {{ field.label }}{% if field.field.required %} *{% endif %}
+                                        </label>
+                                        {{ field }}
+                                        {% if field.help_text %}
+                                            <p class="w-field__help-text">{{ field.help_text }}</p>{% endif %}
+                                        {% if field.errors %}
+                                            {% for error in field.errors %}
+                                                <p class="error-message">
+                                                    {{ error }}
+                                                </p>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+
+                    </div>
+                </div>
+            {% endwith %}
+        {% endfor %}
+
+        <div class="gcol-submit-row">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-arrow-right icon" aria-hidden="true">
+                        <use href="#icon-arrow-right"></use>
+                    </svg>
+                </span>
+                {% trans "Create Feed" %}
+            </button>
+            <a href="{% url 'wizard_step2_feed' model_name=model_name %}" class="button button-secondary">
+                {% trans "Back" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}
 
 {% block extra_js %}

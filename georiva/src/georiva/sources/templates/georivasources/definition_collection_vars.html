@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Manage Variables" %} — {{ collection.name }}{% endblock %}
@@ -122,88 +122,84 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=_("Manage Variables") subtitle=collection.name icon="list-ul" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <div class="dcv-header-info">
+        <span class="dcv-collection-name">
+            {{ collection.name }}
+        </span>
+        <span class="dcv-meta">
+            {{ collection.catalog.slug }}/{{ collection.slug }}
+        </span>
+        <span class="dcv-meta">
+            {% blocktrans count n=var_total %}
+                {{ n }} variable in definition{% plural %}{{ n }} variables in definition
+            {% endblocktrans %}
+        </span>
+    </div>
 
-    <div class="nice-padding">
-        <div class="dcv-header-info">
-            <span class="dcv-collection-name">
-                {{ collection.name }}
+    <form method="post">
+        {% csrf_token %}
+
+        <div class="dcv-vars-header">
+            <span class="dcv-vars-label">
+                {% trans "Variables" %}
             </span>
-            <span class="dcv-meta">
-                {{ collection.catalog.slug }}/{{ collection.slug }}
-            </span>
-            <span class="dcv-meta">
-                {% blocktrans count n=var_total %}
-                    {{ n }} variable in definition{% plural %}{{ n }} variables in definition
-                {% endblocktrans %}
-            </span>
+            <label class="dcv-select-all-label">
+                <input type="checkbox" id="dcv-select-all">
+                {% trans "Select all" %}
+            </label>
         </div>
 
-        <form method="post">
-            {% csrf_token %}
-
-            <div class="dcv-vars-header">
-                <span class="dcv-vars-label">
-                    {% trans "Variables" %}
-                </span>
-                <label class="dcv-select-all-label">
-                    <input type="checkbox" id="dcv-select-all">
-                    {% trans "Select all" %}
-                </label>
-            </div>
-
-            {% for grp in variable_groups %}
-                <div class="dcv-group">
-                    <div class="dcv-group-header">
-                        <input type="checkbox" class="dcv-group-cb" data-group="{{ grp.key }}">
-                        <span class="dcv-group-name">
-                            {% if grp.type == "ungrouped" and grp.name %}
-                                {{ grp.name }}
-                            {% elif grp.type == "ungrouped" %}
-                                {% trans "Other" %}
-                            {% else %}
-                                {{ grp.name }}
-                            {% endif %}
-                        </span>
-                        <span class="dcv-group-count">{{ grp.variables|length }}</span>
-                    </div>
-                    <div class="dcv-var-list">
-                        {% for entry in grp.variables %}
-                            <div class="dcv-var-row">
-                                <input type="checkbox"
-                                       class="dcv-var-cb"
-                                       name="variables"
-                                       value="{{ entry.var_def.key }}"
-                                       data-group="{{ grp.key }}"
-                                       {% if entry.active %}checked{% endif %}>
-                                <span class="dcv-var-name">
-                                    {{ entry.var_def.name }}
-                                </span>
-                                <span class="dcv-var-units">
-                                    ({{ entry.var_def.exposed_units }})
-                                </span>
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endfor %}
-
-            <div class="dcv-actions">
-                <button type="submit" class="button bicolor button--icon">
-                    <span class="icon-wrapper">
-                        <svg class="icon icon-tick icon" aria-hidden="true">
-                            <use href="#icon-tick"></use>
-                        </svg>
+        {% for grp in variable_groups %}
+            <div class="dcv-group">
+                <div class="dcv-group-header">
+                    <input type="checkbox" class="dcv-group-cb" data-group="{{ grp.key }}">
+                    <span class="dcv-group-name">
+                        {% if grp.type == "ungrouped" and grp.name %}
+                            {{ grp.name }}
+                        {% elif grp.type == "ungrouped" %}
+                            {% trans "Other" %}
+                        {% else %}
+                            {{ grp.name }}
+                        {% endif %}
                     </span>
-                    {% trans "Save" %}
-                </button>
-                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
-                    {% trans "Cancel" %}
-                </a>
+                    <span class="dcv-group-count">{{ grp.variables|length }}</span>
+                </div>
+                <div class="dcv-var-list">
+                    {% for entry in grp.variables %}
+                        <div class="dcv-var-row">
+                            <input type="checkbox"
+                                   class="dcv-var-cb"
+                                   name="variables"
+                                   value="{{ entry.var_def.key }}"
+                                   data-group="{{ grp.key }}"
+                                   {% if entry.active %}checked{% endif %}>
+                            <span class="dcv-var-name">
+                                {{ entry.var_def.name }}
+                            </span>
+                            <span class="dcv-var-units">
+                                ({{ entry.var_def.exposed_units }})
+                            </span>
+                        </div>
+                    {% endfor %}
+                </div>
             </div>
-        </form>
-    </div>
+        {% endfor %}
+
+        <div class="dcv-actions">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-tick icon" aria-hidden="true">
+                        <use href="#icon-tick"></use>
+                    </svg>
+                </span>
+                {% trans "Save" %}
+            </button>
+            <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                {% trans "Cancel" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}
 
 {% block extra_js %}

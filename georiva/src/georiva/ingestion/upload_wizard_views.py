@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
@@ -25,6 +26,23 @@ STEP_LABELS = [
     _("Collection Setup"),
     _("Review"),
 ]
+
+
+def _wizard_chrome(step):
+    """Slim-header context for a wizard step (wagtailadmin/generic/base.html
+    renders breadcrumbs_items/header_title), plus the step counters the
+    progress pills read."""
+    return {
+        "breadcrumbs_items": [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
+            {"url": None, "label": _("Setup Wizard — %s") % STEP_LABELS[step - 1]},
+        ],
+        "header_title": _("Manual Upload Setup Wizard — %s") % STEP_LABELS[step - 1],
+        "header_icon": "upload",
+        "step": step,
+        "step_labels": STEP_LABELS,
+    }
 
 _FORMAT_EXAMPLES = {
     "YYYYMMDD":     "20250115.grib2",
@@ -147,8 +165,7 @@ def upload_wizard_step1(request):
         "all_catalogs": all_catalogs,
         "file_format_choices": file_format_choices,
         "session": session,
-        "step": 1,
-        "step_labels": STEP_LABELS,
+        **_wizard_chrome(1),
     })
 
 
@@ -199,8 +216,7 @@ def upload_wizard_step2(request):
     return render(request, "georivaingestion/wizard_step2_name.html", {
         "session": session,
         "default_config_name": default_config_name,
-        "step": 2,
-        "step_labels": STEP_LABELS,
+        **_wizard_chrome(2),
     })
 
 
@@ -388,8 +404,7 @@ def upload_wizard_step3(request):
                 "prefill_selected_json": selected_json_str or "[]",
                 "prefill_format": valid_time_format,
                 "prefill_is_forecast": is_forecast,
-                "step": 3,
-                "step_labels": STEP_LABELS,
+                **_wizard_chrome(3),
             })
 
         session.update({
@@ -421,8 +436,7 @@ def upload_wizard_step3(request):
         "prefill_selected_json": prefill_selected_json,
         "prefill_format": prefill_format,
         "prefill_is_forecast": prefill_is_forecast,
-        "step": 3,
-        "step_labels": STEP_LABELS,
+        **_wizard_chrome(3),
     })
 
 
@@ -453,8 +467,7 @@ def upload_wizard_step4(request):
             "units_json": json.dumps(units),
             "prefill_collections_json": prefill_collections_json,
             "prefill_assignments_json": prefill_assignments_json,
-            "step": 4,
-            "step_labels": STEP_LABELS,
+            **_wizard_chrome(4),
         })
 
     if request.method == "POST":
@@ -601,8 +614,7 @@ def upload_wizard_step5(request):
         "session": session,
         "catalog_display": catalog_display,
         "collections_display": collections_display,
-        "step": 5,
-        "step_labels": STEP_LABELS,
+        **_wizard_chrome(5),
     })
 
 

@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Delete Orphaned Product" %} — {{ product_label }}{% endblock %}
@@ -35,25 +35,21 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=_("Delete Orphaned Product") subtitle=product_label icon="warning" breadcrumbs=breadcrumbs_items %}
-
-    <div class="nice-padding">
-        <div class="god-box">
-            <p class="god-title">
-                {% blocktrans %}“{{ product_label }}” is no longer provided by this plugin.{% endblocktrans %}
-            </p>
-            <p class="god-note">
-                {% blocktrans %}Deleting it removes only its configuration row. Any collections it already published, and all their items and data, are kept.{% endblocktrans %}
-            </p>
-        </div>
-
-        <form method="post" action="{% url 'feed_product_delete_orphan' feed_pk=feed.pk product_pk=product.pk %}">
-            {% csrf_token %}
-            <div class="god-actions">
-                <button type="submit" class="button no">{% trans "Yes, delete the row" %}</button>
-                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
-            </div>
-        </form>
+{% block main_content %}
+    <div class="god-box">
+        <p class="god-title">
+            {% blocktrans %}“{{ product_label }}” is no longer provided by this plugin.{% endblocktrans %}
+        </p>
+        <p class="god-note">
+            {% blocktrans %}Deleting it removes only its configuration row. Any collections it already published, and all their items and data, are kept.{% endblocktrans %}
+        </p>
     </div>
+
+    <form method="post" action="{% url 'feed_product_delete_orphan' feed_pk=feed.pk product_pk=product.pk %}">
+        {% csrf_token %}
+        <div class="god-actions">
+            <button type="submit" class="button no">{% trans "Yes, delete the row" %}</button>
+            <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
 {% endblock %}

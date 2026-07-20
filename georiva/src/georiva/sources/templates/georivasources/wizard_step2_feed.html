@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}
@@ -92,79 +92,75 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=source_verbose_name subtitle=_("Step 2 of 3 — Feed Details") icon="file-import" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <div class="gwiz-progress">
+        <span class="gwiz-step gwiz-step--done">
+            1. {% trans "Catalog" %}
+        </span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--active">
+            2. {% trans "Feed Details" %}
+        </span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--pending">
+            3. {% trans "Collections" %}
+        </span>
+    </div>
 
-    <div class="nice-padding">
-        <div class="gwiz-progress">
-            <span class="gwiz-step gwiz-step--done">
-                1. {% trans "Catalog" %}
-            </span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--active">
-                2. {% trans "Feed Details" %}
-            </span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--pending">
-                3. {% trans "Collections" %}
-            </span>
+    <form method="post" action="">
+        {% csrf_token %}
+
+        <div class="w-field__wrapper gwiz-field">
+            <label class="w-field__label" for="new_feed_name">
+                {% trans "Feed Name" %} <sup>*</sup>
+            </label>
+            <input type="text" name="new_feed_name" id="new_feed_name" class="w-field__input"
+                   value="{{ prefill_feed_name|default:default_feed_name }}"
+                   placeholder="{{ default_feed_name }}"
+                   required>
         </div>
 
-        <form method="post" action="">
-            {% csrf_token %}
+        <div class="w-field__wrapper gwiz-field--lg">
+            <label class="w-field__label" for="new_feed_interval">
+                {% trans "Global Run Interval (minutes)" %}
+            </label>
+            <input type="number" name="new_feed_interval" id="new_feed_interval"
+                   class="w-field__input gwiz-interval-input"
+                   value="{{ prefill_interval|default:360 }}" min="5">
+            <p class="w-field__help-text">
+                {% trans "The Celery task fires at this cadence. If collections have different schedules, set this to the shortest one — per-collection intervals are configured in the next step." %}
+            </p>
+        </div>
 
-            <div class="w-field__wrapper gwiz-field">
-                <label class="w-field__label" for="new_feed_name">
-                    {% trans "Feed Name" %} <sup>*</sup>
-                </label>
-                <input type="text" name="new_feed_name" id="new_feed_name" class="w-field__input"
-                       value="{{ prefill_feed_name|default:default_feed_name }}"
-                       placeholder="{{ default_feed_name }}"
-                       required>
-            </div>
+        {% if extra_form %}
+            <fieldset class="gwiz-source-config">
+                <legend class="gwiz-source-config__legend">
+                    {% trans "Source Configuration" %}
+                </legend>
+                {% for field in extra_form %}
+                    {% if field.is_hidden %}
+                        {{ field }}
+                    {% else %}
+                        {% include "wagtailadmin/shared/field.html" %}
+                    {% endif %}
+                {% endfor %}
+            </fieldset>
+        {% endif %}
 
-            <div class="w-field__wrapper gwiz-field--lg">
-                <label class="w-field__label" for="new_feed_interval">
-                    {% trans "Global Run Interval (minutes)" %}
-                </label>
-                <input type="number" name="new_feed_interval" id="new_feed_interval"
-                       class="w-field__input gwiz-interval-input"
-                       value="{{ prefill_interval|default:360 }}" min="5">
-                <p class="w-field__help-text">
-                    {% trans "The Celery task fires at this cadence. If collections have different schedules, set this to the shortest one — per-collection intervals are configured in the next step." %}
-                </p>
-            </div>
-
-            {% if extra_form %}
-                <fieldset class="gwiz-source-config">
-                    <legend class="gwiz-source-config__legend">
-                        {% trans "Source Configuration" %}
-                    </legend>
-                    {% for field in extra_form %}
-                        {% if field.is_hidden %}
-                            {{ field }}
-                        {% else %}
-                            {% include "wagtailadmin/shared/field.html" %}
-                        {% endif %}
-                    {% endfor %}
-                </fieldset>
-            {% endif %}
-
-            <div class="gwiz-actions">
-                <button type="submit" class="button bicolor button--icon">
-                    <span class="icon-wrapper">
-                        <svg class="icon icon-arrow-right icon" aria-hidden="true">
-                            <use ref="#icon-arrow-right"></use>
-                        </svg>
-                    </span>
-                    {% trans "Next: Collections" %}
-                </button>
-                <a href="{% url 'wizard_step1_catalog' model_name=model_name %}" class="button button-secondary">
-                    {% trans "Back" %}
-                </a>
-            </div>
-        </form>
-    </div>
+        <div class="gwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-arrow-right icon" aria-hidden="true">
+                        <use ref="#icon-arrow-right"></use>
+                    </svg>
+                </span>
+                {% trans "Next: Collections" %}
+            </button>
+            <a href="{% url 'wizard_step1_catalog' model_name=model_name %}" class="button button-secondary">
+                {% trans "Back" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}
 
 {% block extra_js %}

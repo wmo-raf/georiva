@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Item lineage" %} — {{ item }}{% endblock %}
@@ -41,23 +41,19 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=item subtitle=_("Item lineage") icon="site" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <p class="glin-intro">
+        {% trans "The input items this produced item was derived from, read from the recorded derivation links." %}
+    </p>
 
-    <div class="nice-padding">
-        <p class="glin-intro">
-            {% trans "The input items this produced item was derived from, read from the recorded derivation links." %}
-        </p>
-
-        {% if sources %}
-            {% for source in sources %}
-                <div class="glin-source">
-                    <span class="glin-collection">{{ source.collection.slug }}</span>
-                    <span class="glin-when">{{ source }}</span>
-                </div>
-            {% endfor %}
-        {% else %}
-            <p class="glin-empty">{% trans "No recorded inputs for this item." %}</p>
-        {% endif %}
-    </div>
+    {% if sources %}
+        {% for source in sources %}
+            <div class="glin-source">
+                <span class="glin-collection">{{ source.collection.slug }}</span>
+                <span class="glin-when">{{ source }}</span>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="glin-empty">{% trans "No recorded inputs for this item." %}</p>
+    {% endif %}
 {% endblock %}

@@ -3,7 +3,21 @@
        used by both the wizard step (wizard mode) and the feed-detail panel
        (manage mode). Kept in one place so the two surfaces can't drift. */
     .gprod-stage {
+        position: relative;
         margin-bottom: 1.5em;
+        padding-left: 1em;
+    }
+
+    /* Left border of the stage bracket. Starts at the label's mid-height so it
+       meets the label's leading top-border segment at the corner. */
+    .gprod-stage::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0.5em;
+        bottom: 0;
+        width: 0;
+        border-left: 1px dashed var(--w-color-primary);
     }
 
     .gprod-stage__label {
@@ -14,15 +28,26 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: var(--w-color-grey-400);
-        margin: 0 0 0.6em;
+        color: var(--w-color-primary);
+        /* Pull the label back over the container's padding so its leading
+           segment starts exactly on the left border. */
+        margin: 0 0 0.6em -1em;
     }
 
+    /* Short leading top-border segment joining the left border to the label. */
+    .gprod-stage__label::before {
+        content: "";
+        flex: 0 0 0.45em;
+        height: 0;
+        border-top: 1px dashed var(--w-color-primary);
+    }
+
+    /* The rest of the top border, running from the label to the right edge. */
     .gprod-stage__label::after {
         content: "";
         flex: 1 1 auto;
-        height: 1px;
-        background: var(--w-color-border-furniture);
+        height: 0;
+        border-top: 1px dashed var(--w-color-primary);
     }
 
     .gprod-card {
@@ -177,10 +202,28 @@
         border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
     }
 
-    .gprod-card__edit {
+    .gprod-card__links {
         margin-left: auto;
-        font-size: 0.8em;
-        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+    }
+
+    .gprod-card__link {
+        font-size: 0.75em;
+        font-weight: 700;
+        padding: 0.25em 0.75em;
+        border-radius: 4px;
+        border: 1px solid color-mix(in srgb, var(--w-color-secondary) 40%, transparent);
+        color: var(--w-color-secondary);
+        background: var(--w-color-surface-page);
+        text-decoration: none;
+    }
+
+    .gprod-card__link:hover {
+        background: var(--w-color-secondary);
+        color: var(--w-color-white);
+        text-decoration: none;
     }
 
     .gprod-manage-body {

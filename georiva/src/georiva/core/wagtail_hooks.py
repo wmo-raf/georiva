@@ -1,5 +1,6 @@
 from adminboundarymanager.wagtail_hooks import AdminBoundaryViewSetGroup
 from django.urls import path, reverse_lazy
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
@@ -20,20 +21,18 @@ def urlconf_georivacore():
     ]
 
 
-# The single "Data" menu group: creation (Add Data) first, then the management
-# surfaces. These items were previously separate top-level menu entries; the
-# corresponding registrations in sources/ingestion hooks and the Catalog
-# viewset's add_to_admin_menu are disabled in favour of this group.
+# The "Data" menu group: creation (Add Data) first, then the acquisition
+# surfaces. Catalogs sits above this group as a top-level entry (the Catalog
+# viewset's add_to_admin_menu, order 390); derived products are reached from
+# each Data Feed's dashboard, not from a menu item.
 @hooks.register("register_admin_menu_item")
 def register_data_menu():
     return SubmenuMenuItem(
         _("Data"),
         Menu(items=[
             MenuItem(_("Add Data"), reverse_lazy("add_data"), icon_name="plus", order=10),
-            MenuItem(_("Catalogs"), reverse_lazy("catalog:index"), icon_name="globe", order=20),
             MenuItem(_("Automated Sources"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
             MenuItem(_("Manual Uploads"), reverse_lazy("manual_upload_config_list"), icon_name="upload", order=40),
-            MenuItem(_("Derived Products"), reverse_lazy("derived_product_tracking"), icon_name="cogs", order=50),
         ]),
         icon_name="folder-open-inverse",
         order=400,
@@ -70,6 +69,17 @@ def construct_homepage_summary_items(request, summary_items):
         CollectionSummaryItem(request),
         PluginSummaryItem(request),
     ]
+
+
+# wagtailadmin/generic/base.html wraps main_content in a bare .nice-padding,
+# which pads the sides only — Wagtail's own pages add w-mt-8 where they need
+# top space. Our function-based-view pages render straight into that wrapper,
+# so give the slim-header + bare-nice-padding pairing the same breathing room.
+@hooks.register("insert_global_admin_css")
+def main_content_breathing_space():
+    return mark_safe(
+        "<style>.w-sticky.w-z-header + .nice-padding { margin-top: 2rem; }</style>"
+    )
 
 
 @hooks.register("register_icons")
