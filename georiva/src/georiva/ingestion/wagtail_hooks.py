@@ -68,6 +68,9 @@ def register_manual_upload_config_urls():
         manual_upload_config_list,
         manual_upload_config_edit,
         manual_upload_config_delete,
+        manual_upload_variable_edit,
+        manual_upload_variable_add,
+        manual_upload_variable_remove,
     )
     from .upload_views import (
         manual_upload_page,
@@ -77,6 +80,12 @@ def register_manual_upload_config_urls():
     return [
         path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
         path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
+        path("manual-uploads/<int:pk>/variables/add/", manual_upload_variable_add,
+             name="manual_upload_variable_add"),
+        path("manual-uploads/<int:pk>/variables/<int:var_pk>/edit/", manual_upload_variable_edit,
+             name="manual_upload_variable_edit"),
+        path("manual-uploads/<int:pk>/variables/<int:var_pk>/remove/", manual_upload_variable_remove,
+             name="manual_upload_variable_remove"),
         path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
         path("manual-uploads/<int:pk>/upload/", manual_upload_page, name="manual_upload_page"),
         path("manual-uploads/<int:pk>/upload/extract-times/", manual_upload_extract_times,

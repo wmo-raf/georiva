@@ -97,16 +97,21 @@ class ManualUploadConfigEditTests(TestCase):
         response = self.client.get(EDIT_URL.format(99999))
         self.assertEqual(response.status_code, 404)
 
-    def test_edit_lists_variables_with_collection_link(self):
+    def test_edit_lists_variables_with_editor_actions(self):
         col = _make_collection(self.catalog, slug="surface")
-        ManualUploadConfigVariable.objects.create(
+        mcv = ManualUploadConfigVariable.objects.create(
             config=self.config, collection=col, variable_name="2t",
             long_name="2m temperature", units="K",
         )
         response = self.client.get(EDIT_URL.format(self.config.pk))
         self.assertContains(response, "2t")
         self.assertContains(response, "2m temperature")
-        self.assertContains(response, f"/admin/collection/edit/{col.pk}/")
+        # Variables are managed through the manual variable editor, never a
+        # link into the raw Collection form (permission-gated for data managers).
+        self.assertContains(
+            response, f"/admin/manual-uploads/{self.config.pk}/variables/{mcv.pk}/edit/"
+        )
+        self.assertNotContains(response, f"/admin/collection/edit/{col.pk}/")
 
 
 class ManualUploadConfigDeleteTests(TestCase):
