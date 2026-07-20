@@ -141,13 +141,12 @@ examples.
 
 We use a simple branching model:
 
-- `main` — stable, deployable state
-- `dev` — integration branch for ongoing work
-- Feature branches — branched from `dev`, named descriptively
+- `main` — stable, deployable state, and the base for all work
+- Feature branches — branched from `main`, named descriptively, squash-merged back via pull request
 
 ```
-dev
-  └── feature/gfs-source-plugin
+main
+  └── feat/gfs-source-plugin
   └── fix/item-datetime-indexing
   └── docs/plugin-authoring-guide
 ```
