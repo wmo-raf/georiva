@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Upload" %} — {{ upload_config.name }}{% endblock %}
@@ -95,81 +95,77 @@
 </style>
 {% endblock %}
 
-{% block content %}
-{% include "wagtailadmin/shared/header.html" with title=upload_config.name subtitle=_("Upload files") icon="upload" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+<div class="mup-meta">
+    <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ upload_config.catalog.name }}
+    &nbsp;·&nbsp;
+    <span class="mup-meta-label">{% trans "Format:" %}</span> {{ format_label }}
+    &nbsp;·&nbsp;
+    <span class="mup-meta-label">{% trans "Type:" %}</span>
+    {% if upload_config.is_forecast %}{% trans "Forecast" %}{% else %}{% trans "Observation" %}{% endif %}
+    {% if upload_config.valid_time_format != "CONTENT" %}
+    &nbsp;·&nbsp;
+    <span class="mup-meta-label">{% trans "Filename format:" %}</span> <code>{{ upload_config.valid_time_format }}</code>
+    {% endif %}
+</div>
 
-<div class="nice-padding">
-    <div class="mup-meta">
-        <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ upload_config.catalog.name }}
-        &nbsp;·&nbsp;
-        <span class="mup-meta-label">{% trans "Format:" %}</span> {{ format_label }}
-        &nbsp;·&nbsp;
-        <span class="mup-meta-label">{% trans "Type:" %}</span>
-        {% if upload_config.is_forecast %}{% trans "Forecast" %}{% else %}{% trans "Observation" %}{% endif %}
-        {% if upload_config.valid_time_format != "CONTENT" %}
-        &nbsp;·&nbsp;
-        <span class="mup-meta-label">{% trans "Filename format:" %}</span> <code>{{ upload_config.valid_time_format }}</code>
-        {% endif %}
+<form id="upload-form" class="mup-form">
+    {% csrf_token %}
+
+    {% if not is_geotiff %}
+    <div class="mup-field">
+        <div class="w-field__label">{% trans "Collections to be processed" %}</div>
+        <ul class="mup-collections">
+            {% for collection in affected_collections %}
+            <li>{{ collection.name }}</li>
+            {% endfor %}
+        </ul>
+        <div class="mup-help">{% trans "All active variables in these collections will be extracted from each uploaded file." %}</div>
     </div>
 
-    <form id="upload-form" class="mup-form">
-        {% csrf_token %}
-
-        {% if not is_geotiff %}
-        <div class="mup-field">
-            <div class="w-field__label">{% trans "Collections to be processed" %}</div>
-            <ul class="mup-collections">
-                {% for collection in affected_collections %}
-                <li>{{ collection.name }}</li>
-                {% endfor %}
-            </ul>
-            <div class="mup-help">{% trans "All active variables in these collections will be extracted from each uploaded file." %}</div>
+    <div class="w-field__wrapper mup-field" id="shared-time-field">
+        <label class="w-field__label" for="shared-time-input">
+            {{ time_label }}{% if time_required %} <sup>*</sup>{% endif %}
+        </label>
+        <input type="datetime-local" id="shared-time-input" class="w-field__input"
+               {% if time_required %}required{% endif %}>
+        <div class="mup-help">
+            {% if upload_config.valid_time_format != "CONTENT" %}
+            {% trans "Pre-filled from the filename when it matches the" %} <code>{{ upload_config.valid_time_format }}</code> {% trans "format." %}
+            {% else %}
+            {% trans "Pre-filled from the filename when it carries a" %} <code>GR--YYYYMMDDTHHMM--</code> {% trans "prefix." %}
+            {% endif %}
         </div>
-
-        <div class="w-field__wrapper mup-field" id="shared-time-field">
-            <label class="w-field__label" for="shared-time-input">
-                {{ time_label }}{% if time_required %} <sup>*</sup>{% endif %}
-            </label>
-            <input type="datetime-local" id="shared-time-input" class="w-field__input"
-                   {% if time_required %}required{% endif %}>
-            <div class="mup-help">
-                {% if upload_config.valid_time_format != "CONTENT" %}
-                {% trans "Pre-filled from the filename when it matches the" %} <code>{{ upload_config.valid_time_format }}</code> {% trans "format." %}
-                {% else %}
-                {% trans "Pre-filled from the filename when it carries a" %} <code>GR--YYYYMMDDTHHMM--</code> {% trans "prefix." %}
-                {% endif %}
-            </div>
-        </div>
-        {% endif %}
-
-        <div class="w-field__wrapper mup-field">
-            <label class="w-field__label" for="file-input">{% trans "Files" %} <sup>*</sup></label>
-            <input type="file" id="file-input" class="w-field__input"
-                   accept="{{ accept_extensions }}" multiple required>
-            <div class="mup-help">{{ format_label }} {% trans "files only" %} ({{ accept_extensions }})</div>
-        </div>
-
-        <div id="file-queue"></div>
-
-        <div class="mup-error" id="form-error"></div>
-
-        <div class="mup-actions">
-            <button type="submit" id="submit-btn" class="button bicolor button--icon">
-                <span class="icon-wrapper"><svg class="icon icon-upload" aria-hidden="true"><use href="#icon-upload"></use></svg></span>
-                {% trans "Upload & ingest" %}
-            </button>
-            <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Back" %}</a>
-        </div>
-    </form>
-
-    <div id="progress-log" class="mup-log">
-        <div class="mup-log-header">
-            <span class="mup-spinner" id="log-spinner"></span>
-            <span id="log-title">{% trans "Ingesting…" %}</span>
-        </div>
-        <ul class="mup-log-steps" id="log-steps"></ul>
-        <div class="mup-log-summary" id="log-summary"></div>
     </div>
+    {% endif %}
+
+    <div class="w-field__wrapper mup-field">
+        <label class="w-field__label" for="file-input">{% trans "Files" %} <sup>*</sup></label>
+        <input type="file" id="file-input" class="w-field__input"
+               accept="{{ accept_extensions }}" multiple required>
+        <div class="mup-help">{{ format_label }} {% trans "files only" %} ({{ accept_extensions }})</div>
+    </div>
+
+    <div id="file-queue"></div>
+
+    <div class="mup-error" id="form-error"></div>
+
+    <div class="mup-actions">
+        <button type="submit" id="submit-btn" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-upload" aria-hidden="true"><use href="#icon-upload"></use></svg></span>
+            {% trans "Upload & ingest" %}
+        </button>
+        <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Back" %}</a>
+    </div>
+</form>
+
+<div id="progress-log" class="mup-log">
+    <div class="mup-log-header">
+        <span class="mup-spinner" id="log-spinner"></span>
+        <span id="log-title">{% trans "Ingesting…" %}</span>
+    </div>
+    <ul class="mup-log-steps" id="log-steps"></ul>
+    <div class="mup-log-summary" id="log-summary"></div>
 </div>
 {% endblock %}
 

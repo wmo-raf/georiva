@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Edit Derived Product" %} — {{ product.display_label }}{% endblock %}
@@ -102,125 +102,121 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=product.display_label subtitle=_("Edit Derived Product") icon="cog" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    {% if messages %}
+        {% for msg in messages %}
+            <div class="help-block help-block--{{ msg.tags }}">{{ msg }}</div>
+        {% endfor %}
+    {% endif %}
 
-    <div class="nice-padding">
-        {% if messages %}
-            {% for msg in messages %}
-                <div class="help-block help-block--{{ msg.tags }}">{{ msg }}</div>
-            {% endfor %}
-        {% endif %}
+    <form method="post">
+        {% csrf_token %}
 
-        <form method="post">
-            {% csrf_token %}
+        {# ── 1. Display overrides #}
+        <div class="gpe-section">
+            <div class="gpe-section__header">
+                <p class="gpe-section__title">{% trans "Display" %}</p>
+                <p class="gpe-section__hint">
+                    {% trans "How this product is named across the app. Leave a field blank to use the plugin's declared text (which then refreshes on upgrades)." %}
+                </p>
+            </div>
+            <div class="gpe-section__body">
+                {% for field in display_form %}
+                    <div class="w-field__wrapper">
+                        <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<p class="w-field__help-text">{{ field.help_text }}</p>{% endif %}
+                        {% for error in field.errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
 
-            {# ── 1. Display overrides #}
+        {# ── 2. Output collections #}
+        {% if collection_pairs %}
             <div class="gpe-section">
                 <div class="gpe-section__header">
-                    <p class="gpe-section__title">{% trans "Display" %}</p>
+                    <p class="gpe-section__title">{% trans "Output collections" %}</p>
                     <p class="gpe-section__hint">
-                        {% trans "How this product is named across the app. Leave a field blank to use the plugin's declared text (which then refreshes on upgrades)." %}
+                        {% trans "The catalog-facing name and description of each collection this product produces." %}
                     </p>
                 </div>
                 <div class="gpe-section__body">
-                    {% for field in display_form %}
-                        <div class="w-field__wrapper">
-                            <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-                            {{ field }}
-                            {% if field.help_text %}<p class="w-field__help-text">{{ field.help_text }}</p>{% endif %}
-                            {% for error in field.errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                    {% for collection, form in collection_pairs %}
+                        <div class="gpe-collection">
+                            <p class="gpe-collection__slug">{{ collection.catalog.slug }}/{{ collection.slug }}</p>
+                            {% for field in form %}
+                                <div class="w-field__wrapper">
+                                    <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                    {{ field }}
+                                    {% for error in field.errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                                </div>
+                            {% endfor %}
                         </div>
                     {% endfor %}
                 </div>
             </div>
+        {% endif %}
 
-            {# ── 2. Output collections #}
-            {% if collection_pairs %}
-                <div class="gpe-section">
-                    <div class="gpe-section__header">
-                        <p class="gpe-section__title">{% trans "Output collections" %}</p>
-                        <p class="gpe-section__hint">
-                            {% trans "The catalog-facing name and description of each collection this product produces." %}
-                        </p>
-                    </div>
-                    <div class="gpe-section__body">
-                        {% for collection, form in collection_pairs %}
-                            <div class="gpe-collection">
-                                <p class="gpe-collection__slug">{{ collection.catalog.slug }}/{{ collection.slug }}</p>
-                                {% for field in form %}
-                                    <div class="w-field__wrapper">
-                                        <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-                                        {{ field }}
-                                        {% for error in field.errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
-                                    </div>
-                                {% endfor %}
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-
-            {# ── 3. Options (future runs only) #}
-            {% if config_form or is_scheduled %}
-                <div class="gpe-section">
-                    <div class="gpe-section__header">
-                        <p class="gpe-section__title">
-                            {% trans "Options" %}
-                            <span class="gpe-future-flag">{% trans "Affects future runs only" %}</span>
-                        </p>
-                        <p class="gpe-section__hint">
-                            {% trans "Changing these does not re-process already-produced data." %}
-                        </p>
-                    </div>
-                    <div class="gpe-section__body">
-                        {% if config_form %}
-                            {% for field in config_form %}
-                                <div class="w-field__wrapper">
-                                    <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-                                    {{ field }}
-                                </div>
-                            {% endfor %}
-                            {% for error in config_form.non_field_errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
-                        {% endif %}
-                        {% if is_scheduled %}
-                            <div class="w-field__wrapper">
-                                <label class="w-field__label" for="id_interval_minutes">{% trans "Run interval (minutes)" %}</label>
-                                <input type="number" name="interval_minutes" id="id_interval_minutes"
-                                       value="{{ interval_value|default_if_none:'' }}" min="5" class="w-field__input">
-                                <p class="w-field__help-text">{% trans "Leave blank to use the feed's global interval." %}</p>
-                                {% if interval_error %}<p class="gpe-error">{{ interval_error }}</p>{% endif %}
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-            {% endif %}
-
-            {# ── Structural identity (read-only) #}
+        {# ── 3. Options (future runs only) #}
+        {% if config_form or is_scheduled %}
             <div class="gpe-section">
                 <div class="gpe-section__header">
-                    <p class="gpe-section__title">{% trans "Structure" %}</p>
-                    <p class="gpe-section__hint">{% trans "Structural identity is fixed by the plugin declaration and can't be edited here." %}</p>
+                    <p class="gpe-section__title">
+                        {% trans "Options" %}
+                        <span class="gpe-future-flag">{% trans "Affects future runs only" %}</span>
+                    </p>
+                    <p class="gpe-section__hint">
+                        {% trans "Changing these does not re-process already-produced data." %}
+                    </p>
                 </div>
                 <div class="gpe-section__body">
-                    <dl class="gpe-readonly">
-                        <dt>{% trans "Key" %}</dt><dd>{{ product.definition_key }}</dd>
-                        <dt>{% trans "Recipe" %}</dt><dd>{{ product.recipe_type }}</dd>
-                        {% if definition %}
-                            <dt>{% trans "Trigger" %}</dt><dd>{{ definition.trigger_mode }}</dd>
-                            <dt>{% trans "Inputs" %}</dt>
-                            <dd>{% for ref in definition.inputs %}{{ ref.collection }} ({{ ref.tier }}){% if not forloop.last %}, {% endif %}{% endfor %}</dd>
-                            <dt>{% trans "Outputs" %}</dt>
-                            <dd>{% for ref in definition.outputs %}{{ ref.collection }}{% if not forloop.last %}, {% endif %}{% endfor %}</dd>
-                        {% endif %}
-                    </dl>
+                    {% if config_form %}
+                        {% for field in config_form %}
+                            <div class="w-field__wrapper">
+                                <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                                {{ field }}
+                            </div>
+                        {% endfor %}
+                        {% for error in config_form.non_field_errors %}<p class="gpe-error">{{ error }}</p>{% endfor %}
+                    {% endif %}
+                    {% if is_scheduled %}
+                        <div class="w-field__wrapper">
+                            <label class="w-field__label" for="id_interval_minutes">{% trans "Run interval (minutes)" %}</label>
+                            <input type="number" name="interval_minutes" id="id_interval_minutes"
+                                   value="{{ interval_value|default_if_none:'' }}" min="5" class="w-field__input">
+                            <p class="w-field__help-text">{% trans "Leave blank to use the feed's global interval." %}</p>
+                            {% if interval_error %}<p class="gpe-error">{{ interval_error }}</p>{% endif %}
+                        </div>
+                    {% endif %}
                 </div>
             </div>
+        {% endif %}
 
-            <div class="gpe-actions">
-                <button type="submit" class="button">{% trans "Save" %}</button>
-                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        {# ── Structural identity (read-only) #}
+        <div class="gpe-section">
+            <div class="gpe-section__header">
+                <p class="gpe-section__title">{% trans "Structure" %}</p>
+                <p class="gpe-section__hint">{% trans "Structural identity is fixed by the plugin declaration and can't be edited here." %}</p>
             </div>
-        </form>
-    </div>
+            <div class="gpe-section__body">
+                <dl class="gpe-readonly">
+                    <dt>{% trans "Key" %}</dt><dd>{{ product.definition_key }}</dd>
+                    <dt>{% trans "Recipe" %}</dt><dd>{{ product.recipe_type }}</dd>
+                    {% if definition %}
+                        <dt>{% trans "Trigger" %}</dt><dd>{{ definition.trigger_mode }}</dd>
+                        <dt>{% trans "Inputs" %}</dt>
+                        <dd>{% for ref in definition.inputs %}{{ ref.collection }} ({{ ref.tier }}){% if not forloop.last %}, {% endif %}{% endfor %}</dd>
+                        <dt>{% trans "Outputs" %}</dt>
+                        <dd>{% for ref in definition.outputs %}{{ ref.collection }}{% if not forloop.last %}, {% endif %}{% endfor %}</dd>
+                    {% endif %}
+                </dl>
+            </div>
+        </div>
+
+        <div class="gpe-actions">
+            <button type="submit" class="button">{% trans "Save" %}</button>
+            <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        </div>
+    </form>
 {% endblock %}

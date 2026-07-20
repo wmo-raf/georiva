@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{{ feed.name }}{% endblock %}
@@ -264,239 +264,235 @@
     {% include "georivasources/includes/product_chain_styles.html" %}
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=feed_type_name icon="file-import" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
 
-    <div class="nice-padding">
+    {# ── Action bar #}
+    <div class="gfeed-action-bar">
+        <a href="{% url 'data_feed_edit' pk=feed.pk %}" class="button bicolor button--icon">
+            <span class="icon-wrapper">
+                <svg class="icon icon-edit icon" aria-hidden="true">
+                    <use href="#icon-edit"></use>
+                </svg>
+            </span>
+            {% trans "Edit Details" %}
+        </a>
 
-        {# ── Action bar #}
-        <div class="gfeed-action-bar">
-            <a href="{% url 'data_feed_edit' pk=feed.pk %}" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-edit icon" aria-hidden="true">
-                        <use href="#icon-edit"></use>
-                    </svg>
-                </span>
-                {% trans "Edit Details" %}
+        <a href="{% url 'derived_product_chain' feed_pk=feed.pk %}" class="button bicolor button--icon">
+            <span class="icon-wrapper">
+                <svg class="icon icon-site icon" aria-hidden="true">
+                    <use href="#icon-site"></use>
+                </svg>
+            </span>
+            {% trans "View Chain" %}
+        </a>
+
+        {% if feed.delete_url %}
+            <a href="{{ feed.delete_url }}" class="button no">
+                {% trans "Delete" %}
             </a>
-
-            <a href="{% url 'derived_product_chain' feed_pk=feed.pk %}" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-site icon" aria-hidden="true">
-                        <use href="#icon-site"></use>
-                    </svg>
-                </span>
-                {% trans "View Chain" %}
-            </a>
-
-            {% if feed.delete_url %}
-                <a href="{{ feed.delete_url }}" class="button no">
-                    {% trans "Delete" %}
-                </a>
-            {% endif %}
-
-            <div class="gfeed-meta">
-                {% if feed.is_active %}
-                    <span class="gfeed-dot gfeed-dot--success"></span>
-                    <span class="gfeed-status-active">
-                        {% trans "Active" %}
-                    </span>
-                {% else %}
-                    <span class="gfeed-dot gfeed-dot--default"></span>
-                    <span class="gfeed-status-inactive">
-                        {% trans "Inactive" %}
-                    </span>
-                {% endif %}
-                &nbsp;·&nbsp;
-                {% blocktrans with interval=feed.interval_minutes %}Runs every {{ interval }} min{% endblocktrans %}
-            </div>
-        </div>
-
-        {# ── Activity stat cards (PRD #217 follow-up) #}
-        <div class="gfeed-stats">
-            <div class="gfeed-card">
-                <div class="gfeed-card__header">
-                    <div>
-                        <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
-                        <p class="gfeed-card__explainer">{% trans "Fetch runs pulling files from the source into storage." %}</p>
-                    </div>
-                    <a class="button button-small button-secondary"
-                       href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "View all" %}</a>
-                </div>
-                <div class="gfeed-activity-card__body">
-                    <div class="gfeed-activity-card__row">
-                        <span class="gfeed-stat__value">{{ acquisition_summary.total_runs }}</span>
-                        <span class="gfeed-stat__label">{% trans "Total Runs" %}</span>
-                    </div>
-                    {% with last=acquisition_summary.last_run %}
-                        {% if last %}
-                            <a class="gfeed-activity-card__link"
-                               href="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=last.pk %}">
-                                <span class="gfeed-activity-card__row">
-                                    <span class="gfeed-stat__label">{% trans "Last run" %}</span>
-                                    <span class="gfeed-status">
-                                        {% if last.status == "completed" %}
-                                            <span class="gfeed-dot gfeed-dot--success"></span>
-                                        {% elif last.status == "failed" %}
-                                            <span class="gfeed-dot gfeed-dot--failed"></span>
-                                        {% elif last.status == "running" %}
-                                            <span class="gfeed-dot gfeed-dot--running"></span>
-                                        {% else %}
-                                            <span class="gfeed-dot gfeed-dot--default"></span>
-                                        {% endif %}
-                                        {{ last.get_status_display }}
-                                    </span>
-                                    <span class="gfeed-meta">{{ last.started_at|timesince }} {% trans "ago" %}</span>
-                                </span>
-                                <span class="gfeed-activity-card__row">
-                                    <span class="gfeed-meta">
-                                        {% blocktrans with requested=last.files_requested failed=last.files_failed %}
-                                            {{ requested }} requested · {{ failed }} failed
-                                        {% endblocktrans %}
-                                    </span>
-                                </span>
-                            </a>
-                        {% else %}
-                            <span class="gfeed-meta">{% trans "No runs yet." %}</span>
-                        {% endif %}
-                    {% endwith %}
-                </div>
-            </div>
-
-            <div class="gfeed-card">
-                <div class="gfeed-card__header">
-                    <div>
-                        <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
-                        <p class="gfeed-card__explainer">{% trans "Processing of stored files into STAC items and assets." %}</p>
-                    </div>
-                    <a class="button button-small button-secondary"
-                       href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">{% trans "View all" %}</a>
-                </div>
-                <div class="gfeed-activity-card__body">
-                    <div class="gfeed-activity-counts">
-                        {% for value, label, count in ingestion_count_rows %}
-                            <a class="gfeed-activity-count gfeed-activity-count--{{ value }}"
-                               href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?status={{ value }}">
-                                <span class="gfeed-stat__value">{{ count }}</span>
-                                <span class="gfeed-stat__label">{{ label }}</span>
-                            </a>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {# ── Collections card #}
-        <div class="gfeed-card">
-            <div class="gfeed-card__header">
-                <h3 class="gfeed-card__title">
-                    {% trans "Collections" %}
-                    {% with enabled=definition_link_pairs|length %}
-                        &nbsp;({{ enabled }})
-                    {% endwith %}
-                </h3>
-            </div>
-            {% if definition_link_pairs %}
-                <div class="gfeed-defn-grid">
-                    {% for pair in definition_link_pairs %}
-                        {% with defn=pair.definition link=pair.link enabled=pair.enabled %}
-                            <div class="gfeed-defn-card {% if enabled %}gfeed-defn-card--enabled{% else %}gfeed-defn-card--disabled{% endif %}">
-                                <div class="gfeed-defn-header">
-                                    <span class="gfeed-defn-name">
-                                        {{ defn.name }}
-                                    </span>
-                                    <span class="gfeed-defn-badge {% if enabled %}gfeed-defn-badge--enabled{% else %}gfeed-defn-badge--disabled{% endif %}">
-                                        {% if enabled %}
-                                            {% trans "Enabled" %}
-                                        {% else %}
-                                            {% trans "Disabled" %}
-                                        {% endif %}
-                                    </span>
-                                </div>
-                                <div class="gfeed-defn-meta">
-                                    {{ defn.time_resolution }}
-                                    &nbsp;·&nbsp;
-                                    {% if enabled and pair.multi_variable %}
-                                        {{ pair.var_count }}&nbsp;/&nbsp;{{ pair.var_total }}
-                                        {% blocktrans count n=pair.var_total %}
-                                            variable{% plural %}variables
-                                        {% endblocktrans %}
-                                    {% else %}
-                                        {% blocktrans count n=defn.variables|length %}{{ n }} variable
-                                            {% plural %}{{ n }} variables
-                                        {% endblocktrans %}
-                                    {% endif %}
-                                    {% if link.effective_interval %}
-                                        &nbsp;·&nbsp; every {{ link.effective_interval }} min
-                                    {% endif %}
-                                </div>
-                                {% if enabled and link %}
-                                    {% with cfg=link.config %}
-                                        {% if cfg %}
-                                            <div class="gfeed-defn-config">
-                                                {% for key, val in cfg.items %}
-                                                    {% if val %}
-                                                        <span class="gfeed-link-tag">
-                                                            {{ key }}: {{ val }}
-                                                        </span>
-                                                    {% endif %}
-                                                {% endfor %}
-                                            </div>
-                                        {% endif %}
-                                    {% endwith %}
-                                {% endif %}
-                                <div class="gfeed-defn-actions">
-                                    {% if enabled and link %}
-                                        {% if pair.multi_variable %}
-                                            <a href="{% url 'definition_collection_vars_edit' feed_pk=feed.pk link_pk=link.pk %}"
-                                               class="button button-small button-secondary">
-                                                {% trans "Variables" %}
-                                            </a>
-                                        {% endif %}
-                                        {% if link.has_configurable_fields %}
-                                            <a href="{% url 'definition_collection_edit' feed_pk=feed.pk link_pk=link.pk %}"
-                                               class="button button-small button-secondary">
-                                                {% trans "Edit Config" %}
-                                            </a>
-                                        {% endif %}
-                                        <a href="{% url 'definition_collection_remove' feed_pk=feed.pk link_pk=link.pk %}"
-                                           class="button button-small no">
-                                            {% trans "Remove" %}
-                                        </a>
-                                    {% else %}
-                                        <a href="{% url 'definition_collection_add' feed_pk=feed.pk definition_key=defn.key %}"
-                                           class="button button-small bicolor button--icon">
-                                            <span class="icon-wrapper">
-                                                <svg class="icon icon-plus icon" aria-hidden="true">
-                                                    <use href="#icon-plus"></use>
-                                                </svg>
-                                            </span>
-                                            {% trans "Add" %}
-                                        </a>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        {% endwith %}
-                    {% endfor %}
-                </div>
-            {% else %}
-                <p class="gfeed-empty-state">
-                    {% trans "No collection definitions for this feed type." %}
-                </p>
-            {% endif %}
-        </div>
-
-        {# ── Derived products chain panel #}
-        {% if product_stage_lanes or product_orphans %}
-            <div class="gfeed-card">
-                <div class="gfeed-card__header">
-                    <h3 class="gfeed-card__title">{% trans "Derived Products" %}</h3>
-                </div>
-                <div class="gfeed-card__body">
-                    {% include "georivasources/includes/product_chain.html" with stage_lanes=product_stage_lanes orphans=product_orphans mode="manage" %}
-                </div>
-            </div>
         {% endif %}
 
+        <div class="gfeed-meta">
+            {% if feed.is_active %}
+                <span class="gfeed-dot gfeed-dot--success"></span>
+                <span class="gfeed-status-active">
+                    {% trans "Active" %}
+                </span>
+            {% else %}
+                <span class="gfeed-dot gfeed-dot--default"></span>
+                <span class="gfeed-status-inactive">
+                    {% trans "Inactive" %}
+                </span>
+            {% endif %}
+            &nbsp;·&nbsp;
+            {% blocktrans with interval=feed.interval_minutes %}Runs every {{ interval }} min{% endblocktrans %}
+        </div>
     </div>
+
+    {# ── Activity stat cards (PRD #217 follow-up) #}
+    <div class="gfeed-stats">
+        <div class="gfeed-card">
+            <div class="gfeed-card__header">
+                <div>
+                    <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
+                    <p class="gfeed-card__explainer">{% trans "Fetch runs pulling files from the source into storage." %}</p>
+                </div>
+                <a class="button button-small button-secondary"
+                   href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "View all" %}</a>
+            </div>
+            <div class="gfeed-activity-card__body">
+                <div class="gfeed-activity-card__row">
+                    <span class="gfeed-stat__value">{{ acquisition_summary.total_runs }}</span>
+                    <span class="gfeed-stat__label">{% trans "Total Runs" %}</span>
+                </div>
+                {% with last=acquisition_summary.last_run %}
+                    {% if last %}
+                        <a class="gfeed-activity-card__link"
+                           href="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=last.pk %}">
+                            <span class="gfeed-activity-card__row">
+                                <span class="gfeed-stat__label">{% trans "Last run" %}</span>
+                                <span class="gfeed-status">
+                                    {% if last.status == "completed" %}
+                                        <span class="gfeed-dot gfeed-dot--success"></span>
+                                    {% elif last.status == "failed" %}
+                                        <span class="gfeed-dot gfeed-dot--failed"></span>
+                                    {% elif last.status == "running" %}
+                                        <span class="gfeed-dot gfeed-dot--running"></span>
+                                    {% else %}
+                                        <span class="gfeed-dot gfeed-dot--default"></span>
+                                    {% endif %}
+                                    {{ last.get_status_display }}
+                                </span>
+                                <span class="gfeed-meta">{{ last.started_at|timesince }} {% trans "ago" %}</span>
+                            </span>
+                            <span class="gfeed-activity-card__row">
+                                <span class="gfeed-meta">
+                                    {% blocktrans with requested=last.files_requested failed=last.files_failed %}
+                                        {{ requested }} requested · {{ failed }} failed
+                                    {% endblocktrans %}
+                                </span>
+                            </span>
+                        </a>
+                    {% else %}
+                        <span class="gfeed-meta">{% trans "No runs yet." %}</span>
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+
+        <div class="gfeed-card">
+            <div class="gfeed-card__header">
+                <div>
+                    <h3 class="gfeed-card__title">{% trans "Ingestion Activity" %}</h3>
+                    <p class="gfeed-card__explainer">{% trans "Processing of stored files into STAC items and assets." %}</p>
+                </div>
+                <a class="button button-small button-secondary"
+                   href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}">{% trans "View all" %}</a>
+            </div>
+            <div class="gfeed-activity-card__body">
+                <div class="gfeed-activity-counts">
+                    {% for value, label, count in ingestion_count_rows %}
+                        <a class="gfeed-activity-count gfeed-activity-count--{{ value }}"
+                           href="{% url 'data_feed_ingestions' feed_pk=feed.pk %}?status={{ value }}">
+                            <span class="gfeed-stat__value">{{ count }}</span>
+                            <span class="gfeed-stat__label">{{ label }}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Collections card #}
+    <div class="gfeed-card">
+        <div class="gfeed-card__header">
+            <h3 class="gfeed-card__title">
+                {% trans "Collections" %}
+                {% with enabled=definition_link_pairs|length %}
+                    &nbsp;({{ enabled }})
+                {% endwith %}
+            </h3>
+        </div>
+        {% if definition_link_pairs %}
+            <div class="gfeed-defn-grid">
+                {% for pair in definition_link_pairs %}
+                    {% with defn=pair.definition link=pair.link enabled=pair.enabled %}
+                        <div class="gfeed-defn-card {% if enabled %}gfeed-defn-card--enabled{% else %}gfeed-defn-card--disabled{% endif %}">
+                            <div class="gfeed-defn-header">
+                                <span class="gfeed-defn-name">
+                                    {{ defn.name }}
+                                </span>
+                                <span class="gfeed-defn-badge {% if enabled %}gfeed-defn-badge--enabled{% else %}gfeed-defn-badge--disabled{% endif %}">
+                                    {% if enabled %}
+                                        {% trans "Enabled" %}
+                                    {% else %}
+                                        {% trans "Disabled" %}
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="gfeed-defn-meta">
+                                {{ defn.time_resolution }}
+                                &nbsp;·&nbsp;
+                                {% if enabled and pair.multi_variable %}
+                                    {{ pair.var_count }}&nbsp;/&nbsp;{{ pair.var_total }}
+                                    {% blocktrans count n=pair.var_total %}
+                                        variable{% plural %}variables
+                                    {% endblocktrans %}
+                                {% else %}
+                                    {% blocktrans count n=defn.variables|length %}{{ n }} variable
+                                        {% plural %}{{ n }} variables
+                                    {% endblocktrans %}
+                                {% endif %}
+                                {% if link.effective_interval %}
+                                    &nbsp;·&nbsp; every {{ link.effective_interval }} min
+                                {% endif %}
+                            </div>
+                            {% if enabled and link %}
+                                {% with cfg=link.config %}
+                                    {% if cfg %}
+                                        <div class="gfeed-defn-config">
+                                            {% for key, val in cfg.items %}
+                                                {% if val %}
+                                                    <span class="gfeed-link-tag">
+                                                        {{ key }}: {{ val }}
+                                                    </span>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                {% endwith %}
+                            {% endif %}
+                            <div class="gfeed-defn-actions">
+                                {% if enabled and link %}
+                                    {% if pair.multi_variable %}
+                                        <a href="{% url 'definition_collection_vars_edit' feed_pk=feed.pk link_pk=link.pk %}"
+                                           class="button button-small button-secondary">
+                                            {% trans "Variables" %}
+                                        </a>
+                                    {% endif %}
+                                    {% if link.has_configurable_fields %}
+                                        <a href="{% url 'definition_collection_edit' feed_pk=feed.pk link_pk=link.pk %}"
+                                           class="button button-small button-secondary">
+                                            {% trans "Edit Config" %}
+                                        </a>
+                                    {% endif %}
+                                    <a href="{% url 'definition_collection_remove' feed_pk=feed.pk link_pk=link.pk %}"
+                                       class="button button-small no">
+                                        {% trans "Remove" %}
+                                    </a>
+                                {% else %}
+                                    <a href="{% url 'definition_collection_add' feed_pk=feed.pk definition_key=defn.key %}"
+                                       class="button button-small bicolor button--icon">
+                                        <span class="icon-wrapper">
+                                            <svg class="icon icon-plus icon" aria-hidden="true">
+                                                <use href="#icon-plus"></use>
+                                            </svg>
+                                        </span>
+                                        {% trans "Add" %}
+                                    </a>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endwith %}
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="gfeed-empty-state">
+                {% trans "No collection definitions for this feed type." %}
+            </p>
+        {% endif %}
+    </div>
+
+    {# ── Derived products chain panel #}
+    {% if product_stage_lanes or product_orphans %}
+        <div class="gfeed-card">
+            <div class="gfeed-card__header">
+                <h3 class="gfeed-card__title">{% trans "Derived Products" %}</h3>
+            </div>
+            <div class="gfeed-card__body">
+                {% include "georivasources/includes/product_chain.html" with stage_lanes=product_stage_lanes orphans=product_orphans mode="manage" %}
+            </div>
+        </div>
+    {% endif %}
+
 {% endblock %}

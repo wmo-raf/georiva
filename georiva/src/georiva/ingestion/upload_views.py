@@ -111,11 +111,14 @@ def manual_upload_page(request, pk):
                 affected_collections.append(v.collection)
 
     return render(request, "georivaingestion/manual_upload_page.html", {
+        # Rendered by the slim header via wagtailadmin/generic/base.html.
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": "", "label": config.name},
+            {"url": None, "label": config.name},
         ],
+        "header_title": _("Upload files — %s") % config.name,
+        "header_icon": "upload",
         # 'upload_config', not 'config': wagtailadmin/admin_base.html assigns
         # {% wagtail_config as config %}, which shadows a 'config' context var
         # by the time extra_js renders.

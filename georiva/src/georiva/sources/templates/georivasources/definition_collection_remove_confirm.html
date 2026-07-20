@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Remove Collection" %} — {{ collection.name }}{% endblock %}
@@ -67,57 +67,53 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html"  with title=_("Remove Collection") subtitle=feed.name icon="warning" breadcrumbs=breadcrumbs_items %}
-
-    <div class="nice-padding">
-        <div class="rmc-collection-meta">
-            <strong>
-                {{ collection.name }}
-            </strong>
-            <span class="rmc-collection-slug">
-                {{ collection.catalog.slug }}/{{ collection.slug }}
-            </span>
-            <div class="rmc-collection-extra">
-                {{ collection.time_resolution }}
-                &nbsp;·&nbsp;
-                {% blocktrans count n=collection.item_count %}
-                    {{ n }} item{% plural %}{{ n }} items
-                {% endblocktrans %}
-            </div>
+{% block main_content %}
+    <div class="rmc-collection-meta">
+        <strong>
+            {{ collection.name }}
+        </strong>
+        <span class="rmc-collection-slug">
+            {{ collection.catalog.slug }}/{{ collection.slug }}
+        </span>
+        <div class="rmc-collection-extra">
+            {{ collection.time_resolution }}
+            &nbsp;·&nbsp;
+            {% blocktrans count n=collection.item_count %}
+                {{ n }} item{% plural %}{{ n }} items
+            {% endblocktrans %}
         </div>
-
-        <div class="rmc-warning-box">
-            <p class="rmc-warning-title">{% trans "This action will permanently delete:" %}</p>
-            <ul class="rmc-warning-list">
-                <li>
-                    {% trans "The collection" %} <strong>{{ collection.name }}</strong>
-                </li>
-                <li>
-                    {% trans "All variables in this collection" %}
-                </li>
-                <li>
-                    {% trans "All items and their raster/visual assets" %}
-                </li>
-                <li>
-                    {% trans "All ingestion logs associated with this collection" %}
-                </li>
-            </ul>
-            <p class="rmc-warning-note">
-                {% trans "This cannot be undone." %}
-            </p>
-        </div>
-
-        <form method="post">
-            {% csrf_token %}
-            <div class="rmc-actions">
-                <button type="submit" class="button no">
-                    {% trans "Yes, delete collection" %}
-                </button>
-                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
-                    {% trans "Cancel" %}
-                </a>
-            </div>
-        </form>
     </div>
+
+    <div class="rmc-warning-box">
+        <p class="rmc-warning-title">{% trans "This action will permanently delete:" %}</p>
+        <ul class="rmc-warning-list">
+            <li>
+                {% trans "The collection" %} <strong>{{ collection.name }}</strong>
+            </li>
+            <li>
+                {% trans "All variables in this collection" %}
+            </li>
+            <li>
+                {% trans "All items and their raster/visual assets" %}
+            </li>
+            <li>
+                {% trans "All ingestion logs associated with this collection" %}
+            </li>
+        </ul>
+        <p class="rmc-warning-note">
+            {% trans "This cannot be undone." %}
+        </p>
+    </div>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="rmc-actions">
+            <button type="submit" class="button no">
+                {% trans "Yes, delete collection" %}
+            </button>
+            <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                {% trans "Cancel" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}

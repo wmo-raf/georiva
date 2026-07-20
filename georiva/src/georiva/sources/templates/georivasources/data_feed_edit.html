@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}
@@ -22,42 +22,38 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Edit Feed Details") icon="file-import" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <form method="post">
+        {% csrf_token %}
 
-    <div class="nice-padding">
-        <form method="post">
-            {% csrf_token %}
-
-            {% if form.non_field_errors %}
-                <div class="help-block help-block--critical gfeed-error-banner">
-                    {{ form.non_field_errors }}
-                </div>
-            {% endif %}
-
-            {% for field in form %}
-                {% if field.is_hidden %}
-                    {{ field }}
-                {% else %}
-                    {% include "wagtailadmin/shared/field.html" %}
-                {% endif %}
-            {% endfor %}
-
-            <div class="gfeed-form-actions">
-                <button type="submit" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-save icon" aria-hidden="true">
-                        <use href="#icon-save"></use>
-                    </svg>
-                </span>
-                    {% trans "Save Changes" %}
-                </button>
-                <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
-                    {% trans "Cancel" %}
-                </a>
+        {% if form.non_field_errors %}
+            <div class="help-block help-block--critical gfeed-error-banner">
+                {{ form.non_field_errors }}
             </div>
-        </form>
-    </div>
+        {% endif %}
+
+        {% for field in form %}
+            {% if field.is_hidden %}
+                {{ field }}
+            {% else %}
+                {% include "wagtailadmin/shared/field.html" %}
+            {% endif %}
+        {% endfor %}
+
+        <div class="gfeed-form-actions">
+            <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper">
+                <svg class="icon icon-save icon" aria-hidden="true">
+                    <use href="#icon-save"></use>
+                </svg>
+            </span>
+                {% trans "Save Changes" %}
+            </button>
+            <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
+                {% trans "Cancel" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}
 
 {% block extra_js %}

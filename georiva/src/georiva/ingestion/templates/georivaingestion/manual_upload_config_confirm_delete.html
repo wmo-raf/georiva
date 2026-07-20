@@ -1,22 +1,18 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Delete configuration" %} — {{ config.name }}{% endblock %}
 
-{% block content %}
-{% include "wagtailadmin/shared/header.html" with title=_("Delete configuration") subtitle=config.name icon="bin" breadcrumbs=breadcrumbs_items %}
-
-<div class="nice-padding">
-    <p>{% blocktrans with name=config.name %}Are you sure you want to delete <strong>{{ name }}</strong> and all its variables? This cannot be undone.{% endblocktrans %}</p>
-    <form method="post" action="">
-        {% csrf_token %}
-        <div style="display:flex;gap:1em;margin-top:1.5em;">
-            <button type="submit" class="button bicolor button--icon button-warning">
-                <span class="icon-wrapper"><svg class="icon icon-bin" aria-hidden="true"><use href="#icon-bin"></use></svg></span>
-                {% trans "Yes, delete" %}
-            </button>
-            <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Cancel" %}</a>
-        </div>
-    </form>
-</div>
+{% block main_content %}
+<p>{% blocktrans with name=config.name %}Are you sure you want to delete <strong>{{ name }}</strong> and all its variables? This cannot be undone.{% endblocktrans %}</p>
+<form method="post" action="">
+    {% csrf_token %}
+    <div style="display:flex;gap:1em;margin-top:1.5em;">
+        <button type="submit" class="button bicolor button--icon button-warning">
+            <span class="icon-wrapper"><svg class="icon icon-bin" aria-hidden="true"><use href="#icon-bin"></use></svg></span>
+            {% trans "Yes, delete" %}
+        </button>
+        <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Cancel" %}</a>
+    </div>
+</form>
 {% endblock %}

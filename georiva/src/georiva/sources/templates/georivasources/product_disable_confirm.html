@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Disable Derived Product" %} — {{ product_label }}{% endblock %}
@@ -41,38 +41,34 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=_("Disable Derived Product") subtitle=product_label icon="warning" breadcrumbs=breadcrumbs_items %}
-
-    <div class="nice-padding">
-        <div class="pdc-warning-box">
-            <p class="pdc-warning-title">
-                {% blocktrans %}Disabling “{{ product_label }}” will also disable the products that depend on it:{% endblocktrans %}
-            </p>
-            <ul class="pdc-dependent-list">
-                {% for label in dependent_labels %}
-                    <li><strong>{{ label }}</strong></li>
-                {% endfor %}
-            </ul>
-            <p class="pdc-warning-intro">
-                {% trans "Their configuration is kept — they can be re-enabled later once their dependencies are on again." %}
-            </p>
-        </div>
-
-        <form method="post" action="{{ form_action }}">
-            {% csrf_token %}
-            {% for name, value in hidden_fields.items %}
-                <input type="hidden" name="{{ name }}" value="{{ value }}">
+{% block main_content %}
+    <div class="pdc-warning-box">
+        <p class="pdc-warning-title">
+            {% blocktrans %}Disabling “{{ product_label }}” will also disable the products that depend on it:{% endblocktrans %}
+        </p>
+        <ul class="pdc-dependent-list">
+            {% for label in dependent_labels %}
+                <li><strong>{{ label }}</strong></li>
             {% endfor %}
-            <input type="hidden" name="confirmed" value="1">
-            <div class="pdc-actions">
-                <button type="submit" class="button no">
-                    {% trans "Yes, disable all" %}
-                </button>
-                <a href="{{ cancel_url }}" class="button button-secondary">
-                    {% trans "Cancel" %}
-                </a>
-            </div>
-        </form>
+        </ul>
+        <p class="pdc-warning-intro">
+            {% trans "Their configuration is kept — they can be re-enabled later once their dependencies are on again." %}
+        </p>
     </div>
+
+    <form method="post" action="{{ form_action }}">
+        {% csrf_token %}
+        {% for name, value in hidden_fields.items %}
+            <input type="hidden" name="{{ name }}" value="{{ value }}">
+        {% endfor %}
+        <input type="hidden" name="confirmed" value="1">
+        <div class="pdc-actions">
+            <button type="submit" class="button no">
+                {% trans "Yes, disable all" %}
+            </button>
+            <a href="{{ cancel_url }}" class="button button-secondary">
+                {% trans "Cancel" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}

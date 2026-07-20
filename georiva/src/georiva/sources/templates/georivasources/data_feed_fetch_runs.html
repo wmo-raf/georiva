@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% blocktrans with label=feed.name %}Acquisition Activity — {{ label }}{% endblocktrans %}{% endblock %}
@@ -159,126 +159,122 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=feed.name subtitle=_("Acquisition Activity") icon="download" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <div class="gaq-actions">
+        <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="check_new_files">
+            <button class="button button-secondary" type="submit">{% trans "Check for new files" %}</button>
+        </form>
+        <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="fetch_now">
+            <button class="button" type="submit">{% trans "Fetch now" %}</button>
+        </form>
+    </div>
 
-    <div class="nice-padding">
-        <div class="gaq-actions">
-            <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="check_new_files">
-                <button class="button button-secondary" type="submit">{% trans "Check for new files" %}</button>
-            </form>
-            <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="fetch_now">
-                <button class="button" type="submit">{% trans "Fetch now" %}</button>
-            </form>
-        </div>
-
-        {% if check_results is not None %}
-            <div class="gaq-check">
-                <h2 class="gaq-check__title">{% trans "Check results" %}</h2>
-                {% for entry in check_results %}
-                    <div class="gaq-check__group">
-                        <h3 class="gaq-check__collection">
-                            {{ entry.collection.name }}
-                            <span class="gaq-meta">
-                                — {% blocktrans with new=entry.new_count existing=entry.existing_count %}{{ new }} new · {{ existing }} existing{% endblocktrans %}
-                            </span>
-                        </h3>
-                        {% if entry.error %}
-                            <div class="gaq-error">{{ entry.error }}</div>
-                        {% elif entry.candidates %}
-                            <ul class="gaq-check__files">
-                                {% for candidate in entry.candidates %}
-                                    <li>
-                                        <span class="gaq-mono">{{ candidate.filename }}</span>
-                                        {% if candidate.exists %}
-                                            <span class="gaq-badge gaq-badge--cancelled">{% trans "already exists" %}</span>
-                                        {% else %}
-                                            <span class="gaq-badge gaq-badge--completed">{% trans "new" %}</span>
-                                        {% endif %}
-                                    </li>
-                                {% endfor %}
-                            </ul>
-                        {% else %}
-                            <p class="gaq-meta">{% trans "Source offered no files." %}</p>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-
-        <div class="gaq-filters">
-            <span class="gaq-meta">{% trans "Filter" %}:</span>
-            <a class="gaq-filter {% if not current_status %}gaq-filter--active{% endif %}"
-               href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "All" %}</a>
-            {% for value, label in statuses %}
-                <a class="gaq-filter {% if current_status == value %}gaq-filter--active{% endif %}"
-                   href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}?status={{ value }}">{{ label }}</a>
-            {% endfor %}
-        </div>
-
-        {% if rows %}
-            <table class="gaq-table">
-                <thead>
-                    <tr>
-                        <th>{% trans "Status" %}</th>
-                        <th>{% trans "Started" %}</th>
-                        <th>{% trans "Finished" %}</th>
-                        <th>{% trans "Duration" %}</th>
-                        <th class="gaq-num">{% trans "Requested" %}</th>
-                        <th class="gaq-num">{% trans "Fetched" %}</th>
-                        <th class="gaq-num">{% trans "Skipped" %}</th>
-                        <th class="gaq-num">{% trans "Failed" %}</th>
-                        <th class="gaq-num">{% trans "Bytes" %}</th>
-                        <th>{% trans "Error" %}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in rows %}
-                        <tr>
-                            <td>
-                                <span class="gaq-badge gaq-badge--{{ row.run.status }}">{{ row.run.get_status_display }}</span>
-                            </td>
-                            <td>
-                                <a href="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=row.run.pk %}">{{ row.run.started_at|default:"—" }}</a>
-                            </td>
-                            <td class="gaq-meta">{{ row.run.finished_at|default:"—" }}</td>
-                            <td class="gaq-meta">
-                                {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
-                            </td>
-                            <td class="gaq-num">{{ row.run.files_requested }}</td>
-                            <td class="gaq-num">{{ row.run.files_fetched }}</td>
-                            <td class="gaq-num">{{ row.run.files_skipped }}</td>
-                            <td class="gaq-num">{{ row.run.files_failed }}</td>
-                            <td class="gaq-num">{{ row.run.bytes_transferred|filesizeformat }}</td>
-                            <td>
-                                {% if row.run.error_message %}
-                                    <div class="gaq-error">{{ row.run.error_message|truncatechars:200 }}</div>
-                                {% else %}
-                                    <span class="gaq-meta">—</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-
-            {% if page.paginator.num_pages > 1 %}
-                <div class="gaq-pagination">
-                    {% if page.has_previous %}
-                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
-                    {% endif %}
-                    {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
-                    {% if page.has_next %}
-                        <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+    {% if check_results is not None %}
+        <div class="gaq-check">
+            <h2 class="gaq-check__title">{% trans "Check results" %}</h2>
+            {% for entry in check_results %}
+                <div class="gaq-check__group">
+                    <h3 class="gaq-check__collection">
+                        {{ entry.collection.name }}
+                        <span class="gaq-meta">
+                            — {% blocktrans with new=entry.new_count existing=entry.existing_count %}{{ new }} new · {{ existing }} existing{% endblocktrans %}
+                        </span>
+                    </h3>
+                    {% if entry.error %}
+                        <div class="gaq-error">{{ entry.error }}</div>
+                    {% elif entry.candidates %}
+                        <ul class="gaq-check__files">
+                            {% for candidate in entry.candidates %}
+                                <li>
+                                    <span class="gaq-mono">{{ candidate.filename }}</span>
+                                    {% if candidate.exists %}
+                                        <span class="gaq-badge gaq-badge--cancelled">{% trans "already exists" %}</span>
+                                    {% else %}
+                                        <span class="gaq-badge gaq-badge--completed">{% trans "new" %}</span>
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="gaq-meta">{% trans "Source offered no files." %}</p>
                     {% endif %}
                 </div>
-            {% endif %}
-        {% else %}
-            <p class="gaq-empty">{% trans "No fetch runs yet for this feed." %}</p>
-        {% endif %}
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <div class="gaq-filters">
+        <span class="gaq-meta">{% trans "Filter" %}:</span>
+        <a class="gaq-filter {% if not current_status %}gaq-filter--active{% endif %}"
+           href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "All" %}</a>
+        {% for value, label in statuses %}
+            <a class="gaq-filter {% if current_status == value %}gaq-filter--active{% endif %}"
+               href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}?status={{ value }}">{{ label }}</a>
+        {% endfor %}
     </div>
+
+    {% if rows %}
+        <table class="gaq-table">
+            <thead>
+                <tr>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "Started" %}</th>
+                    <th>{% trans "Finished" %}</th>
+                    <th>{% trans "Duration" %}</th>
+                    <th class="gaq-num">{% trans "Requested" %}</th>
+                    <th class="gaq-num">{% trans "Fetched" %}</th>
+                    <th class="gaq-num">{% trans "Skipped" %}</th>
+                    <th class="gaq-num">{% trans "Failed" %}</th>
+                    <th class="gaq-num">{% trans "Bytes" %}</th>
+                    <th>{% trans "Error" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>
+                            <span class="gaq-badge gaq-badge--{{ row.run.status }}">{{ row.run.get_status_display }}</span>
+                        </td>
+                        <td>
+                            <a href="{% url 'data_feed_fetch_run_detail' feed_pk=feed.pk run_pk=row.run.pk %}">{{ row.run.started_at|default:"—" }}</a>
+                        </td>
+                        <td class="gaq-meta">{{ row.run.finished_at|default:"—" }}</td>
+                        <td class="gaq-meta">
+                            {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
+                        </td>
+                        <td class="gaq-num">{{ row.run.files_requested }}</td>
+                        <td class="gaq-num">{{ row.run.files_fetched }}</td>
+                        <td class="gaq-num">{{ row.run.files_skipped }}</td>
+                        <td class="gaq-num">{{ row.run.files_failed }}</td>
+                        <td class="gaq-num">{{ row.run.bytes_transferred|filesizeformat }}</td>
+                        <td>
+                            {% if row.run.error_message %}
+                                <div class="gaq-error">{{ row.run.error_message|truncatechars:200 }}</div>
+                            {% else %}
+                                <span class="gaq-meta">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {% if page.paginator.num_pages > 1 %}
+            <div class="gaq-pagination">
+                {% if page.has_previous %}
+                    <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                {% endif %}
+                {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                {% if page.has_next %}
+                    <a href="?{% if current_status %}status={{ current_status }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% else %}
+        <p class="gaq-empty">{% trans "No fetch runs yet for this feed." %}</p>
+    {% endif %}
 {% endblock %}

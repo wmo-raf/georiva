@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Ingestion Activity" %}{% endblock %}
@@ -155,13 +155,9 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=_("Ingestion Activity") icon="history" breadcrumbs=breadcrumbs_items %}
-
-    <div class="nice-padding">
-        <div id="activity-feed">
-            <div class="iaf-empty" id="feed-empty">{% trans "Connecting…" %}</div>
-        </div>
+{% block main_content %}
+    <div id="activity-feed">
+        <div class="iaf-empty" id="feed-empty">{% trans "Connecting…" %}</div>
     </div>
 {% endblock %}
 

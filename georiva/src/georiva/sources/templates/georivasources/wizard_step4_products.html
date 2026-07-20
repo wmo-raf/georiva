@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}
@@ -60,53 +60,49 @@
     {% include "georivasources/includes/product_chain_styles.html" %}
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=source_verbose_name subtitle=_("Step 4 — Derived Products") icon="cogs" breadcrumbs=breadcrumbs_items %}
-
-    <div class="nice-padding">
-        <div class="gwiz-progress">
-            <span class="gwiz-step gwiz-step--done">1. {% trans "Catalog" %}</span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--done">2. {% trans "Feed Details" %}</span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--done">3. {% trans "Collections" %}</span>
-            <span class="gwiz-sep">→</span>
-            <span class="gwiz-step gwiz-step--active">4. {% trans "Derived Products" %}</span>
-        </div>
-
-        <form method="post" id="products-form">
-            {% csrf_token %}
-
-            {% if messages %}
-                {% for msg in messages %}
-                    <div class="help-block help-block--{{ msg.tags }} gprod-message">{{ msg }}</div>
-                {% endfor %}
-            {% endif %}
-
-            <p class="gprod-intro">
-                {% trans "Configure the derived products this feed produces. Each product turns the feed's data into a further derived layer. Products are grouped by dependency stage — enabling one that needs another turns its prerequisites on automatically." %}
-            </p>
-
-            {% include "georivasources/includes/product_chain.html" with mode="wizard" %}
-
-            {{ dependencies_closure_json|json_script:"product-chain-dependencies" }}
-            {{ dependents_closure_json|json_script:"product-chain-dependents" }}
-
-            <div class="gprod-submit-row">
-                <button type="submit" class="button bicolor button--icon">
-                    <span class="icon-wrapper">
-                        <svg class="icon icon-arrow-right icon" aria-hidden="true">
-                            <use href="#icon-arrow-right"></use>
-                        </svg>
-                    </span>
-                    {% trans "Create Feed" %}
-                </button>
-                <a href="{% url 'wizard_step3_collections' model_name=model_name %}" class="button button-secondary">
-                    {% trans "Back" %}
-                </a>
-            </div>
-        </form>
+{% block main_content %}
+    <div class="gwiz-progress">
+        <span class="gwiz-step gwiz-step--done">1. {% trans "Catalog" %}</span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--done">2. {% trans "Feed Details" %}</span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--done">3. {% trans "Collections" %}</span>
+        <span class="gwiz-sep">→</span>
+        <span class="gwiz-step gwiz-step--active">4. {% trans "Derived Products" %}</span>
     </div>
+
+    <form method="post" id="products-form">
+        {% csrf_token %}
+
+        {% if messages %}
+            {% for msg in messages %}
+                <div class="help-block help-block--{{ msg.tags }} gprod-message">{{ msg }}</div>
+            {% endfor %}
+        {% endif %}
+
+        <p class="gprod-intro">
+            {% trans "Configure the derived products this feed produces. Each product turns the feed's data into a further derived layer. Products are grouped by dependency stage — enabling one that needs another turns its prerequisites on automatically." %}
+        </p>
+
+        {% include "georivasources/includes/product_chain.html" with mode="wizard" %}
+
+        {{ dependencies_closure_json|json_script:"product-chain-dependencies" }}
+        {{ dependents_closure_json|json_script:"product-chain-dependents" }}
+
+        <div class="gprod-submit-row">
+            <button type="submit" class="button bicolor button--icon">
+                <span class="icon-wrapper">
+                    <svg class="icon icon-arrow-right icon" aria-hidden="true">
+                        <use href="#icon-arrow-right"></use>
+                    </svg>
+                </span>
+                {% trans "Create Feed" %}
+            </button>
+            <a href="{% url 'wizard_step3_collections' model_name=model_name %}" class="button button-secondary">
+                {% trans "Back" %}
+            </a>
+        </div>
+    </form>
 {% endblock %}
 
 {% block extra_js %}

@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Add Data Feed" %}{% endblock %}
@@ -65,35 +65,31 @@
     </style>
 {% endblock %}
 
-{% block content %}
-    {% include "wagtailadmin/shared/header.html" with title=_("Add Data Feed") icon="file-import" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+    <p class="help-text">
+        {% trans "Choose a feed type. Types with a Wizard will guide you through setup; others open the manual configuration form." %}
+    </p>
 
-    <div class="nice-padding">
-        <p class="help-text">
-            {% trans "Choose a feed type. Types with a Wizard will guide you through setup; others open the manual configuration form." %}
-        </p>
-
-        <div class="gfeed-type-list">
-            {% for item in items %}
-                <a href="{{ item.url }}" class="gfeed-type-item">
-                    <span class="gfeed-type-name">
-                        {{ item.verbose_name }}
-                    </span>
-                    {% if item.has_wizard %}
-                        <span class="gfeed-wizard-badge gfeed-wizard-badge--yes">
-                    &#x2726; {% trans "Wizard" %}
+    <div class="gfeed-type-list">
+        {% for item in items %}
+            <a href="{{ item.url }}" class="gfeed-type-item">
+                <span class="gfeed-type-name">
+                    {{ item.verbose_name }}
                 </span>
-                    {% else %}
-                        <span class="gfeed-wizard-badge gfeed-wizard-badge--no">
-                    {% trans "Manual" %}
-                </span>
-                    {% endif %}
-                </a>
-                {% empty %}
-                <p class="help-block">
-                    {% trans "No data feed types are registered." %}
-                </p>
-            {% endfor %}
-        </div>
+                {% if item.has_wizard %}
+                    <span class="gfeed-wizard-badge gfeed-wizard-badge--yes">
+                &#x2726; {% trans "Wizard" %}
+            </span>
+                {% else %}
+                    <span class="gfeed-wizard-badge gfeed-wizard-badge--no">
+                {% trans "Manual" %}
+            </span>
+                {% endif %}
+            </a>
+            {% empty %}
+            <p class="help-block">
+                {% trans "No data feed types are registered." %}
+            </p>
+        {% endfor %}
     </div>
 {% endblock %}

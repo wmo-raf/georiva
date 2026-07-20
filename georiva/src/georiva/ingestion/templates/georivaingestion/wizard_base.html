@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block extra_css %}
@@ -39,23 +39,20 @@
 </style>
 {% endblock %}
 
-{% block content %}
-{% include "wagtailadmin/shared/header.html" with title=_("Manual Upload Setup Wizard") subtitle=step_subtitle icon="upload" %}
-<div class="nice-padding">
-    <div class="uwiz-progress">
-        {% for label in step_labels %}
-            {% with forloop.counter as n %}
-                {% if n < step %}
-                    <span class="uwiz-step uwiz-step--done">{{ n }}. {{ label }}</span>
-                {% elif n == step %}
-                    <span class="uwiz-step uwiz-step--active">{{ n }}. {{ label }}</span>
-                {% else %}
-                    <span class="uwiz-step uwiz-step--pending">{{ n }}. {{ label }}</span>
-                {% endif %}
-                {% if not forloop.last %}<span class="uwiz-sep">→</span>{% endif %}
-            {% endwith %}
-        {% endfor %}
-    </div>
-    {% block wizard_content %}{% endblock %}
+{% block main_content %}
+<div class="uwiz-progress">
+    {% for label in step_labels %}
+        {% with forloop.counter as n %}
+            {% if n < step %}
+                <span class="uwiz-step uwiz-step--done">{{ n }}. {{ label }}</span>
+            {% elif n == step %}
+                <span class="uwiz-step uwiz-step--active">{{ n }}. {{ label }}</span>
+            {% else %}
+                <span class="uwiz-step uwiz-step--pending">{{ n }}. {{ label }}</span>
+            {% endif %}
+            {% if not forloop.last %}<span class="uwiz-sep">→</span>{% endif %}
+        {% endwith %}
+    {% endfor %}
 </div>
+{% block wizard_content %}{% endblock %}
 {% endblock %}

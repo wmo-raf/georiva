@@ -1,4 +1,4 @@
-{% extends "wagtailadmin/base.html" %}
+{% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Edit variable" %} — {{ mcv.variable_name }}{% endblock %}
@@ -15,33 +15,29 @@
 </style>
 {% endblock %}
 
-{% block content %}
-{% include "wagtailadmin/shared/header.html" with title=mcv.variable_name subtitle=_("Edit variable") icon="edit" breadcrumbs=breadcrumbs_items %}
+{% block main_content %}
+<p class="muv-source-note">
+    {% blocktrans trimmed with source=mcv.variable_name collection=mcv.collection.name %}
+        Reads <code>{{ source }}</code> from uploaded files into the
+        <strong>{{ collection }}</strong> collection.
+    {% endblocktrans %}
+</p>
 
-<div class="nice-padding">
-    <p class="muv-source-note">
-        {% blocktrans trimmed with source=mcv.variable_name collection=mcv.collection.name %}
-            Reads <code>{{ source }}</code> from uploaded files into the
-            <strong>{{ collection }}</strong> collection.
-        {% endblocktrans %}
-    </p>
-
-    <form method="post" action="">
-        {% csrf_token %}
-        {% for field in form %}
-            {% if field.is_hidden %}
-                {{ field }}
-            {% else %}
-                {% include "wagtailadmin/shared/field.html" %}
-            {% endif %}
-        {% endfor %}
-        <div class="muv-actions">
-            <button type="submit" class="button bicolor button--icon">
-                <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
-                {% trans "Save" %}
-            </button>
-            <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
-        </div>
-    </form>
-</div>
+<form method="post" action="">
+    {% csrf_token %}
+    {% for field in form %}
+        {% if field.is_hidden %}
+            {{ field }}
+        {% else %}
+            {% include "wagtailadmin/shared/field.html" %}
+        {% endif %}
+    {% endfor %}
+    <div class="muv-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+            {% trans "Save" %}
+        </button>
+        <a href="{% url 'manual_upload_config_edit' config.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+    </div>
+</form>
 {% endblock %}
