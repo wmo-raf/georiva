@@ -1,1 +1,5 @@
 {% extends "wagtailadmin/generic/index.html" %}
+
+{# Outer shell: page chrome, and (from the next commit) the CSS and JS for the
+   status rows. Rendered once per full page load. The rows themselves live in
+   data_feed_list_results.html, which the search box re-renders on its own. #}

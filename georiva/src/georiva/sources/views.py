@@ -3,9 +3,12 @@ import json
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
+from django.utils.functional import cached_property
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from wagtail.admin.forms import WagtailAdminModelForm
-from wagtail.admin.ui.tables import TitleColumn, Table, ButtonsColumnMixin, BooleanColumn
+from wagtail.admin.views.generic import IndexView
+from wagtail.admin.ui.tables import TitleColumn, ButtonsColumnMixin, BooleanColumn
 from wagtail.admin.widgets import HeaderButton, ButtonWithDropdown, Button
 
 from georiva.sources.models import DataFeed
@@ -24,81 +27,116 @@ def _to_json_safe(value):
         return str(value)
 
 
-def data_feed_list(request):
-    data_feeds = DataFeed.objects.all()
-    
-    class DataFeedButtonsColumn(ButtonsColumnMixin, TitleColumn):
-        def get_buttons(self, instance, parent_context):
-            buttons = []
-            more_buttons = []
-            
-            if edit_url := instance.edit_url:
-                more_buttons.append(
-                    Button(
-                        _("Edit"),
-                        url=edit_url,
-                        icon_name="edit",
-                        attrs={
-                            "aria-label": _("Edit '%(title)s'") % {"title": str(instance)}
-                        },
-                        priority=10,
-                    )
+class DataFeedButtonsColumn(ButtonsColumnMixin, TitleColumn):
+    def get_buttons(self, instance, parent_context):
+        buttons = []
+        more_buttons = []
+
+        if edit_url := instance.edit_url:
+            more_buttons.append(
+                Button(
+                    _("Edit"),
+                    url=edit_url,
+                    icon_name="edit",
+                    attrs={
+                        "aria-label": _("Edit '%(title)s'") % {"title": str(instance)}
+                    },
+                    priority=10,
                 )
-            
-            if delete_url := instance.delete_url:
-                more_buttons.append(
-                    Button(
-                        _("Delete"),
-                        url=delete_url,
-                        icon_name="bin",
-                        attrs={
-                            "aria-label": _("Delete '%(title)s'") % {"title": str(instance)}
-                        },
-                        priority=30,
-                    )
+            )
+
+        if delete_url := instance.delete_url:
+            more_buttons.append(
+                Button(
+                    _("Delete"),
+                    url=delete_url,
+                    icon_name="bin",
+                    attrs={
+                        "aria-label": _("Delete '%(title)s'") % {"title": str(instance)}
+                    },
+                    priority=30,
                 )
-            
-            if more_buttons:
-                buttons.append(
-                    ButtonWithDropdown(
-                        buttons=more_buttons,
-                        icon_name="dots-horizontal",
-                        attrs={
-                            "aria-label": _("More options for '%(title)s'")
-                                          % {"title": str(instance)},
-                        },
-                    )
+            )
+
+        if more_buttons:
+            buttons.append(
+                ButtonWithDropdown(
+                    buttons=more_buttons,
+                    icon_name="dots-horizontal",
+                    attrs={
+                        "aria-label": _("More options for '%(title)s'")
+                                      % {"title": str(instance)},
+                    },
                 )
-            
-            return buttons
-    
-    def get_url(instance):
-        return reverse("data_feed_detail", kwargs={"pk": instance.pk})
-    
-    columns = [
-        DataFeedButtonsColumn("name", label=_("Data Feed"), get_url=get_url),
-        BooleanColumn("is_active", label=_("Active")),
-    ]
-    
-    table = Table(columns, data_feeds)
-    
-    context = {
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": None, "label": _("Data Feeds")},
-        ],
-        "header_buttons": [
+            )
+
+        return buttons
+
+
+class DataFeedIndexView(IndexView):
+    """Data Feed listing, built on Wagtail's generic IndexView so server-side
+    pagination and the admin header search (with its AJAX results swap) work
+    out of the box.
+
+    Registered directly at the "data_feed_list" URL name rather than through a
+    ModelViewSet: that name is reversed by DataFeedSuccessUrlMixin,
+    DataFeed.delete_url, the admin menu and breadcrumbs in several templates,
+    and a viewset would rename it.
+
+    Ordering is health-first, which is the whole point of annotating health in
+    SQL — a failing feed sorts onto page 1 instead of hiding on page 3.
+    """
+
+    model = DataFeed
+    paginate_by = 20
+    page_title = gettext_lazy("Data Feeds")
+    header_icon = "file-import"
+    search_fields = ["name"]
+    index_url_name = "data_feed_list"
+    index_results_url_name = "data_feed_list_results"
+    template_name = "georivasources/data_feed_list.html"
+    results_template_name = "georivasources/data_feed_list_results.html"
+
+    def get_base_queryset(self):
+        return DataFeed.objects.with_health()
+
+    def order_queryset(self, queryset):
+        # "pk" is the tiebreak, not decoration: names are not unique, and an
+        # unstable sort lets rows repeat or vanish across page boundaries.
+        # Wagtail only appends -pk for querysets that are otherwise unordered.
+        if self.ordering:
+            return super().order_queryset(queryset)
+        return queryset.order_by("health_rank", "name", "pk")
+
+    @cached_property
+    def columns(self):
+        def get_url(instance):
+            return reverse("data_feed_detail", kwargs={"pk": instance.pk})
+
+        return [
+            DataFeedButtonsColumn("name", label=_("Data Feed"), get_url=get_url),
+            BooleanColumn("is_active", label=_("Active")),
+        ]
+
+    @cached_property
+    def header_buttons(self):
+        return [
             HeaderButton(
                 label=_("Add Data Feed"),
                 url=reverse("data_feed_add_select"),
                 icon_name="plus",
             ),
-        ],
-        "object_list": data_feeds,
-        "table": table,
-    }
-    
-    return render(request, 'georivasources/data_feed_list.html', context)
+        ]
+
+    def get_breadcrumbs_items(self):
+        return [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": None, "label": _("Data Feeds")},
+        ]
+
+
+data_feed_list = DataFeedIndexView.as_view()
+data_feed_list_results = DataFeedIndexView.as_view(results_only=True)
 
 
 def data_feed_detail(request, pk):
