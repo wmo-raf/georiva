@@ -1,5 +1,6 @@
 from adminboundarymanager.wagtail_hooks import AdminBoundaryViewSetGroup
 from django.urls import path, reverse_lazy
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
@@ -68,6 +69,17 @@ def construct_homepage_summary_items(request, summary_items):
         CollectionSummaryItem(request),
         PluginSummaryItem(request),
     ]
+
+
+# wagtailadmin/generic/base.html wraps main_content in a bare .nice-padding,
+# which pads the sides only — Wagtail's own pages add w-mt-8 where they need
+# top space. Our function-based-view pages render straight into that wrapper,
+# so give the slim-header + bare-nice-padding pairing the same breathing room.
+@hooks.register("insert_global_admin_css")
+def main_content_breathing_space():
+    return mark_safe(
+        "<style>.w-sticky.w-z-header + .nice-padding { margin-top: 2rem; }</style>"
+    )
 
 
 @hooks.register("register_icons")
