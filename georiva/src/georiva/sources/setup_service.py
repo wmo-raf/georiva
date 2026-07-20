@@ -11,6 +11,7 @@ from typing import Optional
 from django.db import transaction
 from django.utils.text import slugify
 
+from georiva.core.provisioning import build_source_block, resolve_unit
 from georiva.sources.collection_definitions import CollectionDefinition, CollectionVariable
 
 logger = logging.getLogger("georiva.sources.setup_service")
@@ -227,9 +228,9 @@ class SourceSetupService:
         from georiva.core.models import Variable
         
         slug = slugify(var_def.key)
-        source_unit = self._get_or_create_unit(var_def.source_units)
+        source_unit = resolve_unit(var_def.source_units)
         output_unit = (
-            self._get_or_create_unit(var_def.output_units)
+            resolve_unit(var_def.output_units)
             if var_def.output_units
             else source_unit
         )
@@ -296,40 +297,11 @@ class SourceSetupService:
     
     @staticmethod
     def _source_key_to_block(block_type: str, source_key) -> dict:
+        """Adapt a definition SourceKey to a canonical sources block."""
         level = source_key.level
-        return {
-            "type": block_type,
-            "value": {
-                "source_name": source_key.name,
-                "vertical_dimension": level.dimension if level else "",
-                "vertical_value": level.value if level else None,
-            },
-        }
-    
-    @staticmethod
-    def _get_or_create_unit(symbol: str):
-        from django.db import IntegrityError
-
-        from georiva.core.models import Unit
-
-        # Case-insensitive symbol match covers plugins that use e.g. "Dimensionless"
-        # while the DB stores "dimensionless".
-        unit = Unit.objects.filter(symbol__iexact=symbol).first()
-        if unit:
-            return unit
-
-        # Some plugins pass the unit's display name rather than its pint symbol.
-        unit = Unit.objects.filter(name__iexact=symbol).first()
-        if unit:
-            return unit
-
-        try:
-            unit = Unit.objects.create(symbol=symbol, name=symbol)
-            logger.info("Created Unit: %s", symbol)
-            return unit
-        except IntegrityError:
-            # Concurrent ingestion worker created the same unit; re-fetch it.
-            return (
-                Unit.objects.filter(symbol__iexact=symbol).first()
-                or Unit.objects.filter(name__iexact=symbol).first()
-            )
+        return build_source_block(
+            block_type,
+            source_key.name,
+            vertical_dimension=level.dimension if level else "",
+            vertical_value=level.value if level else None,
+        )
