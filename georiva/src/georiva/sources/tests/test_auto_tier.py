@@ -20,6 +20,7 @@ from georiva.sources.models import (
     DerivedProduct,
     DerivedProductInput,
 )
+from georiva.organisations.testing import make_organisation
 
 
 def _definition(**overrides):
@@ -42,7 +43,7 @@ class CollectionRoutesToStagingTests(TestCase):
     not by re-matching declarations (ADR-0010 §4)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)

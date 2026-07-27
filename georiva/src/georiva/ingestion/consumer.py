@@ -9,7 +9,7 @@ import redis
 from django.conf import settings
 
 from georiva.core.filename import validate_path
-from georiva.core.models import Catalog
+from georiva.core.path_resolution import resolve_org_catalog
 from georiva.core.storage import BucketType, get_bucket_config
 from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.tasks import process_incoming_file
@@ -33,11 +33,7 @@ def _resolve_origin(bucket_name: str):
     return _get_ingest_buckets().get(bucket_name)
 
 
-def _get_catalog(catalog_slug: str):
-    return Catalog.objects.filter(slug=catalog_slug, is_active=True).first()
-
-
-def _required_time_error(catalog_slug: str, key: str) -> str | None:
+def _required_time_error(catalog, key: str) -> str | None:
     """
     For formats with no native time dimension (time_from_filename), a file's
     valid time must be parseable from its filename. Returns a descriptive
@@ -50,9 +46,6 @@ def _required_time_error(catalog_slug: str, key: str) -> str | None:
     from georiva.ingestion.models import ManualUploadConfig
     from georiva.ingestion.time_extraction import extract_times
 
-    catalog = Catalog.objects.filter(slug=catalog_slug).only("file_format").first()
-    if catalog is None:
-        return None
     plugin = format_registry.get(catalog.file_format)
     if plugin is None or not plugin.time_from_filename:
         return None  # time is read from file content during ingestion
@@ -104,21 +97,27 @@ def _handle_event(ev: dict):
         logger.warning("Invalid path %s: %s", key, e)
         return
     
+    org_slug = meta["org"]
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
 
-    catalog = _get_catalog(catalog_slug)
-    if catalog is None:
-        logger.warning("Unknown catalog '%s': %s", catalog_slug, key)
-        return
+    catalog, resolution_error = resolve_org_catalog(org_slug, catalog_slug)
 
+    # Register before deciding: a file we refuse to ingest must still leave a
+    # visible, actionable record. It is left in place in its bucket — never
+    # guessed into some other organisation, never deleted.
     log, created = FileIngestion.register(
         bucket=origin_bucket,
         file_path=key,
         reference_time=meta.get("reference_time"),
     )
 
-    time_error = _required_time_error(catalog.slug, key)
+    if catalog is None:
+        logger.warning("Refusing %s: %s", key, resolution_error)
+        FileIngestion.mark_failed(origin_bucket, key, resolution_error)
+        return
+
+    time_error = _required_time_error(catalog, key)
     if time_error:
         logger.warning("Time extraction failed for %s: %s", key, time_error)
         FileIngestion.mark_failed(origin_bucket, key, time_error)
@@ -142,8 +141,8 @@ def _handle_event(ev: dict):
         ),
     )
     logger.info(
-        "Queued: %s/%s (catalog=%s, collection=%s, ref=%s)",
-        bucket_name, key, catalog_slug,
+        "Queued: %s/%s (org=%s, catalog=%s, collection=%s, ref=%s)",
+        bucket_name, key, org_slug, catalog_slug,
         collection_slug or "(to resolve)",
         meta.get("reference_time"),
     )

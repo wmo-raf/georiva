@@ -19,6 +19,7 @@ from georiva.core.models import Catalog
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
 from georiva.sources.views import DataFeedIndexView
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -32,7 +33,7 @@ def _ago(**kwargs):
 def _make_feed_named(name, **kwargs):
     """Create a feed whose name may collide with others (catalog slugs stay unique)."""
     _make_feed_named.counter += 1
-    catalog = Catalog.objects.create(
+    catalog = Catalog.objects.create(organisation=make_organisation(), 
         name=f"{name} {_make_feed_named.counter}",
         slug=f"cat-{_make_feed_named.counter}",
         file_format="geotiff",
@@ -45,7 +46,7 @@ _make_feed_named.counter = 0
 
 def _make_feed(name, **kwargs):
     slug = name.lower().replace(" ", "-")
-    catalog = Catalog.objects.create(name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
     return DataFeed.objects.create(name=name, catalog=catalog, **kwargs)
 
 

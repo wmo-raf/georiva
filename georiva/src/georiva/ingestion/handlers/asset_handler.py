@@ -251,9 +251,9 @@ class AssetHandler:
         COG failure raises immediately (PNG and JSON are skipped).
         PNG and JSON failures are non-fatal — a warning is logged.
         """
-        catalog_slug = item.collection.catalog.slug
+        catalog = item.collection.catalog
         collection_slug = item.collection.slug
-        
+
         if item.reference_time:
             ref_str = item.reference_time.strftime("%Y%m%dT%H%M%S")
             base_name = f"{variable.slug}_{timestamp.strftime('%H%M%S')}__ref{ref_str}"
@@ -261,7 +261,8 @@ class AssetHandler:
             base_name = f"{variable.slug}_{timestamp.strftime('%H%M%S')}"
         
         base_dir = storage.build_asset_path(
-            catalog=catalog_slug,
+            org=catalog.organisation.slug,
+            catalog=catalog.slug,
             collection=collection_slug,
             variable=variable.slug,
             timestamp=timestamp,

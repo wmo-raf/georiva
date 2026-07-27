@@ -13,10 +13,11 @@ from georiva.core.models import Catalog, Collection
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchRun, FetchedFile
 from georiva.sources.fetch.base import FetchResult
+from georiva.organisations.testing import make_organisation
 
 
 def _make_feed_and_collection():
-    catalog = Catalog.objects.create(name="Test", slug="test", file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="Test", slug="test", file_format="grib2")
     collection = Collection.objects.create(name="Col", slug="col", catalog=catalog)
     feed = DataFeed.objects.create(name="Feed", catalog=catalog)
     return feed, collection

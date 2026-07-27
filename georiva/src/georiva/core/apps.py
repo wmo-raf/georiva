@@ -45,7 +45,7 @@ def _sync_keep_for_collection(collection):
     from georiva.core.storage import storage, BucketType
     
     bucket = storage.bucket(BucketType.INCOMING)
-    keep_path = f"{collection.catalog.slug}/{collection.slug}/.keep"
+    keep_path = f"{collection.catalog.storage_prefix}/{collection.slug}/.keep"
     
     if collection.feed_links.exists():
         _delete_keep(bucket, keep_path)

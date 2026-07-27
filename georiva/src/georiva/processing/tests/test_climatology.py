@@ -22,6 +22,7 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
+from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
@@ -43,7 +44,7 @@ def _cube(monthly_by_year, ny=3, nx=2, start="2011-01-01"):
 
 class _ClimatologyFixture(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="netcdf"
         )
         self.scol = StagingCollection.objects.create(

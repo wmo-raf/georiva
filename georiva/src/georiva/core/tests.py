@@ -6,12 +6,13 @@ from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import FileIngestion
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
 
 def _setup():
-    catalog = Catalog.objects.create(name="Models", slug="models", file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="Models", slug="models", file_format="grib2")
     collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface")
     return catalog, collection
 
@@ -87,7 +88,7 @@ class CatalogIndexTests(TestCase):
         self.results_url = reverse("catalog:index_results")
     
     def _catalog(self, name, slug):
-        return Catalog.objects.create(name=name, slug=slug, file_format="grib2")
+        return Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="grib2")
     
     def test_renders_for_admin(self):
         response = self.client.get(self.url)
@@ -249,8 +250,8 @@ class DashboardSummaryTests(TestCase):
             CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem,
         )
 
-        cat = Catalog.objects.create(name="A", slug="a", file_format="grib2")
-        Catalog.objects.create(name="B", slug="b", file_format="grib2")
+        cat = Catalog.objects.create(organisation=make_organisation(), name="A", slug="a", file_format="grib2")
+        Catalog.objects.create(organisation=make_organisation(), name="B", slug="b", file_format="grib2")
         Collection.objects.create(catalog=cat, name="c1", slug="c1")
 
         request = self._request()
@@ -307,7 +308,7 @@ class CollectionVisibilityTests(TestCase):
     are never served but read freely by the derivation engine."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Models", slug="models", file_format="grib2"
         )
 
@@ -331,7 +332,7 @@ class TileConfigVisibilityTests(TestCase):
     """The internal tile-config endpoint must not serve internal collections."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.unit = Unit.objects.create(name="Celsius", symbol="C")
@@ -451,7 +452,7 @@ class DataManagersGatingTests(TestCase):
         self.assertEqual(self.client.get(reverse("catalog:add")).status_code, 302)
 
     def test_data_manager_cannot_edit_collections_raw(self):
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="grib2")
         collection = Collection.objects.create(catalog=catalog, name="S", slug="s")
         self.client.force_login(self._data_manager())
         self.assertEqual(
@@ -476,11 +477,11 @@ class CatalogIndexAffordanceTests(TestCase):
     """The catalog accordion only shows affordances the user can actually use."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(name="Models", slug="models-idx", file_format="grib2")
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="Models", slug="models-idx", file_format="grib2")
         self.collection = Collection.objects.create(
             catalog=self.catalog, name="Surface", slug="surface-idx"
         )
-        self.empty_catalog = Catalog.objects.create(name="Empty", slug="empty-idx", file_format="grib2")
+        self.empty_catalog = Catalog.objects.create(organisation=make_organisation(), name="Empty", slug="empty-idx", file_format="grib2")
 
     def _get_index_as(self, user):
         self.client.force_login(user)

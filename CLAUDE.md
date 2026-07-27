@@ -129,7 +129,8 @@ Defined in `api/urls.py`:
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
-- **Storage paths**: Time-partitioned: `{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
+- **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
+  — the first segment of every key on every bucket is the owning organisation's slug
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
   `requirements.txt`). Add via `make uv-add pkg="..."`; `uv sync --all-packages` builds the local dev env
 - **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no

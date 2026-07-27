@@ -5,6 +5,7 @@ from django.conf import settings
 from django.test import TestCase
 
 from georiva.ingestion.events import CHANNEL
+from georiva.organisations.testing import make_organisation
 
 
 class IngestionEventsTestCase(TestCase):
@@ -172,7 +173,7 @@ class FetchRunEventTests(IngestionEventsTestCase):
     def _make_feed(self):
         from georiva.core.models import Catalog
         from georiva.sources.models import DataFeed
-        catalog = Catalog.objects.create(name="FR", slug="fr-ev", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="FR", slug="fr-ev", file_format="grib2")
         return DataFeed.objects.create(name="FR Feed", catalog=catalog)
 
     def test_fetch_run_creation_publishes_event(self):
@@ -205,7 +206,7 @@ class UploadSessionEventTests(IngestionEventsTestCase):
     def _make_session(self):
         from georiva.core.models import Catalog
         from georiva.ingestion.models import UploadSession
-        catalog = Catalog.objects.create(name="US", slug="us-ev", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="US", slug="us-ev", file_format="geotiff")
         return UploadSession.objects.create(catalog=catalog)
 
     def test_upload_session_creation_publishes_event(self):
@@ -238,7 +239,7 @@ class FetchedFileEventTests(IngestionEventsTestCase):
     def _make_run(self):
         from georiva.core.models import Catalog
         from georiva.sources.models import DataFeed, FetchRun
-        catalog = Catalog.objects.create(name="FF", slug="ff-ev", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="FF", slug="ff-ev", file_format="grib2")
         feed = DataFeed.objects.create(name="FF Feed", catalog=catalog)
         return FetchRun.objects.create(data_feed=feed)
 
@@ -299,7 +300,7 @@ class UploadedFileEventTests(IngestionEventsTestCase):
     def _make_session(self):
         from georiva.core.models import Catalog
         from georiva.ingestion.models import UploadSession
-        catalog = Catalog.objects.create(name="UF", slug="uf-ev", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="UF", slug="uf-ev", file_format="geotiff")
         return UploadSession.objects.create(catalog=catalog)
 
     def test_mark_uploading_publishes_status_changed_event(self):

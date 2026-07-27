@@ -50,6 +50,7 @@ def _asset_output_path(item, variable, fmt: str) -> str:
     else:
         name = f"{variable.slug}_{t:%H%M%S}.{ext}"
     return storage.build_asset_path(
+        org=item.collection.catalog.organisation.slug,
         catalog=item.collection.catalog.slug,
         collection=item.collection.slug,
         variable=variable.slug,

@@ -17,6 +17,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('adminboundarymanager', '0007_boundarymenupermission'),
+        ('organisations', '0001_initial'),
     ]
 
     operations = [
@@ -73,7 +74,7 @@ class Migration(migrations.Migration):
                 ('created', django_extensions.db.fields.CreationDateTimeField(auto_now_add=True, verbose_name='created')),
                 ('modified', django_extensions.db.fields.ModificationDateTimeField(auto_now=True, verbose_name='modified')),
                 ('name', models.CharField(max_length=255)),
-                ('slug', models.SlugField(max_length=100, unique=True)),
+                ('slug', models.SlugField(max_length=100)),
                 ('description', models.TextField(blank=True)),
                 ('provider', models.CharField(blank=True, max_length=255)),
                 ('provider_url', models.URLField(blank=True)),
@@ -83,6 +84,7 @@ class Migration(migrations.Migration):
                 ('is_active', models.BooleanField(default=True)),
                 ('clip_mode', models.CharField(choices=[('none', 'No clipping'), ('bbox', 'Bounding box only'), ('mask', 'Precise geometry mask')], default='mask', help_text='How to apply boundary clipping', max_length=20)),
                 ('boundary', models.ForeignKey(blank=True, help_text='Boundary to clip data to', null=True, on_delete=django.db.models.deletion.SET_NULL, to='adminboundarymanager.adminboundary')),
+                ('organisation', models.ForeignKey(help_text='The organisation that owns this catalog and everything under it.', on_delete=django.db.models.deletion.CASCADE, related_name='catalogs', to='organisations.organisation')),
                 ('topics', models.ManyToManyField(blank=True, help_text='Thematic topics for this catalog.', related_name='catalogs', to='georivacore.topic')),
             ],
             options={
@@ -241,5 +243,9 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='asset',
             constraint=models.UniqueConstraint(fields=('item', 'variable', 'format'), name='unique_format_per_variable_per_item'),
+        ),
+        migrations.AddConstraint(
+            model_name='catalog',
+            constraint=models.UniqueConstraint(fields=('organisation', 'slug'), name='unique_catalog_slug_per_organisation'),
         ),
     ]

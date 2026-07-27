@@ -7,10 +7,11 @@ from django.test import TestCase
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.handlers.item_handler import ItemHandler
 from georiva.ingestion.models import FileIngestion, FileIngestionJob
+from georiva.organisations.testing import make_organisation
 
 
 def _setup():
-    catalog = Catalog.objects.create(name="wrf", slug="wrf", file_format="netcdf")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="wrf", slug="wrf", file_format="netcdf")
     collection = Collection.objects.create(
         catalog=catalog, name="Forecast", slug="wrf-forecast-collection-1",
     )

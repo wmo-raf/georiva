@@ -116,6 +116,7 @@ def _save_session(request, data):
 
 def upload_wizard_step1(request):
     from georiva.core.models import Catalog
+    from georiva.organisations.access import require_active_org
 
     # A Catalog is either feed-managed or manually-managed, never both: a
     # DataFeed's deletion cascades to its Catalog, which would silently destroy
@@ -141,7 +142,13 @@ def upload_wizard_step1(request):
                 errors.append(_("Please enter a name for the new Catalog."))
             if not new_catalog_format:
                 errors.append(_("Please choose a file format."))
-            if new_catalog_slug and Catalog.objects.filter(slug=new_catalog_slug).exists():
+            # Scoped to this organisation: catalog slugs are unique per org, so
+            # another institution already owning this slug is neither a conflict
+            # nor something this operator should be told about.
+            taken = Catalog.objects.filter(
+                organisation=require_active_org(request), slug=new_catalog_slug
+            ).exists()
+            if new_catalog_slug and taken:
                 errors.append(_("A Catalog with slug '%s' already exists.") % new_catalog_slug)
 
         if errors:
@@ -642,6 +649,7 @@ def upload_wizard_provision(request):
     from georiva.core.models import Catalog, Collection, Variable
     from georiva.core.provisioning import passthrough_sources
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+    from georiva.organisations.access import require_active_org
 
     if request.method != "POST":
         return redirect("upload_wizard_step5")
@@ -655,6 +663,7 @@ def upload_wizard_provision(request):
         with transaction.atomic():
             if session.get("catalog_mode") == "create":
                 catalog, _created = Catalog.objects.get_or_create(
+                    organisation=require_active_org(request),
                     slug=session["new_catalog_slug"],
                     defaults={
                         "name": session["new_catalog_name"],

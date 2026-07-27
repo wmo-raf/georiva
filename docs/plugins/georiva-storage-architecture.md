@@ -75,13 +75,13 @@ Additionally, separate buckets allow per-bucket access policies (assets are publ
 Files placed in `georiva-incoming` or `georiva-sources` follow this structure:
 
 ```
-{catalog}/{collection}/{filename}
+{org}/{catalog}/{collection}/{filename}
 ```
 
 The `collection` segment is **optional**. Some data sources organize files with only a catalog:
 
 ```
-{catalog}/{filename}
+{org}/{catalog}/{filename}
 ```
 
 When the collection is missing from the path, the ingestion pipeline processes the file against **all active collections** under that catalog.
@@ -89,44 +89,49 @@ When the collection is missing from the path, the ingestion pipeline processes t
 **Examples:**
 
 ```
-weather-models/gfs/GR--20250115T0600--gfs_025.grib2     ← catalog + collection
-satellite-imagery/sentinel2_20250115.tif                  ← catalog only
-station-data/daily/synop_hourly.csv                       ← catalog + collection
+kenya/weather-models/gfs/GR--20250115T0600--gfs_025.grib2   ← org + catalog + collection
+kenya/satellite-imagery/sentinel2_20250115.tif              ← org + catalog only
+kenya/station-data/daily/synop_hourly.csv                   ← org + catalog + collection
 ```
 
-The minimum valid path is `{catalog}/{filename}` (2 segments). A bare filename with no catalog is rejected.
+The minimum valid path is `{org}/{catalog}/{filename}` (3 segments). Anything shorter is rejected.
+
+The `org` segment is the owning `Organisation.slug`. Ingestion resolves it to an
+organisation and then looks the catalog up **within** it: an unknown org, or a
+catalog belonging to a different org, fails the file loudly and leaves it in
+place. There is no default organisation to fall back on.
 
 ### Assets bucket
 
 Processed assets use a time-partitioned structure with a variable segment for efficient range queries:
 
 ```
-georiva-assets/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}
+georiva-assets/{org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}
 ```
 
 **Example:**
 
 ```
-georiva-assets/weather-models/gfs/temperature/2025/01/15/temperature_060000.png
-georiva-assets/weather-models/gfs/temperature/2025/01/15/temperature_060000.tif
-georiva-assets/weather-models/gfs/temperature/2025/01/15/temperature_060000.json
+georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.png
+georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.tif
+georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.json
 ```
 
 Each variable at each timestep produces three files: a PNG for visualization (e.g., WeatherLayers GL), a Cloud-Optimized GeoTIFF for data access, and a JSON sidecar with metadata, stats, and color map information.
 
 ### Archive bucket
 
-The archive preserves raw source files before processing. It mirrors the source path but adds the origin bucket type as a prefix, so you can always trace a raw file back to where it came from:
+The archive preserves raw source files before processing. It mirrors the source path but names the origin bucket type just after the org segment, so you can always trace a raw file back to where it came from:
 
 ```
-georiva-archive/{incoming|sources}/{catalog}/{collection}/{filename}
+georiva-archive/{org}/{incoming|sources}/{catalog}/{collection}/{filename}
 ```
 
 **Example:**
 
 ```
-georiva-archive/sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
-georiva-archive/incoming/station-data/daily/synop_20250115.csv
+georiva-archive/kenya/sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
+georiva-archive/kenya/incoming/station-data/daily/synop_20250115.csv
 ```
 
 Whether archiving happens is controlled by the `Catalog.archive_source_files` field. When enabled, the ingestion pipeline copies the raw file to the archive and deletes it from the source bucket after successful processing.
@@ -471,7 +476,7 @@ Private buckets (internal + signed):
   http://georiva-minio:9000/georiva-sources/...?X-Amz-Signature=...
 
 Assets bucket (public + clean):
-  http://localhost:9000/georiva-assets/weather-models/gfs/temperature/2025/01/15/temp.png
+  http://localhost:9000/georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temp.png
 ```
 
 ### Serving public assets through nginx
@@ -660,11 +665,11 @@ bucket.list_directories(path)        # List subdirectories
 # Cross-bucket operations
 storage.transfer(source, dest, path)       # Copy between buckets (S3 server-side)
 storage.move_between(source, dest, path)   # Move between buckets
-storage.archive_raw(origin_bucket, path)   # Archive with origin prefix
+storage.archive_raw(origin_bucket, path)   # Archive as {org}/{origin}/…
 
 # Asset path builder (time-partitioned)
-storage.build_asset_path(catalog, collection, variable, timestamp, filename)
-# → "weather-models/gfs/temperature/2025/01/15/temperature_060000.tif"
+storage.build_asset_path(org, catalog, collection, variable, timestamp, filename)
+# → "kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.tif"
 ```
 
 ---

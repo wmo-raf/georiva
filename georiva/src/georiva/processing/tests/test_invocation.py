@@ -13,6 +13,7 @@ from django.test import TestCase
 from georiva.processing.engine import run
 from georiva.processing.recipe import BaseRecipe, OutputItem
 from georiva.processing.registry import RecipeRegistry
+from georiva.organisations.testing import make_organisation
 
 
 class _TriggerRecipe(BaseRecipe):
@@ -158,7 +159,7 @@ class _StagingFixture(TestCase):
             StagingItem,
         )
 
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.scol = StagingCollection.objects.create(
@@ -229,7 +230,7 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
 
         from georiva.core.models import Catalog, Collection, Item
 
-        catalog = Catalog.objects.create(
+        catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="C", slug="c", file_format="geotiff"
         )
         col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
@@ -374,7 +375,7 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
         from georiva.staging.models import DerivationLink
 
         t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        catalog = Catalog.objects.create(name="C2", slug="c2", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C2", slug="c2", file_format="geotiff")
 
         # B is the stale unit's product (sweep_fake, recorded ≠ current).
         bcol = Collection.objects.create(catalog=catalog, slug="b2", name="b2")
@@ -484,7 +485,7 @@ class ForwardInvalidationTests(TestCase):
         )
 
         t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
 
         # A: staging input.
         scol = StagingCollection.objects.create(catalog=catalog, slug="a", name="a")
@@ -581,7 +582,7 @@ class TriggerBuilderTests(TestCase):
         from georiva.core.models import Catalog, Collection, Item
         from georiva.processing.invocation import published_item_trigger
 
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
         item = Item.objects.create(
             collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -598,7 +599,7 @@ class TriggerBuilderTests(TestCase):
         from georiva.processing.invocation import staging_item_trigger
         from georiva.staging.models import StagingCollection, StagingItem
 
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         core = Collection.objects.create(catalog=catalog, slug="rain", name="Rain")
         sc = StagingCollection.objects.create(
             catalog=catalog, slug="rain", name="Rain", collection=core
@@ -619,7 +620,7 @@ class TriggerBuilderTests(TestCase):
         from georiva.processing.invocation import staging_item_trigger
         from georiva.staging.models import StagingCollection, StagingItem
 
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         sc = StagingCollection.objects.create(
             catalog=catalog, slug="rain", name="Rain"
         )

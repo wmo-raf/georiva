@@ -7,6 +7,7 @@ from django.db.models import Prefetch
 
 from georiva.core.filename import parse_path
 from georiva.core.models import Catalog, Collection, Variable
+from georiva.core.path_resolution import resolve_org_catalog
 from georiva.core.storage import storage, BucketType
 from georiva.formats.registry import format_registry
 from georiva.ingestion.asset_writer import AssetWriter
@@ -42,8 +43,13 @@ class IngestionService:
 
     Processing Flow:
     ─────────────────
-    1.  Parse the file path → extract catalog slug, collection slug, reference time
-    2.  Resolve the Catalog from the database (must exist and be active)
+    1.  Parse the file path → extract org slug, catalog slug, collection slug,
+        reference time
+    2.  Resolve the Organisation from the path's first segment, then the Catalog
+        *within that organisation* (must exist and be active). There is no
+        default organisation and no catalog-by-slug lookup without one: an
+        unknown org, or a catalog that belongs to a different org, fails the run
+        and leaves the file in place.
     3.  Resolve Collection(s):
           - If collection slug present in path → process that one collection
           - If absent → process ALL active collections under the catalog
@@ -111,6 +117,7 @@ class IngestionService:
         
         # ── Path parsing ──────────────────────────────────────────────────────
         path_meta = parse_path(file_path)
+        org_slug = path_meta.get("org")
         catalog_slug = path_meta.get("catalog")
         collection_slug = path_meta.get("collection")
         
@@ -127,19 +134,12 @@ class IngestionService:
         )
         
         try:
-            # ── Catalog resolution ────────────────────────────────────────────
-            if not catalog_slug:
-                result.add_error(f"Cannot determine catalog from path: {file_path}")
+            # ── Organisation + catalog resolution ─────────────────────────────
+            catalog, error = resolve_org_catalog(org_slug, catalog_slug)
+            if catalog is None:
+                result.add_error(error or f"Cannot resolve a catalog from path: {file_path}")
                 return result
-            
-            try:
-                catalog = Catalog.objects.select_related("boundary").get(
-                    slug=catalog_slug, is_active=True
-                )
-            except Catalog.DoesNotExist:
-                result.add_error(f"Catalog not found or inactive: {catalog_slug}")
-                return result
-            
+
             # ── Collection resolution ─────────────────────────────────────────
             collections = self._resolve_collections(catalog, collection_slug)
             
@@ -147,11 +147,12 @@ class IngestionService:
                 if collection_slug:
                     result.add_error(
                         f"Collection not found or inactive: "
-                        f"{catalog_slug}/{collection_slug}"
+                        f"{org_slug}/{catalog_slug}/{collection_slug}"
                     )
                 else:
                     result.add_error(
-                        f"No active collections found for catalog: {catalog_slug}"
+                        f"No active collections found for catalog: "
+                        f"{org_slug}/{catalog_slug}"
                     )
                 return result
             
@@ -329,7 +330,11 @@ class IngestionService:
         Returns a single-element list if collection_slug is given,
         or all active collections if not.
         """
-        base_qs = Collection.objects.select_related("catalog").prefetch_related(
+        # ``catalog__organisation`` is fetched here, not lazily: every asset
+        # write reads ``catalog.organisation.slug`` to build its path.
+        base_qs = Collection.objects.select_related(
+            "catalog__organisation"
+        ).prefetch_related(
             Prefetch(
                 "variables",
                 queryset=Variable.objects.select_related(

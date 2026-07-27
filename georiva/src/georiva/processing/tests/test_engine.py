@@ -25,6 +25,7 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
+from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
@@ -37,7 +38,7 @@ def _mock_writer():
 
 class _PromotionFixture(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.pub_col = Collection.objects.create(
@@ -308,10 +309,10 @@ class AssetOutputPathTests(_PromotionFixture):
             time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
         )
         path = _asset_output_path(item, self.variable, "cog")
-        self.assertEqual(path, "cmip6/tas/tas/2026/05/01/tas_000000.tif")
+        self.assertEqual(path, "test-org/cmip6/tas/tas/2026/05/01/tas_000000.tif")
 
         png = _asset_output_path(item, self.variable, "png")
-        self.assertEqual(png, "cmip6/tas/tas/2026/05/01/tas_000000.png")
+        self.assertEqual(png, "test-org/cmip6/tas/tas/2026/05/01/tas_000000.png")
 
     def test_forecast_asset_path_carries_the_reference_time(self):
         from datetime import datetime, timezone
@@ -326,7 +327,7 @@ class AssetOutputPathTests(_PromotionFixture):
         )
         path = _asset_output_path(item, self.variable, "cog")
         self.assertEqual(
-            path, "cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif"
+            path, "test-org/cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif"
         )
 
 

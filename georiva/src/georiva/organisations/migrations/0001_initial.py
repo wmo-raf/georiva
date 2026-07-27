@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('name', models.CharField(help_text='Display name of the institution.', max_length=255)),
-                ('slug', models.SlugField(help_text="Immutable. Used as the organisation's subdomain and as the first segment of every storage path. Cannot be changed after creation.", unique=True, validators=[georiva.organisations.validators.validate_org_slug])),
+                ('slug', models.SlugField(help_text="Immutable. The organisation's subdomain, and the segment its storage paths will be filed under. Cannot be changed after creation.", max_length=50, unique=True, validators=[georiva.organisations.validators.validate_org_slug])),
                 ('description', models.TextField(blank=True)),
                 ('contact_email', models.EmailField(blank=True, max_length=254)),
                 ('website', models.URLField(blank=True)),
