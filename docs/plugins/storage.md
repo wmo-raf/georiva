@@ -80,7 +80,7 @@ georiva-assets/kenya/satellite-imagery/ndvi/temperature/2025/01/15/GR--20250115T
 
 ### Archive bucket
 
-The archive mirrors the source path but prefixes it with the origin bucket type, so you can always trace a raw file back
+The archive mirrors the source path but names the origin bucket type just after the org segment, so you can always trace a raw file back
 to where it came from:
 
 ```
@@ -168,7 +168,9 @@ filename = build_filename(
 # → "GR--20250115T0600--gfs_025.grib2"
 
 # Save to georiva-sources bucket
-path = f"{catalog_slug}/{collection_slug}/{filename}"
+# The org segment comes from the catalog you are writing under — never from
+# the remote source or the filename.
+path = f"{collection.catalog.storage_prefix}/{collection.slug}/{filename}"
 storage.sources.save(path, file_data)
 # → georiva-sources/kenya/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
 ```
@@ -181,7 +183,9 @@ filename = build_filename(
 )
 # → "sentinel2_ndvi_20250115.tif"  (no prefix added)
 
-path = f"{catalog_slug}/{collection_slug}/{filename}"
+# The org segment comes from the catalog you are writing under — never from
+# the remote source or the filename.
+path = f"{collection.catalog.storage_prefix}/{collection.slug}/{filename}"
 storage.sources.save(path, file_data)
 ```
 
@@ -238,8 +242,10 @@ georiva-minio-consumer (BLPOP):
     register IngestionLog → enqueue process_incoming_file (georiva-ingestion queue)
     ↓
 Ingestion worker:
-    1. parse_path → catalog="weather-models", collection="gfs",
+    1. parse_path → org="kenya", catalog="weather-models", collection="gfs",
                     reference_time=2025-01-15T06:00Z
+       → resolve the org, then the catalog *within* it (unknown org or a
+         catalog owned by another org fails the file and leaves it in place)
     2. Process → extract variables, clip, encode
     3. Save assets → georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/GR--20250115T0600--temp.tif
     4. Optionally archive original source files

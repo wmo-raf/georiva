@@ -732,6 +732,49 @@ class ProvisionTests(TestCase):
         self.assertFalse(Variable.objects.exists())
 
 
+class Step1SlugScopingTests(TestCase):
+    """Catalog slugs are unique per organisation, so the wizard's
+    "slug already taken" check must be too — otherwise one institution's
+    catalog names quietly become unavailable to (and visible to) every other."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_slug", "s@s.com", "pw")
+        self.client.force_login(self.user)
+        self.kenya = make_organisation("kenya")
+
+    def _post(self, **headers):
+        return self.client.post(STEP1_URL, {
+            "catalog_mode": "create",
+            "new_catalog_name": "Forecast",
+            "new_catalog_slug": "forecast",
+            "new_catalog_format": "grib2",
+        }, **headers)
+
+    def test_a_slug_taken_by_another_org_does_not_block_this_one(self):
+        Catalog.objects.create(
+            organisation=self.kenya, name="Forecast", slug="forecast",
+            file_format="grib2",
+        )
+
+        # Posted on the default host — a different organisation's admin.
+        response = self._post()
+
+        self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
+
+    def test_a_slug_taken_within_this_org_is_still_rejected(self):
+        response = self._post(headers={"host": "kenya.testserver"})
+        self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
+
+        Catalog.objects.create(
+            organisation=self.kenya, name="Forecast", slug="forecast",
+            file_format="grib2",
+        )
+
+        response = self._post(headers={"host": "kenya.testserver"})
+        self.assertEqual(response.status_code, 200)  # re-rendered with the error
+        self.assertContains(response, "already exists")
+
+
 class CatalogOwnershipTests(TestCase):
     """A Catalog is either feed-managed or manually-managed, never both.
 

@@ -110,9 +110,8 @@ class VirtualZarrManifest(TimeStampedModel):
         collection and catalog — org slug first, like every other bucket key.
         """
         collection = variable.collection
-        catalog = collection.catalog
         return (
-            f"{catalog.organisation.slug}/{catalog.slug}/"
+            f"{collection.catalog.storage_prefix}/"
             f"{collection.slug}/{variable.slug}.json"
         )
     

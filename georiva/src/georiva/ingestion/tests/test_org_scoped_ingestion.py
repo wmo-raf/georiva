@@ -127,6 +127,65 @@ class ConsumerOrgResolutionTests(TestCase):
         task.delay.assert_called_once()
 
 
+class SweepOrgResolutionTests(TestCase):
+    """Recovery honours the same org rules as the live event path.
+
+    ``sweep_unprocessed`` is the safety net for files the bucket event missed,
+    so it is the obvious place for a "just ingest whatever is lying around"
+    shortcut to creep in. It must reach the same refusal.
+    """
+
+    def setUp(self):
+        make_organisation("kenya")
+        Catalog.objects.create(
+            organisation=make_organisation("uganda"), name="CHIRPS", slug="chirps",
+            file_format="geotiff", clip_mode="none",
+        )
+
+    def test_a_swept_file_of_another_org_is_refused_by_the_same_resolver(self):
+        from georiva.ingestion.job_types import FileIngestionJobType
+        from georiva.ingestion.models import FileIngestionJob
+        from georiva.ingestion.unprocessed import UnprocessedFile, ingest_unprocessed
+
+        key = "kenya/chirps/rainfall/rain.tif"
+
+        with patch("georiva.ingestion.tasks.process_incoming_file") as task:
+            task.delay = MagicMock()
+            ingest_unprocessed([
+                UnprocessedFile(
+                    bucket=BucketType.SOURCES, file_path=key, reason="untracked"
+                )
+            ])
+
+        # The sweep registers and dispatches; the refusal happens where every
+        # other path's does — inside the job that runs IngestionService.
+        task.delay.assert_called_once()
+
+        from django.contrib.contenttypes.models import ContentType
+
+        job = FileIngestionJob.objects.create(
+            user=None,
+            content_type=ContentType.objects.get_for_model(
+                FileIngestionJob, for_concrete_model=False
+            ),
+            file_path=key,
+            bucket=BucketType.SOURCES,
+        )
+
+        with (
+            patch("georiva.ingestion.service.storage") as mock_storage,
+            patch("georiva.ingestion.service.format_registry"),
+            self.assertRaises(RuntimeError) as raised,
+        ):
+            mock_storage.bucket.return_value = MagicMock()
+            FileIngestionJobType().run(job, MagicMock())
+
+        self.assertIn("does not belong to organisation 'kenya'", str(raised.exception))
+        log = FileIngestion.objects.get(file_path=key)
+        self.assertEqual(log.status, FileIngestion.Status.FAILED)
+        self.assertIn("does not belong to organisation 'kenya'", log.error)
+
+
 class ServerSideOrgSegmentTests(TestCase):
     """Writers derive the org segment from the catalog, never from a client."""
 

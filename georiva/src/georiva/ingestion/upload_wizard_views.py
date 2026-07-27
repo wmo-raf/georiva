@@ -116,6 +116,7 @@ def _save_session(request, data):
 
 def upload_wizard_step1(request):
     from georiva.core.models import Catalog
+    from georiva.organisations.access import require_active_org
 
     # A Catalog is either feed-managed or manually-managed, never both: a
     # DataFeed's deletion cascades to its Catalog, which would silently destroy
@@ -141,7 +142,13 @@ def upload_wizard_step1(request):
                 errors.append(_("Please enter a name for the new Catalog."))
             if not new_catalog_format:
                 errors.append(_("Please choose a file format."))
-            if new_catalog_slug and Catalog.objects.filter(slug=new_catalog_slug).exists():
+            # Scoped to this organisation: catalog slugs are unique per org, so
+            # another institution already owning this slug is neither a conflict
+            # nor something this operator should be told about.
+            taken = Catalog.objects.filter(
+                organisation=require_active_org(request), slug=new_catalog_slug
+            ).exists()
+            if new_catalog_slug and taken:
                 errors.append(_("A Catalog with slug '%s' already exists.") % new_catalog_slug)
 
         if errors:

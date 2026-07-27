@@ -1,8 +1,9 @@
-"""The choke point every org-scoped code path goes through.
+"""Reading a request's organisation, without ever guessing one.
 
-Only the piece storage and ingestion need lives here so far: reading the
-request's organisation without ever guessing one. Row scoping (`scoped_queryset`,
-`get_org_object_or_404`, `require_org_admin`) lands on top of this module.
+That is all this module does today. It is the module row scoping
+(`scoped_queryset`, `get_org_object_or_404`, `require_org_admin`) will be built
+on, but none of that lives here yet — writers that must stamp an organisation on
+what they create need only the helper below.
 """
 from django.http import Http404
 

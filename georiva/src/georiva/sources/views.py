@@ -1208,7 +1208,8 @@ def wizard_step1_catalog(request, model_name):
     """Step 1: create a new Catalog or select an existing unclaimed one."""
     from django.utils.text import slugify
     from georiva.core.models import Catalog
-    
+    from georiva.organisations.access import require_active_org
+
     model_cls, err = _get_model_or_redirect(request, model_name)
     if err:
         return err
@@ -1235,7 +1236,13 @@ def wizard_step1_catalog(request, model_name):
                 errors.append(_("Please enter a name for the new Catalog."))
             if not new_catalog_format:
                 errors.append(_("Please choose a file format."))
-            if new_catalog_slug and Catalog.objects.filter(slug=new_catalog_slug).exists():
+            # Scoped to this organisation: catalog slugs are unique per org, so
+            # another institution already owning this slug is neither a conflict
+            # nor something this operator should be told about.
+            taken = Catalog.objects.filter(
+                organisation=require_active_org(request), slug=new_catalog_slug
+            ).exists()
+            if new_catalog_slug and taken:
                 errors.append(_("A Catalog with slug '%s' already exists.") % new_catalog_slug)
         
         if errors:

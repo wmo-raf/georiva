@@ -430,7 +430,7 @@ class Loader:
             original_filename=request.filename,
             reference_time=request.reference_time,
         )
-        catalog_prefix = self._catalog_prefix()
+        catalog_prefix = self.collection.catalog.storage_prefix
         collection_slug = self.collection.slug
 
         # ── 1. FileIngestion check ─────────────────────────────────────────────
@@ -463,7 +463,7 @@ class Loader:
             ):
                 sibling = link.collection
                 candidate = (
-                    f"{self._catalog_prefix(sibling.catalog)}/{sibling.slug}/{filename}"
+                    f"{sibling.catalog.storage_prefix}/{sibling.slug}/{filename}"
                 )
                 if self._tier_bucket.exists(candidate):
                     return candidate
@@ -552,17 +552,6 @@ class Loader:
     # =========================================================================
     # Storage Operations
     # =========================================================================
-    def _catalog_prefix(self, catalog=None) -> str:
-        """``{org}/{catalog}`` — the first two segments of every key we write.
-
-        The org segment is derived server-side from the DataFeed's catalog chain
-        (collection → catalog → organisation), never from anything a source
-        plugin or a remote server hands us: a crafted filename must not be able
-        to land one institution's data under another's prefix.
-        """
-        catalog = catalog or self.collection.catalog
-        return catalog.storage_prefix
-
     def _get_storage_path(self, request) -> str:
         """
         Build storage path in georiva-sources bucket.
@@ -570,6 +559,11 @@ class Loader:
         Path: {org}/{catalog}/{collection}/{filename}
 
         If request has reference_time, filename gets GR-- prefix.
+
+        The org segment comes from the DataFeed's catalog chain
+        (collection → catalog → organisation), never from anything a source
+        plugin or a remote server hands us: a crafted filename must not be able
+        to land one institution's data under another's prefix.
         """
         from georiva.core.filename import build_filename
 
@@ -581,7 +575,7 @@ class Loader:
         # request.reference_time exists  → GR--20250115T0600--gfs_025.grib2
         # request.reference_time is None → sentinel2_ndvi.tif
 
-        return f"{self._catalog_prefix()}/{self.collection.slug}/{filename}"
+        return f"{self.collection.catalog.storage_prefix}/{self.collection.slug}/{filename}"
     
     def _store_file(self, local_path: Path, storage_path: str):
         """Store file in permanent storage for this feed's target tier."""
