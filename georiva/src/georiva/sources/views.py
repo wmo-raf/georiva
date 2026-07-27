@@ -1208,15 +1208,20 @@ def wizard_step1_catalog(request, model_name):
     """Step 1: create a new Catalog or select an existing unclaimed one."""
     from django.utils.text import slugify
     from georiva.core.models import Catalog
+    from georiva.core.provisioning import catalog_slug_taken
     from georiva.organisations.access import require_active_org
 
     model_cls, err = _get_model_or_redirect(request, model_name)
     if err:
         return err
-    
+
     verbose_name = model_cls._meta.verbose_name
-    # Only show catalogs that don't already have a DataFeed linked
-    unclaimed_catalogs = Catalog.objects.filter(data_feed__isnull=True).order_by("name")
+    org = require_active_org(request)
+    # Only show catalogs that don't already have a DataFeed linked, and only this
+    # organisation's: the feed derives its storage prefix from the catalog's org,
+    # so offering another tenant's catalog would send every fetched file into
+    # *their* `{org}/` prefix.
+    unclaimed_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True).order_by("name")
     catalog_defaults = model_cls.get_catalog_defaults()
     file_format_choices = Catalog.FileFormat.choices
     
@@ -1231,18 +1236,18 @@ def wizard_step1_catalog(request, model_name):
         errors = []
         if catalog_mode == "select" and not catalog_id:
             errors.append(_("Please choose a catalog."))
+        # A forged id must not reach step 2: everything downstream trusts this
+        # catalog to name the organisation the feed writes under. Same message
+        # for another org's catalog as for a claimed one — the operator has no
+        # business learning which other institutions exist.
+        if catalog_mode == "select" and catalog_id and not unclaimed_catalogs.filter(pk=catalog_id).exists():
+            errors.append(_("Please choose a catalog."))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
             if not new_catalog_format:
                 errors.append(_("Please choose a file format."))
-            # Scoped to this organisation: catalog slugs are unique per org, so
-            # another institution already owning this slug is neither a conflict
-            # nor something this operator should be told about.
-            taken = Catalog.objects.filter(
-                organisation=require_active_org(request), slug=new_catalog_slug
-            ).exists()
-            if new_catalog_slug and taken:
+            if new_catalog_slug and catalog_slug_taken(org, new_catalog_slug):
                 errors.append(_("A Catalog with slug '%s' already exists.") % new_catalog_slug)
         
         if errors:
@@ -1657,7 +1662,12 @@ def wizard_provision(request, model_name):
             },
         )
     else:
-        catalog = get_object_or_404(Catalog, pk=session_data["catalog_id"])
+        # Scoped again at the point of use, not just in step 1: a wizard session
+        # outlives a switch to another organisation's host, so the stored id may
+        # no longer belong to the org this request is served for.
+        catalog = get_object_or_404(
+            Catalog, pk=session_data["catalog_id"], organisation=require_active_org(request)
+        )
     
     definitions_map = {d.key: d for d in model_cls.get_collection_definitions()}
     selected_keys = session_data["selected_collection_keys"]

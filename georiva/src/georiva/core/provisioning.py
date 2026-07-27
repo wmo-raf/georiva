@@ -1,11 +1,12 @@
 """
-Shared low-level builders for provisioning core Variables.
+Shared low-level builders for the provisioning wizards.
 
 Both provisioning paths — the DataFeed setup path (definition-is-truth) and the
 Manual Upload Setup Wizard (operator-is-truth) — and any variable editor built
 on top of them create the same underlying records: Units resolved from loose
 symbols, and Variable ``sources`` StreamField blocks. These helpers are that
-common mechanical layer.
+common mechanical layer, along with the catalog-slug check both wizards run
+before offering to create a Catalog.
 
 Deliberately NOT here: the upsert semantics. The DataFeed path re-provisions
 with update_or_create (the plugin definition is the source of truth); the
@@ -16,6 +17,18 @@ services and must stay distinct.
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def catalog_slug_taken(organisation, slug):
+    """Whether ``organisation`` already owns a Catalog with this slug.
+
+    Scoped to the one organisation: catalog slugs are unique per org, so another
+    institution already owning this slug is neither a conflict nor something
+    this operator should be told about.
+    """
+    from georiva.core.models import Catalog
+
+    return Catalog.objects.filter(organisation=organisation, slug=slug).exists()
 
 
 def resolve_unit(symbol: str):
