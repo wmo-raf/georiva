@@ -8,7 +8,7 @@ from django.utils.functional import cached_property
 from wagtail.admin.viewsets.model import ModelViewSet
 
 from .forms import OrganisationCreateForm, OrganisationEditForm
-from .models import Organisation
+from .models import Organisation, OrganisationMembership
 from .permissions import SuperuserOnlyPermissionPolicy
 
 
@@ -23,17 +23,40 @@ class OrganisationViewSet(ModelViewSet):
     list_display = ["name", "slug", "hostname", "country"]
     search_fields = ["name", "slug"]
     inspect_view_enabled = True
-
-    # Organisations are deleted by the instance admin at the database level, not
-    # from the admin: deleting one would strand its Site, pages and storage.
     copy_view_enabled = False
 
     @cached_property
     def permission_policy(self):
-        return SuperuserOnlyPermissionPolicy(self.model)
+        # Deleting an organisation from here would strand its Site, page tree,
+        # storage prefix and group with no way to put them back; teardown is a
+        # database-level act for the instance admin.
+        return SuperuserOnlyPermissionPolicy(self.model, denied_actions=["delete"])
 
     def get_form_class(self, for_update=False):
         return OrganisationEditForm if for_update else OrganisationCreateForm
 
 
+class OrganisationMembershipViewSet(ModelViewSet):
+    """Who belongs to which organisation — including an org's first org admin.
+
+    Instance-admin only for now: org admins managing their own members is a
+    separate surface, on the org's own host.
+    """
+
+    model = OrganisationMembership
+    icon = "user"
+    menu_label = "Organisation members"
+    menu_icon = "user"
+    add_to_admin_menu = True
+    menu_order = 810
+    form_fields = ["user", "organisation", "role"]
+    list_display = ["user", "organisation", "role"]
+    search_fields = ["user__username", "organisation__name"]
+
+    @cached_property
+    def permission_policy(self):
+        return SuperuserOnlyPermissionPolicy(self.model)
+
+
 organisation_viewset = OrganisationViewSet("organisation")
+organisation_membership_viewset = OrganisationMembershipViewSet("organisation_membership")

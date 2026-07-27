@@ -10,13 +10,23 @@ from wagtail.permission_policies.base import BasePermissionPolicy
 
 
 class SuperuserOnlyPermissionPolicy(BasePermissionPolicy):
-    """Grants every action to active superusers, and to nobody else."""
+    """Grants every action to active superusers, and to nobody else.
+
+    ``denied_actions`` withholds an action from everyone, superusers included —
+    the way to take a view off a viewset such that its buttons disappear too.
+    """
+
+    def __init__(self, model, denied_actions=()):
+        super().__init__(model)
+        self.denied_actions = frozenset(denied_actions)
 
     def user_has_permission(self, user, action):
+        if action in self.denied_actions:
+            return False
         return bool(user and user.is_authenticated and user.is_active and user.is_superuser)
 
     def user_has_any_permission(self, user, actions):
-        return self.user_has_permission(user, None)
+        return any(self.user_has_permission(user, action) for action in actions)
 
     def users_with_any_permission(self, actions):
         return get_user_model().objects.filter(is_active=True, is_superuser=True)

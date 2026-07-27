@@ -61,6 +61,61 @@ class OrganisationAdminAccessTests(TestCase):
         response = self.client.get(reverse("wagtailadmin_home"), headers=HOST)
         self.assertNotContains(response, reverse("organisation:index"))
 
+    def test_org_admin_cannot_reach_the_membership_admin(self):
+        user = self._login("amina")
+        add_member(user, self.kenya, role=OrganisationMembership.Role.ADMIN)
+        response = self.client.get(reverse("organisation_membership:index"), headers=HOST)
+        self.assertEqual(response.status_code, 302)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class FirstOrgAdminTests(TestCase):
+    """The superuser's path from "new institution" to "someone who can run it"."""
+
+    def setUp(self):
+        self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        make_user("root", superuser=True)
+        self.client.login(username="root", password=PASSWORD)
+
+    def test_superuser_can_make_a_users_first_org_admin_membership(self):
+        amina = make_user("amina")
+
+        response = self.client.post(
+            reverse("organisation_membership:add"),
+            {
+                "user": amina.pk,
+                "organisation": self.kenya.pk,
+                "role": OrganisationMembership.Role.ADMIN,
+            },
+            headers=HOST,
+        )
+        self.assertEqual(response.status_code, 302)
+
+        membership = OrganisationMembership.objects.get(user=amina, organisation=self.kenya)
+        self.assertEqual(membership.role, OrganisationMembership.Role.ADMIN)
+
+    def test_the_new_org_admin_holds_that_role_on_their_host(self):
+        amina = make_user("amina")
+        add_member(amina, self.kenya, role=OrganisationMembership.Role.ADMIN)
+
+        self.client.login(username="amina", password=PASSWORD)
+        request = self.client.get("/admin/login/", headers=HOST).wsgi_request
+        self.assertEqual(request.active_org_role, OrganisationMembership.Role.ADMIN)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class OrganisationDeletionTests(TestCase):
+
+    def setUp(self):
+        self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        make_user("root", superuser=True)
+        self.client.login(username="root", password=PASSWORD)
+
+    def test_even_a_superuser_cannot_delete_an_organisation_from_the_admin(self):
+        response = self.client.post(reverse("organisation:delete", args=[self.kenya.pk]), headers=HOST)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Organisation.objects.filter(pk=self.kenya.pk).exists())
+
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class OrganisationAdminProvisioningTests(TestCase):

@@ -26,8 +26,8 @@ class Organisation(models.Model):
         unique=True,
         validators=[validate_org_slug],
         help_text=(
-            "Immutable. Used as the organisation's subdomain and as the first "
-            "segment of every storage path. Cannot be changed after creation."
+            "Immutable. The organisation's subdomain, and the segment its storage paths "
+            "will be filed under. Cannot be changed after creation."
         ),
     )
     site = models.OneToOneField(
@@ -63,15 +63,32 @@ class Organisation(models.Model):
     def __str__(self):
         return self.name
 
+    def _stored_slug(self):
+        if not self.pk:
+            return None
+        return type(self).objects.filter(pk=self.pk).values_list("slug", flat=True).first()
+
     def clean(self):
         super().clean()
-        if self.pk:
-            original = type(self).objects.filter(pk=self.pk).values_list("slug", flat=True).first()
-            if original is not None and original != self.slug:
-                raise ValidationError(
-                    {"slug": "The organisation slug is immutable and cannot be changed after creation."},
-                    code="immutable_org_slug",
-                )
+        stored = self._stored_slug()
+        if stored is not None and stored != self.slug:
+            raise ValidationError(
+                {"slug": "The organisation slug is immutable and cannot be changed after creation."},
+                code="immutable_org_slug",
+            )
+
+    def save(self, *args, **kwargs):
+        # Immutability is enforced here and not only in clean(), because a slug
+        # change is not a validation nicety: `{slug}/` storage keys and published
+        # links already point at the old one. Code paths that skip full_clean()
+        # must not be able to sneak one through.
+        stored = self._stored_slug()
+        if stored is not None and stored != self.slug:
+            raise ValidationError(
+                {"slug": "The organisation slug is immutable and cannot be changed after creation."},
+                code="immutable_org_slug",
+            )
+        return super().save(*args, **kwargs)
 
     @property
     def hostname(self):
@@ -112,7 +129,3 @@ class OrganisationMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} in {self.organisation} ({self.get_role_display()})"
-
-    @property
-    def is_admin(self):
-        return self.role == self.Role.ADMIN

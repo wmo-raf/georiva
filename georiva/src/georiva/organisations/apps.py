@@ -24,17 +24,13 @@ def bootstrap_on_migrate(sender, **kwargs):
     if Organisation.objects.exists():
         return
 
-    try:
-        organisation = bootstrap_central_org(
-            name=getattr(settings, "WAGTAIL_SITE_NAME", None),
-            slug=getattr(settings, "GEORIVA_CENTRAL_ORG_SLUG", "central"),
-        )
-    except Exception:
-        # Never block a migration on it: an operator can run
-        # `bootstrap_central_org` by hand once the cause is fixed.
-        logger.exception("Could not bootstrap the central organisation.")
-        return
-
+    # Deliberately unguarded: an instance whose central org failed to provision
+    # serves 404s on every host, so a migration that silently swallowed the
+    # failure would hand the operator a dead instance and a log line.
+    organisation = bootstrap_central_org(
+        name=getattr(settings, "WAGTAIL_SITE_NAME", None),
+        slug=getattr(settings, "GEORIVA_CENTRAL_ORG_SLUG", "central"),
+    )
     logger.info("Bootstrapped central organisation %s at %s", organisation.slug, organisation.hostname)
 
 

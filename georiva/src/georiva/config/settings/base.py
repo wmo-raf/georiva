@@ -412,6 +412,9 @@ GEORIVA_SITE_PORT = env.int("GEORIVA_SITE_PORT", default=80)
 GEORIVA_BOOTSTRAP_CENTRAL_ORG = env.bool("GEORIVA_BOOTSTRAP_CENTRAL_ORG", default=True)
 GEORIVA_CENTRAL_ORG_SLUG = env.str("GEORIVA_CENTRAL_ORG_SLUG", default="central")
 
+# Tests run against a host that must belong to an organisation, so the runner
+# points GEORIVA_BASE_DOMAIN at "testserver" before building the test database.
+# Affects `georiva test` only — nothing here changes how the app runs.
 TEST_RUNNER = "georiva.config.test_runner.GeoRivaTestRunner"
 
 if "." in GEORIVA_BASE_DOMAIN:

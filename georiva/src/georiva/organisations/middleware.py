@@ -29,7 +29,6 @@ def exempt_path_prefixes():
     organisation or 404.
     """
     prefixes = ["/health/"]
-    prefixes += list(getattr(settings, "GEORIVA_ORG_EXEMPT_PATH_PREFIXES", []))
     for url in (getattr(settings, "STATIC_URL", None), getattr(settings, "MEDIA_URL", None)):
         if url and url.startswith("/"):
             prefixes.append(url)
@@ -39,10 +38,13 @@ def exempt_path_prefixes():
 def resolve_organisation_for_host(hostname, port=None):
     """The Organisation serving ``hostname``, or ``None``.
 
-    Matches on hostname only — never on Wagtail's default-site fallback. Where
-    several Sites share a hostname on different ports, the port disambiguates.
+    The hostname must match a Site — never Wagtail's default-site fallback. The
+    port only breaks ties between Sites sharing a hostname: a request's port is
+    routinely not the Site's (the dev server answers on 8000, the proxy on 443,
+    while Sites are provisioned on 80), so a hostname match with a different
+    port is still a match.
     """
-    sites = Site.objects.filter(hostname=hostname)
+    sites = Site.objects.filter(hostname=hostname.lower())
     site = None
     if port is not None:
         site = sites.filter(port=port).first()
@@ -104,5 +106,5 @@ class OrganisationMiddleware:
             return None
         if user.is_superuser:
             return OrganisationMembership.Role.ADMIN
-        membership = organisation.memberships.filter(user=user).only("role").first()
+        membership = organisation.membership_for(user)
         return membership.role if membership else None

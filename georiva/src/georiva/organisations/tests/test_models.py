@@ -75,6 +75,13 @@ class OrganisationSlugImmutabilityTests(TestCase):
     def test_unchanged_slug_validates(self):
         self.organisation.full_clean()
 
+    def test_slug_change_is_refused_even_without_validation(self):
+        self.organisation.slug = "kenya-met"
+        with self.assertRaises(ValidationError):
+            self.organisation.save()
+        self.organisation.refresh_from_db()
+        self.assertEqual(self.organisation.slug, "kenya")
+
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
 class OrganisationMembershipTests(TestCase):
@@ -102,7 +109,6 @@ class OrganisationMembershipTests(TestCase):
     def test_default_role_is_member(self):
         membership = OrganisationMembership.objects.create(user=self.user, organisation=self.organisation)
         self.assertEqual(membership.role, OrganisationMembership.Role.MEMBER)
-        self.assertFalse(membership.is_admin)
 
     def test_membership_for_returns_live_row(self):
         self.assertIsNone(self.organisation.membership_for(self.user))

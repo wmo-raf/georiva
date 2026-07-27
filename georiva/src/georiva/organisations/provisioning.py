@@ -28,10 +28,14 @@ logger = logging.getLogger(__name__)
 ORG_PAGE_PERMISSION_TYPES = ("add", "change", "publish")
 
 
+def resolve_base_domain(base_domain=None):
+    """The domain organisations hang off; the central org sits on it directly."""
+    return base_domain or settings.GEORIVA_BASE_DOMAIN
+
+
 def build_org_hostname(slug, base_domain=None):
     """The hostname an organisation's Site is served from."""
-    base = base_domain or settings.GEORIVA_BASE_DOMAIN
-    return f"{slug}.{base}"
+    return f"{slug}.{resolve_base_domain(base_domain)}"
 
 
 def org_page_group_name(slug):
@@ -111,7 +115,7 @@ def bootstrap_central_org(*, name=None, slug="central", base_domain=None):
     if existing is not None:
         return existing
 
-    base = base_domain or settings.GEORIVA_BASE_DOMAIN
+    base = resolve_base_domain(base_domain)
     with transaction.atomic():
         if site.hostname != base:
             site.hostname = base
