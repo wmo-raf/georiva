@@ -134,7 +134,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         help_text="Number of collections to show per page."
     )
     
-    max_count = 1
+    # One per portal, i.e. one per organisation's HomePage — not one per instance.
+    max_count_per_parent = 1
     parent_page_types = ['home.HomePage']
     subpage_types = []
     

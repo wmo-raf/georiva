@@ -357,3 +357,42 @@ A task-ferry job providing real-time status of a single `FileIngestion` run. One
 `process_incoming_file` invocation, so retries and re-ingests produce multiple jobs pointing at the same
 `FileIngestion` (FK, not one-to-one).
 _Avoid_: IngestionJob
+
+### Tenancy
+
+**Organisation**:
+An institution (NMHS or regional centre) occupying one tenant of a shared GeoRiva instance. Created only by the
+instance admin (provisioned tenancy — no self-service signup). Identified by an immutable, strictly lowercase slug
+that enters public URLs and storage paths. Carries contact/identity settings and default provider metadata that
+prefill new catalogs; carries no branding or boundary.
+_Avoid_: tenant (as a model name), workspace, institution (as a model name)
+
+**Organisation Membership**:
+The row linking a user to an Organisation with a role of Admin or Member. A membership always means the person
+belongs to that institution. Users can belong to multiple Organisations. Members are onboarded by direct account
+creation (an org admin or the instance admin creates the account) — no email invitations.
+_Avoid_: OrganizationUser, workspace user, invite
+
+**Instance admin**:
+The Django superuser. Not a separate concept or flag. Creates Organisations and their first org admins, bypasses
+membership checks entirely, and may enter any Organisation without holding a membership row.
+_Avoid_: platform admin, staff (as a synonym)
+
+**Active organisation**:
+The Organisation a request is operating in, derived from its Host and nothing else: hostname → Wagtail Site →
+Organisation. There is no session-org state — the subdomain *is* the switcher. Membership is re-read on every
+request and access fails closed; an unknown hostname is a 404, never a fallback to some default organisation.
+Carried on the request as `active_org` (with `active_org_role`), and all admin-plane scoping derives from it.
+_Avoid_: current tenant, session org, default org
+
+**Central organisation**:
+The Organisation bootstrapped on Wagtail's default Site at the base domain during first setup. Entirely ordinary —
+same storage prefix, same membership rules, no fallback status — so that a single-institution install never has to
+think about tenancy.
+_Avoid_: default org, root org, main tenant
+
+**Shared reference data**:
+Instance-global records that no Organisation owns and every Organisation reads: topics, administrative boundaries,
+and the global tier of color palettes. Curated by the instance admin; deliberately exempt from org scoping (an
+unscoped chooser over reference data is by design, not a missed guard).
+_Avoid_: system data, common data

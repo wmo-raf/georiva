@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "georiva.edr",
     "georiva.visualization",
     "georiva.sources",
+    "georiva.organisations",
 
     # pages
     "georiva.pages.home",
@@ -168,6 +169,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # After authentication: the active organisation's role depends on request.user.
+    "georiva.organisations.middleware.OrganisationMiddleware",
     "wagtail.contrib.redirects.middleware.RedirectMiddleware",
 ]
 
@@ -395,6 +398,28 @@ else:
 # Django sets a maximum of 1000 fields per form by default, but particularly complex page models
 # can exceed this limit within Wagtail's page editor.
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10_000
+
+# Tenancy
+# Every organisation is served from <slug>.<GEORIVA_BASE_DOMAIN>; the central org
+# sits on the apex itself. One login covers the whole instance, so the session and
+# CSRF cookies are scoped to the parent domain — except on a single-label base
+# domain such as "localhost", where browsers reject a dotted cookie domain.
+GEORIVA_BASE_DOMAIN = env.str("GEORIVA_BASE_DOMAIN", default="localhost")
+GEORIVA_SITE_PORT = env.int("GEORIVA_SITE_PORT", default=80)
+
+# First setup binds Wagtail's default Site to an ordinary "central" organisation
+# on the base domain, so a single-institution install needs no tenancy ceremony.
+GEORIVA_BOOTSTRAP_CENTRAL_ORG = env.bool("GEORIVA_BOOTSTRAP_CENTRAL_ORG", default=True)
+GEORIVA_CENTRAL_ORG_SLUG = env.str("GEORIVA_CENTRAL_ORG_SLUG", default="central")
+
+# Tests run against a host that must belong to an organisation, so the runner
+# points GEORIVA_BASE_DOMAIN at "testserver" before building the test database.
+# Affects `georiva test` only — nothing here changes how the app runs.
+TEST_RUNNER = "georiva.config.test_runner.GeoRivaTestRunner"
+
+if "." in GEORIVA_BASE_DOMAIN:
+    SESSION_COOKIE_DOMAIN = f".{GEORIVA_BASE_DOMAIN}"
+    CSRF_COOKIE_DOMAIN = f".{GEORIVA_BASE_DOMAIN}"
 
 # Wagtail settings
 
