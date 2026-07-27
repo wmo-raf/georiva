@@ -21,6 +21,21 @@ if TYPE_CHECKING:
     from georiva.sources.collection_definitions import CollectionDefinition
 
 
+class DataFeedForm(WagtailAdminModelForm):
+    """Requires a catalog, which the database still allows to be null.
+
+    The column stays nullable because the wizard creates the catalog and the feed
+    in one transaction and older rows predate the link. On the raw admin form,
+    though, saving a feed without one produces something invisible: its
+    organisation is its catalog's, so a catalog-less feed belongs to nobody.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "catalog" in self.fields:
+            self.fields["catalog"].required = True
+
+
 class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     """
     A configured data source: what to fetch, how often, and with what settings.
@@ -29,6 +44,11 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     operator-supplied configuration (schedule, credentials, variable selection).
     """
     
+    # A feed's organisation is its catalog's. The FK is nullable, so a feed
+    # created without one belongs to nobody and is visible on no host —
+    # fail-closed by construction rather than a fallback to some default org.
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
     catalog = models.OneToOneField(
         'georivacore.Catalog',
         null=True,
@@ -81,11 +101,17 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
 
     base_panels = [
         FieldPanel('name'),
+        # On the form because a feed with no catalog has no organisation, and so
+        # is served on no host and reachable from no admin. The chooser only ever
+        # offers this organisation's catalogs (organisations/scoping.py).
+        FieldPanel('catalog'),
         FieldPanel('is_active'),
         FieldPanel('interval_minutes'),
     ]
 
     panels = base_panels
+
+    base_form_class = DataFeedForm
 
     class Meta:
         verbose_name = _("Data Feed")
@@ -364,6 +390,8 @@ class DataFeedCollectionLink(PolymorphicModel):
       - interval_minutes: per-collection override; null means use DataFeed.interval_minutes
       - last_run_at: updated after each successful collection run for is_due() checks
     """
+    ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
+
     data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name='collection_links')
     collection = models.ForeignKey('georivacore.Collection', on_delete=models.CASCADE, related_name='feed_links')
     
@@ -464,6 +492,8 @@ class DerivedProduct(models.Model):
     several output Collections; in the chain DAG products are edges, collections
     are nodes.
     """
+    ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
+
     data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name='derived_products')
 
     definition_key = models.CharField(
@@ -566,6 +596,8 @@ class DerivedProductInput(models.Model):
     re-resolution across upgrades and for diagnostics. Deleting the bound
     `Collection` cascades this row away (surfaced as an *unbound* product in a
     later slice)."""
+    ORGANISATION_LOOKUP = "product__data_feed__catalog__organisation"
+
     product = models.ForeignKey(
         DerivedProduct, on_delete=models.CASCADE, related_name='input_bindings'
     )
@@ -598,6 +630,8 @@ class DerivedProductOutput(models.Model):
     when the product is enabled, so the chain panel and downstream resolution read
     a product's served/internal collections by FK instead of a catalog+slug query.
     `output_key` keeps the declared key for re-resolution and diagnostics."""
+    ORGANISATION_LOOKUP = "product__data_feed__catalog__organisation"
+
     product = models.ForeignKey(
         DerivedProduct, on_delete=models.CASCADE, related_name='output_bindings'
     )
@@ -632,6 +666,8 @@ class FetchRun(models.Model):
         COMPLETED = 'completed', 'Completed'
         FAILED = 'failed', 'Failed'
         CANCELLED = 'cancelled', 'Cancelled'
+
+    ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
 
     data_feed = models.ForeignKey(
         DataFeed,
@@ -705,6 +741,8 @@ class FetchedFile(models.Model):
         STORED = 'stored', 'Stored'
         SKIPPED = 'skipped', 'Skipped'
         FAILED = 'failed', 'Failed'
+
+    ORGANISATION_LOOKUP = "fetch_run__data_feed__catalog__organisation"
 
     fetch_run = models.ForeignKey(
         FetchRun,

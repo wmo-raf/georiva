@@ -16,7 +16,9 @@ from datetime import datetime
 
 import pytz
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import render
+
+from georiva.organisations.access import get_org_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
@@ -94,7 +96,8 @@ def manual_upload_page(request, pk):
         _CATALOG_FORMAT_LABEL,
     )
 
-    config = get_object_or_404(
+    config = get_org_object_or_404(
+        request,
         ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
     )
     variables = config.variables.select_related("collection").order_by(
@@ -143,7 +146,7 @@ def manual_upload_extract_times(request, pk):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
     filename = request.POST.get("filename", "").strip()
     if not filename:
         return JsonResponse({"error": str(_("No filename provided."))}, status=400)
@@ -175,7 +178,8 @@ def manual_upload_submit(request, pk):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    config = get_object_or_404(
+    config = get_org_object_or_404(
+        request,
         ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
     )
 

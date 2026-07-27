@@ -28,7 +28,7 @@ from django.contrib.auth import get_user_model
 
 from georiva.core.models import Catalog
 from georiva.sources.models import DataFeed, DerivedProduct
-from georiva.organisations.testing import make_organisation, org_host
+from georiva.organisations.testing import dial_org, make_organisation, org_host
 
 User = get_user_model()
 
@@ -92,6 +92,7 @@ def _checkbox_is_checked(html, key):
 class WizardStepBase(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("wiz", "w@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         # The wizard only offers (and accepts) catalogs of the org serving the
         # request, so dial the host that owns this fixture.

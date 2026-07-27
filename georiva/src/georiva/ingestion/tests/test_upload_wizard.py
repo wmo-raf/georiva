@@ -6,7 +6,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
-from georiva.organisations.testing import make_organisation, org_host
+from georiva.organisations.testing import dial_org, join_org, make_organisation, org_host
 
 User = get_user_model()
 
@@ -77,6 +77,7 @@ def _full_session():
 class Step1CatalogTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@b.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         # The wizard only offers (and accepts) catalogs of the org serving the
         # request, so dial the host that owns the fixtures.
@@ -128,6 +129,7 @@ class Step1CatalogTests(TestCase):
 class Step2ConfigNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin2", "b@c.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
@@ -172,6 +174,7 @@ class Step2ConfigNameTests(TestCase):
 class UploadSampleAjaxTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ajax", "x@y.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_returns_405_on_get(self):
@@ -264,6 +267,7 @@ class UploadSampleAjaxTests(TestCase):
 class Step3CombinedTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
@@ -356,6 +360,7 @@ class Step3CombinedTests(TestCase):
 class Step4CollectionsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4", "d@e.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
@@ -465,6 +470,7 @@ class Step4CollectionsTests(TestCase):
 class Step4DuplicateSourceNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4dup", "dup@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create",
@@ -572,6 +578,7 @@ class Step4DuplicateSourceNameTests(TestCase):
 class Step5ReviewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin5", "e@f.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, _full_session())
 
@@ -594,6 +601,7 @@ class Step5ReviewTests(TestCase):
 class ProvisionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin6", "g@h.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         make_organisation()
         self.client.defaults["HTTP_HOST"] = org_host()
@@ -745,6 +753,7 @@ class Step1SlugScopingTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_slug", "s@s.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.kenya = make_organisation("kenya")
 
@@ -790,6 +799,7 @@ class CatalogOwnershipTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin7", "o@o.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.client.defaults["HTTP_HOST"] = org_host()
         from georiva.sources.models import DataFeed
@@ -841,6 +851,8 @@ class DataManagerWizardAccessTests(TestCase):
         from django.contrib.auth.models import Group
         self.user = User.objects.create_user("dm2", "dm2@x.com", "pw")
         self.user.groups.add(Group.objects.get(name="Data Managers"))
+        join_org(self.user)
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_data_manager_can_provision_via_the_wizard(self):

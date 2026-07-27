@@ -2,6 +2,8 @@ from django.urls import path
 from wagtail import hooks
 from wagtail.admin.viewsets.model import ModelViewSet
 
+from georiva.organisations.scoping import OrgScopedViewSetMixin
+
 from .models import DataFeed
 from .registry import data_feed_viewset_registry
 from .utils import get_all_child_models
@@ -118,9 +120,12 @@ def get_data_feed_viewsets():
             "delete_view_class": DataFeedDeleteView,
         }
         
+        # Row scoping is injected here rather than left to each plugin: these
+        # viewsets are generated from whatever DataFeed subclasses are installed,
+        # so a plugin can neither opt in nor opt out of it.
         viewset = type(
             f"{model_cls.__name__}ViewSet",
-            (ModelViewSet,),
+            (OrgScopedViewSetMixin, ModelViewSet),
             attrs
         )
         

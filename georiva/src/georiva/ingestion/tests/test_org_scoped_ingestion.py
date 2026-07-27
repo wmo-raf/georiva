@@ -15,7 +15,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.service import IngestionService
-from georiva.organisations.testing import make_organisation, org_host
+from georiva.organisations.testing import dial_org, make_organisation, org_host
 
 
 def _event(bucket_name, key):
@@ -239,6 +239,7 @@ class UploadWizardCatalogScopingTests(TestCase):
     SESSION_KEY = "georiva_upload_wizard"
 
     def setUp(self):
+        dial_org(self.client)
         self.client.force_login(
             get_user_model().objects.create_superuser("orgadmin", "o@x.com", "pw")
         )

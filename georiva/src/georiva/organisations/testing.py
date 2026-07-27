@@ -34,6 +34,33 @@ def org_host(slug=DEFAULT_TEST_ORG_SLUG):
     return f"{slug}.testserver"
 
 
+def dial_org(client, slug=DEFAULT_TEST_ORG_SLUG):
+    """Point ``client`` at ``slug``'s host for every request it makes.
+
+    Creates the organisation if it does not exist yet: an unknown host is a 404
+    on every URL, and a test that only drives admin views has no other reason to
+    build one.
+    """
+    make_organisation(slug)
+    client.defaults["HTTP_HOST"] = org_host(slug)
+    return client
+
+
+def join_org(user, slug=DEFAULT_TEST_ORG_SLUG, role=None):
+    """Give ``user`` a membership row in ``slug``, defaulting to Member.
+
+    Non-superusers need one to reach any organisation's admin at all — the
+    middleware turns a signed-in stranger away before any view runs.
+    """
+    from .models import OrganisationMembership
+
+    return OrganisationMembership.objects.create(
+        user=user,
+        organisation=make_organisation(slug),
+        role=role or OrganisationMembership.Role.MEMBER,
+    )
+
+
 def make_organisation(slug=DEFAULT_TEST_ORG_SLUG, name=None, **fields):
     """An Organisation with ``slug``, created once and returned thereafter."""
     existing = Organisation.objects.filter(slug=slug).first()

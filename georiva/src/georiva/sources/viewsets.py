@@ -3,6 +3,8 @@ from django.urls import reverse
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 
+from georiva.organisations.scoping import OrgScopedChooserViewSetMixin
+
 from .models import DataFeed
 
 
@@ -30,7 +32,7 @@ class DataFeedDeleteView(DataFeedSuccessUrlMixin, generic.DeleteView):
         return redirect("data_feed_delete", pk=self.object.pk)
 
 
-class DataFeedChooserViewSet(ChooserViewSet):
+class DataFeedChooserViewSet(OrgScopedChooserViewSetMixin, ChooserViewSet):
     model = DataFeed
 
     icon = "file-import"

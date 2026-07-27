@@ -57,6 +57,10 @@ class Catalog(Indexed, TimeStampedModel):
     manifests, zonal stats) belongs to the catalog's organisation transitively
     through the FK chain, and carries no organisation FK of its own.
     """
+    # The tenancy root: everything beneath declares the path that reaches this
+    # field. See organisations/access.py.
+    ORGANISATION_LOOKUP = "organisation"
+
     organisation = models.ForeignKey(
         'organisations.Organisation',
         on_delete=models.CASCADE,
@@ -122,6 +126,11 @@ class Catalog(Indexed, TimeStampedModel):
         index.AutocompleteField("name"),
         index.SearchField("get_collection_names"),
         index.AutocompleteField("get_collection_names"),
+        # The admin search runs through the search backend rather than the ORM,
+        # and a backend can only honour a filter on a field it indexes. Without
+        # this the org-scoped queryset the listing hands it raises — which is the
+        # right failure, but the search box is meant to work.
+        index.FilterField("organisation"),
     ]
     
     panels = [

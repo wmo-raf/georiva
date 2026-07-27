@@ -1,3 +1,4 @@
+from georiva.organisations.testing import dial_org
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.test import TestCase

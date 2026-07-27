@@ -14,8 +14,14 @@ from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 from georiva.formats.registry import format_registry
+from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
+
+
+def _org_catalogs(request, catalog_model):
+    """This organisation's catalogs — the only ones a wizard id may name."""
+    return scoped_queryset(request, catalog_model.objects.all())
 
 _WIZARD_SESSION_KEY = "georiva_upload_wizard"
 
@@ -221,10 +227,11 @@ def upload_wizard_step2(request):
             default_config_name = f"{session['new_catalog_name']} Config"
         elif session.get("catalog_id"):
             from georiva.core.models import Catalog as _Catalog
-            try:
-                default_config_name = f"{_Catalog.objects.get(pk=session['catalog_id']).name} Config"
-            except _Catalog.DoesNotExist:
-                pass
+            # Scoped: the stored id is only meaningful on the host it was chosen
+            # on, and a name read across organisations is still a name leaked.
+            catalog = _org_catalogs(request, _Catalog).filter(pk=session["catalog_id"]).first()
+            if catalog is not None:
+                default_config_name = f"{catalog.name} Config"
 
     return render(request, "georivaingestion/wizard_step2_name.html", {
         "session": session,
@@ -609,10 +616,8 @@ def upload_wizard_step5(request):
     if session.get("catalog_mode") == "create":
         catalog_display = session.get("new_catalog_name")
     elif session.get("catalog_id"):
-        try:
-            catalog_display = Catalog.objects.get(pk=session["catalog_id"]).name
-        except Catalog.DoesNotExist:
-            pass
+        catalog = _org_catalogs(request, Catalog).filter(pk=session["catalog_id"]).first()
+        catalog_display = catalog.name if catalog is not None else None
 
     collections_display = []
     for idx, coll in enumerate(session.get("collections", [])):

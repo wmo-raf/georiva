@@ -54,7 +54,9 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
     """
     
     base_form_class = CollectionForm
-    
+
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
     class Visibility(models.TextChoices):
         PUBLIC = 'public', 'Public'      # served via STAC/EDR/pages/tiles
         INTERNAL = 'internal', 'Internal'  # derivation intermediate — never served

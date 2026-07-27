@@ -19,7 +19,7 @@ from georiva.core.models import Catalog
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
 from georiva.sources.views import DataFeedIndexView
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -56,6 +56,7 @@ class DataFeedIndexBase(TestCase):
 
         ensure_base_datafeed_viewset()
         self.user = User.objects.create_superuser("op", "op@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.url = reverse("data_feed_list")
 

@@ -41,4 +41,6 @@ class OrganisationsConfig(AppConfig):
     verbose_name = "Organisations"
 
     def ready(self):
+        from . import signals  # noqa: F401  (registers the membership receiver)
+
         post_migrate.connect(bootstrap_on_migrate, sender=self)

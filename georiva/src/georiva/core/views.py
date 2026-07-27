@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from django.core.paginator import InvalidPage
 from django.db.models import Count, OuterRef, Subquery
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
@@ -12,6 +12,7 @@ from wagtail.admin.views.generic import IndexView
 from wagtail.admin.widgets import Button, ButtonWithDropdown
 
 from georiva.core.models import Catalog
+from georiva.organisations.access import get_org_object_or_404
 from georiva.core.models import Collection, Item
 from .table import LinkColumnWithIcon
 
@@ -159,7 +160,8 @@ class CatalogIndexView(IndexView):
 
 
 def collection_items_list(request, collection_pk):
-    collection = get_object_or_404(
+    collection = get_org_object_or_404(
+        request,
         Collection.objects.select_related("catalog", "catalog__boundary"),
         pk=collection_pk,
     )

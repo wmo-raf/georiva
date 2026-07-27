@@ -3,7 +3,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -29,6 +29,7 @@ def _make_config(catalog, name="Surface variables", fmt="YYYYMMDD"):
 class ManualUploadConfigListTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@b.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_list_renders(self):
@@ -67,6 +68,7 @@ class ManualUploadConfigListTests(TestCase):
 class ManualUploadConfigEditTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin2", "b@c.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = _make_catalog()
         self.config = _make_config(self.catalog)
@@ -118,6 +120,7 @@ class ManualUploadConfigEditTests(TestCase):
 class ManualUploadConfigDeleteTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = _make_catalog()
         self.config = _make_config(self.catalog)

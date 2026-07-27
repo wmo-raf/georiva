@@ -17,7 +17,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.sources.fetch.base import FetchResult, FileRequest
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 class FileRequestRoundTripTests(TestCase):
@@ -254,6 +254,7 @@ class RunDetailRetryUITests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_retry", "r@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed, self.collection = _feed_and_collection()
         self.run = FetchRun.objects.create(

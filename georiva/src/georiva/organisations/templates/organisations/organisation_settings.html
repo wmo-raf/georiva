@@ -1,0 +1,43 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Organisation settings" %} — {{ organisation.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .gr-org-identity {
+        margin-bottom: 1.5em;
+        padding-bottom: 1em;
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        color: var(--w-color-text-label);
+    }
+    .gr-org-identity code { color: var(--w-color-text-context); }
+    .gr-org-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<div class="gr-org-identity">
+    {% blocktrans with host=organisation.hostname slug=organisation.slug %}
+        Served at <code>{{ host }}</code>. Storage prefix <code>{{ slug }}/</code>.
+        Both are fixed when the organisation is created.
+    {% endblocktrans %}
+</div>
+
+<form method="post" action="">
+    {% csrf_token %}
+    {% for field in form %}
+        {% if field.is_hidden %}
+            {{ field }}
+        {% else %}
+            {% include "wagtailadmin/shared/field.html" %}
+        {% endif %}
+    {% endfor %}
+    <div class="gr-org-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+            {% trans "Save" %}
+        </button>
+    </div>
+</form>
+{% endblock %}

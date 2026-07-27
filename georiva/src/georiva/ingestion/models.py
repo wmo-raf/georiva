@@ -407,6 +407,8 @@ class UploadSession(models.Model):
         FAILED = 'failed', 'Failed'
         CANCELLED = 'cancelled', 'Cancelled'
 
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
     catalog = models.ForeignKey(
         'georivacore.Catalog',
         on_delete=models.CASCADE,
@@ -456,6 +458,8 @@ class UploadedFile(models.Model):
         UPLOADING = 'uploading', 'Uploading'
         STORED = 'stored', 'Stored'
         FAILED = 'failed', 'Failed'
+
+    ORGANISATION_LOOKUP = "session__catalog__organisation"
 
     session = models.ForeignKey(
         UploadSession,
@@ -514,6 +518,8 @@ class ManualUploadConfig(models.Model):
         YYMMDD       = 'YYMMDD',       'YYMMDD'
         CONTENT      = 'CONTENT',      'From file content'
 
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
     catalog = models.ForeignKey(
         'georivacore.Catalog',
         on_delete=models.CASCADE,
@@ -540,6 +546,8 @@ class ManualUploadConfig(models.Model):
 
 class ManualUploadConfigVariable(models.Model):
     """Links a ManualUploadConfig to a Collection for one variable."""
+
+    ORGANISATION_LOOKUP = "config__catalog__organisation"
 
     config = models.ForeignKey(
         ManualUploadConfig,

@@ -6,6 +6,8 @@ from django.db import models
 from django.http import JsonResponse, Http404
 from django.utils import timezone
 
+from georiva.organisations.access import get_org_object_or_404, scoped_queryset
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,7 +24,7 @@ def ingestion_dashboard_api(request):
     from georiva.sources.models import DataFeedCollectionLink
 
     collections = list(
-        Collection.objects
+        scoped_queryset(request, Collection.objects.all())
         .select_related("catalog")
         .filter(is_active=True)
         .order_by("catalog__slug", "sort_order", "name")
@@ -124,10 +126,9 @@ def collection_ingestion_jobs_api(request, collection_id):
     from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestionJob
     
-    try:
-        collection = Collection.objects.select_related("catalog").get(pk=collection_id)
-    except Collection.DoesNotExist:
-        raise Http404
+    collection = get_org_object_or_404(
+        request, Collection.objects.select_related("catalog"), pk=collection_id
+    )
     
     active_states = ("pending", "started")
     
@@ -177,10 +178,9 @@ def collection_ingestion_logs_api(request, collection_id):
     from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestion
     
-    try:
-        collection = Collection.objects.select_related("catalog").get(pk=collection_id)
-    except Collection.DoesNotExist:
-        raise Http404
+    collection = get_org_object_or_404(
+        request, Collection.objects.select_related("catalog"), pk=collection_id
+    )
     
     logs = (
         FileIngestion.objects
@@ -222,10 +222,7 @@ def collection_fetch_runs_api(request, collection_id):
     from georiva.core.models import Collection
     from georiva.sources.models import DataFeedCollectionLink, FetchRun
     
-    try:
-        Collection.objects.get(pk=collection_id)
-    except Collection.DoesNotExist:
-        raise Http404
+    get_org_object_or_404(request, Collection, pk=collection_id)
     
     feed_ids = list(
         DataFeedCollectionLink.objects
@@ -272,10 +269,7 @@ def collection_upload_sessions_api(request, collection_id):
     from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestion, UploadedFile, UploadSession
 
-    try:
-        Collection.objects.get(pk=collection_id)
-    except Collection.DoesNotExist:
-        raise Http404
+    get_org_object_or_404(request, Collection, pk=collection_id)
 
     fi_paths = (
         FileIngestion.objects
