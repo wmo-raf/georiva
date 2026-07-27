@@ -607,6 +607,14 @@ UPLOAD_SESSION_STATUS_URL = "/api/upload-sessions/{}/status/"
 
 
 class UploadSessionStatusEndpointTests(TestCase):
+    """The polling endpoint an upload page watches — scoped like everything else.
+
+    A session belongs to its catalog's organisation, so the answer depends on the
+    host asked, and these dial the one that owns the fixtures.
+    """
+
+    def setUp(self):
+        dial_org(self.client)
 
     def _make_session(self, status=UploadSession.Status.ACTIVE):
         catalog = Catalog.objects.create(organisation=make_organisation(), name="S", slug="s", file_format="geotiff")
