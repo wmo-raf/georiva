@@ -116,12 +116,19 @@ def _save_session(request, data):
 
 def upload_wizard_step1(request):
     from georiva.core.models import Catalog
+    from georiva.core.provisioning import catalog_slug_taken
     from georiva.organisations.access import require_active_org
 
+    org = require_active_org(request)
     # A Catalog is either feed-managed or manually-managed, never both: a
     # DataFeed's deletion cascades to its Catalog, which would silently destroy
     # any manual Collections placed inside it. Only offer unclaimed Catalogs.
-    all_catalogs = Catalog.objects.filter(data_feed__isnull=True).order_by("name")
+    #
+    # Scoped to this organisation as well: the org segment is derived from the
+    # chosen catalog, so offering another tenant's catalog here would file every
+    # subsequent upload under *their* `{org}/` prefix — server-side misfiling of
+    # national data, which is precisely what org-scoped storage exists to stop.
+    all_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True).order_by("name")
     file_format_choices = Catalog.FileFormat.choices
 
     if request.method == "POST":
@@ -135,20 +142,19 @@ def upload_wizard_step1(request):
         errors = []
         if catalog_mode == "select" and not catalog_id:
             errors.append(_("Please choose a catalog."))
-        if catalog_mode == "select" and catalog_id and not all_catalogs.filter(pk=catalog_id).exists():
-            errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
+        if catalog_mode == "select" and catalog_id:
+            if not Catalog.objects.filter(pk=catalog_id, organisation=org).exists():
+                # Another organisation's catalog, or none at all. Same message
+                # either way: this operator has no business learning which.
+                errors.append(_("Please choose a catalog."))
+            elif not all_catalogs.filter(pk=catalog_id).exists():
+                errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
             if not new_catalog_format:
                 errors.append(_("Please choose a file format."))
-            # Scoped to this organisation: catalog slugs are unique per org, so
-            # another institution already owning this slug is neither a conflict
-            # nor something this operator should be told about.
-            taken = Catalog.objects.filter(
-                organisation=require_active_org(request), slug=new_catalog_slug
-            ).exists()
-            if new_catalog_slug and taken:
+            if new_catalog_slug and catalog_slug_taken(org, new_catalog_slug):
                 errors.append(_("A Catalog with slug '%s' already exists.") % new_catalog_slug)
 
         if errors:
@@ -673,7 +679,13 @@ def upload_wizard_provision(request):
                 )
             else:
                 try:
-                    catalog = Catalog.objects.get(pk=session["catalog_id"])
+                    # Scoped again at the point of use, not just in step 1: a
+                    # wizard session outlives a switch to another organisation's
+                    # host, so the stored id may no longer belong to the org this
+                    # request is served for.
+                    catalog = Catalog.objects.get(
+                        pk=session["catalog_id"], organisation=require_active_org(request)
+                    )
                 except Catalog.DoesNotExist:
                     messages.error(request, _("Selected catalog no longer exists."))
                     return redirect("upload_wizard_step1")

@@ -23,6 +23,17 @@ def _root_page():
     return Page.get_first_root_node()
 
 
+def org_host(slug=DEFAULT_TEST_ORG_SLUG):
+    """The Host header that ``make_organisation(slug)`` answers on.
+
+    Admin views owning tenant data resolve their organisation from the request
+    Host and refuse to guess one. A test driving such a view therefore has to
+    dial the org that owns its fixtures: the bare ``testserver`` default belongs
+    to the bootstrap organisation, not to anything ``make_organisation`` built.
+    """
+    return f"{slug}.testserver"
+
+
 def make_organisation(slug=DEFAULT_TEST_ORG_SLUG, name=None, **fields):
     """An Organisation with ``slug``, created once and returned thereafter."""
     existing = Organisation.objects.filter(slug=slug).first()

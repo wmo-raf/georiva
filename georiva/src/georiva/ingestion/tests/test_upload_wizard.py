@@ -6,7 +6,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import make_organisation, org_host
 
 User = get_user_model()
 
@@ -78,6 +78,10 @@ class Step1CatalogTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@b.com", "pw")
         self.client.force_login(self.user)
+        # The wizard only offers (and accepts) catalogs of the org serving the
+        # request, so dial the host that owns the fixtures.
+        make_organisation()
+        self.client.defaults["HTTP_HOST"] = org_host()
 
     def test_step1_renders(self):
         self.assertEqual(self.client.get(STEP1_URL).status_code, 200)
@@ -591,6 +595,8 @@ class ProvisionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin6", "g@h.com", "pw")
         self.client.force_login(self.user)
+        make_organisation()
+        self.client.defaults["HTTP_HOST"] = org_host()
 
     def test_provision_creates_collection_config_and_variables(self):
         _seed_session(self.client, _full_session())
@@ -785,6 +791,7 @@ class CatalogOwnershipTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin7", "o@o.com", "pw")
         self.client.force_login(self.user)
+        self.client.defaults["HTTP_HOST"] = org_host()
         from georiva.sources.models import DataFeed
         self.claimed = _make_catalog(slug="chirps")
         self.unclaimed = _make_catalog(slug="local-models")

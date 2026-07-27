@@ -8,13 +8,14 @@ national data filed under another's prefix.
 """
 from unittest.mock import MagicMock, patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.service import IngestionService
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import make_organisation, org_host
 
 
 def _event(bucket_name, key):
@@ -223,3 +224,56 @@ class ServerSideOrgSegmentTests(TestCase):
         self.assertEqual(
             loader._get_storage_path(request), "kenya/chirps/rainfall/rain.grib2"
         )
+
+
+class UploadWizardCatalogScopingTests(TestCase):
+    """The wizard never lets an operator target another organisation's catalog.
+
+    Deriving the org segment server-side is only half the guarantee: if the
+    wizard will accept *any* catalog id, an operator on org A can still pick org
+    B's catalog and have every later upload written under ``B/…``. Server-side
+    derivation would faithfully misfile it.
+    """
+
+    STEP1_URL = "/admin/manual-uploads/wizard/step1/"
+    SESSION_KEY = "georiva_upload_wizard"
+
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_superuser("orgadmin", "o@x.com", "pw")
+        )
+        self.client.defaults["HTTP_HOST"] = org_host("kenya")
+        make_organisation("kenya")
+        self.other_orgs_catalog = Catalog.objects.create(
+            organisation=make_organisation("uganda"), name="Rain", slug="rain",
+            file_format="grib2",
+        )
+
+    def test_another_orgs_catalog_is_not_offered(self):
+        response = self.client.get(self.STEP1_URL)
+        self.assertNotIn(self.other_orgs_catalog, response.context["all_catalogs"])
+
+    def test_selecting_another_orgs_catalog_is_refused(self):
+        response = self.client.post(self.STEP1_URL, {
+            "catalog_mode": "select",
+            "catalog_id": self.other_orgs_catalog.pk,
+        })
+
+        # Re-rendered with an error rather than advancing, and nothing stored.
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self.client.session.get(self.SESSION_KEY))
+
+    def test_the_same_slug_in_our_own_org_is_still_selectable(self):
+        """Per-org slugs mean 'rain' is free here even though another org has it."""
+        ours = Catalog.objects.create(
+            organisation=make_organisation("kenya"), name="Rain", slug="rain",
+            file_format="grib2",
+        )
+
+        response = self.client.post(self.STEP1_URL, {
+            "catalog_mode": "select",
+            "catalog_id": ours.pk,
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.session[self.SESSION_KEY]["catalog_id"], ours.pk)
