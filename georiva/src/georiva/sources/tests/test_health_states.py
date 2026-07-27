@@ -207,10 +207,18 @@ class PolymorphicHealthTests(TestCase):
         # module level, so it stays in the app registry for the whole run; every
         # later DataFeed deletion has its cascade collector walk this subclass.
         # Dropping the table would leave the registry pointing at nothing and
-        # break unrelated tests. Creation is idempotent for --keepdb.
+        # break unrelated tests. GeoRivaTestRunner.setup_databases normally builds
+        # the table before any test runs; this stays as an idempotent fallback for
+        # --keepdb and for parallel clones, which are taken before it runs.
         if StubPluginFeed._meta.db_table not in connection.introspection.table_names():
             with connection.schema_editor() as editor:
                 editor.create_model(StubPluginFeed)
+        # Clear the cache before resolving: an earlier test that touched this
+        # subclass (any DataFeed cascade does) may have created the ContentType
+        # row inside its own transaction and then rolled back, leaving the cache
+        # holding an id whose row is gone. A cache hit here would skip the insert
+        # and every StubPluginFeed row would then violate the ctype FK.
+        ContentType.objects.clear_cache()
         ContentType.objects.get_for_model(StubPluginFeed)
         super().setUpClass()
 
