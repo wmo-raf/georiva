@@ -396,3 +396,18 @@ Instance-global records that no Organisation owns and every Organisation reads: 
 and the global tier of color palettes. Curated by the instance admin; deliberately exempt from org scoping (an
 unscoped chooser over reference data is by design, not a missed guard).
 _Avoid_: system data, common data
+
+**Org-owned model**:
+A model whose rows belong to exactly one Organisation, reached through the FK chain rooted at `Catalog` rather than
+an organisation FK of its own. Says so by declaring `ORGANISATION_LOOKUP` — the ORM path from itself to
+`Organisation`. A model that declares none cannot be scoped at all: scoping it raises rather than returning every
+row, so an undeclared model is a loud error instead of a quiet leak.
+_Avoid_: tenant model, scoped model, owned model
+
+**Access choke point**:
+`organisations/access.py` — the single module every admin surface goes through to reach tenant rows
+(`scoped_queryset`, `get_org_object_or_404`, `require_org_object`, `require_org_member`, `require_org_admin`). One
+implementation so there is one place to audit, and one that a guard test walking the whole admin can hold the
+instance to. Distinct from Wagtail's model permissions, which stay the *capability* layer: what a user may do, not
+whose rows they may do it to.
+_Avoid_: permission manager chain, scoping middleware, tenancy filter
