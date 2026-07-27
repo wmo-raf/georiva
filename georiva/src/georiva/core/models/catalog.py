@@ -8,12 +8,18 @@ from wagtail.admin.panels import (
 )
 from wagtail.search import index
 from wagtail.search.index import Indexed
+from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 
 class Topic(Indexed, TimeStampedModel):
     """
     Thematic topic for classifying Catalogs
+
+    Shared reference data: curated once for the instance and read by every
+    organisation, so deliberately not org-scoped (decision #259).
     """
+
+    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
     name = models.CharField(max_length=100, unique=True)
     slug = AutoSlugField(populate_from='name', unique=True, editable=False)
     description = models.TextField(blank=True)

@@ -9,6 +9,7 @@ from wagtail.models import Page
 
 from georiva.core.models import Catalog, Collection, Topic, Item, Asset
 from georiva.core.utils import get_full_url_by_request
+from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
 ITEMS_PER_PAGE = 24
 
@@ -113,6 +114,8 @@ def _group_assets_by_level(assets):
 
 
 class DatasetsIndexPage(RoutablePageMixin, Page):
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     """
     Landing page for browsing datasets.
 

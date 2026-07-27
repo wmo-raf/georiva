@@ -1,0 +1,31 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{{ header_title }} — {{ organisation.name }}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .gr-member-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<form method="post" action="">
+    {% csrf_token %}
+    {% for field in form %}
+        {% if field.is_hidden %}
+            {{ field }}
+        {% else %}
+            {% include "wagtailadmin/shared/field.html" %}
+        {% endif %}
+    {% endfor %}
+    <div class="gr-member-actions">
+        <button type="submit" class="button bicolor button--icon">
+            <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+            {% trans "Save" %}
+        </button>
+        <a href="{{ cancel_url }}" class="button button-secondary">{% trans "Cancel" %}</a>
+    </div>
+</form>
+{% endblock %}

@@ -32,12 +32,16 @@ from django.db.models import Model, QuerySet
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 
+from .lookups import (  # re-exported so enforcement code has one import
+    LOOKUP_ATTR,
+    NOT_ORM_SCOPABLE,
+    ORGANISATION_SELF,
+    OWN_MODULE_PREFIX,
+    SENTINELS,
+    SHARED_REFERENCE_DATA,
+    declared_lookup,
+)
 from .models import OrganisationMembership
-
-#: Class attribute a model declares to name the ORM path from itself to the
-#: ``Organisation`` that owns it — ``"organisation"`` on the tenancy root,
-#: ``"catalog__organisation"`` one step down, and so on.
-LOOKUP_ATTR = "ORGANISATION_LOOKUP"
 
 
 def require_active_org(request):
@@ -58,18 +62,20 @@ def require_active_org(request):
 def organisation_lookup(model):
     """The ORM path from ``model`` to its owning organisation.
 
-    Raises ``ImproperlyConfigured`` for a model that has not declared one. That
-    is the deny-by-default hinge: a new org-owned model is unusable with these
-    helpers until somebody writes down how it reaches its organisation.
+    Raises ``ImproperlyConfigured`` for anything that is not a path — including a
+    model that declared one of the sentinels, since none of them describes a
+    route the ORM can walk. That is the deny-by-default hinge: a model is
+    unusable with these helpers until somebody writes down how it reaches its
+    organisation, or writes down that it cannot.
     """
-    lookup = getattr(model, LOOKUP_ATTR, None)
-    if not lookup:
+    declared = declared_lookup(model)
+    if not declared or declared in SENTINELS:
         raise ImproperlyConfigured(
-            f"{model._meta.label} cannot be scoped to an organisation: it declares no "
-            f"{LOOKUP_ATTR}. Add one naming the ORM path to Organisation, or keep the "
-            f"model off org-scoped admin surfaces."
+            f"{model._meta.label} cannot be scoped by an ORM filter: it declares "
+            f"{LOOKUP_ATTR} = {declared!r}. Give it the path to Organisation, or reach "
+            f"its rows through a parent that has one."
         )
-    return lookup
+    return declared
 
 
 def organisation_of(obj):
@@ -79,6 +85,8 @@ def organisation_of(obj):
     the row belongs to no organisation, and callers treat that as "nobody's" —
     never as "everybody's".
     """
+    if declared_lookup(type(obj)) == ORGANISATION_SELF:
+        return obj
     value = obj
     for step in organisation_lookup(type(obj)).split("__"):
         value = getattr(value, step, None)
@@ -90,6 +98,8 @@ def organisation_of(obj):
 def scoped_queryset(request, queryset):
     """``queryset`` narrowed to the organisation serving ``request``."""
     organisation = require_active_org(request)
+    if declared_lookup(queryset.model) == ORGANISATION_SELF:
+        return queryset.filter(pk=organisation.pk)
     return queryset.filter(**{organisation_lookup(queryset.model): organisation})
 
 
@@ -172,22 +182,41 @@ def scope_form_fields(request, form):
 
     Covers both halves of a relation field: an operator is only offered their own
     organisation's objects, and a posted id for anyone else's fails validation
-    rather than being saved. Fields over models that declare no route to an
-    organisation (shared reference data — topics, units, boundaries) are left
-    alone.
+    rather than being saved. Fields over shared reference data (topics, units,
+    boundaries) are left alone; a field over a model that has declared neither
+    raises, because a chooser is exactly where an undeclared model leaks.
     """
     for field in form.fields.values():
         queryset = getattr(field, "queryset", None)
         if queryset is None or not isinstance(queryset, QuerySet):
             continue
-        if not getattr(queryset.model, LOOKUP_ATTR, None):
-            continue
-        field.queryset = scoped_queryset(request, queryset)
+        field.queryset = scope_or_pass(request, queryset)
     return form
 
 
 def is_org_owned(model):
-    """Whether ``model`` has declared a route to an owning organisation."""
-    return isinstance(model, type) and issubclass(model, Model) and bool(
-        getattr(model, LOOKUP_ATTR, None)
-    )
+    """Whether ``model`` declared a way to reach the organisation that owns it."""
+    if not (isinstance(model, type) and issubclass(model, Model)):
+        return False
+    declared = declared_lookup(model)
+    return bool(declared) and declared not in (SHARED_REFERENCE_DATA, NOT_ORM_SCOPABLE)
+
+
+def is_shared_reference(model):
+    """Whether ``model`` declared that no organisation owns it."""
+    return declared_lookup(model) == SHARED_REFERENCE_DATA
+
+
+def scope_or_pass(request, queryset):
+    """Scope ``queryset`` if its model is org-owned, pass it through if shared.
+
+    The seam that decides, and the one that must not guess. A model that has
+    declared neither is refused here rather than quietly passed through — that
+    silent pass-through would be the very leak the declaration exists to prevent,
+    and it would be invisible: an unscoped listing looks exactly like a scoped
+    one until a second organisation exists.
+    """
+    model = queryset.model
+    if is_shared_reference(model):
+        return queryset
+    return scoped_queryset(request, queryset)

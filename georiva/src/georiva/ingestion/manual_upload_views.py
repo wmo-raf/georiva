@@ -1,16 +1,19 @@
 from django.contrib import messages
 from django.shortcuts import redirect, render
-
-from georiva.organisations.access import get_org_object_or_404
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
+
+from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
 
 def manual_upload_config_list(request):
     from georiva.ingestion.models import ManualUploadConfig
 
-    configs = ManualUploadConfig.objects.select_related("catalog").prefetch_related("variables").order_by(
-        "catalog__name", "name"
+    configs = (
+        scoped_queryset(request, ManualUploadConfig.objects.all())
+        .select_related("catalog")
+        .prefetch_related("variables")
+        .order_by("catalog__name", "name")
     )
 
     return render(request, "georivaingestion/manual_upload_config_list.html", {

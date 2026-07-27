@@ -39,15 +39,34 @@ it.** `organisations/access.py` provides `scoped_queryset`,
 `require_org_admin`. Row scoping is explicit at every call site — nothing is
 implicit at the manager level — but there is exactly one implementation to audit.
 
-**A model declares its own route to its organisation.** `ORGANISATION_LOOKUP` is
-the ORM path from a model to `Organisation` (`"organisation"` on `Catalog`,
-`"collection__catalog__organisation"` on `Item`). Only `Catalog` carries an
-organisation FK; everything beneath it is owned transitively, as decided in #259.
+**Every model in the codebase declares where it stands.**
+`ORGANISATION_LOOKUP` is either the ORM path from a model to `Organisation`
+(`"organisation"` on `Catalog`, `"collection__catalog__organisation"` on `Item`)
+or one of three sentinels that are themselves decisions:
 
-**Deny by default.** A model that declares no path cannot be scoped: the helpers
-raise `ImproperlyConfigured` rather than returning every row. Forgetting a new
-model is a loud error, not a silent leak. A nullable link anywhere along a
-declared path means the row belongs to *nobody* — never to everybody.
+- `SHARED_REFERENCE_DATA` — no organisation owns it, every organisation reads it
+  (topics, units, the global palette tier). Scoping passes it through.
+- `ORGANISATION_SELF` — it *is* an organisation. Scoping matches on identity.
+- `NOT_ORM_SCOPABLE` — it belongs to an organisation but no ORM path reaches
+  one: pipeline bookkeeping keyed by a storage path (`FileIngestion` and its
+  jobs), records reached only through an already-scoped parent
+  (`DerivationRun`), and Wagtail pages, org-owned through the Site → root-page
+  link rather than a field (#261). Scoping *refuses* these.
+
+Only `Catalog` carries an organisation FK; everything beneath it is owned
+transitively, as decided in #259. The declarations live on the models, in
+`organisations/lookups.py`'s vocabulary — a module deliberately free of imports
+so a model can declare without pulling in the enforcement machinery that reads
+the organisation models.
+
+**Deny by default, at the seam that matters.** An undeclared model is refused
+where scoping is applied, not quietly passed through: a silent pass-through
+would be exactly the leak the declaration exists to prevent, and it would be
+invisible, because an unscoped listing looks identical to a scoped one until a
+second organisation exists. A test enumerates every model in the codebase and
+fails on any that has declared nothing, which is what makes refusing safe — no
+model reaches production undeclared. A nullable link anywhere along a declared
+path means the row belongs to *nobody* — never to everybody.
 
 **Superusers skip the membership gate, not the host.** The instance admin may
 enter any organisation's admin without a membership row (#257). They do not get
@@ -57,14 +76,33 @@ Reaching another organisation's data means visiting its host.
 
 **Membership gates the admin plane as a whole**, in the middleware, re-read from
 the database every request. A signed-in non-member never reaches a view, so a
-revoked membership fails closed on the next request rather than at logout. The
-public plane stays open to anonymous readers and is scoped separately (#278).
+revoked membership fails closed on the next request rather than at logout. This
+is a coarse layer above row scoping rather than a replacement for it: scoping
+still decides every row, and the gate only saves a stranger from reaching an
+empty listing. The public plane stays open to anonymous readers and is scoped
+separately (#278).
+
+**Live event streams carry their organisation.** The SSE feeds fan out from one
+Redis channel to every organisation's admin, so each published event names the
+organisation it belongs to and a listener forwards only its own. Where that name
+comes from follows the same rule as everything else: a catalog chain where one
+exists, the storage key's leading segment where none does. An event that cannot
+be attributed reaches nobody.
 
 **Two independent layers.** Wagtail's `ModelPermissionPolicy` and Django groups
 stay exactly as they were — the *capability* layer, answering what a user may
 do. Tenancy is a second layer answering whose rows they may do it to. Joining an
 organisation grants the standard data-manager capabilities so the two never have
 to be kept in sync by hand.
+
+**The two roles differ on org-management surfaces only.** Members do every bit
+of the data work their admins do. What an admin has in addition is the
+organisation's own account: its settings, and its roster — adding a member
+(account and membership together, since there are no invitations to accept,
+#257), changing a role, and removing a membership without deleting the account,
+because a user may belong to several institutions. Each of those views calls
+`require_org_admin` itself; the menu that leads to them reads the same role, so
+visibility and enforcement cannot drift.
 
 **No checks inside Celery tasks.** A task reaches its organisation by
 construction, through the FK chain from the catalog it was handed. Adding checks
@@ -82,10 +120,12 @@ there would mean inventing a request-like context for code that has none.
   validation rather than saving. What remains is a create whose relations are all
   in-org — harmless by construction.
 - The guarantee is tested by sweep rather than by list: a two-organisation
-  fixture with colliding catalog slugs drives every registered admin URL that
-  takes a pk with the other organisation's ids, and a static check forbids bare
-  `get_object_or_404` in org-owned apps. New views are covered on the day they
-  are registered.
+  fixture with colliding catalog slugs drives every registered admin URL — nested
+  multi-id routes included — with the other organisation's ids, asserts that no
+  pk-less admin listing names the other organisation, and a static check forbids
+  bare `get_object_or_404` in org-owned apps. New views are covered on the day
+  they are registered. The sweep is what found the collection-drawer JSON
+  endpoints, Wagtail's copy view and the snippet chooser's `chosen/<pk>/`.
 - A `DataFeed` with no catalog now belongs to no organisation and is therefore
   reachable from no admin. The column stays nullable for rows that predate the
   link, but the admin form requires one.

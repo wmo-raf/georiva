@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import timedelta
 
 from django.db import models
-from django.http import JsonResponse, Http404
+from django.http import JsonResponse
 from django.utils import timezone
 
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
@@ -318,10 +318,9 @@ def upload_session_status_api(request, session_id):
     """Returns {id, status, files} for a single UploadSession."""
     from georiva.ingestion.models import UploadSession
     
-    try:
-        session = UploadSession.objects.prefetch_related('uploaded_files').get(pk=session_id)
-    except UploadSession.DoesNotExist:
-        raise Http404
+    session = get_org_object_or_404(
+        request, UploadSession.objects.prefetch_related('uploaded_files'), pk=session_id
+    )
     
     return JsonResponse({
         "id": session.pk,

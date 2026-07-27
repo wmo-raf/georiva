@@ -18,11 +18,6 @@ from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
 
-
-def _org_catalogs(request, catalog_model):
-    """This organisation's catalogs — the only ones a wizard id may name."""
-    return scoped_queryset(request, catalog_model.objects.all())
-
 _WIZARD_SESSION_KEY = "georiva_upload_wizard"
 
 STEP_LABELS = [
@@ -74,30 +69,38 @@ _CATALOG_FORMAT_LABEL = {
 }
 
 
-def _catalog_format_from_session(session):
+def _session_catalog(request, session):
+    """The catalog a wizard session points at, if this organisation owns it.
+
+    A wizard session outlives a move to another organisation's host, so the
+    stored id is only meaningful once re-checked against the organisation now
+    serving the request. Everything read out of the catalog goes through here.
+    """
+    if not session.get("catalog_id"):
+        return None
+    from georiva.core.models import Catalog
+
+    return (
+        scoped_queryset(request, Catalog.objects.all())
+        .filter(pk=session["catalog_id"])
+        .first()
+    )
+
+
+def _catalog_format_from_session(request, session):
     """Return the file_format string for the catalog chosen in step 1."""
     if session.get("catalog_mode") == "create":
         return session.get("new_catalog_format") or ""
-    if session.get("catalog_id"):
-        from georiva.core.models import Catalog as _C
-        try:
-            return _C.objects.get(pk=session["catalog_id"]).file_format
-        except _C.DoesNotExist:
-            pass
-    return ""
+    catalog = _session_catalog(request, session)
+    return catalog.file_format if catalog else ""
 
 
-def _catalog_name_from_session(session):
+def _catalog_name_from_session(request, session):
     """Return the catalog display name from the session."""
     if session.get("catalog_mode") == "create":
         return session.get("new_catalog_name") or ""
-    if session.get("catalog_id"):
-        from georiva.core.models import Catalog as _C
-        try:
-            return _C.objects.get(pk=session["catalog_id"]).name
-        except _C.DoesNotExist:
-            pass
-    return ""
+    catalog = _session_catalog(request, session)
+    return catalog.name if catalog else ""
 
 
 def _show_filename_format(catalog_format: str) -> bool:
@@ -226,10 +229,7 @@ def upload_wizard_step2(request):
         if session.get("catalog_mode") == "create" and session.get("new_catalog_name"):
             default_config_name = f"{session['new_catalog_name']} Config"
         elif session.get("catalog_id"):
-            from georiva.core.models import Catalog as _Catalog
-            # Scoped: the stored id is only meaningful on the host it was chosen
-            # on, and a name read across organisations is still a name leaked.
-            catalog = _org_catalogs(request, _Catalog).filter(pk=session["catalog_id"]).first()
+            catalog = _session_catalog(request, session)
             if catalog is not None:
                 default_config_name = f"{catalog.name} Config"
 
@@ -371,7 +371,7 @@ def upload_wizard_step3(request):
         return redirect("upload_wizard_step2")
 
     format_choices = ManualUploadConfig.ValidTimeFormat.choices
-    catalog_format = _catalog_format_from_session(session)
+    catalog_format = _catalog_format_from_session(request, session)
     accept_extensions = _CATALOG_FORMAT_ACCEPT.get(catalog_format, ",".join(_CATALOG_FORMAT_ACCEPT.values()))
     format_label = _CATALOG_FORMAT_LABEL.get(catalog_format, "NetCDF, GRIB2, or GeoTIFF")
     show_fmt = _show_filename_format(catalog_format)
@@ -475,7 +475,7 @@ def upload_wizard_step4(request):
     selected_names = session.get("selected_variable_names", [])
     selected_variables = [v for v in all_variables if v["name"] in selected_names]
 
-    catalog_name = _catalog_name_from_session(session)
+    catalog_name = _catalog_name_from_session(request, session)
     collection_base_name = f"{catalog_name} Collection" if catalog_name else "Collection"
     units = list(Unit.objects.order_by("name").values("id", "name", "symbol"))
 
@@ -616,7 +616,7 @@ def upload_wizard_step5(request):
     if session.get("catalog_mode") == "create":
         catalog_display = session.get("new_catalog_name")
     elif session.get("catalog_id"):
-        catalog = _org_catalogs(request, Catalog).filter(pk=session["catalog_id"]).first()
+        catalog = _session_catalog(request, session)
         catalog_display = catalog.name if catalog is not None else None
 
     collections_display = []

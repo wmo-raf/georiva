@@ -3,13 +3,20 @@ from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, InlinePanel
 from wagtail.models import Orderable
+from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 
 class ColorPalette(ClusterableModel):
     """
     Palette definition: numeric stops + hex colors.
     At runtime we convert hex -> [r,g,b] or [r,g,b,a] for WeatherLayers.
+
+    Shared reference data for now: the global tier every organisation reads.
+    Per-org palette overrides are a separate, later decision (#269).
     """
+
+    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
+
     name = models.CharField(max_length=255)
     
     class PaletteType(models.TextChoices):
@@ -91,6 +98,8 @@ class ColorPalette(ClusterableModel):
 
 
 class PaletteStop(Orderable):
+    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
+
     palette = ParentalKey(ColorPalette, related_name='stops', on_delete=models.CASCADE)
     value = models.FloatField(help_text="Numeric value at this stop (e.g. 11.5749)")
     hex_value = models.CharField(

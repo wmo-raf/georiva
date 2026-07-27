@@ -57,21 +57,26 @@ def _build_upload_session_dict(session) -> dict:
 
 
 @sync_to_async
-def _fetch_acquisition_items(terminal_limit: int) -> list[dict]:
+def _fetch_acquisition_items(org_slug: str, terminal_limit: int) -> list[dict]:
     from django.db.models import Prefetch
     from georiva.sources.models import FetchRun, FetchedFile
     from georiva.ingestion.models import UploadSession, UploadedFile
 
+    # Both records reach their organisation through a catalog, so both are
+    # filtered on that chain rather than on the storage key.
+    runs = FetchRun.objects.filter(data_feed__catalog__organisation__slug=org_slug)
+    sessions = UploadSession.objects.filter(catalog__organisation__slug=org_slug)
+
     # FetchRuns
     active_runs = list(
-        FetchRun.objects
+        runs
         .select_related("data_feed")
         .prefetch_related(Prefetch("fetched_files", queryset=FetchedFile.objects.order_by("id")))
         .exclude(status__in=TERMINAL_FETCH_STATUSES)
         .order_by("-started_at")
     )
     terminal_runs = list(
-        FetchRun.objects
+        runs
         .select_related("data_feed")
         .prefetch_related(Prefetch("fetched_files", queryset=FetchedFile.objects.order_by("id")))
         .filter(status__in=TERMINAL_FETCH_STATUSES)
@@ -80,14 +85,14 @@ def _fetch_acquisition_items(terminal_limit: int) -> list[dict]:
 
     # UploadSessions
     active_sessions = list(
-        UploadSession.objects
+        sessions
         .select_related("catalog", "user")
         .prefetch_related(Prefetch("uploaded_files", queryset=UploadedFile.objects.order_by("id")))
         .exclude(status__in=TERMINAL_UPLOAD_STATUSES)
         .order_by("-started_at")
     )
     terminal_sessions = list(
-        UploadSession.objects
+        sessions
         .select_related("catalog", "user")
         .prefetch_related(Prefetch("uploaded_files", queryset=UploadedFile.objects.order_by("id")))
         .filter(status__in=TERMINAL_UPLOAD_STATUSES)
@@ -102,6 +107,6 @@ def _fetch_acquisition_items(terminal_limit: int) -> list[dict]:
     return items
 
 
-async def build_acquisition_snapshot(terminal_limit: int = 10) -> list[dict]:
-    """Return all active FetchRuns and UploadSessions plus last `terminal_limit` of each."""
-    return await _fetch_acquisition_items(terminal_limit)
+async def build_acquisition_snapshot(org_slug: str, terminal_limit: int = 10) -> list[dict]:
+    """One organisation's active FetchRuns and UploadSessions, plus its last of each."""
+    return await _fetch_acquisition_items(org_slug, terminal_limit)

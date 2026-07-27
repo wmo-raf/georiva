@@ -1,0 +1,65 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Members" %} — {{ organisation.name }}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .gr-members-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1em;
+        margin-bottom: 1em;
+    }
+    .gr-members-help {
+        color: var(--w-color-text-label);
+        max-width: 46em;
+    }
+    .gr-members-role { color: var(--w-color-text-context); }
+    .gr-members-remove { color: var(--w-color-critical-200); }
+    .gr-members-actions a { margin-right: 0.75em; }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<div class="gr-members-header">
+    <p class="gr-members-help">
+        {% blocktrans with host=organisation.hostname %}
+            Everyone listed here signs in at {{ host }} and works on this organisation's data.
+            Org admins can additionally manage members and organisation settings.
+        {% endblocktrans %}
+    </p>
+    <a href="{{ add_url }}" class="button bicolor button--icon">
+        <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+        {% trans "Add member" %}
+    </a>
+</div>
+
+<table class="listing">
+    <thead>
+        <tr>
+            <th>{% trans "User" %}</th>
+            <th>{% trans "Email" %}</th>
+            <th>{% trans "Role" %}</th>
+            <th>{% trans "Actions" %}</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for membership in memberships %}
+        <tr>
+            <td>{{ membership.user.get_full_name|default:membership.user.get_username }}</td>
+            <td>{{ membership.user.email|default:"—" }}</td>
+            <td class="gr-members-role">{{ membership.get_role_display }}</td>
+            <td class="gr-members-actions">
+                <a href="{% url 'organisation_member_edit' membership.pk %}">{% trans "Change role" %}</a>
+                <a href="{% url 'organisation_member_remove' membership.pk %}" class="gr-members-remove">{% trans "Remove" %}</a>
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">{% trans "No members yet." %}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

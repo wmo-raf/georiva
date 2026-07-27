@@ -4,6 +4,7 @@
 {% block titletag %}{% trans "Organisation settings" %} — {{ organisation.name }}{% endblock %}
 
 {% block extra_css %}
+{{ block.super }}
 <style>
     .gr-org-identity {
         margin-bottom: 1.5em;

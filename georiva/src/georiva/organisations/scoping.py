@@ -15,9 +15,10 @@ The mixins below are deliberately blunt: they wrap every view class a viewset
 exposes rather than an enumerated few, so a Wagtail upgrade that adds a view, or
 a viewset that overrides one, is scoped by default rather than by remembering.
 
-Scoping is skipped for models that declare no route to an organisation
-(``organisations.access.is_org_owned``): shared reference data such as topics,
-units and administrative boundaries is instance-global on purpose.
+Scoping is skipped only for models that declare themselves shared reference
+data (topics, units, administrative boundaries): instance-global on purpose. A
+model that has declared nothing is refused, not passed through — see
+``organisations.access.scope_or_pass``.
 """
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import QuerySet
@@ -26,6 +27,7 @@ from .access import (
     is_org_owned,
     require_org_object,
     scope_form_fields,
+    scope_or_pass,
     scoped_queryset,
 )
 
@@ -43,9 +45,12 @@ class OrgScopedViewMixin:
     """
 
     def scope(self, queryset):
-        if queryset is None or not is_org_owned(queryset.model):
+        """Scoped if the model is org-owned, untouched if it is shared reference
+        data, and refused if it has declared neither — see
+        ``access.scope_or_pass``."""
+        if queryset is None:
             return queryset
-        return scoped_queryset(self.request, queryset)
+        return scope_or_pass(self.request, queryset)
 
     # -- listings ----------------------------------------------------------
 
@@ -137,40 +142,73 @@ def org_scoped_view(view_class, mixin=OrgScopedViewMixin):
     return _subclass(view_class, mixin)
 
 
-class OrgScopedViewSetMixin:
-    """Scopes every view a ``ModelViewSet``/``SnippetViewSet`` exposes.
+class OrgScopedViewSetMixinBase:
+    """Rebinds a viewset's view classes to scoped subclasses at construction.
 
-    Wrapping happens at construction and writes onto the instance, so a viewset
-    constructed with ``SomeViewSet(index_view_class=…)`` has its override scoped
-    too — the kwarg has already landed on ``__dict__`` by then.
+    Writing onto the instance rather than the class means a viewset constructed
+    as ``SomeViewSet(index_view_class=…)`` has its override scoped too — the
+    kwarg has already landed on ``__dict__`` by the time this runs.
     """
+
+    #: attr name → mixin. Subclasses that leave this ``None`` scope every
+    #: ``*_view_class`` the viewset exposes with the general view mixin.
+    SCOPED_VIEW_CLASSES = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for attr in view_class_attrs(self):
+        wanted = self.SCOPED_VIEW_CLASSES or {
+            attr: OrgScopedViewMixin for attr in view_class_attrs(self)
+        }
+        for attr, mixin in wanted.items():
             # Read the raw attribute rather than `getattr(self, …)`: some view
             # classes are cached properties whose evaluation needs a configured
             # model, and construction is too early for that. Those resolve to a
             # descriptor here and are left alone.
             view_class = self.__dict__.get(attr, getattr(type(self), attr, None))
             if isinstance(view_class, type):
-                self.__dict__[attr] = org_scoped_view(view_class)
+                self.__dict__[attr] = org_scoped_view(view_class, mixin)
 
 
-class OrgScopedChooserViewSetMixin:
-    """Scopes both halves of a ``ChooserViewSet``."""
+class OrgScopedViewSetMixin(OrgScopedViewSetMixinBase):
+    """Scopes every view a ``ModelViewSet``/``SnippetViewSet`` exposes.
 
-    CHOOSER_MIXINS = {
+    Every one, rather than an enumerated few: a view added by a Wagtail upgrade
+    is then scoped by default instead of by somebody remembering.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # A registered snippet gets a chooser of its own, built from a class
+        # attribute and registered separately — so scoping the viewset's own
+        # views leaves `/admin/snippets/choose/<app>/<model>/chosen/<pk>/` wide
+        # open. Rebind the class the chooser is built from.
+        chooser_class = getattr(self, "chooser_viewset_class", None)
+        if isinstance(chooser_class, type):
+            self.__dict__["chooser_viewset_class"] = org_scoped_chooser_viewset(chooser_class)
+
+
+def org_scoped_chooser_viewset(viewset_class):
+    """``viewset_class`` with chooser scoping mixed in, built once per class."""
+    if issubclass(viewset_class, OrgScopedChooserViewSetMixin):
+        return viewset_class
+    return type(
+        f"OrgScoped{viewset_class.__name__}",
+        (OrgScopedChooserViewSetMixin, viewset_class),
+        {},
+    )
+
+
+class OrgScopedChooserViewSetMixin(OrgScopedViewSetMixinBase):
+    """Scopes both halves of a ``ChooserViewSet``.
+
+    Named explicitly here because a chooser's seams are not the generic view's:
+    its list and its ``chosen/<pk>/`` endpoint resolve rows by different methods.
+    """
+
+    SCOPED_VIEW_CLASSES = {
         "choose_view_class": OrgScopedChooseMixin,
         "choose_results_view_class": OrgScopedChooseMixin,
         "chosen_view_class": OrgScopedChosenMixin,
         "chosen_multiple_view_class": OrgScopedChosenMultipleMixin,
         "create_view_class": OrgScopedViewMixin,
     }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for attr, mixin in self.CHOOSER_MIXINS.items():
-            view_class = getattr(self, attr, None)
-            if isinstance(view_class, type):
-                self.__dict__[attr] = org_scoped_view(view_class, mixin)

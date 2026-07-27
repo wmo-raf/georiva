@@ -20,6 +20,8 @@ import os
 from datetime import timedelta
 
 from django.db import models
+
+from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
 
@@ -29,6 +31,12 @@ from wagtail.snippets.models import register_snippet
 @register_snippet
 class FileIngestion(models.Model):
     """Per-file record of processing a single file from MinIO into STAC items and assets."""
+
+    # Written before its collections are known, so there is no FK chain to an
+    # organisation to follow. Its owner is the first segment of ``file_path`` —
+    # the org slug, by the storage grammar — and the one listing that shows these
+    # (the ingestion SSE snapshot) filters on that prefix directly.
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
     
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
@@ -577,6 +585,9 @@ from task_ferry.models import Job  # noqa: E402
 
 @register_snippet
 class FileIngestionJob(Job):
+    # Same storage-key ownership as the FileIngestion it tracks.
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     """
     Operator-visible record for a single file ingestion run.
 
@@ -618,6 +629,8 @@ class FileIngestionJob(Job):
 
 
 class LoaderJob(Job):
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     """Per-run record for a Loader execution (data-source fetch + ingestion queue phase)."""
 
     data_feed = models.ForeignKey(
