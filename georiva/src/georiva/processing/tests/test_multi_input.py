@@ -34,6 +34,7 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
+from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
@@ -156,7 +157,7 @@ class _MultiInputFixtureRecipe(BaseRecipe):
 
 class _MultiInputFixture(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Climate", slug="climate", file_format="geotiff"
         )
         self.unit = Unit.objects.create(name="dimensionless", symbol="x")

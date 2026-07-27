@@ -66,11 +66,14 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
     """
     Construct the MinIO incoming-bucket path.
 
-    GeoTIFF:      {catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}
-    GRIB/NetCDF:  {catalog}/{filename}  (GR-- prefixed when a reference time exists,
-                  so the whole file is processed against every collection)
+    GeoTIFF:      {org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}
+    GRIB/NetCDF:  {org}/{catalog}/{filename}  (GR-- prefixed when a reference time
+                  exists, so the whole file is processed against every collection)
+
+    The org segment comes from ``config.catalog.organisation``, never from the
+    uploading client — an operator cannot file data into another institution.
     """
-    catalog_slug = config.catalog.slug
+    catalog_prefix = config.catalog.storage_prefix
     original_name = parse_filename(filename)["original_name"]
     final_name = build_filename(original_name, reference_time)
 
@@ -78,10 +81,10 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
         var_slug = slugify(variable.variable_name)
         coll_slug = variable.collection.slug
         return (
-            f"{catalog_slug}/{coll_slug}/{var_slug}/"
+            f"{catalog_prefix}/{coll_slug}/{var_slug}/"
             f"{valid_time:%Y}/{valid_time:%m}/{valid_time:%d}/{final_name}"
         )
-    return f"{catalog_slug}/{final_name}"
+    return f"{catalog_prefix}/{final_name}"
 
 
 def manual_upload_page(request, pk):
@@ -92,7 +95,7 @@ def manual_upload_page(request, pk):
     )
 
     config = get_object_or_404(
-        ManualUploadConfig.objects.select_related("catalog"), pk=pk
+        ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
     )
     variables = config.variables.select_related("collection").order_by(
         "long_name", "variable_name"
@@ -173,7 +176,7 @@ def manual_upload_submit(request, pk):
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
     config = get_object_or_404(
-        ManualUploadConfig.objects.select_related("catalog"), pk=pk
+        ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
     )
 
     uploaded_files = request.FILES.getlist("files")

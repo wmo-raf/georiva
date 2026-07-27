@@ -9,15 +9,16 @@ Files without a reference time use their original name as-is:
 
     {original_name}.{ext}
 
-Path convention (collection is optional):
-    georiva-{bucket}/{catalog}/[{collection}/][GR--YYYYMMDDTHHMM--]{name}.{ext}
-    georiva-assets/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/[GR--YYYYMMDDTHHMM--]{name}.{ext}
+Path convention — the first segment of every key, on every bucket, is the
+owning organisation's slug (collection is optional):
+    georiva-{bucket}/{org}/{catalog}/[{collection}/][GR--YYYYMMDDTHHMM--]{name}.{ext}
+    georiva-assets/{org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/[GR--YYYYMMDDTHHMM--]{name}.{ext}
 
 Examples:
-    weather-models/gfs/GR--20250115T0600--gfs_025.grib2       ← catalog + collection + ref time
-    satellite-imagery/ndvi/sentinel2_20250115.tif              ← catalog + collection, no ref time
-    weather-models/GR--20250115T0600--gfs_025.grib2           ← catalog only + ref time
-    station-data/synop_hourly.csv                              ← catalog only, no ref time
+    kenya/weather-models/gfs/GR--20250115T0600--gfs_025.grib2  ← org + catalog + collection + ref time
+    kenya/satellite-imagery/ndvi/sentinel2_20250115.tif        ← org + catalog + collection, no ref time
+    kenya/weather-models/GR--20250115T0600--gfs_025.grib2      ← org + catalog only + ref time
+    kenya/station-data/synop_hourly.csv                        ← org + catalog only, no ref time
 """
 
 import re
@@ -133,17 +134,18 @@ def parse_path(file_path: str) -> dict:
     Parse a GeoRiva storage path.
 
     Handles both:
-        {catalog}/{collection}/{filename}    → catalog + collection
-        {catalog}/{filename}                 → catalog only, no collection
+        {org}/{catalog}/{collection}/{filename}   → org + catalog + collection
+        {org}/{catalog}/{filename}                → org + catalog, no collection
 
-    The distinction: if the path has 3+ parts, the second part is
-    treated as a collection. If only 2 parts, there's no collection.
+    The distinction: if the path has 4+ parts, the third part is
+    treated as a collection. If only 3 parts, there's no collection.
 
     Args:
         file_path: Path relative to bucket root.
 
     Returns:
         {
+            'org': str or None,
             'catalog': str or None,
             'collection': str or None,
             'reference_time': datetime (UTC) or None,
@@ -153,20 +155,24 @@ def parse_path(file_path: str) -> dict:
     parts = Path(file_path).parts
     filename = Path(file_path).name
     parsed = parse_filename(filename)
-    
-    if len(parts) >= 3:
-        # {catalog}/{collection}/[...dirs...]/{filename}
-        catalog = parts[0]
-        collection = parts[1]
-    elif len(parts) == 2:
-        # {catalog}/{filename}
-        catalog = parts[0]
+
+    if len(parts) >= 4:
+        # {org}/{catalog}/{collection}/[...dirs...]/{filename}
+        org = parts[0]
+        catalog = parts[1]
+        collection = parts[2]
+    elif len(parts) == 3:
+        # {org}/{catalog}/{filename}
+        org = parts[0]
+        catalog = parts[1]
         collection = None
     else:
+        org = None
         catalog = None
         collection = None
-    
+
     return {
+        'org': org,
         'catalog': catalog,
         'collection': collection,
         'reference_time': parsed['reference_time'],
@@ -176,7 +182,7 @@ def parse_path(file_path: str) -> dict:
 
 def validate_path(file_path: str) -> dict:
     """
-    Validate a file path has at minimum a catalog and a filename.
+    Validate a file path has at minimum an org, a catalog and a filename.
 
     Does NOT require collection or GR-- prefix.
 
@@ -187,14 +193,14 @@ def validate_path(file_path: str) -> dict:
         Parsed metadata dict.
 
     Raises:
-        ValueError: If path doesn't have at least catalog/filename.
+        ValueError: If path doesn't have at least org/catalog/filename.
     """
     parts = Path(file_path).parts
-    
-    if len(parts) < 2:
+
+    if len(parts) < 3:
         raise ValueError(
             f"Invalid path: '{file_path}'. "
-            f"Expected at minimum: {{catalog}}/filename.ext"
+            f"Expected at minimum: {{org}}/{{catalog}}/filename.ext"
         )
-    
+
     return parse_path(file_path)

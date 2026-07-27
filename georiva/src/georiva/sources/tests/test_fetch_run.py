@@ -2,10 +2,11 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog
 from georiva.sources.models import DataFeed, FetchRun, FetchedFile
+from georiva.organisations.testing import make_organisation
 
 
 def _make_feed():
-    catalog = Catalog.objects.create(name="Test", slug="test", file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="Test", slug="test", file_format="grib2")
     return DataFeed.objects.create(name="Test Feed", catalog=catalog)
 
 

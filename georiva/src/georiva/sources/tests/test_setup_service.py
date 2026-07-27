@@ -13,10 +13,11 @@ from georiva.sources.collection_definitions import (
 from georiva.sources.models import DataFeed
 from georiva.sources.parameters import SourceKey
 from georiva.sources.setup_service import SourceSetupService
+from georiva.organisations.testing import make_organisation
 
 
 def _collection():
-    catalog = Catalog.objects.create(name="Cat", slug="cat", file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="Cat", slug="cat", file_format="grib2")
     return Collection.objects.create(name="Col", slug="col", catalog=catalog)
 
 
@@ -27,7 +28,7 @@ class ProvisionCollectionSlugTests(TestCase):
 
     def test_slug_is_the_definition_key_without_a_catalog_prefix(self):
         service = SourceSetupService()
-        catalog = Catalog.objects.create(
+        catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         feed = DataFeed.objects.create(name="Rain Feed", catalog=catalog)

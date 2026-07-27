@@ -17,6 +17,7 @@ from django.urls import reverse
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.core.provisioning import passthrough_sources
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -27,7 +28,7 @@ class ManualVariableEditorTestCase(TestCase):
         self.user.groups.add(Group.objects.get(name="Data Managers"))
         self.client.force_login(self.user)
 
-        self.catalog = Catalog.objects.create(name="Local", slug="local", file_format="grib2")
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="Local", slug="local", file_format="grib2")
         self.collection = Collection.objects.create(catalog=self.catalog, name="Surface", slug="surface")
         self.config = ManualUploadConfig.objects.create(
             catalog=self.catalog, name="Surface variables", valid_time_format="CONTENT",

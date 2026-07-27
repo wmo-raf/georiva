@@ -17,6 +17,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.sources.fetch.base import FetchResult, FileRequest
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
+from georiva.organisations.testing import make_organisation
 
 
 class FileRequestRoundTripTests(TestCase):
@@ -54,7 +55,7 @@ User = get_user_model()
 
 
 def _feed_and_collection(name="CHIRPS", slug="chirps"):
-    catalog = Catalog.objects.create(name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
     collection = Collection.objects.create(
         name="Rainfall", slug="rainfall", catalog=catalog
     )

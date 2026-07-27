@@ -10,6 +10,7 @@ from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
 from georiva.core.models.catalog import Topic
 from georiva.core.views import CatalogIndexView
+from georiva.organisations.access import require_active_org
 
 
 class BoundaryChooserViewSet(ChooserViewSet):
@@ -30,6 +31,14 @@ class TopicViewSet(ModelViewSet):
 
 
 class CatalogCreateView(generic.CreateView):
+    def save_instance(self):
+        # The owning organisation is the host's, not a form field: letting an
+        # operator pick one would be a way to write into another institution's
+        # storage prefix. Set here rather than on the panel set so there is no
+        # editable widget to post around.
+        self.form.instance.organisation = require_active_org(self.request)
+        return super().save_instance()
+
     def get_success_url(self):
         url = reverse("catalog:index")
         return self._set_locale_query_param(url)

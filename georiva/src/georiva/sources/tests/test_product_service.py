@@ -43,6 +43,7 @@ from georiva.sources.product_service import (
     materialise_output_collections,
     product_label,
 )
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -90,7 +91,7 @@ def _chirps_defs():
 
 class ProductServiceBase(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -244,7 +245,7 @@ class DisableCascadeTests(ProductServiceBase):
 
 class MaterialiseOutputCollectionsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -490,7 +491,7 @@ class BuildChainReadinessTests(TestCase):
     """Readiness reason + the staging-gap hint on a blocked card."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -924,7 +925,7 @@ class PinBindingsBase(TestCase):
     gate fixtures above deliberately skip this — here we exercise the pinning."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)

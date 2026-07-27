@@ -21,6 +21,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductInput
+from georiva.organisations.testing import make_organisation
 
 
 def _staging_definition(collection_slug="tas"):
@@ -35,7 +36,7 @@ def _staging_definition(collection_slug="tas"):
 
 class TargetTierRoutingTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="netcdf"
         )
         self.collection = Collection.objects.create(

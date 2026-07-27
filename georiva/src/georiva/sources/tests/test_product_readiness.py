@@ -24,6 +24,7 @@ from georiva.sources.models import (
     DerivedProductInput,
 )
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
+from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
@@ -45,7 +46,7 @@ def _definition(**overrides):
 
 class ProductReadinessTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -127,7 +128,7 @@ class ProductReadinessTests(TestCase):
         # Another catalog has the same 'rainfall' slug WITH data; this product's
         # own catalog has none. Readiness must resolve through the pinned
         # collection_id, so it stays blocked (ADR-0010 §5) — no cross-catalog leak.
-        other_cat = Catalog.objects.create(
+        other_cat = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_core = Collection.objects.create(

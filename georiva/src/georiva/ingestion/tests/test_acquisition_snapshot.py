@@ -10,11 +10,12 @@ from django.test import TestCase
 from georiva.core.models import Catalog
 from georiva.ingestion.acquisition_snapshot import build_acquisition_snapshot
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
+from georiva.organisations.testing import make_organisation
 
 
 class AcquisitionSnapshotTests(TestCase):
     def test_snapshot_serializes_fetched_files_by_path(self):
-        catalog = Catalog.objects.create(
+        catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         feed = DataFeed.objects.create(name="Feed", catalog=catalog)

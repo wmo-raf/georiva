@@ -28,6 +28,7 @@ from django.contrib.auth import get_user_model
 
 from georiva.core.models import Catalog
 from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -92,7 +93,7 @@ class WizardStepBase(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("wiz", "w@test.com", "pw")
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
 

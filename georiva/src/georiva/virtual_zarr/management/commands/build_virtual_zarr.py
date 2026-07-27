@@ -11,7 +11,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--collection",
-            help="catalog_slug/collection_slug, e.g. chirps/chirps-monthly",
+            help="org_slug/catalog_slug/collection_slug, e.g. kenya/chirps/chirps-monthly",
         )
         parser.add_argument(
             "--variable",
@@ -93,7 +93,7 @@ class Command(BaseCommand):
                 variable_slug=options.get("variable"),
             )
         
-        raise CommandError("Pass --collection <catalog/collection> or --all.")
+        raise CommandError("Pass --collection <org/catalog/collection> or --all.")
     
     def _resolve_for_collection(
             self,
@@ -109,15 +109,17 @@ class Command(BaseCommand):
         without a separate setup step.
         """
         parts = collection_arg.split("/")
-        if len(parts) != 2:
+        if len(parts) != 3:
             raise CommandError(
-                "--collection must be catalog_slug/collection_slug, "
+                "--collection must be org_slug/catalog_slug/collection_slug "
+                "(catalog slugs are only unique within an organisation), "
                 f"got: {collection_arg!r}"
             )
-        catalog_slug, collection_slug = parts
-        
+        org_slug, catalog_slug, collection_slug = parts
+
         try:
-            collection = Collection.objects.select_related("catalog").get(
+            collection = Collection.objects.select_related("catalog__organisation").get(
+                catalog__organisation__slug=org_slug,
                 catalog__slug=catalog_slug,
                 slug=collection_slug,
             )

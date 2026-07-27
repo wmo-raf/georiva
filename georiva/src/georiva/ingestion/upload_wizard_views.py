@@ -642,6 +642,7 @@ def upload_wizard_provision(request):
     from georiva.core.models import Catalog, Collection, Variable
     from georiva.core.provisioning import passthrough_sources
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+    from georiva.organisations.access import require_active_org
 
     if request.method != "POST":
         return redirect("upload_wizard_step5")
@@ -655,6 +656,7 @@ def upload_wizard_provision(request):
         with transaction.atomic():
             if session.get("catalog_mode") == "create":
                 catalog, _created = Catalog.objects.get_or_create(
+                    organisation=require_active_org(request),
                     slug=session["new_catalog_slug"],
                     defaults={
                         "name": session["new_catalog_name"],

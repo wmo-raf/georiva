@@ -13,11 +13,12 @@ from django.test import TestCase
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
+from georiva.organisations.testing import make_organisation
 
 
 class SweepStagingTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.scol = StagingCollection.objects.create(

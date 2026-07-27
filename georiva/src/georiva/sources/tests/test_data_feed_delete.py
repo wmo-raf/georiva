@@ -20,6 +20,7 @@ from georiva.sources.models import (
     DerivedProductInput,
     DerivedProductOutput,
 )
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -38,7 +39,7 @@ class DataFeedDeleteBase(TestCase):
         ensure_base_datafeed_viewset()
         self.user = User.objects.create_superuser("op", "op@test.com", "pw")
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="CHIRPS Feed", catalog=self.catalog)
@@ -82,7 +83,7 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertContains(response, "Rainfall anomaly product")
 
     def test_confirmation_lists_other_feeds_products_bound_to_doomed_collections(self):
-        other_catalog = Catalog.objects.create(
+        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
@@ -106,7 +107,7 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertContains(response, "Other Feed")
 
     def test_unrelated_products_are_not_listed(self):
-        other_catalog = Catalog.objects.create(
+        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
@@ -160,7 +161,7 @@ class DeletionTests(DataFeedDeleteBase):
         self.assertEqual(Collection.objects.count(), 2)
 
     def test_external_product_survives_but_loses_its_bindings(self):
-        other_catalog = Catalog.objects.create(
+        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)

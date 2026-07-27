@@ -15,6 +15,7 @@ from georiva.processing.registry import RecipeRegistry
 
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
+from georiva.organisations.testing import make_organisation
 
 
 class _Asset:
@@ -61,7 +62,7 @@ class _InlineRecipeMixin:
         super().setUp()
         from georiva.core.models import Catalog, Collection
 
-        catalog = Catalog.objects.create(name="Retry", slug="retry", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="Retry", slug="retry", file_format="geotiff")
         Collection.objects.create(catalog=catalog, slug="retry-out", name="retry-out")
 
         self._saved = dict(RecipeRegistry._recipes)

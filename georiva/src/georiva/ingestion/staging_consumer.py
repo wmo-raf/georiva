@@ -26,8 +26,8 @@ import redis
 from django.conf import settings
 
 from georiva.core.filename import validate_path
-from georiva.core.models import Catalog
 from georiva.core.models.base import AbstractAsset
+from georiva.core.path_resolution import resolve_org_catalog
 from georiva.core.storage import BucketType, storage
 
 logger = logging.getLogger(__name__)
@@ -94,12 +94,11 @@ def register_staging_file(bucket: str, key: str):
     )
 
     meta = validate_path(key)
-    catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
 
-    catalog = Catalog.objects.filter(slug=catalog_slug, is_active=True).first()
+    catalog, resolution_error = resolve_org_catalog(meta["org"], meta["catalog"])
     if catalog is None:
-        logger.warning("Staging: unknown catalog '%s': %s", catalog_slug, key)
+        logger.warning("Staging: refusing %s: %s", key, resolution_error)
         return None
     if not collection_slug:
         logger.warning("Staging: no collection in path: %s", key)

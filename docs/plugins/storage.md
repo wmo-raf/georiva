@@ -51,31 +51,31 @@ on refresh. Buckets are persistent and always visible, which means:
 All files in GeoRiva follow a consistent path structure relative to the bucket root:
 
 ```
-{catalog}/{collection}/{filename}
+{org}/{catalog}/{collection}/{filename}
 ```
 
 **Examples:**
 
 ```
-georiva-incoming/satellite-imagery/ndvi/sentinel2_scene.tif
-georiva-sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
+georiva-incoming/kenya/satellite-imagery/ndvi/sentinel2_scene.tif
+georiva-sources/kenya/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
 ```
 
-The `catalog` and `collection` segments map directly to GeoRiva's data model — the ingestion pipeline infers both from
-the file path.
+The `org`, `catalog` and `collection` segments map directly to GeoRiva's data model — the ingestion pipeline infers
+all three from the file path, resolving the catalog *within* the organisation the first segment names.
 
 ### Assets bucket
 
 Processed assets add time partitioning and a variable segment:
 
 ```
-georiva-assets/{catalog}/{collection}/{variable}/{year}/{month}/{day}/{filename}
+georiva-assets/{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/{filename}
 ```
 
 **Example:**
 
 ```
-georiva-assets/satellite-imagery/ndvi/temperature/2025/01/15/GR--20250115T0600--temp.tif
+georiva-assets/kenya/satellite-imagery/ndvi/temperature/2025/01/15/GR--20250115T0600--temp.tif
 ```
 
 ### Archive bucket
@@ -84,13 +84,13 @@ The archive mirrors the source path but prefixes it with the origin bucket type,
 to where it came from:
 
 ```
-georiva-archive/{incoming|sources}/{catalog}/{collection}/{filename}
+georiva-archive/{org}/{incoming|sources}/{catalog}/{collection}/{filename}
 ```
 
 **Example:**
 
 ```
-georiva-archive/sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
+georiva-archive/kenya/sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
 ```
 
 ---
@@ -170,7 +170,7 @@ filename = build_filename(
 # Save to georiva-sources bucket
 path = f"{catalog_slug}/{collection_slug}/{filename}"
 storage.sources.save(path, file_data)
-# → georiva-sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
+# → georiva-sources/kenya/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
 ```
 
 For files without a reference time:
@@ -230,7 +230,7 @@ validates the object key, registers an `IngestionLog`, and enqueues the `process
 ```
 Plugin saves file
     ↓
-georiva-sources/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
+georiva-sources/kenya/weather-models/gfs/GR--20250115T0600--gfs_025.grib2
     ↓
 MinIO publishes event → Redis list (georiva:minio:events)
     ↓
@@ -241,6 +241,6 @@ Ingestion worker:
     1. parse_path → catalog="weather-models", collection="gfs",
                     reference_time=2025-01-15T06:00Z
     2. Process → extract variables, clip, encode
-    3. Save assets → georiva-assets/weather-models/gfs/temperature/2025/01/15/GR--20250115T0600--temp.tif
+    3. Save assets → georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/GR--20250115T0600--temp.tif
     4. Optionally archive original source files
 ```

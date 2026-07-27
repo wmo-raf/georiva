@@ -20,6 +20,7 @@ from georiva.core.derived_products import (
 from georiva.core.models import Catalog
 from georiva.sources.derivation_invocation import dispatch_due_scheduled_products
 from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.organisations.testing import make_organisation
 
 
 def _definition(trigger_mode="scheduled", **overrides):
@@ -39,7 +40,7 @@ def _definition(trigger_mode="scheduled", **overrides):
 
 class DispatchDueScheduledProductsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(

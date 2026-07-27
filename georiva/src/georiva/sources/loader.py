@@ -430,7 +430,7 @@ class Loader:
             original_filename=request.filename,
             reference_time=request.reference_time,
         )
-        catalog_slug = self.collection.catalog.slug
+        catalog_prefix = self._catalog_prefix()
         collection_slug = self.collection.slug
 
         # ── 1. FileIngestion check ─────────────────────────────────────────────
@@ -438,7 +438,7 @@ class Loader:
             FileIngestion.objects
             .filter(
                 bucket=self._tier_bucket_type,
-                file_path__startswith=f"{catalog_slug}/",
+                file_path__startswith=f"{catalog_prefix}/",
                 file_path__endswith=f"/{filename}",
                 status__in=[
                     FileIngestion.Status.PENDING,
@@ -456,11 +456,15 @@ class Loader:
         # Handles files that exist in MinIO but have no FileIngestion entry
         # (dropped event, manual upload, consumer restart, etc.).
         if self.data_feed:
-            for link in self.data_feed.collection_links.select_related('collection__catalog').exclude(
+            for link in self.data_feed.collection_links.select_related(
+                'collection__catalog__organisation'
+            ).exclude(
                 collection=self.collection
             ):
                 sibling = link.collection
-                candidate = f"{sibling.catalog.slug}/{sibling.slug}/{filename}"
+                candidate = (
+                    f"{self._catalog_prefix(sibling.catalog)}/{sibling.slug}/{filename}"
+                )
                 if self._tier_bucket.exists(candidate):
                     return candidate
 
@@ -548,25 +552,36 @@ class Loader:
     # =========================================================================
     # Storage Operations
     # =========================================================================
+    def _catalog_prefix(self, catalog=None) -> str:
+        """``{org}/{catalog}`` — the first two segments of every key we write.
+
+        The org segment is derived server-side from the DataFeed's catalog chain
+        (collection → catalog → organisation), never from anything a source
+        plugin or a remote server hands us: a crafted filename must not be able
+        to land one institution's data under another's prefix.
+        """
+        catalog = catalog or self.collection.catalog
+        return catalog.storage_prefix
+
     def _get_storage_path(self, request) -> str:
         """
         Build storage path in georiva-sources bucket.
-    
-        Path: {catalog}/{collection}/{filename}
-        
+
+        Path: {org}/{catalog}/{collection}/{filename}
+
         If request has reference_time, filename gets GR-- prefix.
         """
         from georiva.core.filename import build_filename
-        
+
         filename = build_filename(
             original_filename=request.filename,
             reference_time=request.reference_time,
         )
-        
+
         # request.reference_time exists  → GR--20250115T0600--gfs_025.grib2
         # request.reference_time is None → sentinel2_ndvi.tif
-        
-        return f"{self.collection.catalog.slug}/{self.collection.slug}/{filename}"
+
+        return f"{self._catalog_prefix()}/{self.collection.slug}/{filename}"
     
     def _store_file(self, local_path: Path, storage_path: str):
         """Store file in permanent storage for this feed's target tier."""

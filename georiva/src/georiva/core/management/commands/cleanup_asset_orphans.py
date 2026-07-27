@@ -14,8 +14,12 @@ Safe by default:
 Examples::
 
     georiva cleanup_asset_orphans --catalog chirps --collection chirps-monthly
-    georiva cleanup_asset_orphans --catalog chirps --apply
+    georiva cleanup_asset_orphans --org kenya --catalog chirps --apply
     georiva cleanup_asset_orphans --all --apply
+
+Catalog slugs are unique per organisation, so ``--catalog`` alone may match
+catalogs in several organisations. Each is scanned under its own ``{org}/``
+prefix; pass ``--org`` to narrow to one.
 """
 from django.core.management.base import BaseCommand, CommandError
 
@@ -32,8 +36,12 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "--org", metavar="SLUG",
+            help="Scope to one organisation (by slug).",
+        )
+        parser.add_argument(
             "--catalog", metavar="SLUG",
-            help="Scope to one catalog (by slug).",
+            help="Scope to one catalog (by slug). Not unique across organisations.",
         )
         parser.add_argument(
             "--collection", metavar="SLUG",
@@ -59,7 +67,9 @@ class Command(BaseCommand):
                 "Pass --catalog SLUG (optionally --collection SLUG), or --all."
             )
 
-        collections = Collection.objects.select_related("catalog")
+        collections = Collection.objects.select_related("catalog__organisation")
+        if options["org"]:
+            collections = collections.filter(catalog__organisation__slug=options["org"])
         if catalog:
             collections = collections.filter(catalog__slug=catalog)
         if collection:
@@ -71,7 +81,7 @@ class Command(BaseCommand):
         total_orphans = 0
         total_bytes = 0
         for coll in collections:
-            prefix = f"{coll.catalog.slug}/{coll.slug}"
+            prefix = f"{coll.catalog.storage_prefix}/{coll.slug}"
             objects = [
                 f["path"]
                 for f in storage.assets.list_files(prefix, recursive=True)
@@ -86,7 +96,7 @@ class Command(BaseCommand):
                 continue
 
             self.stdout.write(
-                f"{coll.catalog.slug}/{coll.slug}: "
+                f"{prefix}: "
                 f"{len(objects)} objects, {len(live)} live, "
                 f"{len(orphans)} orphan(s)"
             )

@@ -15,12 +15,13 @@ from django.utils import timezone
 from georiva.core.models import Catalog
 from georiva.sources.acquisition_tracking import feed_fetch_runs
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
 
 def _feed(name="Rain Feed", slug="chirps"):
-    catalog = Catalog.objects.create(name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
     return DataFeed.objects.create(name=name, catalog=catalog)
 
 

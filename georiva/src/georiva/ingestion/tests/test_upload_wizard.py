@@ -6,6 +6,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -23,7 +24,7 @@ SESSION_KEY = "georiva_upload_wizard"
 
 
 def _make_catalog(slug="cat", file_format="grib2"):
-    return Catalog.objects.create(name=slug, slug=slug, file_format=file_format)
+    return Catalog.objects.create(organisation=make_organisation(), name=slug, slug=slug, file_format=file_format)
 
 
 def _make_collection(catalog, slug="col"):

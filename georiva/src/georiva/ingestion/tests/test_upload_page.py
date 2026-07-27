@@ -13,6 +13,7 @@ from georiva.ingestion.models import (
     UploadSession,
     UploadedFile,
 )
+from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
@@ -25,7 +26,7 @@ INCOMING_BUCKET_NAME = "georiva-incoming"
 
 def _geotiff_setup():
     """Observation GeoTIFF catalog: dated path, valid time from filename."""
-    catalog = Catalog.objects.create(name="Imagery", slug="imagery", file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="Imagery", slug="imagery", file_format="geotiff")
     collection = Collection.objects.create(catalog=catalog, name="NDVI", slug="ndvi")
     config = ManualUploadConfig.objects.create(
         catalog=catalog, name="NDVI uploads",
@@ -40,7 +41,7 @@ def _geotiff_setup():
 
 def _grib_setup():
     """Forecast GRIB catalog: flat path with GR-- prefix, time from content."""
-    catalog = Catalog.objects.create(name="Models", slug="models", file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name="Models", slug="models", file_format="grib2")
     collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface")
     config = ManualUploadConfig.objects.create(
         catalog=catalog, name="Surface uploads",
@@ -186,7 +187,7 @@ class UploadSubmitTests(TestCase):
 
         uf = UploadedFile.objects.get(pk=data["files"][0]["id"])
         self.assertEqual(uf.status, "stored")
-        self.assertEqual(uf.file_path, "imagery/ndvi/band_1/2025/01/15/20250115.tif")
+        self.assertEqual(uf.file_path, "test-org/imagery/ndvi/band_1/2025/01/15/20250115.tif")
 
     def test_submit_no_data_arrival_created(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -210,7 +211,7 @@ class UploadSubmitTests(TestCase):
             "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
         })
 
-        fi = FileIngestion.objects.get(file_path="imagery/ndvi/band_1/2025/01/15/20250115.tif")
+        fi = FileIngestion.objects.get(file_path="test-org/imagery/ndvi/band_1/2025/01/15/20250115.tif")
         self.assertEqual(fi.bucket, "incoming")
 
     def test_geotiff_date_from_form_when_filename_unparseable(self, mock_incoming, mock_task):
@@ -225,7 +226,7 @@ class UploadSubmitTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
-        self.assertEqual(uf.file_path, "imagery/ndvi/band_1/2025/03/02/scene.tif")
+        self.assertEqual(uf.file_path, "test-org/imagery/ndvi/band_1/2025/03/02/scene.tif")
 
     def test_grib_forecast_path_gets_gr_prefix(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -238,7 +239,7 @@ class UploadSubmitTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
-        self.assertEqual(uf.file_path, "models/GR--20250115T0600--gfs.grib2")
+        self.assertEqual(uf.file_path, "test-org/models/GR--20250115T0600--gfs.grib2")
 
         mock_task.delay.assert_called_once()
         self.assertEqual(
@@ -255,7 +256,7 @@ class UploadSubmitTests(TestCase):
         })
 
         uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
-        self.assertEqual(uf.file_path, "models/GR--20250115T0600--gfs.grib2")
+        self.assertEqual(uf.file_path, "test-org/models/GR--20250115T0600--gfs.grib2")
 
     def test_forecast_without_time_returns_400(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -297,7 +298,7 @@ class UploadSubmitTests(TestCase):
         # A previous run exhausted its retries.
         spent, _ = FileIngestion.register(
             bucket="incoming",
-            file_path="imagery/ndvi/band_1/2025/01/15/20250115.tif",
+            file_path="test-org/imagery/ndvi/band_1/2025/01/15/20250115.tif",
         )
         FileIngestion.objects.filter(pk=spent.pk).update(
             status=FileIngestion.Status.FAILED,
@@ -464,7 +465,7 @@ class UploadSubmitMultiFileTests(TestCase):
 
     def test_session_completes_even_when_one_file_fails(self, mock_incoming, mock_task):
         bucket = MagicMock()
-        bucket.save.side_effect = [RuntimeError("fail"), "imagery/ndvi/band_1/2025/01/16/20250116.tif"]
+        bucket.save.side_effect = [RuntimeError("fail"), "test-org/imagery/ndvi/band_1/2025/01/16/20250116.tif"]
         mock_incoming.return_value = bucket
         _, _, config, variable = _geotiff_setup()
 
@@ -516,9 +517,9 @@ class DirectDropTimeValidationTests(TestCase):
         from georiva.ingestion.consumer import _handle_event
         _geotiff_setup()
 
-        _handle_event(self._event("imagery/random_name.tif"))
+        _handle_event(self._event("test-org/imagery/random_name.tif"))
 
-        fi = FileIngestion.objects.get(file_path="imagery/random_name.tif")
+        fi = FileIngestion.objects.get(file_path="test-org/imagery/random_name.tif")
         self.assertEqual(fi.status, FileIngestion.Status.FAILED)
         self.assertIn("Could not extract a valid time", fi.error)
         self.assertIn("YYYYMMDD", fi.error)
@@ -529,9 +530,9 @@ class DirectDropTimeValidationTests(TestCase):
         from georiva.ingestion.consumer import _handle_event
         _geotiff_setup()
 
-        _handle_event(self._event("imagery/20250115.tif"))
+        _handle_event(self._event("test-org/imagery/20250115.tif"))
 
-        fi = FileIngestion.objects.get(file_path="imagery/20250115.tif")
+        fi = FileIngestion.objects.get(file_path="test-org/imagery/20250115.tif")
         self.assertEqual(fi.status, FileIngestion.Status.PENDING)
         mock_task.delay.assert_called_once()
 
@@ -539,9 +540,9 @@ class DirectDropTimeValidationTests(TestCase):
         from georiva.ingestion.consumer import _handle_event
         _grib_setup()
 
-        _handle_event(self._event("models/any_name.grib2"))
+        _handle_event(self._event("test-org/models/any_name.grib2"))
 
-        fi = FileIngestion.objects.get(file_path="models/any_name.grib2")
+        fi = FileIngestion.objects.get(file_path="test-org/models/any_name.grib2")
         self.assertEqual(fi.status, FileIngestion.Status.PENDING)
         mock_task.delay.assert_called_once()
 
@@ -550,9 +551,9 @@ class DirectDropTimeValidationTests(TestCase):
         from georiva.ingestion.consumer import _handle_event
         _geotiff_setup()
 
-        _handle_event(self._event("imagery/operator_named.tif"))
+        _handle_event(self._event("test-org/imagery/operator_named.tif"))
 
-        fi = FileIngestion.objects.get(file_path="imagery/operator_named.tif")
+        fi = FileIngestion.objects.get(file_path="test-org/imagery/operator_named.tif")
         self.assertEqual(fi.status, FileIngestion.Status.FAILED)
         mock_task.delay.assert_not_called()
 
@@ -604,7 +605,7 @@ UPLOAD_SESSION_STATUS_URL = "/api/upload-sessions/{}/status/"
 class UploadSessionStatusEndpointTests(TestCase):
 
     def _make_session(self, status=UploadSession.Status.ACTIVE):
-        catalog = Catalog.objects.create(name="S", slug="s", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="S", slug="s", file_format="geotiff")
         session = UploadSession.objects.create(catalog=catalog)
         if status != UploadSession.Status.ACTIVE:
             from django.utils import timezone

@@ -107,10 +107,14 @@ class VirtualZarrManifest(TimeStampedModel):
     def make_manifest_path(cls, variable: "Variable") -> str:
         """
         Canonical MinIO key for a manifest, derived from the variable's
-        collection and catalog.
+        collection and catalog — org slug first, like every other bucket key.
         """
         collection = variable.collection
-        return f"{collection.catalog.slug}/{collection.slug}/{variable.slug}.json"
+        catalog = collection.catalog
+        return (
+            f"{catalog.organisation.slug}/{catalog.slug}/"
+            f"{collection.slug}/{variable.slug}.json"
+        )
     
     def get_manifest_path(self) -> str:
         """Return (or derive) the manifest path for this record."""
