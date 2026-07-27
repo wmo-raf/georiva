@@ -49,8 +49,9 @@ class GeoRivaSettings(BaseSiteSetting):
 
 
 class HomePage(Page):
-    max_count = 1
-    
+    # No max_count: there is one HomePage per organisation, each the root of its
+    # own portal, all siblings under the Wagtail root node.
+
     # --- Hero Section ---
     hero_heading = models.CharField(max_length=255, default="GeoRiva")
     hero_background_image = models.ForeignKey(
