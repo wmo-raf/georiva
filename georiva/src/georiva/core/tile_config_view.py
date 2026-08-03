@@ -27,9 +27,17 @@ nothing else. Every other Django plane widened to the ``private`` tier in #273
 by asking who is calling; this one cannot, because on the call it exists for
 there is nobody to ask — Titiler forwards no credential and holds no session.
 Answering for a private collection would therefore mean answering for anyone,
-so it answers for no one, and the palette cache Django warms directly is how a
-private variable still renders. Authenticating the machine plane properly is
-the nginx ``auth_request`` gateway's job (#274).
+so it answers for no one, and the palette cache Django warms directly — for
+every active variable, whatever its tier — is how a private variable renders.
+
+The nginx gateway (#274, ADR 0015) does not change that, though it is easy to
+assume it does. It authorises the *browser's* request before Titiler ever sees
+it; this is Titiler's own onward call, made from a container name, carrying
+nothing of the caller. Reading the gateway's earlier decision here would mean
+inventing something for Titiler to prove it with. What the gateway does change
+is when this matters: a private variable's tiles now reach Titiler, so a palette
+cache miss on one is a tile that does not render rather than one that was never
+asked for.
 
 Returns the same payload structure as the Redis palette cache:
   With palette:    {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}

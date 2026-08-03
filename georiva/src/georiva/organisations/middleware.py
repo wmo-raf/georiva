@@ -7,11 +7,13 @@ falls back to the default Site when no hostname matches, which here would
 silently serve the central org's data to a request for an unknown host. Unknown
 hostname is a 404.
 
-One path is allowed to survive that 404, and only because the Host it arrives on
-is genuinely nobody's: the tile-config callback Titiler dials on an internal
-container name. It carries its organisation in its own first path segment and
-scopes on it. See :meth:`OrganisationMiddleware._host_optional` for how narrowly
-that is drawn, and ADR 0013 for why the machine plane needs it at all.
+Two paths are allowed to survive that 404, both on the machine plane: the
+tile-config callback Titiler dials on an internal container name that is
+genuinely nobody's, and the tile gateway nginx subrequests before proxying a
+tile. Neither is exempt from tenancy — the first scopes on its own first path
+segment, the second denies outright when no organisation answered. See
+:meth:`OrganisationMiddleware._host_optional` for how narrowly that is drawn,
+and ADR 0013 for why the machine plane needs it at all.
 
 Membership is re-read from the database on every request. A session that
 outlives its membership row loses access on its next request, not at logout.
@@ -35,6 +37,14 @@ logger = logging.getLogger(__name__)
 #: :meth:`OrganisationMiddleware._host_optional`, which is where that is
 #: allowed for and how narrowly.
 TILE_CONFIG_PREFIX = "/api/tile-config/"
+
+#: The gateway nginx subrequests before proxying a tile (#274). It is listed
+#: here for a different reason than the one above: the Host it carries is the
+#: browser's own and normally resolves fine. But ``auth_request`` understands
+#: only 2xx, 401 and 403 — a 404 from this middleware would make nginx fail the
+#: tile with a 500 instead of denying it — so an unknown host has to reach
+#: ``TileAuthView``, which denies it in a language nginx speaks.
+TILE_AUTH_PREFIX = "/internal/tile-auth/"
 
 
 def exempt_path_prefixes():
@@ -120,13 +130,21 @@ class OrganisationMiddleware:
     def _host_optional(request):
         """Whether this path may be served when no organisation answers the host.
 
-        Exactly one path may: the tile-config callback, because Titiler dials it
-        on an internal container name that is nobody's hostname. It is *not*
-        exempt from tenancy — it carries the organisation in its own first path
-        segment and ``core.tile_config_view`` filters on it.
+        Two paths may, both on the machine plane and each for its own reason.
 
-        The narrowness is the point. Making the path unconditionally exempt
-        would have been simpler and wrong: ``/api/`` is publicly proxied, so an
+        The tile-config callback, because Titiler dials it on an internal
+        container name that is nobody's hostname. It is *not* exempt from
+        tenancy — it carries the organisation in its own first path segment and
+        ``core.tile_config_view`` filters on it.
+
+        The tile gateway, because it must answer a status ``auth_request``
+        understands even when the host is unknown, and a 404 raised here is not
+        one. It is not exempt from tenancy either: ``core.tile_auth_view`` denies
+        every request that reaches it without an organisation, so surviving this
+        404 buys such a request a 403 and nothing else.
+
+        The narrowness is the point. Making a path unconditionally exempt would
+        have been simpler and wrong: ``/api/`` is publicly proxied, so an
         anonymous caller on any tenant's host could then have read any other
         organisation's rendering config, and learned from a 200 which catalogs
         that organisation runs. The relaxation applies only where the stated
@@ -134,7 +152,7 @@ class OrganisationMiddleware:
         request arriving on a host that *does* resolve is treated as the
         ordinary tenant request it is, path segment and all.
         """
-        return request.path.startswith(TILE_CONFIG_PREFIX)
+        return request.path.startswith((TILE_CONFIG_PREFIX, TILE_AUTH_PREFIX))
 
     @staticmethod
     def _guard_admin(request):

@@ -135,9 +135,10 @@ Defined in `api/urls.py`:
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
 - **Serving visibility**: never filter `visibility` by hand — go through `Collection.objects.visible_to(request)`
   (or `visible_visibilities(request)` where you need the tiers). `public` → anyone, `private` → members of the
-  host's org, `internal` → nobody. Membership is `organisations.access.may_see_private` (ADR 0014). The one
-  exception is `core/tile_config_view.py`: Titiler forwards no credential, so there is nobody to ask and it stays
-  `public`-only until the nginx `auth_request` gateway (#274)
+  host's org, `internal` → nobody. Membership is `organisations.access.may_see_private` (ADR 0014). Titiler and
+  Martin are gated at the proxy instead, by the nginx `auth_request` into `core/tile_auth_view.py` (ADR 0015) —
+  never add tenancy logic to either tile server. The one exception is `core/tile_config_view.py`: Titiler forwards
+  no credential on that callback, so there is nobody to ask and it stays `public`-only
 - **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
   — the first segment of every key on every bucket is the owning organisation's slug
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no

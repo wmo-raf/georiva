@@ -411,7 +411,9 @@ read by the engine as an input and served on no plane. `private` is *not* a smal
 smaller `private`; the three are separate audiences, so widening one never publishes another by accident. Defined
 once as `Collection.objects.visible_to(request)` and reached by every serving surface through it. A caller who may
 not see a `private` collection is not told it exists: it is absent from listings and search, and a fetch by name is
-the same 404 a misspelling gets. See ADR 0014.
+the same 404 a misspelling gets. Holds on the machine plane too since the **Tile gateway** — the raster and the
+choropleth are gated as the collection is, so the tier is a security boundary and not only a listing filter.
+See ADR 0014 and ADR 0015.
 _Avoid_: private as "restricted public", access level, permission level
 
 **API key**:
@@ -451,5 +453,17 @@ Organisation from a hostname there and nothing tries: the Organisation travels i
 `georiva:palette:{org}:…`). This is the *only* place a path names the tenant, and for the one reason that justifies
 it — there is no Host to disagree with. Django decides which Organisation and writes every such URL through
 `core/machine_plane.py`, from a row it already resolved from the Host; Titiler and Martin concatenate and join.
+Guarded by the **Tile gateway** below, which is what makes the Visibility tier mean anything here.
 See ADR 0013.
 _Avoid_: tile plane, internal API, server-to-server tenancy
+
+**Tile gateway**:
+The nginx `auth_request` that decides whether a machine-plane request may be proxied at all. Before serving a
+Titiler or Martin URL, nginx subrequests Django's internal `/internal/tile-auth/` endpoint with the original
+request line and the caller's own credentials (session cookie, `Authorization`, `?api_key=`); Django reads the
+address through `machine_plane.scope_of` — the inverse of the URL builders beside it — checks the org segment
+against the Host, and answers from the same `public()` / `visible_to()` vocabulary every other serving plane uses.
+Titiler and Martin gain no tenancy logic, which is the property it exists to preserve. Denials are 403 on the wire
+(all `auth_request` understands) and 404 to the caller; a broken key stays 401. Cached ~60s per
+collection-and-credential, so revocation lags on tiles and nowhere else. See ADR 0015.
+_Avoid_: tile auth middleware, tile permission check, signed tile URL

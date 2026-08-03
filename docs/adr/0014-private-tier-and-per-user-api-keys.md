@@ -127,6 +127,10 @@ still identified — and which previously applied no visibility filter at all, s
   change it: a private collection is hidden on all four Django planes and its
   tiles are not. Operators should not treat `private` as a security boundary for
   raster tiles before #274.
+
+  **Superseded by ADR 0015.** The gateway landed; this warning no longer holds.
+  Titiler and Martin are gated at the proxy, and `private` is a security
+  boundary for tiles as well as for listings.
 - `REST_FRAMEWORK` exists for the first time, with two authentication classes
   and no permission classes. DRF's `BasicAuthentication` default is dropped:
   passwords over the API were never a supported way in, and leaving it on would
