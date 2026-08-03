@@ -5,13 +5,36 @@ from wagtail import urls as wagtail_urls
 from wagtail.admin import urls as wagtailadmin_urls
 from wagtail.documents import urls as wagtaildocs_urls
 
+from wagtail.admin.auth import require_admin_access
+
 from georiva.api import urls as georiva_urls
 from georiva.core.tile_auth_view import TileAuthView
+from georiva.organisations.pages import OrgScopedPageSearchView
 from .views import health
+
+# The one place the admin's mount point is written down. `OrganisationMiddleware`
+# and the page-tree guard both gate on `GEORIVA_ADMIN_PATH_PREFIX`, so the routes
+# are derived from it rather than repeating the literal and drifting from it.
+ADMIN_PREFIX = settings.GEORIVA_ADMIN_PATH_PREFIX.lstrip("/")
 
 urlpatterns = [
     path("django-admin/", admin.site.urls),
-    path("admin/", include(wagtailadmin_urls)),
+    # Page search, scoped to the host organisation's page tree, standing in front
+    # of Wagtail's own route at the same path — Wagtail's `register_admin_urls`
+    # hook can only append, so replacing a view means claiming its URL here
+    # (#269). `require_admin_access` is the decorator Wagtail applies to its own
+    # admin patterns and that this one would otherwise miss.
+    path(
+        f"{ADMIN_PREFIX}pages/search/",
+        require_admin_access(OrgScopedPageSearchView.as_view()),
+        name="georiva_org_scoped_page_search",
+    ),
+    path(
+        f"{ADMIN_PREFIX}pages/search/results/",
+        require_admin_access(OrgScopedPageSearchView.as_view(results_only=True)),
+        name="georiva_org_scoped_page_search_results",
+    ),
+    path(ADMIN_PREFIX, include(wagtailadmin_urls)),
     path("documents/", include(wagtaildocs_urls)),
     path("api/", include(georiva_urls), name="georiva_api"),
     # Nginx's tile gateway (#274). Deliberately not under "api/": that prefix is

@@ -28,11 +28,12 @@ institution's storage prefix. Reaching another organisation's data means
 visiting its host.
 """
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
-from django.db.models import Model, QuerySet
+from django.db.models import Model, Q, QuerySet
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 
 from .lookups import (  # re-exported so enforcement code has one import
+    GLOBAL_TIER_ATTR,
     LOOKUP_ATTR,
     NOT_ORM_SCOPABLE,
     ORGANISATION_SELF,
@@ -40,6 +41,7 @@ from .lookups import (  # re-exported so enforcement code has one import
     SENTINELS,
     SHARED_REFERENCE_DATA,
     declared_lookup,
+    has_global_tier,
 )
 from .models import OrganisationMembership
 
@@ -83,7 +85,9 @@ def organisation_of(obj):
 
     A ``None`` anywhere along the declared path (a nullable FK left unset) means
     the row belongs to no organisation, and callers treat that as "nobody's" —
-    never as "everybody's".
+    never as "everybody's". The one model where nobody's *is* everybody's says so
+    explicitly, with :data:`GLOBAL_TIER_ATTR`, and the callers below read that
+    declaration rather than inferring anything from the ``None`` itself.
     """
     if declared_lookup(type(obj)) == ORGANISATION_SELF:
         return obj
@@ -96,11 +100,21 @@ def organisation_of(obj):
 
 
 def scoped_queryset(request, queryset):
-    """``queryset`` narrowed to the organisation serving ``request``."""
+    """``queryset`` narrowed to the organisation serving ``request``.
+
+    A model with a global tier (:data:`GLOBAL_TIER_ATTR`) is narrowed to this
+    organisation's rows *plus* the ownerless ones — the shipped palettes an
+    institution draws on alongside its own. Reading is where the two tiers meet;
+    writing is not, and :func:`require_writable_org_object` keeps them apart.
+    """
     organisation = require_active_org(request)
-    if declared_lookup(queryset.model) == ORGANISATION_SELF:
+    model = queryset.model
+    if declared_lookup(model) == ORGANISATION_SELF:
         return queryset.filter(pk=organisation.pk)
-    return queryset.filter(**{organisation_lookup(queryset.model): organisation})
+    lookup = organisation_lookup(model)
+    if has_global_tier(model):
+        return queryset.filter(Q(**{lookup: organisation}) | Q(**{f"{lookup}__isnull": True}))
+    return queryset.filter(**{lookup: organisation})
 
 
 def require_org_object(request, obj):
@@ -114,9 +128,45 @@ def require_org_object(request, obj):
     organisation's business.
     """
     organisation = require_active_org(request)
-    if organisation_of(obj) != organisation:
+    owner = organisation_of(obj)
+    if owner is None and has_global_tier(type(obj)):
+        # The global tier: owned by nobody, readable by everybody. See
+        # :func:`scoped_queryset`.
+        return obj
+    if owner != organisation:
         raise Http404("No such object in this organisation.")
     return obj
+
+
+def require_writable_org_object(request, obj):
+    """Return ``obj`` if this request may *change* it, else 404.
+
+    The same rule as :func:`require_org_object` for everything an organisation
+    owns, and the tighter half of the global tier: a shipped palette is instance
+    data, so an organisation reads it and only the instance admin edits it. A
+    member is told it is not there to edit rather than forbidden, which is what
+    "read-only tier" means from inside one organisation's admin.
+    """
+    if organisation_of(obj) is None and has_global_tier(type(obj)):
+        user = getattr(request, "user", None)
+        if user is not None and user.is_authenticated and user.is_superuser:
+            return obj
+        raise Http404("This is instance-wide reference data; it is read-only here.")
+    return require_org_object(request, obj)
+
+
+def may_change_org_object(request, obj):
+    """Whether :func:`require_writable_org_object` would admit ``obj``.
+
+    For listings, which would rather not offer an edit button that 404s. The
+    answer comes from the enforcing helper itself, so what is shown and what is
+    allowed cannot drift apart.
+    """
+    try:
+        require_writable_org_object(request, obj)
+    except Http404:
+        return False
+    return True
 
 
 def get_org_object_or_404(request, klass, *args, **kwargs):
@@ -229,13 +279,56 @@ def scope_form_fields(request, form):
     rather than being saved. Fields over shared reference data (topics, units,
     boundaries) are left alone; a field over a model that has declared neither
     raises, because a chooser is exactly where an undeclared model leaks.
+
+    A Wagtail edit form is more than its own fields: an inline panel carries a
+    formset whose rows are forms in their own right, with relation fields of
+    their own — the variables edited inside a collection, and the palette each
+    one picks. Those are narrowed too, by :func:`scope_formset_fields`.
     """
     for field in form.fields.values():
         queryset = getattr(field, "queryset", None)
         if queryset is None or not isinstance(queryset, QuerySet):
             continue
         field.queryset = scope_or_pass(request, queryset)
+    for formset in getattr(form, "formsets", {}).values():
+        scope_formset_fields(request, formset)
     return form
+
+
+def scope_formset_fields(request, formset):
+    """Narrow the choices in every row of an inline panel — present and future.
+
+    Two halves, because a formset renders two kinds of row. The rows it has built
+    are ordinary forms, and scoping them is what refuses a foreign id: on a POST
+    those are the forms that validate what was submitted. The row the "add
+    another" button clones is built fresh from the formset's form *class*, so
+    narrowing it means shadowing that class per request — a subclass carrying its
+    own copy of the fields, assigned to this formset instance only, because the
+    class itself is shared by every request in the process.
+    """
+    for child_form in formset.forms:
+        scope_form_fields(request, child_form)
+    formset.form = _scoped_form_class(request, formset.form)
+
+
+def _scoped_form_class(request, form_class):
+    """``form_class`` with its relation choices narrowed, as a throwaway subclass.
+
+    The fields are copied before being narrowed, and the copies are attached
+    *after* the class exists: a form metaclass rebuilds ``base_fields`` from the
+    declared fields and the model, so anything passed in the class body is
+    discarded on the way through.
+    """
+    from copy import deepcopy
+
+    scoped = type(form_class)(form_class.__name__, (form_class,), {})
+    fields = {name: deepcopy(field) for name, field in form_class.base_fields.items()}
+    for field in fields.values():
+        queryset = getattr(field, "queryset", None)
+        if isinstance(queryset, QuerySet):
+            field.queryset = scope_or_pass(request, queryset)
+    scoped.base_fields = fields
+    return scoped
 
 
 def is_org_owned(model):

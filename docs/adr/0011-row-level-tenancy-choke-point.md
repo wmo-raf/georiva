@@ -45,13 +45,23 @@ implicit at the manager level — but there is exactly one implementation to aud
 or one of three sentinels that are themselves decisions:
 
 - `SHARED_REFERENCE_DATA` — no organisation owns it, every organisation reads it
-  (topics, units, the global palette tier). Scoping passes it through.
+  (topics, units, administrative boundaries). Scoping passes it through.
 - `ORGANISATION_SELF` — it *is* an organisation. Scoping matches on identity.
 - `NOT_ORM_SCOPABLE` — it belongs to an organisation but no ORM path reaches
   one: pipeline bookkeeping keyed by a storage path (`FileIngestion` and its
   jobs), records reached only through an already-scoped parent
   (`DerivationRun`), and Wagtail pages, org-owned through the Site → root-page
   link rather than a field (#261). Scoping *refuses* these.
+
+One model declares a *tier* on top of its path: `ColorPalette` sets
+`ORGANISATION_GLOBAL_TIER` beside `ORGANISATION_LOOKUP = "organisation"` on a
+nullable FK, meaning a null organisation is not a broken route but the
+instance-wide library (#269). Reads widen to include those ownerless rows —
+listings and choosers offer both tiers — while writes stay narrow: an
+organisation edits only its own, and the ownerless rows are the instance
+admin's. That is one helper apart, `require_writable_org_object`, which the
+write half of every scoped view class calls where the read half calls
+`require_org_object`.
 
 Only `Catalog` carries an organisation FK; everything beneath it is owned
 transitively, as decided in #259. The declarations live on the models, in
@@ -66,7 +76,9 @@ invisible, because an unscoped listing looks identical to a scoped one until a
 second organisation exists. A test enumerates every model in the codebase and
 fails on any that has declared nothing, which is what makes refusing safe — no
 model reaches production undeclared. A nullable link anywhere along a declared
-path means the row belongs to *nobody* — never to everybody.
+path means the row belongs to *nobody* — never to everybody, unless the model
+says otherwise in as many words by declaring a global tier (below), which is a
+decision somebody wrote down rather than an inference from a `None`.
 
 **Superusers skip the membership gate, not the host.** The instance admin may
 enter any organisation's admin without a membership row (#257). They do not get

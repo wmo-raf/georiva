@@ -97,6 +97,16 @@ class Organisation(models.Model):
     def hostname(self):
         return self.site.hostname
 
+    @property
+    def root_page(self):
+        """The root of this organisation's page tree — its whole portal.
+
+        Named here so that callers ask the organisation for its pages rather than
+        walking Site → root_page themselves, and so the Site → root-page link
+        stays a provisioning detail (see ``organisations.pages``).
+        """
+        return self.site.root_page
+
     def membership_for(self, user):
         """The user's live membership row, or ``None``. Never cached."""
         if not user or not user.is_authenticated:

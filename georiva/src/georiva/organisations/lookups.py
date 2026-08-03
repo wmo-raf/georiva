@@ -36,12 +36,28 @@ NOT_ORM_SCOPABLE = "not-orm-scopable"
 #: Every declaration that is a decision rather than an ORM path.
 SENTINELS = frozenset({SHARED_REFERENCE_DATA, ORGANISATION_SELF, NOT_ORM_SCOPABLE})
 
+#: Class attribute a model sets alongside a *path* to say that a null along that
+#: path is not a broken route but a tier: a row no organisation owns, which every
+#: organisation reads and only the instance admin writes. Colour palettes are the
+#: case the declaration exists for — a shipped library everybody draws on, plus
+#: each institution's own (decision #269).
+#:
+#: It is deliberately not a sentinel. A model declaring it is still org-owned,
+#: still filtered by the path it declared; the global rows are added to what a
+#: read may see, and are refused to every write that is not the instance admin's.
+GLOBAL_TIER_ATTR = "ORGANISATION_GLOBAL_TIER"
+
 #: Models we did not write cannot declare anything — and cannot be org-owned
 #: either, since nothing outside this codebase sits in the FK chain under a
 #: Catalog. They are shared by construction, so the declaration requirement
 #: applies to our own models only.
 OWN_MODULE_PREFIX = "georiva."
 
+
+
+def has_global_tier(model):
+    """Whether ``model`` declared that a null organisation means "everybody's"."""
+    return bool(getattr(model, GLOBAL_TIER_ATTR, False))
 
 
 def declared_lookup(model):

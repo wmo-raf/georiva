@@ -3,7 +3,11 @@ from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
 
-from georiva.organisations.access import get_org_object_or_404, scoped_queryset
+from georiva.organisations.access import (
+    get_org_object_or_404,
+    scope_form_fields,
+    scoped_queryset,
+)
 
 
 def manual_upload_config_list(request):
@@ -142,7 +146,10 @@ def manual_upload_variable_edit(request, pk, var_pk):
             return cleaned
 
     if request.method == "POST":
-        form = VariableEditForm(request.POST, instance=variable)
+        # Scoped on both halves: the palette field offers this organisation's
+        # palettes and the instance-wide tier, and a posted id for anyone else's
+        # fails validation rather than being saved.
+        form = scope_form_fields(request, VariableEditForm(request.POST, instance=variable))
         if form.is_valid():
             form.save()
             # Keep the config's own display name consistent with the Variable
@@ -151,7 +158,7 @@ def manual_upload_variable_edit(request, pk, var_pk):
             messages.success(request, _("Variable '%s' updated.") % variable.name)
             return redirect("manual_upload_config_edit", pk=config.pk)
     else:
-        form = VariableEditForm(instance=variable)
+        form = scope_form_fields(request, VariableEditForm(instance=variable))
 
     return render(request, "georivaingestion/manual_upload_variable_edit.html", {
         "breadcrumbs_items": _variable_breadcrumbs(config, mcv.variable_name),
