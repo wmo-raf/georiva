@@ -32,6 +32,8 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
     # reference index (see core/test_reference_index_exclusion.py).
     wagtail_reference_index_ignore = True
 
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
     catalog = models.ForeignKey(
         'georivacore.Catalog',
         on_delete=models.CASCADE,
@@ -77,6 +79,8 @@ class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
     # Machine-generated data written on every staged file — kept out of Wagtail's
     # reference index (see core/test_reference_index_exclusion.py).
     wagtail_reference_index_ignore = True
+
+    ORGANISATION_LOOKUP = "collection__catalog__organisation"
 
     collection = models.ForeignKey(
         StagingCollection,
@@ -131,6 +135,8 @@ class StagingAsset(AbstractAsset, TimeStampedModel, Orderable):
     not map to a single Variable.
     """
     
+    ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
+
     item = ParentalKey(
         StagingItem,
         on_delete=models.CASCADE,
@@ -170,6 +176,8 @@ class DerivationLink(models.Model):
     See docs/adr/0004-staging-tier-and-abstract-stac-models.md.
     """
     
+    ORGANISATION_LOOKUP = "derived_item__collection__catalog__organisation"
+
     # FKs to Item use db_constraint=False because Item is a TimescaleDB
     # hypertable with no simple unique PK to reference (same as Asset.item).
     derived_item = models.ForeignKey(

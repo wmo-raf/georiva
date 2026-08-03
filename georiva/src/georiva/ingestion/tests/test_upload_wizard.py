@@ -6,6 +6,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+from georiva.organisations.testing import dial_org, join_org, make_organisation, org_host
 
 User = get_user_model()
 
@@ -23,7 +24,7 @@ SESSION_KEY = "georiva_upload_wizard"
 
 
 def _make_catalog(slug="cat", file_format="grib2"):
-    return Catalog.objects.create(name=slug, slug=slug, file_format=file_format)
+    return Catalog.objects.create(organisation=make_organisation(), name=slug, slug=slug, file_format=file_format)
 
 
 def _make_collection(catalog, slug="col"):
@@ -76,7 +77,12 @@ def _full_session():
 class Step1CatalogTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@b.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
+        # The wizard only offers (and accepts) catalogs of the org serving the
+        # request, so dial the host that owns the fixtures.
+        make_organisation()
+        self.client.defaults["HTTP_HOST"] = org_host()
 
     def test_step1_renders(self):
         self.assertEqual(self.client.get(STEP1_URL).status_code, 200)
@@ -123,6 +129,7 @@ class Step1CatalogTests(TestCase):
 class Step2ConfigNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin2", "b@c.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
@@ -167,6 +174,7 @@ class Step2ConfigNameTests(TestCase):
 class UploadSampleAjaxTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ajax", "x@y.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_returns_405_on_get(self):
@@ -259,6 +267,7 @@ class UploadSampleAjaxTests(TestCase):
 class Step3CombinedTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
@@ -351,6 +360,7 @@ class Step3CombinedTests(TestCase):
 class Step4CollectionsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4", "d@e.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create", "new_catalog_name": "WM",
@@ -460,6 +470,7 @@ class Step4CollectionsTests(TestCase):
 class Step4DuplicateSourceNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4dup", "dup@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, {
             "catalog_mode": "create",
@@ -567,6 +578,7 @@ class Step4DuplicateSourceNameTests(TestCase):
 class Step5ReviewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin5", "e@f.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         _seed_session(self.client, _full_session())
 
@@ -589,7 +601,10 @@ class Step5ReviewTests(TestCase):
 class ProvisionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin6", "g@h.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
+        make_organisation()
+        self.client.defaults["HTTP_HOST"] = org_host()
 
     def test_provision_creates_collection_config_and_variables(self):
         _seed_session(self.client, _full_session())
@@ -731,6 +746,50 @@ class ProvisionTests(TestCase):
         self.assertFalse(Variable.objects.exists())
 
 
+class Step1SlugScopingTests(TestCase):
+    """Catalog slugs are unique per organisation, so the wizard's
+    "slug already taken" check must be too — otherwise one institution's
+    catalog names quietly become unavailable to (and visible to) every other."""
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_slug", "s@s.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        self.kenya = make_organisation("kenya")
+
+    def _post(self, **headers):
+        return self.client.post(STEP1_URL, {
+            "catalog_mode": "create",
+            "new_catalog_name": "Forecast",
+            "new_catalog_slug": "forecast",
+            "new_catalog_format": "grib2",
+        }, **headers)
+
+    def test_a_slug_taken_by_another_org_does_not_block_this_one(self):
+        Catalog.objects.create(
+            organisation=self.kenya, name="Forecast", slug="forecast",
+            file_format="grib2",
+        )
+
+        # Posted on the default host — a different organisation's admin.
+        response = self._post()
+
+        self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
+
+    def test_a_slug_taken_within_this_org_is_still_rejected(self):
+        response = self._post(headers={"host": "kenya.testserver"})
+        self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
+
+        Catalog.objects.create(
+            organisation=self.kenya, name="Forecast", slug="forecast",
+            file_format="grib2",
+        )
+
+        response = self._post(headers={"host": "kenya.testserver"})
+        self.assertEqual(response.status_code, 200)  # re-rendered with the error
+        self.assertContains(response, "already exists")
+
+
 class CatalogOwnershipTests(TestCase):
     """A Catalog is either feed-managed or manually-managed, never both.
 
@@ -740,7 +799,9 @@ class CatalogOwnershipTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin7", "o@o.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
+        self.client.defaults["HTTP_HOST"] = org_host()
         from georiva.sources.models import DataFeed
         self.claimed = _make_catalog(slug="chirps")
         self.unclaimed = _make_catalog(slug="local-models")
@@ -790,6 +851,8 @@ class DataManagerWizardAccessTests(TestCase):
         from django.contrib.auth.models import Group
         self.user = User.objects.create_user("dm2", "dm2@x.com", "pw")
         self.user.groups.add(Group.objects.get(name="Data Managers"))
+        join_org(self.user)
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_data_manager_can_provision_via_the_wizard(self):

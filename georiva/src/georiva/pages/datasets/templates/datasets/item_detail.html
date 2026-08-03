@@ -399,6 +399,7 @@
     {# Item config injected for JS — time is fixed, no time selector needed #}
     <script id="grItemConfig" type="application/json">
         {
+            "orgSlug":              "{{ org_slug }}",
             "catalogSlug":          "{{ catalog_slug }}",
             "collectionSlug":       "{{ collection_slug }}",
             "activeVarSlug":        "{{ active_var_slug }}",
@@ -406,8 +407,8 @@
             "referenceTime":        "{{ item.reference_time_iso|default:'' }}",
             "edrUrl":               "/api/edr/collections/{{ collection_slug }}/",
             "minioBase":            "{{ MINIO_ASSETS_BASE_URL }}",
-            "titilerBase":          "/titiler",
-            "martinBase":           "{{ martin_base_url }}",
+            {# escapejs: the URL carries query params, and `&amp;` would break JSON.parse #}
+            "martinBoundaryStatsUrl": "{{ martin_boundary_stats_url|escapejs }}",
             "boundaryStatsLevels":  {{ boundary_stats_levels|to_json }}
         }
     </script>

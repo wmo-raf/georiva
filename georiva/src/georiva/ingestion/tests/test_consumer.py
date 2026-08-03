@@ -6,19 +6,21 @@ from georiva.core.models import Catalog
 from georiva.core.storage import BucketType
 from georiva.ingestion.consumer import _handle_event
 from georiva.ingestion.models import FileIngestion
+from georiva.organisations.testing import make_organisation
 
 
 def _make_event(bucket_name: str, key: str) -> dict:
     return {"s3": {"bucket": {"name": bucket_name}, "object": {"key": key}}}
 
 
-def _run(ev, catalog_slug="test-catalog", collection_slug="test-collection"):
+def _run(ev, org_slug="test-org", catalog_slug="test-catalog", collection_slug="test-collection"):
     with (
         patch("georiva.ingestion.consumer.validate_path") as mock_vp,
         patch("georiva.ingestion.consumer._resolve_origin", return_value=BucketType.SOURCES),
         patch("georiva.ingestion.consumer.process_incoming_file") as mock_task,
     ):
         mock_vp.return_value = {
+            "org": org_slug,
             "catalog": catalog_slug,
             "collection": collection_slug,
             "reference_time": None,
@@ -29,8 +31,8 @@ def _run(ev, catalog_slug="test-catalog", collection_slug="test-collection"):
 
 class ConsumerDirectFileIngestionTests(TestCase):
     def setUp(self):
-        Catalog.objects.create(name="Test", slug="test-catalog", file_format="grib2")
-        self.file_path = "test-catalog/test-collection/somefile.grib2"
+        Catalog.objects.create(organisation=make_organisation(), name="Test", slug="test-catalog", file_format="grib2")
+        self.file_path = "test-org/test-catalog/test-collection/somefile.grib2"
         self.ev = _make_event("georiva-sources", self.file_path)
 
     def test_direct_drop_creates_file_ingestion(self):
@@ -46,6 +48,7 @@ class ConsumerDirectFileIngestionTests(TestCase):
                   return_value="Could not extract valid time"),
         ):
             mock_vp.return_value = {
+                "org": "test-org",
                 "catalog": "test-catalog",
                 "collection": "test-collection",
                 "reference_time": None,
@@ -60,13 +63,13 @@ class ConsumerDirectFileIngestionTests(TestCase):
 
 class SweepDirectFileIngestionTests(TestCase):
     def setUp(self):
-        Catalog.objects.create(name="Sweep", slug="sweep-cat", file_format="grib2")
+        Catalog.objects.create(organisation=make_organisation(), name="Sweep", slug="sweep-cat", file_format="grib2")
 
     def test_sweep_registers_file(self):
         from georiva.core.storage import BucketType as BT
         from georiva.ingestion.tasks import sweep_unprocessed
 
-        file_path = "sweep-cat/col/rain.grib"
+        file_path = "test-org/sweep-cat/col/rain.grib"
         incoming_bucket = MagicMock()
         incoming_bucket.list_files.return_value = []
         sources_bucket = MagicMock()
@@ -83,7 +86,7 @@ class SweepDirectFileIngestionTests(TestCase):
             patch("georiva.ingestion.tasks.process_incoming_file") as mock_task,
         ):
             mock_storage.bucket.side_effect = _bucket_side_effect
-            mock_vp.return_value = {"catalog": "sweep-cat", "reference_time": None}
+            mock_vp.return_value = {"org": "test-org", "catalog": "sweep-cat", "reference_time": None}
             mock_task.run = MagicMock()
 
             sweep_unprocessed(sync=True)

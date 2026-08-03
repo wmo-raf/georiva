@@ -28,6 +28,7 @@ from django.contrib.auth import get_user_model
 
 from georiva.core.models import Catalog
 from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.organisations.testing import dial_org, make_organisation, org_host
 
 User = get_user_model()
 
@@ -91,8 +92,12 @@ def _checkbox_is_checked(html, key):
 class WizardStepBase(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("wiz", "w@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        # The wizard only offers (and accepts) catalogs of the org serving the
+        # request, so dial the host that owns this fixture.
+        self.client.defaults["HTTP_HOST"] = org_host()
+        self.catalog = Catalog.objects.create(organisation=make_organisation(),
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
 
@@ -320,3 +325,64 @@ class WizardProvisionSeamTests(WizardStepBase):
         self.assertFalse(
             DerivedProduct.objects.get(definition_key="promotion").is_enabled
         )
+
+
+class WizardCatalogScopingTests(WizardStepBase):
+    """The feed wizard never lets an operator claim another organisation's catalog.
+
+    A DataFeed derives its storage prefix from its catalog's organisation, so a
+    catalog picked across the tenant boundary would send every fetched file into
+    the other institution's ``{org}/`` prefix — misfiled server-side, which is
+    exactly what org-scoped storage exists to prevent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.other_orgs_catalog = Catalog.objects.create(
+            organisation=make_organisation("uganda"), name="Rain", slug="rain",
+            file_format="geotiff",
+        )
+
+    def _step1(self, method="get", data=None):
+        """Drive step 1, resolving the operator's source type to the base DataFeed.
+
+        Core ships no concrete subclass, so model resolution is patched exactly
+        as the other steps' tests do.
+        """
+        url = reverse("wizard_step1_catalog", kwargs={"model_name": MODEL_NAME})
+        with (
+            patch(
+                "georiva.sources.views.get_child_model_by_name", return_value=DataFeed
+            ),
+            # The base class declares no catalog defaults; the step-1 template
+            # reads them, so supply what a real plugin would.
+            patch.object(DataFeed, "get_catalog_defaults", return_value={
+                "name": "CHIRPS", "file_format": "geotiff", "description": "",
+            }),
+        ):
+            if method == "post":
+                return self.client.post(url, data)
+            return self.client.get(url)
+
+    def test_another_orgs_catalog_is_not_offered(self):
+        response = self._step1()
+        self.assertNotIn(self.other_orgs_catalog, response.context["unclaimed_catalogs"])
+
+    def test_selecting_another_orgs_catalog_is_refused(self):
+        response = self._step1("post", {
+            "catalog_mode": "select",
+            "catalog_id": self.other_orgs_catalog.pk,
+        })
+
+        # Re-rendered with an error rather than advancing to step 2.
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(self.client.session.get(SESSION_KEY, {}).get("catalog_id"))
+
+    def test_our_own_unclaimed_catalog_is_still_selectable(self):
+        response = self._step1("post", {
+            "catalog_mode": "select",
+            "catalog_id": self.catalog.pk,
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.session[SESSION_KEY]["catalog_id"], self.catalog.pk)

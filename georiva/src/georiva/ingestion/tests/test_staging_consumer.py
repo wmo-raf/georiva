@@ -18,6 +18,7 @@ from georiva.core.models import Catalog
 from georiva.core.models.base import AbstractAsset
 from georiva.core.storage import BucketType
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
+from georiva.organisations.testing import make_organisation
 
 
 @contextmanager
@@ -37,11 +38,11 @@ def _ts(*days):
 
 class RegisterStagingFileTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="netcdf"
         )
 
-    def _register(self, timestamps, key="cmip6/tas-ssp245/series.nc"):
+    def _register(self, timestamps, key="test-org/cmip6/tas-ssp245/series.nc"):
         plugin = MagicMock()
         plugin.list_variables.return_value = [{"name": "tas"}]
         plugin.get_timestamps.return_value = timestamps
@@ -71,7 +72,7 @@ class RegisterStagingFileTests(TestCase):
         self.assertIsNone(item.datetime)
         self.assertEqual(item.start_datetime, datetime(2020, 1, 1, tzinfo=timezone.utc))
         self.assertEqual(item.end_datetime, datetime(2020, 1, 5, tzinfo=timezone.utc))
-        self.assertEqual(item.source_file, "staging:cmip6/tas-ssp245/series.nc")
+        self.assertEqual(item.source_file, "staging:test-org/cmip6/tas-ssp245/series.nc")
         self.assertEqual(item.bounds, [0, 0, 1, 1])
 
     def test_no_shredding_even_for_many_timesteps(self):
@@ -79,7 +80,7 @@ class RegisterStagingFileTests(TestCase):
         self.assertEqual(StagingItem.objects.count(), 1)
 
     def test_single_timestamp_uses_datetime(self):
-        item = self._register(_ts(7), key="cmip6/tas-ssp245/slice.nc")
+        item = self._register(_ts(7), key="test-org/cmip6/tas-ssp245/slice.nc")
         self.assertEqual(item.datetime, datetime(2020, 1, 7, tzinfo=timezone.utc))
         self.assertIsNone(item.start_datetime)
 
@@ -90,7 +91,7 @@ class RegisterStagingFileTests(TestCase):
         self.assertEqual(asset.format, AbstractAsset.Format.NETCDF)
         self.assertEqual(len(asset.checksum), 64)  # sha256 hex
         self.assertGreater(asset.file_size, 0)
-        self.assertEqual(asset.href, "cmip6/tas-ssp245/series.nc")
+        self.assertEqual(asset.href, "test-org/cmip6/tas-ssp245/series.nc")
 
     def test_creates_staging_collection_from_path(self):
         self._register(_ts(1))
@@ -119,7 +120,7 @@ class RegisterStagingFileTests(TestCase):
         self.assertIsNone(sc.collection)
 
     def test_unknown_catalog_is_skipped(self):
-        item = self._register(_ts(1), key="nope/coll/file.nc")
+        item = self._register(_ts(1), key="test-org/nope/coll/file.nc")
         self.assertIsNone(item)
         self.assertEqual(StagingItem.objects.count(), 0)
 
@@ -141,7 +142,7 @@ class BackfillStagingLinkTests(TestCase):
         )
         backfill_staging_links = migration.backfill_staging_links
 
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         core = Collection.objects.create(catalog=catalog, slug="rain", name="Rain")
         matched = StagingCollection.objects.create(
             catalog=catalog, slug="rain", name="Rain"

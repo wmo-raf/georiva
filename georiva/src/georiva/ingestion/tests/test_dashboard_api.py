@@ -9,6 +9,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.ingestion.models import FileIngestion, FileIngestionJob
 from georiva.sources.models import DataFeed, DataFeedCollectionLink
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -20,7 +21,7 @@ UPLOAD_SESSIONS_URL = "/admin/api/ingestion/collections/{}/upload-sessions/"
 
 
 def _setup_collection(catalog_slug="cat", collection_slug="col"):
-    catalog = Catalog.objects.create(name=catalog_slug, slug=catalog_slug, file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=catalog_slug, slug=catalog_slug, file_format="grib2")
     return Collection.objects.create(name=collection_slug, slug=collection_slug, catalog=catalog)
 
 
@@ -39,8 +40,9 @@ def _make_file_ingestion(collection, file_path=None, status=FileIngestion.Status
 class DashboardCatalogGroupedTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_cg", "cg@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(name="CHIRPS", slug="chirps", file_format="grib2")
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="grib2")
         self.collection = Collection.objects.create(name="Daily", slug="daily", catalog=self.catalog)
 
     def test_dashboard_returns_catalogs_key(self):
@@ -95,7 +97,7 @@ class DashboardCatalogGroupedTests(TestCase):
         self.assertEqual(cat["summary"]["empty"], 1)
 
     def test_catalog_with_no_active_collections_excluded(self):
-        empty_catalog = Catalog.objects.create(name="Empty", slug="empty-cat", file_format="grib2")
+        empty_catalog = Catalog.objects.create(organisation=make_organisation(), name="Empty", slug="empty-cat", file_format="grib2")
         col = Collection.objects.create(name="col", slug="col-e", catalog=empty_catalog)
         col.is_active = False
         col.save()
@@ -127,6 +129,7 @@ def _all_collections_in_response(data):
 class DashboardCollectionListTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "admin@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.collection = _setup_collection()
 
@@ -208,7 +211,7 @@ class DashboardCollectionListTests(TestCase):
         self.assertEqual(col["sparkline"][-1]["status"], "failed")
 
     def test_multi_collection_grib_independent_sparkline_statuses(self):
-        catalog = Catalog.objects.create(name="shared-cat", slug="shared-cat", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="shared-cat", slug="shared-cat", file_format="grib2")
         col_a = Collection.objects.create(name="col-a", slug="col-a", catalog=catalog)
         col_b = Collection.objects.create(name="col-b", slug="col-b", catalog=catalog)
 
@@ -236,6 +239,7 @@ class DashboardCollectionListTests(TestCase):
 class CollectionIngestionLogsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.collection = _setup_collection("cat3", "col3")
 
@@ -313,7 +317,7 @@ class CollectionIngestionLogsAPITests(TestCase):
         self.assertEqual(logs[1]["id"], fi1.pk)
 
     def test_ingestion_logs_for_grib_collection_linked_via_m2m(self):
-        catalog = Catalog.objects.create(name="grib-cat", slug="grib-cat", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="grib-cat", slug="grib-cat", file_format="grib2")
         col_x = Collection.objects.create(name="col-x", slug="col-x", catalog=catalog)
         col_y = Collection.objects.create(name="col-y", slug="col-y", catalog=catalog)
 
@@ -334,8 +338,9 @@ class CollectionIngestionLogsAPITests(TestCase):
 class CollectionFetchRunsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin5", "g@h.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        catalog = Catalog.objects.create(name="cat5", slug="cat5", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="cat5", slug="cat5", file_format="grib2")
         self.collection = Collection.objects.create(name="col5", slug="col5", catalog=catalog)
         self.feed = DataFeed.objects.create(name="Test Feed")
         DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.collection)
@@ -419,6 +424,7 @@ def _make_job(fi, **kwargs):
 class CollectionIngestionJobsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4", "e@f.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.collection = _setup_collection("cat4", "col4")
 
@@ -482,8 +488,9 @@ def _make_upload_session(catalog, user=None, file_path=None, collection=None):
 class CollectionUploadSessionsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_us", "us@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(name="cat-us", slug="cat-us", file_format="grib2")
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="cat-us", slug="cat-us", file_format="grib2")
         self.collection = Collection.objects.create(name="col-us", slug="col-us", catalog=self.catalog)
 
     def test_upload_sessions_returns_200_with_upload_sessions_key(self):

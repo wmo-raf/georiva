@@ -2,15 +2,21 @@
 Public dataset pages must not surface `internal` collections — they are
 derivation intermediates, read by the engine but never served.
 """
-from django.test import TestCase
+import json
+
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from georiva.core.models import Catalog, Collection
+from georiva.core.models import Asset, Catalog, Collection
+from georiva.organisations.provisioning import provision_organisation
+from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
 
 
 class DatasetVisibilityTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        # Dataset pages are per organisation and resolved from the Host.
+        dial_org(self.client)
+        self.catalog = Catalog.objects.create(organisation=make_organisation(),
             name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         Collection.objects.create(
@@ -34,3 +40,62 @@ class DatasetVisibilityTests(TestCase):
                     args=["cmip6", "tas-anomaly"])
         )
         self.assertEqual(hidden.status_code, 404)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class ItemDetailMachinePlaneConfigTests(TestCase):
+    """The map's config block, which is where Django hands tenancy to the client.
+
+    The item map talks to MinIO and Martin directly — neither of which can see
+    the Host that decided which organisation this page belongs to. So the org
+    reaches them only through this JSON block, and two things have to hold: it
+    must parse (the Martin URL carries query params, and HTML-escaping their
+    ``&`` would break ``JSON.parse`` on a page that otherwise looks fine), and
+    every address in it must name *this* portal's organisation.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
+        from georiva.pages.datasets.models import DatasetsIndexPage
+
+        cls.index = DatasetsIndexPage(title="Datasets", slug="datasets")
+        cls.organisation.site.root_page.add_child(instance=cls.index)
+
+        tree = make_org_tree(cls.organisation)
+        cls.catalog = tree["catalog"]
+        cls.collection = tree["collection"]
+        cls.item = tree["item"]
+        # The map only offers the choropleth for a collection that has levels,
+        # and only lists an item that has a COG for the active variable.
+        Collection.objects.filter(pk=cls.collection.pk).update(boundary_stats_levels=[1])
+        cls.collection.refresh_from_db()
+        Asset.objects.filter(item=cls.item).update(format=Asset.Format.COG)
+
+    def setUp(self):
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _config(self):
+        url = f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/items/{self.item.pk}/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, url)
+        body = response.content.decode()
+        start = body.index('id="grItemConfig"')
+        start = body.index(">", start) + 1
+        raw = body[start:body.index("</script>", start)]
+        return json.loads(raw)
+
+    def test_the_config_block_is_parseable_json(self):
+        """The `&` in the Martin URL must survive as `&`, not as `&amp;`."""
+        self.assertIn("martinBoundaryStatsUrl", self._config())
+
+    def test_the_martin_url_names_this_portals_organisation(self):
+        url = self._config()["martinBoundaryStatsUrl"]
+        self.assertIn("/martin/boundary_stats/{z}/{x}/{y}?", url)
+        self.assertIn("org=kenya", url)
+        self.assertIn(f"catalog={self.catalog.slug}", url)
+        self.assertIn(f"collection={self.collection.slug}", url)
+
+    def test_the_asset_base_carries_the_org_the_storage_keys_use(self):
+        """The map rebuilds PNG keys client-side, and keys are org-first."""
+        self.assertEqual(self._config()["orgSlug"], "kenya")

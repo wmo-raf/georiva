@@ -3,9 +3,14 @@ from django.utils.translation import gettext_lazy as _
 from wagtail.admin.panels import FieldPanel
 
 from georiva.core.unit_utils import validate_unit, ureg
+from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 
 class Unit(models.Model):
+    """Shared reference data: one instance-wide list of units (decision #259)."""
+
+    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
+
     name = models.CharField(max_length=255, verbose_name=_("Name"), help_text=_("Name of the unit"), unique=True)
     symbol = models.CharField(max_length=255, verbose_name=_("Symbol"), help_text=_("Symbol of the unit"),
                               validators=[validate_unit], unique=True)

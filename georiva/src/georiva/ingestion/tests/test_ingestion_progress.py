@@ -10,6 +10,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.ingestion.handlers.ingestion_handler import IngestionHandler
 from georiva.ingestion.progress import PublishingProgress
 from georiva.ingestion.service import IngestionService
+from georiva.organisations.testing import make_organisation
 
 
 # =============================================================================
@@ -35,7 +36,7 @@ class PublishingProgressTests(TestCase):
 class ProcessFileProgressTests(TestCase):
 
     def setUp(self):
-        catalog = Catalog.objects.create(
+        catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff",
             is_active=True, clip_mode="none",
         )
@@ -79,7 +80,7 @@ class ProcessFileProgressTests(TestCase):
             service._source_file_manager = mock_sfm
 
             service.process_file(
-                "chirps/rainfall/2024/01/15/file.tif",
+                "test-org/chirps/rainfall/2024/01/15/file.tif",
                 progress=mock_progress,
             )
 

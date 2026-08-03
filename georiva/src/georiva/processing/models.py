@@ -13,6 +13,8 @@ See docs/adr/0005-generic-derivation-engine.md.
 from datetime import timedelta
 
 from django.db import models
+
+from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 from django.utils import timezone as dj_timezone
 from django_extensions.db.models import TimeStampedModel
 
@@ -20,6 +22,12 @@ from georiva.processing.constants import DERIVATION_LOCK_TIMEOUT_SECONDS
 
 
 class DerivationRun(TimeStampedModel):
+    # Its only link to the data tree is ``produced_item``, which is null until a
+    # run succeeds — so scoping on it would hide every pending run from its own
+    # organisation. Runs are reached through an already-scoped product instead
+    # (see access.get_via_scoped_parent_or_404).
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     # Aligned with the run_unit_task hard time limit (see processing/constants):
     # the lock only becomes stealable strictly after Celery would have killed a
     # runaway task, so a live task's lock is never stolen, and a dead worker's

@@ -13,12 +13,13 @@ from georiva.core.models import Catalog, Collection
 from georiva.ingestion.ingestion_tracking import feed_file_ingestions
 from georiva.ingestion.models import FileIngestion
 from georiva.sources.models import DataFeed
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
 
 def _feed(name="CHIRPS", slug="chirps"):
-    catalog = Catalog.objects.create(name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
     feed = DataFeed.objects.create(name=f"{name} Feed", catalog=catalog)
     return feed
 
@@ -27,7 +28,7 @@ def _ingestion(feed, filename, *, status=FileIngestion.Status.COMPLETED,
                collections=(), **fields):
     record = FileIngestion.objects.create(
         bucket="sources",
-        file_path=f"{feed.catalog.slug}/rainfall/{filename}",
+        file_path=f"{feed.catalog.storage_prefix}/rainfall/{filename}",
         status=status,
         **fields,
     )
@@ -94,6 +95,7 @@ class IngestionActivityViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ing", "i@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
         self.rainfall = Collection.objects.create(
@@ -169,6 +171,7 @@ class CheckUnprocessedViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_chk", "k@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 
@@ -187,13 +190,13 @@ class CheckUnprocessedViewTests(TestCase):
 
         with patch(
             "georiva.ingestion.unprocessed.find_unprocessed",
-            return_value=self._found("chirps/rainfall/stuck.grib"),
+            return_value=self._found("test-org/chirps/rainfall/stuck.grib"),
         ) as find:
             response = self.client.post(self._url(), {"action": "check_unprocessed"})
 
-        find.assert_called_once_with(prefix="chirps/")
+        find.assert_called_once_with(prefix="test-org/chirps/")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "chirps/rainfall/stuck.grib")
+        self.assertContains(response, "test-org/chirps/rainfall/stuck.grib")
         self.assertContains(response, "untracked")
 
     def test_check_with_a_clean_bucket_shows_a_clear_empty_state(self):
@@ -210,17 +213,17 @@ class CheckUnprocessedViewTests(TestCase):
         from unittest.mock import patch
 
         FileIngestion.objects.create(
-            bucket="sources", file_path="chirps/rainfall/pending.grib",
+            bucket="sources", file_path="test-org/chirps/rainfall/pending.grib",
             status=FileIngestion.Status.PENDING,
         )
         FileIngestion.objects.create(
-            bucket="sources", file_path="chirps/rainfall/dead.grib",
+            bucket="sources", file_path="test-org/chirps/rainfall/dead.grib",
             status=FileIngestion.Status.COMPLETED, force_reingest=True,
         )
         found = (
-            self._found("chirps/rainfall/new.grib", reason="untracked")
-            + self._found("chirps/rainfall/pending.grib", reason="pending")
-            + self._found("chirps/rainfall/dead.grib", reason="reingest")
+            self._found("test-org/chirps/rainfall/new.grib", reason="untracked")
+            + self._found("test-org/chirps/rainfall/pending.grib", reason="pending")
+            + self._found("test-org/chirps/rainfall/dead.grib", reason="reingest")
         )
 
         with (
@@ -234,15 +237,15 @@ class CheckUnprocessedViewTests(TestCase):
 
         dispatched = {c.kwargs["file_path"] for c in task.delay.call_args_list}
         self.assertEqual(dispatched, {
-            "chirps/rainfall/new.grib",
-            "chirps/rainfall/pending.grib",
-            "chirps/rainfall/dead.grib",
+            "test-org/chirps/rainfall/new.grib",
+            "test-org/chirps/rainfall/pending.grib",
+            "test-org/chirps/rainfall/dead.grib",
         })
         # The untracked file now has a FileIngestion; the dead one was reset.
         self.assertTrue(FileIngestion.objects.filter(
-            file_path="chirps/rainfall/new.grib").exists())
+            file_path="test-org/chirps/rainfall/new.grib").exists())
         self.assertEqual(
-            FileIngestion.objects.get(file_path="chirps/rainfall/dead.grib").status,
+            FileIngestion.objects.get(file_path="test-org/chirps/rainfall/dead.grib").status,
             FileIngestion.Status.PENDING,
         )
         self.assertRedirects(response, self._url())
@@ -270,6 +273,7 @@ class ReingestUITests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_rei", "re@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 
@@ -385,6 +389,7 @@ class DataFeedDetailIngestionCardTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ipanel", "ip@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 

@@ -197,7 +197,7 @@ class TimeseriesService:
             raise ManifestNotReady(
                 f"No virtual Zarr manifest found for {variable}. "
                 "Run: manage.py build_virtual_zarr "
-                f"--collection {variable.collection.catalog.slug}"
+                f"--collection {variable.collection.catalog.storage_prefix}"
                 f"/{variable.collection.slug} "
                 f"--variable {variable.slug}"
             )

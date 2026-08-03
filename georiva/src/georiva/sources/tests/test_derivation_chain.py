@@ -18,6 +18,7 @@ from georiva.core.derived_products import (
 from georiva.core.models import Catalog
 from georiva.sources.derivation_chain import build_chain_graph, item_lineage
 from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 def _definition(key="anomaly", inputs=None, outputs=None, **overrides):
@@ -37,7 +38,7 @@ def _definition(key="anomaly", inputs=None, outputs=None, **overrides):
 
 class BuildChainGraphTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -163,7 +164,7 @@ class ItemLineageTests(TestCase):
         )
 
         t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
 
         # The produced (derived) item.
         out_col = Collection.objects.create(catalog=catalog, slug="anomaly", name="Anomaly")
@@ -196,8 +197,9 @@ class ChainViewTests(TestCase):
         from django.contrib.auth import get_user_model
         User = get_user_model()
         self.user = User.objects.create_superuser("admin_chain", "c@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -243,6 +245,7 @@ class ItemLineageViewTests(TestCase):
         from django.contrib.auth import get_user_model
         User = get_user_model()
         self.user = User.objects.create_superuser("admin_lin", "l@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_lineage_page_lists_a_produced_items_inputs(self):
@@ -258,7 +261,7 @@ class ItemLineageViewTests(TestCase):
         )
 
         t = datetime(2020, 1, 1, tzinfo=timezone.utc)
-        catalog = Catalog.objects.create(name="C", slug="c", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         out_col = Collection.objects.create(catalog=catalog, slug="anomaly", name="Anomaly")
         derived = Item.objects.create(collection=out_col, time=t)
         scol = StagingCollection.objects.create(catalog=catalog, slug="rainfall", name="Rainfall")

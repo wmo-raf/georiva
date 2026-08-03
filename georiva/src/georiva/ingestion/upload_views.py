@@ -16,12 +16,13 @@ from datetime import datetime
 
 import pytz
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import render
 from django.urls import reverse, reverse_lazy
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 from georiva.core.filename import build_filename, parse_filename
+from georiva.organisations.access import get_org_object_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +67,14 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
     """
     Construct the MinIO incoming-bucket path.
 
-    GeoTIFF:      {catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}
-    GRIB/NetCDF:  {catalog}/{filename}  (GR-- prefixed when a reference time exists,
-                  so the whole file is processed against every collection)
+    GeoTIFF:      {org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filename}
+    GRIB/NetCDF:  {org}/{catalog}/{filename}  (GR-- prefixed when a reference time
+                  exists, so the whole file is processed against every collection)
+
+    The org segment comes from ``config.catalog.organisation``, never from the
+    uploading client — an operator cannot file data into another institution.
     """
-    catalog_slug = config.catalog.slug
+    catalog_prefix = config.catalog.storage_prefix
     original_name = parse_filename(filename)["original_name"]
     final_name = build_filename(original_name, reference_time)
 
@@ -78,10 +82,10 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
         var_slug = slugify(variable.variable_name)
         coll_slug = variable.collection.slug
         return (
-            f"{catalog_slug}/{coll_slug}/{var_slug}/"
+            f"{catalog_prefix}/{coll_slug}/{var_slug}/"
             f"{valid_time:%Y}/{valid_time:%m}/{valid_time:%d}/{final_name}"
         )
-    return f"{catalog_slug}/{final_name}"
+    return f"{catalog_prefix}/{final_name}"
 
 
 def manual_upload_page(request, pk):
@@ -91,8 +95,9 @@ def manual_upload_page(request, pk):
         _CATALOG_FORMAT_LABEL,
     )
 
-    config = get_object_or_404(
-        ManualUploadConfig.objects.select_related("catalog"), pk=pk
+    config = get_org_object_or_404(
+        request,
+        ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
     )
     variables = config.variables.select_related("collection").order_by(
         "long_name", "variable_name"
@@ -140,7 +145,7 @@ def manual_upload_extract_times(request, pk):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
     filename = request.POST.get("filename", "").strip()
     if not filename:
         return JsonResponse({"error": str(_("No filename provided."))}, status=400)
@@ -172,8 +177,9 @@ def manual_upload_submit(request, pk):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    config = get_object_or_404(
-        ManualUploadConfig.objects.select_related("catalog"), pk=pk
+    config = get_org_object_or_404(
+        request,
+        ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
     )
 
     uploaded_files = request.FILES.getlist("files")

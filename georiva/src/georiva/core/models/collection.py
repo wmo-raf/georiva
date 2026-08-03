@@ -43,6 +43,79 @@ class CollectionForm(WagtailAdminModelForm):
         return [int(v) for v in self.cleaned_data.get("boundary_stats_levels", [])]
 
 
+def visible_visibilities(request):
+    """The visibility tiers ``request`` may be served, most-open first.
+
+    The audience rule on its own, for the handful of places that need the tiers
+    rather than a queryset of collections — a ``Count(..., filter=Q(...))``
+    annotation over a catalog's collections cannot go through
+    :meth:`CollectionQuerySet.visible_to`, but it must agree with it.
+    """
+    # Late import: ``access`` reads the organisation models, and importing it
+    # while the core models are still being defined would close that circle.
+    from georiva.organisations.access import may_see_private
+
+    if may_see_private(request):
+        return (Collection.Visibility.PUBLIC, Collection.Visibility.PRIVATE)
+    return (Collection.Visibility.PUBLIC,)
+
+
+class CollectionQuerySet(models.QuerySet):
+    """Query vocabulary shared by every surface that serves collections."""
+
+    def servable(self):
+        """Everything this instance is willing to serve to *somebody*.
+
+        Two conditions that travel together everywhere — the collection is
+        active and its catalog is active — plus the one tier that is never
+        served to anyone: ``internal`` is a derivation intermediate, read by the
+        engine as an input and published to nothing. It is not a private dataset
+        with a small audience; it is not a dataset.
+
+        On its own this is not an answer to "what may this caller see" — it is
+        the set the audience filters below narrow. Callers want
+        :meth:`visible_to`.
+        """
+        return self.filter(
+            is_active=True,
+            catalog__is_active=True,
+            visibility__in=(Collection.Visibility.PUBLIC, Collection.Visibility.PRIVATE),
+        )
+
+    def public(self):
+        """The collections this instance will serve to anybody who asks.
+
+        Three conditions travel together everywhere — the collection is active,
+        its catalog is active, and its visibility is public — and getting one of
+        them wrong publishes a derivation intermediate or a retired dataset. They
+        are written here once so STAC, EDR, the dataset pages and the analysis
+        endpoints cannot drift apart on what "public" means.
+
+        Deliberately says nothing about *whose* collections these are: tenancy is
+        the caller's job, applied by wrapping this in ``scoped_queryset`` so the
+        organisation filter stays visible at every call site (ADR 0011).
+        """
+        return self.servable().filter(visibility=Collection.Visibility.PUBLIC)
+
+    def visible_to(self, request):
+        """The collections ``request`` may be served, by tier and by audience.
+
+        The seam every serving surface reaches for. ``public`` goes to anyone;
+        ``private`` goes to authenticated members of the organisation the
+        request is being served for, and to nobody else; ``internal`` goes
+        nowhere. A caller who may not see a private collection does not get a
+        403 out of this — the collection is simply absent from the queryset, so
+        listings omit it and a fetch by name 404s, which is the whole point of
+        the tier (#273).
+
+        Like :meth:`public` it says nothing about *whose* rows these are: the
+        organisation filter is still the caller's, applied by wrapping this in
+        ``scoped_queryset`` (ADR 0011). Membership is decided by
+        ``organisations.access``, one implementation shared with the admin.
+        """
+        return self.servable().filter(visibility__in=visible_visibilities(request))
+
+
 class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
     """
     Groups one or more Variables.
@@ -52,11 +125,16 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
         - gfs-wind-10m (wind_speed + wind_direction)
         - sentinel-vegetation (ndvi + nir + red)
     """
-    
+
     base_form_class = CollectionForm
-    
+
+    objects = CollectionQuerySet.as_manager()
+
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
     class Visibility(models.TextChoices):
-        PUBLIC = 'public', 'Public'      # served via STAC/EDR/pages/tiles
+        PUBLIC = 'public', 'Public'      # served via STAC/EDR/pages/tiles to anyone
+        PRIVATE = 'private', 'Private'   # served only to members of the owning org
         INTERNAL = 'internal', 'Internal'  # derivation intermediate — never served
 
     class TimeResolution(models.TextChoices):
@@ -100,9 +178,11 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
         choices=Visibility.choices,
         default=Visibility.PUBLIC,
         help_text=(
-            "Public collections are served via STAC/EDR/pages/tiles. "
-            "Internal collections are derivation intermediates — read by the "
-            "engine as inputs but never served."
+            "Public collections are served via STAC/EDR/pages/tiles to anyone. "
+            "Private collections are served only to signed-in members of this "
+            "organisation, over a session or an API key, and are invisible to "
+            "everybody else. Internal collections are derivation intermediates "
+            "— read by the engine as inputs but never served."
         ),
     )
     

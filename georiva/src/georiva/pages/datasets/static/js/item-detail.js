@@ -232,7 +232,10 @@ class ItemDetailMap {
             filename += `__ref${refStr}`;
         }
 
-        return `${this.config.minioBase}/${this.config.catalogSlug}/${this.config.collectionSlug}/${varSlug}/${Y}/${m}/${d}/${filename}.png`;
+        // Org-first, matching the storage grammar every bucket key follows:
+        // catalog slugs repeat across organisations, so the leading segment is
+        // what makes the key address this portal's asset and not a namesake.
+        return `${this.config.minioBase}/${this.config.orgSlug}/${this.config.catalogSlug}/${this.config.collectionSlug}/${varSlug}/${Y}/${m}/${d}/${filename}.png`;
     }
 
     async _loadRasterLayer() {
@@ -283,6 +286,10 @@ class ItemDetailMap {
 
     // ── Boundary choropleth layer (Martin vector tiles) ────────────────────
 
+    // Django hands us the tile URL with the org/catalog/collection triple
+    // already on it — the tile servers have no Host to resolve one from, so
+    // which organisation's rows a tile shows is never decided here. Only the
+    // parameters the user drives are appended.
     _buildMartinTileUrl(level) {
         const params = new URLSearchParams({
             variable: this.currentVarSlug,
@@ -290,7 +297,7 @@ class ItemDetailMap {
             admin_level: level,
         });
         if (this.config.referenceTime) params.set('reference_time', this.config.referenceTime);
-        return `${this.config.martinBase}/boundary_stats/{z}/{x}/{y}?${params.toString()}`;
+        return `${this.config.martinBoundaryStatsUrl}&${params.toString()}`;
     }
 
     _buildChoroplethColorExpression(palette, paletteMin, paletteMax) {

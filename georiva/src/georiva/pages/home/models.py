@@ -5,10 +5,14 @@ from wagtail.contrib.settings.models import BaseSiteSetting, register_setting
 from wagtail.models import Page, Orderable
 from wagtail_color_panel.edit_handlers import NativeColorPanel
 from wagtail_color_panel.fields import ColorField
+from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
 
 @register_setting
 class GeoRivaSettings(BaseSiteSetting):
+    # Per-Site settings: the Site is the organisation, but not through a field.
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     site_name = models.CharField(max_length=255, default="GeoRiva", help_text="The name of your GeoRiva instance")
     site_tagline = models.CharField(max_length=500, blank=True,
                                     help_text="A short description or tagline for your GeoRiva instance")
@@ -49,8 +53,13 @@ class GeoRivaSettings(BaseSiteSetting):
 
 
 class HomePage(Page):
-    max_count = 1
-    
+    # No max_count: there is one HomePage per organisation, each the root of its
+    # own portal, all siblings under the Wagtail root node.
+
+    # Pages are org-owned through the Site → root-page link rather than a field
+    # (decision #261), so no ORM path reaches the organisation from here.
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     # --- Hero Section ---
     hero_heading = models.CharField(max_length=255, default="GeoRiva")
     hero_background_image = models.ForeignKey(
@@ -99,6 +108,10 @@ class HomePage(Page):
 
 
 class FeaturedCatalog(Orderable):
+    # Owned by its page's organisation, which pages reach through the Site link
+    # rather than a field.
+    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+
     page = ParentalKey(
         'home.HomePage',
         on_delete=models.CASCADE,

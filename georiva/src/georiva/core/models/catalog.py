@@ -8,12 +8,18 @@ from wagtail.admin.panels import (
 )
 from wagtail.search import index
 from wagtail.search.index import Indexed
+from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 
 class Topic(Indexed, TimeStampedModel):
     """
     Thematic topic for classifying Catalogs
+
+    Shared reference data: curated once for the instance and read by every
+    organisation, so deliberately not org-scoped (decision #259).
     """
+
+    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
     name = models.CharField(max_length=100, unique=True)
     slug = AutoSlugField(populate_from='name', unique=True, editable=False)
     description = models.TextField(blank=True)
@@ -51,9 +57,27 @@ class Catalog(Indexed, TimeStampedModel):
     Examples: GFS, CHIRPS, ERA5, MSG
 
     This is an organizational grouping - it defines how data is ingested
+
+    A Catalog is the tenancy root of the data tree: everything beneath it
+    (Collection, Variable, Item, Asset, DataFeed, upload configs, virtual-zarr
+    manifests, zonal stats) belongs to the catalog's organisation transitively
+    through the FK chain, and carries no organisation FK of its own.
     """
+    # The tenancy root: everything beneath declares the path that reaches this
+    # field. See organisations/access.py.
+    ORGANISATION_LOOKUP = "organisation"
+
+    organisation = models.ForeignKey(
+        'organisations.Organisation',
+        on_delete=models.CASCADE,
+        related_name='catalogs',
+        help_text="The organisation that owns this catalog and everything under it.",
+    )
     name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=100, unique=True)
+    # Unique per organisation, not globally: two institutions may each run a
+    # catalog called `forecast`. The organisation slug is the first segment of
+    # every storage key, so the pair stays unambiguous on disk too.
+    slug = models.SlugField(max_length=100)
     description = models.TextField(blank=True)
     
     # Provider information
@@ -108,6 +132,11 @@ class Catalog(Indexed, TimeStampedModel):
         index.AutocompleteField("name"),
         index.SearchField("get_collection_names"),
         index.AutocompleteField("get_collection_names"),
+        # The admin search runs through the search backend rather than the ORM,
+        # and a backend can only honour a filter on a field it indexes. Without
+        # this the org-scoped queryset the listing hands it raises — which is the
+        # right failure, but the search box is meant to work.
+        index.FilterField("organisation"),
     ]
     
     panels = [
@@ -146,9 +175,22 @@ class Catalog(Indexed, TimeStampedModel):
     class Meta:
         ordering = ['name']
         verbose_name_plural = 'Catalogs'
-    
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organisation', 'slug'],
+                name='unique_catalog_slug_per_organisation',
+            ),
+        ]
+
     def __str__(self):
         return self.name
+
+    @property
+    def storage_prefix(self) -> str:
+        """``{org}/{catalog}`` — the first two segments of every key holding this
+        catalog's data, on every bucket. The single place that ordering is
+        spelled out, so path-building and prefix scans cannot drift apart."""
+        return f"{self.organisation.slug}/{self.slug}"
     
     def get_collection_names(self):
         """Space-joined collection names, indexed so the admin header search

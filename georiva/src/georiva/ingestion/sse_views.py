@@ -3,6 +3,8 @@ import logging
 
 from django.http import StreamingHttpResponse
 
+from georiva.organisations.access import require_active_org
+
 logger = logging.getLogger(__name__)
 
 _KEEPALIVE_SECS = 25
@@ -27,8 +29,11 @@ _ACQUISITION_EVENT_TYPES = frozenset([
 
 def ingestion_events_sse(request):
     """Async SSE endpoint streaming ingestion (FileIngestion/Job) events."""
+    # Resolved here, while the request is still in hand: the stream itself
+    # outlives the view and has no request to ask.
+    org = require_active_org(request)
     return StreamingHttpResponse(
-        _event_stream(_INGESTION_EVENT_TYPES, _build_ingestion_snapshot),
+        _event_stream(_INGESTION_EVENT_TYPES, _build_ingestion_snapshot, org.slug),
         content_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -39,8 +44,9 @@ def ingestion_events_sse(request):
 
 def acquisition_events_sse(request):
     """Async SSE endpoint streaming acquisition (FetchRun/UploadSession) events."""
+    org = require_active_org(request)
     return StreamingHttpResponse(
-        _event_stream(_ACQUISITION_EVENT_TYPES, _build_acquisition_snapshot),
+        _event_stream(_ACQUISITION_EVENT_TYPES, _build_acquisition_snapshot, org.slug),
         content_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -49,17 +55,36 @@ def acquisition_events_sse(request):
     )
 
 
-async def _build_ingestion_snapshot():
+async def _build_ingestion_snapshot(org_slug):
     from .snapshot import build_ingestion_snapshot
-    return await build_ingestion_snapshot()
+    return await build_ingestion_snapshot(org_slug)
 
 
-async def _build_acquisition_snapshot():
+async def _build_acquisition_snapshot(org_slug):
     from .acquisition_snapshot import build_acquisition_snapshot
-    return await build_acquisition_snapshot()
+    return await build_acquisition_snapshot(org_slug)
 
 
-async def _event_stream(allowed_types, snapshot_fn):
+def should_forward(payload, allowed_types, org_slug):
+    """Whether one published event belongs on this listener's stream.
+
+    Two independent reasons to drop: the event is for another feed, or it is for
+    another organisation. Everything on the channel is one or the other for
+    somebody, since a single Redis channel carries every organisation's events
+    and both SSE endpoints subscribe to all of it.
+
+    An event carrying no organisation reaches nobody. That is not a fallback to
+    "everybody" — an event whose owner could not be determined is exactly the one
+    it would be wrong to broadcast.
+    """
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("type", "ingestion") not in allowed_types:
+        return False
+    return payload.get("org") == org_slug
+
+
+async def _event_stream(allowed_types, snapshot_fn, org_slug):
     from django.conf import settings
     import redis.asyncio as aioredis
 
@@ -70,7 +95,7 @@ async def _event_stream(allowed_types, snapshot_fn):
         pubsub = r.pubsub()
         await pubsub.subscribe(CHANNEL)
 
-        snapshot = await snapshot_fn()
+        snapshot = await snapshot_fn(org_slug)
         yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
 
         try:
@@ -87,15 +112,13 @@ async def _event_stream(allowed_types, snapshot_fn):
                 data = raw.decode() if isinstance(raw, bytes) else raw
                 try:
                     payload = json.loads(data)
-                    event_type = payload.get("type", "ingestion")
-                except (ValueError, AttributeError):
-                    event_type = "ingestion"
-
-                # Each SSE endpoint only forwards events relevant to its feed.
-                if event_type not in allowed_types:
+                except (ValueError, TypeError):
                     continue
 
-                yield f"event: {event_type}\ndata: {data}\n\n"
+                if not should_forward(payload, allowed_types, org_slug):
+                    continue
+
+                yield f"event: {payload['type']}\ndata: {data}\n\n"
         finally:
             await pubsub.unsubscribe(CHANNEL)
             await pubsub.aclose()

@@ -14,6 +14,7 @@ from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 from georiva.formats.registry import format_registry
+from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
 
@@ -68,30 +69,38 @@ _CATALOG_FORMAT_LABEL = {
 }
 
 
-def _catalog_format_from_session(session):
+def _session_catalog(request, session):
+    """The catalog a wizard session points at, if this organisation owns it.
+
+    A wizard session outlives a move to another organisation's host, so the
+    stored id is only meaningful once re-checked against the organisation now
+    serving the request. Everything read out of the catalog goes through here.
+    """
+    if not session.get("catalog_id"):
+        return None
+    from georiva.core.models import Catalog
+
+    return (
+        scoped_queryset(request, Catalog.objects.all())
+        .filter(pk=session["catalog_id"])
+        .first()
+    )
+
+
+def _catalog_format_from_session(request, session):
     """Return the file_format string for the catalog chosen in step 1."""
     if session.get("catalog_mode") == "create":
         return session.get("new_catalog_format") or ""
-    if session.get("catalog_id"):
-        from georiva.core.models import Catalog as _C
-        try:
-            return _C.objects.get(pk=session["catalog_id"]).file_format
-        except _C.DoesNotExist:
-            pass
-    return ""
+    catalog = _session_catalog(request, session)
+    return catalog.file_format if catalog else ""
 
 
-def _catalog_name_from_session(session):
+def _catalog_name_from_session(request, session):
     """Return the catalog display name from the session."""
     if session.get("catalog_mode") == "create":
         return session.get("new_catalog_name") or ""
-    if session.get("catalog_id"):
-        from georiva.core.models import Catalog as _C
-        try:
-            return _C.objects.get(pk=session["catalog_id"]).name
-        except _C.DoesNotExist:
-            pass
-    return ""
+    catalog = _session_catalog(request, session)
+    return catalog.name if catalog else ""
 
 
 def _show_filename_format(catalog_format: str) -> bool:
@@ -116,11 +125,19 @@ def _save_session(request, data):
 
 def upload_wizard_step1(request):
     from georiva.core.models import Catalog
+    from georiva.core.provisioning import catalog_slug_taken
+    from georiva.organisations.access import require_active_org
 
+    org = require_active_org(request)
     # A Catalog is either feed-managed or manually-managed, never both: a
     # DataFeed's deletion cascades to its Catalog, which would silently destroy
     # any manual Collections placed inside it. Only offer unclaimed Catalogs.
-    all_catalogs = Catalog.objects.filter(data_feed__isnull=True).order_by("name")
+    #
+    # Scoped to this organisation as well: the org segment is derived from the
+    # chosen catalog, so offering another tenant's catalog here would file every
+    # subsequent upload under *their* `{org}/` prefix — server-side misfiling of
+    # national data, which is precisely what org-scoped storage exists to stop.
+    all_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True).order_by("name")
     file_format_choices = Catalog.FileFormat.choices
 
     if request.method == "POST":
@@ -134,14 +151,19 @@ def upload_wizard_step1(request):
         errors = []
         if catalog_mode == "select" and not catalog_id:
             errors.append(_("Please choose a catalog."))
-        if catalog_mode == "select" and catalog_id and not all_catalogs.filter(pk=catalog_id).exists():
-            errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
+        if catalog_mode == "select" and catalog_id:
+            if not Catalog.objects.filter(pk=catalog_id, organisation=org).exists():
+                # Another organisation's catalog, or none at all. Same message
+                # either way: this operator has no business learning which.
+                errors.append(_("Please choose a catalog."))
+            elif not all_catalogs.filter(pk=catalog_id).exists():
+                errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
             if not new_catalog_format:
                 errors.append(_("Please choose a file format."))
-            if new_catalog_slug and Catalog.objects.filter(slug=new_catalog_slug).exists():
+            if new_catalog_slug and catalog_slug_taken(org, new_catalog_slug):
                 errors.append(_("A Catalog with slug '%s' already exists.") % new_catalog_slug)
 
         if errors:
@@ -207,11 +229,9 @@ def upload_wizard_step2(request):
         if session.get("catalog_mode") == "create" and session.get("new_catalog_name"):
             default_config_name = f"{session['new_catalog_name']} Config"
         elif session.get("catalog_id"):
-            from georiva.core.models import Catalog as _Catalog
-            try:
-                default_config_name = f"{_Catalog.objects.get(pk=session['catalog_id']).name} Config"
-            except _Catalog.DoesNotExist:
-                pass
+            catalog = _session_catalog(request, session)
+            if catalog is not None:
+                default_config_name = f"{catalog.name} Config"
 
     return render(request, "georivaingestion/wizard_step2_name.html", {
         "session": session,
@@ -351,7 +371,7 @@ def upload_wizard_step3(request):
         return redirect("upload_wizard_step2")
 
     format_choices = ManualUploadConfig.ValidTimeFormat.choices
-    catalog_format = _catalog_format_from_session(session)
+    catalog_format = _catalog_format_from_session(request, session)
     accept_extensions = _CATALOG_FORMAT_ACCEPT.get(catalog_format, ",".join(_CATALOG_FORMAT_ACCEPT.values()))
     format_label = _CATALOG_FORMAT_LABEL.get(catalog_format, "NetCDF, GRIB2, or GeoTIFF")
     show_fmt = _show_filename_format(catalog_format)
@@ -455,7 +475,7 @@ def upload_wizard_step4(request):
     selected_names = session.get("selected_variable_names", [])
     selected_variables = [v for v in all_variables if v["name"] in selected_names]
 
-    catalog_name = _catalog_name_from_session(session)
+    catalog_name = _catalog_name_from_session(request, session)
     collection_base_name = f"{catalog_name} Collection" if catalog_name else "Collection"
     units = list(Unit.objects.order_by("name").values("id", "name", "symbol"))
 
@@ -596,10 +616,8 @@ def upload_wizard_step5(request):
     if session.get("catalog_mode") == "create":
         catalog_display = session.get("new_catalog_name")
     elif session.get("catalog_id"):
-        try:
-            catalog_display = Catalog.objects.get(pk=session["catalog_id"]).name
-        except Catalog.DoesNotExist:
-            pass
+        catalog = _session_catalog(request, session)
+        catalog_display = catalog.name if catalog is not None else None
 
     collections_display = []
     for idx, coll in enumerate(session.get("collections", [])):
@@ -642,6 +660,7 @@ def upload_wizard_provision(request):
     from georiva.core.models import Catalog, Collection, Variable
     from georiva.core.provisioning import passthrough_sources
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+    from georiva.organisations.access import require_active_org
 
     if request.method != "POST":
         return redirect("upload_wizard_step5")
@@ -655,6 +674,7 @@ def upload_wizard_provision(request):
         with transaction.atomic():
             if session.get("catalog_mode") == "create":
                 catalog, _created = Catalog.objects.get_or_create(
+                    organisation=require_active_org(request),
                     slug=session["new_catalog_slug"],
                     defaults={
                         "name": session["new_catalog_name"],
@@ -664,7 +684,13 @@ def upload_wizard_provision(request):
                 )
             else:
                 try:
-                    catalog = Catalog.objects.get(pk=session["catalog_id"])
+                    # Scoped again at the point of use, not just in step 1: a
+                    # wizard session outlives a switch to another organisation's
+                    # host, so the stored id may no longer belong to the org this
+                    # request is served for.
+                    catalog = Catalog.objects.get(
+                        pk=session["catalog_id"], organisation=require_active_org(request)
+                    )
                 except Catalog.DoesNotExist:
                     messages.error(request, _("Selected catalog no longer exists."))
                     return redirect("upload_wizard_step1")

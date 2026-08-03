@@ -3,11 +3,14 @@ GeoRiva Storage Manager
 
 Multi-bucket storage interface for GeoRiva's data pipeline.
 
+One path grammar, no per-bucket exceptions: the first segment of every key is
+the owning organisation's slug.
+
 Bucket layout:
-    georiva-incoming/   User-uploaded raw data      {catalog}/{collection}/file.ext
-    georiva-sources/    Plugin-collected data        {catalog}/{collection}/file.ext
-    georiva-archive/    Raw copy before processing   {incoming|sources}/{catalog}/{collection}/file.ext
-    georiva-assets/     Final processed datasets     {catalog}/{collection}/{variable}/{year}/{month}/{day}/file.ext
+    georiva-incoming/   User-uploaded raw data       {org}/{catalog}/{collection}/file.ext
+    georiva-sources/    Plugin-collected data        {org}/{catalog}/{collection}/file.ext
+    georiva-archive/    Raw copy before processing   {org}/{incoming|sources}/{catalog}/{collection}/file.ext
+    georiva-assets/     Final processed datasets     {org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/file.ext
 
 Flow:
     incoming/sources → process → assets
@@ -402,10 +405,18 @@ class StorageManager:
         """
         Archive a raw file before processing.
 
-        Preserves origin by prefixing with the source bucket type:
-            georiva-archive/{incoming|sources}/{catalog}/{collection}/file.ext
+        Preserves origin by naming the source bucket type — inserted *after* the
+        org segment, so the archive obeys the same "org slug first" rule as
+        every other bucket:
+            georiva-archive/{org}/{incoming|sources}/{catalog}/{collection}/file.ext
         """
-        archive_path = f"{source.bucket_type}/{path}"
+        org, _, remainder = path.partition("/")
+        if not remainder:
+            raise ValueError(
+                f"Cannot archive '{path}': expected an org-prefixed path "
+                f"({{org}}/{{catalog}}/…)."
+            )
+        archive_path = f"{org}/{source.bucket_type}/{remainder}"
         return self.transfer(source, self.archive, path, archive_path)
     
     def ingest(
@@ -423,7 +434,7 @@ class StorageManager:
             source: The bucket the raw file is in (incoming or sources).
             path: Path to the raw file in the source bucket.
             asset_path: Destination path in the assets bucket.
-                        e.g. "sat-imagery/ndvi/temperature/2025/01/15/20250115T060000_temp.tif"
+                        e.g. "kenya/sat-imagery/ndvi/temperature/2025/01/15/20250115T060000_temp.tif"
             processed_data: The processed bytes to save as an asset.
             delete_source: Whether to remove the raw file after archiving.
 
@@ -453,6 +464,7 @@ class StorageManager:
     
     @staticmethod
     def build_asset_path(
+            org: str,
             catalog: str,
             collection: str,
             variable: str,
@@ -460,19 +472,26 @@ class StorageManager:
             filename: str,
     ) -> str:
         """
-        Build a time-partitioned asset path.
-        
+        Build a time-partitioned asset path:
+            {org}/{catalog}/{collection}/{variable}/{yyyy}/{mm}/{dd}/{filename}
+
+        ``org`` is required and has no default — every caller must state which
+        organisation's prefix it is writing under, and derive it server-side
+        from ``catalog.organisation.slug``, never from client input.
+
         timestamp must be UTC-aware. Date components are extracted
         from UTC values to ensure consistent paths across timezones.
         """
         import pytz
+        if not org:
+            raise ValueError("org is required to build an asset path")
         if timestamp.tzinfo is None:
             raise ValueError(
                 f"timestamp must be UTC-aware, got naive datetime: {timestamp}"
             )
         ts = timestamp.astimezone(pytz.utc)
         return (
-            f"{catalog}/{collection}/{variable}/"
+            f"{org}/{catalog}/{collection}/{variable}/"
             f"{ts.year}/{ts.month:02d}/{ts.day:02d}/"
             f"{filename}"
         )

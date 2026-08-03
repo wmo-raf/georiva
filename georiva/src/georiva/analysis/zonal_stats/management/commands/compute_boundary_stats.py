@@ -38,7 +38,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             "--collection",
-            help="catalog_slug/collection_slug, e.g. chirps/chirps-monthly",
+            help="org_slug/catalog_slug/collection_slug, e.g. kenya/chirps/chirps-monthly",
         )
         parser.add_argument(
             "--variable",
@@ -191,14 +191,16 @@ class Command(BaseCommand):
         
         if options.get("collection"):
             parts = options["collection"].split("/")
-            if len(parts) != 2:
+            if len(parts) != 3:
                 raise CommandError(
-                    "--collection must be catalog_slug/collection_slug"
+                    "--collection must be org_slug/catalog_slug/collection_slug "
+                    "(catalog slugs are only unique within an organisation)"
                 )
-            catalog_slug, collection_slug = parts
+            org_slug, catalog_slug, collection_slug = parts
             try:
                 return [
-                    Collection.objects.select_related("catalog").get(
+                    Collection.objects.select_related("catalog__organisation").get(
+                        catalog__organisation__slug=org_slug,
                         catalog__slug=catalog_slug,
                         slug=collection_slug,
                     )
@@ -208,7 +210,7 @@ class Command(BaseCommand):
                     f"Collection not found: {options['collection']}"
                 )
         
-        raise CommandError("Pass --collection <catalog/collection> or --all.")
+        raise CommandError("Pass --collection <org/catalog/collection> or --all.")
     
     @staticmethod
     def _parse_date(value: str | None):

@@ -3,7 +3,7 @@ Ingestion tracking for the feed-scoped Ingestion Activity page (PRD #217).
 
 FileIngestion has no FK to acquisition records or feeds (ADR-0003) — the
 feed's records are found by the catalog path prefix (file_path is always
-{catalog}/{collection}/{filename}), which also surfaces failed Ingestions
+{org}/{catalog}/{collection}/{filename}), which also surfaces failed Ingestions
 that never got associated with any Collection.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ def feed_file_ingestions(feed, *, status=None, collection=None):
     from georiva.ingestion.models import FileIngestion
 
     records = FileIngestion.objects.filter(
-        file_path__startswith=f"{feed.catalog.slug}/"
+        file_path__startswith=f"{feed.catalog.storage_prefix}/"
     )
     if status:
         records = records.filter(status=status)

@@ -20,13 +20,14 @@ from georiva.sources.models import (
     FetchedFile,
     FetchRun,
 )
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 User = get_user_model()
 
 
 def _feed_and_collection(name="CHIRPS", slug="chirps"):
-    catalog = Catalog.objects.create(name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
     collection = Collection.objects.create(
         name="Rainfall", slug="rainfall", catalog=catalog
     )
@@ -72,7 +73,7 @@ class LoaderCheckNewFilesTests(TestCase):
         self.assertFalse(by_name["new.tif"].exists)
         self.assertTrue(by_name["old.tif"].exists)
         self.assertEqual(
-            by_name["new.tif"].storage_path, "chirps/rainfall/new.tif"
+            by_name["new.tif"].storage_path, "test-org/chirps/rainfall/new.tif"
         )
 
     def test_persists_no_acquisition_records(self):
@@ -166,6 +167,7 @@ class CheckNewFilesViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_check", "c@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed, self.rainfall = _feed_and_collection()
         DataFeedCollectionLink.objects.create(

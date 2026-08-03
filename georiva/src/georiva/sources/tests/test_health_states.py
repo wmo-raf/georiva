@@ -10,10 +10,11 @@ from django.db.models import Count
 from georiva.core.models import Catalog
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
+from georiva.organisations.testing import make_organisation
 
 
 def _make_feed(name="Test Feed", **kwargs):
-    catalog = Catalog.objects.create(name=name, slug=name.lower().replace(" ", "-"), file_format="grib2")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=name.lower().replace(" ", "-"), file_format="grib2")
     return DataFeed.objects.create(name=name, catalog=catalog, **kwargs)
 
 
@@ -206,15 +207,23 @@ class PolymorphicHealthTests(TestCase):
         # module level, so it stays in the app registry for the whole run; every
         # later DataFeed deletion has its cascade collector walk this subclass.
         # Dropping the table would leave the registry pointing at nothing and
-        # break unrelated tests. Creation is idempotent for --keepdb.
+        # break unrelated tests. GeoRivaTestRunner.setup_databases normally builds
+        # the table before any test runs; this stays as an idempotent fallback for
+        # --keepdb and for parallel clones, which are taken before it runs.
         if StubPluginFeed._meta.db_table not in connection.introspection.table_names():
             with connection.schema_editor() as editor:
                 editor.create_model(StubPluginFeed)
+        # Clear the cache before resolving: an earlier test that touched this
+        # subclass (any DataFeed cascade does) may have created the ContentType
+        # row inside its own transaction and then rolled back, leaving the cache
+        # holding an id whose row is gone. A cache hit here would skip the insert
+        # and every StubPluginFeed row would then violate the ctype FK.
+        ContentType.objects.clear_cache()
         ContentType.objects.get_for_model(StubPluginFeed)
         super().setUpClass()
 
     def test_annotation_survives_the_polymorphic_downcast(self):
-        catalog = Catalog.objects.create(name="Sub", slug="sub", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="Sub", slug="sub", file_format="grib2")
         StubPluginFeed.objects.create(
             name="Sub Feed", catalog=catalog, last_run_status="failed", last_run_at=_ago(minutes=1)
         )
@@ -227,7 +236,7 @@ class PolymorphicHealthTests(TestCase):
     def test_ordering_holds_across_mixed_subclasses(self):
         """The grouped re-fetch issues one query per content type -- ordering must survive it."""
         _make_feed(name="Base Healthy", last_run_status="success", last_run_at=_ago(minutes=1))
-        catalog = Catalog.objects.create(name="Sub", slug="sub", file_format="grib2")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="Sub", slug="sub", file_format="grib2")
         StubPluginFeed.objects.create(
             name="Sub Failed", catalog=catalog, last_run_status="failed", last_run_at=_ago(minutes=1)
         )

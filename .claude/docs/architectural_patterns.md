@@ -80,8 +80,17 @@ Access via import: `from georiva.core.storage import storage`
 
 - Lazy bucket initialization via `@property` + `_get_bucket()` (e.g. `zarr` property at line 296)
 - Cross-bucket operations with S3 server-side copy optimization + local fallback (`transfer()` at line 303)
-- Time-partitioned asset paths: `{catalog}/{collection}/{variable}/{year}/{month}/{day}/{filename}` (
-  `build_asset_path()` at line 423)
+- Org-first, time-partitioned asset paths:
+  `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/{filename}` — `build_asset_path()` takes a
+  **required** `org`, so no caller can write outside an organisation's prefix. The first segment of every key on
+  every bucket is the org slug; `Catalog.storage_prefix` is the one place `{org}/{catalog}` is spelled out.
+  `core/path_resolution.resolve_org_catalog()` is the only place a path's leading segments become a `Catalog`,
+  and it never falls back to a default organisation
+- The one exception, and it is a process boundary rather than a second opinion: the machine plane re-spells the
+  same grammar where the ORM cannot reach. `core/machine_plane.py` builds Titiler/Martin URLs from it on the Django
+  side, and `titiler-app/app/dependencies.build_cog_url()` reconstructs the key inside Titiler, which has no
+  Django. Both are conventional restatements of `Catalog.storage_prefix`; a change to the grammar must touch all
+  three. See ADR 0013
 - Bucket configuration from Django settings (`GEORIVA_BUCKETS` in `config/settings/base.py`)
 
 ## 5. Service Layer Pattern

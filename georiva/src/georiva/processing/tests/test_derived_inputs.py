@@ -18,13 +18,14 @@ from georiva.core.derived_products import InputRef
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.processing.recipe import BaseRecipe, resolve_declared_inputs
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
+from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 
 class ResolveDeclaredInputsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.unit_dim, _ = Unit.objects.get_or_create(
@@ -124,7 +125,7 @@ class ResolveDeclaredInputsTests(TestCase):
         mine = self._add_staging()
 
         # A different catalog, same 'rainfall' slug, with its own staged item.
-        other_cat = Catalog.objects.create(
+        other_cat = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_core = Collection.objects.create(
@@ -152,7 +153,7 @@ class ResolveDeclaredInputsTests(TestCase):
         item = self._add_published()
 
         # Another catalog's collection with the same slug and its own item.
-        other_cat = Catalog.objects.create(
+        other_cat = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other = Collection.objects.create(

@@ -6,11 +6,15 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 class STACVisibilityTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        # The API roots are per organisation and resolved from the Host, so the
+        # client has to dial the org that owns these fixtures.
+        dial_org(self.client)
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.unit = Unit.objects.create(name="Celsius", symbol="C")

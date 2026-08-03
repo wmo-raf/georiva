@@ -35,6 +35,8 @@ class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableMod
     # workers. See core/test_reference_index_exclusion.py.
     wagtail_reference_index_ignore = True
 
+    ORGANISATION_LOOKUP = "collection__catalog__organisation"
+
     collection = models.ForeignKey(
         'georivacore.Collection',
         on_delete=models.CASCADE,
@@ -173,6 +175,8 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     from AbstractAsset; only the tier-specific relations live here.
     """
     
+    ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
+
     # Parent Item
     item = ParentalKey(
         Item,
@@ -276,12 +280,8 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     @property
     def preview_url(self) -> str:
         """TiTiler preview URL for this asset."""
-        from urllib.parse import urlencode
-        params = {'time': self.item.time_iso}
-        if self.item.reference_time:
-            params['reftime'] = self.item.reference_time_iso
-        qs = urlencode(params)
-        return f"/titiler/{self.item.collection.catalog.slug}/{self.item.collection.slug}/{self.variable.slug}/preview.webp?{qs}"
+        from georiva.core.machine_plane import titiler_preview_url
+        return titiler_preview_url(self.item, self.variable.slug)
 
 
 # =============================================================================

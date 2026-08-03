@@ -1,0 +1,76 @@
+{% load i18n %}
+{% comment %}
+    The workspace block that sits at the top of the admin sidebar, under the
+    branding. Mounted into Wagtail's React-rendered sidebar by org_hopper.js;
+    every decision it renders — who is listed, whether there is a popover at all,
+    whether the list is searchable — was already made server-side in hopper.py.
+
+    For a user in exactly one organisation this is a static badge with no
+    control: org identity always visible, nothing to click.
+{% endcomment %}
+<div class="gr-orghop" data-gr-orghop>
+    {% if is_interactive %}
+        <button type="button"
+                class="gr-orghop__trigger"
+                data-gr-orghop-trigger
+                aria-expanded="false"
+                aria-haspopup="true"
+                aria-controls="gr-orghop-popover">
+            {% include "organisations/org_hopper_avatar.html" with entry=current large=True %}
+            <span class="gr-orghop__label">
+                <span class="gr-orghop__name">{{ current.name }}</span>
+                <span class="gr-orghop__host">{{ current.host }}</span>
+            </span>
+            <span class="gr-orghop__chevron" aria-hidden="true">▾</span>
+        </button>
+
+        <div class="gr-orghop__popover" id="gr-orghop-popover" data-gr-orghop-popover hidden>
+            <p class="gr-orghop__popover-title">
+                {% if lists_all_organisations %}
+                    {% translate "All organisations" %}
+                {% else %}
+                    {% translate "Your organisations" %}
+                {% endif %}
+            </p>
+
+            {% if is_searchable %}
+                <input type="search"
+                       class="gr-orghop__search"
+                       data-gr-orghop-search
+                       placeholder="{% translate 'Find an organisation…' %}"
+                       aria-label="{% translate 'Find an organisation' %}">
+            {% endif %}
+
+            <ul class="gr-orghop__list" data-gr-orghop-list>
+                {% for entry in entries %}
+                    <li class="gr-orghop__item{% if entry.is_current %} gr-orghop__item--current{% endif %}"
+                        data-gr-orghop-item
+                        data-gr-orghop-haystack="{{ entry.name|lower }} {{ entry.slug }} {{ entry.host|lower }}">
+                        <a class="gr-orghop__link" href="{{ entry.url }}"{% if entry.is_current %} aria-current="true"{% endif %}>
+                            {% include "organisations/org_hopper_avatar.html" with entry=entry large=False %}
+                            <span class="gr-orghop__label">
+                                <span class="gr-orghop__name">{{ entry.name }}</span>
+                                <span class="gr-orghop__host">{{ entry.host }}</span>
+                            </span>
+                            {% if entry.is_current %}
+                                <span class="gr-orghop__check" aria-hidden="true">✓</span>
+                            {% endif %}
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+
+            <p class="gr-orghop__empty" data-gr-orghop-empty hidden>
+                {% translate "No organisation matches." %}
+            </p>
+        </div>
+    {% else %}
+        <div class="gr-orghop__badge">
+            {% include "organisations/org_hopper_avatar.html" with entry=current large=True %}
+            <span class="gr-orghop__label">
+                <span class="gr-orghop__name">{{ current.name }}</span>
+                <span class="gr-orghop__host">{{ current.host }}</span>
+            </span>
+        </div>
+    {% endif %}
+</div>

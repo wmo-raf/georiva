@@ -25,10 +25,13 @@ def _build_file_ingestion_dict(fi) -> dict:
 
 
 @sync_to_async
-def _fetch_file_ingestions(terminal_limit: int) -> list[dict]:
+def _fetch_file_ingestions(org_slug: str, terminal_limit: int) -> list[dict]:
     from georiva.ingestion.models import FileIngestion, FileIngestionJob
 
-    base = FileIngestion.objects.prefetch_related(
+    # A FileIngestion exists before its collections are known, so its owner is
+    # read from the storage key it was filed under rather than an FK chain: the
+    # first segment of every bucket key is the organisation slug.
+    base = FileIngestion.objects.filter(file_path__startswith=f"{org_slug}/").prefetch_related(
         Prefetch(
             "jobs",
             queryset=FileIngestionJob.objects.order_by("-created_at"),
@@ -45,6 +48,6 @@ def _fetch_file_ingestions(terminal_limit: int) -> list[dict]:
     return [_build_file_ingestion_dict(fi) for fi in combined]
 
 
-async def build_ingestion_snapshot(terminal_limit: int = 10) -> list[dict]:
-    """Return all active FileIngestions plus the last `terminal_limit` completed/failed ones."""
-    return await _fetch_file_ingestions(terminal_limit)
+async def build_ingestion_snapshot(org_slug: str, terminal_limit: int = 10) -> list[dict]:
+    """One organisation's active FileIngestions plus its last `terminal_limit` finished ones."""
+    return await _fetch_file_ingestions(org_slug, terminal_limit)

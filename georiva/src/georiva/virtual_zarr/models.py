@@ -31,6 +31,8 @@ class VirtualZarrManifest(TimeStampedModel):
     # Identity — one manifest per variable
     # -------------------------------------------------------------------------
     
+    ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
+
     variable = models.OneToOneField(
         "georivacore.Variable",
         on_delete=models.CASCADE,
@@ -107,10 +109,13 @@ class VirtualZarrManifest(TimeStampedModel):
     def make_manifest_path(cls, variable: "Variable") -> str:
         """
         Canonical MinIO key for a manifest, derived from the variable's
-        collection and catalog.
+        collection and catalog — org slug first, like every other bucket key.
         """
         collection = variable.collection
-        return f"{collection.catalog.slug}/{collection.slug}/{variable.slug}.json"
+        return (
+            f"{collection.catalog.storage_prefix}/"
+            f"{collection.slug}/{variable.slug}.json"
+        )
     
     def get_manifest_path(self) -> str:
         """Return (or derive) the manifest path for this record."""

@@ -22,9 +22,19 @@ MANIFEST_LOADER = {
 
 WAGTAIL_ENABLE_UPDATE_CHECK = False
 
-ALLOWED_HOSTS = ["georiva"] + env.list('ALLOWED_HOSTS', default=[])
+# Every organisation lives on a subdomain of the base domain, so the whole
+# subtree is allowed here; the middleware, not ALLOWED_HOSTS, decides which
+# hostnames actually resolve to an organisation.
+ALLOWED_HOSTS = [
+    "georiva",
+    GEORIVA_BASE_DOMAIN,
+    f".{GEORIVA_BASE_DOMAIN}",
+] + env.list('ALLOWED_HOSTS', default=[])
 
-CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', cast=None, default=[])
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{GEORIVA_BASE_DOMAIN}",
+    f"https://*.{GEORIVA_BASE_DOMAIN}",
+] + env.list('CSRF_TRUSTED_ORIGINS', cast=None, default=[])
 
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', cast=None, default=[])

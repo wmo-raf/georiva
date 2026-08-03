@@ -190,3 +190,6 @@ node_modules/
 # Dev overlay lockfile (varies with which plugins are checked out). Core has its
 # own committed lock at georiva/uv.lock.
 /uv.lock
+
+# Redis snapshot, written into the repo root when a dev container dumps state.
+dump.rdb

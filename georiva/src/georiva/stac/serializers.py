@@ -21,11 +21,11 @@ Implements STAC Spec v1.0.0
 import calendar
 from datetime import timedelta
 from typing import Optional
-from urllib.parse import urlencode
 
 from rest_framework import serializers
 
-from georiva.core.models import Collection
+from georiva.core.machine_plane import titiler_preview_url
+from georiva.core.models import Collection, visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 
@@ -337,14 +337,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         return assets
 
     def _build_thumbnail_href(self, obj, variable, request) -> Optional[str]:
-        params = {"time": obj.time_iso}
-        if obj.reference_time:
-            params["reftime"] = obj.reference_time_iso
-        path = (
-            f"/titiler/{obj.collection.catalog.slug}"
-            f"/{obj.collection.slug}/{variable.slug}/preview.webp"
-            f"?{urlencode(params)}"
-        )
+        path = titiler_preview_url(obj, variable.slug)
         if request:
             return get_full_url_by_request(request, path)
         return path
@@ -574,11 +567,22 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
             "https://stac-extensions.github.io/item-assets/v1.0.0/schema.json",
         ]
     
-    def get_extent(self, obj):
-        collections = obj.collections.filter(
-            is_active=True, visibility=Collection.Visibility.PUBLIC
+    def _served_collections(self, obj):
+        """This catalog's collections at the tiers the caller may be served.
+
+        The catalog's advertised extent and summaries are derived from its
+        collections, so they have to honour the same audience rule the listing
+        does — otherwise a private collection's bounds and variable names leak
+        through the parent catalog to a caller who cannot fetch it (#273).
+        """
+        return obj.collections.filter(
+            is_active=True,
+            visibility__in=visible_visibilities(self.context['request']),
         )
-        
+
+    def get_extent(self, obj):
+        collections = self._served_collections(obj)
+
         all_bounds = [c.spatial_extent for c in collections if c.spatial_extent]
         if all_bounds:
             spatial_bbox = [
@@ -604,10 +608,8 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
         }
     
     def get_summaries(self, obj):
-        collections = obj.collections.filter(
-            is_active=True, visibility=Collection.Visibility.PUBLIC
-        )
-        
+        collections = self._served_collections(obj)
+
         all_variables = set()
         for collection in collections:
             for var in collection.variables.filter(is_active=True):
@@ -633,8 +635,11 @@ class STACCatalogAsCollectionSerializer(serializers.Serializer, STACBaseURLMixin
             {"rel": "root", "href": base_url, "type": "application/json"},
         ]
 
-        # Child links — one per variable across all collections
-        for collection in obj.collections.filter(is_active=True):
+        # Child links — one per variable across the collections this caller may
+        # be served. A link is an address plus a title, so an unfiltered list
+        # here announced every internal collection's name and structure and
+        # invited a fetch that 404s; private ones would have followed (#273).
+        for collection in self._served_collections(obj):
             active_variables = list(collection.variables.filter(is_active=True))
             variable_count = len(active_variables)
             for variable in active_variables:

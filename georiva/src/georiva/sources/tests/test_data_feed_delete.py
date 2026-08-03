@@ -20,6 +20,7 @@ from georiva.sources.models import (
     DerivedProductInput,
     DerivedProductOutput,
 )
+from georiva.organisations.testing import dial_org, join_org, make_organisation
 
 User = get_user_model()
 
@@ -37,8 +38,9 @@ class DataFeedDeleteBase(TestCase):
         from georiva.sources.tests.support import ensure_base_datafeed_viewset
         ensure_base_datafeed_viewset()
         self.user = User.objects.create_superuser("op", "op@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="CHIRPS Feed", catalog=self.catalog)
@@ -82,7 +84,7 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertContains(response, "Rainfall anomaly product")
 
     def test_confirmation_lists_other_feeds_products_bound_to_doomed_collections(self):
-        other_catalog = Catalog.objects.create(
+        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
@@ -106,7 +108,7 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertContains(response, "Other Feed")
 
     def test_unrelated_products_are_not_listed(self):
-        other_catalog = Catalog.objects.create(
+        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
@@ -129,13 +131,15 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertEqual(Collection.objects.count(), 2)
         self.assertEqual(Item.objects.count(), 3)
 
-    def test_feed_without_catalog_renders(self):
+    def test_feed_without_catalog_belongs_to_no_organisation(self):
+        # A feed's organisation is its catalog's, so one with no catalog is
+        # owned by nobody and reachable from no organisation's admin. The admin
+        # form now requires a catalog; this covers rows that predate it.
         lone = DataFeed.objects.create(name="Lone Feed")
 
         response = self.client.get(self._url(lone))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Lone Feed")
+        self.assertEqual(response.status_code, 404)
 
 
 class DeletionTests(DataFeedDeleteBase):
@@ -148,19 +152,16 @@ class DeletionTests(DataFeedDeleteBase):
         self.assertEqual(Collection.objects.count(), 0)
         self.assertEqual(Item.objects.count(), 0)
 
-    def test_post_deletes_feed_without_catalog(self):
+    def test_post_cannot_delete_a_feed_that_belongs_to_no_organisation(self):
         lone = DataFeed.objects.create(name="Lone Feed")
 
         response = self.client.post(self._url(lone))
 
-        self.assertRedirects(response, reverse("data_feed_list"))
-        self.assertFalse(DataFeed.objects.filter(pk=lone.pk).exists())
-        # The other feed's catalog tree is untouched.
-        self.assertTrue(Catalog.objects.filter(pk=self.catalog.pk).exists())
-        self.assertEqual(Collection.objects.count(), 2)
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(DataFeed.objects.filter(pk=lone.pk).exists())
 
     def test_external_product_survives_but_loses_its_bindings(self):
-        other_catalog = Catalog.objects.create(
+        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
@@ -206,6 +207,10 @@ class PermissionTests(DataFeedDeleteBase):
                 content_type__app_label="wagtailadmin", codename="access_admin"
             )
         )
+        # Membership is what gets anyone through the door at all; the point of
+        # this class is what happens once they are inside without permissions.
+        join_org(limited)
+        dial_org(self.client)
         self.client.force_login(limited)
         return limited
 

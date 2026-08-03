@@ -43,6 +43,7 @@ from georiva.sources.product_service import (
     materialise_output_collections,
     product_label,
 )
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -90,7 +91,7 @@ def _chirps_defs():
 
 class ProductServiceBase(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -244,7 +245,7 @@ class DisableCascadeTests(ProductServiceBase):
 
 class MaterialiseOutputCollectionsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -490,7 +491,7 @@ class BuildChainReadinessTests(TestCase):
     """Readiness reason + the staging-gap hint on a blocked card."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -643,6 +644,7 @@ class ProductEditViewTests(ProductServiceBase):
     def setUp(self):
         super().setUp()
         self.user = User.objects.create_superuser("edit", "e@t.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         # climatology's output collection is materialised, so the edit view can
         # expose its catalog-facing name/description.
@@ -758,6 +760,7 @@ class UpgradeLifecycleEndpointTests(ProductServiceBase):
     def setUp(self):
         super().setUp()
         self.user = User.objects.create_superuser("up", "u@t.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_enable_new_get_shows_the_config_form(self):
@@ -832,6 +835,7 @@ class FeedProductEndpointTests(ProductServiceBase):
     def setUp(self):
         super().setUp()
         self.user = User.objects.create_superuser("feed", "f@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def _url(self, name, product):
@@ -924,7 +928,7 @@ class PinBindingsBase(TestCase):
     gate fixtures above deliberately skip this — here we exercise the pinning."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -1304,6 +1308,7 @@ class RebindEndpointTests(PinBindingsBase):
     def setUp(self):
         super().setUp()
         self.user = User.objects.create_superuser("rebind", "rb@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_rebind_endpoint_restores_bindings_and_confirms(self):

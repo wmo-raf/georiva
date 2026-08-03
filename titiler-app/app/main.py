@@ -21,11 +21,18 @@ logger = logging.getLogger(__name__)
 # TilerFactory
 # ---------------------------------------------------------------------------
 
+#: Every tile route opens with the organisation. This service has no way to work
+#: one out — it is dialled through nginx on whatever host the portal runs on and
+#: reads storage directly — so Django, which does know, puts it in the path and
+#: the segment is carried through to the storage key and the palette cache key
+#: unchanged. No tenancy decision is taken here.
+TILE_ROUTE_PREFIX = "/{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
+
 cog = TilerFactory(
     path_dependency=SemanticPathParams,
     colormap_dependency=SemanticColorMap,
     process_dependency=SemanticRescale,
-    router_prefix="/{catalog_slug}/{collection_slug}/{variable_slug}",
+    router_prefix=TILE_ROUTE_PREFIX,
 )
 
 # ---------------------------------------------------------------------------
@@ -63,5 +70,5 @@ async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> J
 
 app.include_router(
     cog.router,
-    prefix="/{catalog_slug}/{collection_slug}/{variable_slug}",
+    prefix=TILE_ROUTE_PREFIX,
 )

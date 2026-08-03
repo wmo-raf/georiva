@@ -52,6 +52,7 @@ georiva/src/georiva/          # Main Django application
 ├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry)
 ├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk) manifests over COG assets
 ├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)
+├── accounts/                 # Per-user identity: API keys (grv_…) + DRF auth + account panel
 ├── pages/                    # Wagtail CMS pages (home, datasets)
 └── utils/                    # Shared utilities
 ```
@@ -112,12 +113,15 @@ Defined in `api/urls.py`:
 - `/api/edr/` — Environmental Data Retrieval API (metadata plane only so far)
 - `/api/jobs/` — Async job status (task_ferry)
 - `/api/analysis/` — Analysis API (e.g. `timeseries/point`, `timeseries/area`)
-- `/api/tile-config/<catalog>/<collection>/<variable>/` — Tile/render config
+- `/api/tile-config/<org>/<catalog>/<collection>/<variable>/` — Tile/render config (machine plane; see ADR 0013)
 - `/api/datasets/` — Dataset pages API
 - `/admin/` — Wagtail CMS admin (mounted in `config/urls.py`)
 
 > MinIO events arrive via a Redis list consumed by `minio-consumer`, **not** an HTTP webhook
-> endpoint. Vector tiles for zonal stats are served by Martin at `/martin/boundary_stats/{z}/{x}/{y}`.
+> endpoint. Vector tiles for zonal stats are served by Martin at `/martin/boundary_stats/{z}/{x}/{y}`,
+> which requires `org`, `catalog`, `collection` and `variable` query params. Titiler raster tiles live
+> under `/titiler/<org>/<catalog>/<collection>/<variable>/…`. Build every such URL through
+> `core/machine_plane.py` — never by hand (ADR 0013).
 
 ## Key Conventions
 
@@ -129,7 +133,19 @@ Defined in `api/urls.py`:
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
-- **Storage paths**: Time-partitioned: `{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
+- **Serving visibility**: never filter `visibility` by hand — go through `Collection.objects.visible_to(request)`
+  (or `visible_visibilities(request)` where you need the tiers). `public` → anyone, `private` → members of the
+  host's org, `internal` → nobody. Membership is `organisations.access.may_see_private` (ADR 0014). Titiler and
+  Martin are gated at the proxy instead, by the nginx `auth_request` into `core/tile_auth_view.py` (ADR 0015) —
+  never add tenancy logic to either tile server. The one exception is `core/tile_config_view.py`: Titiler forwards
+  no credential on that callback, so there is nobody to ask and it stays `public`-only
+- **Tenancy declarations**: every model says where it stands via `ORGANISATION_LOOKUP` (an ORM path, or one of
+  `SHARED_REFERENCE_DATA` / `ORGANISATION_SELF` / `NOT_ORM_SCOPABLE`); a model that declares nothing cannot be
+  scoped and raises. `ORGANISATION_GLOBAL_TIER` beside a nullable path means null = the instance-wide tier — read
+  by every org, written only by the instance admin (ADR 0011). Wagtail pages are org-owned through the Site →
+  root-page link, scoped by `organisations/pages.py` rather than the queryset helpers (ADR 0016)
+- **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
+  — the first segment of every key on every bucket is the owning organisation's slug
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
   `requirements.txt`). Add via `make uv-add pkg="..."`; `uv sync --all-packages` builds the local dev env
 - **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no

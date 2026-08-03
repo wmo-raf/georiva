@@ -17,6 +17,7 @@ from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import product_origin
 from georiva.sources.derivation_tracking import product_runs, product_status
 from georiva.sources.models import DataFeed, DerivedProduct
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -32,7 +33,7 @@ def _run(origin, status, *, completed_at=None, unit):
 
 class ProductStatusTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -123,7 +124,7 @@ class ProductRunsTests(TestCase):
     #211): the product's DerivationRuns joined by origin, most-recent first."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -170,8 +171,9 @@ class RunListViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_runs", "r@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
@@ -262,8 +264,9 @@ class RunDetailViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_rd", "d@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)

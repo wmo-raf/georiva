@@ -18,6 +18,7 @@ from django.utils import timezone
 from georiva.core.models import Catalog, Collection
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -28,7 +29,7 @@ def _ago(**kwargs):
 
 def _make_feed(name="CHIRPS Daily", **kwargs):
     slug = name.lower().replace(" ", "-")
-    catalog = Catalog.objects.create(name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
     return DataFeed.objects.create(name=name, catalog=catalog, **kwargs)
 
 
@@ -38,6 +39,7 @@ class RowRenderBase(TestCase):
 
         ensure_base_datafeed_viewset()
         self.user = User.objects.create_superuser("op", "op@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.url = reverse("data_feed_list")
 

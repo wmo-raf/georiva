@@ -23,6 +23,7 @@ from georiva.sources.views import (
     build_product_config_form,
     selected_products_from_session,
 )
+from georiva.organisations.testing import make_organisation
 
 
 def _definition(**overrides):
@@ -46,7 +47,7 @@ def _definition(**overrides):
 
 class GetDerivedProductsTests(TestCase):
     def test_defaults_to_empty_list(self):
-        catalog = Catalog.objects.create(name="CHIRPS", slug="chirps", file_format="geotiff")
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff")
         feed = DataFeed.objects.create(name="Feed", catalog=catalog)
 
         self.assertEqual(feed.get_derived_products(), [])
@@ -54,7 +55,7 @@ class GetDerivedProductsTests(TestCase):
 
 class DerivedProductModelTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -110,7 +111,7 @@ class DerivedProductModelTests(TestCase):
 class ProvisionDerivedProductsTests(TestCase):
     def setUp(self):
         self.service = SourceSetupService()
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -325,7 +326,7 @@ class SelectedDefinitionKeysTests(TestCase):
     wizard's stash while still transient, and must agree across the two."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
 
@@ -356,7 +357,7 @@ class SelectedProductsFromSessionTests(TestCase):
     so provisioning always writes a full row set with the opt-out in is_enabled."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)

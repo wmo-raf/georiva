@@ -16,7 +16,7 @@ def on_palette_save(sender, instance, **kwargs):
     for variable in (
             instance.variable_set
                     .filter(is_active=True)
-                    .select_related('collection__catalog', 'palette')
+                    .select_related('collection__catalog__organisation', 'palette')
                     .prefetch_related('palette__stops')
     ):
         warm_variable(variable)
@@ -45,7 +45,7 @@ def _sync_keep_for_collection(collection):
     from georiva.core.storage import storage, BucketType
     
     bucket = storage.bucket(BucketType.INCOMING)
-    keep_path = f"{collection.catalog.slug}/{collection.slug}/.keep"
+    keep_path = f"{collection.catalog.storage_prefix}/{collection.slug}/.keep"
     
     if collection.feed_links.exists():
         _delete_keep(bucket, keep_path)

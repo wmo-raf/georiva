@@ -28,6 +28,7 @@ from georiva.sources.derivation_invocation import (
 )
 from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
+from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
@@ -92,7 +93,7 @@ def _pin(product, definition, catalog):
 
 class DispatchForInputTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -215,7 +216,7 @@ class EndToEndPromotionTests(TestCase):
     carries the product origin."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.pub_col = Collection.objects.create(
@@ -288,7 +289,7 @@ class StagingArrivalRoutesToProductsTests(TestCase):
     file dispatches the input to its consuming products."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.scol = StagingCollection.objects.create(
@@ -346,7 +347,7 @@ class RunProductNowTests(TestCase):
     selector (its config), so the recipe enumerates all its units."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -415,7 +416,7 @@ class OrphanExclusionTests(TestCase):
     dispatcher skips it. This locks that in (issue #171)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
@@ -464,7 +465,7 @@ class CrossCatalogIsolationTests(TestCase):
     because dispatch matches the collection FK, not the slug (ADR-0010 §4 AC2)."""
 
     def _feed_with_product(self, catalog_slug):
-        catalog = Catalog.objects.create(
+        catalog = Catalog.objects.create(organisation=make_organisation(), 
             name=catalog_slug, slug=catalog_slug, file_format="geotiff"
         )
         feed = DataFeed.objects.create(name=f"Feed {catalog_slug}", catalog=catalog)
@@ -498,7 +499,7 @@ class UnboundProductSkippedTests(TestCase):
     (ADR-0010 §4 AC4)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(
+        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)

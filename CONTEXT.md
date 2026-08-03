@@ -19,14 +19,14 @@ _Avoid_: Raw (as a tier name), Raw tier
 Product-grained, **served** STAC data — the existing `core` `Collection`/`Item`/`Asset`. "Served" always means
 Published. A published `Item` is a TimescaleDB hypertable (one row per timestep). Reached either directly
 (Direct → Published, for ready products needing only inline normalization) or via Derivation from Staging.
-A Published `Collection` carries a `visibility` (`public | internal`); serving exposes only `public`.
+A Published `Collection` carries a `visibility` (`public | private | internal`) — see **Visibility tier**.
 _Avoid_: Processed tier, Analysis-ready (as a tier name — those are MinIO buckets, not tiers)
 
 **Intermediate product**:
 A derived product that is itself an input to a further Derivation (e.g. an anomaly feeding the Combined Drought
 Indicator). Lives in **Published** as a normal `core.Item`/`Collection` with `visibility=internal` — **not** in
 Staging (it is product-shaped and derived, not raw acquisition). Internal collections are read freely by the engine
-but never served.
+but never served — on any plane, to anyone, signed in or not.
 _Avoid_: pre-final artifact, internal staging
 
 ### Derivation & lineage
@@ -357,3 +357,143 @@ A task-ferry job providing real-time status of a single `FileIngestion` run. One
 `process_incoming_file` invocation, so retries and re-ingests produce multiple jobs pointing at the same
 `FileIngestion` (FK, not one-to-one).
 _Avoid_: IngestionJob
+
+### Tenancy
+
+**Organisation**:
+An institution (NMHS or regional centre) occupying one tenant of a shared GeoRiva instance. Created only by the
+instance admin (provisioned tenancy — no self-service signup). Identified by an immutable, strictly lowercase slug
+that enters public URLs and storage paths. Carries contact/identity settings and default provider metadata that
+prefill new catalogs; carries no branding or boundary.
+_Avoid_: tenant (as a model name), workspace, institution (as a model name)
+
+**Organisation Membership**:
+The row linking a user to an Organisation with a role of Admin or Member. A membership always means the person
+belongs to that institution. Users can belong to multiple Organisations. Members are onboarded by direct account
+creation (an org admin or the instance admin creates the account) — no email invitations.
+_Avoid_: OrganizationUser, workspace user, invite
+
+**Instance admin**:
+The Django superuser. Not a separate concept or flag. Creates Organisations and their first org admins, bypasses
+membership checks entirely, and may enter any Organisation without holding a membership row.
+_Avoid_: platform admin, staff (as a synonym)
+
+**Active organisation**:
+The Organisation a request is operating in, derived from its Host and nothing else: hostname → Wagtail Site →
+Organisation. There is no session-org state — the subdomain *is* the switcher. Membership is re-read on every
+request and access fails closed; an unknown hostname is a 404, never a fallback to some default organisation.
+Carried on the request as `active_org` (with `active_org_role`), and all admin-plane scoping derives from it.
+_Avoid_: current tenant, session org, default org
+
+**Org-hopper**:
+The workspace block at the top of the admin sidebar: the Organisation's name and host, always visible, with a
+popover listing the Organisations the signed-in user may cross to. Wayfinding only — each entry is a plain
+cross-host link to that Organisation's `/admin/`, and clicking one is an ordinary navigation whose Host resolves the
+Active organisation as usual. It holds no state of its own; there is no "last organisation" memory to go stale. A
+member is listed the Organisations they hold a membership row in, the instance admin all of them, and a user in
+exactly one gets a static badge with nothing to open.
+_Avoid_: org switcher, workspace switcher, tenant picker
+
+**Central organisation**:
+The Organisation bootstrapped on Wagtail's default Site at the base domain during first setup. Entirely ordinary —
+same storage prefix, same membership rules, no fallback status — so that a single-institution install never has to
+think about tenancy.
+_Avoid_: default org, root org, main tenant
+
+**Shared reference data**:
+Instance-global records that no Organisation owns and every Organisation reads: topics, units, and administrative
+boundaries (with the zonal-stats geometries beneath them). Curated by the instance admin — `Topic`'s admin is
+superuser-only — and deliberately exempt from org scoping: an unscoped chooser over reference data is by design, not
+a missed guard. Boundaries are the clearest case for the exemption: a regional centre clips against several
+countries, and the model is a third party's, so per-org curation (if ever needed) would be a mapping table, not an
+FK on someone else's model.
+_Avoid_: system data, common data
+
+**Global tier**:
+The ownerless rows of a model that *is* org-owned — a nullable organisation FK where null means "the instance's,
+readable by every Organisation and writable only by the instance admin". Colour palettes are the case: an
+institution draws on the shipped library and adds its own beside it, and a chooser offers both tiers together.
+Declared by `ORGANISATION_GLOBAL_TIER` alongside the usual `ORGANISATION_LOOKUP`, which is what makes reads widen to
+include the ownerless rows while writes stay narrow. Distinct from **Shared reference data**, which no organisation
+can own at all.
+_Avoid_: default palette, system palette, public row
+
+**Org page tree**:
+The portal an Organisation authors, being everything under the root page of its Wagtail Site. Pages are org-owned
+through that link rather than through a field, so their scoping is a tree question and not an FK filter: on an
+organisation's host the explorer, the page chooser, page search and every page-id admin URL are confined to its own
+root. Wagtail's per-org page-permission group is the capability half of this; the host scoping is the tenancy half,
+and it is what a user who belongs to two institutions — or a superuser, who effectively belongs to all of them —
+runs into.
+_Avoid_: site tree (ambiguous with Wagtail Site), portal pages
+
+**Org-owned model**:
+A model whose rows belong to exactly one Organisation, reached through the FK chain rooted at `Catalog` rather than
+an organisation FK of its own. Says so by declaring `ORGANISATION_LOOKUP` — the ORM path from itself to
+`Organisation`. A model that declares none cannot be scoped at all: scoping it raises rather than returning every
+row, so an undeclared model is a loud error instead of a quiet leak.
+_Avoid_: tenant model, scoped model, owned model
+
+**Visibility tier**:
+What audience a Published `Collection` is served to, and the only thing that decides it: `public` to anyone,
+`private` to authenticated members of the owning Organisation, `internal` to nobody — a derivation intermediate,
+read by the engine as an input and served on no plane. `private` is *not* a smaller `public` and `internal` is not a
+smaller `private`; the three are separate audiences, so widening one never publishes another by accident. Defined
+once as `Collection.objects.visible_to(request)` and reached by every serving surface through it. A caller who may
+not see a `private` collection is not told it exists: it is absent from listings and search, and a fetch by name is
+the same 404 a misspelling gets. Holds on the machine plane too since the **Tile gateway** — the raster and the
+choropleth are gated as the collection is, so the tier is a security boundary and not only a listing filter.
+See ADR 0014 and ADR 0015.
+_Avoid_: private as "restricted public", access level, permission level
+
+**API key**:
+A per-user credential (`grv_`-prefixed, hash-only at rest, shown once at creation) that lets a script — QGIS,
+`pystac-client`, a notebook, a cron job — read what its holder can already see, without a browser session. Named,
+individually revocable, with an optional expiry and a `last_used_at`. Carries **no** Organisation: it establishes
+*who* is asking and nothing else, and what that reaches is then decided per request by the access choke point
+against the host's Organisation. Presented as `Authorization: Bearer grv_…`, or as `?api_key=grv_…` for clients that
+can only take a URL. Lives in the `accounts` app, because it belongs to a person rather than to an institution.
+_Avoid_: token, service account, org key, scoped key
+
+**Access choke point**:
+`organisations/access.py` — the single module every surface goes through to reach tenant rows, admin and public
+plane alike (`scoped_queryset`, `get_org_object_or_404`, `require_org_object`, `require_org_member`,
+`require_org_admin`, `may_see_private`). Membership itself is `resolve_org_role`, read live from the database and
+shared by the middleware and the serving planes — the latter cannot use the middleware's answer, because an API-key
+request is still anonymous when the middleware runs. One implementation so there is one place to audit, and one that guard tests walking the admin
+and the public API can hold the instance to. Distinct from Wagtail's model permissions, which stay the *capability*
+layer: what a user may do, not whose rows they may do it to.
+_Avoid_: permission manager chain, scoping middleware, tenancy filter
+
+**Per-org API root**:
+One Organisation's whole public service, served at its own host: `<org-host>/api/stac/`, `/api/edr/`,
+`/api/analysis/`, `/api/datasets/`. Self-contained — conformance, search, queryables and every self/root/child link
+resolve on the host they were requested from, and no root ever names or reaches another Organisation's rows. Ids
+stay bare (`Catalog.slug`, `Collection.slug`) and may collide across Organisations; the Organisation lives in the
+hostname, never in a path segment or query parameter. Two deliberate exceptions: `/api/jobs/` is mounted on every
+host and org-agnostic, guarded by unguessable job ids rather than tenancy; and the **machine plane** below, which
+has no hostname to read and so carries the Organisation in the path instead.
+_Avoid_: org path prefix, namespaced STAC id, tenant-qualified id
+
+**Machine plane**:
+The services that answer without a resolvable Host — Titiler and Martin — plus the one Django endpoint they call
+back on (`/api/tile-config/{org}/…`). They read object storage and the database directly, so nothing resolves an
+Organisation from a hostname there and nothing tries: the Organisation travels in the address instead
+(`/titiler/{org}/{catalog}/{collection}/{variable}/…`, Martin's required `org`/`catalog`/`collection` params,
+`georiva:palette:{org}:…`). This is the *only* place a path names the tenant, and for the one reason that justifies
+it — there is no Host to disagree with. Django decides which Organisation and writes every such URL through
+`core/machine_plane.py`, from a row it already resolved from the Host; Titiler and Martin concatenate and join.
+Guarded by the **Tile gateway** below, which is what makes the Visibility tier mean anything here.
+See ADR 0013.
+_Avoid_: tile plane, internal API, server-to-server tenancy
+
+**Tile gateway**:
+The nginx `auth_request` that decides whether a machine-plane request may be proxied at all. Before serving a
+Titiler or Martin URL, nginx subrequests Django's internal `/internal/tile-auth/` endpoint with the original
+request line and the caller's own credentials (session cookie, `Authorization`, `?api_key=`); Django reads the
+address through `machine_plane.scope_of` — the inverse of the URL builders beside it — checks the org segment
+against the Host, and answers from the same `public()` / `visible_to()` vocabulary every other serving plane uses.
+Titiler and Martin gain no tenancy logic, which is the property it exists to preserve. Denials are 403 on the wire
+(all `auth_request` understands) and 404 to the caller; a broken key stays 401. Cached ~60s per
+collection-and-credential, so revocation lags on tiles and nowhere else. See ADR 0015.
+_Avoid_: tile auth middleware, tile permission check, signed tile URL

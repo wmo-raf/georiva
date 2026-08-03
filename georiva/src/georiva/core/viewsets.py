@@ -1,6 +1,8 @@
 from django.urls import reverse
+from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin.filters import WagtailFilterSet
+from wagtail.admin.panels import FieldPanel, ObjectList
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 from wagtail.admin.viewsets.model import ModelViewSet
@@ -10,11 +12,30 @@ from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
 from georiva.core.models.catalog import Topic
 from georiva.core.views import CatalogIndexView
+from georiva.organisations.access import may_change_org_object, require_active_org
+from georiva.organisations.permissions import SuperuserOnlyPermissionPolicy
+from georiva.organisations.scoping import OrgScopedChooserViewSetMixin, OrgScopedViewSetMixin
 
 
 class BoundaryChooserViewSet(ChooserViewSet):
+    """Administrative boundaries, offered to every organisation unscoped.
+
+    The deliberate scoping exemption (decision #269), and the reason it is one:
+    boundaries are shared reference data, not tenant data. A regional centre
+    clips against several countries, a national service against its own and its
+    neighbours', and the model is a third party's — putting an organisation FK on
+    it would fork ``adminboundarymanager`` to express something no institution
+    owns. Nothing under a boundary is anybody's data either: the zonal statistics
+    computed over one belong to the variable they came from, and *those* are
+    org-scoped through the catalog chain.
+
+    So this chooser is not missing a guard. If per-org curation ever matters, the
+    escape hatch is a mapping table between Organisation and boundary, not an FK
+    on the third-party model.
+    """
+
     model = "adminboundarymanager.AdminBoundary"
-    
+
     icon = "map"
     choose_one_text = "Choose a boundary"
     choose_another_text = "Choose another boundary"
@@ -22,14 +43,34 @@ class BoundaryChooserViewSet(ChooserViewSet):
 
 
 class TopicViewSet(ModelViewSet):
+    """The instance's thematic taxonomy, curated by the instance admin.
+
+    Topics are shared reference data (decision #259): one vocabulary across the
+    instance, so that "Rainfall" means the same thing on every organisation's
+    portal. Editing that vocabulary is therefore an instance-admin act, and org
+    members meet topics only as options on the catalog form.
+    """
+
     model = Topic
     add_to_admin_menu = True
     menu_order = 300
     menu_icon = "hashtag"
     exclude_form_fields = ["created_at", "updated_at"]
 
+    @cached_property
+    def permission_policy(self):
+        return SuperuserOnlyPermissionPolicy(self.model)
+
 
 class CatalogCreateView(generic.CreateView):
+    def save_instance(self):
+        # The owning organisation is the host's, not a form field: letting an
+        # operator pick one would be a way to write into another institution's
+        # storage prefix. Set here rather than on the panel set so there is no
+        # editable widget to post around.
+        self.form.instance.organisation = require_active_org(self.request)
+        return super().save_instance()
+
     def get_success_url(self):
         url = reverse("catalog:index")
         return self._set_locale_query_param(url)
@@ -45,7 +86,7 @@ class CatalogDeleteView(generic.DeleteView):
         return reverse("catalog:index")
 
 
-class CatalogViewSet(ModelViewSet):
+class CatalogViewSet(OrgScopedViewSetMixin, ModelViewSet):
     model = Catalog
     icon = "globe"
     menu_label = _("Catalogs")
@@ -64,7 +105,7 @@ class CatalogViewSet(ModelViewSet):
     delete_view_class = CatalogDeleteView
 
 
-class CatalogChooserViewSet(ChooserViewSet):
+class CatalogChooserViewSet(OrgScopedChooserViewSetMixin, ChooserViewSet):
     model = Catalog
     icon = "globe"
     choose_one_text = "Choose a catalog"
@@ -101,7 +142,7 @@ class CollectionIndexView(generic.IndexView):
         return buttons
 
 
-class CollectionViewSet(ModelViewSet):
+class CollectionViewSet(OrgScopedViewSetMixin, ModelViewSet):
     model = Collection
     icon = "folder-open-inverse"
     add_to_admin_menu = False
@@ -139,7 +180,7 @@ class ItemFilterSet(WagtailFilterSet):
         fields = ["collection"]
 
 
-class ItemViewSet(SnippetViewSet):
+class ItemViewSet(OrgScopedViewSetMixin, SnippetViewSet):
     model = Item
     icon = "snippet"
     exclude_form_fields = ["created_at", "updated_at"]
@@ -147,18 +188,78 @@ class ItemViewSet(SnippetViewSet):
     list_filter = ["collection"]
 
 
-class AssetViewSet(SnippetViewSet):
+class AssetViewSet(OrgScopedViewSetMixin, SnippetViewSet):
     model = Asset
     exclude_form_fields = ["created_at", "updated_at"]
     list_filter = ["format", "variable"]
 
 
-class ColorPaletteModelViewSet(ModelViewSet):
+class ColorPaletteCreateView(generic.CreateView):
+    """Creating a palette, in whichever tier the creator may write to.
+
+    For an operator there is no choice to make and none is offered: a palette
+    they create belongs to the organisation whose admin they are in. An editable
+    organisation would be a way to file one under another institution, or under
+    none — the instance-wide tier, which is not theirs to add to.
+
+    The instance admin is the one who curates that tier, so they get the field:
+    blank makes an instance-wide palette, and their own organisation is still
+    the host's, so routine work on a tenant's host lands where it should.
+    """
+
+    def _may_choose_tier(self):
+        user = self.request.user
+        return user.is_authenticated and user.is_superuser
+
+    def get_panel(self):
+        panel = super().get_panel()
+        if not self._may_choose_tier() or panel is None:
+            return panel
+        return ObjectList(
+            list(panel.children) + [FieldPanel("organisation")]
+        ).bind_to_model(self.model)
+
+    def save_instance(self):
+        if not self._may_choose_tier():
+            self.form.instance.organisation = require_active_org(self.request)
+        return super().save_instance()
+
+
+class ColorPaletteIndexView(generic.IndexView):
+    """The listing, showing both tiers and offering edits on only one.
+
+    The instance-wide palettes are listed because an operator needs to see what
+    they already have before making another; their edit and delete links are
+    withheld because ``require_writable_org_object`` would refuse them. The
+    listing asks that helper rather than re-deriving the rule.
+    """
+
+    def get_edit_url(self, instance):
+        return super().get_edit_url(instance) if self._writable(instance) else None
+
+    def get_delete_url(self, instance):
+        return super().get_delete_url(instance) if self._writable(instance) else None
+
+    def _writable(self, instance):
+        return may_change_org_object(self.request, instance)
+
+
+class ColorPaletteModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
     model = ColorPalette
     icon = "palette"
     add_to_admin_menu = True
     menu_order = 600
     exclude_form_fields = ["created_at", "updated_at"]
+    add_view_class = ColorPaletteCreateView
+    index_view_class = ColorPaletteIndexView
+    # Wagtail's generic copy view binds its form to the *source* row, so saving
+    # renames that row instead of duplicating it (verified against Wagtail 7.4.2).
+    # Harmless-looking on a single-tenant instance; here it would be a member
+    # rewriting the instance-wide palette every organisation renders with. Until
+    # that is fixed upstream or worked around deliberately, palettes are copied by
+    # creating one.
+    copy_view_enabled = False
+    list_display = ["name", "palette_type", "owner_label"]
 
 
 CatalogChooserViewSetObject = CatalogChooserViewSet("catalog_chooser")
