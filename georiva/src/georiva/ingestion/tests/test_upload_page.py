@@ -13,7 +13,7 @@ from georiva.ingestion.models import (
     UploadSession,
     UploadedFile,
 )
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -63,6 +63,7 @@ def _mock_incoming_bucket():
 class UploadPageRenderTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_up", "u@p.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_file_input_accepts_multiple(self):
@@ -129,6 +130,7 @@ class UploadPageRenderTests(TestCase):
 class ExtractTimesTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ex", "e@x.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_prefill_from_filename_stem(self):
@@ -162,6 +164,7 @@ class ExtractTimesTests(TestCase):
 class UploadSubmitTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_su", "s@u.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_geotiff_submit_creates_upload_session_and_uploaded_file(self, mock_incoming, mock_task):
@@ -380,6 +383,7 @@ class UploadSubmitTests(TestCase):
 class UploadSubmitMultiFileTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_mf", "mf@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_two_geotiff_files_create_one_session_two_uploaded_files(self, mock_incoming, mock_task):
@@ -603,6 +607,14 @@ UPLOAD_SESSION_STATUS_URL = "/api/upload-sessions/{}/status/"
 
 
 class UploadSessionStatusEndpointTests(TestCase):
+    """The polling endpoint an upload page watches — scoped like everything else.
+
+    A session belongs to its catalog's organisation, so the answer depends on the
+    host asked, and these dial the one that owns the fixtures.
+    """
+
+    def setUp(self):
+        dial_org(self.client)
 
     def _make_session(self, status=UploadSession.Status.ACTIVE):
         catalog = Catalog.objects.create(organisation=make_organisation(), name="S", slug="s", file_format="geotiff")

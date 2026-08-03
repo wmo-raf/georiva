@@ -18,7 +18,7 @@ from georiva.core.derived_products import (
 from georiva.core.models import Catalog
 from georiva.sources.derivation_chain import build_chain_graph, item_lineage
 from georiva.sources.models import DataFeed, DerivedProduct
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 def _definition(key="anomaly", inputs=None, outputs=None, **overrides):
@@ -197,6 +197,7 @@ class ChainViewTests(TestCase):
         from django.contrib.auth import get_user_model
         User = get_user_model()
         self.user = User.objects.create_superuser("admin_chain", "c@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
@@ -244,6 +245,7 @@ class ItemLineageViewTests(TestCase):
         from django.contrib.auth import get_user_model
         User = get_user_model()
         self.user = User.objects.create_superuser("admin_lin", "l@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_lineage_page_lists_a_produced_items_inputs(self):

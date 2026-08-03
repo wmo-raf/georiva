@@ -19,6 +19,8 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     # Identity
     # -------------------------------------------------------------------------
     
+    ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
+
     item = models.ForeignKey(
         "georivacore.Item",
         on_delete=models.CASCADE,

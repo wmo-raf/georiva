@@ -91,6 +91,8 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         SQRT = 'sqrt', 'Square Root'
         DIVERGING = 'diverging', 'Diverging'
     
+    ORGANISATION_LOOKUP = "collection__catalog__organisation"
+
     collection = ParentalKey(
         'georivacore.Collection',
         on_delete=models.CASCADE,

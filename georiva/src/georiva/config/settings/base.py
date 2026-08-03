@@ -407,6 +407,11 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 10_000
 GEORIVA_BASE_DOMAIN = env.str("GEORIVA_BASE_DOMAIN", default="localhost")
 GEORIVA_SITE_PORT = env.int("GEORIVA_SITE_PORT", default=80)
 
+# Where the Wagtail admin is mounted (see config/urls.py). Every URL under it is
+# tenant work, which is what lets OrganisationMiddleware gate the whole prefix on
+# membership in one place.
+GEORIVA_ADMIN_PATH_PREFIX = "/admin/"
+
 # First setup binds Wagtail's default Site to an ordinary "central" organisation
 # on the base domain, so a single-institution install needs no tenancy ceremony.
 GEORIVA_BOOTSTRAP_CENTRAL_ORG = env.bool("GEORIVA_BOOTSTRAP_CENTRAL_ORG", default=True)

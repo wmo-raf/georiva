@@ -10,7 +10,7 @@ from django.test import TestCase
 from georiva.core.models import Catalog
 from georiva.ingestion.acquisition_snapshot import build_acquisition_snapshot
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG, make_organisation
 
 
 class AcquisitionSnapshotTests(TestCase):
@@ -28,7 +28,7 @@ class AcquisitionSnapshotTests(TestCase):
             status=FetchedFile.Status.STORED,
         )
 
-        snapshot = async_to_sync(build_acquisition_snapshot)()
+        snapshot = async_to_sync(build_acquisition_snapshot)(DEFAULT_TEST_ORG_SLUG)
 
         run_entry = next(i for i in snapshot if i["type"] == "fetch_run")
         self.assertEqual(

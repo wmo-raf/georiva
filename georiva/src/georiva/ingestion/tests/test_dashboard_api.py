@@ -9,7 +9,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.ingestion.models import FileIngestion, FileIngestionJob
 from georiva.sources.models import DataFeed, DataFeedCollectionLink
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -40,6 +40,7 @@ def _make_file_ingestion(collection, file_path=None, status=FileIngestion.Status
 class DashboardCatalogGroupedTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_cg", "cg@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = Catalog.objects.create(organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="grib2")
         self.collection = Collection.objects.create(name="Daily", slug="daily", catalog=self.catalog)
@@ -128,6 +129,7 @@ def _all_collections_in_response(data):
 class DashboardCollectionListTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "admin@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.collection = _setup_collection()
 
@@ -237,6 +239,7 @@ class DashboardCollectionListTests(TestCase):
 class CollectionIngestionLogsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.collection = _setup_collection("cat3", "col3")
 
@@ -335,6 +338,7 @@ class CollectionIngestionLogsAPITests(TestCase):
 class CollectionFetchRunsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin5", "g@h.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="cat5", slug="cat5", file_format="grib2")
         self.collection = Collection.objects.create(name="col5", slug="col5", catalog=catalog)
@@ -420,6 +424,7 @@ def _make_job(fi, **kwargs):
 class CollectionIngestionJobsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4", "e@f.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.collection = _setup_collection("cat4", "col4")
 
@@ -483,6 +488,7 @@ def _make_upload_session(catalog, user=None, file_path=None, collection=None):
 class CollectionUploadSessionsAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_us", "us@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = Catalog.objects.create(organisation=make_organisation(), name="cat-us", slug="cat-us", file_format="grib2")
         self.collection = Collection.objects.create(name="col-us", slug="col-us", catalog=self.catalog)

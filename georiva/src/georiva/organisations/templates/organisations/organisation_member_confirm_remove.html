@@ -1,0 +1,36 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Remove member" %} — {{ organisation.name }}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .gr-member-warning {
+        max-width: 46em;
+        color: var(--w-color-text-label);
+    }
+    .gr-member-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<p class="gr-member-warning">
+    {% blocktrans with user=membership.user org=organisation.name %}
+        {{ user }} will lose access to {{ org }} on their next request. Their account
+        is not deleted — they may belong to other organisations, and their work here
+        stays where it is.
+    {% endblocktrans %}
+</p>
+
+<form method="post" action="">
+    {% csrf_token %}
+    <div class="gr-member-actions">
+        <button type="submit" class="button button--icon serious">
+            <span class="icon-wrapper"><svg class="icon icon-bin" aria-hidden="true"><use href="#icon-bin"></use></svg></span>
+            {% trans "Remove member" %}
+        </button>
+        <a href="{{ cancel_url }}" class="button button-secondary">{% trans "Cancel" %}</a>
+    </div>
+</form>
+{% endblock %}

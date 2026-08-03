@@ -15,7 +15,7 @@ from django.utils import timezone
 from georiva.core.models import Catalog
 from georiva.sources.acquisition_tracking import feed_fetch_runs
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -65,6 +65,7 @@ class FetchRunListViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_acq", "a@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 
@@ -149,6 +150,7 @@ class FetchRunDetailViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_run", "d@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
         self.run = _run(
@@ -240,6 +242,7 @@ class DataFeedDetailAcquisitionCardTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_panel", "p@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 

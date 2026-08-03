@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import FileIngestion
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, join_org, make_organisation
 
 User = get_user_model()
 
@@ -35,6 +35,7 @@ def _make_fi(bucket, file_path, status, error=""):
 class CollectionItemsIngestionBadgeTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ci", "ci@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog, self.collection = _setup()
         self.url = reverse("collection_items_list", args=[self.collection.pk])
@@ -83,6 +84,7 @@ class CollectionItemsIngestionBadgeTests(TestCase):
 class CatalogIndexTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_cat", "cat@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.url = reverse("catalog:index")
         self.results_url = reverse("catalog:index_results")
@@ -236,6 +238,7 @@ class CatalogIndexTests(TestCase):
 class DashboardSummaryTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_dash", "dash@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def _request(self):
@@ -277,6 +280,7 @@ class DashboardSummaryTests(TestCase):
 class PluginListTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_plugins", "pl@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.url = reverse("plugin_list")
 
@@ -363,6 +367,7 @@ class AddDataFrontDoorTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "a@a.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_front_door_offers_both_arrival_scenarios(self):
@@ -431,6 +436,9 @@ class DataManagersGatingTests(TestCase):
     def _data_manager(self):
         from django.contrib.auth.models import Group
         user = User.objects.create_user("dm", "dm@x.com", "pw")
+        # Joining the organisation is what grants the group in production; the
+        # explicit add here keeps the test honest about which layer it exercises.
+        join_org(user)
         user.groups.add(Group.objects.get(name="Data Managers"))
         return user
 
@@ -446,6 +454,7 @@ class DataManagersGatingTests(TestCase):
             self.assertNotIn(forbidden, codenames)
 
     def test_data_manager_can_browse_but_not_edit_catalogs(self):
+        dial_org(self.client)
         self.client.force_login(self._data_manager())
         self.assertEqual(self.client.get(reverse("catalog:index")).status_code, 200)
         # Raw add/edit forms are denied server-side (redirect with permission error)
@@ -454,6 +463,7 @@ class DataManagersGatingTests(TestCase):
     def test_data_manager_cannot_edit_collections_raw(self):
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="grib2")
         collection = Collection.objects.create(catalog=catalog, name="S", slug="s")
+        dial_org(self.client)
         self.client.force_login(self._data_manager())
         self.assertEqual(
             self.client.get(reverse("collection:edit", args=[collection.pk])).status_code, 302
@@ -461,6 +471,7 @@ class DataManagersGatingTests(TestCase):
 
     def test_advanced_user_keeps_the_raw_escape_hatch(self):
         admin = User.objects.create_superuser("root", "r@x.com", "pw")
+        dial_org(self.client)
         self.client.force_login(admin)
         self.assertEqual(self.client.get(reverse("catalog:add")).status_code, 200)
 
@@ -484,12 +495,14 @@ class CatalogIndexAffordanceTests(TestCase):
         self.empty_catalog = Catalog.objects.create(organisation=make_organisation(), name="Empty", slug="empty-idx", file_format="grib2")
 
     def _get_index_as(self, user):
+        dial_org(self.client)
         self.client.force_login(user)
         return self.client.get(reverse("catalog:index")).content.decode()
 
     def test_data_manager_sees_a_read_only_accordion(self):
         from django.contrib.auth.models import Group
         user = User.objects.create_user("dm-idx", "dmi@x.com", "pw")
+        join_org(user)
         user.groups.add(Group.objects.get(name="Data Managers"))
         html = self._get_index_as(user)
 

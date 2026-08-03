@@ -20,7 +20,7 @@ from georiva.sources.models import (
     FetchedFile,
     FetchRun,
 )
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 User = get_user_model()
@@ -167,6 +167,7 @@ class CheckNewFilesViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_check", "c@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed, self.rainfall = _feed_and_collection()
         DataFeedCollectionLink.objects.create(

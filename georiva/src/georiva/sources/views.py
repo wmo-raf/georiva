@@ -2,7 +2,7 @@ import json
 
 from django.contrib import messages
 from django.db.models import Count
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse_lazy, reverse
 from django.utils.functional import cached_property
 from django.utils.timesince import timesince
@@ -13,6 +13,8 @@ from wagtail.admin.views.generic import IndexView
 from wagtail.admin.ui.tables import TitleColumn, ButtonsColumnMixin, BooleanColumn
 from wagtail.admin.widgets import HeaderButton, ButtonWithDropdown, Button
 
+from georiva.organisations.access import get_org_object_or_404, get_via_scoped_parent_or_404
+from georiva.organisations.scoping import OrgScopedViewMixin
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
 from georiva.sources.registry import data_feed_viewset_registry
@@ -87,7 +89,7 @@ class DataFeedButtonsColumn(ButtonsColumnMixin, TitleColumn):
         return buttons
 
 
-class DataFeedIndexView(IndexView):
+class DataFeedIndexView(OrgScopedViewMixin, IndexView):
     """Data Feed listing, built on Wagtail's generic IndexView so server-side
     pagination and the admin header search (with its AJAX results swap) work
     out of the box.
@@ -296,7 +298,7 @@ data_feed_list_results = DataFeedIndexView.as_view(results_only=True)
 
 def data_feed_detail(request, pk):
     """Dashboard view for a single DataFeed."""
-    feed = get_object_or_404(DataFeed, pk=pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=pk)
 
     # Activity stat cards (PRD #217 follow-up): pure summaries — actions
     # (Fetch now, checks, retries) live on the linked activity pages.
@@ -420,7 +422,7 @@ def feed_product_toggle(request, feed_pk, product_pk):
     the shared gate/cascade service."""
     from georiva.sources.models import DerivedProduct
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
     detail_url = reverse("data_feed_detail", kwargs={"pk": feed_pk})
     return _apply_product_toggle(
         request, product,
@@ -450,7 +452,7 @@ def feed_product_run(request, feed_pk, product_pk):
     from georiva.sources.models import DerivedProduct
     from georiva.sources.product_service import product_label
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
     readiness = product_readiness(product)
     if readiness.ready:
         run_product_now(product)
@@ -485,7 +487,7 @@ def feed_product_edit(request, feed_pk, product_pk):
     from georiva.sources.derivation_invocation import definition_for
     from georiva.sources.models import DerivedProduct
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
     definition = definition_for(product)
 
     display_form_cls = modelform_factory(DerivedProduct, fields=["title", "description"])
@@ -575,7 +577,7 @@ def feed_product_enable_new(request, feed_pk, definition_key):
     outputs) — no wizard re-run."""
     from georiva.sources.product_service import ProductActionError, enable_new_definition
 
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
     real_feed = feed.get_real_instance()
     definition = next(
         (d for d in real_feed.get_derived_products() if d.key == definition_key), None
@@ -621,7 +623,7 @@ def feed_product_delete_orphan(request, feed_pk, product_pk):
     from georiva.sources.models import DerivedProduct
     from georiva.sources.product_service import ProductActionError, delete_orphan
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
 
     if request.method == "POST":
         label = product.display_label
@@ -658,7 +660,7 @@ def feed_product_rebind(request, feed_pk, product_pk):
     from georiva.sources.models import DerivedProduct
     from georiva.sources.product_service import ProductActionError, rebind_product
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk, data_feed_id=feed_pk)
 
     if request.method == "POST":
         try:
@@ -673,7 +675,7 @@ def feed_product_rebind(request, feed_pk, product_pk):
 
 def data_feed_edit(request, pk):
     """Edit feed name, interval, and global config fields inline."""
-    feed = get_object_or_404(DataFeed, pk=pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=pk)
     real_feed = feed.get_real_instance()
     real_cls = type(real_feed)
     
@@ -715,7 +717,7 @@ def data_feed_delete(request, pk):
     from wagtail.permissions import ModelPermissionPolicy
     from georiva.sources.models import DerivedProduct
 
-    feed = get_object_or_404(DataFeed, pk=pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=pk)
 
     # Same gate the per-subclass viewset DeleteView enforced: delete permission
     # on the concrete feed model (base DataFeed for rows whose plugin is gone).
@@ -771,7 +773,7 @@ def definition_collection_add(request, feed_pk, definition_key):
     """
     from georiva.sources.setup_service import SourceSetupService
     
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
     
     real_feed = feed.get_real_instance()
     real_cls = type(real_feed)
@@ -846,9 +848,9 @@ def definition_collection_edit(request, feed_pk, link_pk):
     """Edit per-collection config for an existing link."""
     from georiva.sources.models import DataFeedCollectionLink
     
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
     
-    base_link = get_object_or_404(DataFeedCollectionLink, pk=link_pk, data_feed=feed)
+    base_link = get_org_object_or_404(request, DataFeedCollectionLink, pk=link_pk, data_feed=feed)
     link = base_link.get_real_instance()
     
     real_cls = type(feed.get_real_instance())
@@ -892,8 +894,8 @@ def definition_collection_remove_confirm(request, feed_pk, link_pk):
     """Confirmation page before removing a collection link and deleting the collection."""
     from georiva.sources.models import DataFeedCollectionLink
     
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
-    base_link = get_object_or_404(DataFeedCollectionLink, pk=link_pk, data_feed=feed)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    base_link = get_org_object_or_404(request, DataFeedCollectionLink, pk=link_pk, data_feed=feed)
     link = base_link.get_real_instance()
     collection = link.collection
     
@@ -924,8 +926,8 @@ def definition_collection_vars_edit(request, feed_pk, link_pk):
     from georiva.sources.models import DataFeedCollectionLink
     from georiva.sources.setup_service import SourceSetupService
     
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
-    base_link = get_object_or_404(DataFeedCollectionLink, pk=link_pk, data_feed=feed)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    base_link = get_org_object_or_404(request, DataFeedCollectionLink, pk=link_pk, data_feed=feed)
     link = base_link.get_real_instance()
     collection = link.collection
     
@@ -1665,9 +1667,7 @@ def wizard_provision(request, model_name):
         # Scoped again at the point of use, not just in step 1: a wizard session
         # outlives a switch to another organisation's host, so the stored id may
         # no longer belong to the org this request is served for.
-        catalog = get_object_or_404(
-            Catalog, pk=session_data["catalog_id"], organisation=require_active_org(request)
-        )
+        catalog = get_org_object_or_404(request, Catalog, pk=session_data["catalog_id"])
     
     definitions_map = {d.key: d for d in model_cls.get_collection_definitions()}
     selected_keys = session_data["selected_collection_keys"]
@@ -1741,7 +1741,7 @@ def derived_product_runs(request, product_pk):
     from georiva.sources.derivation_tracking import product_runs, run_duration_seconds
     from georiva.sources.models import DerivedProduct
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk)
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk)
     status = request.GET.get("status") or None
 
     paginator = Paginator(product_runs(product, status=status), 25)
@@ -1784,7 +1784,7 @@ def data_feed_fetch_runs(request, feed_pk):
     from georiva.sources.acquisition_tracking import feed_fetch_runs, run_duration_seconds
     from georiva.sources.models import FetchRun
 
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
 
     # Synchronous, ephemeral dry run (PRD #217): results render on this POST
     # response and are never persisted. Re-POSTing on refresh is harmless —
@@ -1848,7 +1848,7 @@ def data_feed_ingestions(request, feed_pk):
     from georiva.ingestion.ingestion_tracking import NO_COLLECTION, feed_file_ingestions
     from georiva.ingestion.models import FileIngestion
 
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
 
     # Synchronous, ephemeral dry run (PRD #217): scan MinIO under the feed's
     # catalog prefix; results render on this POST response, nothing persists.
@@ -1945,8 +1945,8 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     from georiva.sources.acquisition_tracking import run_duration_seconds
     from georiva.sources.models import FetchedFile, FetchRun
 
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
-    run = get_object_or_404(FetchRun, pk=run_pk, data_feed=feed)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    run = get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed)
 
     def retryable_files(pks):
         """Only failed files of THIS run that carry a stored request may be
@@ -2024,9 +2024,11 @@ def derived_product_run_detail(request, product_pk, run_pk):
     from georiva.sources.derivation_tracking import run_duration_seconds
     from georiva.sources.models import DerivedProduct
 
-    product = get_object_or_404(DerivedProduct, pk=product_pk)
-    run = get_object_or_404(
-        DerivationRun, pk=run_pk, origin=product_origin(product),
+    product = get_org_object_or_404(request, DerivedProduct, pk=product_pk)
+    # The product above is org-scoped and its origin string is derived from it,
+    # so this run is confined to the same organisation by that filter.
+    run = get_via_scoped_parent_or_404(
+        DerivationRun.objects.all(), pk=run_pk, origin=product_origin(product),
     )
 
     duration = run_duration_seconds(run)
@@ -2060,7 +2062,7 @@ def derived_product_chain(request, feed_pk):
     """
     from georiva.sources.derivation_chain import build_chain_graph
 
-    feed = get_object_or_404(DataFeed, pk=feed_pk)
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
     graph = build_chain_graph(feed)
 
     context = {
@@ -2087,7 +2089,7 @@ def item_lineage(request, item_pk):
     from georiva.core.models import Item
     from georiva.sources.derivation_chain import item_lineage as lineage_sources
 
-    item = get_object_or_404(Item, pk=item_pk)
+    item = get_org_object_or_404(request, Item, pk=item_pk)
     sources = lineage_sources(item)
 
     context = {

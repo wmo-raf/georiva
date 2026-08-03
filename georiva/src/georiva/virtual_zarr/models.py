@@ -31,6 +31,8 @@ class VirtualZarrManifest(TimeStampedModel):
     # Identity — one manifest per variable
     # -------------------------------------------------------------------------
     
+    ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
+
     variable = models.OneToOneField(
         "georivacore.Variable",
         on_delete=models.CASCADE,

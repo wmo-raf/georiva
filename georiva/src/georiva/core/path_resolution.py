@@ -15,6 +15,20 @@ from georiva.core.models import Catalog
 from georiva.organisations.models import Organisation
 
 
+def org_slug_from_key(key):
+    """The organisation slug a bucket key is filed under, or ``None``.
+
+    The first segment of every key on every bucket is the owning organisation's
+    slug, which makes the path itself a usable owner marker for records that
+    have no FK chain to lean on — a ``FileIngestion`` written before its
+    collections are known, for instance.
+    """
+    if not key:
+        return None
+    head = str(key).lstrip("/").split("/", 1)[0]
+    return head or None
+
+
 def resolve_org_catalog(org_slug, catalog_slug, *, require_active=True):
     """Resolve ``(org_slug, catalog_slug)`` to a Catalog.
 

@@ -35,6 +35,8 @@ class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableMod
     # workers. See core/test_reference_index_exclusion.py.
     wagtail_reference_index_ignore = True
 
+    ORGANISATION_LOOKUP = "collection__catalog__organisation"
+
     collection = models.ForeignKey(
         'georivacore.Collection',
         on_delete=models.CASCADE,
@@ -173,6 +175,8 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     from AbstractAsset; only the tier-specific relations live here.
     """
     
+    ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
+
     # Parent Item
     item = ParentalKey(
         Item,

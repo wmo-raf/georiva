@@ -17,7 +17,7 @@ from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import product_origin
 from georiva.sources.derivation_tracking import product_runs, product_status
 from georiva.sources.models import DataFeed, DerivedProduct
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -171,6 +171,7 @@ class RunListViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_runs", "r@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"
@@ -263,6 +264,7 @@ class RunDetailViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_rd", "d@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CHIRPS", slug="chirps", file_format="geotiff"

@@ -1,14 +1,19 @@
 from django.contrib import messages
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
+
+from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
 
 def manual_upload_config_list(request):
     from georiva.ingestion.models import ManualUploadConfig
 
-    configs = ManualUploadConfig.objects.select_related("catalog").prefetch_related("variables").order_by(
-        "catalog__name", "name"
+    configs = (
+        scoped_queryset(request, ManualUploadConfig.objects.all())
+        .select_related("catalog")
+        .prefetch_related("variables")
+        .order_by("catalog__name", "name")
     )
 
     return render(request, "georivaingestion/manual_upload_config_list.html", {
@@ -28,7 +33,7 @@ def manual_upload_config_edit(request, pk):
     from django.forms import ModelForm
     from georiva.ingestion.models import ManualUploadConfig
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
 
     class EditForm(ModelForm):
         class Meta:
@@ -65,7 +70,7 @@ def manual_upload_config_edit(request, pk):
 def manual_upload_config_delete(request, pk):
     from georiva.ingestion.models import ManualUploadConfig
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
 
     if request.method == "POST":
         name = config.name
@@ -117,8 +122,8 @@ def manual_upload_variable_edit(request, pk, var_pk):
     from georiva.core.models import Variable
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
-    mcv = get_object_or_404(ManualUploadConfigVariable, pk=var_pk, config=config)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
+    mcv = get_org_object_or_404(request, ManualUploadConfigVariable, pk=var_pk, config=config)
     variable = _core_variable_for(mcv)
     if variable is None:
         messages.error(request, _("No variable record found for '%s'.") % mcv.variable_name)
@@ -167,7 +172,7 @@ def manual_upload_variable_add(request, pk):
     from georiva.core.provisioning import passthrough_sources, resolve_unit
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
     collections = config.catalog.collections.order_by("name")
 
     class VariableAddForm(forms.Form):
@@ -247,8 +252,8 @@ def manual_upload_variable_add(request, pk):
 def manual_upload_variable_remove(request, pk, var_pk):
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
 
-    config = get_object_or_404(ManualUploadConfig, pk=pk)
-    mcv = get_object_or_404(ManualUploadConfigVariable, pk=var_pk, config=config)
+    config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
+    mcv = get_org_object_or_404(request, ManualUploadConfigVariable, pk=var_pk, config=config)
 
     if request.method == "POST":
         name = mcv.variable_name

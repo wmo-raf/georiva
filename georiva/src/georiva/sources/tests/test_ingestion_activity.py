@@ -13,7 +13,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.ingestion.ingestion_tracking import feed_file_ingestions
 from georiva.ingestion.models import FileIngestion
 from georiva.sources.models import DataFeed
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -95,6 +95,7 @@ class IngestionActivityViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ing", "i@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
         self.rainfall = Collection.objects.create(
@@ -170,6 +171,7 @@ class CheckUnprocessedViewTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_chk", "k@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 
@@ -271,6 +273,7 @@ class ReingestUITests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_rei", "re@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 
@@ -386,6 +389,7 @@ class DataFeedDetailIngestionCardTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_ipanel", "ip@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
 

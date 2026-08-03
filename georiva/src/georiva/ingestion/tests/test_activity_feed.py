@@ -1,3 +1,4 @@
+from georiva.organisations.testing import dial_org
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -15,6 +16,7 @@ class ActivityPageRenderTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_af", "af@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_page_returns_200(self):
@@ -47,6 +49,7 @@ class ActivityFeedLiveArrivalTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_la", "la@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_page_handles_file_ingestion_created_event(self):
@@ -62,6 +65,7 @@ class ActivityFeedCancelWiringTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_cw", "cw@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_page_contains_cancel_jobs_url_prefix(self):
@@ -79,6 +83,7 @@ class DashboardPanelViewAllTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_dp", "dp@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_dashboard_panel_has_view_all_link(self):
@@ -104,6 +109,7 @@ class AcquisitionFeedPageTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_superuser("admin_aq", "aq@test.com", "pw")
+        dial_org(self.client)
         self.client.force_login(self.user)
 
     def test_acquisition_feed_returns_200(self):

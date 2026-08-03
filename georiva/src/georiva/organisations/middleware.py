@@ -13,6 +13,7 @@ outlives its membership row loses access on its next request, not at logout.
 import logging
 
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from wagtail.models import Site
 
@@ -92,7 +93,35 @@ class OrganisationMiddleware:
         request._wagtail_site = organisation.site
         request.active_org_role = self._resolve_role(request, organisation)
 
+        self._guard_admin(request)
+
         return self.get_response(request)
+
+    @staticmethod
+    def _guard_admin(request):
+        """Keep signed-in non-members out of an organisation's admin entirely.
+
+        The admin is the one plane where every URL is tenant work, so membership
+        is checked once here rather than view by view — row scoping still
+        applies underneath, but a stranger never gets as far as an empty listing.
+        Anonymous requests fall through: the login page lives under the same
+        prefix, and a login is how somebody stops being anonymous.
+
+        The check re-reads the role the middleware just resolved from the
+        database, so a revoked membership locks its former holder out on their
+        very next request rather than at logout.
+        """
+        if not request.path.startswith(settings.GEORIVA_ADMIN_PATH_PREFIX):
+            return
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return
+        if request.active_org_role is None:
+            logger.warning(
+                "Rejected %s from %s's admin: not a member",
+                user, request.active_org.slug,
+            )
+            raise PermissionDenied("You are not a member of this organisation.")
 
     @staticmethod
     def _resolve_role(request, organisation):

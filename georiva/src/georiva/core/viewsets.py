@@ -11,6 +11,7 @@ from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
 from georiva.core.models.catalog import Topic
 from georiva.core.views import CatalogIndexView
 from georiva.organisations.access import require_active_org
+from georiva.organisations.scoping import OrgScopedChooserViewSetMixin, OrgScopedViewSetMixin
 
 
 class BoundaryChooserViewSet(ChooserViewSet):
@@ -54,7 +55,7 @@ class CatalogDeleteView(generic.DeleteView):
         return reverse("catalog:index")
 
 
-class CatalogViewSet(ModelViewSet):
+class CatalogViewSet(OrgScopedViewSetMixin, ModelViewSet):
     model = Catalog
     icon = "globe"
     menu_label = _("Catalogs")
@@ -73,7 +74,7 @@ class CatalogViewSet(ModelViewSet):
     delete_view_class = CatalogDeleteView
 
 
-class CatalogChooserViewSet(ChooserViewSet):
+class CatalogChooserViewSet(OrgScopedChooserViewSetMixin, ChooserViewSet):
     model = Catalog
     icon = "globe"
     choose_one_text = "Choose a catalog"
@@ -110,7 +111,7 @@ class CollectionIndexView(generic.IndexView):
         return buttons
 
 
-class CollectionViewSet(ModelViewSet):
+class CollectionViewSet(OrgScopedViewSetMixin, ModelViewSet):
     model = Collection
     icon = "folder-open-inverse"
     add_to_admin_menu = False
@@ -148,7 +149,7 @@ class ItemFilterSet(WagtailFilterSet):
         fields = ["collection"]
 
 
-class ItemViewSet(SnippetViewSet):
+class ItemViewSet(OrgScopedViewSetMixin, SnippetViewSet):
     model = Item
     icon = "snippet"
     exclude_form_fields = ["created_at", "updated_at"]
@@ -156,7 +157,7 @@ class ItemViewSet(SnippetViewSet):
     list_filter = ["collection"]
 
 
-class AssetViewSet(SnippetViewSet):
+class AssetViewSet(OrgScopedViewSetMixin, SnippetViewSet):
     model = Asset
     exclude_form_fields = ["created_at", "updated_at"]
     list_filter = ["format", "variable"]
