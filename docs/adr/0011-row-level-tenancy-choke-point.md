@@ -131,6 +131,7 @@ there would mean inventing a request-like context for code that has none.
   link, but the admin form requires one.
 - Reads on the public plane (STAC, EDR, analysis, dataset pages) are **not**
   covered here; they were #271's subject and reach the same helpers — see
-  ADR 0012. The tile-config endpoint is still outstanding: Titiler calls it over
-  an internal hostname belonging to no organisation, so it gains its org segment
-  with the machine plane (#272).
+  ADR 0012. The tile-config endpoint is the one lookup that cannot resolve its
+  organisation from the Host at all — Titiler calls it over an internal hostname
+  belonging to no organisation — and takes it from an explicit path segment
+  instead; see ADR 0013.

@@ -28,21 +28,26 @@ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 # Django fallback
 # ---------------------------------------------------------------------------
 
-def _fetch_config_from_django(catalog: str, collection: str, variable: str) -> Optional[dict]:
-    """Fetch rendering config from Django internal API on Redis miss."""
-    url = f"{DJANGO_BASE_URL}/api/tile-config/{catalog}/{collection}/{variable}/"
+def _fetch_config_from_django(org: str, catalog: str, collection: str, variable: str) -> Optional[dict]:
+    """Fetch rendering config from Django internal API on Redis miss.
+
+    The org segment is forwarded, not resolved: this service is dialled on an
+    internal container name that belongs to no organisation, so Django cannot
+    work one out from the Host and reads it from the path instead.
+    """
+    url = f"{DJANGO_BASE_URL}/api/tile-config/{org}/{catalog}/{collection}/{variable}/"
     try:
         resp = httpx.get(url, timeout=5.0)
         if resp.status_code == 200:
             return resp.json()
         logger.warning(
-            "Django tile-config returned %d for %s/%s/%s",
-            resp.status_code, catalog, collection, variable,
+            "Django tile-config returned %d for %s/%s/%s/%s",
+            resp.status_code, org, catalog, collection, variable,
         )
     except Exception as e:
         logger.warning(
-            "Django tile-config fallback failed for %s/%s/%s: %s",
-            catalog, collection, variable, e,
+            "Django tile-config fallback failed for %s/%s/%s/%s: %s",
+            org, catalog, collection, variable, e,
         )
     return None
 
@@ -52,6 +57,7 @@ def _fetch_config_from_django(catalog: str, collection: str, variable: str) -> O
 # ---------------------------------------------------------------------------
 
 def build_cog_url(
+        org: str,
         catalog: str,
         collection: str,
         variable: str,
@@ -61,21 +67,27 @@ def build_cog_url(
     """
     Construct the MinIO COG URL from path components.
 
-    Path convention (matches ingestion/service.py:626-640):
-      {catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{variable}_{HHMMSS}.tif
-      {catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{variable}_{HHMMSS}__ref{YYYYMMDDTHHmmss}.tif
+    Path convention (org-first, matching the storage grammar every bucket key
+    follows — see georiva/core/path_resolution.py):
+      {org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{variable}_{HHMMSS}.tif
+      {org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{variable}_{HHMMSS}__ref{YYYYMMDDTHHmmss}.tif
+
+    The org is concatenated, never interpreted: catalog slugs repeat across
+    organisations, so a key missing its leading org segment is ambiguous — but
+    which org a request may ask for is Django's decision, made when it wrote the
+    URL, not this service's.
     """
     date_path = time_dt.strftime("%Y/%m/%d")
     time_str = time_dt.strftime("%H%M%S")
-    
+
     if reftime_dt is not None:
         ref_str = reftime_dt.strftime("%Y%m%dT%H%M%S")
         filename = f"{variable}_{time_str}__ref{ref_str}.tif"
     else:
         filename = f"{variable}_{time_str}.tif"
-    
-    dataset_path = f"{catalog}/{collection}/{variable}/{date_path}/{filename}"
-    
+
+    dataset_path = f"{org}/{catalog}/{collection}/{variable}/{date_path}/{filename}"
+
     if not PATH_RE.match(dataset_path):
         raise HTTPException(status_code=400, detail=f"Invalid constructed path: {dataset_path}")
     
@@ -99,6 +111,7 @@ def parse_iso_datetime(value: str, param_name: str) -> datetime:
 # ---------------------------------------------------------------------------
 
 def SemanticTileConfig(
+        org_slug: Annotated[str, Path(...)],
         catalog_slug: Annotated[str, Path(...)],
         collection_slug: Annotated[str, Path(...)],
         variable_slug: Annotated[str, Path(...)],
@@ -108,18 +121,26 @@ def SemanticTileConfig(
     Resolution order: Redis → Django internal API → HTTP 503.
     FastAPI caches this result per request so colormap and rescale
     dependencies share a single Redis call.
+
+    The Redis key is org-first because catalog slugs are only unique within an
+    organisation: without that segment two institutions running a catalog of the
+    same name would share one entry, and whichever Django warmed last would
+    decide how both render.
     """
-    raw = redis_client.get(f"{PALETTE_KEY_PREFIX}:{catalog_slug}:{collection_slug}:{variable_slug}")
+    address = f"{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
+    key = f"{PALETTE_KEY_PREFIX}:{org_slug}:{catalog_slug}:{collection_slug}:{variable_slug}"
+
+    raw = redis_client.get(key)
     if raw:
-        logger.debug("Redis cache hit: %s/%s/%s", catalog_slug, collection_slug, variable_slug)
+        logger.debug("Redis cache hit: %s", address)
         return json.loads(raw)
-    
-    config = _fetch_config_from_django(catalog_slug, collection_slug, variable_slug)
+
+    config = _fetch_config_from_django(org_slug, catalog_slug, collection_slug, variable_slug)
     if config is not None:
-        logger.debug("Django fallback hit: %s/%s/%s", catalog_slug, collection_slug, variable_slug)
+        logger.debug("Django fallback hit: %s", address)
         return config
-    
-    logger.warning("Tile config unavailable: %s/%s/%s", catalog_slug, collection_slug, variable_slug)
+
+    logger.warning("Tile config unavailable: %s", address)
     raise HTTPException(
         status_code=503,
         detail="Tile config unavailable — Redis cold and Django fallback failed",
@@ -127,6 +148,7 @@ def SemanticTileConfig(
 
 
 def SemanticPathParams(
+        org_slug: Annotated[str, Path(...)],
         catalog_slug: Annotated[str, Path(...)],
         collection_slug: Annotated[str, Path(...)],
         variable_slug: Annotated[str, Path(...)],
@@ -136,7 +158,7 @@ def SemanticPathParams(
     """Resolve the COG URL from semantic path params and time query params."""
     time_dt = parse_iso_datetime(time, "time")
     reftime_dt = parse_iso_datetime(reftime, "reftime") if reftime else None
-    url = build_cog_url(catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
+    url = build_cog_url(org_slug, catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
     logger.debug("Resolved COG URL: %s", url)
     return url
 

@@ -358,8 +358,10 @@ These are the building blocks that all higher-level analysis modules can rely on
 > `BoundaryZonalStats` TimescaleDB hypertable. Levels come from `Collection.boundary_stats_levels` and
 > the `adminboundarymanager` package; a `compute_boundary_stats` command backfills history. These
 > stats are served to the frontend as **vector tiles via Martin** (a generated PostgreSQL function,
-> `create_martin_function`, exposed at `/martin/boundary_stats/{z}/{x}/{y}`). There is no DRF endpoint
-> for zonal stats yet — they are consumed through Martin/DB.
+> `create_martin_function`, exposed at `/martin/boundary_stats/{z}/{x}/{y}`). That function requires
+> `org`, `catalog`, `collection` and `variable` query params — Martin sees no Host, so the
+> organisation travels in the URL Django writes (ADR 0013). There is no DRF endpoint for zonal stats
+> yet — they are consumed through Martin/DB.
 
 ### 6.2 Pluggable Analysis Modules
 

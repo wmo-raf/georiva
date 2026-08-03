@@ -8,9 +8,23 @@ The function joins BoundaryZonalStats with AdminBoundary.geom and returns
 Mapbox Vector Tiles. Martin calls it via:
 
     GET /martin/boundary_stats/{z}/{x}/{y}
-        ?variable=precipitation
+        ?org=kenya-met
+        &catalog=forecast
+        &collection=daily
+        &variable=precipitation
         &time=2026-03-01T00:00:00Z
         &reference_time=2026-03-01T00:00:00Z  (optional, forecasts only)
+
+The org/catalog/collection triple is required and is what pins a tile to one
+organisation's rows. Martin, like Titiler, sees no usable Host and holds no
+tenancy logic: Django emits the URL with the triple already filled in and the
+function simply joins on it, walking variable → collection → catalog →
+organisation. A triple naming nothing — an unknown organisation, or a catalog
+belonging to a different one — matches no rows and yields an empty tile.
+
+Requiring the triple also settles a bug that predates tenancy: a bare variable
+slug is ambiguous across catalogs, so a map asking for `precipitation` could be
+served another collection's statistics under its own palette.
 
 Usage
 -----
@@ -29,7 +43,9 @@ from django.db import connection
 # Table names derived from Django app labels:
 #   georiva_analysis_zonal_stats  → georiva_analysis_zonal_stats_boundaryzonalstats
 #   adminboundarymanager          → adminboundarymanager_adminboundary
-#   georivacore                   → georivacore_variable, georivacore_item
+#   georivacore                   → georivacore_variable, georivacore_item,
+#                                   georivacore_collection, georivacore_catalog
+#   organisations                 → organisations_organisation
 
 _CREATE_FUNCTION_SQL = """
 CREATE OR REPLACE FUNCTION georiva_boundary_stats(
@@ -45,6 +61,9 @@ PARALLEL SAFE
 AS $func$
 DECLARE
     tile        bytea;
+    org_slug    text        := query_params->>'org';
+    cat_slug    text        := query_params->>'catalog';
+    coll_slug   text        := query_params->>'collection';
     var_slug    text        := query_params->>'variable';
     valid_time  timestamptz := NULLIF(query_params->>'time', '')::timestamptz;
     ref_time    timestamptz := NULLIF(query_params->>'reference_time', '')::timestamptz;
@@ -52,6 +71,22 @@ DECLARE
     tile_env    geometry    := ST_TileEnvelope(z, x, y);
     tile_bbox   geometry    := ST_Transform(tile_env, 4326);
 BEGIN
+    -- The org/catalog/collection triple is what makes the variable slug
+    -- unambiguous: slugs repeat across catalogs and catalogs repeat across
+    -- organisations. Missing is an error; wrong is simply an empty tile, since
+    -- a caller must not learn from a tile whether another organisation exists.
+    IF org_slug IS NULL OR org_slug = '' THEN
+        RAISE EXCEPTION 'org query parameter is required';
+    END IF;
+
+    IF cat_slug IS NULL OR cat_slug = '' THEN
+        RAISE EXCEPTION 'catalog query parameter is required';
+    END IF;
+
+    IF coll_slug IS NULL OR coll_slug = '' THEN
+        RAISE EXCEPTION 'collection query parameter is required';
+    END IF;
+
     IF var_slug IS NULL OR var_slug = '' THEN
         RAISE EXCEPTION 'variable query parameter is required';
     END IF;
@@ -99,8 +134,17 @@ BEGIN
             ON i.id = s.item_id
         INNER JOIN georivacore_variable v
             ON v.id = s.variable_id
+        INNER JOIN georivacore_collection c
+            ON c.id = v.collection_id
+        INNER JOIN georivacore_catalog cat
+            ON cat.id = c.catalog_id
+        INNER JOIN organisations_organisation org
+            ON org.id = cat.organisation_id
         WHERE b.geom && tile_bbox
           AND b.level = admin_level
+          AND org.slug = org_slug
+          AND cat.slug = cat_slug
+          AND c.slug = coll_slug
           AND v.slug = var_slug
           AND s.time = valid_time
           AND (
@@ -153,10 +197,25 @@ DO $do$
 BEGIN
     EXECUTE 'COMMENT ON FUNCTION georiva_boundary_stats(integer, integer, integer, json) IS $tj$' || $$
     {
-        "description": "Boundary zonal statistics as vector tiles. Required query parameters: variable (string), time (ISO 8601 datetime), admin_level (integer). Optional query parameter: reference_time (ISO 8601 datetime). If reference_time is omitted and matching rows have reference_time values, the latest available reference_time is used.",
+        "description": "Boundary zonal statistics as vector tiles. Required query parameters: org (string), catalog (string), collection (string), variable (string), time (ISO 8601 datetime), admin_level (integer). Optional query parameter: reference_time (ISO 8601 datetime). If reference_time is omitted and matching rows have reference_time values, the latest available reference_time is used. The org/catalog/collection triple identifies the variable unambiguously; a triple naming no such variable yields an empty tile.",
         "attribution": "GeoRiva",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "parameters": {
+            "org": {
+                "type": "string",
+                "required": true,
+                "description": "Slug of the organisation owning the catalog."
+            },
+            "catalog": {
+                "type": "string",
+                "required": true,
+                "description": "Catalog slug, unique within the organisation."
+            },
+            "collection": {
+                "type": "string",
+                "required": true,
+                "description": "Collection slug, unique within the catalog."
+            },
             "variable": {
                 "type": "string",
                 "required": true,
@@ -244,7 +303,8 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             "\nFunction created. Martin tile URL:\n"
             "  /martin/boundary_stats/{z}/{x}/{y}"
-            "?variable=<slug>&time=<iso>&reference_time=<iso>\n\n"
+            "?org=<slug>&catalog=<slug>&collection=<slug>"
+            "&variable=<slug>&admin_level=<int>&time=<iso>&reference_time=<iso>\n\n"
             "Reload Martin to pick up the new function source:\n"
             "  docker compose restart martin\n"
             "  # or POST http://martin:3000/reload"

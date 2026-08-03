@@ -113,7 +113,9 @@ them to an organisation would buy nothing (PRD #265, story 26).
 - The portal template tags (`get_latest_catalogs`, `get_landing_stats`, …) take
   the template context so they can scope. A tag rendered without a request now
   raises instead of listing the instance.
-- Titiler's `tile-config` endpoint is **not** covered. It is called
-  server-to-server over an internal hostname that belongs to no organisation, so
-  the Host cannot name one; it gains an explicit org segment with the machine
-  plane (#272) and remains a known gap until then.
+- Titiler's `tile-config` endpoint is **not** covered by the host-first rule. It
+  is called server-to-server over an internal hostname that belongs to no
+  organisation, so the Host cannot name one. It takes an explicit org path
+  segment instead — the one place on the instance where a path names the tenant,
+  and for the one reason that justifies it: there is no Host to disagree with.
+  See ADR 0013.

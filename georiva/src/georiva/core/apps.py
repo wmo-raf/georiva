@@ -16,7 +16,7 @@ def on_palette_save(sender, instance, **kwargs):
     for variable in (
             instance.variable_set
                     .filter(is_active=True)
-                    .select_related('collection__catalog', 'palette')
+                    .select_related('collection__catalog__organisation', 'palette')
                     .prefetch_related('palette__stops')
     ):
         warm_variable(variable)
