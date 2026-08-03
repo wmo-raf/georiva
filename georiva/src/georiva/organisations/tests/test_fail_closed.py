@@ -66,6 +66,20 @@ class Undeclared(models.Model):
         app_label = "organisations"
 
 
+def build_org_page(organisation, *, name):
+    """A page in the organisation's portal, named after it like everything else.
+
+    Pages are org-owned through the Site → root-page link rather than an FK, so
+    the sweeps reach them the same way they reach everything else: by putting
+    this page's id into every admin URL that names a page.
+    """
+    from georiva.pages.home.models import HomePage
+
+    page = HomePage(title=name, slug=SHARED_SLUG, hero_heading=name)
+    organisation.site.root_page.add_child(instance=page)
+    return page
+
+
 def build_org_tree(organisation, *, name):
     """One organisation's whole data tree, down to an asset and an upload config."""
     catalog = Catalog.objects.create(
@@ -110,6 +124,7 @@ def build_org_tree(organisation, *, name):
         "config": config,
         "config_variable": config_variable,
         "session": session,
+        "page": build_org_page(organisation, name=name),
     }
 
 
@@ -296,6 +311,10 @@ class AdminUrlSweepTests(TestCase):
             "session_id": tree["session"].pk,
             "var": tree["config_variable"].pk,
             "var_pk": tree["config_variable"].pk,
+            # Matches page_id, parent_page_id and page_to_move_id by substring;
+            # destination_id names a page without saying so, so it is listed too.
+            "page": tree["page"].pk,
+            "destination_id": tree["page"].pk,
         }
 
     def _resolve_id(self, name, prefix, pks):
@@ -339,6 +358,11 @@ class AdminUrlSweepTests(TestCase):
                 url = re.sub(r"<[^>]+>", str(pk), url, count=1)
             urls.append("/" + url)
         return urls
+
+    def test_the_sweep_reaches_the_page_admin(self):
+        """Pages are the one org-owned thing with no FK, so prove they are swept."""
+        page_urls = [url for url in self._foreign_admin_urls() if url.startswith("/admin/pages/")]
+        self.assertGreater(len(page_urls), 5)
 
     def test_no_admin_url_serves_another_organisations_row(self):
         checked = 0

@@ -139,6 +139,11 @@ Defined in `api/urls.py`:
   Martin are gated at the proxy instead, by the nginx `auth_request` into `core/tile_auth_view.py` (ADR 0015) —
   never add tenancy logic to either tile server. The one exception is `core/tile_config_view.py`: Titiler forwards
   no credential on that callback, so there is nobody to ask and it stays `public`-only
+- **Tenancy declarations**: every model says where it stands via `ORGANISATION_LOOKUP` (an ORM path, or one of
+  `SHARED_REFERENCE_DATA` / `ORGANISATION_SELF` / `NOT_ORM_SCOPABLE`); a model that declares nothing cannot be
+  scoped and raises. `ORGANISATION_GLOBAL_TIER` beside a nullable path means null = the instance-wide tier — read
+  by every org, written only by the instance admin (ADR 0011). Wagtail pages are org-owned through the Site →
+  root-page link, scoped by `organisations/pages.py` rather than the queryset helpers (ADR 0016)
 - **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
   — the first segment of every key on every bucket is the owning organisation's slug
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no

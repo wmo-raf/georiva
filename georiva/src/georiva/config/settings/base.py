@@ -172,6 +172,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # After authentication: the active organisation's role depends on request.user.
     "georiva.organisations.middleware.OrganisationMiddleware",
+    # After that: page-tree scoping needs the organisation it resolved.
+    "georiva.organisations.pages.OrgPageTreeMiddleware",
     "wagtail.contrib.redirects.middleware.RedirectMiddleware",
 ]
 

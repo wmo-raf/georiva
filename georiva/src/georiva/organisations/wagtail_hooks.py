@@ -4,6 +4,7 @@ from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 
 from .access import is_org_admin
+from .pages import scope_pages
 from .views import (
     organisation_member_add,
     organisation_member_edit,
@@ -29,6 +30,22 @@ def register_organisation_urls():
         path("org-members/<int:pk>/remove/", organisation_member_remove,
              name="organisation_member_remove"),
     ]
+
+
+@hooks.register("construct_explorer_page_queryset")
+def scope_explorer_to_this_organisation(parent_page, pages, request):
+    """The page explorer, and the sidebar's page browser through the admin API.
+
+    Both run every listing through this hook, so the explorer started at the tree
+    root — where a superuser lands, and where every organisation's root sits side
+    by side — lists only the root of the organisation whose host was dialled.
+    """
+    return scope_pages(request, pages)
+
+
+@hooks.register("construct_page_chooser_queryset")
+def scope_page_chooser_to_this_organisation(pages, request):
+    return scope_pages(request, pages)
 
 
 class OrgAdminMenuItem(MenuItem):

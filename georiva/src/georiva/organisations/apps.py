@@ -42,5 +42,7 @@ class OrganisationsConfig(AppConfig):
 
     def ready(self):
         from . import signals  # noqa: F401  (registers the membership receiver)
+        from .pages import scope_page_filters
 
         post_migrate.connect(bootstrap_on_migrate, sender=self)
+        scope_page_filters()

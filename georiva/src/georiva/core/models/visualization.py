@@ -3,7 +3,6 @@ from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, InlinePanel
 from wagtail.models import Orderable
-from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 
 class ColorPalette(ClusterableModel):
@@ -11,14 +10,29 @@ class ColorPalette(ClusterableModel):
     Palette definition: numeric stops + hex colors.
     At runtime we convert hex -> [r,g,b] or [r,g,b,a] for WeatherLayers.
 
-    Shared reference data for now: the global tier every organisation reads.
-    Per-org palette overrides are a separate, later decision (#269).
+    Global-with-org-overrides (decision #269): a palette with no organisation is
+    the instance-wide tier every organisation draws on and only the instance
+    admin edits; a palette with one belongs to that institution alone. Both tiers
+    are offered wherever a palette is chosen, which is the point — an operator
+    reuses the shipped rainfall ramp and adds their own beside it.
     """
 
-    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
+    ORGANISATION_LOOKUP = "organisation"
+    ORGANISATION_GLOBAL_TIER = True
 
+    organisation = models.ForeignKey(
+        'organisations.Organisation',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='color_palettes',
+        help_text=(
+            "The organisation this palette belongs to. Left empty, it is part of "
+            "the instance-wide palette library every organisation can use."
+        ),
+    )
     name = models.CharField(max_length=255)
-    
+
     class PaletteType(models.TextChoices):
         SEQUENTIAL = 'sequential', 'Sequential'
         DIVERGING = 'diverging', 'Diverging'
@@ -43,10 +57,33 @@ class ColorPalette(ClusterableModel):
         ordering = ['name']
         verbose_name = "Color Palette"
         verbose_name_plural = "Color Palettes"
+        constraints = [
+            # Names are how operators tell palettes apart in a chooser that mixes
+            # both tiers, so a name is unique within its tier — while different
+            # organisations may of course each have a "Rainfall". Two constraints
+            # because the first cannot cover the instance-wide tier: Postgres
+            # treats NULLs as distinct, so an unqualified pair would let any
+            # number of ownerless "Rainfall"s through.
+            models.UniqueConstraint(
+                fields=['organisation', 'name'],
+                name='unique_palette_name_per_organisation',
+            ),
+            models.UniqueConstraint(
+                fields=['name'],
+                condition=models.Q(organisation__isnull=True),
+                name='unique_global_palette_name',
+            ),
+        ]
     
     def __str__(self):
         return self.name
-    
+
+    def owner_label(self):
+        """Which tier this palette is in, for a listing that shows both."""
+        return self.organisation.name if self.organisation_id else "Instance-wide"
+
+    owner_label.short_description = "Owner"
+
     # -------- runtime conversion helpers --------
     
     @staticmethod
@@ -98,7 +135,10 @@ class ColorPalette(ClusterableModel):
 
 
 class PaletteStop(Orderable):
-    ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
+    # Owned by whoever owns the palette — including nobody, for the instance-wide
+    # tier. See ColorPalette.
+    ORGANISATION_LOOKUP = "palette__organisation"
+    ORGANISATION_GLOBAL_TIER = True
 
     palette = ParentalKey(ColorPalette, related_name='stops', on_delete=models.CASCADE)
     value = models.FloatField(help_text="Numeric value at this stop (e.g. 11.5749)")

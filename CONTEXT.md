@@ -392,10 +392,31 @@ think about tenancy.
 _Avoid_: default org, root org, main tenant
 
 **Shared reference data**:
-Instance-global records that no Organisation owns and every Organisation reads: topics, administrative boundaries,
-and the global tier of color palettes. Curated by the instance admin; deliberately exempt from org scoping (an
-unscoped chooser over reference data is by design, not a missed guard).
+Instance-global records that no Organisation owns and every Organisation reads: topics, units, and administrative
+boundaries (with the zonal-stats geometries beneath them). Curated by the instance admin — `Topic`'s admin is
+superuser-only — and deliberately exempt from org scoping: an unscoped chooser over reference data is by design, not
+a missed guard. Boundaries are the clearest case for the exemption: a regional centre clips against several
+countries, and the model is a third party's, so per-org curation (if ever needed) would be a mapping table, not an
+FK on someone else's model.
 _Avoid_: system data, common data
+
+**Global tier**:
+The ownerless rows of a model that *is* org-owned — a nullable organisation FK where null means "the instance's,
+readable by every Organisation and writable only by the instance admin". Colour palettes are the case: an
+institution draws on the shipped library and adds its own beside it, and a chooser offers both tiers together.
+Declared by `ORGANISATION_GLOBAL_TIER` alongside the usual `ORGANISATION_LOOKUP`, which is what makes reads widen to
+include the ownerless rows while writes stay narrow. Distinct from **Shared reference data**, which no organisation
+can own at all.
+_Avoid_: default palette, system palette, public row
+
+**Org page tree**:
+The portal an Organisation authors, being everything under the root page of its Wagtail Site. Pages are org-owned
+through that link rather than through a field, so their scoping is a tree question and not an FK filter: on an
+organisation's host the explorer, the page chooser, page search and every page-id admin URL are confined to its own
+root. Wagtail's per-org page-permission group is the capability half of this; the host scoping is the tenancy half,
+and it is what a user who belongs to two institutions — or a superuser, who effectively belongs to all of them —
+runs into.
+_Avoid_: site tree (ambiguous with Wagtail Site), portal pages
 
 **Org-owned model**:
 A model whose rows belong to exactly one Organisation, reached through the FK chain rooted at `Catalog` rather than

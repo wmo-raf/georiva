@@ -26,6 +26,7 @@ from django.db.models import QuerySet
 from .access import (
     is_org_owned,
     require_org_object,
+    require_writable_org_object,
     scope_form_fields,
     scope_or_pass,
     scoped_queryset,
@@ -33,6 +34,26 @@ from .access import (
 
 #: Suffix of every attribute on a viewset naming a view class.
 VIEW_CLASS_SUFFIX = "_view_class"
+
+#: The view classes that only ever read. Everything else a viewset exposes is
+#: treated as a write, so a view added by a Wagtail upgrade lands on the stricter
+#: side by default.
+#:
+#: The distinction is invisible for everything an organisation owns outright —
+#: both mixins scope to the same rows. It decides one thing: whether the global
+#: tier of a model that has one (colour palettes) is readable here but not
+#: editable. See ``access.require_writable_org_object``.
+READ_ONLY_VIEW_CLASS_ATTRS = frozenset({
+    "index_view_class",
+    "index_results_view_class",
+    "inspect_view_class",
+    "history_view_class",
+    "usage_view_class",
+    "revisions_compare_view_class",
+    "revisions_view_class",
+    "workflow_history_view_class",
+    "workflow_history_detail_view_class",
+})
 
 
 class OrgScopedViewMixin:
@@ -91,12 +112,27 @@ class OrgScopedViewMixin:
         obj = super().get_object(*args, **kwargs)
         if obj is None or not is_org_owned(type(obj)):
             return obj
+        return self.require_object(obj)
+
+    def require_object(self, obj):
+        """The check a resolved object must pass on this kind of view."""
         return require_org_object(self.request, obj)
 
     # -- forms -------------------------------------------------------------
 
     def get_form(self, *args, **kwargs):
         return scope_form_fields(self.request, super().get_form(*args, **kwargs))
+
+
+class OrgScopedWriteViewMixin(OrgScopedViewMixin):
+    """The same, for a view that changes what it resolves.
+
+    Only the global tier tells the two apart: an organisation reads instance-wide
+    reference data and does not edit it.
+    """
+
+    def require_object(self, obj):
+        return require_writable_org_object(self.request, obj)
 
 
 class OrgScopedChooseMixin:
@@ -131,6 +167,14 @@ def view_class_attrs(viewset):
     )
 
 
+def mixin_for(attr):
+    """The scoping mixin a view class named ``attr`` gets — read, or write."""
+    return (
+        OrgScopedViewMixin if attr in READ_ONLY_VIEW_CLASS_ATTRS
+        else OrgScopedWriteViewMixin
+    )
+
+
 def _subclass(view_class, mixin):
     return type(f"OrgScoped{view_class.__name__}", (mixin, view_class), {})
 
@@ -157,7 +201,7 @@ class OrgScopedViewSetMixinBase:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         wanted = self.SCOPED_VIEW_CLASSES or {
-            attr: OrgScopedViewMixin for attr in view_class_attrs(self)
+            attr: mixin_for(attr) for attr in view_class_attrs(self)
         }
         for attr, mixin in wanted.items():
             # Read the raw attribute rather than `getattr(self, …)`: some view
@@ -210,5 +254,5 @@ class OrgScopedChooserViewSetMixin(OrgScopedViewSetMixinBase):
         "choose_results_view_class": OrgScopedChooseMixin,
         "chosen_view_class": OrgScopedChosenMixin,
         "chosen_multiple_view_class": OrgScopedChosenMultipleMixin,
-        "create_view_class": OrgScopedViewMixin,
+        "create_view_class": OrgScopedWriteViewMixin,
     }
