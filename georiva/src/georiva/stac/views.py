@@ -72,19 +72,20 @@ def _org_catalogs(request: Request):
 
 
 def _org_variables(request: Request):
-    """This organisation's variables in collections it will serve."""
+    """This organisation's variables in collections it will serve this caller."""
     return scoped_queryset(
         request,
         Variable.objects.filter(
-            is_active=True, collection__in=Collection.objects.public(),
+            is_active=True, collection__in=Collection.objects.visible_to(request),
         ),
     )
 
 
 def _org_items(request: Request):
-    """This organisation's items in collections it will serve."""
+    """This organisation's items in collections it will serve this caller."""
     return scoped_queryset(
-        request, Item.objects.filter(collection__in=Collection.objects.public()),
+        request,
+        Item.objects.filter(collection__in=Collection.objects.visible_to(request)),
     )
 
 

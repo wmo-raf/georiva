@@ -52,6 +52,7 @@ georiva/src/georiva/          # Main Django application
 ├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry)
 ├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk) manifests over COG assets
 ├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)
+├── accounts/                 # Per-user identity: API keys (grv_…) + DRF auth + account panel
 ├── pages/                    # Wagtail CMS pages (home, datasets)
 └── utils/                    # Shared utilities
 ```
@@ -132,6 +133,11 @@ Defined in `api/urls.py`:
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
+- **Serving visibility**: never filter `visibility` by hand — go through `Collection.objects.visible_to(request)`
+  (or `visible_visibilities(request)` where you need the tiers). `public` → anyone, `private` → members of the
+  host's org, `internal` → nobody. Membership is `organisations.access.may_see_private` (ADR 0014). The one
+  exception is `core/tile_config_view.py`: Titiler forwards no credential, so there is nobody to ask and it stays
+  `public`-only until the nginx `auth_request` gateway (#274)
 - **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
   — the first segment of every key on every bucket is the owning organisation's slug
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no

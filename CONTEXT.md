@@ -19,14 +19,14 @@ _Avoid_: Raw (as a tier name), Raw tier
 Product-grained, **served** STAC data — the existing `core` `Collection`/`Item`/`Asset`. "Served" always means
 Published. A published `Item` is a TimescaleDB hypertable (one row per timestep). Reached either directly
 (Direct → Published, for ready products needing only inline normalization) or via Derivation from Staging.
-A Published `Collection` carries a `visibility` (`public | internal`); serving exposes only `public`.
+A Published `Collection` carries a `visibility` (`public | private | internal`) — see **Visibility tier**.
 _Avoid_: Processed tier, Analysis-ready (as a tier name — those are MinIO buckets, not tiers)
 
 **Intermediate product**:
 A derived product that is itself an input to a further Derivation (e.g. an anomaly feeding the Combined Drought
 Indicator). Lives in **Published** as a normal `core.Item`/`Collection` with `visibility=internal` — **not** in
 Staging (it is product-shaped and derived, not raw acquisition). Internal collections are read freely by the engine
-but never served.
+but never served — on any plane, to anyone, signed in or not.
 _Avoid_: pre-final artifact, internal staging
 
 ### Derivation & lineage
@@ -404,10 +404,31 @@ an organisation FK of its own. Says so by declaring `ORGANISATION_LOOKUP` — th
 row, so an undeclared model is a loud error instead of a quiet leak.
 _Avoid_: tenant model, scoped model, owned model
 
+**Visibility tier**:
+What audience a Published `Collection` is served to, and the only thing that decides it: `public` to anyone,
+`private` to authenticated members of the owning Organisation, `internal` to nobody — a derivation intermediate,
+read by the engine as an input and served on no plane. `private` is *not* a smaller `public` and `internal` is not a
+smaller `private`; the three are separate audiences, so widening one never publishes another by accident. Defined
+once as `Collection.objects.visible_to(request)` and reached by every serving surface through it. A caller who may
+not see a `private` collection is not told it exists: it is absent from listings and search, and a fetch by name is
+the same 404 a misspelling gets. See ADR 0014.
+_Avoid_: private as "restricted public", access level, permission level
+
+**API key**:
+A per-user credential (`grv_`-prefixed, hash-only at rest, shown once at creation) that lets a script — QGIS,
+`pystac-client`, a notebook, a cron job — read what its holder can already see, without a browser session. Named,
+individually revocable, with an optional expiry and a `last_used_at`. Carries **no** Organisation: it establishes
+*who* is asking and nothing else, and what that reaches is then decided per request by the access choke point
+against the host's Organisation. Presented as `Authorization: Bearer grv_…`, or as `?api_key=grv_…` for clients that
+can only take a URL. Lives in the `accounts` app, because it belongs to a person rather than to an institution.
+_Avoid_: token, service account, org key, scoped key
+
 **Access choke point**:
 `organisations/access.py` — the single module every surface goes through to reach tenant rows, admin and public
 plane alike (`scoped_queryset`, `get_org_object_or_404`, `require_org_object`, `require_org_member`,
-`require_org_admin`). One implementation so there is one place to audit, and one that guard tests walking the admin
+`require_org_admin`, `may_see_private`). Membership itself is `resolve_org_role`, read live from the database and
+shared by the middleware and the serving planes — the latter cannot use the middleware's answer, because an API-key
+request is still anonymous when the middleware runs. One implementation so there is one place to audit, and one that guard tests walking the admin
 and the public API can hold the instance to. Distinct from Wagtail's model permissions, which stay the *capability*
 layer: what a user may do, not whose rows they may do it to.
 _Avoid_: permission manager chain, scoping middleware, tenancy filter

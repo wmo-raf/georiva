@@ -1,0 +1,33 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Revoke API key" %} — {{ key.name }}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .gr-revoke-warning {
+        color: var(--w-color-text-label);
+        max-width: 46em;
+        margin-bottom: 1.5em;
+    }
+    .gr-revoke-prefix { font-family: monospace; }
+    .gr-revoke-actions { display: flex; gap: 1em; align-items: center; }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<p class="gr-revoke-warning">
+    {% blocktrans with name=key.name prefix=key.prefix %}
+        Anything still presenting <span class="gr-revoke-prefix">{{ prefix }}…</span> ("{{ name }}")
+        will stop working immediately. This cannot be undone — a replacement key is a new
+        key with a new secret.
+    {% endblocktrans %}
+</p>
+
+<form method="post" class="gr-revoke-actions">
+    {% csrf_token %}
+    <button type="submit" class="button no">{% trans "Revoke this key" %}</button>
+    <a href="{% url 'api_keys' %}">{% trans "Cancel" %}</a>
+</form>
+{% endblock %}

@@ -21,13 +21,16 @@ SHARED_REFERENCE_DATA = "shared-reference-data"
 #: Scoping matches on identity rather than following a path.
 ORGANISATION_SELF = "self"
 
-#: Declared by a model that belongs to an organisation but has no ORM path to
-#: it: pipeline bookkeeping keyed by a storage path (``FileIngestion`` and its
-#: jobs), records reached only through an already-scoped parent
-#: (``DerivationRun``), and Wagtail pages, which are org-owned through the
-#: Site → root-page link rather than a field (decision #261). Scoping *refuses*
-#: these — loudly — so putting one on a scoped surface is a decision somebody
-#: has to make explicitly rather than a filter that quietly does nothing.
+#: Declared by a model that no ORM filter on an organisation can narrow, for one
+#: of two reasons. Either it belongs to an organisation but has no path to one —
+#: pipeline bookkeeping keyed by a storage path (``FileIngestion`` and its jobs),
+#: records reached only through an already-scoped parent (``DerivationRun``), and
+#: Wagtail pages, org-owned through the Site → root-page link rather than a field
+#: (decision #261) — or it belongs to a *person* rather than to an institution
+#: (``ApiKey``), whose holder may be a member of several and whose credential is
+#: nobody's tenant data. Scoping *refuses* these — loudly — so putting one on a
+#: scoped surface is a decision somebody has to make explicitly rather than a
+#: filter that quietly does nothing.
 NOT_ORM_SCOPABLE = "not-orm-scopable"
 
 #: Every declaration that is a decision rather than an ORM path.

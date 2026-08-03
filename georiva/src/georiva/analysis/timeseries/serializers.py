@@ -23,6 +23,13 @@ class VariablePathField(serializers.CharField):
     "not found" rather than that institution's numbers. A serializer built
     without a request in its context therefore cannot resolve anything at all:
     that is the fail-closed half, and it is why the request is not optional.
+
+    Resolution is also where visibility is enforced, and submission is the only
+    place it can be. ``/api/jobs/`` is org-agnostic by decision (ADR 0012) and
+    its ids are sequential integers, so nothing downstream of a created job
+    re-checks who may see what. Anything this field lets through is therefore
+    through for good — which is why the same tiers the serving planes honour are
+    honoured here, while the caller is still identified (#273).
     """
 
     def to_internal_value(self, data: str):
@@ -35,7 +42,7 @@ class VariablePathField(serializers.CharField):
             )
         catalog_slug, collection_slug, variable_slug = parts
 
-        from georiva.core.models import Variable
+        from georiva.core.models import Collection, Variable
         from georiva.organisations.access import scoped_queryset
 
         request = self.context.get("request")
@@ -45,7 +52,13 @@ class VariablePathField(serializers.CharField):
                 "the organisation from."
             )
 
-        variables = scoped_queryset(request, Variable.objects.filter(is_active=True))
+        variables = scoped_queryset(
+            request,
+            Variable.objects.filter(
+                is_active=True,
+                collection__in=Collection.objects.visible_to(request),
+            ),
+        )
         try:
             return variables.select_related(
                 "collection",

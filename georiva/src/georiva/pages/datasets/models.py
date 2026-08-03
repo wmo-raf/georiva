@@ -12,7 +12,7 @@ from georiva.core.machine_plane import (
     martin_boundary_stats_url,
     org_slug_of,
 )
-from georiva.core.models import Catalog, Collection, Item, Asset
+from georiva.core.models import Catalog, Collection, Item, Asset, visible_visibilities
 from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
 from georiva.organisations.access import (
@@ -482,9 +482,16 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         )
 
     def _org_collection(self, request, catalog, collection_slug):
-        """A public collection of ``catalog``, re-checked against this host's org."""
+        """A servable collection of ``catalog``, re-checked against this host's org.
+
+        Private collections are here for a signed-in member and absent for
+        everybody else, so a portal visitor who may not see one gets the same
+        404 they would get for a collection that does not exist (#273).
+        """
         return get_org_object_or_404(
-            request, Collection.objects.public().filter(catalog=catalog), slug=collection_slug,
+            request,
+            Collection.objects.visible_to(request).filter(catalog=catalog),
+            slug=collection_slug,
         )
 
     def _base_catalogs_qs(self, request):
@@ -495,7 +502,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .annotate(
                 collection_count=Count('collections', filter=Q(
                     collections__is_active=True,
-                    collections__visibility=Collection.Visibility.PUBLIC,
+                    collections__visibility__in=visible_visibilities(request),
                 )),
                 latest_updated=Max('collections__time_end'),
             )
@@ -523,7 +530,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             qs = qs.filter(
                 collections__time_resolution=filters['resolution'],
                 collections__is_active=True,
-                collections__visibility=Collection.Visibility.PUBLIC,
+                collections__visibility__in=visible_visibilities(request),
             ).distinct()
 
         return qs, filters
@@ -556,7 +563,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
     def _base_collections_qs(self, request):
         return (
-            scoped_queryset(request, Collection.objects.public())
+            scoped_queryset(request, Collection.objects.visible_to(request))
             .select_related('catalog')
             .prefetch_related('catalog__topics', 'variables')
             .order_by('catalog__name', 'sort_order', 'name')

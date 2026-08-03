@@ -82,6 +82,7 @@ INSTALLED_APPS = [
     "georiva.visualization",
     "georiva.sources",
     "georiva.organisations",
+    "georiva.accounts",
 
     # pages
     "georiva.pages.home",
@@ -416,6 +417,20 @@ GEORIVA_ADMIN_PATH_PREFIX = "/admin/"
 # on the base domain, so a single-institution install needs no tenancy ceremony.
 GEORIVA_BOOTSTRAP_CENTRAL_ORG = env.bool("GEORIVA_BOOTSTRAP_CENTRAL_ORG", default=True)
 GEORIVA_CENTRAL_ORG_SLUG = env.str("GEORIVA_CENTRAL_ORG_SLUG", default="central")
+
+# The two ways a caller identifies itself on the data planes: an API key for
+# scripts (QGIS, notebooks, cron) and a session cookie for the portal. Both only
+# establish *who* is asking — what they may see is decided per request by
+# organisations.access, so the order here is about precedence, not privilege: an
+# explicitly presented key wins over whatever cookie the browser happened to
+# send. DRF's BasicAuthentication default is deliberately dropped; passwords over
+# the API were never a supported way in.
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "georiva.accounts.authentication.ApiKeyAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+}
 
 # Tests run against a host that must belong to an organisation, so the runner
 # points GEORIVA_BASE_DOMAIN at "testserver" before building the test database.

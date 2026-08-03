@@ -12,7 +12,10 @@ def collection_available_dates(request, catalog_slug, collection_slug):
 
     The catalog is resolved within the organisation this host serves: the picker
     on one institution's portal never offers another institution's dates, even
-    where the two share a catalog slug.
+    where the two share a catalog slug. It resolves the collection through the
+    same seam the page around it does, so a member browsing a private dataset
+    gets a working picker and everybody else gets the 404 the page itself gave
+    them (#273).
 
     Query params:
         level    — 'years' | 'months' | 'days' | 'hours'
@@ -32,7 +35,7 @@ def collection_available_dates(request, catalog_slug, collection_slug):
     )
     collection = get_org_object_or_404(
         request,
-        Collection.objects.public().filter(catalog=catalog),
+        Collection.objects.visible_to(request).filter(catalog=catalog),
         slug=collection_slug,
     )
     
