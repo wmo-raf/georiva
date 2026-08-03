@@ -405,9 +405,18 @@ row, so an undeclared model is a loud error instead of a quiet leak.
 _Avoid_: tenant model, scoped model, owned model
 
 **Access choke point**:
-`organisations/access.py` — the single module every admin surface goes through to reach tenant rows
-(`scoped_queryset`, `get_org_object_or_404`, `require_org_object`, `require_org_member`, `require_org_admin`). One
-implementation so there is one place to audit, and one that a guard test walking the whole admin can hold the
-instance to. Distinct from Wagtail's model permissions, which stay the *capability* layer: what a user may do, not
-whose rows they may do it to.
+`organisations/access.py` — the single module every surface goes through to reach tenant rows, admin and public
+plane alike (`scoped_queryset`, `get_org_object_or_404`, `require_org_object`, `require_org_member`,
+`require_org_admin`). One implementation so there is one place to audit, and one that guard tests walking the admin
+and the public API can hold the instance to. Distinct from Wagtail's model permissions, which stay the *capability*
+layer: what a user may do, not whose rows they may do it to.
 _Avoid_: permission manager chain, scoping middleware, tenancy filter
+
+**Per-org API root**:
+One Organisation's whole public service, served at its own host: `<org-host>/api/stac/`, `/api/edr/`,
+`/api/analysis/`, `/api/datasets/`. Self-contained — conformance, search, queryables and every self/root/child link
+resolve on the host they were requested from, and no root ever names or reaches another Organisation's rows. Ids
+stay bare (`Catalog.slug`, `Collection.slug`) and may collide across Organisations; the Organisation lives in the
+hostname, never in a path segment or query parameter. `/api/jobs/` is the deliberate exception: mounted on every
+host and org-agnostic, guarded by unguessable job ids rather than tenancy.
+_Avoid_: org path prefix, namespaced STAC id, tenant-qualified id

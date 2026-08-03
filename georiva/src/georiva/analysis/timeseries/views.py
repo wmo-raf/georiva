@@ -8,6 +8,11 @@ Area   — POST /api/analysis/timeseries/area/
 Both endpoints resolve the variable from the natural key
 ``catalog_slug/collection_slug/variable_slug`` and delegate
 extraction to TimeseriesService.
+
+The key carries no organisation: like STAC and EDR, each host is one
+organisation's whole analysis root (#271). Both views therefore hand the request
+to their serializer, which is where the variable is resolved *within* the
+organisation the host resolved to.
 """
 
 from __future__ import annotations
@@ -53,7 +58,9 @@ class PointTimeseriesView(APIView):
     """
     
     def get(self, request: Request) -> Response:
-        serializer = PointRequestSerializer(data=request.query_params)
+        serializer = PointRequestSerializer(
+            data=request.query_params, context={"request": request},
+        )
         if not serializer.is_valid():
             return Response(
                 serializer.errors,
@@ -126,7 +133,9 @@ class AreaTimeseriesView(APIView):
     """
     
     def post(self, request: Request) -> Response:
-        serializer = AreaRequestSerializer(data=request.data)
+        serializer = AreaRequestSerializer(
+            data=request.data, context={"request": request},
+        )
         if not serializer.is_valid():
             return Response(
                 serializer.errors,

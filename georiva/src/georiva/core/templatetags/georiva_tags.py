@@ -6,15 +6,60 @@ from django.conf import settings
 
 from georiva import __version__
 from georiva.core.models import Catalog, Item, Collection
+from georiva.core.topics import topics_of
+from georiva.organisations.access import scoped_queryset
 
 register = template.Library()
 
 
-@register.simple_tag
-def datasets_index_url():
-    """Return the URL of the DatasetsIndexPage, or '/datasets/' as fallback."""
+def require_request(context):
+    """The request a portal tag reads its organisation from.
+
+    Every tag using this lists tenant rows, and a portal shows exactly one
+    organisation's — the one its hostname resolved to. Rendering without a
+    request would mean guessing, and guessing wrong means one institution's
+    portal advertising another's holdings. So it refuses instead, and says why:
+    a bare ``KeyError`` from a template is a long afternoon.
+    """
+    request = context.get("request")
+    if request is None:
+        raise RuntimeError(
+            "This tag lists one organisation's data and needs the request to "
+            "know which. Render through a RequestContext (or add "
+            "django.template.context_processors.request)."
+        )
+    return request
+
+
+def org_catalogs(context):
+    """The active catalogs of the organisation this portal serves."""
+    return scoped_queryset(require_request(context), Catalog.objects.filter(is_active=True))
+
+
+def org_collections(context):
+    """The active collections of the organisation this portal serves."""
+    return scoped_queryset(require_request(context), Collection.objects.filter(is_active=True))
+
+
+@register.simple_tag(takes_context=True)
+def datasets_index_url(context):
+    """The URL of *this* portal's DatasetsIndexPage, or '/datasets/' as fallback.
+
+    Page trees are per organisation, so the index is found by descending from
+    the request Site's root rather than by taking the first one on the instance
+    — which, on a second tenant's host, would link away to somebody else's
+    portal.
+    """
+    from wagtail.models import Site
+
     from georiva.pages.datasets.models import DatasetsIndexPage
-    page = DatasetsIndexPage.objects.filter(live=True).first()
+
+    request = context.get("request")
+    site = Site.find_for_request(request) if request is not None else None
+    pages = DatasetsIndexPage.objects.live()
+    if site is not None:
+        pages = pages.descendant_of(site.root_page, inclusive=True)
+    page = pages.first()
     return page.url if page else '/datasets/'
 
 
@@ -41,62 +86,59 @@ def get_item(dictionary, key):
     return dictionary.get(key)
 
 
-@register.simple_tag
-def get_latest_collections(limit=6):
+@register.simple_tag(takes_context=True)
+def get_latest_collections(context, limit=6):
     """Latest active collections ordered by most recently updated item."""
     return (
-        Collection.objects
-        .filter(is_active=True)
+        org_collections(context)
         .select_related('catalog')
         .prefetch_related('catalog__topics')
         .order_by('-time_end', '-modified')[:limit]
     )
 
 
-@register.simple_tag
-def get_latest_catalogs(limit=6):
+@register.simple_tag(takes_context=True)
+def get_latest_catalogs(context, limit=6):
     """Active catalogs ordered by most recently updated item across their collections."""
     from django.db.models import Max
     return (
-        Catalog.objects
-        .filter(is_active=True)
+        org_catalogs(context)
         .prefetch_related('topics')
         .annotate(latest_updated=Max('collections__time_end'))
         .order_by('-latest_updated', 'name')[:limit]
     )
 
 
-@register.simple_tag
-def get_active_topics():
-    """Topics that have at least one active catalog."""
-    from georiva.core.models import Topic
-    return (
-        Topic.objects
-        .filter(catalogs__is_active=True)
-        .distinct()
-        .order_by('sort_order', 'name')
-    )
+@register.simple_tag(takes_context=True)
+def get_active_topics(context):
+    """Topics this organisation has at least one active catalog under.
+
+    Topics themselves are instance-global shared reference data; which of them
+    a portal offers is not.
+    """
+    return topics_of(org_catalogs(context))
 
 
 # Landing page stats — used in stats_bar.html
-@register.simple_tag
-def get_landing_stats():
+@register.simple_tag(takes_context=True)
+def get_landing_stats(context):
     """
     Returns a dict of live stats from Django ORM for the stats bar.
     Called once per page render — cheap queries.
+
+    Counts this organisation's holdings: a portal that boasts the instance's
+    totals is quoting its neighbours' numbers.
     """
-    catalog_count = Catalog.objects.filter(is_active=True).count()
-    collection_count = Collection.objects.filter(is_active=True).count()
-    
     latest_item = (
-        Item.objects.order_by('-created')
+        scoped_queryset(require_request(context), Item.objects.all())
+        .order_by('-created')
         .values('created')
         .first()
     )
     
     return {
-        'catalog_count': catalog_count,
-        'collection_count': collection_count,
+        'catalog_count': org_catalogs(context).count(),
+        'collection_count': org_collections(context).count(),
         'last_updated': latest_item['created'] if latest_item else None,
     }
 
@@ -105,11 +147,10 @@ def get_landing_stats():
 # All collections
 # -----------------------------------------------------------------------------
 
-@register.simple_tag
-def get_all_collections():
+@register.simple_tag(takes_context=True)
+def get_all_collections(context):
     return (
-        Collection.objects
-        .filter(is_active=True)
+        org_collections(context)
         .select_related('catalog')
         .prefetch_related('variables', 'catalog__topics')
         .order_by('catalog__name', 'sort_order', 'name')
@@ -147,13 +188,12 @@ def active_collection_count(catalog):
     return catalog.collections.filter(is_active=True).count()
 
 
-@register.simple_tag
-def get_active_time_resolutions():
-    """Only resolutions used by at least one active collection."""
+@register.simple_tag(takes_context=True)
+def get_active_time_resolutions(context):
+    """Only resolutions used by at least one of this organisation's collections."""
     from georiva.core.models import Collection
     active_values = (
-        Collection.objects
-        .filter(is_active=True)
+        org_collections(context)
         .exclude(time_resolution='')
         .values_list('time_resolution', flat=True)
         .distinct()

@@ -18,6 +18,17 @@ The collection slug is required in the URL because multiple GeoRiva collections 
 the same catalog can contain variables with identical slugs (e.g. 'precip' in both
 chirps-monthly and chirps-dekadal).
 
+Every root here is one organisation's whole STAC service, and which organisation
+is decided by the hostname the request arrived on — never by a path segment and
+never by a query parameter. That is why the ids stay bare (#271): `forecast` means
+Kenya's forecast catalog on Kenya's host and Uganda's on Uganda's, the two roots
+never meet, and a client that only ever talks to one host cannot tell this
+instance from a single-tenant one.
+
+The three ``_org_*`` helpers below are the only entry points to tenant rows in
+this module. Reaching a Catalog, Variable or Item any other way is how a slug
+that exists in two organisations starts answering with the wrong one's data.
+
 Implements STAC API v1.0.0
 """
 
@@ -25,7 +36,6 @@ from datetime import datetime
 from typing import Optional
 
 from django.db.models import Q
-from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.parsers import JSONParser
 from rest_framework.renderers import JSONRenderer
@@ -35,6 +45,11 @@ from rest_framework.views import APIView
 
 from georiva.core.models import Catalog, Collection, Item, Variable
 from georiva.core.utils import get_full_url_by_request
+from georiva.organisations.access import (
+    get_org_object_or_404,
+    require_active_org,
+    scoped_queryset,
+)
 from .renderers import STACJSONRenderer, GeoJSONRenderer
 from .serializers import (
     STACRootCatalogSerializer,
@@ -51,21 +66,38 @@ from .serializers import (
 # Helpers
 # =============================================================================
 
-def _resolve_variable(
-        catalog_slug: str, collection_slug: str, variable_slug: str
-) -> Variable:
-    """Resolve a Variable from its full three-part address."""
-    return get_object_or_404(
-        Variable.objects.select_related(
-            'collection', 'collection__catalog'
-        ).filter(
-            collection__catalog__slug=catalog_slug,
-            collection__catalog__is_active=True,
-            collection__slug=collection_slug,
-            collection__is_active=True,
-            collection__visibility=Collection.Visibility.PUBLIC,
-            is_active=True,
+def _org_catalogs(request: Request):
+    """The active catalogs of the organisation this host serves."""
+    return scoped_queryset(request, Catalog.objects.filter(is_active=True))
+
+
+def _org_variables(request: Request):
+    """This organisation's variables in collections it will serve."""
+    return scoped_queryset(
+        request,
+        Variable.objects.filter(
+            is_active=True, collection__in=Collection.objects.public(),
         ),
+    )
+
+
+def _org_items(request: Request):
+    """This organisation's items in collections it will serve."""
+    return scoped_queryset(
+        request, Item.objects.filter(collection__in=Collection.objects.public()),
+    )
+
+
+def _resolve_variable(
+        request: Request, catalog_slug: str, collection_slug: str, variable_slug: str
+) -> Variable:
+    """Resolve a Variable from its full three-part address, within this org."""
+    return get_org_object_or_404(
+        request,
+        _org_variables(request).filter(
+            collection__slug=collection_slug,
+            collection__catalog__slug=catalog_slug,
+        ).select_related('collection', 'collection__catalog'),
         slug=variable_slug,
     )
 
@@ -95,23 +127,28 @@ class STACLandingPageView(STACAPIView):
     STAC API Landing Page (Root Catalog)
 
     GET /stac/
+
+    The root is the organisation serving this host, named after it: two hosts
+    are two independent catalogs, not two views of one.
     """
-    
+
     def get(self, request: Request) -> Response:
-        catalogs = Catalog.objects.filter(is_active=True).prefetch_related(
-            'collections'
-        )
-        
+        organisation = require_active_org(request)
+        catalogs = _org_catalogs(request).prefetch_related('collections')
+
         data = STACRootCatalogSerializer(
             {
-                'id': 'georiva',
-                'title': 'GeoRiva STAC API',
-                'description': 'Geospatial data catalog for Earth observation and meteorological data',
+                'id': organisation.slug,
+                'title': f"{organisation.name} STAC API",
+                'description': (
+                    organisation.description
+                    or f"Geospatial data catalog published by {organisation.name}."
+                ),
                 'catalogs': catalogs,
             },
             context={'request': request}
         ).data
-        
+
         return Response(data)
 
 
@@ -148,11 +185,11 @@ class STACCatalogListView(STACAPIView):
     """
     
     def get(self, request: Request) -> Response:
-        catalogs = Catalog.objects.filter(is_active=True).prefetch_related(
+        catalogs = _org_catalogs(request).prefetch_related(
             'collections',
             'collections__variables',
         )
-        
+
         data = STACCatalogListSerializer(
             {'catalogs': catalogs},
             context={'request': request}
@@ -171,15 +208,15 @@ class STACCatalogDetailView(STACAPIView):
     """
     
     def get(self, request: Request, catalog_slug: str) -> Response:
-        catalog = get_object_or_404(
-            Catalog.objects.prefetch_related(
+        catalog = get_org_object_or_404(
+            request,
+            Catalog.objects.filter(is_active=True).prefetch_related(
                 'collections',
                 'collections__variables',
             ),
             slug=catalog_slug,
-            is_active=True,
         )
-        
+
         data = STACCatalogAsCollectionSerializer(
             catalog,
             context={'request': request}
@@ -202,21 +239,16 @@ class STACCollectionListView(STACAPIView):
     """
     
     def get(self, request: Request, catalog_slug: str) -> Response:
-        catalog = get_object_or_404(
-            Catalog,
-            slug=catalog_slug,
-            is_active=True,
+        catalog = get_org_object_or_404(
+            request, Catalog.objects.filter(is_active=True), slug=catalog_slug,
         )
-        
-        variables = Variable.objects.filter(
+
+        variables = _org_variables(request).filter(
             collection__catalog=catalog,
-            collection__is_active=True,
-            collection__visibility=Collection.Visibility.PUBLIC,
-            is_active=True,
         ).select_related(
             'collection', 'collection__catalog'
         ).order_by('collection__sort_order', 'sort_order')
-        
+
         data = STACVariableCollectionListSerializer(
             {
                 'catalog': catalog,
@@ -242,7 +274,7 @@ class STACCollectionDetailView(STACAPIView):
             collection_slug: str,
             variable_slug: str,
     ) -> Response:
-        variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
+        variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
         
         data = STACVariableCollectionSerializer(
             variable,
@@ -282,7 +314,7 @@ class STACItemsView(STACGeoAPIView):
             collection_slug: str,
             variable_slug: str,
     ) -> Response:
-        variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
+        variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
         collection = variable.collection
         
         # Parse query parameters
@@ -431,7 +463,7 @@ class STACItemDetailView(STACGeoAPIView):
             variable_slug: str,
             item_id: str,
     ) -> Response:
-        variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
+        variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
         collection = variable.collection
         
         item = self._find_item(collection, item_id)
@@ -529,21 +561,15 @@ class STACSearchView(STACGeoAPIView):
         return self._search(request, request.data)
     
     def _search(self, request: Request, params: dict) -> Response:
-        queryset = Item.objects.filter(
-            collection__is_active=True,
-            collection__catalog__is_active=True,
-            collection__visibility=Collection.Visibility.PUBLIC,
-        )
-        queryset = queryset.select_related(
+        queryset = _org_items(request).select_related(
             'collection', 'collection__catalog'
-        )
-        queryset = queryset.prefetch_related('assets', 'assets__variable')
-        
+        ).prefetch_related('assets', 'assets__variable')
+
         # Resolve variable context from collections param
         variable = None
         collections_param = params.get('collections', [])
         queryset, variable = self._apply_collections_filter(
-            queryset, collections_param
+            request, queryset, collections_param
         )
         
         # Filter by item IDs
@@ -597,12 +623,16 @@ class STACSearchView(STACGeoAPIView):
         
         return Response(data)
     
-    def _apply_collections_filter(self, queryset, collections: list):
+    def _apply_collections_filter(self, request: Request, queryset, collections: list):
         """
         Filter by collection IDs.
 
         Collection IDs are in the format {catalog}/{collection}/{variable}.
         Resolves to the GeoRiva Variable and filters items to its parent Collection.
+
+        Every branch resolves through ``_org_variables``, so a collection id
+        naming another organisation's catalog matches nothing rather than
+        widening the search past this host's root.
 
         Returns (queryset, variable) — variable is set when filtering
         by a single collection (for asset filtering in serializer).
@@ -610,6 +640,9 @@ class STACSearchView(STACGeoAPIView):
         if not collections:
             return queryset, None
 
+        org_variables = _org_variables(request).select_related(
+            'collection', 'collection__catalog'
+        )
         q_filter = Q()
         resolved_variable = None
 
@@ -617,53 +650,33 @@ class STACSearchView(STACGeoAPIView):
             parts = coll_id.split('/')
             if len(parts) == 3:
                 catalog_slug, collection_slug, variable_slug = parts
-                try:
-                    var = Variable.objects.select_related(
-                        'collection', 'collection__catalog'
-                    ).get(
-                        collection__catalog__slug=catalog_slug,
-                        collection__slug=collection_slug,
-                        slug=variable_slug,
-                        collection__is_active=True,
-                        collection__visibility=Collection.Visibility.PUBLIC,
-                        is_active=True,
-                    )
-                    q_filter |= Q(collection=var.collection)
-                    if len(collections) == 1:
-                        resolved_variable = var
-                except Variable.DoesNotExist:
-                    continue
+                variables = org_variables.filter(
+                    collection__catalog__slug=catalog_slug,
+                    collection__slug=collection_slug,
+                    slug=variable_slug,
+                )
             elif len(parts) == 2:
                 # Legacy format {catalog}/{variable} — kept for backward compatibility
                 catalog_slug, variable_slug = parts
-                variables = Variable.objects.filter(
+                variables = org_variables.filter(
                     collection__catalog__slug=catalog_slug,
                     slug=variable_slug,
-                    collection__is_active=True,
-                    collection__visibility=Collection.Visibility.PUBLIC,
-                    is_active=True,
-                ).select_related('collection', 'collection__catalog')
-                for var in variables:
-                    q_filter |= Q(collection=var.collection)
-                if len(collections) == 1 and variables.count() == 1:
-                    resolved_variable = variables.first()
+                )
             else:
-                # Bare variable slug — match across all catalogs
-                variables = Variable.objects.filter(
-                    slug=coll_id,
-                    collection__is_active=True,
-                    collection__visibility=Collection.Visibility.PUBLIC,
-                    is_active=True,
-                ).select_related('collection')
-                for var in variables:
-                    q_filter |= Q(collection=var.collection)
-                if len(collections) == 1 and variables.count() == 1:
-                    resolved_variable = variables.first()
+                # Bare variable slug — match across this organisation's catalogs
+                variables = org_variables.filter(slug=coll_id)
 
-        if q_filter:
-            queryset = queryset.filter(q_filter)
+            matched = list(variables)
+            for var in matched:
+                q_filter |= Q(collection=var.collection)
+            if len(collections) == 1 and len(matched) == 1:
+                resolved_variable = matched[0]
 
-        return queryset, resolved_variable
+        # An empty filter here means every id the caller named resolved to
+        # nothing — most likely another organisation's. Falling through
+        # unfiltered would answer a request for somebody else's collection with
+        # the whole of this one's, which reads as a successful search.
+        return queryset.filter(q_filter) if q_filter else queryset.none(), resolved_variable
     
     def _apply_ids_filter(self, queryset, ids: list):
         if not ids:
@@ -852,22 +865,17 @@ class STACQueryablesView(STACAPIView):
         
         # Catalog-level: list available variable collections
         if catalog_slug and not variable_slug:
-            catalog = get_object_or_404(
-                Catalog, slug=catalog_slug, is_active=True
+            catalog = get_org_object_or_404(
+                request, Catalog.objects.filter(is_active=True), slug=catalog_slug,
             )
-            variables = Variable.objects.filter(
-                collection__catalog=catalog,
-                collection__is_active=True,
-                collection__visibility=Collection.Visibility.PUBLIC,
-                is_active=True,
-            )
+            variables = _org_variables(request).filter(collection__catalog=catalog)
             queryables["properties"]["collection"]["enum"] = [
                 v.slug for v in variables
             ]
         
         # Variable-level: add forecast queryables if applicable
         if catalog_slug and collection_slug and variable_slug:
-            variable = _resolve_variable(catalog_slug, collection_slug, variable_slug)
+            variable = _resolve_variable(request, catalog_slug, collection_slug, variable_slug)
             collection = variable.collection
             
             # Variable info

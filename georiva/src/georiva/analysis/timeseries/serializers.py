@@ -16,8 +16,15 @@ class VariablePathField(serializers.CharField):
     Parses and validates ``catalog_slug/collection_slug/variable_slug``.
 
     Returns a resolved ``Variable`` instance via ``to_internal_value``.
+
+    The address is bare — no organisation segment — because the analysis root is
+    self-contained per host like STAC's and EDR's (#271). The organisation comes
+    from the request, so a caller naming another institution's catalog gets
+    "not found" rather than that institution's numbers. A serializer built
+    without a request in its context therefore cannot resolve anything at all:
+    that is the fail-closed half, and it is why the request is not optional.
     """
-    
+
     def to_internal_value(self, data: str):
         value = super().to_internal_value(data)
         parts = value.strip("/").split("/")
@@ -27,11 +34,20 @@ class VariablePathField(serializers.CharField):
                 f"e.g. chirps/chirps-monthly/precipitation. Got: {value!r}"
             )
         catalog_slug, collection_slug, variable_slug = parts
-        
+
         from georiva.core.models import Variable
-        
+        from georiva.organisations.access import scoped_queryset
+
+        request = self.context.get("request")
+        if request is None:
+            raise serializers.ValidationError(
+                "This field cannot resolve a variable without a request to take "
+                "the organisation from."
+            )
+
+        variables = scoped_queryset(request, Variable.objects.filter(is_active=True))
         try:
-            return Variable.objects.select_related(
+            return variables.select_related(
                 "collection",
                 "collection__catalog",
                 "unit",
@@ -39,7 +55,6 @@ class VariablePathField(serializers.CharField):
                 slug=variable_slug,
                 collection__slug=collection_slug,
                 collection__catalog__slug=catalog_slug,
-                is_active=True,
             )
         except Variable.DoesNotExist:
             raise serializers.ValidationError(

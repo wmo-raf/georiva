@@ -43,6 +43,29 @@ class CollectionForm(WagtailAdminModelForm):
         return [int(v) for v in self.cleaned_data.get("boundary_stats_levels", [])]
 
 
+class CollectionQuerySet(models.QuerySet):
+    """Query vocabulary shared by every surface that serves collections."""
+
+    def public(self):
+        """The collections this instance will serve to anybody who asks.
+
+        Three conditions travel together everywhere — the collection is active,
+        its catalog is active, and its visibility is public — and getting one of
+        them wrong publishes a derivation intermediate or a retired dataset. They
+        are written here once so STAC, EDR, the dataset pages and the analysis
+        endpoints cannot drift apart on what "public" means.
+
+        Deliberately says nothing about *whose* collections these are: tenancy is
+        the caller's job, applied by wrapping this in ``scoped_queryset`` so the
+        organisation filter stays visible at every call site (ADR 0011).
+        """
+        return self.filter(
+            is_active=True,
+            catalog__is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
+        )
+
+
 class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
     """
     Groups one or more Variables.
@@ -52,8 +75,10 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
         - gfs-wind-10m (wind_speed + wind_direction)
         - sentinel-vegetation (ndvi + nir + red)
     """
-    
+
     base_form_class = CollectionForm
+
+    objects = CollectionQuerySet.as_manager()
 
     ORGANISATION_LOOKUP = "catalog__organisation"
 

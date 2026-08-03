@@ -6,11 +6,13 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 
 
 class DatasetVisibilityTests(TestCase):
     def setUp(self):
+        # Dataset pages are per organisation and resolved from the Host.
+        dial_org(self.client)
         self.catalog = Catalog.objects.create(organisation=make_organisation(), 
             name="CMIP6", slug="cmip6", file_format="geotiff"
         )
