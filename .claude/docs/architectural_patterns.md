@@ -86,6 +86,11 @@ Access via import: `from georiva.core.storage import storage`
   every bucket is the org slug; `Catalog.storage_prefix` is the one place `{org}/{catalog}` is spelled out.
   `core/path_resolution.resolve_org_catalog()` is the only place a path's leading segments become a `Catalog`,
   and it never falls back to a default organisation
+- The one exception, and it is a process boundary rather than a second opinion: the machine plane re-spells the
+  same grammar where the ORM cannot reach. `core/machine_plane.py` builds Titiler/Martin URLs from it on the Django
+  side, and `titiler-app/app/dependencies.build_cog_url()` reconstructs the key inside Titiler, which has no
+  Django. Both are conventional restatements of `Catalog.storage_prefix`; a change to the grammar must touch all
+  three. See ADR 0013
 - Bucket configuration from Django settings (`GEORIVA_BUCKETS` in `config/settings/base.py`)
 
 ## 5. Service Layer Pattern

@@ -1,11 +1,17 @@
 """Host → Site → Organisation resolution, failing closed.
 
-Tenancy on this instance lives in the hostname: there are no org path segments
-anywhere. This middleware is the single place that turns a request's Host into
-``request.active_org``, and it is deliberately stricter than Wagtail's own
-``Site.find_for_request`` — that helper falls back to the default Site when no
-hostname matches, which here would silently serve the central org's data to a
-request for an unknown host. Unknown hostname is a 404, always.
+Tenancy on this instance lives in the hostname. This middleware is the single
+place that turns a request's Host into ``request.active_org``, and it is
+deliberately stricter than Wagtail's own ``Site.find_for_request`` — that helper
+falls back to the default Site when no hostname matches, which here would
+silently serve the central org's data to a request for an unknown host. Unknown
+hostname is a 404.
+
+One path is allowed to survive that 404, and only because the Host it arrives on
+is genuinely nobody's: the tile-config callback Titiler dials on an internal
+container name. It carries its organisation in its own first path segment and
+scopes on it. See :meth:`OrganisationMiddleware._host_optional` for how narrowly
+that is drawn, and ADR 0013 for why the machine plane needs it at all.
 
 Membership is re-read from the database on every request. A session that
 outlives its membership row loses access on its next request, not at logout.
@@ -20,6 +26,14 @@ from wagtail.models import Site
 from .models import Organisation, OrganisationMembership
 
 logger = logging.getLogger(__name__)
+
+
+#: The tile-config endpoint Titiler calls back on a palette-cache miss. Titiler
+#: dials it server-to-server on an internal container name, which is nobody's
+#: hostname, so a 404 for an unknown host would break every call — see
+#: :meth:`OrganisationMiddleware._host_optional`, which is where that is
+#: allowed for and how narrowly.
+TILE_CONFIG_PREFIX = "/api/tile-config/"
 
 
 def exempt_path_prefixes():
@@ -84,6 +98,10 @@ class OrganisationMiddleware:
 
         organisation = resolve_organisation_for_host(hostname, port)
         if organisation is None:
+            if self._host_optional(request):
+                request.active_org = None
+                request.active_org_role = None
+                return self.get_response(request)
             logger.warning("Rejected request for unknown organisation host: %s", hostname)
             raise Http404("No organisation is served at this address.")
 
@@ -96,6 +114,26 @@ class OrganisationMiddleware:
         self._guard_admin(request)
 
         return self.get_response(request)
+
+    @staticmethod
+    def _host_optional(request):
+        """Whether this path may be served when no organisation answers the host.
+
+        Exactly one path may: the tile-config callback, because Titiler dials it
+        on an internal container name that is nobody's hostname. It is *not*
+        exempt from tenancy — it carries the organisation in its own first path
+        segment and ``core.tile_config_view`` filters on it.
+
+        The narrowness is the point. Making the path unconditionally exempt
+        would have been simpler and wrong: ``/api/`` is publicly proxied, so an
+        anonymous caller on any tenant's host could then have read any other
+        organisation's rendering config, and learned from a 200 which catalogs
+        that organisation runs. The relaxation applies only where the stated
+        reason actually holds — no organisation answers this host — and a
+        request arriving on a host that *does* resolve is treated as the
+        ordinary tenant request it is, path segment and all.
+        """
+        return request.path.startswith(TILE_CONFIG_PREFIX)
 
     @staticmethod
     def _guard_admin(request):

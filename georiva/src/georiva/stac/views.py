@@ -327,6 +327,10 @@ class STACItemsView(STACGeoAPIView):
         
         queryset = Item.objects.filter(
             collection=collection
+        ).select_related(
+            # Thumbnail hrefs are Titiler URLs, which open with the owning
+            # organisation — read off each item rather than the request.
+            'collection__catalog__organisation'
         ).prefetch_related('assets', 'assets__variable')
         
         # For forecast collections, exclude past items unless caller opts in
@@ -562,7 +566,9 @@ class STACSearchView(STACGeoAPIView):
     
     def _search(self, request: Request, params: dict) -> Response:
         queryset = _org_items(request).select_related(
-            'collection', 'collection__catalog'
+            # ``organisation`` for the thumbnail hrefs: every Titiler URL opens
+            # with the owning org, read off the item itself.
+            'collection', 'collection__catalog__organisation'
         ).prefetch_related('assets', 'assets__variable')
 
         # Resolve variable context from collections param

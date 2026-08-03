@@ -298,10 +298,11 @@ class PublicApiUrlSweepTests(TestCase):
     """
 
     #: Routes the sweep cannot drive as data lookups. ``jobs`` is org-agnostic
-    #: by design (#265, story 26) and takes integer ids, not slugs; the
-    #: tile-config endpoint is called by Titiler over an internal hostname that
-    #: belongs to no organisation, and gains its org segment with the machine
-    #: plane (#272).
+    #: by design (#265, story 26) and takes integer ids, not slugs. tile-config
+    #: is the machine plane's one Django endpoint (#272): Titiler dials it over
+    #: an internal hostname belonging to no organisation, so it takes its org
+    #: from its own first path segment rather than the Host this sweep varies.
+    #: ``core.test_machine_plane`` scopes it the way it is actually addressed.
     _SWEEP_EXEMPT_PREFIXES = ("api/jobs/", "api/tile-config/")
 
     @classmethod

@@ -255,20 +255,23 @@ def query_string_drop(context, *keys):
     return params.urlencode()
 
 
-@register.simple_tag
-def titiler_preview_url(item, catalog_slug, collection_slug, variable_slug):
+@register.simple_tag(name="titiler_preview_url")
+def titiler_preview_url_tag(item, variable_slug):
     """
     Build a TiTiler preview.webp URL for a given item and variable.
- 
+
+    Catalog, collection and organisation all come from the item rather than from
+    the template's context variables: a page that had picked up one of the three
+    from somewhere else could address one organisation's catalog under another's
+    org segment, and the thumbnail would quietly render the wrong tenant's data.
+
     Usage:
-        {% titiler_preview_url item catalog_slug collection_slug active_var_slug as thumb_url %}
+        {% titiler_preview_url item active_var_slug as thumb_url %}
         <img src="{{ thumb_url }}">
     """
-    params = {'time': item.time_iso}
-    if item.reference_time:
-        params['reftime'] = item.reference_time_iso
-    qs = urlencode(params)
-    return f"/titiler/{catalog_slug}/{collection_slug}/{variable_slug}/preview.webp?{qs}"
+    from georiva.core.machine_plane import titiler_preview_url
+
+    return titiler_preview_url(item, variable_slug)
 
 
 @register.filter

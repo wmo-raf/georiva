@@ -417,6 +417,18 @@ One Organisation's whole public service, served at its own host: `<org-host>/api
 `/api/analysis/`, `/api/datasets/`. Self-contained — conformance, search, queryables and every self/root/child link
 resolve on the host they were requested from, and no root ever names or reaches another Organisation's rows. Ids
 stay bare (`Catalog.slug`, `Collection.slug`) and may collide across Organisations; the Organisation lives in the
-hostname, never in a path segment or query parameter. `/api/jobs/` is the deliberate exception: mounted on every
-host and org-agnostic, guarded by unguessable job ids rather than tenancy.
+hostname, never in a path segment or query parameter. Two deliberate exceptions: `/api/jobs/` is mounted on every
+host and org-agnostic, guarded by unguessable job ids rather than tenancy; and the **machine plane** below, which
+has no hostname to read and so carries the Organisation in the path instead.
 _Avoid_: org path prefix, namespaced STAC id, tenant-qualified id
+
+**Machine plane**:
+The services that answer without a resolvable Host — Titiler and Martin — plus the one Django endpoint they call
+back on (`/api/tile-config/{org}/…`). They read object storage and the database directly, so nothing resolves an
+Organisation from a hostname there and nothing tries: the Organisation travels in the address instead
+(`/titiler/{org}/{catalog}/{collection}/{variable}/…`, Martin's required `org`/`catalog`/`collection` params,
+`georiva:palette:{org}:…`). This is the *only* place a path names the tenant, and for the one reason that justifies
+it — there is no Host to disagree with. Django decides which Organisation and writes every such URL through
+`core/machine_plane.py`, from a row it already resolved from the Host; Titiler and Martin concatenate and join.
+See ADR 0013.
+_Avoid_: tile plane, internal API, server-to-server tenancy

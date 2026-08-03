@@ -7,6 +7,11 @@ from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.contrib.routable_page.models import RoutablePageMixin, path
 from wagtail.models import Page
 
+from georiva.core.machine_plane import (
+    MARTIN_PREFIX,
+    martin_boundary_stats_url,
+    org_slug_of,
+)
 from georiva.core.models import Catalog, Collection, Item, Asset
 from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
@@ -268,9 +273,13 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 assets__variable__is_active=True,
             )
             .distinct()
+            # Each card's thumbnail is a Titiler URL, and Titiler URLs open with
+            # the owning organisation — read from the item rather than from the
+            # page context, so the chain is walked once per page, not per card.
+            .select_related('collection__catalog__organisation')
             .order_by('time' if collection.is_forecast else '-time')
         )
-        
+
         page_number = request.GET.get('p', 1)
         paginator = WagtailPaginator(items_qs, ITEMS_PER_PAGE)
         items_page = paginator.get_page(page_number)
@@ -416,7 +425,12 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'catalog_slug': catalog.slug,
             'collection_slug': collection.slug,
             'boundary_stats_levels': collection.boundary_stats_levels or [],
-            "martin_base_url": get_full_url_by_request(request, '/martin'),
+            'org_slug': org_slug_of(collection),
+            # Tenancy travels in the URL Django writes, not in anything the map
+            # decides: the tile servers see no usable Host (#272).
+            'martin_boundary_stats_url': martin_boundary_stats_url(
+                collection, base=get_full_url_by_request(request, MARTIN_PREFIX),
+            ),
         })
     
     # -------------------------------------------------------------------------

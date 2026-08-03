@@ -5,7 +5,12 @@ Django writes variable rendering config to Redis at startup and on save.
 Titiler reads these keys directly (bypassing Django's cache framework prefix)
 to apply server-side colormaps when serving XYZ tiles.
 
-Key format:  georiva:palette:{catalog_slug}:{collection_slug}:{variable_slug}
+Key format:  georiva:palette:{org_slug}:{catalog_slug}:{collection_slug}:{variable_slug}
+
+The organisation leads the key for the same reason it leads a storage path and a
+Titiler route: catalog slugs are unique only *within* an organisation (#267), so
+without it two institutions each running a ``forecast`` catalog share one cache
+entry and whichever wrote last decides how both render.
 Value format (JSON):
   With palette:    {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...}}
   Without palette: {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear"}
@@ -19,8 +24,10 @@ logger = logging.getLogger(__name__)
 PALETTE_KEY_PREFIX = "georiva:palette"
 
 
-def get_palette_cache_key(catalog_slug: str, collection_slug: str, variable_slug: str) -> str:
-    return f"{PALETTE_KEY_PREFIX}:{catalog_slug}:{collection_slug}:{variable_slug}"
+def get_palette_cache_key(
+    org_slug: str, catalog_slug: str, collection_slug: str, variable_slug: str,
+) -> str:
+    return f"{PALETTE_KEY_PREFIX}:{org_slug}:{catalog_slug}:{collection_slug}:{variable_slug}"
 
 
 def _ensure_rgba(color: list) -> list:
@@ -85,19 +92,69 @@ def build_variable_payload(variable) -> dict:
     return payload
 
 
-def warm_variable(variable) -> None:
-    """Write one Variable's rendering config to Redis."""
+def variable_cache_key(variable) -> str:
+    """The Redis key holding ``variable``'s rendering config."""
+    from georiva.core.machine_plane import org_slug_of
+
+    collection = variable.collection
+    return get_palette_cache_key(
+        org_slug_of(collection), collection.catalog.slug,
+        collection.slug, variable.slug,
+    )
+
+
+def warm_variable(variable):
+    """Write one Variable's rendering config to Redis, returning the key used.
+
+    Returns ``None`` if the write failed, which is also what tells
+    :func:`warm_all` not to treat the key as live: a key it could not write is
+    not one it should protect from the sweep.
+    """
     from django_redis import get_redis_connection
 
     try:
-        catalog_slug = variable.collection.catalog.slug
-        collection_slug = variable.collection.slug
-        key = get_palette_cache_key(catalog_slug, collection_slug, variable.slug)
+        key = variable_cache_key(variable)
         payload = build_variable_payload(variable)
         redis_conn = get_redis_connection("default")
         redis_conn.set(key, json.dumps(payload))
+        return key
     except Exception as e:
         logger.warning("Failed to warm palette cache for variable %s: %s", getattr(variable, 'slug', '?'), e)
+        return None
+
+
+def prune_stale_keys(live_keys) -> int:
+    """Delete every palette key not in ``live_keys``. Returns the count removed.
+
+    Titiler reads these keys directly, so nothing else ever expires them: a key
+    written under a slug that has since been renamed, or for a variable since
+    deleted or deactivated, would otherwise sit there indefinitely. Sweeping on
+    every warm keeps the cache a mirror of the database rather than an
+    accumulation of its history — which also clears the keys left behind by the
+    org segment being added to the format (#272).
+
+    Deleting a key a request needs costs one Django fallback, which is the
+    documented miss path; keeping a key a request must not have is a stale
+    palette nobody can flush without a redeploy.
+    """
+    from django_redis import get_redis_connection
+
+    try:
+        redis_conn = get_redis_connection("default")
+        stale = [
+            key for key in redis_conn.scan_iter(match=f"{PALETTE_KEY_PREFIX}:*")
+            if _as_text(key) not in live_keys
+        ]
+        if stale:
+            redis_conn.delete(*stale)
+        return len(stale)
+    except Exception as e:
+        logger.warning("Failed to prune stale palette cache keys: %s", e)
+        return 0
+
+
+def _as_text(key) -> str:
+    return key.decode() if isinstance(key, bytes) else key
 
 
 def warm_all() -> None:
@@ -107,13 +164,14 @@ def warm_all() -> None:
     qs = (
         Variable.objects
         .filter(is_active=True)
-        .select_related('collection__catalog', 'palette')
+        .select_related('collection__catalog__organisation', 'palette')
         .prefetch_related('palette__stops')
     )
 
-    count = 0
-    for variable in qs:
-        warm_variable(variable)
-        count += 1
+    live_keys = {key for key in (warm_variable(v) for v in qs) if key}
 
-    logger.info("Warmed palette cache for %d variables", count)
+    pruned = prune_stale_keys(live_keys)
+    logger.info(
+        "Warmed palette cache for %d variables, pruned %d stale key(s)",
+        len(live_keys), pruned,
+    )

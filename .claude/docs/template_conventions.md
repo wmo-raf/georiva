@@ -6,6 +6,15 @@ Conventions for all HTML templates in GeoRiva. Referenced from `CLAUDE.md`.
 
 - **No inline styles** — never use `style="..."` attributes. Extract all CSS into a
   `{% block extra_css %}<style>…</style>{% endblock %}` block and give elements semantic class names.
+- **Multi-line comments use `{% comment %}`** — the `{# … #}` syntax is for single-line comments only.
+  When a comment spans multiple lines, always use a `{% comment %}…{% endcomment %}` block:
+
+  ```django
+  {% comment %}
+      Always rendered, whatever the ladder concluded — nothing else
+      reports which broker stack an installation runs.
+  {% endcomment %}
+  ```
 - **Modern JS** — use `const` and `let`; never `var`.
 - **JS placement** — all JavaScript goes in `{% block extra_js %}…{% endblock %}` at the bottom of the template. Wrap
   code in `document.addEventListener('DOMContentLoaded', function () { … })` instead of IIFEs `(function(){ … }())`.
@@ -51,9 +60,9 @@ context = {
     "breadcrumbs_items": [
         {"url": reverse("wagtailadmin_home"), "label": _("Home")},
         {"url": reverse("data_feed_list"), "label": _("Data Feeds")},
-        {"url": None, "label": current_page_label},   # leaf: url=None, NOT ""
+        {"url": None, "label": current_page_label},  # leaf: url=None, NOT ""
     ],
-    "header_title": …,   # slim header's sr-only h1 + titletag fallback
+    "header_title": …,      # slim header's sr-only h1 + titletag fallback
     "header_icon": "cogs",  # icon shown beside the breadcrumbs
     ...
 }

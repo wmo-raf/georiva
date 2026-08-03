@@ -280,12 +280,8 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     @property
     def preview_url(self) -> str:
         """TiTiler preview URL for this asset."""
-        from urllib.parse import urlencode
-        params = {'time': self.item.time_iso}
-        if self.item.reference_time:
-            params['reftime'] = self.item.reference_time_iso
-        qs = urlencode(params)
-        return f"/titiler/{self.item.collection.catalog.slug}/{self.item.collection.slug}/{self.variable.slug}/preview.webp?{qs}"
+        from georiva.core.machine_plane import titiler_preview_url
+        return titiler_preview_url(self.item, self.variable.slug)
 
 
 # =============================================================================

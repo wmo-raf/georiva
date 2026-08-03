@@ -10,7 +10,7 @@ urlpatterns = [
     path('edr/', include(edr_urls), name='edr'),
     path('jobs/', include('task_ferry.api.urls', namespace='task_ferry')),
     path(
-        'tile-config/<slug:catalog_slug>/<slug:collection_slug>/<slug:variable_slug>/',
+        'tile-config/<slug:org_slug>/<slug:catalog_slug>/<slug:collection_slug>/<slug:variable_slug>/',
         TileConfigView.as_view(),
         name='tile_config',
     ),

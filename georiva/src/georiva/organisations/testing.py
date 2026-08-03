@@ -9,6 +9,8 @@ with the same slug.
 Not a test module itself: it lives beside the app so any app's tests can import
 it without reaching into another app's ``tests`` package.
 """
+from datetime import datetime, timezone
+
 from wagtail.models import Page, Site
 
 from .models import Organisation
@@ -75,3 +77,46 @@ def make_organisation(slug=DEFAULT_TEST_ORG_SLUG, name=None, **fields):
     return Organisation.objects.create(
         name=name or slug, slug=slug, site=site, **fields
     )
+
+
+#: The catalog/collection/variable slug :func:`make_org_tree` defaults to. It is
+#: the *same* string for every organisation on purpose: slugs are unique only
+#: within an organisation (#267), so a fixture that gave each one a distinct
+#: slug would pass every scoping test by accident.
+SHARED_TREE_SLUG = "forecast"
+
+
+def make_org_tree(organisation, *, name=None, slug=SHARED_TREE_SLUG):
+    """One organisation's data chain: catalog → collection → variable → item → asset.
+
+    The fixture almost every tenancy test needs, and the one it is easy to build
+    subtly wrong. Two organisations' trees must be distinguishable *only* by
+    their organisation — same slugs, differing names — because that is the
+    arrangement in which a dropped org filter stops being invisible: it either
+    collides or serves the other institution's row, and the name in the response
+    says which.
+
+    Returns a dict rather than a tuple so a caller takes the two or three pieces
+    it cares about by name.
+    """
+    from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+
+    name = name or f"{organisation.slug} {slug}"
+    catalog = Catalog.objects.create(
+        organisation=organisation, name=name, slug=slug,
+        file_format=Catalog.FileFormat.GEOTIFF,
+    )
+    collection = Collection.objects.create(catalog=catalog, name=name, slug=slug)
+    unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
+    variable = Variable.objects.create(
+        collection=collection, name=name, slug=slug,
+        unit=unit, value_min=0, value_max=50,
+    )
+    item = Item.objects.create(
+        collection=collection, time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+    )
+    asset = Asset.objects.create(item=item, variable=variable, href="x.tif")
+    return {
+        "organisation": organisation, "catalog": catalog, "collection": collection,
+        "variable": variable, "item": item, "asset": asset,
+    }

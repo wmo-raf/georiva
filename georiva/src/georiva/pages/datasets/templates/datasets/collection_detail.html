@@ -329,7 +329,7 @@
                                 <a href="{{ page.url }}{{ catalog_slug }}/{{ collection_slug }}/items/{{ item.pk }}/"
                                    class="gr-item-card">
                                     <div class="gr-item-card-thumb">
-                                        {% titiler_preview_url item catalog_slug collection_slug active_var_slug as thumb_url %}
+                                        {% titiler_preview_url item active_var_slug as thumb_url %}
                                         <img src="{{ thumb_url }}"
                                              alt="{{ item.time|date:"d M Y H:i" }} UTC"
                                              loading="lazy"

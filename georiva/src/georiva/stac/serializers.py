@@ -21,10 +21,10 @@ Implements STAC Spec v1.0.0
 import calendar
 from datetime import timedelta
 from typing import Optional
-from urllib.parse import urlencode
 
 from rest_framework import serializers
 
+from georiva.core.machine_plane import titiler_preview_url
 from georiva.core.models import Collection
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
@@ -337,14 +337,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         return assets
 
     def _build_thumbnail_href(self, obj, variable, request) -> Optional[str]:
-        params = {"time": obj.time_iso}
-        if obj.reference_time:
-            params["reftime"] = obj.reference_time_iso
-        path = (
-            f"/titiler/{obj.collection.catalog.slug}"
-            f"/{obj.collection.slug}/{variable.slug}/preview.webp"
-            f"?{urlencode(params)}"
-        )
+        path = titiler_preview_url(obj, variable.slug)
         if request:
             return get_full_url_by_request(request, path)
         return path
