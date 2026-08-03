@@ -56,8 +56,10 @@ or can be made to return another organisation's rows.
 may collide across organisations — `forecast` is Kenya's on Kenya's host and
 Uganda's on Uganda's. The two roots never meet, so the collision is harmless, and
 a client that only ever talks to one host cannot tell this instance from a
-single-tenant one. The root catalog's own id is the organisation slug, because a
-root *is* the organisation.
+single-tenant one. The one id that *does* change is the root document's own: it
+becomes the organisation slug (title and description follow), because a root *is*
+the organisation and calling every institution's root `georiva` would be the one
+place the API still pretended there was a single shared catalog.
 
 **The organisation comes from the same choke point.** Public views call
 `scoped_queryset`, `get_org_object_or_404` and `require_active_org` — the
@@ -65,6 +67,14 @@ identical helpers the admin uses, reading the `active_org` the middleware
 resolved from the Host. There is no second resolution path to keep in step, and
 the deny-by-default property (an undeclared model raises rather than returning
 everything) covers the public plane for free.
+
+**"Public" is defined once.** `Collection.objects.public()` holds the three
+conditions that travel together everywhere — collection active, catalog active,
+visibility public. Getting one wrong publishes a derivation intermediate or a
+retired dataset, and it was previously written out in seven places that could
+drift. It says nothing about tenancy: that stays the caller's, applied by
+wrapping it in `scoped_queryset` so the organisation filter is visible at every
+call site (ADR 0011).
 
 **Tenant rows are reached through a named per-module seam.** `stac/views.py` has
 `_org_catalogs` / `_org_variables` / `_org_items`, `edr/views.py` has
@@ -78,9 +88,13 @@ them to an organisation would buy nothing (PRD #265, story 26).
 
 ## Consequences
 
-- Existing single-tenant clients are unaffected: same URLs, same ids, same
-  payloads. Only the set of rows behind them narrows, and on a one-organisation
-  instance it narrows to everything.
+- Existing single-tenant clients keep the same URLs and the same catalog,
+  collection and item ids; the set of rows behind them narrows, and on a
+  one-organisation instance it narrows to everything. The one visible break is
+  the root document: `id` was the constant `georiva` and is now the
+  organisation's slug (`central` on a bootstrapped single-tenant install), with
+  the title and description following. A client that pins the root id has to be
+  updated; one that follows links does not notice.
 - There is no cross-org public view, and adding one would be a new explicit
   endpoint rather than something that falls out of an unscoped queryset. This is
   a decision, not an oversight: a combined discovery surface across institutions

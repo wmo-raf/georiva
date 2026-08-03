@@ -72,27 +72,19 @@ def _org_catalogs(request: Request):
 
 
 def _org_variables(request: Request):
-    """This organisation's variables that are public enough to serve."""
+    """This organisation's variables in collections it will serve."""
     return scoped_queryset(
         request,
         Variable.objects.filter(
-            is_active=True,
-            collection__is_active=True,
-            collection__visibility=Collection.Visibility.PUBLIC,
-            collection__catalog__is_active=True,
+            is_active=True, collection__in=Collection.objects.public(),
         ),
     )
 
 
 def _org_items(request: Request):
-    """This organisation's items in collections that are public enough to serve."""
+    """This organisation's items in collections it will serve."""
     return scoped_queryset(
-        request,
-        Item.objects.filter(
-            collection__is_active=True,
-            collection__visibility=Collection.Visibility.PUBLIC,
-            collection__catalog__is_active=True,
-        ),
+        request, Item.objects.filter(collection__in=Collection.objects.public()),
     )
 
 
@@ -102,13 +94,9 @@ def _resolve_variable(
     """Resolve a Variable from its full three-part address, within this org."""
     return get_org_object_or_404(
         request,
-        Variable.objects.filter(
-            is_active=True,
+        _org_variables(request).filter(
             collection__slug=collection_slug,
-            collection__is_active=True,
-            collection__visibility=Collection.Visibility.PUBLIC,
             collection__catalog__slug=catalog_slug,
-            collection__catalog__is_active=True,
         ).select_related('collection', 'collection__catalog'),
         slug=variable_slug,
     )

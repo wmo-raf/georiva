@@ -32,11 +32,7 @@ def collection_available_dates(request, catalog_slug, collection_slug):
     )
     collection = get_org_object_or_404(
         request,
-        Collection.objects.filter(
-            catalog=catalog,
-            is_active=True,
-            visibility=Collection.Visibility.PUBLIC,
-        ),
+        Collection.objects.public().filter(catalog=catalog),
         slug=collection_slug,
     )
     

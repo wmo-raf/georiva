@@ -7,7 +7,8 @@ from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.contrib.routable_page.models import RoutablePageMixin, path
 from wagtail.models import Page
 
-from georiva.core.models import Catalog, Collection, Topic, Item, Asset
+from georiva.core.models import Catalog, Collection, Item, Asset
+from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
 from georiva.organisations.access import (
     get_org_object_or_404,
@@ -469,13 +470,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     def _org_collection(self, request, catalog, collection_slug):
         """A public collection of ``catalog``, re-checked against this host's org."""
         return get_org_object_or_404(
-            request,
-            Collection.objects.filter(
-                catalog=catalog,
-                is_active=True,
-                visibility=Collection.Visibility.PUBLIC,
-            ),
-            slug=collection_slug,
+            request, Collection.objects.public().filter(catalog=catalog), slug=collection_slug,
         )
 
     def _base_catalogs_qs(self, request):
@@ -537,14 +532,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         choices = dict(Collection.TimeResolution.choices)
 
         return {
-            'topics': (
-                Topic.objects
-                .filter(catalogs__in=scoped_queryset(
-                    request, Catalog.objects.filter(is_active=True),
-                ))
-                .distinct()
-                .order_by('sort_order', 'name')
-            ),
+            'topics': topics_of(self._base_catalogs_qs(request)),
             'time_resolutions': [
                 (value, choices[value])
                 for value in Collection.TimeResolution.values
@@ -554,12 +542,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
     def _base_collections_qs(self, request):
         return (
-            scoped_queryset(
-                request,
-                Collection.objects.filter(
-                    is_active=True, visibility=Collection.Visibility.PUBLIC,
-                ),
-            )
+            scoped_queryset(request, Collection.objects.public())
             .select_related('catalog')
             .prefetch_related('catalog__topics', 'variables')
             .order_by('catalog__name', 'sort_order', 'name')

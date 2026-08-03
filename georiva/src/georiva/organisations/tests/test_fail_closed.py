@@ -15,7 +15,7 @@ import re
 from django.contrib.auth.models import Group, Permission
 from django.db import models
 from django.test import TestCase, override_settings
-from django.urls import URLPattern, URLResolver, get_resolver, reverse
+from django.urls import get_resolver, reverse
 from wagtail import hooks
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
@@ -37,6 +37,7 @@ from georiva.sources.models import (
 from georiva.sources.tests.support import ensure_base_datafeed_viewset
 
 from .factories import PASSWORD, add_member, make_user
+from .urlsweep import flatten_url_patterns
 
 # The colliding slug both organisations use.
 SHARED_SLUG = "forecast"
@@ -323,7 +324,7 @@ class AdminUrlSweepTests(TestCase):
         """
         pks = self._foreign_pks()
         urls = []
-        for pattern, prefix in _flatten(get_resolver().url_patterns):
+        for pattern, prefix in flatten_url_patterns(get_resolver().url_patterns):
             route = str(pattern.pattern)
             if not prefix.startswith("admin/"):
                 continue
@@ -361,7 +362,7 @@ class AdminUrlSweepTests(TestCase):
         appearing anywhere in a rendered admin page is the leak itself.
         """
         checked = 0
-        for pattern, prefix in _flatten(get_resolver().url_patterns):
+        for pattern, prefix in flatten_url_patterns(get_resolver().url_patterns):
             route = str(pattern.pattern)
             if not prefix.startswith("admin/") or re.search(r"<[^>]+>", prefix + route):
                 continue
@@ -474,11 +475,3 @@ class NoUnscopedObjectLookupTests(TestCase):
             "these resolve rows without an organisation; use "
             "organisations.access.get_org_object_or_404 instead",
         )
-
-
-def _flatten(patterns, prefix=""):
-    for entry in patterns:
-        if isinstance(entry, URLResolver):
-            yield from _flatten(entry.url_patterns, prefix + str(entry.pattern))
-        elif isinstance(entry, URLPattern):
-            yield entry, prefix

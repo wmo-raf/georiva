@@ -53,15 +53,8 @@ from .serializers import (
 # =============================================================================
 
 def _org_collections(request: Request):
-    """This organisation's collections that are public enough to serve."""
-    return scoped_queryset(
-        request,
-        Collection.objects.filter(
-            is_active=True,
-            catalog__is_active=True,
-            visibility=Collection.Visibility.PUBLIC,
-        ),
-    )
+    """The collections this organisation will serve."""
+    return scoped_queryset(request, Collection.objects.public())
 
 
 # =============================================================================
@@ -245,11 +238,7 @@ class EDRCollectionDetailView(EDRAPIView):
     def get(self, request: Request, collection_slug: str) -> Response:
         collection = get_org_object_or_404(
             request,
-            Collection.objects.filter(
-                is_active=True,
-                catalog__is_active=True,
-                visibility=Collection.Visibility.PUBLIC,
-            ).select_related(
+            _org_collections(request).select_related(
                 'catalog',
             ).prefetch_related(
                 'variables',

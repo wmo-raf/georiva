@@ -24,12 +24,14 @@ import json
 import re
 
 from django.test import TestCase, override_settings
-from django.urls import URLPattern, URLResolver, get_resolver, reverse
+from django.urls import get_resolver, reverse
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.organisations.provisioning import provision_organisation
 
-from .test_fail_closed import SHARED_SLUG, _flatten, build_org_tree
+from .factories import PASSWORD, add_member, make_user
+from .test_fail_closed import SHARED_SLUG, build_org_tree
+from .urlsweep import flatten_url_patterns
 
 #: A slug only Uganda uses. The colliding fixture proves the right row wins;
 #: this one proves a stranger's row is not found at all rather than served.
@@ -55,6 +57,15 @@ def build_uganda_only_tree(organisation):
     item = Item.objects.create(collection=collection, time="2026-01-01T00:00:00Z")
     Asset.objects.create(item=item, variable=variable, href="uganda.tif")
     return {"catalog": catalog, "collection": collection, "variable": variable}
+
+
+def _add_datasets_index(organisation):
+    """The datasets portal page under ``organisation``'s own root."""
+    from georiva.pages.datasets.models import DatasetsIndexPage
+
+    index = DatasetsIndexPage(title="Datasets", slug="datasets")
+    organisation.site.root_page.add_child(instance=index)
+    return index
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
@@ -204,7 +215,61 @@ class CrossOrgPublicApiTests(TestCase):
         )
         self.assertEqual(self.client.get(url).status_code, 200)
 
+    # -- dataset pages -----------------------------------------------------
+
+    def test_each_portals_dataset_index_lists_only_its_own_catalogs(self):
+        """`/api/datasets/` is site-native because the page tree is (#271).
+
+        Provisioning gives every organisation its own root page, so each portal
+        gets its own datasets index. Serving it is Wagtail's page routing, which
+        picks the tree by Site — what this checks is that the catalogs it lists
+        are that Site's organisation's, on both hosts.
+        """
+        indexes = {
+            "kenya.georiva.test": _add_datasets_index(self.kenya),
+            "uganda.georiva.test": _add_datasets_index(self.uganda),
+        }
+        for host, index in indexes.items():
+            with self.subTest(host=host):
+                self.client.defaults["HTTP_HOST"] = host
+                response = self.client.get(index.url)
+                self.assertEqual(response.status_code, 200)
+                own, other = (
+                    (b"Kenya Forecast", b"Uganda Forecast")
+                    if host.startswith("kenya")
+                    else (b"Uganda Forecast", b"Kenya Forecast")
+                )
+                self.assertIn(own, response.content)
+                self.assertNotIn(other, response.content)
+
     # -- jobs --------------------------------------------------------------
+
+    def test_a_job_is_reachable_from_any_organisations_host(self):
+        """The capability is the job id and the session — not the hostname.
+
+        A portal on one host can start work and be polled from another, so the
+        job endpoint must not acquire tenancy along with the rest of `/api/`.
+        Amina belongs to Kenya only, and reads her job from Uganda's host all
+        the same.
+        """
+        from django.contrib.contenttypes.models import ContentType
+        from task_ferry.models import Job
+
+        user = make_user("amina")
+        add_member(user, self.kenya)
+        self.client.login(username="amina", password=PASSWORD)
+        job = Job.objects.create(
+            user=user, content_type=ContentType.objects.get_for_model(Job),
+        )
+
+        payloads = {}
+        for host in ("kenya.georiva.test", "uganda.georiva.test"):
+            self.client.defaults["HTTP_HOST"] = host
+            response = self.client.get(reverse("task_ferry:job-detail", args=[job.id]))
+            self.assertEqual(response.status_code, 200, host)
+            payloads[host] = response.json()
+
+        self.assertEqual(*payloads.values())
 
     def test_jobs_answer_identically_on_every_host(self):
         """task_ferry is deliberately org-agnostic: UUID capability, not tenancy.
@@ -253,7 +318,7 @@ class PublicApiUrlSweepTests(TestCase):
     def _foreign_api_urls(self):
         """Every ``/api/`` route whose parameters are all slugs, filled with Uganda's."""
         urls = []
-        for pattern, prefix in _flatten(get_resolver().url_patterns):
+        for pattern, prefix in flatten_url_patterns(get_resolver().url_patterns):
             route = prefix + str(pattern.pattern)
             if not route.startswith("api/") or route.startswith(self._SWEEP_EXEMPT_PREFIXES):
                 continue
@@ -280,7 +345,7 @@ class PublicApiUrlSweepTests(TestCase):
     def test_no_public_api_listing_names_another_organisation(self):
         """The half no pk or slug reaches: roots, listings and search."""
         checked = 0
-        for pattern, prefix in _flatten(get_resolver().url_patterns):
+        for pattern, prefix in flatten_url_patterns(get_resolver().url_patterns):
             route = prefix + str(pattern.pattern)
             if not route.startswith("api/") or re.search(r"<[^>]+>", route):
                 continue
