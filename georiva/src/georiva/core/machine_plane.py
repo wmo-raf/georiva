@@ -19,14 +19,83 @@ and path then agree because the same request produced both.
 The grammar mirrors the storage grammar deliberately (``{org}/{catalog}/…``, see
 ``core.path_resolution``): a Titiler tile URL and the COG key behind it differ
 only by prefix, so an operator reading one can find the other.
+
+Since #274 the grammar is read as well as written: the nginx gateway hands
+Django a tile URL it did not build and asks whose collection it addresses.
+:func:`scope_of` is that reader, and it lives here rather than beside the gate
+for one reason — it is the exact inverse of the builders above, and an inverse
+that drifts from its function is a gate that authorises one collection while the
+tile server reads another.
 """
-from urllib.parse import urlencode
+from collections import namedtuple
+from urllib.parse import parse_qs, urlencode
 
 TITILER_PREFIX = "/titiler"
 MARTIN_PREFIX = "/martin"
 
 #: Martin's function source, mounted under its own tile path.
 MARTIN_BOUNDARY_STATS_SOURCE = "boundary_stats"
+
+#: The organisation, catalog and collection a machine-plane URL addresses —
+#: everything needed to decide whether it may be served, and nothing more. The
+#: variable is deliberately absent: ``visibility`` is a property of the
+#: collection, so naming the variable here would imply a check that is not made.
+MachineScope = namedtuple("MachineScope", "org catalog collection")
+
+
+def _titiler_scope(segments):
+    """The scope of ``/titiler/{org}/{catalog}/{collection}/{variable}/…``.
+
+    Every Titiler route on the instance sits under the four-segment prefix
+    (``TILE_ROUTE_PREFIX`` in ``titiler-app/app/main.py``), so a URL that does
+    not reach a variable addresses no data and gets no scope — which the gate
+    reads as a denial. The service's own ``/docs`` and ``/openapi.json`` fall
+    under that too, and being unreachable through the proxy is the correct
+    answer for them.
+    """
+    if len(segments) < 5:
+        return None
+    return MachineScope(*segments[1:4])
+
+
+def _martin_scope(query):
+    """The scope of Martin's zonal-stats tile, carried in its query parameters.
+
+    ``georiva_boundary_stats`` already requires the triple and answers an empty
+    tile for one that names nothing (ADR 0013). This reads the same three, with
+    one addition: a parameter given twice yields no scope at all. Martin's own
+    choice between duplicates is not something this side can see, so a request
+    that leaves it a choice is refused rather than authorised against a guess.
+    """
+    params = parse_qs(query)
+    values = [params.get(name, []) for name in ("org", "catalog", "collection")]
+    if not all(len(v) == 1 and v[0] for v in values):
+        return None
+    return MachineScope(*(v[0] for v in values))
+
+
+def scope_of(uri):
+    """The collection a machine-plane ``uri`` addresses, or ``None``.
+
+    Takes the original request line as nginx received it — path and query, still
+    percent-encoded — and returns the triple that decides whether it may be
+    served. Anything this does not recognise returns ``None``, and the caller
+    treats that as "no". Encoded slugs are left encoded on purpose: they then
+    match no row and are denied, which is the right answer for an address whose
+    spelling is trying to be two things at once.
+
+    Recognising is all this does. Whether the collection exists, and who may see
+    it, is :mod:`georiva.core.tile_auth_view`'s question.
+    """
+    path, _, query = (uri or "").partition("?")
+    segments = [segment for segment in path.split("/") if segment]
+    if not segments:
+        return None
+    if segments[0] == TITILER_PREFIX.strip("/"):
+        return _titiler_scope(segments)
+    if segments[:2] == [MARTIN_PREFIX.strip("/"), MARTIN_BOUNDARY_STATS_SOURCE]:
+        return _martin_scope(query)
+    return None
 
 
 def org_slug_of(collection) -> str:

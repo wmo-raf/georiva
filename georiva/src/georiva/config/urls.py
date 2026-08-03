@@ -6,6 +6,7 @@ from wagtail.admin import urls as wagtailadmin_urls
 from wagtail.documents import urls as wagtaildocs_urls
 
 from georiva.api import urls as georiva_urls
+from georiva.core.tile_auth_view import TileAuthView
 from .views import health
 
 urlpatterns = [
@@ -13,6 +14,11 @@ urlpatterns = [
     path("admin/", include(wagtailadmin_urls)),
     path("documents/", include(wagtaildocs_urls)),
     path("api/", include(georiva_urls), name="georiva_api"),
+    # Nginx's tile gateway (#274). Deliberately not under "api/": that prefix is
+    # one organisation's whole public service (ADR 0012), and this answers no
+    # part of it — it is the proxy asking the proxy's own question, and nginx
+    # marks the location `internal` so nothing outside can ask it.
+    path("internal/tile-auth/", TileAuthView.as_view(), name="tile_auth"),
     path("health/", health),
     path("", include("adminboundarymanager.urls")),
 ]
