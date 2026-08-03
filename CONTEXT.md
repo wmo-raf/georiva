@@ -385,6 +385,15 @@ request and access fails closed; an unknown hostname is a 404, never a fallback 
 Carried on the request as `active_org` (with `active_org_role`), and all admin-plane scoping derives from it.
 _Avoid_: current tenant, session org, default org
 
+**Org-hopper**:
+The workspace block at the top of the admin sidebar: the Organisation's name and host, always visible, with a
+popover listing the Organisations the signed-in user may cross to. Wayfinding only — each entry is a plain
+cross-host link to that Organisation's `/admin/`, and clicking one is an ordinary navigation whose Host resolves the
+Active organisation as usual. It holds no state of its own; there is no "last organisation" memory to go stale. A
+member is listed the Organisations they hold a membership row in, the instance admin all of them, and a user in
+exactly one gets a static badge with nothing to open.
+_Avoid_: org switcher, workspace switcher, tenant picker
+
 **Central organisation**:
 The Organisation bootstrapped on Wagtail's default Site at the base domain during first setup. Entirely ordinary —
 same storage prefix, same membership rules, no fallback status — so that a single-institution install never has to

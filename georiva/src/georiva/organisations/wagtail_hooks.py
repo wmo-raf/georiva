@@ -1,4 +1,6 @@
-from django.urls import path, reverse_lazy
+from django.templatetags.static import static
+from django.urls import path, reverse, reverse_lazy
+from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
@@ -30,6 +32,30 @@ def register_organisation_urls():
         path("org-members/<int:pk>/remove/", organisation_member_remove,
              name="organisation_member_remove"),
     ]
+
+
+@hooks.register("insert_global_admin_css")
+def org_hopper_css():
+    return format_html(
+        '<link rel="stylesheet" href="{}">', static("organisations/org_hopper.css")
+    )
+
+
+@hooks.register("insert_global_admin_js")
+def org_hopper_js():
+    """The two halves of the org-hopper, in the order they have to run.
+
+    The behaviour is a static file, cacheable and identical for everyone. The
+    block it mounts is not — it names the organisations *this* user may hop to —
+    so it comes from a view, for the reason ADR 0017 gives. Both are ``defer``,
+    so they run in document order: the mount function exists before the markup
+    calls it.
+    """
+    return format_html(
+        '<script src="{}" defer></script><script src="{}" defer></script>',
+        static("organisations/org_hopper.js"),
+        reverse("organisation_hopper_script"),
+    )
 
 
 @hooks.register("construct_explorer_page_queryset")

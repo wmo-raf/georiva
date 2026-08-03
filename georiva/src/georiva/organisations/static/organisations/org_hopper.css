@@ -1,0 +1,202 @@
+/* The org-hopper workspace block, at the top of the Wagtail admin sidebar.
+ *
+ * Two surfaces, two sets of tokens: the block itself sits on the sidebar's dark
+ * ground (white text, --w-color-surface-menu-item-active on hover), while the
+ * popover is an ordinary light panel over the page (--w-color-surface-page,
+ * --w-color-grey-*). Markup in
+ * organisations/templates/organisations/org_hopper_block.html.
+ */
+
+.gr-orghop {
+    position: relative;
+    padding: 0.5rem 0.75rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* -- the block itself: trigger (multi-org) and badge (single-org) ---------- */
+
+.gr-orghop__trigger,
+.gr-orghop__badge {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem;
+    border: 0;
+    border-radius: 4px;
+    text-align: start;
+    color: var(--w-color-white);
+    background: transparent;
+}
+
+.gr-orghop__trigger {
+    cursor: pointer;
+}
+
+.gr-orghop__trigger:hover,
+.gr-orghop--open .gr-orghop__trigger {
+    background: var(--w-color-surface-menu-item-active);
+}
+
+.gr-orghop__label {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.gr-orghop__name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gr-orghop__host {
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    opacity: 0.7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gr-orghop__chevron {
+    flex: none;
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
+
+/* -- avatar ---------------------------------------------------------------- */
+
+.gr-orghop__avatar {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 4px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--w-color-white);
+}
+
+.gr-orghop__avatar--lg {
+    width: 2.125rem;
+    height: 2.125rem;
+    font-size: 0.6875rem;
+}
+
+/* Eight stable slots; organisations/hopper.py picks one per slug. */
+.gr-orghop__avatar--0 { background: #0ea5e9; }
+.gr-orghop__avatar--1 { background: #22c55e; }
+.gr-orghop__avatar--2 { background: #b45309; }
+.gr-orghop__avatar--3 { background: #a855f7; }
+.gr-orghop__avatar--4 { background: #ef4444; }
+.gr-orghop__avatar--5 { background: #0d9488; }
+.gr-orghop__avatar--6 { background: #ca8a04; }
+.gr-orghop__avatar--7 { background: #6366f1; }
+
+/* -- popover --------------------------------------------------------------- */
+
+.gr-orghop__popover {
+    position: absolute;
+    z-index: 100;
+    inset-inline-start: 0.75rem;
+    top: calc(100% - 0.25rem);
+    /* Wider than the rail it hangs off: hostnames are the thing being read here,
+       and at sidebar width they all truncate to their first few characters. */
+    min-width: 15.5rem;
+    padding: 0.5rem;
+    border: 1px solid var(--w-color-border-furniture);
+    border-radius: 6px;
+    background: var(--w-color-surface-page);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.gr-orghop__popover-title {
+    margin: 0 0 0.375rem;
+    padding: 0 0.375rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--w-color-grey-400);
+}
+
+.gr-orghop__search {
+    width: 100%;
+    margin-bottom: 0.375rem;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    border: 1px solid var(--w-color-border-furniture);
+    border-radius: 4px;
+    background: var(--w-color-surface-field);
+    color: var(--w-color-text-label);
+}
+
+.gr-orghop__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.gr-orghop__link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem;
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--w-color-text-label);
+}
+
+.gr-orghop__link:hover {
+    background: var(--w-color-grey-50);
+}
+
+.gr-orghop__item--current .gr-orghop__link {
+    background: var(--w-color-grey-100);
+}
+
+.gr-orghop__check {
+    flex: none;
+    font-weight: 700;
+    color: var(--w-color-secondary);
+}
+
+.gr-orghop__empty {
+    margin: 0;
+    padding: 0.5rem 0.375rem;
+    font-size: 0.8125rem;
+    color: var(--w-color-grey-400);
+}
+
+/* -- collapsed sidebar ------------------------------------------------------ */
+
+/* In slim mode the sidebar is an icon rail: keep the avatar as the org's mark
+   and drop everything that needs width. The trigger and the badge only — the
+   popover flies out beside the rail and is not narrow, so its own rows keep
+   their names and hosts. */
+.sidebar--slim .gr-orghop__trigger .gr-orghop__label,
+.sidebar--slim .gr-orghop__badge .gr-orghop__label,
+.sidebar--slim .gr-orghop__chevron {
+    display: none;
+}
+
+.sidebar--slim .gr-orghop {
+    padding-inline: 0.375rem;
+}
+
+.sidebar--slim .gr-orghop__popover {
+    inset-inline-start: 100%;
+    inset-inline-end: auto;
+    top: 0;
+    width: 17rem;
+}

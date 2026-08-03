@@ -1,0 +1,5 @@
+{% comment %}
+    The organisation's colour chip. The colour is a class rather than an inline
+    style so the palette stays in one stylesheet — no template writes colours.
+{% endcomment %}
+<span class="gr-orghop__avatar gr-orghop__avatar--{{ entry.avatar_index }}{% if large %} gr-orghop__avatar--lg{% endif %}" aria-hidden="true">{{ entry.letters }}</span>
