@@ -9,6 +9,7 @@ from wagtail.admin.auth import require_admin_access
 
 from georiva.api import urls as georiva_urls
 from georiva.core.tile_auth_view import TileAuthView
+from georiva.organisations.hopper import org_hopper_script
 from georiva.organisations.pages import OrgScopedPageSearchView
 from .views import health
 
@@ -33,6 +34,15 @@ urlpatterns = [
         f"{ADMIN_PREFIX}pages/search/results/",
         require_admin_access(OrgScopedPageSearchView.as_view(results_only=True)),
         name="georiva_org_scoped_page_search_results",
+    ),
+    # The org-hopper's per-request half (#270). Routed here rather than through
+    # `register_admin_urls` because that hook wraps its URLs in
+    # `require_admin_access`, whose login redirect the login page's own copy of
+    # this script tag would follow into HTML. See ADR 0017.
+    path(
+        f"{ADMIN_PREFIX}org-hopper.js",
+        org_hopper_script,
+        name="organisation_hopper_script",
     ),
     path(ADMIN_PREFIX, include(wagtailadmin_urls)),
     path("documents/", include(wagtaildocs_urls)),
