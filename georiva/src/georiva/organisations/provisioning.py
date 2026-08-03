@@ -133,6 +133,66 @@ def sync_site_ports(port=None):
     return len(updated)
 
 
+def sync_site_domains(old_domain, base_domain=None):
+    """Move organisation Sites from ``old_domain`` onto the base domain.
+
+    The base domain is read once, when an organisation is provisioned: its Site
+    hostname is written there and nothing revisits it, and the bootstrap returns
+    early once any organisation exists. An instance that corrects
+    ``GEORIVA_BASE_DOMAIN`` after setup therefore goes dark in both directions —
+    the new domain matches no Site, so ``OrganisationMiddleware`` 404s every
+    request, while the old one has already dropped out of ``ALLOWED_HOSTS``.
+    This is the way back.
+
+    Each organisation keeps its own label: the org on the apex moves to the new
+    apex, ``<slug>.<old>`` moves to ``<slug>.<new>``. Storage keys are untouched
+    — they are keyed on the slug, and the domain never appears in one. Returns
+    the ``(old, new)`` hostname pairs it rewrote.
+    """
+    target = resolve_base_domain(base_domain)
+    old = old_domain.strip().lower().rstrip(".")
+    if not old:
+        raise ValueError("Pass the domain the organisations are currently served on.")
+    if old == target:
+        return []
+
+    suffix = f".{old}"
+    moves = []
+    for site in Site.objects.filter(organisation__isnull=False):
+        hostname = site.hostname.lower()
+        if hostname == old:
+            new_hostname = target
+        elif hostname.endswith(suffix):
+            new_hostname = f"{hostname[:-len(suffix)]}.{target}"
+        else:
+            continue
+        moves.append((site, hostname, new_hostname))
+
+    # Wagtail holds (hostname, port) unique, and a half-applied rename is an
+    # instance where some organisations are reachable and others are not.
+    # Nothing moves unless every move can.
+    taken = set(
+        Site.objects.exclude(pk__in=[site.pk for site, _, _ in moves]).values_list("hostname", "port")
+    )
+    collisions = [f"{old_hostname} -> {new}" for site, old_hostname, new in moves if (new, site.port) in taken]
+    if collisions:
+        raise ValueError(
+            "Another Site already answers on: " + ", ".join(collisions) + ". Nothing was moved."
+        )
+
+    with transaction.atomic():
+        for site, _, new_hostname in moves:
+            site.hostname = new_hostname
+            site.save(update_fields=["hostname"])
+
+    if moves:
+        logger.info(
+            "Moved %d organisation Site(s) from %s to %s: %s",
+            len(moves), old, target, ", ".join(new for _, _, new in moves),
+        )
+    return [(old_hostname, new) for _, old_hostname, new in moves]
+
+
 def bootstrap_central_org(*, name=None, slug="central", base_domain=None, port=None):
     """First-setup bootstrap: an ordinary org on Wagtail's default Site.
 

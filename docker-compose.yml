@@ -20,6 +20,15 @@ x-backend-variables: &backend-variables
   DJANGO_ADMINS: ${DJANGO_ADMINS:-}
   WAGTAILADMIN_BASE_URL: ${WAGTAILADMIN_BASE_URL:-}
   LANGUAGE_CODE: ${LANGUAGE_CODE:-en}
+  # Tenancy: organisations are served at <org-slug>.<GEORIVA_BASE_DOMAIN>. The port
+  # is where org Sites are created, and Wagtail reads the scheme off it (80 -> http,
+  # 443 -> https), so set it to 443 behind TLS or the APIs advertise http:// links.
+  GEORIVA_BASE_DOMAIN: ${GEORIVA_BASE_DOMAIN:-localhost}
+  GEORIVA_SITE_PORT: ${GEORIVA_SITE_PORT:-80}
+  # First setup binds Wagtail's default Site to a "central" org on the base domain,
+  # so a single-institution install needs no tenancy ceremony.
+  GEORIVA_BOOTSTRAP_CENTRAL_ORG: ${GEORIVA_BOOTSTRAP_CENTRAL_ORG:-true}
+  GEORIVA_CENTRAL_ORG_SLUG: ${GEORIVA_CENTRAL_ORG_SLUG:-central}
   GEORIVA_LOG_LEVEL: ${GEORIVA_LOG_LEVEL:-WARN}
   GEORIVA_DATABASE_LOG_LEVEL: ${GEORIVA_DATABASE_LOG_LEVEL:-ERROR}
   GEORIVA_CELERY_BEAT_DEBUG_LEVEL: ${GEORIVA_CELERY_BEAT_DEBUG_LEVEL:-INFO}
