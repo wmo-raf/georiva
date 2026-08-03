@@ -1,6 +1,6 @@
 from django.core.paginator import Paginator
 from django.db import models
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import render
 from django.utils.dateparse import parse_date, parse_datetime
 from wagtail.admin.paginator import WagtailPaginator
 from wagtail.admin.panels import FieldPanel, MultiFieldPanel
@@ -9,6 +9,11 @@ from wagtail.models import Page
 
 from georiva.core.models import Catalog, Collection, Topic, Item, Asset
 from georiva.core.utils import get_full_url_by_request
+from georiva.organisations.access import (
+    get_org_object_or_404,
+    get_via_scoped_parent_or_404,
+    scoped_queryset,
+)
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
 ITEMS_PER_PAGE = 24
@@ -160,7 +165,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     def index(self, request):
         """All catalogs — filterable by topic and time resolution. Paginated."""
         
-        catalogs = self._base_catalogs_qs()
+        catalogs = self._base_catalogs_qs(request)
         catalogs, filters = self._apply_catalog_filters(request, catalogs)
         
         paginator = Paginator(catalogs, self.collections_per_page)
@@ -170,16 +175,16 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'page': self,
             'catalogs': page_obj,
             'filters': filters,
-            **self._catalog_filter_context(),
+            **self._catalog_filter_context(request),
         })
     
     @path('<slug:catalog_slug>/')
     def catalog_detail(self, request, catalog_slug):
         """Catalog landing page — shows catalog metadata + all its collections."""
         
-        catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
+        catalog = self._org_catalog(request, catalog_slug)
         collections = (
-            self._base_collections_qs()
+            self._base_collections_qs(request)
             .filter(catalog=catalog)
         )
         
@@ -192,14 +197,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     @path('<slug:catalog_slug>/<slug:collection_slug>/')
     def collection_detail(self, request, catalog_slug, collection_slug):
         
-        catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
-        collection = get_object_or_404(
-            Collection,
-            catalog=catalog,
-            slug=collection_slug,
-            is_active=True,
-            visibility=Collection.Visibility.PUBLIC,
-        )
+        catalog = self._org_catalog(request, catalog_slug)
+        collection = self._org_collection(request, catalog, collection_slug)
 
         variables = list(
             collection.variables.filter(is_active=True).order_by('sort_order')
@@ -312,15 +311,13 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
     @path('<slug:catalog_slug>/<slug:collection_slug>/items/<int:item_id>/')
     def collection_item_detail(self, request, catalog_slug, collection_slug, item_id):
         
-        catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
-        collection = get_object_or_404(
-            Collection,
-            catalog=catalog,
-            slug=collection_slug,
-            is_active=True,
-            visibility=Collection.Visibility.PUBLIC,
+        catalog = self._org_catalog(request, catalog_slug)
+        collection = self._org_collection(request, catalog, collection_slug)
+        # Reached only through the collection resolved above, which the
+        # organisation filter has already narrowed.
+        item = get_via_scoped_parent_or_404(
+            Item.objects.filter(collection=collection), pk=item_id,
         )
-        item = get_object_or_404(Item, pk=item_id, collection=collection)
         
         # COG assets for the map — one per variable
         cog_assets = list(
@@ -454,11 +451,37 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             pass
         return qs
     
-    def _base_catalogs_qs(self):
+    # -------------------------------------------------------------------------
+    # Tenant rows
+    #
+    # A portal is one organisation's, and so is everything it lists. Each route
+    # above reaches its catalogs, collections and items through one of these
+    # four, which take the organisation from the request Host — never from a
+    # path segment, because there is none (#271).
+    # -------------------------------------------------------------------------
+
+    def _org_catalog(self, request, catalog_slug):
+        """An active catalog of this host's organisation, or 404."""
+        return get_org_object_or_404(
+            request, Catalog.objects.filter(is_active=True), slug=catalog_slug,
+        )
+
+    def _org_collection(self, request, catalog, collection_slug):
+        """A public collection of ``catalog``, re-checked against this host's org."""
+        return get_org_object_or_404(
+            request,
+            Collection.objects.filter(
+                catalog=catalog,
+                is_active=True,
+                visibility=Collection.Visibility.PUBLIC,
+            ),
+            slug=collection_slug,
+        )
+
+    def _base_catalogs_qs(self, request):
         from django.db.models import Count, Max, Q
         return (
-            Catalog.objects
-            .filter(is_active=True)
+            scoped_queryset(request, Catalog.objects.filter(is_active=True))
             .prefetch_related('topics')
             .annotate(
                 collection_count=Count('collections', filter=Q(
@@ -496,82 +519,49 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
         return qs, filters
     
-    def _catalog_filter_context(self):
+    def _catalog_filter_context(self, request):
+        """Sidebar filter options, drawn from this organisation's holdings only.
+
+        Topics are instance-global shared reference data, but the ones offered
+        here are still narrowed to those some catalog of *this* organisation
+        carries — otherwise the sidebar advertises subject areas the portal has
+        nothing to show for, and hints at what the neighbours publish.
+        """
+        org_collections = self._base_collections_qs(request)
         active_resolutions = (
-            Collection.objects
-            .filter(is_active=True, visibility=Collection.Visibility.PUBLIC)
+            org_collections
             .exclude(time_resolution='')
             .values_list('time_resolution', flat=True)
             .distinct()
         )
         choices = dict(Collection.TimeResolution.choices)
-        
+
         return {
-            'topics': Topic.objects.filter(catalogs__is_active=True).distinct().order_by('sort_order', 'name'),
+            'topics': (
+                Topic.objects
+                .filter(catalogs__in=scoped_queryset(
+                    request, Catalog.objects.filter(is_active=True),
+                ))
+                .distinct()
+                .order_by('sort_order', 'name')
+            ),
             'time_resolutions': [
                 (value, choices[value])
                 for value in Collection.TimeResolution.values
                 if value in active_resolutions
             ],
         }
-    
-    def _base_collections_qs(self):
+
+    def _base_collections_qs(self, request):
         return (
-            Collection.objects
-            .filter(is_active=True, visibility=Collection.Visibility.PUBLIC)
+            scoped_queryset(
+                request,
+                Collection.objects.filter(
+                    is_active=True, visibility=Collection.Visibility.PUBLIC,
+                ),
+            )
             .select_related('catalog')
             .prefetch_related('catalog__topics', 'variables')
             .order_by('catalog__name', 'sort_order', 'name')
         )
     
-    def _apply_filters(self, request, qs):
-        """
-        Apply GET param filters to a collections queryset.
-        Returns (filtered_qs, active_filters_dict).
-        """
-        filters = {
-            'topic': request.GET.get('topic', ''),
-            'resolution': request.GET.get('resolution', ''),
-            'catalog': request.GET.get('catalog', ''),
-            'q': request.GET.get('q', ''),
-        }
-        
-        if filters['q']:
-            from django.db.models import Q
-            qs = qs.filter(
-                Q(name__icontains=filters['q']) |
-                Q(description__icontains=filters['q']) |
-                Q(catalog__name__icontains=filters['q'])
-            )
-        
-        if filters['topic']:
-            qs = qs.filter(catalog__topics__slug=filters['topic'])
-        
-        if filters['resolution']:
-            qs = qs.filter(time_resolution=filters['resolution'])
-        
-        if filters['catalog']:
-            qs = qs.filter(catalog__slug=filters['catalog'])
-        
-        return qs, filters
-    
-    def _filter_context(self):
-        """Context data needed to render the sidebar filters."""
-        active_resolutions = (
-            Collection.objects
-            .filter(is_active=True, visibility=Collection.Visibility.PUBLIC)
-            .exclude(time_resolution='')
-            .values_list('time_resolution', flat=True)
-            .distinct()
-        )
-        choices = dict(Collection.TimeResolution.choices)
-        
-        return {
-            'topics': Topic.objects.filter(catalogs__is_active=True).distinct().order_by('sort_order', 'name'),
-            'catalogs': Catalog.objects.filter(is_active=True).order_by('name'),
-            'time_resolutions': [
-                (value, choices[value])
-                for value in Collection.TimeResolution.values
-                if value in active_resolutions
-            ],
-        }

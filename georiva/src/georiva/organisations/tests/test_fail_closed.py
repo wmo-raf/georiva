@@ -446,7 +446,13 @@ class NoUnscopedObjectLookupTests(TestCase):
     not, and this catches it at the source.
     """
 
-    APPS = ["core", "sources", "ingestion", "visualization", "virtual_zarr", "analysis"]
+    APPS = [
+        "core", "sources", "ingestion", "visualization", "virtual_zarr", "analysis",
+        # The public plane resolves the same rows from the same slugs, and its
+        # callers are anonymous — it earns the rule rather than being exempt
+        # from it (#271).
+        "stac", "edr", "pages",
+    ]
 
     def test_org_owned_apps_do_not_call_get_object_or_404(self):
         import pathlib

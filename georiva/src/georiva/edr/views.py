@@ -12,6 +12,10 @@ Endpoint map:
 
 Collection ID = Collection.slug
 
+Each host is one organisation's whole EDR service, resolved from the hostname
+exactly as STAC's is (#271): the collection ids stay bare, and `?catalog=` names
+a catalog inside *this* organisation or matches nothing.
+
 Cross-API relationships:
     EDR collection detail  → links to STAC collection via canonical rel
     STAC collection        → can link to EDR collection detail
@@ -24,7 +28,6 @@ Future additions:
 """
 
 from django.db.models import Exists, OuterRef
-from django.shortcuts import get_object_or_404
 from rest_framework.parsers import JSONParser
 from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
@@ -33,11 +36,32 @@ from rest_framework.views import APIView
 
 from georiva.core.models import Collection, Item
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
+from georiva.organisations.access import (
+    get_org_object_or_404,
+    require_active_org,
+    scoped_queryset,
+)
 from .renderers import EDRJSONRenderer
 from .serializers import (
     EDRCollectionSerializer,
     EDRCollectionSummarySerializer,
 )
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def _org_collections(request: Request):
+    """This organisation's collections that are public enough to serve."""
+    return scoped_queryset(
+        request,
+        Collection.objects.filter(
+            is_active=True,
+            catalog__is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
+        ),
+    )
 
 
 # =============================================================================
@@ -66,12 +90,16 @@ class EDRLandingPageView(EDRAPIView):
     
     def get(self, request: Request) -> Response:
         base_url = get_full_url_by_request(request, '/api/edr/')
-        
+        organisation = require_active_org(request)
+
         return Response({
-            "title": "GeoRiva EDR API",
+            "title": f"{organisation.name} EDR API",
             "description": (
-                "OGC API - Environmental Data Retrieval service for "
-                "Earth observation and meteorological data across African NMHSs."
+                organisation.description
+                or (
+                    "OGC API - Environmental Data Retrieval service for "
+                    f"{organisation.name}'s Earth observation and meteorological data."
+                )
             ),
             "links": [
                 {
@@ -96,7 +124,7 @@ class EDRLandingPageView(EDRAPIView):
                     "rel": "related",
                     "href": get_base_stac_api_url(request),
                     "type": "application/json",
-                    "title": "GeoRiva STAC API",
+                    "title": f"{organisation.name} STAC API",
                 },
             ],
         })
@@ -154,11 +182,7 @@ class EDRCollectionListView(EDRAPIView):
     def get(self, request: Request) -> Response:
         base_url = get_full_url_by_request(request, '/api/edr/')
         
-        queryset = Collection.objects.filter(
-            is_active=True,
-            catalog__is_active=True,
-            visibility=Collection.Visibility.PUBLIC,
-        ).select_related(
+        queryset = _org_collections(request).select_related(
             'catalog',
         ).prefetch_related(
             'variables',
@@ -219,8 +243,13 @@ class EDRCollectionDetailView(EDRAPIView):
     """
     
     def get(self, request: Request, collection_slug: str) -> Response:
-        collection = get_object_or_404(
-            Collection.objects.select_related(
+        collection = get_org_object_or_404(
+            request,
+            Collection.objects.filter(
+                is_active=True,
+                catalog__is_active=True,
+                visibility=Collection.Visibility.PUBLIC,
+            ).select_related(
                 'catalog',
             ).prefetch_related(
                 'variables',
@@ -228,9 +257,6 @@ class EDRCollectionDetailView(EDRAPIView):
                 'variables__palette__stops',
             ),
             slug=collection_slug,
-            is_active=True,
-            catalog__is_active=True,
-            visibility=Collection.Visibility.PUBLIC,
         )
 
         data = EDRCollectionSerializer(

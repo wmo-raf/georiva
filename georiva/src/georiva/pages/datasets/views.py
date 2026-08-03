@@ -1,7 +1,7 @@
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
 
 from georiva.core.models import Catalog, Collection, Item, Asset
+from georiva.organisations.access import get_org_object_or_404
 
 
 def collection_available_dates(request, catalog_slug, collection_slug):
@@ -9,6 +9,10 @@ def collection_available_dates(request, catalog_slug, collection_slug):
     Available dates for the cascading date picker.
 
     GET /datasets/collections/<catalog>/<collection>/dates/
+
+    The catalog is resolved within the organisation this host serves: the picker
+    on one institution's portal never offers another institution's dates, even
+    where the two share a catalog slug.
 
     Query params:
         level    — 'years' | 'months' | 'days' | 'hours'
@@ -23,13 +27,17 @@ def collection_available_dates(request, catalog_slug, collection_slug):
         {"values": [1, 5, 10, 15, 20]}    days
         {"values": [0, 6, 12, 18]}         hours (UTC)
     """
-    catalog = get_object_or_404(Catalog, slug=catalog_slug, is_active=True)
-    collection = get_object_or_404(
-        Collection,
-        catalog=catalog,
+    catalog = get_org_object_or_404(
+        request, Catalog.objects.filter(is_active=True), slug=catalog_slug,
+    )
+    collection = get_org_object_or_404(
+        request,
+        Collection.objects.filter(
+            catalog=catalog,
+            is_active=True,
+            visibility=Collection.Visibility.PUBLIC,
+        ),
         slug=collection_slug,
-        is_active=True,
-        visibility=Collection.Visibility.PUBLIC,
     )
     
     level = request.GET.get('level', 'years')
