@@ -25,9 +25,10 @@ TRIGGER_MODES = ("event", "scheduled", "manual")
 CONFIG_FIELD_TYPES = ("str", "int", "float", "bool", "choice")
 TIERS = ("staging", "published")
 # Output-collection visibility (mirrors core.Collection.Visibility): a "public"
-# output is served via STAC/EDR/tiles; an "internal" one is a derivation
-# intermediate — read by the engine but never served.
-VISIBILITIES = ("public", "internal")
+# output is served via STAC/EDR/tiles to anyone; a "private" one only to members
+# of the owning organisation; an "internal" one is a derivation intermediate —
+# read by the engine but never served.
+VISIBILITIES = ("public", "private", "internal")
 
 _SCALAR_COERCERS = {"str": str, "int": int, "float": float, "bool": bool}
 

@@ -23,7 +23,8 @@ from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from wagtail.models import Site
 
-from .models import Organisation, OrganisationMembership
+from .access import resolve_org_role
+from .models import Organisation
 
 logger = logging.getLogger(__name__)
 
@@ -165,13 +166,8 @@ class OrganisationMiddleware:
     def _resolve_role(request, organisation):
         """The requesting user's live role in this organisation, or ``None``.
 
-        Superusers are the instance admin: they enter any host as an org admin
-        without holding a membership row.
+        The rule itself lives in ``access.resolve_org_role``, because the
+        serving planes have to ask the same question of a user this middleware
+        never saw — an API-key request is still anonymous here (#273).
         """
-        user = getattr(request, "user", None)
-        if user is None or not user.is_authenticated or not user.is_active:
-            return None
-        if user.is_superuser:
-            return OrganisationMembership.Role.ADMIN
-        membership = organisation.membership_for(user)
-        return membership.role if membership else None
+        return resolve_org_role(organisation, getattr(request, "user", None))

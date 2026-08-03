@@ -22,6 +22,15 @@ on one tenant's host could read another's rendering config and learn from the
 200 which catalogs it runs. So when the request *does* belong to an
 organisation, the segment must name that same one.
 
+Both of which are also why this endpoint serves ``public`` collections and
+nothing else. Every other Django plane widened to the ``private`` tier in #273
+by asking who is calling; this one cannot, because on the call it exists for
+there is nobody to ask — Titiler forwards no credential and holds no session.
+Answering for a private collection would therefore mean answering for anyone,
+so it answers for no one, and the palette cache Django warms directly is how a
+private variable still renders. Authenticating the machine plane properly is
+the nginx ``auth_request`` gateway's job (#274).
+
 Returns the same payload structure as the Redis palette cache:
   With palette:    {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}
   Without palette: {"vmin", "vmax", "scale_type"}

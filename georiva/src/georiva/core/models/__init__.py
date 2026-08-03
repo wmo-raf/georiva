@@ -1,5 +1,5 @@
 from .catalog import Topic, Catalog
-from .collection import Collection
+from .collection import Collection, visible_visibilities
 from .item import Item, Asset
 from .units import Unit
 from .variable import Variable

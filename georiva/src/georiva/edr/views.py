@@ -53,8 +53,8 @@ from .serializers import (
 # =============================================================================
 
 def _org_collections(request: Request):
-    """The collections this organisation will serve."""
-    return scoped_queryset(request, Collection.objects.public())
+    """The collections this organisation will serve to this caller."""
+    return scoped_queryset(request, Collection.objects.visible_to(request))
 
 
 # =============================================================================

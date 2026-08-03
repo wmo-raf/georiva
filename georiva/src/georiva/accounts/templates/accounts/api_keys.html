@@ -1,0 +1,115 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "API keys" %}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .gr-keys-help {
+        color: var(--w-color-text-label);
+        max-width: 46em;
+        margin-bottom: 1.5em;
+    }
+    .gr-keys-new {
+        border: 1px solid var(--w-color-border-furniture);
+        background: var(--w-color-positive-100);
+        color: var(--w-color-white);
+        padding: 1em;
+        border-radius: 4px;
+        margin-bottom: 1.5em;
+    }
+    .gr-keys-secret {
+        display: block;
+        font-family: monospace;
+        font-size: 1.1em;
+        word-break: break-all;
+        background: var(--w-color-white);
+        color: var(--w-color-text-label);
+        padding: 0.6em;
+        border-radius: 3px;
+        margin: 0.6em 0;
+    }
+    .gr-keys-form {
+        border: 1px solid var(--w-color-border-furniture);
+        background: var(--w-color-grey-50);
+        padding: 1em;
+        border-radius: 4px;
+        margin-bottom: 2em;
+    }
+    .gr-keys-prefix { font-family: monospace; }
+    .gr-keys-muted { color: var(--w-color-grey-400); }
+    .gr-keys-revoke { color: var(--w-color-critical-200); }
+    .gr-keys-retired td { opacity: 0.6; }
+</style>
+{% endblock %}
+
+{% block main_content %}
+<p class="gr-keys-help">
+    {% blocktrans %}
+        API keys let scripts and desktop tools — QGIS, notebooks, cron jobs — read the
+        data you can already see, without a browser session. A key identifies you, so it
+        reaches exactly the organisations you are a member of and nothing more.
+    {% endblocktrans %}
+</p>
+
+{% if new_secret %}
+<div class="gr-keys-new">
+    <strong>{% trans "Copy this key now. It is shown once and cannot be recovered." %}</strong>
+    <code class="gr-keys-secret">{{ new_secret }}</code>
+    {% blocktrans %}
+        Send it as an <code>Authorization: Bearer</code> header, or — for tools that only
+        take a URL — as an <code>api_key</code> query parameter.
+    {% endblocktrans %}
+</div>
+{% endif %}
+
+<form method="post" class="gr-keys-form">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="button">{% trans "Create key" %}</button>
+</form>
+
+<table class="listing">
+    <thead>
+        <tr>
+            <th>{% trans "Name" %}</th>
+            <th>{% trans "Key" %}</th>
+            <th>{% trans "Created" %}</th>
+            <th>{% trans "Expires" %}</th>
+            <th>{% trans "Last used" %}</th>
+            <th>{% trans "Actions" %}</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for key in keys %}
+        <tr {% if not key.is_live %}class="gr-keys-retired"{% endif %}>
+            <td>{{ key.name }}</td>
+            <td class="gr-keys-prefix">{{ key.prefix }}…</td>
+            <td>{{ key.created|date:"j M Y" }}</td>
+            <td>
+                {% if key.expires_at %}{{ key.expires_at|date:"j M Y H:i" }}{% else %}
+                    <span class="gr-keys-muted">{% trans "Never" %}</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if key.last_used_at %}{{ key.last_used_at|date:"j M Y H:i" }}{% else %}
+                    <span class="gr-keys-muted">{% trans "Never" %}</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if key.revoked_at %}
+                    <span class="gr-keys-muted">{% trans "Revoked" %}</span>
+                {% elif key.is_expired %}
+                    <span class="gr-keys-muted">{% trans "Expired" %}</span>
+                {% else %}
+                    <a href="{% url 'api_key_revoke' key.pk %}" class="gr-keys-revoke">{% trans "Revoke" %}</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">{% trans "You have no API keys yet." %}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

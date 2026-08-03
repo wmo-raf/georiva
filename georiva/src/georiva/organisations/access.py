@@ -148,9 +148,53 @@ def get_via_scoped_parent_or_404(queryset, *args, **kwargs):
     return get_object_or_404(queryset, *args, **kwargs)
 
 
+def resolve_org_role(organisation, user):
+    """``user``'s live role in ``organisation``, read from the database, or ``None``.
+
+    The membership rule itself, in one function, so the middleware and the
+    serving planes cannot answer it differently. Never cached: a revoked
+    membership must fail on the very next request rather than at logout.
+
+    Superusers are the instance admin and hold the ADMIN role in every
+    organisation without a membership row — see this module's docstring for why
+    that is not a cross-tenant view.
+    """
+    if organisation is None:
+        return None
+    if user is None or not user.is_authenticated or not user.is_active:
+        return None
+    if user.is_superuser:
+        return OrganisationMembership.Role.ADMIN
+    membership = organisation.membership_for(user)
+    return membership.role if membership else None
+
+
 def org_role(request):
-    """The requesting user's role in the organisation serving the request."""
+    """The requesting user's role in the organisation serving the request.
+
+    Reads what ``OrganisationMiddleware`` resolved. That is the right source on
+    the admin plane, where the identity is a session cookie and is therefore
+    known before any middleware after ``AuthenticationMiddleware`` runs.
+    """
     return getattr(request, "active_org_role", None)
+
+
+def may_see_private(request):
+    """Whether this request may be served the active organisation's private data.
+
+    The serving-plane counterpart of :func:`require_org_member`, and the reason
+    ``private`` collections can be filtered rather than forbidden: a caller this
+    returns ``False`` for is simply not shown them, and a fetch by name 404s.
+
+    It deliberately re-resolves the role from ``request.user`` instead of
+    reading :func:`org_role`. On the public plane the identity is not always
+    settled when the middleware runs: an API-key request arrives anonymous and
+    only acquires its user when DRF authenticates it, inside the view. Reading
+    the middleware's answer there would deny every key holder. Same rule, same
+    :func:`resolve_org_role`, read at the moment the answer is used.
+    """
+    organisation = require_active_org(request)
+    return resolve_org_role(organisation, getattr(request, "user", None)) is not None
 
 
 def is_org_admin(request):
