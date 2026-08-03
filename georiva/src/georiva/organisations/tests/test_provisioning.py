@@ -9,6 +9,7 @@ from georiva.organisations.provisioning import (
     bootstrap_central_org,
     org_page_group_name,
     provision_organisation,
+    sync_site_ports,
 )
 from georiva.pages.home.models import HomePage
 
@@ -49,6 +50,15 @@ class ProvisionOrganisationTests(TestCase):
         self.assertEqual(Site.objects.count(), sites_before)
         self.assertEqual(HomePage.objects.count(), pages_before)
         self.assertEqual(Group.objects.count(), groups_before)
+
+    @override_settings(GEORIVA_SITE_PORT=443)
+    def test_site_port_decides_the_scheme_of_advertised_urls(self):
+        # The port is not bookkeeping: Wagtail reads the scheme off it, and
+        # root_url is what every absolute STAC/EDR link is built from.
+        organisation = provision_organisation(name="Kenya Met", slug="kenya")
+
+        self.assertEqual(organisation.site.port, 443)
+        self.assertTrue(organisation.site.root_url.startswith("https://"))
 
     def test_lean_settings_are_stored(self):
         organisation = provision_organisation(
@@ -98,3 +108,58 @@ class BootstrapCentralOrgTests(TestCase):
         second = bootstrap_central_org(slug="central")
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(Organisation.objects.filter(slug="central").count(), 1)
+
+    @override_settings(GEORIVA_SITE_PORT=443)
+    def test_moves_the_default_site_off_wagtails_port_80(self):
+        # Wagtail's default Site ships on port 80, so an instance behind TLS
+        # would otherwise advertise http:// links from its central org.
+        organisation = bootstrap_central_org(slug="central")
+
+        self.assertEqual(organisation.site.port, 443)
+        self.assertTrue(organisation.site.root_url.startswith("https://"))
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
+class SyncSitePortsTests(TestCase):
+    """The upgrade path: organisations that already exist when TLS arrives.
+
+    The bootstrap returns early once any organisation exists, so nothing else
+    ever revisits their Sites.
+    """
+
+    def test_moves_every_organisation_site_and_reports_the_count(self):
+        kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        icpac = provision_organisation(name="ICPAC", slug="icpac")
+        self.assertEqual(kenya.site.port, 80)
+
+        with override_settings(GEORIVA_SITE_PORT=443):
+            updated = sync_site_ports()
+
+        for organisation in (kenya, icpac):
+            organisation.site.refresh_from_db()
+            self.assertEqual(organisation.site.port, 443)
+            self.assertTrue(organisation.site.root_url.startswith("https://"))
+        # The suite's own bootstrapped central org is moved too, so the count is
+        # "at least these two" rather than exactly two.
+        self.assertGreaterEqual(updated, 2)
+
+    def test_is_idempotent(self):
+        provision_organisation(name="Kenya Met", slug="kenya")
+
+        with override_settings(GEORIVA_SITE_PORT=443):
+            sync_site_ports()
+            self.assertEqual(sync_site_ports(), 0)
+
+    def test_leaves_sites_that_belong_to_no_organisation_alone(self):
+        # A Site without an organisation is not ours to move: nothing serves it
+        # under tenancy, and its port may mean something to whoever made it.
+        orphan = Site.objects.create(
+            hostname="orphan.georiva.test", port=8000,
+            root_page=provision_organisation(name="Kenya Met", slug="kenya").site.root_page,
+        )
+
+        with override_settings(GEORIVA_SITE_PORT=443):
+            sync_site_ports()
+
+        orphan.refresh_from_db()
+        self.assertEqual(orphan.port, 8000)

@@ -33,6 +33,21 @@ def resolve_base_domain(base_domain=None):
     return base_domain or settings.GEORIVA_BASE_DOMAIN
 
 
+def resolve_site_port(port=None):
+    """The port organisation Sites are created on.
+
+    More than a port: Wagtail derives a Site's ``root_url`` scheme from it (80 →
+    ``http://``, 443 → ``https://``), and ``root_url`` is what
+    ``core.utils.get_full_url_by_request`` builds every absolute URL from — STAC
+    and EDR ``self`` links included. An instance behind TLS whose Sites are left
+    on port 80 advertises ``http://`` links to callers who reached it over
+    ``https://``, and that is not cosmetic: STAC Browser compares every link
+    against its configured catalog URL and reads an unexpected scheme as another
+    origin entirely, so the whole catalog becomes unbrowsable.
+    """
+    return port if port is not None else getattr(settings, "GEORIVA_SITE_PORT", 80)
+
+
 def build_org_hostname(slug, base_domain=None):
     """The hostname an organisation's Site is served from."""
     return f"{slug}.{resolve_base_domain(base_domain)}"
@@ -83,7 +98,7 @@ def provision_organisation(*, name, slug, site=None, port=None, base_domain=None
         root_page = _create_root_page(name, slug)
         site = Site.objects.create(
             hostname=build_org_hostname(slug, base_domain),
-            port=port if port is not None else getattr(settings, "GEORIVA_SITE_PORT", 80),
+            port=resolve_site_port(port),
             site_name=name,
             root_page=root_page,
         )
@@ -100,12 +115,33 @@ def provision_organisation(*, name, slug, site=None, port=None, base_domain=None
     return organisation
 
 
-def bootstrap_central_org(*, name=None, slug="central", base_domain=None):
+def sync_site_ports(port=None):
+    """Move every organisation's Site onto ``GEORIVA_SITE_PORT``. Returns the count.
+
+    New organisations get the port at provisioning time, but an instance that
+    gains TLS after its organisations exist has no other way to correct them —
+    the bootstrap is idempotent and returns early once any organisation exists,
+    so it will never revisit them. See :func:`resolve_site_port` for why the
+    stale value is worth a command of its own rather than a note in the docs.
+    """
+    target = resolve_site_port(port)
+    stale = Site.objects.filter(organisation__isnull=False).exclude(port=target)
+    updated = [site.hostname for site in stale]
+    stale.update(port=target)
+    if updated:
+        logger.info("Moved %d organisation Site(s) to port %d: %s", len(updated), target, ", ".join(updated))
+    return len(updated)
+
+
+def bootstrap_central_org(*, name=None, slug="central", base_domain=None, port=None):
     """First-setup bootstrap: an ordinary org on Wagtail's default Site.
 
     Idempotent — returns the existing organisation if the default Site already
     has one. The default Site's hostname is moved onto the base domain so the
-    apex serves the central org's portal.
+    apex serves the central org's portal, and its port onto
+    :func:`resolve_site_port` for the same reason an ordinary organisation is
+    provisioned there: Wagtail reads the scheme of every absolute URL off it, and
+    the default Site ships on port 80.
     """
     site = Site.objects.filter(is_default_site=True).first()
     if site is None:
@@ -116,8 +152,15 @@ def bootstrap_central_org(*, name=None, slug="central", base_domain=None):
         return existing
 
     base = resolve_base_domain(base_domain)
+    site_port = resolve_site_port(port)
     with transaction.atomic():
+        changed = []
         if site.hostname != base:
             site.hostname = base
-            site.save(update_fields=["hostname"])
+            changed.append("hostname")
+        if site.port != site_port:
+            site.port = site_port
+            changed.append("port")
+        if changed:
+            site.save(update_fields=changed)
         return provision_organisation(name=name or site.site_name or "Central", slug=slug, site=site)

@@ -271,15 +271,18 @@ services:
       CPL_VSIL_CURL_CACHE_SIZE: ${CPL_VSIL_CURL_CACHE_SIZE:-67108864}
 
   georiva-stac-browser:
+    # Built from our own context so the catalog URL can be a function of the
+    # host — see deploy/stac-browser/config.custom.mjs. Deliberately sets no
+    # SB_catalogUrl: the entrypoint turns SB_* variables into runtime-config.js,
+    # which outranks that module and would pin every tenant to one catalog.
     build:
-      context: https://github.com/radiantearth/stac-browser.git#v4.0.1
+      context: ./deploy/stac-browser
       args:
         pathPrefix: /stac-browser/
+        STAC_BROWSER_VERSION: v5.0.0
     restart: unless-stopped
     ports:
       - "8080"
-    environment:
-      SB_catalogUrl: ${GEORIVA_STAC_BROWSER_CATALOG_URL:-}
 
   georiva-web-proxy:
     image: nginx:1.29.5-alpine
