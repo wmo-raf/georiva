@@ -9,6 +9,7 @@ from georiva.organisations.provisioning import (
     bootstrap_central_org,
     org_page_group_name,
     provision_organisation,
+    sync_site_domains,
     sync_site_ports,
 )
 from georiva.pages.home.models import HomePage
@@ -163,3 +164,96 @@ class SyncSitePortsTests(TestCase):
 
         orphan.refresh_from_db()
         self.assertEqual(orphan.port, 8000)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
+class SyncSiteDomainsTests(TestCase):
+    """The way back from a base domain that turned out to be the wrong one.
+
+    Nothing else revisits a Site hostname once provisioning has written it, so
+    without this the instance answers on neither domain.
+    """
+
+    def test_moves_every_organisation_onto_the_new_domain_keeping_its_label(self):
+        with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
+            kenya = provision_organisation(name="Kenya Met", slug="kenya")
+            icpac = provision_organisation(name="ICPAC", slug="icpac")
+        self.assertEqual(kenya.site.hostname, "kenya.wrong.test")
+
+        moves = sync_site_domains("wrong.test")
+
+        kenya.site.refresh_from_db()
+        icpac.site.refresh_from_db()
+        self.assertEqual(kenya.site.hostname, "kenya.georiva.test")
+        self.assertEqual(icpac.site.hostname, "icpac.georiva.test")
+        self.assertEqual(len(moves), 2)
+        self.assertIn(("kenya.wrong.test", "kenya.georiva.test"), moves)
+
+    def test_moves_the_organisation_on_the_apex_to_the_new_apex(self):
+        # The central org sits on the base domain itself, not a subdomain of it.
+        Organisation.objects.all().delete()
+        with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
+            central = bootstrap_central_org(slug="central")
+        self.assertEqual(central.site.hostname, "wrong.test")
+
+        sync_site_domains("wrong.test")
+
+        central.site.refresh_from_db()
+        self.assertEqual(central.site.hostname, "georiva.test")
+
+    def test_is_idempotent(self):
+        with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
+            provision_organisation(name="Kenya Met", slug="kenya")
+
+        sync_site_domains("wrong.test")
+        self.assertEqual(sync_site_domains("wrong.test"), [])
+
+    def test_leaves_organisations_on_other_domains_alone(self):
+        # Only the domain being left is rewritten; an organisation deliberately
+        # parked elsewhere is not swept up.
+        with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
+            kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        with override_settings(GEORIVA_BASE_DOMAIN="other.test"):
+            icpac = provision_organisation(name="ICPAC", slug="icpac")
+
+        sync_site_domains("wrong.test")
+
+        kenya.site.refresh_from_db()
+        icpac.site.refresh_from_db()
+        self.assertEqual(kenya.site.hostname, "kenya.georiva.test")
+        self.assertEqual(icpac.site.hostname, "icpac.other.test")
+
+    def test_leaves_sites_that_belong_to_no_organisation_alone(self):
+        with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
+            kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        orphan = Site.objects.create(
+            hostname="orphan.wrong.test", port=80, root_page=kenya.site.root_page,
+        )
+
+        sync_site_domains("wrong.test")
+
+        orphan.refresh_from_db()
+        self.assertEqual(orphan.hostname, "orphan.wrong.test")
+
+    def test_a_collision_moves_nothing(self):
+        # A half-applied rename leaves some organisations reachable and others
+        # not, which is worse than not having started.
+        with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
+            kenya = provision_organisation(name="Kenya Met", slug="kenya")
+            icpac = provision_organisation(name="ICPAC", slug="icpac")
+        Site.objects.create(
+            hostname="kenya.georiva.test", port=kenya.site.port, root_page=kenya.site.root_page,
+        )
+
+        with self.assertRaises(ValueError):
+            sync_site_domains("wrong.test")
+
+        kenya.site.refresh_from_db()
+        icpac.site.refresh_from_db()
+        self.assertEqual(kenya.site.hostname, "kenya.wrong.test")
+        self.assertEqual(icpac.site.hostname, "icpac.wrong.test")
+
+    def test_moving_to_the_domain_already_in_use_is_a_no_op(self):
+        provision_organisation(name="Kenya Met", slug="kenya")
+
+        self.assertEqual(sync_site_domains("georiva.test"), [])
