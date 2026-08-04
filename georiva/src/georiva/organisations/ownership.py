@@ -10,7 +10,14 @@ single ``.filter()`` can express — and it offers exactly two entry points:
 Both walk the same vocabulary, so a surface cannot be scoped one way in its
 listing and another way in its detail view, and a model that gains a declaration
 becomes scopable on every surface at once rather than on the ones somebody
-remembers.
+remembers. Both — and :func:`is_scopable` beside them — switch exactly once, on
+``lookups.kind_of``, so a kind added to the vocabulary is a branch to add in one
+place rather than a cascade three functions have to keep agreeing about.
+
+Where the two halves *could* legitimately differ, they are made to agree
+deliberately, and each of those places says so: a null link is nobody's on both
+sides, and a subject whose model belongs everywhere is admitted on both sides
+without either half resolving the row.
 
 The kinds it dispatches on, and what each resolves to:
 
@@ -62,13 +69,16 @@ from wagtail.models import Page
 
 from .access import (
     LOOKUP_ATTR,
-    NOT_ORM_SCOPABLE,
+    NO_ROUTE,
     ORGANISATION_SELF,
+    ORM_PATH,
     PAGE_TREE,
     SHARED_REFERENCE_DATA,
+    VIA_CONTENT_OBJECT,
+    VIA_RELATED,
     content_object_fields,
     declared_lookup,
-    is_orm_path,
+    kind_of,
     related_path,
     require_org_object,
     require_writable_org_object,
@@ -133,27 +143,24 @@ def scope_rows(request, queryset, _seen=frozenset()):
     """
     model = queryset.model
     declared = declaration_of(model)
+    kind = kind_of(declared)
 
-    if declared == SHARED_REFERENCE_DATA:
+    if kind == SHARED_REFERENCE_DATA:
         return queryset
-    if declared == PAGE_TREE:
+    if kind == PAGE_TREE:
         return scope_pages(request, queryset)
-    if is_orm_path(declared) or declared == ORGANISATION_SELF:
+    if kind in (ORM_PATH, ORGANISATION_SELF):
         return scoped_queryset(request, queryset)
+    if kind == NO_ROUTE:
+        raise _no_route(
+            model, declared, "Its rows cannot be listed on a scoped surface."
+        )
 
     seen = _visit(model, _seen)
-
-    path = related_path(declared)
-    if path is not None:
-        return _scope_via_related(request, queryset, path, seen)
-
-    fields = content_object_fields(declared)
-    if fields is not None:
-        return _scope_via_content_object(request, queryset, *fields, seen)
-
-    raise ImproperlyConfigured(
-        f"{model._meta.label} declares {LOOKUP_ATTR} = {declared!r}, which names no way "
-        f"to reach an organisation. Its rows cannot be listed on a scoped surface."
+    if kind == VIA_RELATED:
+        return _scope_via_related(request, queryset, related_path(declared), seen)
+    return _scope_via_content_object(
+        request, queryset, *content_object_fields(declared), seen
     )
 
 
@@ -165,10 +172,11 @@ def _scope_via_related(request, queryset, path, seen):
     ``access.organisation_of`` gives a null along a declared path.
     """
     target = _related_model(queryset.model, path)
-    if declaration_of(target) == SHARED_REFERENCE_DATA:
-        # Every row of the target belongs everywhere, so the join would only
-        # discard the rows whose relation is null. Leave them.
-        return queryset
+    if kind_of(declaration_of(target)) == SHARED_REFERENCE_DATA:
+        # Every row of the target belongs everywhere, so no subquery is needed —
+        # but a null link is still nobody's, and dropping those here is what
+        # keeps this agreeing with the object half, which reads a null as False.
+        return queryset.filter(**{f"{path}__isnull": False})
     scoped = scope_rows(request, target._default_manager.all(), seen)
     return queryset.filter(**{f"{path}__in": scoped})
 
@@ -198,7 +206,11 @@ def _scope_via_content_object(request, queryset, content_type_field, object_id_f
         if subject is None:
             continue
         here = Q(**{f"{content_type_field}_id": content_type.pk})
-        if declaration_of(subject) == SHARED_REFERENCE_DATA:
+        if kind_of(declaration_of(subject)) == SHARED_REFERENCE_DATA:
+            # Admitted whole, without an id list: every row of the subject
+            # belongs everywhere, and listing its primary keys would be the one
+            # place this scales with a *shared* table rather than an owned one.
+            # The object half admits the same rows on the same terms.
             clauses.append(here)
             continue
         allowed = scope_rows(request, subject._default_manager.all(), seen)
@@ -263,38 +275,46 @@ def belongs_to_active_org(request, obj, _seen=frozenset()):
     """
     model = type(obj)
     declared = declaration_of(model)
+    kind = kind_of(declared)
 
-    if declared == SHARED_REFERENCE_DATA:
+    if kind == SHARED_REFERENCE_DATA:
         return True
-    if declared == PAGE_TREE:
+    if kind == PAGE_TREE:
         return page_is_in_org_tree(org_root_page(request), obj.path, obj.depth)
-    if is_orm_path(declared) or declared == ORGANISATION_SELF:
+    if kind in (ORM_PATH, ORGANISATION_SELF):
         try:
             require_org_object(request, obj)
         except Http404:
             return False
         return True
+    if kind == NO_ROUTE:
+        raise _no_route(model, declared, "Whether this row is yours cannot be answered.")
 
     seen = _visit(model, _seen)
-
-    path = related_path(declared)
-    if path is not None:
+    if kind == VIA_RELATED:
+        path = related_path(declared)
         _related_model(model, path)  # a mistyped path is a loud error, not a False
         related = _walk(obj, path)
         # A null anywhere along the path, or a row that has gone: nobody's,
         # never everybody's — the same reading the queryset half gives, where
-        # such a row simply matches no subquery.
+        # such a row matches no subquery and is excluded outright.
         return False if related is None else belongs_to_active_org(request, related, seen)
 
-    fields = content_object_fields(declared)
-    if fields is not None:
-        subject = _content_object(obj, *fields)
-        return False if subject is None else belongs_to_active_org(request, subject, seen)
-
-    raise ImproperlyConfigured(
-        f"{model._meta.label} declares {LOOKUP_ATTR} = {declared!r}, which names no way "
-        f"to reach an organisation. Whether this row is yours cannot be answered."
-    )
+    content_type_field, object_id_field = content_object_fields(declared)
+    subject_model = _subject_model(obj, content_type_field)
+    if subject_model is None:
+        # A content type whose model has gone: the subject names nothing.
+        return False
+    if kind_of(declaration_of(subject_model)) == SHARED_REFERENCE_DATA:
+        # Admitted without resolving the row at all, which is exactly what the
+        # queryset half does with the whole content type. Resolving it here
+        # would make the two halves disagree about a dangling id — and would
+        # also be the one place this module fetches a row it does not need.
+        return True
+    subject = subject_model._default_manager.filter(
+        pk=getattr(obj, object_id_field, None)
+    ).first()
+    return False if subject is None else belongs_to_active_org(request, subject, seen)
 
 
 def _walk(obj, path):
@@ -316,22 +336,29 @@ def _walk(obj, path):
     return obj
 
 
-def _content_object(obj, content_type_field, object_id_field):
-    """The subject of a generic key, resolved without assuming an accessor.
+def _subject_model(obj, content_type_field):
+    """The model a generic key points at, or ``None`` if it points at nothing.
 
-    Wagtail names its generic foreign key ``content_object`` on the workflow
-    tables and does not define one at all on the model log, so the pair of
-    columns the declaration already names is the reliable route. A subject whose
-    row or whose model has gone is ``None``, and the caller reads that as
-    nobody's.
+    Read from the content-type column the declaration names rather than through a
+    generic-foreign-key accessor: Wagtail calls one ``content_object`` on the
+    workflow tables and defines none at all on the model log, so the columns are
+    the only reliable route. An uninstalled model resolves to ``None``.
     """
     content_type = getattr(obj, content_type_field, None)
-    subject_model = content_type.model_class() if content_type is not None else None
-    if subject_model is None:
-        return None
-    return subject_model._default_manager.filter(
-        pk=getattr(obj, object_id_field, None)
-    ).first()
+    return content_type.model_class() if content_type is not None else None
+
+
+def _no_route(model, declared, consequence):
+    """The refusal both entry points give a model that reaches no organisation.
+
+    One function so the two cannot describe the same condition differently; the
+    ``consequence`` is the half that legitimately differs — a listing cannot be
+    filtered, a single row cannot be judged.
+    """
+    return ImproperlyConfigured(
+        f"{model._meta.label} declares {LOOKUP_ATTR} = {declared!r}, which names no way "
+        f"to reach an organisation. {consequence}"
+    )
 
 
 def require_active_org_object(request, obj, *, writable=False):
@@ -343,8 +370,7 @@ def require_active_org_object(request, obj, *, writable=False):
     organisation and writable only by the instance admin. Nothing outside the
     ORM-path kinds has a global tier, so for everything else the two agree.
     """
-    declared = declaration_of(type(obj))
-    if writable and (is_orm_path(declared) or declared == ORGANISATION_SELF):
+    if writable and kind_of(declaration_of(type(obj))) in (ORM_PATH, ORGANISATION_SELF):
         return require_writable_org_object(request, obj)
     if not belongs_to_active_org(request, obj):
         raise Http404("No such object in this organisation.")
@@ -354,16 +380,11 @@ def require_active_org_object(request, obj, *, writable=False):
 def is_scopable(model):
     """Whether the dispatcher knows how to narrow ``model``'s rows.
 
-    For the sweep, and for a caller that would rather ask than catch. Anything
-    this returns ``False`` for is refused by both entry points above.
+    For the sweep, and for a caller that would rather ask than catch. It reads
+    the same ``kind_of`` the two entry points switch on, and names the one kind
+    they both refuse — so it cannot come to answer a question they answer
+    differently.
     """
     if not (isinstance(model, type) and issubclass(model, Model)):
         return False
-    declared = declaration_of(model)
-    if not declared or declared == NOT_ORM_SCOPABLE:
-        return False
-    if is_orm_path(declared) or declared in (
-        SHARED_REFERENCE_DATA, ORGANISATION_SELF, PAGE_TREE,
-    ):
-        return True
-    return related_path(declared) is not None or content_object_fields(declared) is not None
+    return kind_of(declaration_of(model)) != NO_ROUTE

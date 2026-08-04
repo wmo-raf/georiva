@@ -49,11 +49,21 @@ SENTINELS = frozenset({
     NOT_ORM_SCOPABLE,
 })
 
-#: Prefix of the declaration built by :func:`via_related`.
-VIA_RELATED_PREFIX = "via-related:"
+#: The parameterised kinds. Each names a *kind* of declaration rather than a
+#: whole one — the declaration is this string, a colon and the arguments, which
+#: is why they are recognised by prefix and not by membership of a set.
+VIA_RELATED = "via-related"
+VIA_CONTENT_OBJECT = "via-content-object"
 
-#: Prefix of the declaration built by :func:`via_content_object`.
-VIA_CONTENT_OBJECT_PREFIX = "via-content-object:"
+VIA_RELATED_PREFIX = f"{VIA_RELATED}:"
+VIA_CONTENT_OBJECT_PREFIX = f"{VIA_CONTENT_OBJECT}:"
+
+#: The two kinds that are not spellings of a declaration: an ORM path is any
+#: string that is none of the above, and no-route covers both a model that
+#: declared :data:`NOT_ORM_SCOPABLE` and one that declared nothing at all. The
+#: dispatcher refuses them identically, so they are one kind here.
+ORM_PATH = "orm-path"
+NO_ROUTE = "no-route"
 
 
 def via_related(path):
@@ -107,16 +117,39 @@ def content_object_fields(declared):
     return None
 
 
+def kind_of(declared):
+    """Which kind of declaration ``declared`` is — the one question to ask of one.
+
+    Every caller that would otherwise test the declaration string five ways in a
+    row asks this instead and switches once on the answer. That is what keeps the
+    dispatcher's two entry points and :func:`~.ownership.is_scopable` from
+    drifting apart as kinds are added: a new kind is a new branch in one place,
+    and a caller that does not handle it fails visibly rather than falling
+    through to "ORM path" and filtering on a column called ``via-related:page``.
+
+    The answer is one of :data:`SHARED_REFERENCE_DATA`,
+    :data:`ORGANISATION_SELF`, :data:`PAGE_TREE`, :data:`VIA_RELATED`,
+    :data:`VIA_CONTENT_OBJECT`, :data:`ORM_PATH` or :data:`NO_ROUTE` — the first
+    three being their own declaration, since they carry no arguments.
+    """
+    if declared in (SHARED_REFERENCE_DATA, ORGANISATION_SELF, PAGE_TREE):
+        return declared
+    if not declared or declared == NOT_ORM_SCOPABLE:
+        return NO_ROUTE
+    if related_path(declared) is not None:
+        return VIA_RELATED
+    if content_object_fields(declared) is not None:
+        return VIA_CONTENT_OBJECT
+    return ORM_PATH
+
+
 def is_orm_path(declared):
     """Whether ``declared`` is an ORM path to Organisation rather than a decision.
 
-    The one test callers should use. Membership of :data:`SENTINELS` is not
-    enough on its own: the parameterised declarations carry their argument in the
-    string, so they can only be recognised by their prefix.
+    A shorthand for the one question the helpers in ``access`` ask, which is
+    whether they can do anything at all with a declaration.
     """
-    if not declared or declared in SENTINELS:
-        return False
-    return related_path(declared) is None and content_object_fields(declared) is None
+    return kind_of(declared) == ORM_PATH
 
 
 #: Class attribute a model sets alongside a *path* to say that a null along that

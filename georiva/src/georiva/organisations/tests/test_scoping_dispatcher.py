@@ -26,9 +26,12 @@ from wagtail.models import (
 )
 
 from georiva.organisations.lookups import (
+    NOT_ORM_SCOPABLE,
     PAGE_TREE,
+    SHARED_REFERENCE_DATA,
     content_object_fields,
     is_orm_path,
+    kind_of,
     related_path,
     via_content_object,
     via_related,
@@ -87,6 +90,30 @@ class VocabularyTests(TestCase):
                 self.assertFalse(is_orm_path(declared))
         self.assertFalse(is_orm_path(PAGE_TREE))
         self.assertTrue(is_orm_path("collection__catalog__organisation"))
+
+    def test_every_declaration_resolves_to_exactly_one_kind(self):
+        """The one question the dispatcher asks, answered for each spelling.
+
+        Both entry points and ``is_scopable`` switch on this and nothing else, so
+        a kind that came out wrong here would not be a wrong branch in one of
+        them — it would be the same wrong branch in all three.
+        """
+        from georiva.organisations import lookups
+
+        expected = {
+            SHARED_REFERENCE_DATA: SHARED_REFERENCE_DATA,
+            lookups.ORGANISATION_SELF: lookups.ORGANISATION_SELF,
+            PAGE_TREE: PAGE_TREE,
+            NOT_ORM_SCOPABLE: lookups.NO_ROUTE,
+            None: lookups.NO_ROUTE,
+            "": lookups.NO_ROUTE,
+            via_related("page"): lookups.VIA_RELATED,
+            via_content_object("content_type", "object_id"): lookups.VIA_CONTENT_OBJECT,
+            "collection__catalog__organisation": lookups.ORM_PATH,
+        }
+        for declared, kind in expected.items():
+            with self.subTest(declared=declared):
+                self.assertEqual(kind_of(declared), kind)
 
     def test_a_page_class_we_did_not_write_is_still_judged_by_the_tree(self):
         """Wagtail's own ``Page`` could not have declared anything.
@@ -254,6 +281,48 @@ class DispatcherTests(TestCase):
             belongs_to_active_org(self.request(), ModelLogEntry.objects.get(pk=entry.pk))
         )
 
+    def test_a_generic_subject_that_belongs_everywhere_agrees_when_its_row_has_gone(self):
+        """The two halves must not part company over a dangling shared id.
+
+        The queryset half admits a shared content type whole, without listing
+        its primary keys — so the object half must admit it without resolving
+        the row either. Resolve it and a deleted topic turns one row into a
+        listing that shows it and a detail view that 404s.
+        """
+        from georiva.core.models import Topic
+
+        topic = Topic.objects.create(name="Rainfall", slug="rainfall")
+        entry = log(instance=topic, action="wagtail.create", user=self.user)
+        topic.delete()
+        self.assert_scopes_to(ModelLogEntry.objects.filter(pk=entry.pk), [entry])
+
+    def test_a_null_relation_is_nobodys_in_both_halves(self):
+        """Even when the model at the end of the relation belongs everywhere.
+
+        The queryset half could cheaply admit these — a shared target needs no
+        subquery, so the null rows come along free — while the object half reads
+        a null as nobody's. Only one of those can be right, and a row naming no
+        owner is nobody's.
+
+        ``DataFeed`` is the fixture because its catalog is genuinely nullable; it
+        stands in here for any model that delegates through a link it may not
+        have.
+        """
+        from georiva.core.models import Catalog
+        from georiva.sources.models import DataFeed
+
+        feed = DataFeed.objects.create(name="Kenya feed", catalog=self.kenya_catalog)
+        queryset = DataFeed.objects.filter(pk=feed.pk)
+        with declaring(DataFeed, via_related("catalog")), \
+                declaring(Catalog, SHARED_REFERENCE_DATA):
+            self.assertEqual(list(scope_rows(self.request(), queryset)), [feed])
+            self.assertTrue(belongs_to_active_org(self.request(), feed))
+
+            DataFeed.objects.filter(pk=feed.pk).update(catalog=None)
+            orphan = DataFeed.objects.get(pk=feed.pk)
+            self.assertEqual(list(scope_rows(self.request(), queryset)), [])
+            self.assertFalse(belongs_to_active_org(self.request(), orphan))
+
     # -- the kinds that were already there ---------------------------------
 
     def test_an_orm_path_still_reaches_access(self):
@@ -281,6 +350,26 @@ class DispatcherTests(TestCase):
             scope_rows(self.request(), ApiKey.objects.all())
         with self.assertRaises(ImproperlyConfigured):
             belongs_to_active_org(self.request(), ApiKey())
+
+    def test_a_generic_subject_that_reaches_no_organisation_is_refused(self):
+        """#296's open question, at the seam it was actually about.
+
+        Refusing a top-level model is the easy half. The judgement call was what
+        a *subject* with no route should do to an otherwise fine listing, and the
+        answer is the same one everywhere else: fail loudly, because the sweep
+        guarantees no model in this codebase gets here undeclared and a model
+        from outside it reads as shared.
+        """
+        from georiva.core.models import Catalog
+
+        entry = log(instance=self.kenya_catalog, action="wagtail.create", user=self.user)
+        with declaring(Catalog, NOT_ORM_SCOPABLE):
+            with self.assertRaises(ImproperlyConfigured):
+                list(scope_rows(self.request(), ModelLogEntry.objects.filter(pk=entry.pk)))
+            with self.assertRaises(ImproperlyConfigured):
+                belongs_to_active_org(
+                    self.request(), ModelLogEntry.objects.get(pk=entry.pk)
+                )
 
     def test_a_declaration_naming_a_relation_that_is_not_one_is_refused(self):
         """A typo in a declaration fails loudly rather than filtering nothing."""

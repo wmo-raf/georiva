@@ -83,6 +83,15 @@ calls one of them. They dispatch on the same declarations, so a listing and a
 detail view over one model cannot disagree about a row, and a model that gains a
 declaration becomes scopable on every surface at once.
 
+Both entry points switch exactly once, on `lookups.kind_of` — a declaration is
+resolved to its kind in one place, and adding a kind is one branch in each
+consumer rather than a cascade several functions have to keep agreeing about.
+The places where the two halves could legitimately part company are settled
+deliberately: a null link is nobody's on both sides, and a subject whose model
+belongs everywhere is admitted on both sides without either resolving the row —
+so a deleted shared subject cannot make a listing show a row that its detail
+view 404s.
+
 The last three kinds are why the dispatcher exists. `NOT_ORM_SCOPABLE` said only
 how a model *cannot* be scoped, so every model wearing it needed bespoke code
 somewhere else — which pages had, in the page-tree module, and nothing else did.

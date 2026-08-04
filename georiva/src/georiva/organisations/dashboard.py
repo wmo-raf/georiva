@@ -22,12 +22,16 @@ whether its result is sliced:
 * the recent-edits list is limited to a handful of rows *in the database*, so it
   has to be narrowed while the query is still being built. Narrowing afterwards
   would let another institution's edits consume the limit and quietly return
-  fewer rows, or none. Its log entries carry a real foreign key to the page, so
-  the page-tree narrowing applies directly — at the cost of restating Wagtail's
-  query, which is the only place here that is worth paying.
+  fewer rows, or none — at the cost of restating Wagtail's query, which is the
+  only place here that is worth paying.
 * the other three are unsliced — an unevaluated queryset and two lists — so they
   are narrowed after calling the stock implementation. Lossless, and it
   duplicates nothing.
+
+Every one of them narrows through ``ownership``'s dispatcher rather than by
+naming a rule of its own: pages come out narrowed to this organisation's tree
+and log entries to the entries about them, because that is what those models
+declare, not because this module knows anything about trees.
 """
 from django.conf import settings
 from django.db.models import Max
@@ -39,8 +43,8 @@ from wagtail.admin.views.home import (
 )
 from wagtail.models import Page, PageLogEntry
 
-from .ownership import belongs_to_active_org
-from .pages import PAGE_EDIT_ACTION, scope_page_log_entries, scope_pages
+from .ownership import belongs_to_active_org, scope_rows
+from .pages import PAGE_EDIT_ACTION
 
 
 class OrgScopedRecentEditsPanel(RecentEditsPanel):
@@ -62,7 +66,7 @@ class OrgScopedRecentEditsPanel(RecentEditsPanel):
 
         edit_count = getattr(settings, "WAGTAILADMIN_RECENT_EDITS_LIMIT", 5)
         last_edits_dates = (
-            scope_page_log_entries(
+            scope_rows(
                 request,
                 PageLogEntry.objects.filter(user=request.user, action=PAGE_EDIT_ACTION),
             )
@@ -95,7 +99,7 @@ class OrgScopedLockedPagesPanel(LockedPagesPanel):
 
     def get_context_data(self, parent_context):
         context = super().get_context_data(parent_context)
-        context["locked_pages"] = scope_pages(
+        context["locked_pages"] = scope_rows(
             parent_context["request"], context["locked_pages"]
         )
         return context
