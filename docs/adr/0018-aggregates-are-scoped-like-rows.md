@@ -88,6 +88,14 @@ that way.
   URL sweep to assert over rendered numbers was considered and rejected: matching
   digits in HTML is brittle enough that it would be turned off before it caught
   anything.
+- **A proportionality fix cannot be tested through its own response**, and the
+  ingestion dashboard is the case that makes this concrete. Its roll-ups were
+  already right — the neighbour's rows were read and then discarded — so every
+  assertion over the JSON passes equally before and after. The narrowing is
+  therefore pinned against the captured SQL, which is a last resort and is used
+  only here: the alternative, growing a neighbour's holdings until the
+  difference shows up as latency, is a test that asserts on timing, and that is
+  worse than one that asserts on a WHERE clause.
 - The public plane needed no changes. `get_landing_stats` and the dataset index's
   per-catalog collection counts already went through `scoped_queryset` and
   `visible_visibilities`, because they were written after ADR 0012 rather than

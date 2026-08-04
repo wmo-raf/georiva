@@ -243,8 +243,13 @@ class DashboardTenancyTests(TestCase):
     """What the dashboard answers is one organisation's picture of its own
     pipeline, and stays that way whatever a neighbour is doing on the instance.
 
-    The roll-ups behind it are built from the whole ``FileIngestion`` table and
-    the whole link table; these pin down that neither can reach the response.
+    Two different properties are pinned here, and they need different tests.
+    The *response* has always been one organisation's, because every roll-up is
+    read back by scoped collection id — those tests hold a property the code
+    already had. What the code did not have is the narrowing that stops the
+    database reading every tenant's rows on the way, and no assertion over the
+    JSON can see it: the neighbour's rows were discarded either way. That one is
+    pinned against the SQL, below.
     """
 
     def setUp(self):
@@ -287,6 +292,59 @@ class DashboardTenancyTests(TestCase):
         response = self.client.get(DASHBOARD_URL)
         col = _find_collection_in_response(response.json(), self.ours.pk)
         self.assertEqual(col["type"], "manual")
+
+    def _dashboard_sql(self):
+        """The SQL the dashboard runs, captured.
+
+        Asserting over SQL is a last resort and used here for one reason: the
+        property under test is which rows the database *reads*, and that is
+        invisible in the response by construction. A second organisation's
+        holdings could be made large enough to show up as latency, but a test
+        that asserts on timing is worse than one that asserts on a WHERE clause.
+        """
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as captured:
+            self.client.get(DASHBOARD_URL)
+        return [query["sql"] for query in captured.captured_queries]
+
+    def test_the_ingestion_history_is_narrowed_to_this_organisations_collections(self):
+        """The thirty-day roll-up must ask for this organisation's collections
+        by id, not read the whole table and discard the rest."""
+        import re
+
+        second = _setup_collection("ours-2", "monthly")
+        history = [
+            sql for sql in self._dashboard_sql()
+            if "georivaingestion_fileingestion" in sql and "created_at" in sql
+        ]
+        self.assertTrue(history, "the thirty-day history query was not captured")
+
+        ids = "|".join(str(pk) for pk in (self.ours.pk, second.pk))
+        narrowed = re.compile(rf'collection_id"?\s*(?:=\s*({ids})\b|IN\s*\([^)]*\b({ids})\b)')
+        for sql in history:
+            self.assertRegex(
+                sql, narrowed,
+                "the history query is not restricted to the scoped collection ids",
+            )
+
+    def test_the_feed_link_lookup_is_narrowed_to_this_organisations_collections(self):
+        """Same for the link table that decides automated vs manual."""
+        import re
+
+        link_queries = [
+            sql for sql in self._dashboard_sql()
+            if "georivasources_datafeedcollectionlink" in sql
+        ]
+        self.assertTrue(link_queries, "the feed-link query was not captured")
+
+        narrowed = re.compile(rf'collection_id"?\s*(?:=\s*{self.ours.pk}\b|IN\s*\([^)]*\b{self.ours.pk}\b)')
+        for sql in link_queries:
+            self.assertRegex(
+                sql, narrowed,
+                "the feed-link query is not restricted to the scoped collection ids",
+            )
 
 
 class CollectionIngestionLogsAPITests(TestCase):
