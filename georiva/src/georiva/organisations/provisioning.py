@@ -72,11 +72,29 @@ def _grant_page_permissions(group, root_page):
 
 
 def _create_root_page(name, slug):
+    """A fresh portal root, with the datasets index every portal links to.
+
+    The navbar, the hero and the home page's dataset section all reach the
+    listing through ``core.templatetags.georiva_tags.datasets_index_url``, which
+    descends from the request Site's root and falls back to the bare string
+    ``/datasets/`` when it finds nothing. On a portal whose tree has no
+    ``DatasetsIndexPage`` that fallback is a link to a 404, so the index is part
+    of building the root rather than a step an operator has to remember.
+
+    Only newly created roots come through here. A root adopted from a Site handed
+    to ``provision_organisation`` keeps whatever tree it arrived with — for the
+    central org that is the one ``pages/datasets`` migration 0002 built.
+    """
+    from georiva.pages.datasets.models import DatasetsIndexPage
     from georiva.pages.home.models import HomePage
 
     wagtail_root = Page.get_first_root_node()
     home = HomePage(title=name, slug=slug, hero_heading=name)
     wagtail_root.add_child(instance=home)
+    # Slug hardcoded: `datasets_index_url`'s fallback names this path literally,
+    # so a per-organisation slug would make it wrong in a new way. Editors are
+    # free to retitle and configure the page afterwards.
+    home.add_child(instance=DatasetsIndexPage(title="Datasets", slug="datasets", show_in_menus=False))
     return home
 
 
