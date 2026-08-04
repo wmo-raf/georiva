@@ -24,7 +24,7 @@ from georiva.ingestion.models import (
     ManualUploadConfigVariable,
     UploadSession,
 )
-from georiva.organisations import access
+from georiva.organisations import access, ownership
 from georiva.organisations.access import LOOKUP_ATTR
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
@@ -41,6 +41,28 @@ from .urlsweep import flatten_url_patterns
 
 # The colliding slug both organisations use.
 SHARED_SLUG = "forecast"
+
+#: The models that reach no organisation the dispatcher can find, each for a
+#: reason that is not "nobody got round to it". Pinned so that adding one is a
+#: decision made in this file rather than a declaration nobody reviewed.
+#:
+#: * the ingestion pair records a *file*, keyed by its storage path, and is
+#:   written before anything has decided which collection — and therefore which
+#:   organisation — it belongs to. Its owner is the leading segment of that path,
+#:   which is a string rather than a relation;
+#: * a loader job and a derivation run are pipeline bookkeeping whose one link
+#:   upward is nullable, so scoping on it would hide the runs that have not
+#:   produced anything yet. They are reached only through a parent the request
+#:   has already scoped;
+#: * an API key belongs to a *person*, who may be a member of several
+#:   institutions, and is nobody's tenant data.
+NOT_ORM_SCOPABLE_MODELS = {
+    "georivaingestion.FileIngestion",
+    "georivaingestion.FileIngestionJob",
+    "georivaingestion.LoaderJob",
+    "georivaprocessing.DerivationRun",
+    "accounts.ApiKey",
+}
 
 #: Admin URLs the listing sweep must not simply GET:
 #: - failwhale is Wagtail's deliberate-500 page, where raising is the point;
@@ -439,13 +461,93 @@ class OrgOwnedLookupDeclarationTests(TestCase):
         checked = 0
         for model in self._own_models():
             lookup = getattr(model, LOOKUP_ATTR, None)
-            if not lookup or lookup in access.SENTINELS:
+            if not access.is_orm_path(lookup):
                 continue
             checked += 1
             with self.subTest(model=model._meta.label):
                 # Raises FieldError if any segment of the declared path is wrong.
                 model._default_manager.filter(**{f"{lookup}__isnull": True}).query
         self.assertGreater(checked, 5)
+
+    def test_every_model_declares_something_the_dispatcher_understands(self):
+        """The assertion the vocabulary exists to make (#296).
+
+        Declaring *something* is not enough on its own: a declaration the
+        dispatcher cannot act on leaves the model exactly as unscoped as one that
+        said nothing, and the sweep above would still pass. The models excused
+        here are excused by name, so a new one is a decision somebody made rather
+        than a default somebody fell into.
+        """
+        unreachable = sorted(
+            model._meta.label for model in self._own_models()
+            if not ownership.is_scopable(model)
+        )
+        self.assertEqual(
+            unreachable, sorted(NOT_ORM_SCOPABLE_MODELS),
+            "a model here reaches no organisation. Give it an ORM path, PAGE_TREE, "
+            "via_related(...) or via_content_object(...) — or, if it genuinely has no "
+            "owner the dispatcher can find, declare NOT_ORM_SCOPABLE and add it to "
+            "NOT_ORM_SCOPABLE_MODELS with a reason.",
+        )
+
+    def test_delegating_declarations_name_real_relations(self):
+        """A ``via_related`` path is walked, not filtered, so nothing else checks it.
+
+        Covers the declarations on Wagtail's models too: this instance speaks for
+        those, and a Wagtail release that renames one of those columns has to
+        fail here rather than in a report nobody drives.
+        """
+        checked = 0
+        for model, declared in self._all_declarations():
+            path = access.related_path(declared)
+            if path is None:
+                continue
+            checked += 1
+            with self.subTest(model=model._meta.label):
+                # Raises ImproperlyConfigured if any step is not a relation.
+                self.assertIsNotNone(ownership._related_model(model, path))
+        self.assertGreater(checked, 1)
+
+    def test_generic_declarations_name_real_fields(self):
+        checked = 0
+        for model, declared in self._all_declarations():
+            fields = access.content_object_fields(declared)
+            if fields is None:
+                continue
+            checked += 1
+            content_type_field, object_id_field = fields
+            with self.subTest(model=model._meta.label):
+                self.assertIsNotNone(
+                    model._meta.get_field(content_type_field).related_model,
+                    f"{content_type_field} is not a content-type relation",
+                )
+                model._meta.get_field(object_id_field)
+        self.assertGreater(checked, 1)
+
+    def test_declarations_made_on_wagtails_behalf_name_real_models(self):
+        from django.apps import apps
+
+        for label in ownership.EXTERNAL_DECLARATIONS:
+            with self.subTest(label=label):
+                self.assertIsNotNone(apps.get_model(label))
+
+    def _all_declarations(self):
+        """Every (model, declaration) pair this instance stands behind.
+
+        Ours and the ones :data:`EXTERNAL_DECLARATIONS` makes on behalf of models
+        we did not write — checked to the same standard, because a report leaks
+        the same way whoever wrote the model.
+        """
+        from django.apps import apps
+
+        pairs = [
+            (model, getattr(model, LOOKUP_ATTR, None)) for model in self._own_models()
+        ]
+        pairs += [
+            (apps.get_model(label), declared)
+            for label, declared in ownership.EXTERNAL_DECLARATIONS.items()
+        ]
+        return [(model, declared) for model, declared in pairs if declared]
 
     def test_scoping_refuses_a_model_that_declares_nothing(self):
         """The property the test above buys: silence is refused, not passed through."""
@@ -456,7 +558,9 @@ class OrgOwnedLookupDeclarationTests(TestCase):
         request.active_org = self.kenya
 
         with self.assertRaises(ImproperlyConfigured):
-            access.scope_or_pass(request, Undeclared.objects.all())
+            ownership.scope_rows(request, Undeclared.objects.all())
+        with self.assertRaises(ImproperlyConfigured):
+            ownership.belongs_to_active_org(request, Undeclared())
 
     @classmethod
     def setUpTestData(cls):

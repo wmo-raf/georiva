@@ -15,6 +15,20 @@ one cannot be scoped at all: :func:`scoped_queryset` raises rather than quietly
 returning every row. Forgetting to think about a model is therefore a loud
 error, not a silent leak.
 
+This module holds the ORM-path half of that vocabulary — the common case, and
+the only one a single ``filter()`` can express. The kinds that need more than
+one (a page judged by its tree, a row delegating to a related object, a
+polymorphic subject) are read by the dispatcher in ``ownership``, which lands
+back here for everything below.
+
+Which half a caller wants is not a judgement call. **A surface calls the
+dispatcher**, always: it is the only thing that can answer for every model, and
+a helper here handed a page-shaped queryset refuses it. These are what the
+dispatcher calls in turn, and what code already holding an ORM-path model — a
+STAC view over collections, a template tag over catalogs — may call directly.
+Nothing here decides *which* kind a model is; that question has one answer, in
+``lookups.kind_of``, and one reader.
+
 *The host, not the session.* ``request.active_org`` is set by
 ``OrganisationMiddleware`` from the hostname on every request; nothing here
 trusts a session value or a submitted id.
@@ -28,20 +42,31 @@ institution's storage prefix. Reaching another organisation's data means
 visiting its host.
 """
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
-from django.db.models import Model, Q, QuerySet
+from django.db.models import Q, QuerySet
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 
 from .lookups import (  # re-exported so enforcement code has one import
     GLOBAL_TIER_ATTR,
     LOOKUP_ATTR,
+    NO_ROUTE,
     NOT_ORM_SCOPABLE,
     ORGANISATION_SELF,
+    ORM_PATH,
     OWN_MODULE_PREFIX,
+    PAGE_TREE,
     SENTINELS,
     SHARED_REFERENCE_DATA,
+    VIA_CONTENT_OBJECT,
+    VIA_RELATED,
+    content_object_fields,
     declared_lookup,
     has_global_tier,
+    is_orm_path,
+    kind_of,
+    related_path,
+    via_content_object,
+    via_related,
 )
 from .models import OrganisationMembership
 
@@ -64,14 +89,17 @@ def require_active_org(request):
 def organisation_lookup(model):
     """The ORM path from ``model`` to its owning organisation.
 
-    Raises ``ImproperlyConfigured`` for anything that is not a path — including a
-    model that declared one of the sentinels, since none of them describes a
-    route the ORM can walk. That is the deny-by-default hinge: a model is
-    unusable with these helpers until somebody writes down how it reaches its
-    organisation, or writes down that it cannot.
+    Raises ``ImproperlyConfigured`` for anything that is not a path — including
+    every declaration that is a decision rather than a route, since none of them
+    describes something the ORM can walk in one filter. That is the
+    deny-by-default hinge: a model is unusable with *these* helpers until
+    somebody writes down how it reaches its organisation, or writes down that it
+    cannot. The declarations refused here are not necessarily unscopable; the
+    dispatcher in ``ownership`` knows what to do with several of them, and it is
+    what a surface should call.
     """
     declared = declared_lookup(model)
-    if not declared or declared in SENTINELS:
+    if not is_orm_path(declared):
         raise ImproperlyConfigured(
             f"{model._meta.label} cannot be scoped by an ORM filter: it declares "
             f"{LOOKUP_ATTR} = {declared!r}. Give it the path to Organisation, or reach "
@@ -284,12 +312,20 @@ def scope_form_fields(request, form):
     formset whose rows are forms in their own right, with relation fields of
     their own — the variables edited inside a collection, and the palette each
     one picks. Those are narrowed too, by :func:`scope_formset_fields`.
+
+    The dispatcher is imported here rather than at module level: ``ownership``
+    reads this module and the page-tree module, so a module-level import would
+    close the circle. These form helpers are the one place in ``access`` that has
+    to reach the whole vocabulary — a relation field over pages is exactly where
+    a page-shaped model would otherwise leak.
     """
+    from .ownership import scope_rows
+
     for field in form.fields.values():
         queryset = getattr(field, "queryset", None)
         if queryset is None or not isinstance(queryset, QuerySet):
             continue
-        field.queryset = scope_or_pass(request, queryset)
+        field.queryset = scope_rows(request, queryset)
     for formset in getattr(form, "formsets", {}).values():
         scope_formset_fields(request, formset)
     return form
@@ -321,39 +357,13 @@ def _scoped_form_class(request, form_class):
     """
     from copy import deepcopy
 
+    from .ownership import scope_rows  # see :func:`scope_form_fields`
+
     scoped = type(form_class)(form_class.__name__, (form_class,), {})
     fields = {name: deepcopy(field) for name, field in form_class.base_fields.items()}
     for field in fields.values():
         queryset = getattr(field, "queryset", None)
         if isinstance(queryset, QuerySet):
-            field.queryset = scope_or_pass(request, queryset)
+            field.queryset = scope_rows(request, queryset)
     scoped.base_fields = fields
     return scoped
-
-
-def is_org_owned(model):
-    """Whether ``model`` declared a way to reach the organisation that owns it."""
-    if not (isinstance(model, type) and issubclass(model, Model)):
-        return False
-    declared = declared_lookup(model)
-    return bool(declared) and declared not in (SHARED_REFERENCE_DATA, NOT_ORM_SCOPABLE)
-
-
-def is_shared_reference(model):
-    """Whether ``model`` declared that no organisation owns it."""
-    return declared_lookup(model) == SHARED_REFERENCE_DATA
-
-
-def scope_or_pass(request, queryset):
-    """Scope ``queryset`` if its model is org-owned, pass it through if shared.
-
-    The seam that decides, and the one that must not guess. A model that has
-    declared neither is refused here rather than quietly passed through — that
-    silent pass-through would be the very leak the declaration exists to prevent,
-    and it would be invisible: an unscoped listing looks exactly like a scoped
-    one until a second organisation exists.
-    """
-    model = queryset.model
-    if is_shared_reference(model):
-        return queryset
-    return scoped_queryset(request, queryset)

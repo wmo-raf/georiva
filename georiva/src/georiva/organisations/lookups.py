@@ -21,20 +21,136 @@ SHARED_REFERENCE_DATA = "shared-reference-data"
 #: Scoping matches on identity rather than following a path.
 ORGANISATION_SELF = "self"
 
-#: Declared by a model that no ORM filter on an organisation can narrow, for one
-#: of two reasons. Either it belongs to an organisation but has no path to one —
-#: pipeline bookkeeping keyed by a storage path (``FileIngestion`` and its jobs),
-#: records reached only through an already-scoped parent (``DerivationRun``), and
-#: Wagtail pages, org-owned through the Site → root-page link rather than a field
-#: (decision #261) — or it belongs to a *person* rather than to an institution
-#: (``ApiKey``), whose holder may be a member of several and whose credential is
-#: nobody's tenant data. Scoping *refuses* these — loudly — so putting one on a
-#: scoped surface is a decision somebody has to make explicitly rather than a
-#: filter that quietly does nothing.
+#: Declared by a Wagtail page, or by anything else whose owner is decided by
+#: where it sits in the page tree. Each organisation is provisioned with a Site
+#: and a root page of its own, and everything it authors lives under that root
+#: (ADR 0016) — so the ownership question for a page is a tree question, and the
+#: dispatcher answers it by comparing treebeard paths rather than by walking a
+#: field that does not exist.
+PAGE_TREE = "page-tree"
+
+#: Declared by a model that no ORM filter on an organisation can narrow, and
+#: that no other declaration reaches either: pipeline bookkeeping keyed by a
+#: storage path (``FileIngestion`` and its jobs), records reached only through an
+#: already-scoped parent (``DerivationRun``), or a row belonging to a *person*
+#: rather than to an institution (``ApiKey``), whose holder may be a member of
+#: several and whose credential is nobody's tenant data. Scoping *refuses* these
+#: — loudly — so putting one on a scoped surface is a decision somebody has to
+#: make explicitly rather than a filter that quietly does nothing.
 NOT_ORM_SCOPABLE = "not-orm-scopable"
 
-#: Every declaration that is a decision rather than an ORM path.
-SENTINELS = frozenset({SHARED_REFERENCE_DATA, ORGANISATION_SELF, NOT_ORM_SCOPABLE})
+#: Every unparameterised declaration that is a decision rather than an ORM path.
+#: The two parameterised kinds below are decisions too; ask :func:`is_orm_path`
+#: rather than testing membership here.
+SENTINELS = frozenset({
+    SHARED_REFERENCE_DATA,
+    ORGANISATION_SELF,
+    PAGE_TREE,
+    NOT_ORM_SCOPABLE,
+})
+
+#: The parameterised kinds. Each names a *kind* of declaration rather than a
+#: whole one — the declaration is this string, a colon and the arguments, which
+#: is why they are recognised by prefix and not by membership of a set.
+VIA_RELATED = "via-related"
+VIA_CONTENT_OBJECT = "via-content-object"
+
+VIA_RELATED_PREFIX = f"{VIA_RELATED}:"
+VIA_CONTENT_OBJECT_PREFIX = f"{VIA_CONTENT_OBJECT}:"
+
+#: The two kinds that are not spellings of a declaration: an ORM path is any
+#: string that is none of the above, and no-route covers both a model that
+#: declared :data:`NOT_ORM_SCOPABLE` and one that declared nothing at all. The
+#: dispatcher refuses them identically, so they are one kind here.
+ORM_PATH = "orm-path"
+NO_ROUTE = "no-route"
+
+
+def via_related(path):
+    """Declare that the model at the end of ``path`` decides who owns this row.
+
+    ``path`` is a forward relation — one field, or several joined by ``__`` — to
+    another model that has a declaration of its own. The dispatcher reads *that*
+    model's declaration and narrows this queryset to the rows whose related
+    object survived it.
+
+    This is the general form of "owned through the page tree": a page log entry
+    declares ``via_related("page")``, a page-child orderable declares
+    ``via_related("page")``, and both resolve to the tree test because ``Page``
+    declares :data:`PAGE_TREE`. It is not a substitute for an ORM path to
+    Organisation — write that where one exists, since it is one filter rather
+    than two — but for a target that is itself unreachable by ORM path it is the
+    only thing that works, and it composes: the target's own declaration may be
+    another ``via_related``, or a generic content object.
+    """
+    return f"{VIA_RELATED_PREFIX}{path}"
+
+
+def via_content_object(content_type_field, object_id_field):
+    """Declare that this row's subject is polymorphic, named by a generic key.
+
+    Workflow states, task states and model log entries identify their subject by
+    a content type plus an object id, which no single ``.filter()`` can cross.
+    The dispatcher splits the rows by content type, scopes each type by that
+    type's own declaration, and recombines — which is why the two field names are
+    part of the declaration rather than assumed: Wagtail's own two consumers
+    disagree, ``WorkflowState`` keying on ``base_content_type`` and
+    ``ModelLogEntry`` on ``content_type``.
+    """
+    return f"{VIA_CONTENT_OBJECT_PREFIX}{content_type_field}:{object_id_field}"
+
+
+def related_path(declared):
+    """The path in a :func:`via_related` declaration, or ``None``."""
+    if isinstance(declared, str) and declared.startswith(VIA_RELATED_PREFIX):
+        return declared[len(VIA_RELATED_PREFIX):]
+    return None
+
+
+def content_object_fields(declared):
+    """The ``(content_type_field, object_id_field)`` pair, or ``None``."""
+    if isinstance(declared, str) and declared.startswith(VIA_CONTENT_OBJECT_PREFIX):
+        content_type_field, _, object_id_field = declared[
+            len(VIA_CONTENT_OBJECT_PREFIX):
+        ].partition(":")
+        return content_type_field, object_id_field
+    return None
+
+
+def kind_of(declared):
+    """Which kind of declaration ``declared`` is — the one question to ask of one.
+
+    Every caller that would otherwise test the declaration string five ways in a
+    row asks this instead and switches once on the answer. That is what keeps the
+    dispatcher's two entry points and :func:`~.ownership.is_scopable` from
+    drifting apart as kinds are added: a new kind is a new branch in one place,
+    and a caller that does not handle it fails visibly rather than falling
+    through to "ORM path" and filtering on a column called ``via-related:page``.
+
+    The answer is one of :data:`SHARED_REFERENCE_DATA`,
+    :data:`ORGANISATION_SELF`, :data:`PAGE_TREE`, :data:`VIA_RELATED`,
+    :data:`VIA_CONTENT_OBJECT`, :data:`ORM_PATH` or :data:`NO_ROUTE` — the first
+    three being their own declaration, since they carry no arguments.
+    """
+    if declared in (SHARED_REFERENCE_DATA, ORGANISATION_SELF, PAGE_TREE):
+        return declared
+    if not declared or declared == NOT_ORM_SCOPABLE:
+        return NO_ROUTE
+    if related_path(declared) is not None:
+        return VIA_RELATED
+    if content_object_fields(declared) is not None:
+        return VIA_CONTENT_OBJECT
+    return ORM_PATH
+
+
+def is_orm_path(declared):
+    """Whether ``declared`` is an ORM path to Organisation rather than a decision.
+
+    A shorthand for the one question the helpers in ``access`` ask, which is
+    whether they can do anything at all with a declaration.
+    """
+    return kind_of(declared) == ORM_PATH
+
 
 #: Class attribute a model sets alongside a *path* to say that a null along that
 #: path is not a broken route but a tier: a row no organisation owns, which every

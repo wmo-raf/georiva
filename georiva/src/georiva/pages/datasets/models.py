@@ -20,7 +20,7 @@ from georiva.organisations.access import (
     get_via_scoped_parent_or_404,
     scoped_queryset,
 )
-from georiva.organisations.lookups import NOT_ORM_SCOPABLE
+from georiva.organisations.lookups import PAGE_TREE
 
 ITEMS_PER_PAGE = 24
 
@@ -125,7 +125,7 @@ def _group_assets_by_level(assets):
 
 
 class DatasetsIndexPage(RoutablePageMixin, Page):
-    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+    ORGANISATION_LOOKUP = PAGE_TREE
 
     """
     Landing page for browsing datasets.

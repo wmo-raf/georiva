@@ -5,13 +5,14 @@ from wagtail.contrib.settings.models import BaseSiteSetting, register_setting
 from wagtail.models import Page, Orderable
 from wagtail_color_panel.edit_handlers import NativeColorPanel
 from wagtail_color_panel.fields import ColorField
-from georiva.organisations.lookups import NOT_ORM_SCOPABLE
+from georiva.organisations.lookups import PAGE_TREE, via_related
 
 
 @register_setting
 class GeoRivaSettings(BaseSiteSetting):
-    # Per-Site settings: the Site is the organisation, but not through a field.
-    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+    # Per-Site settings, and the Site *is* the organisation: the one-to-one on
+    # Organisation gives these rows a real ORM path to their owner.
+    ORGANISATION_LOOKUP = "site__organisation"
 
     site_name = models.CharField(max_length=255, default="GeoRiva", help_text="The name of your GeoRiva instance")
     site_tagline = models.CharField(max_length=500, blank=True,
@@ -57,8 +58,8 @@ class HomePage(Page):
     # own portal, all siblings under the Wagtail root node.
 
     # Pages are org-owned through the Site → root-page link rather than a field
-    # (decision #261), so no ORM path reaches the organisation from here.
-    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+    # (decision #261), so the owner is decided by tree position.
+    ORGANISATION_LOOKUP = PAGE_TREE
 
     subpage_types = ['datasets.DatasetsIndexPage']
 
@@ -110,9 +111,9 @@ class HomePage(Page):
 
 
 class FeaturedCatalog(Orderable):
-    # Owned by its page's organisation, which pages reach through the Site link
-    # rather than a field.
-    ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
+    # Owned by its page's organisation, which pages reach by tree position
+    # rather than by a field.
+    ORGANISATION_LOOKUP = via_related("page")
 
     page = ParentalKey(
         'home.HomePage',

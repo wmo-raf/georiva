@@ -3,11 +3,14 @@
 Pages are org-owned, but not through a field. Each organisation is provisioned
 with a Site and a root page of its own (see ``provisioning``), and everything it
 authors lives under that root — so the ownership question for a page is a tree
-question, not an FK lookup, and pages declare ``NOT_ORM_SCOPABLE`` rather than a
-path to Organisation.
+question, not an FK lookup, and pages declare ``PAGE_TREE`` rather than a path to
+Organisation.
 
-That leaves the general scoping machinery in ``scoping.py`` unable to help, so
-this module is the pages-shaped equivalent, closing four of the five seams:
+:func:`scope_pages` is what that declaration resolves to: the dispatcher in
+``ownership`` calls it for every page-shaped model and for everything that
+delegates to one. What the dispatcher cannot reach is Wagtail's own page views,
+which take a pk from the URL and expose no queryset to narrow — so this module
+stays the pages-shaped equivalent for four of the five seams:
 
 * the explorer listing and the sidebar's page explorer, via Wagtail's
   ``construct_explorer_page_queryset`` hook;
@@ -87,6 +90,12 @@ def scope_page_log_entries(request, queryset):
     narrowing reaches it through that — which is what lets the dashboard's
     recent-edits panel apply its row limit to this organisation's rows rather
     than to the instance's.
+
+    This is what ``ownership``'s dispatcher resolves ``PageLogEntry`` to as well,
+    from the ``via_related("page")`` it declares on Wagtail's behalf. It stays
+    spelled out here because it is one layer down — ``ownership`` reads this
+    module, not the other way round — and because the two callers that reach for
+    it by name are building queries, not scoping listings.
     """
     return queryset.filter(page__in=scope_pages(request, Page.objects.all()))
 

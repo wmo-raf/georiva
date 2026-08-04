@@ -42,16 +42,23 @@ implicit at the manager level — but there is exactly one implementation to aud
 **Every model in the codebase declares where it stands.**
 `ORGANISATION_LOOKUP` is either the ORM path from a model to `Organisation`
 (`"organisation"` on `Catalog`, `"collection__catalog__organisation"` on `Item`)
-or one of three sentinels that are themselves decisions:
+or one of the declarations below, each of which is itself a decision:
 
 - `SHARED_REFERENCE_DATA` — no organisation owns it, every organisation reads it
   (topics, units, administrative boundaries). Scoping passes it through.
 - `ORGANISATION_SELF` — it *is* an organisation. Scoping matches on identity.
-- `NOT_ORM_SCOPABLE` — it belongs to an organisation but no ORM path reaches
-  one: pipeline bookkeeping keyed by a storage path (`FileIngestion` and its
-  jobs), records reached only through an already-scoped parent
-  (`DerivationRun`), and Wagtail pages, org-owned through the Site → root-page
-  link rather than a field (#261). Scoping *refuses* these.
+- `PAGE_TREE` — its owner is decided by where it sits in the page tree, not by a
+  field, because that is how a Wagtail page is owned (#261, ADR 0016).
+- `via_related(path)` — whoever owns the object at the end of `path` owns this
+  row. Resolved by reading *that* model's declaration, so it composes.
+- `via_content_object(content_type_field, object_id_field)` — the row's subject
+  is polymorphic. Resolved by splitting the rows by content type and scoping
+  each part by that part's own declaration.
+- `NOT_ORM_SCOPABLE` — no route of any kind reaches an organisation: pipeline
+  bookkeeping keyed by a storage path (`FileIngestion` and its jobs), records
+  reached only through an already-scoped parent (`DerivationRun`), a credential
+  belonging to a person rather than an institution (`ApiKey`). Scoping
+  *refuses* these.
 
 One model declares a *tier* on top of its path: `ColorPalette` sets
 `ORGANISATION_GLOBAL_TIER` beside `ORGANISATION_LOOKUP = "organisation"` on a
@@ -69,16 +76,68 @@ transitively, as decided in #259. The declarations live on the models, in
 so a model can declare without pulling in the enforcement machinery that reads
 the organisation models.
 
+**One dispatcher reads the whole vocabulary** (#296). `organisations/ownership.py`
+offers two entry points — `scope_rows` for rows the ORM has yet to fetch and
+`belongs_to_active_org` for an object already in hand — and every admin surface
+calls one of them. They dispatch on the same declarations, so a listing and a
+detail view over one model cannot disagree about a row, and a model that gains a
+declaration becomes scopable on every surface at once.
+
+Both entry points switch exactly once, on `lookups.kind_of` — a declaration is
+resolved to its kind in one place, and adding a kind is one branch in each
+consumer rather than a cascade several functions have to keep agreeing about.
+The places where the two halves could legitimately part company are settled
+deliberately: a null link is nobody's on both sides, and a subject whose model
+belongs everywhere is admitted on both sides without either resolving the row —
+so a deleted shared subject cannot make a listing show a row that its detail
+view 404s.
+
+The last three kinds are why the dispatcher exists. `NOT_ORM_SCOPABLE` said only
+how a model *cannot* be scoped, so every model wearing it needed bespoke code
+somewhere else — which pages had, in the page-tree module, and nothing else did.
+The additions say how a model *can* be:
+
+- `via_related` is deliberately more general than "a path to a page", the shape
+  #296 proposed. A page log entry, a page-child orderable and a workflow task
+  state all delegate through a foreign key; only the first two land on a page,
+  and hard-coding pages would have left the third unscopable. It sits *beside*
+  `NOT_ORM_SCOPABLE` rather than subsuming it — five models still reach nothing,
+  and saying so is worth more than a declaration that pretends otherwise.
+- Generic subjects are scoped **as a queryset**, with one materialised step: a
+  generic key stores its subject's id in a character column, so the surviving ids
+  are fetched per content type and sent back as literals. The cost is bounded by
+  how much of a *subject* type one organisation owns rather than by the table
+  being scoped, and the surfaces that use it (moderation queues, audit trails)
+  are small. If that stops holding the fix is a stored denormalised owner, not a
+  cleverer filter.
+- A content type whose model declares nothing is **refused**, loudly, rather than
+  passed through — the same rule as everywhere else, and safe for the same
+  reason: no model in this codebase reaches production undeclared, and a model
+  from outside it reads as shared. Shared reference data appearing as a
+  workflow's subject is coherent and is admitted whole, matching what the
+  object-level half already did.
+
+**Models we did not write cannot declare**, and four of Wagtail's own are
+exactly what the admin's reports and dashboard panels list. `EXTERNAL_DECLARATIONS`
+in the dispatcher speaks for them — the page audit log by `via_related`, the
+model audit log and workflow state by `via_content_object`, task state by
+`via_related` onto the state — in one table, checked by the same sweep, rather
+than each surface narrowing them by hand.
+
 **Deny by default, at the seam that matters.** An undeclared model is refused
 where scoping is applied, not quietly passed through: a silent pass-through
 would be exactly the leak the declaration exists to prevent, and it would be
 invisible, because an unscoped listing looks identical to a scoped one until a
 second organisation exists. A test enumerates every model in the codebase and
 fails on any that has declared nothing, which is what makes refusing safe — no
-model reaches production undeclared. A nullable link anywhere along a declared
-path means the row belongs to *nobody* — never to everybody, unless the model
-says otherwise in as many words by declaring a global tier (below), which is a
-decision somebody wrote down rather than an inference from a `None`.
+model reaches production undeclared. A second test goes further and fails on
+any model whose declaration the dispatcher cannot *act on*, with the five that
+genuinely reach nothing pinned by name — declaring something and being scopable
+are different properties, and it is the second one a surface depends on. A
+nullable link anywhere along a declared path means the row belongs to *nobody* —
+never to everybody, unless the model says otherwise in as many words by declaring
+a global tier (below), which is a decision somebody wrote down rather than an
+inference from a `None`.
 
 **Superusers skip the membership gate, not the host.** The instance admin may
 enter any organisation's admin without a membership row (#257). They do not get

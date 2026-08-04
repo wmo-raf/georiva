@@ -15,22 +15,18 @@ The mixins below are deliberately blunt: they wrap every view class a viewset
 exposes rather than an enumerated few, so a Wagtail upgrade that adds a view, or
 a viewset that overrides one, is scoped by default rather than by remembering.
 
-Scoping is skipped only for models that declare themselves shared reference
-data (topics, units, administrative boundaries): instance-global on purpose. A
-model that has declared nothing is refused, not passed through — see
-``organisations.access.scope_or_pass``.
+Every seam here goes through the dispatcher in ``organisations.ownership``, so a
+viewset over pages, over a page's children, or over a workflow's rows is scoped
+by the same declarations as a viewset over a catalog. Scoping is skipped only
+for models that declare themselves shared reference data (topics, units,
+administrative boundaries): instance-global on purpose. A model that has
+declared nothing is refused, not passed through.
 """
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import QuerySet
 
-from .access import (
-    is_org_owned,
-    require_org_object,
-    require_writable_org_object,
-    scope_form_fields,
-    scope_or_pass,
-    scoped_queryset,
-)
+from .access import scope_form_fields
+from .ownership import is_scopable, require_active_org_object, scope_rows
 
 #: Suffix of every attribute on a viewset naming a view class.
 VIEW_CLASS_SUFFIX = "_view_class"
@@ -66,12 +62,11 @@ class OrgScopedViewMixin:
     """
 
     def scope(self, queryset):
-        """Scoped if the model is org-owned, untouched if it is shared reference
-        data, and refused if it has declared neither — see
-        ``access.scope_or_pass``."""
+        """Narrowed by whatever the model declared, refused if it declared
+        nothing the dispatcher understands — see ``ownership.scope_rows``."""
         if queryset is None:
             return queryset
-        return scope_or_pass(self.request, queryset)
+        return scope_rows(self.request, queryset)
 
     # -- listings ----------------------------------------------------------
 
@@ -110,13 +105,13 @@ class OrgScopedViewMixin:
         than per view as each is discovered.
         """
         obj = super().get_object(*args, **kwargs)
-        if obj is None or not is_org_owned(type(obj)):
+        if obj is None or not is_scopable(type(obj)):
             return obj
         return self.require_object(obj)
 
     def require_object(self, obj):
         """The check a resolved object must pass on this kind of view."""
-        return require_org_object(self.request, obj)
+        return require_active_org_object(self.request, obj)
 
     # -- forms -------------------------------------------------------------
 
@@ -132,14 +127,14 @@ class OrgScopedWriteViewMixin(OrgScopedViewMixin):
     """
 
     def require_object(self, obj):
-        return require_writable_org_object(self.request, obj)
+        return require_active_org_object(self.request, obj, writable=True)
 
 
 class OrgScopedChooseMixin:
     """The chooser modal's result list."""
 
     def get_object_list(self):
-        return scoped_queryset(self.request, super().get_object_list())
+        return scope_rows(self.request, super().get_object_list())
 
 
 class OrgScopedChosenMixin:
@@ -150,12 +145,12 @@ class OrgScopedChosenMixin:
     """
 
     def get_object(self, pk):
-        return require_org_object(self.request, super().get_object(pk))
+        return require_active_org_object(self.request, super().get_object(pk))
 
 
 class OrgScopedChosenMultipleMixin:
     def get_objects(self, pks):
-        return scoped_queryset(self.request, super().get_objects(pks))
+        return scope_rows(self.request, super().get_objects(pks))
 
 
 def view_class_attrs(viewset):

@@ -19,7 +19,7 @@ from django.urls import reverse
 from georiva.core.models import Catalog, Collection, ColorPalette, Unit, Variable
 from georiva.core.models.catalog import Topic
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
-from georiva.organisations.access import is_shared_reference
+from georiva.organisations.ownership import is_shared_reference
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
 
