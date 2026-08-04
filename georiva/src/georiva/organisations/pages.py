@@ -7,7 +7,7 @@ question, not an FK lookup, and pages declare ``NOT_ORM_SCOPABLE`` rather than a
 path to Organisation.
 
 That leaves the general scoping machinery in ``scoping.py`` unable to help, so
-this module is the pages-shaped equivalent, closing the same four seams:
+this module is the pages-shaped equivalent, closing four of the five seams:
 
 * the explorer listing and the sidebar's page explorer, via Wagtail's
   ``construct_explorer_page_queryset`` hook;
@@ -16,6 +16,11 @@ this module is the pages-shaped equivalent, closing the same four seams:
 * every admin URL naming a page by id — edit, delete, move, copy, history,
   add-child and the rest — via :class:`OrgPageTreeMiddleware`, because Wagtail's
   page views resolve their pk directly and expose no queryset to narrow.
+
+The fifth is the admin dashboard, in ``dashboard.py``. It is separate because it
+is the one page surface where Wagtail resolves pages with neither a queryset to
+hook nor a page id in the URL — a panel does it inside a context method — which
+is exactly why all four mechanisms above missed it.
 
 Wagtail's own page permissions (each org's group holds page permissions over its
 own root, granted at provisioning) already stop a member editing a tree they have
