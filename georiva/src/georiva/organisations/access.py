@@ -19,9 +19,15 @@ This module holds the ORM-path half of that vocabulary — the common case, and
 the only one a single ``filter()`` can express. The kinds that need more than
 one (a page judged by its tree, a row delegating to a related object, a
 polymorphic subject) are read by the dispatcher in ``ownership``, which lands
-back here for everything below. A surface calls the dispatcher; these helpers
-are what it calls in turn, and what code already holding an ORM-path model may
-call directly.
+back here for everything below.
+
+Which half a caller wants is not a judgement call. **A surface calls the
+dispatcher**, always: it is the only thing that can answer for every model, and
+a helper here handed a page-shaped queryset refuses it. These are what the
+dispatcher calls in turn, and what code already holding an ORM-path model — a
+STAC view over collections, a template tag over catalogs — may call directly.
+Nothing here decides *which* kind a model is; that question has one answer, in
+``lookups.kind_of``, and one reader.
 
 *The host, not the session.* ``request.active_org`` is set by
 ``OrganisationMiddleware`` from the hostname on every request; nothing here
@@ -306,12 +312,20 @@ def scope_form_fields(request, form):
     formset whose rows are forms in their own right, with relation fields of
     their own — the variables edited inside a collection, and the palette each
     one picks. Those are narrowed too, by :func:`scope_formset_fields`.
+
+    The dispatcher is imported here rather than at module level: ``ownership``
+    reads this module and the page-tree module, so a module-level import would
+    close the circle. These form helpers are the one place in ``access`` that has
+    to reach the whole vocabulary — a relation field over pages is exactly where
+    a page-shaped model would otherwise leak.
     """
+    from .ownership import scope_rows
+
     for field in form.fields.values():
         queryset = getattr(field, "queryset", None)
         if queryset is None or not isinstance(queryset, QuerySet):
             continue
-        field.queryset = _dispatcher()(request, queryset)
+        field.queryset = scope_rows(request, queryset)
     for formset in getattr(form, "formsets", {}).values():
         scope_formset_fields(request, formset)
     return form
@@ -343,49 +357,13 @@ def _scoped_form_class(request, form_class):
     """
     from copy import deepcopy
 
+    from .ownership import scope_rows  # see :func:`scope_form_fields`
+
     scoped = type(form_class)(form_class.__name__, (form_class,), {})
     fields = {name: deepcopy(field) for name, field in form_class.base_fields.items()}
     for field in fields.values():
         queryset = getattr(field, "queryset", None)
         if isinstance(queryset, QuerySet):
-            field.queryset = _dispatcher()(request, queryset)
+            field.queryset = scope_rows(request, queryset)
     scoped.base_fields = fields
     return scoped
-
-
-def is_shared_reference(model):
-    """Whether ``model`` declared that no organisation owns it."""
-    return declared_lookup(model) == SHARED_REFERENCE_DATA
-
-
-def scope_or_pass(request, queryset):
-    """Scope ``queryset`` if its model is org-owned, pass it through if shared.
-
-    The ORM-path half of the rule, and the one that must not guess. A model that
-    has declared neither is refused here rather than quietly passed through —
-    that silent pass-through would be the very leak the declaration exists to
-    prevent, and it would be invisible: an unscoped listing looks exactly like a
-    scoped one until a second organisation exists.
-
-    A surface should call ``ownership.scope_rows`` rather than this. That is the
-    dispatcher over the whole vocabulary, and it lands here for the ORM-path
-    kinds; this function refuses the page-tree and generic-subject kinds, which
-    it knows nothing about.
-    """
-    model = queryset.model
-    if is_shared_reference(model):
-        return queryset
-    return scoped_queryset(request, queryset)
-
-
-def _dispatcher():
-    """``ownership.scope_rows``, imported at call time.
-
-    ``ownership`` reads this module and the page-tree module, so importing it at
-    module level would close the circle. The form helpers above are the one place
-    in ``access`` that has to reach the whole vocabulary: a relation field over
-    pages is exactly where a page-shaped model would otherwise leak.
-    """
-    from .ownership import scope_rows
-
-    return scope_rows

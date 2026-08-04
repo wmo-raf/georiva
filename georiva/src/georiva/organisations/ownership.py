@@ -133,9 +133,10 @@ def declaration_of(model):
 def scope_rows(request, queryset, _seen=frozenset()):
     """``queryset`` narrowed to the rows the organisation serving ``request`` owns.
 
-    The queryset-level entry point, and the one every admin surface should call:
-    it understands everything the vocabulary can express, where
-    ``access.scope_or_pass`` understands only the ORM-path half.
+    The queryset-level entry point, and the only one an admin surface calls: it
+    understands everything the vocabulary can express, and lands on
+    ``access.scoped_queryset`` for the ORM-path kinds it shares with the older
+    helpers.
 
     ``_seen`` guards the recursion. A declaration may delegate to another model's
     declaration, so a pair of models pointing at each other would otherwise
@@ -375,6 +376,18 @@ def require_active_org_object(request, obj, *, writable=False):
     if not belongs_to_active_org(request, obj):
         raise Http404("No such object in this organisation.")
     return obj
+
+
+def is_shared_reference(model):
+    """Whether no organisation owns ``model`` — every organisation reads it.
+
+    Here rather than in ``access`` because the honest answer needs
+    :func:`declaration_of`, not the raw declaration: a page class from Wagtail or
+    a third-party package declares nothing, and reading it straight would call
+    every organisation's pages shared. That was a live trap while the same
+    question had two answers in two modules.
+    """
+    return kind_of(declaration_of(model)) == SHARED_REFERENCE_DATA
 
 
 def is_scopable(model):

@@ -558,7 +558,9 @@ class OrgOwnedLookupDeclarationTests(TestCase):
         request.active_org = self.kenya
 
         with self.assertRaises(ImproperlyConfigured):
-            access.scope_or_pass(request, Undeclared.objects.all())
+            ownership.scope_rows(request, Undeclared.objects.all())
+        with self.assertRaises(ImproperlyConfigured):
+            ownership.belongs_to_active_org(request, Undeclared())
 
     @classmethod
     def setUpTestData(cls):
