@@ -58,6 +58,25 @@ a redirect to the login page — and the login page loads this script too, so ev
 sign-in would fetch a `<script src>` that redirects to HTML. The view has its own
 answer for a request with nothing to show: an empty script.
 
+**Amended: the route is also outside the tenancy guard, and a non-member is one
+of the requests with nothing to show.** Staying clear of `require_admin_access`
+turned out to be half the job. `OrganisationMiddleware._guard_admin` refuses
+every `/admin/` URL to a signed-in non-member, and a refusal is a rendered HTML
+page — so a member of one organisation who lands on another's sign-in page hit
+the identical failure this decision was written to avoid, by the other route.
+The URL therefore joins `organisations.middleware.admin_open_paths`, alongside
+the four Wagtail itself leaves unauthenticated for the same reason.
+
+Being open is only safe because the view scopes itself, so the scoping is now
+part of this decision rather than a property of the guard in front of it:
+`org_hopper_context` returns `None` for a signed-in non-member of the host
+organisation, and the view renders that as the empty script it already had. It
+previously named the host organisation in that case, reasoning that a block
+naming nobody was worse than a block naming the host — sound while the guard
+made the case unreachable, wrong once the sign-in page can reach it, because a
+stranger's sidebar should not be captioned with an institution they have nothing
+to do with.
+
 **A MutationObserver keeps the block mounted.** It is inserted into DOM that
 React owns, and React re-renders the sidebar when it is collapsed or the viewport
 changes. Rather than fight that, the observer puts the block back if it goes.

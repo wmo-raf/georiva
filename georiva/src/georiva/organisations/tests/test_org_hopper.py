@@ -257,17 +257,22 @@ class OrgHopperContextTests(TestCase):
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
-class OrgHopperNonMemberFallbackTests(TestCase):
-    """The branch the admin gate makes unreachable, exercised past the gate.
+class OrgHopperNonMemberTests(TestCase):
+    """A signed-in non-member of the host organisation gets no block at all.
 
-    ``OrganisationMiddleware._guard_admin`` turns a signed-in non-member away
-    before any admin URL is served, so the hopper never sees this case in
-    production. It is still the case that would produce a block naming somebody
-    else's institution, so the guard against it is tested directly rather than
-    left to be discovered by whoever calls this from somewhere new.
+    This case used to be unreachable — ``_guard_admin`` turned a signed-in
+    non-member away before any admin URL was served — and the hopper handled it
+    by naming the host organisation anyway, on the grounds that a block naming
+    nobody was worse than a block naming the host.
+
+    It is reachable now. ``/admin/org-hopper.js`` is in the admin's open set,
+    because the sign-in page carries a script tag for it and a refusal there
+    hands that tag an HTML document. So the question stopped being hypothetical,
+    and the answer changed with it: a stranger's sidebar must not be captioned
+    with the name of an institution they have nothing to do with.
     """
 
-    def test_the_host_organisation_is_named_even_when_the_list_omits_it(self):
+    def test_a_non_member_of_the_host_organisation_is_shown_no_block(self):
         kenya = provision_organisation(name="Kenya Met", slug="kenya")
         uganda = provision_organisation(name="Uganda Met", slug="uganda")
         stranger = make_user("stranger")
@@ -277,8 +282,4 @@ class OrgHopperNonMemberFallbackTests(TestCase):
         request.active_org = kenya
         request.user = stranger
 
-        context = org_hopper_context(request)
-
-        self.assertEqual(context["current"].slug, "kenya")
-        self.assertTrue(context["current"].is_current)
-        self.assertEqual([entry.slug for entry in context["entries"]], ["kenya", "uganda"])
+        self.assertIsNone(org_hopper_context(request))

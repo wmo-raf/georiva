@@ -21,27 +21,29 @@
 {% block titletag %}{% block error_title %}{% endblock %}{% endblock %}
 {% block bodyclass %}login gr-error{% endblock %}
 
-{% comment %} No icon sprite, and not merely because this page draws no icons.
+{% comment %} No icon sprite: this page draws no icons.
 
-   Wagtail's `icons_sprite` block emits a script that fetches `/admin/sprite/`
-   and injects the response into a `<div data-sprite>`. That URL is under the
-   membership guard, so for the very user this page exists to explain, the fetch
-   is refused — and what comes back is *this page*, which the script then injects
-   into itself. The result is a second full-height copy of the refusal rendered
-   above the real one, and a document that scrolls for no visible reason.
+   That is now the whole reason, but it was not always. `/admin/sprite/` used to
+   sit under the membership guard, so for the very user this page exists to
+   explain, Wagtail's `icons.js` fetched it, got *this page* back, and assigned
+   it into the `<div data-sprite>` — a second full-height copy of the refusal
+   rendered above the real one. That hole is closed at the guard now (see
+   `organisations.middleware.admin_open_paths`), which is where it belonged: the
+   sign-in page needs the sprite too, and it could not override its way out.
 
-   Overriding the block empty is the fix rather than exempting `/admin/sprite/`
-   from the guard: an error page has no business asking the admin for anything.
+   The block stays empty because fetching an asset this page has no use for is
+   still waste, not because the fetch would fail.
 {% endcomment %}
 {% block icons_sprite %}{% endblock %}
 
-{% comment %} No admin JavaScript either, for the same reason and with the same
-   shape. Wagtail's `js` block pulls in the translation catalog at
-   `/admin/jsi18n/` and everything registered on `insert_global_admin_js` —
-   here, the org-hopper's `/admin/org-hopper.js`. Both are under the guard, so
-   both are refused for the reader of this page, and neither has anything to do
-   on a static card. Verified that no admin CSS keys off the `ready` class this
-   drops, so the page still styles correctly without it.
+{% comment %} No admin JavaScript either, and now for the same plain reason.
+   Wagtail's `js` block pulls in the translation catalog at `/admin/jsi18n/` and
+   everything registered on `insert_global_admin_js` — here, the org-hopper's
+   `/admin/org-hopper.js`. Both are in the open set today, and the org-hopper
+   answers a non-member with an empty script anyway, so neither would fail; they
+   simply have nothing to do on a static card, which carries no sidebar to mount
+   a hopper into and no strings to translate. Verified that no admin CSS keys off
+   the `ready` class this drops, so the page still styles correctly without it.
 {% endcomment %}
 {% block js %}{% endblock %}
 

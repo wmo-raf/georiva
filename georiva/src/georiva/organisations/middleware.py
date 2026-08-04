@@ -48,14 +48,53 @@ TILE_CONFIG_PREFIX = "/api/tile-config/"
 TILE_AUTH_PREFIX = "/internal/tile-auth/"
 
 
-def admin_auth_paths():
-    """The admin's own sign-in and sign-out URLs.
+#: The admin URLs served without a membership. Three groups, each here for its
+#: own reason — none of them inherited from the others.
+#:
+#: ``wagtailadmin_logout`` is ours and is the oldest of the three. Wagtail keeps
+#: it *inside* ``require_admin_access``; we open it because the sign-out button
+#: on the refusal page is itself under ``/admin/``, so refusing it left a
+#: signed-in non-member no way out but clearing a cookie by hand.
+#:
+#: The four after it are Wagtail's own. It applies ``require_admin_access`` to
+#: its admin urlconf and *then* appends them, under the comment "these url
+#: patterns do not require an authenticated admin user" — because its sign-in
+#: page needs them: it draws an icon sprite, loads a translation catalog, and
+#: links to a password reset. Refusing any of those hardens nothing; it breaks
+#: the sign-in page for the one user who has been sent to it.
+#:
+#: The last is ours again, and on its own merit rather than by inheritance:
+#: ``organisation_hopper_script`` names only organisations the caller belongs
+#: to, and answers empty when there are none. See ADR 0017, and ``config.urls``,
+#: which keeps that URL outside ``require_admin_access`` for the same reason it
+#: has to be outside this guard.
+ADMIN_OPEN_URL_NAMES = (
+    "wagtailadmin_logout",
+    "wagtailadmin_login",
+    "wagtailadmin_sprite",
+    "wagtailadmin_javascript_catalog",
+    "wagtailadmin_password_reset",
+    "organisation_hopper_script",
+)
 
-    Reversed rather than spelled out so the pair cannot drift from
-    ``wagtail.admin.urls``, and resolved on call rather than at import because
-    URL loading is not finished when this module is imported.
+
+def admin_open_paths():
+    """The admin paths a signed-in non-member is still answered on.
+
+    Reversed rather than spelled out so no entry can drift from the urlconf that
+    defines it — a renamed or dropped URL raises here rather than silently
+    closing a path this guard is supposed to leave open — and resolved on call
+    rather than at import because URL loading is not finished when this module is
+    imported.
+
+    Prefixes, not exact paths, because the password reset is four URLs and one of
+    them carries a ``uidb64`` and a token. ``wagtailadmin_password_reset``
+    reverses to their common mount point. The loosening that buys is confined to
+    nonsense like ``/admin/login/xyz/``, which falls to Wagtail's own catch-all
+    404 — itself outside ``require_admin_access`` — so no organisation-scoped row
+    is reachable through it either way.
     """
-    return (reverse("wagtailadmin_login"), reverse("wagtailadmin_logout"))
+    return tuple(reverse(name) for name in ADMIN_OPEN_URL_NAMES)
 
 
 def exempt_path_prefixes():
@@ -175,16 +214,28 @@ class OrganisationMiddleware:
         Anonymous requests fall through: the login page lives under the same
         prefix, and a login is how somebody stops being anonymous.
 
-        The two auth URLs themselves fall through for signed-in users too, and
-        for the mirror of that reason. Sessions span every organisation's host —
+        ``admin_open_paths`` falls through for signed-in users too, and for the
+        mirror of that reason. Sessions span every organisation's host —
         ``SESSION_COOKIE_DOMAIN`` is the shared base domain — so a member of one
         organisation typing another's hostname arrives here signed in and is
         refused. Without this exemption the sign-out button on that refusal is
         itself under ``/admin/`` and is refused identically, and the only way out
         of the dead end is clearing a cookie by hand. The relaxation is safe
-        because it is drawn at exactly two views that read no organisation-scoped
-        row: one ends a session, the other starts one, and whatever the new
-        session may see is decided by this same check on its next request.
+        because every path in it reads no organisation-scoped row: one ends a
+        session, one starts one, one is the way back to an account whose password
+        is lost, and whatever the resulting session may see is decided by this
+        same check on its next request.
+
+        The rest of that list is there for a subtler version of the same dead
+        end. A page this guard lets through still asks for its own subresources,
+        and a refusal is a *rendered HTML page* — so a guarded subresource hands
+        the sign-in page a document where it expected an asset. Wagtail's
+        ``icons.js`` assigns the response body straight into a ``<div
+        data-sprite>`` without checking status or content type, which drew the
+        403 above the sign-in form and gave the page a second screen to scroll.
+        The fix is to stop refusing what those pages legitimately fetch, not to
+        teach each page not to fetch: the list is Wagtail's own, plus two of ours
+        — the sign-out above, and a hopper that scopes itself.
 
         The check re-reads the role the middleware just resolved from the
         database, so a revoked membership locks its former holder out on their
@@ -192,7 +243,7 @@ class OrganisationMiddleware:
         """
         if not request.path.startswith(settings.GEORIVA_ADMIN_PATH_PREFIX):
             return
-        if request.path in admin_auth_paths():
+        if request.path.startswith(admin_open_paths()):
             return
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
