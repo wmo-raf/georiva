@@ -83,7 +83,7 @@ def scope_the_dashboard_to_this_organisation(request, panels):
     after the apps that append panels of their own, so this hook runs last and
     sees the finished list.
     """
-    scope_dashboard_panels(request, panels)
+    scope_dashboard_panels(panels)
 
 
 class OrgAdminMenuItem(MenuItem):

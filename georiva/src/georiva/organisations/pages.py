@@ -74,6 +74,23 @@ def scope_pages(request, queryset):
     return queryset.descendant_of(org_root_page(request), inclusive=True)
 
 
+#: The audit-log action a page edit is recorded under. Named because two
+#: surfaces read it — the page-listing filter panel and the dashboard's
+#: recent-edits panel — and a string that means something is worth one spelling.
+PAGE_EDIT_ACTION = "wagtail.edit"
+
+
+def scope_page_log_entries(request, queryset):
+    """``queryset`` of page log entries narrowed to this organisation's tree.
+
+    A page log entry carries a real foreign key to its page, so the tree
+    narrowing reaches it through that — which is what lets the dashboard's
+    recent-edits panel apply its row limit to this organisation's rows rather
+    than to the instance's.
+    """
+    return queryset.filter(page__in=scope_pages(request, Page.objects.all()))
+
+
 def page_is_in_org_tree(root, path, depth, *, root_node_allowed=False):
     """Whether a page at treebeard ``path``/``depth`` belongs to ``root``'s tree.
 
@@ -127,8 +144,8 @@ def _org_page_editors(request):
     if filter_organisation(request) is None:
         return users.none()
     return users.filter(
-        pk__in=PageLogEntry.objects.filter(
-            action="wagtail.edit", page__in=scope_pages(request, Page.objects.all())
+        pk__in=scope_page_log_entries(
+            request, PageLogEntry.objects.filter(action=PAGE_EDIT_ACTION)
         )
         .order_by()
         .values_list("user_id", flat=True)

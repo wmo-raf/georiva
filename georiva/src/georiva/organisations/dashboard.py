@@ -40,7 +40,7 @@ from wagtail.admin.views.home import (
 from wagtail.models import Page, PageLogEntry
 
 from .ownership import belongs_to_active_org
-from .pages import scope_pages
+from .pages import PAGE_EDIT_ACTION, scope_page_log_entries, scope_pages
 
 
 class OrgScopedRecentEditsPanel(RecentEditsPanel):
@@ -62,10 +62,9 @@ class OrgScopedRecentEditsPanel(RecentEditsPanel):
 
         edit_count = getattr(settings, "WAGTAILADMIN_RECENT_EDITS_LIMIT", 5)
         last_edits_dates = (
-            PageLogEntry.objects.filter(
-                user=request.user,
-                action="wagtail.edit",
-                page__in=scope_pages(request, Page.objects.all()),
+            scope_page_log_entries(
+                request,
+                PageLogEntry.objects.filter(user=request.user, action=PAGE_EDIT_ACTION),
             )
             .values("page_id")
             .annotate(latest_date=Max("timestamp"))
@@ -108,8 +107,9 @@ class OrgScopedUserObjectsInWorkflowModerationPanel(UserObjectsInWorkflowModerat
     The panel has already materialised its states into a list by the time it
     returns — it drops the ones whose generic foreign key points at nothing — so
     this filters that list rather than the queryset behind it. Each state is
-    judged by the object it moderates, which may be a page or a snippet; the
-    ownership predicate knows the difference.
+    judged by the object it moderates, which may be a page or a snippet, by
+    whatever that model has declared — with the one hole ``ownership`` names: a
+    snippet from outside this codebase reads as shared and is admitted.
     """
 
     def get_context_data(self, parent_context):
@@ -146,11 +146,15 @@ SCOPED_DASHBOARD_PANELS = {
 }
 
 
-def scope_dashboard_panels(request, panels):
+def scope_dashboard_panels(panels):
     """Swap each stock panel for its scoped equivalent, leaving the rest alone.
 
     Matched on the exact class, so a panel another module contributed — or a
     subclass somebody registered deliberately — passes through untouched.
+
+    Takes no request: which panels are replaced is a question about classes, and
+    each replacement reads the request it is rendered for from its own parent
+    context.
     """
     for index, panel in enumerate(panels):
         replacement = SCOPED_DASHBOARD_PANELS.get(type(panel))

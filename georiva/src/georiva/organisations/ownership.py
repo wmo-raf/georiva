@@ -16,7 +16,10 @@ the same vocabulary the queryset half reads:
 * a model naming an ORM path to Organisation is judged by walking it, with the
   global tier of a nullable-owner model counting as everybody's, exactly as
   ``access.require_org_object`` has it;
-* a model declaring itself shared reference data belongs everywhere;
+* a model declaring itself shared reference data belongs everywhere — including
+  every model from outside this codebase, which ``lookups.OWN_MODULE_PREFIX``
+  reads as shared without its having said so. A workflow over a snippet some
+  third-party package defines is therefore admitted, not scoped;
 * a model that has declared no ownership rule is **refused**, loudly. Silence is
   not consent here any more than it is in ``access.scope_or_pass``: a predicate
   that guessed ``True`` would be an invisible leak, and one that guessed
@@ -31,9 +34,10 @@ declare a path to a page, or to a generic content object, so that a future
 surface is scoped by declaration rather than by remembering (#296). That work
 grows this file rather than relocating this function.
 """
+from django.http import Http404
 from wagtail.models import Page
 
-from .access import has_global_tier, is_shared_reference, organisation_of, require_active_org
+from .access import is_shared_reference, require_org_object
 from .pages import org_root_page, page_is_in_org_tree
 
 
@@ -42,16 +46,19 @@ def belongs_to_active_org(request, obj):
 
     Raises ``ImproperlyConfigured`` for a model that has declared no route to an
     organisation — see this module's docstring for why that is not a ``False``.
+
+    The answer for everything that is not a page comes from the enforcing helper
+    itself, for the reason ``access.may_change_org_object`` gives: what a surface
+    shows and what a surface admits cannot then drift apart. The global tier of a
+    nullable-owner model is admitted there, so it is admitted here.
     """
     if isinstance(obj, Page):
         page = obj
         return page_is_in_org_tree(org_root_page(request), page.path, page.depth)
-
-    organisation = require_active_org(request)
     if is_shared_reference(type(obj)):
         return True
-    owner = organisation_of(obj)
-    if owner is None and has_global_tier(type(obj)):
-        # The global tier: owned by nobody, read by everybody.
-        return True
-    return owner == organisation
+    try:
+        require_org_object(request, obj)
+    except Http404:
+        return False
+    return True
