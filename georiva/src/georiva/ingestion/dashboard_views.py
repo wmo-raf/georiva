@@ -29,18 +29,33 @@ def ingestion_dashboard_api(request):
         .filter(is_active=True)
         .order_by("catalog__slug", "sort_order", "name")
     )
+    # The one scoped set every roll-up below descends from. Narrowing on it is
+    # what keeps the supporting queries proportional to this organisation's
+    # holdings rather than to the whole instance's — the rows were always
+    # discarded afterwards, but only after the database had read them all.
+    collection_ids = [c.pk for c in collections]
 
+    # Scoped through the collections rather than by DataFeedCollectionLink's own
+    # organisation path: that path runs through the feed's catalog, which is
+    # nullable, so filtering on it would drop links whose feed has no catalog
+    # and quietly report those collections as manual.
     automated_collection_ids = set(
-        DataFeedCollectionLink.objects.values_list('collection_id', flat=True)
+        DataFeedCollectionLink.objects
+        .filter(collection__in=collection_ids)
+        .values_list('collection_id', flat=True)
     )
 
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=29)
 
+    # FileIngestion is NOT_ORM_SCOPABLE (it records a file, which may belong to
+    # nothing yet), so it is reached the sanctioned way: through the collections
+    # this request already scoped. `collections__in` also subsumes the old
+    # `collections__isnull=False`.
     recent_logs = (
         FileIngestion.objects
         .filter(created_at__date__gte=thirty_days_ago)
-        .filter(collections__isnull=False)
+        .filter(collections__in=collection_ids)
         .values("collections", "status", "created_at")
         .order_by("created_at")
     )
@@ -49,7 +64,6 @@ def ingestion_dashboard_api(request):
     for log in recent_logs:
         logs_by_collection[log["collections"]].append(log)
 
-    collection_ids = [c.pk for c in collections]
     latest_fi_by_collection = {}
     for fi in (
         FileIngestion.objects

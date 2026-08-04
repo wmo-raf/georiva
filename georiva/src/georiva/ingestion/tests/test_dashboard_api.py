@@ -20,8 +20,11 @@ FETCH_RUNS_URL = "/admin/api/ingestion/collections/{}/fetch-runs/"
 UPLOAD_SESSIONS_URL = "/admin/api/ingestion/collections/{}/upload-sessions/"
 
 
-def _setup_collection(catalog_slug="cat", collection_slug="col"):
-    catalog = Catalog.objects.create(organisation=make_organisation(), name=catalog_slug, slug=catalog_slug, file_format="grib2")
+def _setup_collection(catalog_slug="cat", collection_slug="col", organisation=None):
+    catalog = Catalog.objects.create(
+        organisation=organisation or make_organisation(),
+        name=catalog_slug, slug=catalog_slug, file_format="grib2",
+    )
     return Collection.objects.create(name=collection_slug, slug=collection_slug, catalog=catalog)
 
 
@@ -234,6 +237,56 @@ class DashboardCollectionListTests(TestCase):
 
         self.assertEqual(by_id[col_a.pk]["sparkline"][-1]["status"], "success")
         self.assertEqual(by_id[col_b.pk]["sparkline"][-1]["status"], "failed")
+
+
+class DashboardTenancyTests(TestCase):
+    """What the dashboard answers is one organisation's picture of its own
+    pipeline, and stays that way whatever a neighbour is doing on the instance.
+
+    The roll-ups behind it are built from the whole ``FileIngestion`` table and
+    the whole link table; these pin down that neither can reach the response.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_ten", "ten@test.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        self.ours = _setup_collection("ours", "daily")
+        # Same slugs on purpose: distinguishable only by organisation, so a
+        # dropped filter surfaces as the wrong row rather than as nothing.
+        self.neighbour = make_organisation("neighbour-org")
+        self.theirs = _setup_collection("ours", "daily", organisation=self.neighbour)
+
+    def test_another_organisations_catalogs_are_absent(self):
+        response = self.client.get(DASHBOARD_URL)
+        ids = [c["id"] for c in response.json()["catalogs"]]
+        self.assertIn(self.ours.catalog.pk, ids)
+        self.assertNotIn(self.theirs.catalog.pk, ids)
+
+    def test_another_organisations_ingestion_history_does_not_reach_our_rollup(self):
+        """A neighbour's failure must not colour this organisation's status."""
+        # Paths are org-first in production, which is also what keeps these two
+        # apart under the (bucket, file_path) uniqueness constraint.
+        _make_file_ingestion(
+            self.ours, file_path="test-org/ours/daily/file.grib2",
+            status=FileIngestion.Status.COMPLETED,
+        )
+        _make_file_ingestion(
+            self.theirs, file_path="neighbour-org/ours/daily/file.grib2",
+            status=FileIngestion.Status.FAILED,
+        )
+
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.ours.catalog.pk)
+        self.assertEqual(cat["status"], "ok")
+
+    def test_another_organisations_feed_link_does_not_make_our_collection_automated(self):
+        feed = DataFeed.objects.create(name="Theirs", catalog=self.theirs.catalog)
+        DataFeedCollectionLink.objects.create(data_feed=feed, collection=self.theirs)
+
+        response = self.client.get(DASHBOARD_URL)
+        col = _find_collection_in_response(response.json(), self.ours.pk)
+        self.assertEqual(col["type"], "manual")
 
 
 class CollectionIngestionLogsAPITests(TestCase):

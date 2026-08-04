@@ -171,12 +171,17 @@ class DataFeedIndexView(OrgScopedViewMixin, IndexView):
         Deliberately computed over the *unfiltered* queryset: once a filter is
         applied the chips must still show the whole picture, otherwise the one
         you clicked reads as the only state that exists. One GROUP BY.
+
+        "Unfiltered" means the health filter and the search box. It never meant
+        the organisation: these are the listing's own totals, so they count the
+        rows the listing lists — this organisation's.
         """
         # Deliberately NOT get_base_queryset(): its collection/product Count
         # annotations join, and a feed with 3 products would then be counted
-        # three times by this GROUP BY. with_health() carries no joins.
+        # three times by this GROUP BY. with_health() carries no joins. Scoping
+        # is therefore applied here directly rather than inherited from it.
         counts = dict(
-            DataFeed.objects.with_health()
+            self.scope(DataFeed.objects.with_health())
             .values_list("health_rank")
             .annotate(n=Count("pk"))
             .values_list("health_rank", "n")
