@@ -1,0 +1,30 @@
+{% extends error_base %}
+{% comment %} Not found, on either plane.
+
+   Names no organisation on purpose: this page also answers the unknown-host 404
+   `OrganisationMiddleware` raises, where there is no organisation to name. {% endcomment %}
+{% load i18n %}
+
+{% block error_title %}{% trans "Page not found" %}{% endblock %}
+
+{% block error_content %}
+    <div class="gr-error-code">{% trans "404 — Not found" %}</div>
+    <h1>{% trans "This page doesn't exist" %}</h1>
+    <p>
+        {% blocktrans trimmed %}
+            The address may be mistyped, or the page may have been moved or
+            removed since you last saw it.
+        {% endblocktrans %}
+    </p>
+
+    <div class="gr-error-actions">
+        <a class="button" href="/">{% trans "Go to the home page" %}</a>
+    </div>
+
+    <div class="gr-error-hint">
+        {% blocktrans trimmed with host=request.get_host %}
+            You're on <code>{{ host }}</code>. Each organisation is served from its
+            own address, so a link to another organisation's page won't resolve here.
+        {% endblocktrans %}
+    </div>
+{% endblock %}

@@ -1,0 +1,111 @@
+{% extends "wagtailadmin/admin_base.html" %}
+{% comment %} Error shell for the admin plane.
+
+   Extends the sidebar-less admin base — the same shell the login page wears —
+   rather than the full admin chrome. A refused request must not be answered
+   with the menus of the organisation that refused it.
+
+   Colours come from Wagtail's own `--w-color-*` tokens rather than the public
+   site's `--gr-*` ones, so the page follows the admin theme (including dark
+   mode) instead of fighting it. {% endcomment %}
+{% load i18n static %}
+
+{% block titletag %}{% block error_title %}{% endblock %}{% endblock %}
+{% block bodyclass %}gr-error{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .gr-error-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .gr-error-card {
+            width: 100%;
+            max-width: 34rem;
+            padding: 2.5rem;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            background: var(--w-color-surface-page);
+        }
+
+        .gr-error-logo {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 1.5rem;
+        }
+
+        .gr-error-logo svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .gr-error-code {
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--w-color-text-meta);
+        }
+
+        .gr-error-card h1 {
+            margin: 0.5rem 0 1rem;
+            font-size: 1.5rem;
+            line-height: 1.3;
+            color: var(--w-color-text-label);
+        }
+
+        .gr-error-card p {
+            margin: 0 0 1rem;
+            line-height: 1.6;
+            color: var(--w-color-text-context);
+        }
+
+        .gr-error-identity {
+            padding: 0.875rem 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 6px;
+            background: var(--w-color-surface-field-inactive);
+            font-size: 0.9375rem;
+            color: var(--w-color-text-context);
+        }
+
+        .gr-error-identity strong {
+            color: var(--w-color-text-label);
+        }
+
+        .gr-error-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1.75rem;
+        }
+
+        .gr-error-hint {
+            margin-top: 1.75rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--w-color-border-furniture);
+            font-size: 0.875rem;
+            color: var(--w-color-text-meta);
+        }
+
+        .gr-error-hint code {
+            font-family: ui-monospace, monospace;
+            color: var(--w-color-text-label);
+        }
+    </style>
+    {% block error_css %}{% endblock %}
+{% endblock %}
+
+{% block furniture %}
+    <main class="gr-error-wrapper" id="main">
+        <div class="gr-error-card">
+            <figure class="gr-error-logo">{% include "georiva/logos/georiva-symbol.svg" %}</figure>
+            {% block error_content %}{% endblock %}
+        </div>
+    </main>
+{% endblock %}
