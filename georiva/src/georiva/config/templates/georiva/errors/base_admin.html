@@ -110,12 +110,6 @@
             font-family: ui-monospace, monospace;
             color: var(--w-color-text-label);
         }
-
-        /* The wordmark, sized as the sign-in page sizes it. */
-        .gr-error .login-logo svg {
-            width: 100%;
-            height: 100%;
-        }
     </style>
     {% block error_css %}{% endblock %}
 {% endblock %}
@@ -124,11 +118,10 @@
     <main class="content-wrapper" id="main">
         {% block error_content %}{% endblock %}
 
-        {% comment %} Same slot, same class and same asset as the sign-in page's
-           `branding_logo` block, so the mark sits where a user arriving from one
-           page to the other already expects it. {% endcomment %}
-        <div class="login-logo">
-            {% include "georiva/logos/georiva.svg" %}
-        </div>
+        {% comment %} The same partial the sign-in page's `branding_logo` block
+           includes, so the mark cannot differ in size or placement between the
+           two screens the way it did when each wrote out its own markup.
+        {% endcomment %}
+        {% include "georiva/partials/admin_brand_mark.html" %}
     </main>
 {% endblock %}
