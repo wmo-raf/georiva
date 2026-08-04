@@ -8,8 +8,11 @@ accepted
 
 Each Organisation is provisioned with a Wagtail Site, a root page of its own and
 a group holding page permissions over that root (#266). That makes pages
-org-owned — but through the Site → root-page link, not through a field, so they
-declare `NOT_ORM_SCOPABLE` and the choke point in ADR 0011 cannot scope them.
+org-owned — but through the Site → root-page link, not through a field, so at the
+time they declared `NOT_ORM_SCOPABLE` and the choke point in ADR 0011 could not
+scope them. (They now declare `PAGE_TREE`, and the dispatcher #296 added does
+scope them; the four mechanisms below are still what closes Wagtail's own page
+views, which take a pk and expose no queryset to narrow.)
 Nothing else did either: the page explorer, the page chooser, page search and
 every `/admin/pages/<id>/…` view resolved pages with no reference to the host's
 organisation.
