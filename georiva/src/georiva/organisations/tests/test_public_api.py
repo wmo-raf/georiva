@@ -59,13 +59,11 @@ def build_uganda_only_tree(organisation):
     return {"catalog": catalog, "collection": collection, "variable": variable}
 
 
-def _add_datasets_index(organisation):
-    """The datasets portal page under ``organisation``'s own root."""
+def _datasets_index(organisation):
+    """The datasets portal page provisioning put under ``organisation``'s root."""
     from georiva.pages.datasets.models import DatasetsIndexPage
 
-    index = DatasetsIndexPage(title="Datasets", slug="datasets")
-    organisation.site.root_page.add_child(instance=index)
-    return index
+    return DatasetsIndexPage.objects.descendant_of(organisation.site.root_page).get()
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
@@ -226,8 +224,8 @@ class CrossOrgPublicApiTests(TestCase):
         are that Site's organisation's, on both hosts.
         """
         indexes = {
-            "kenya.georiva.test": _add_datasets_index(self.kenya),
-            "uganda.georiva.test": _add_datasets_index(self.uganda),
+            "kenya.georiva.test": _datasets_index(self.kenya),
+            "uganda.georiva.test": _datasets_index(self.uganda),
         }
         for host, index in indexes.items():
             with self.subTest(host=host):

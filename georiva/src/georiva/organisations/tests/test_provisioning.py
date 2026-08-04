@@ -1,8 +1,10 @@
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
-from django.test import TestCase, override_settings
+from django.template import Context
+from django.test import RequestFactory, TestCase, override_settings
 from wagtail.models import GroupPagePermission, Site
 
+from georiva.core.templatetags.georiva_tags import datasets_index_url
 from georiva.organisations.models import Organisation
 from georiva.organisations.provisioning import (
     ORG_PAGE_PERMISSION_TYPES,
@@ -12,6 +14,7 @@ from georiva.organisations.provisioning import (
     sync_site_domains,
     sync_site_ports,
 )
+from georiva.pages.datasets.models import DatasetsIndexPage
 from georiva.pages.home.models import HomePage
 
 
@@ -60,6 +63,51 @@ class ProvisionOrganisationTests(TestCase):
 
         self.assertEqual(organisation.site.port, 443)
         self.assertTrue(organisation.site.root_url.startswith("https://"))
+
+    def test_the_root_page_comes_with_its_datasets_index(self):
+        """A portal root without a datasets index is not a portal.
+
+        Every template linking to the listing goes through ``datasets_index_url``,
+        whose fallback is the bare string ``/datasets/`` — on a host with no such
+        page, a navbar link to a 404.
+        """
+        organisation = provision_organisation(name="Kenya Met", slug="kenya")
+
+        index = DatasetsIndexPage.objects.descendant_of(organisation.site.root_page).get()
+        self.assertEqual(index.get_parent().pk, organisation.site.root_page_id)
+        self.assertEqual(index.slug, "datasets")
+        self.assertTrue(index.live)
+
+    @override_settings(ALLOWED_HOSTS=["*"])
+    def test_each_organisation_gets_its_own_datasets_index(self):
+        """The listing a portal links to is the one in its own tree, not the first
+        on the instance — which on a second tenant's host would be somebody else's.
+        """
+        kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        icpac = provision_organisation(name="ICPAC", slug="icpac")
+
+        kenya_index = DatasetsIndexPage.objects.descendant_of(kenya.site.root_page).get()
+        icpac_index = DatasetsIndexPage.objects.descendant_of(icpac.site.root_page).get()
+        self.assertNotEqual(kenya_index.pk, icpac_index.pk)
+
+        # Each index sits at /datasets/ under its own Site root, so the two URLs
+        # are the same string — and the same string the tag falls back to when it
+        # finds no page at all. An assertion on them could not fail for the reason
+        # it exists, so move one first: now only walking the right tree gets the
+        # right answer.
+        icpac_index.slug = "data"
+        icpac_index.save()
+
+        # With more than one Site in play Wagtail cannot relativise a page URL, so
+        # what comes back names the host as well as the path — both of which are
+        # the claim here.
+        for organisation, path in ((kenya, "/datasets/"), (icpac, "/data/")):
+            with self.subTest(organisation=organisation.slug):
+                request = RequestFactory().get("/", SERVER_NAME=organisation.site.hostname)
+                self.assertEqual(
+                    datasets_index_url(Context({"request": request})),
+                    organisation.site.root_url + path,
+                )
 
     def test_lean_settings_are_stored(self):
         organisation = provision_organisation(

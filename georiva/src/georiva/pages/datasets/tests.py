@@ -59,8 +59,9 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
         from georiva.pages.datasets.models import DatasetsIndexPage
 
-        cls.index = DatasetsIndexPage(title="Datasets", slug="datasets")
-        cls.organisation.site.root_page.add_child(instance=cls.index)
+        cls.index = DatasetsIndexPage.objects.descendant_of(
+            cls.organisation.site.root_page
+        ).get()
 
         tree = make_org_tree(cls.organisation)
         cls.catalog = tree["catalog"]
