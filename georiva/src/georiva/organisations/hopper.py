@@ -117,7 +117,8 @@ def org_hopper_context(request):
 
     ``None`` for an anonymous request and for a request no organisation serves —
     both reachable under ``/admin/`` (the login page is one), and neither has an
-    organisation to name.
+    organisation to name — and ``None`` for a signed-in non-member, for the
+    reason below.
     """
     organisation = getattr(request, "active_org", None)
     user = getattr(request, "user", None)
@@ -126,14 +127,17 @@ def org_hopper_context(request):
 
     entries = [_entry(request, org, organisation) for org in hoppable_organisations(user)]
     if not any(entry.is_current for entry in entries):
-        # Belt to the middleware's braces. `_guard_admin` already turns a
-        # signed-in non-member away before any admin URL is served, so on the
-        # admin plane this cannot happen — but the block's whole job is to name
-        # the organisation whose host this is, and naming somebody else's while
-        # the list disagrees would be worse than naming none. Kept so that a
-        # future caller reaching this outside the admin gate cannot get a block
-        # with no current entry.
-        entries.insert(0, _entry(request, organisation, organisation))
+        # A signed-in non-member of the host organisation. `_guard_admin` used to
+        # make this unreachable, and this branch named the host organisation
+        # anyway on the strength of "the block's whole job is to name the
+        # organisation whose host this is". That premise no longer holds: the
+        # script is now in the admin's open set, because the sign-in page loads
+        # it and a refusal there would hand a `<script src>` an HTML document.
+        # So this case is now live, and on it the honest answer is no block at
+        # all — a stranger's sidebar should not be captioned with the name of an
+        # institution they have nothing to do with. The view already renders
+        # `None` as an empty script: a page without a hopper, not a broken page.
+        return None
 
     current = next(entry for entry in entries if entry.is_current)
     return {

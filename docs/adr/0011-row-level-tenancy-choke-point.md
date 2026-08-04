@@ -87,8 +87,15 @@ nothing they create there can be filed under another institution's prefix.
 Reaching another organisation's data means visiting its host.
 
 **Membership gates the admin plane as a whole**, in the middleware, re-read from
-the database every request. A signed-in non-member never reaches a view, so a
-revoked membership fails closed on the next request rather than at logout. This
+the database every request. A signed-in non-member reaches no view that reads an
+organisation-scoped row, so a revoked membership fails closed on the next request
+rather than at logout. The handful of admin URLs they *do* still reach are named
+by `organisations.middleware.admin_open_paths` and read no such row: the sign-in
+and sign-out pair, the sprite, translation catalog and password reset Wagtail
+itself leaves unauthenticated, and the org-hopper, which answers a non-member
+with nothing. Without them the refusal page could not be escaped, and — because
+a refusal is a rendered HTML page — a guarded subresource would hand the sign-in
+page a document where it expected an asset. This
 is a coarse layer above row scoping rather than a replacement for it: scoping
 still decides every row, and the gate only saves a stranger from reaching an
 empty listing. The public plane stays open to anonymous readers and is scoped

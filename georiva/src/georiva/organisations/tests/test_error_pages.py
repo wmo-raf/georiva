@@ -45,16 +45,19 @@ class NonMemberRefusalTests(TestCase):
         self.assertContains(response, "Uganda Met", status_code=403)
         self.assertContains(response, "amina", status_code=403)
 
-    def test_the_page_asks_the_admin_for_nothing_while_being_refused_by_it(self):
-        """The refusal page must not make refused subrequests of its own.
+    def test_the_page_asks_the_admin_for_nothing(self):
+        """The refusal page fetches no subresources of its own.
 
         Wagtail's admin shell fetches an icon sprite from ``/admin/sprite/``, a
         translation catalog from ``/admin/jsi18n/`` and whatever is registered on
-        ``insert_global_admin_js`` — the org-hopper, here. Every one of those is
-        under the guard, so for the one user this page exists for, every one is
-        refused. The sprite fetch was the visible failure: its script injects the
-        response into a ``<div data-sprite>``, so the refusal page was injected
-        into itself and rendered twice, one full viewport above the other.
+        ``insert_global_admin_js`` — the org-hopper, here. This page has no use
+        for any of the three: it draws no icons, translates no strings, and
+        carries no sidebar to mount a hopper into.
+
+        Those URLs are all answerable for a non-member now (``AdminOpenPathTests``
+        holds that), so this no longer guards against the sprite fetch returning
+        the refusal page and ``icons.js`` injecting it into itself. It records a
+        page that stays static instead.
         """
         response = self.client.get(reverse("wagtailadmin_home"), headers=UGANDA)
         html = response.content.decode()
@@ -97,7 +100,13 @@ class NonMemberRefusalTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_the_exemption_opens_nothing_else_under_the_admin(self):
-        """The exemption is two URLs wide, and must stay that way."""
+        """The open set is what ``admin_open_paths`` names, and nothing beyond it.
+
+        The counterweight to ``AdminOpenPathTests``: every test there asserts
+        that some URL *answers* a non-member, and all of them would keep passing
+        if somebody widened the exemption to ``/admin/`` wholesale. Only a test
+        asserting something is still shut can fail that way.
+        """
         for name in (
             "wagtailadmin_home",
             "wagtailadmin_account",
@@ -113,6 +122,93 @@ class NonMemberRefusalTests(TestCase):
         response = self.client.get(reverse("wagtailadmin_home"), headers=KENYA)
 
         self.assertEqual(response.status_code, 200)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"], DEBUG=False)
+class AdminOpenPathTests(TestCase):
+    """The admin URLs a signed-in non-member still gets an answer from.
+
+    Wagtail applies ``require_admin_access`` to its admin urlconf and *then*
+    appends four URLs deliberately left open, under the comment "these url
+    patterns do not require an authenticated admin user" — because its own login
+    page needs them. The guard used to refuse three of the four, which broke the
+    login page for the very user it was refusing: ``icons.js`` fetches
+    ``/admin/sprite/`` and assigns the response body straight into a
+    ``<div data-sprite>`` with no check on status or content type, so the 403
+    page was injected above the sign-in form and the page grew a second screen.
+
+    The doubling itself cannot be tested here — it happens in a browser running
+    ``icons.js``, which the test client never does. What is testable is the
+    ingredient: these URLs must hand a non-member the thing they are for, not a
+    document. Hence the assertions on the body rather than on the status alone;
+    a status check would have passed throughout, since a 403 HTML page is a
+    perfectly good string as far as ``fetch().then(r => r.text())`` cares.
+    """
+
+    def setUp(self):
+        self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        self.uganda = provision_organisation(name="Uganda Met", slug="uganda")
+        self.user = make_user("amina")
+        add_member(self.user, self.kenya)
+        self.client.login(username="amina", password=PASSWORD)
+
+    def test_the_icon_sprite_is_icons_and_not_the_refusal_page(self):
+        """The regression itself. The body assertions are what matter.
+
+        ``icons.js`` reads this with ``fetch(u).then(r => r.text())``, so a 403
+        HTML page satisfies it just as well as a sprite does — which is exactly
+        how this shipped. Both a symbol definition and the absence of the
+        refusal's own heading are asserted, because either alone would pass on a
+        response that had gone wrong in the other direction.
+        """
+        response = self.client.get(reverse("wagtailadmin_sprite"), headers=UGANDA)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/svg+xml; charset=utf-8")
+        self.assertContains(response, '<symbol id="icon-')
+        self.assertNotContains(response, "Uganda Met")
+
+    def test_the_translation_catalog_is_javascript(self):
+        """Served to a ``<script src>`` on the login page. HTML there is a parse
+        error that leaves ``django.gettext`` undefined for everything after it.
+
+        The body is asserted for the same reason the sprite's is: the header
+        alone would let through anything Django happened to label as script.
+        """
+        response = self.client.get(
+            reverse("wagtailadmin_javascript_catalog"), headers=UGANDA
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("javascript", response["Content-Type"])
+        self.assertContains(response, "gettext")
+        self.assertNotContains(response, "Uganda Met")
+
+    def test_a_password_reset_can_be_started(self):
+        """The dead end one link over from the one the logout exemption fixed.
+
+        The login page renders "Forgotten password?", and the signed-in
+        non-member reading that page is exactly who needs it.
+        """
+        response = self.client.get(reverse("wagtailadmin_password_reset"), headers=UGANDA)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<form")
+
+    def test_the_org_hopper_answers_with_an_empty_script(self):
+        """Open, and empty — the two halves have to arrive together.
+
+        ``config/urls.py`` keeps this URL outside ``require_admin_access``
+        precisely so the login page's copy of its script tag cannot follow a
+        redirect into HTML; the guard was reimposing that. It answers rather
+        than refuses because a non-member has no block to be shown, and
+        ``org_hopper_context`` says so by returning ``None``.
+        """
+        response = self.client.get(reverse("organisation_hopper_script"), headers=UGANDA)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("javascript", response["Content-Type"])
+        self.assertEqual(response.content, b"")
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"], DEBUG=False)
