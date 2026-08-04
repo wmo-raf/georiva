@@ -1,8 +1,8 @@
 {% extends error_base %}
 {% comment %} Not found, on either plane.
 
-   Names no organisation on purpose: this page also answers the unknown-host 404
-   `OrganisationMiddleware` raises, where there is no organisation to name. {% endcomment %}
+    Names no organisation on purpose: this page also answers the unknown-host 404
+    `OrganisationMiddleware` raises, where there is no organisation to name. {% endcomment %}
 {% load i18n %}
 
 {% block error_title %}{% trans "Page not found" %}{% endblock %}

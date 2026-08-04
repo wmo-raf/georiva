@@ -1,11 +1,13 @@
 {% extends error_base %}
-{% comment %} Permission denied.
+{% comment %}
+    Permission denied.
 
     The page leads with the one refusal that has a specific way out — a signed-in
     non-member on an organisation's admin, who needs to sign out — and falls back
     to a plain refusal for anything else. `non_member` is computed in
     `config.views.is_non_member_refusal`, which also records why a member who is
-    not an org admin never arrives here. {% endcomment %}
+    not an org admin never arrives here.
+{% endcomment %}
 {% load i18n %}
 
 {% block error_title %}{% trans "No access" %}{% endblock %}
@@ -14,9 +16,11 @@
     <div class="gr-error-code">{% trans "403 — No access" %}</div>
 
     {% if non_member %}
-        {% comment %} Signed in, but not a member of the organisation this hostname serves.
+        {% comment %}
+            Signed in, but not a member of the organisation this hostname serves.
             Sessions span every organisation's host, so arriving here usually
-            means the address is wrong rather than the account. {% endcomment %}
+            means the address is wrong rather than the account.
+        {% endcomment %}
         <h1>
             {% blocktrans trimmed with name=organisation.name %}
                 You don't have access to {{ name }}
@@ -31,8 +35,7 @@
 
         <p>
             {% blocktrans trimmed %}
-                This account isn't a member of this organisation, so it can't open
-                its admin. If you work here, an organisation admin can add you.
+                This account isn't a member of this organisation.
             {% endblocktrans %}
         </p>
 
@@ -40,17 +43,17 @@
             {% csrf_token %}
             <div class="gr-error-actions">
                 <button class="button" type="submit">
-                    {% trans "Sign out and sign in as someone else" %}
+                    {% trans "Sign in with different account" %}
                 </button>
-                <a href="/">{% trans "Go to the public site" %}</a>
+                <a href="/">
+                    {% trans "Go to the public site" %}
+                </a>
             </div>
         </form>
 
         <div class="gr-error-hint">
             {% blocktrans trimmed with host=request.get_host %}
-                You're on <code>{{ host }}</code>. Each organisation has its own
-                address, and signing in once covers all of them — so if you meant a
-                different organisation, go to its address instead.
+                You're on <code>{{ host }}</code>.
             {% endblocktrans %}
         </div>
     {% else %}
