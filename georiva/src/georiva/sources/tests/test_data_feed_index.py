@@ -44,9 +44,13 @@ def _make_feed_named(name, **kwargs):
 _make_feed_named.counter = 0
 
 
-def _make_feed(name, **kwargs):
+def _make_feed(name, *, organisation=None, **kwargs):
+    """A feed under ``organisation``, defaulting to the org the tests dial."""
     slug = name.lower().replace(" ", "-")
-    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
+    catalog = Catalog.objects.create(
+        organisation=organisation or make_organisation(),
+        name=name, slug=slug, file_format="geotiff",
+    )
     return DataFeed.objects.create(name=name, catalog=catalog, **kwargs)
 
 
@@ -172,6 +176,69 @@ class HealthOrderingTests(DataFeedIndexBase):
         response = self.client.get(self.url)
         feed = response.context["object_list"][0]
         self.assertEqual(feed.health_rank, Health.FAILED.rank)
+
+
+class HealthChipScopingTests(DataFeedIndexBase):
+    """The chips are the listing's own totals, and must count the same rows it
+    lists — this organisation's.
+
+    The chips are deliberately computed over the *unfiltered* queryset so that
+    filtering to one state still shows the whole picture. "Unfiltered" means the
+    health filter and the search box; it never meant another institution's feeds.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.neighbour = make_organisation("neighbour-org")
+
+    def test_a_chip_does_not_count_another_organisations_feeds(self):
+        _make_feed("Ours Failed", last_run_status="failed", last_run_at=_ago(minutes=5))
+        _make_feed(
+            "Theirs Failed", organisation=self.neighbour,
+            last_run_status="failed", last_run_at=_ago(minutes=5),
+        )
+
+        chips = {
+            chip["state"]: chip["count"]
+            for chip in self.client.get(self.url).context["health_chips"]
+        }
+        self.assertEqual(chips[Health.FAILED], 1)
+
+    def test_the_all_total_does_not_count_another_organisations_feeds(self):
+        _make_feed("Ours Healthy", last_run_status="success", last_run_at=_ago(minutes=5))
+        _make_feed(
+            "Theirs Healthy", organisation=self.neighbour,
+            last_run_status="success", last_run_at=_ago(minutes=5),
+        )
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.context["total_count"], 1)
+
+    def test_a_neighbour_only_state_gets_no_chip_at_all(self):
+        """Not just a wrong number: a state only another institution is in must
+        not appear on this bar as something to filter by."""
+        _make_feed("Ours Healthy", last_run_status="success", last_run_at=_ago(minutes=5))
+        _make_feed(
+            "Theirs Failed", organisation=self.neighbour,
+            last_run_status="failed", last_run_at=_ago(minutes=5),
+        )
+
+        states = [chip["state"] for chip in self.client.get(self.url).context["health_chips"]]
+        self.assertNotIn(Health.FAILED, states)
+
+    def test_scoping_still_leaves_the_all_total_above_the_filtered_page(self):
+        """Scoping narrows by organisation, not by the active health filter —
+        the All chip must still outrun the rows shown beneath it."""
+        _make_feed("Ours Failed", last_run_status="failed", last_run_at=_ago(minutes=5))
+        _make_feed("Ours Healthy", last_run_status="success", last_run_at=_ago(minutes=5))
+        _make_feed(
+            "Theirs Failed", organisation=self.neighbour,
+            last_run_status="failed", last_run_at=_ago(minutes=5),
+        )
+
+        response = self.client.get(self.url, {"health": Health.FAILED.rank})
+        self.assertEqual(len(response.context["object_list"]), 1)
+        self.assertEqual(response.context["total_count"], 2)
 
 
 class UrlIntegrityTests(DataFeedIndexBase):

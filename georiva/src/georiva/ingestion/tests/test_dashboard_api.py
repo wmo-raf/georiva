@@ -20,8 +20,11 @@ FETCH_RUNS_URL = "/admin/api/ingestion/collections/{}/fetch-runs/"
 UPLOAD_SESSIONS_URL = "/admin/api/ingestion/collections/{}/upload-sessions/"
 
 
-def _setup_collection(catalog_slug="cat", collection_slug="col"):
-    catalog = Catalog.objects.create(organisation=make_organisation(), name=catalog_slug, slug=catalog_slug, file_format="grib2")
+def _setup_collection(catalog_slug="cat", collection_slug="col", organisation=None):
+    catalog = Catalog.objects.create(
+        organisation=organisation or make_organisation(),
+        name=catalog_slug, slug=catalog_slug, file_format="grib2",
+    )
     return Collection.objects.create(name=collection_slug, slug=collection_slug, catalog=catalog)
 
 
@@ -234,6 +237,114 @@ class DashboardCollectionListTests(TestCase):
 
         self.assertEqual(by_id[col_a.pk]["sparkline"][-1]["status"], "success")
         self.assertEqual(by_id[col_b.pk]["sparkline"][-1]["status"], "failed")
+
+
+class DashboardTenancyTests(TestCase):
+    """What the dashboard answers is one organisation's picture of its own
+    pipeline, and stays that way whatever a neighbour is doing on the instance.
+
+    Two different properties are pinned here, and they need different tests.
+    The *response* has always been one organisation's, because every roll-up is
+    read back by scoped collection id — those tests hold a property the code
+    already had. What the code did not have is the narrowing that stops the
+    database reading every tenant's rows on the way, and no assertion over the
+    JSON can see it: the neighbour's rows were discarded either way. That one is
+    pinned against the SQL, below.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_ten", "ten@test.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        self.ours = _setup_collection("ours", "daily")
+        # Same slugs on purpose: distinguishable only by organisation, so a
+        # dropped filter surfaces as the wrong row rather than as nothing.
+        self.neighbour = make_organisation("neighbour-org")
+        self.theirs = _setup_collection("ours", "daily", organisation=self.neighbour)
+
+    def test_another_organisations_catalogs_are_absent(self):
+        response = self.client.get(DASHBOARD_URL)
+        ids = [c["id"] for c in response.json()["catalogs"]]
+        self.assertIn(self.ours.catalog.pk, ids)
+        self.assertNotIn(self.theirs.catalog.pk, ids)
+
+    def test_another_organisations_ingestion_history_does_not_reach_our_rollup(self):
+        """A neighbour's failure must not colour this organisation's status."""
+        # Paths are org-first in production, which is also what keeps these two
+        # apart under the (bucket, file_path) uniqueness constraint.
+        _make_file_ingestion(
+            self.ours, file_path="test-org/ours/daily/file.grib2",
+            status=FileIngestion.Status.COMPLETED,
+        )
+        _make_file_ingestion(
+            self.theirs, file_path="neighbour-org/ours/daily/file.grib2",
+            status=FileIngestion.Status.FAILED,
+        )
+
+        response = self.client.get(DASHBOARD_URL)
+        cat = next(c for c in response.json()["catalogs"] if c["id"] == self.ours.catalog.pk)
+        self.assertEqual(cat["status"], "ok")
+
+    def test_another_organisations_feed_link_does_not_make_our_collection_automated(self):
+        feed = DataFeed.objects.create(name="Theirs", catalog=self.theirs.catalog)
+        DataFeedCollectionLink.objects.create(data_feed=feed, collection=self.theirs)
+
+        response = self.client.get(DASHBOARD_URL)
+        col = _find_collection_in_response(response.json(), self.ours.pk)
+        self.assertEqual(col["type"], "manual")
+
+    def _dashboard_sql(self):
+        """The SQL the dashboard runs, captured.
+
+        Asserting over SQL is a last resort and used here for one reason: the
+        property under test is which rows the database *reads*, and that is
+        invisible in the response by construction. A second organisation's
+        holdings could be made large enough to show up as latency, but a test
+        that asserts on timing is worse than one that asserts on a WHERE clause.
+        """
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as captured:
+            self.client.get(DASHBOARD_URL)
+        return [query["sql"] for query in captured.captured_queries]
+
+    def test_the_ingestion_history_is_narrowed_to_this_organisations_collections(self):
+        """The thirty-day roll-up must ask for this organisation's collections
+        by id, not read the whole table and discard the rest."""
+        import re
+
+        second = _setup_collection("ours-2", "monthly")
+        history = [
+            sql for sql in self._dashboard_sql()
+            if "georivaingestion_fileingestion" in sql and "created_at" in sql
+        ]
+        self.assertTrue(history, "the thirty-day history query was not captured")
+
+        ids = "|".join(str(pk) for pk in (self.ours.pk, second.pk))
+        narrowed = re.compile(rf'collection_id"?\s*(?:=\s*({ids})\b|IN\s*\([^)]*\b({ids})\b)')
+        for sql in history:
+            self.assertRegex(
+                sql, narrowed,
+                "the history query is not restricted to the scoped collection ids",
+            )
+
+    def test_the_feed_link_lookup_is_narrowed_to_this_organisations_collections(self):
+        """Same for the link table that decides automated vs manual."""
+        import re
+
+        link_queries = [
+            sql for sql in self._dashboard_sql()
+            if "georivasources_datafeedcollectionlink" in sql
+        ]
+        self.assertTrue(link_queries, "the feed-link query was not captured")
+
+        narrowed = re.compile(rf'collection_id"?\s*(?:=\s*{self.ours.pk}\b|IN\s*\([^)]*\b{self.ours.pk}\b)')
+        for sql in link_queries:
+            self.assertRegex(
+                sql, narrowed,
+                "the feed-link query is not restricted to the scoped collection ids",
+            )
 
 
 class CollectionIngestionLogsAPITests(TestCase):
