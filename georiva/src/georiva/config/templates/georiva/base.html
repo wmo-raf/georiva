@@ -1,5 +1,11 @@
 {% load static wagtailcore_tags wagtailimages_tags wagtailsettings_tags i18n wagtailuserbar %}
-{% get_settings use_default_site=True %}
+{% comment %} Resolved from the request's Site, never `use_default_site`. GeoRivaSettings is
+   a BaseSiteSetting and the Site *is* the organisation, so forcing the default
+   site here dressed every tenant's public pages — name, logo, tagline, accent
+   colour — in whichever organisation happens to hold the default Site row.
+   OrganisationMiddleware has already pinned `request._wagtail_site` to the host's
+   organisation, so the plain tag resolves per-org on its own. {% endcomment %}
+{% get_settings %}
 {% get_current_language as LANGUAGE_CODE %}
 
 <!DOCTYPE html>

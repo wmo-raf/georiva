@@ -23,6 +23,7 @@ import logging
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.http import Http404
+from django.urls import reverse
 from wagtail.models import Site
 
 from .access import resolve_org_role
@@ -45,6 +46,16 @@ TILE_CONFIG_PREFIX = "/api/tile-config/"
 #: tile with a 500 instead of denying it — so an unknown host has to reach
 #: ``TileAuthView``, which denies it in a language nginx speaks.
 TILE_AUTH_PREFIX = "/internal/tile-auth/"
+
+
+def admin_auth_paths():
+    """The admin's own sign-in and sign-out URLs.
+
+    Reversed rather than spelled out so the pair cannot drift from
+    ``wagtail.admin.urls``, and resolved on call rather than at import because
+    URL loading is not finished when this module is imported.
+    """
+    return (reverse("wagtailadmin_login"), reverse("wagtailadmin_logout"))
 
 
 def exempt_path_prefixes():
@@ -164,11 +175,24 @@ class OrganisationMiddleware:
         Anonymous requests fall through: the login page lives under the same
         prefix, and a login is how somebody stops being anonymous.
 
+        The two auth URLs themselves fall through for signed-in users too, and
+        for the mirror of that reason. Sessions span every organisation's host —
+        ``SESSION_COOKIE_DOMAIN`` is the shared base domain — so a member of one
+        organisation typing another's hostname arrives here signed in and is
+        refused. Without this exemption the sign-out button on that refusal is
+        itself under ``/admin/`` and is refused identically, and the only way out
+        of the dead end is clearing a cookie by hand. The relaxation is safe
+        because it is drawn at exactly two views that read no organisation-scoped
+        row: one ends a session, the other starts one, and whatever the new
+        session may see is decided by this same check on its next request.
+
         The check re-reads the role the middleware just resolved from the
         database, so a revoked membership locks its former holder out on their
         very next request rather than at logout.
         """
         if not request.path.startswith(settings.GEORIVA_ADMIN_PATH_PREFIX):
+            return
+        if request.path in admin_auth_paths():
             return
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:

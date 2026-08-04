@@ -10,21 +10,5 @@
 {% endblock %}
 
 {% block branding_logo %}
-    <div class="login-logo">
-        <figure style="max-height:70px;max-width:70px;" class="georiva-logo">
-            {% include "georiva/logos/georiva.svg" %}
-        </figure>
-    </div>
-    <style>
-
-        .login-logo {
-            display: flex;
-            justify-content: center;
-        }
-
-        .georiva-logo svg {
-            height: 100%;
-            width: 100%;
-        }
-    </style>
+    {% include "georiva/partials/admin_brand_mark.html" %}
 {% endblock %}

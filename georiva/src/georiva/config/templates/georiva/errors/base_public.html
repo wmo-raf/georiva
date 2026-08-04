@@ -1,0 +1,119 @@
+{% extends "georiva/base.html" %}
+{% comment %} Error shell for the public plane.
+
+   Extends the public site's own base, so a visitor who hits a dead link keeps
+   the navbar and footer that got them there. The class names are deliberately
+   the same as the admin shell's: the status templates are shared between the
+   two, so their markup has to be styleable by either. Only the tokens differ —
+   `--gr-*` here, `--w-color-*` there. {% endcomment %}
+{% load static %}
+
+{% block title %}{% block error_title %}{% endblock %}{% endblock %}
+{% block body_class %}gr-error{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .gr-error-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            padding: 4rem 1rem;
+            background: var(--gr-light-1);
+        }
+
+        .gr-error-card {
+            width: 100%;
+            max-width: 34rem;
+            padding: 2.5rem;
+            border: 1px solid var(--gr-light-border);
+            border-radius: var(--gr-radius-lg);
+            background: var(--gr-light);
+        }
+
+        .gr-error-logo {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 1.5rem;
+        }
+
+        .gr-error-logo svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .gr-error-code {
+            font-family: var(--gr-font-display);
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--gr-accent-dark);
+        }
+
+        .gr-error-card h1 {
+            margin: 0.5rem 0 1rem;
+            font-family: var(--gr-font-sans);
+            font-size: 1.75rem;
+            line-height: 1.3;
+            color: var(--gr-text-1);
+        }
+
+        .gr-error-card p {
+            margin: 0 0 1rem;
+            font-family: var(--gr-font-sans);
+            line-height: 1.6;
+            color: var(--gr-text-2);
+        }
+
+        .gr-error-identity {
+            padding: 0.875rem 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: var(--gr-radius);
+            background: var(--gr-light-2);
+            font-size: 0.9375rem;
+            color: var(--gr-text-2);
+        }
+
+        .gr-error-identity strong {
+            color: var(--gr-text-1);
+        }
+
+        .gr-error-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1.75rem;
+        }
+
+        .gr-error-actions .button {
+            background: var(--gr-accent-dark);
+            border-color: var(--gr-accent-dark);
+            color: #fff;
+        }
+
+        .gr-error-hint {
+            margin-top: 1.75rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--gr-light-border);
+            font-size: 0.875rem;
+            color: var(--gr-text-3);
+        }
+
+        .gr-error-hint code {
+            font-family: var(--gr-font-mono);
+            color: var(--gr-text-1);
+        }
+    </style>
+    {% block error_css %}{% endblock %}
+{% endblock %}
+
+{% block content %}
+    <div class="gr-error-wrapper">
+        <div class="gr-error-card">
+            <figure class="gr-error-logo">{% include "georiva/logos/georiva-symbol.svg" %}</figure>
+            {% block error_content %}{% endblock %}
+        </div>
+    </div>
+{% endblock %}

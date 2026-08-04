@@ -1,0 +1,127 @@
+{% extends "wagtailadmin/admin_base.html" %}
+{% comment %} Error shell for the admin plane, dressed as the sign-in page.
+
+   Same base as `wagtailadmin/login.html`, and deliberately the same furniture:
+   `body.login` plus a `.content-wrapper` main. Wagtail's own stylesheet carries
+   that pair — the centred full-height flex `.wrapper`, the raised rounded card,
+   the 1.875rem centred `h1`, the `.login-logo` footer — so adopting the classes
+   buys the login page's exact look without restating any of it here, and keeps
+   the two in step when Wagtail restyles either.
+
+   That matters beyond neatness: for the reader of the commonest error here, the
+   sign-in page is literally the next screen. A refusal that already looks like
+   it makes the sign-out button read as a step rather than a wall.
+
+   The few rules below are only for what the login page has no equivalent of —
+   its own markup is a form, and this one is prose. All of them use Wagtail's
+   `--w-color-*` tokens, so the page follows the admin theme, dark mode included.
+{% endcomment %}
+{% load i18n static %}
+
+{% block titletag %}{% block error_title %}{% endblock %}{% endblock %}
+{% block bodyclass %}login gr-error{% endblock %}
+
+{% comment %} No icon sprite, and not merely because this page draws no icons.
+
+   Wagtail's `icons_sprite` block emits a script that fetches `/admin/sprite/`
+   and injects the response into a `<div data-sprite>`. That URL is under the
+   membership guard, so for the very user this page exists to explain, the fetch
+   is refused — and what comes back is *this page*, which the script then injects
+   into itself. The result is a second full-height copy of the refusal rendered
+   above the real one, and a document that scrolls for no visible reason.
+
+   Overriding the block empty is the fix rather than exempting `/admin/sprite/`
+   from the guard: an error page has no business asking the admin for anything.
+{% endcomment %}
+{% block icons_sprite %}{% endblock %}
+
+{% comment %} No admin JavaScript either, for the same reason and with the same
+   shape. Wagtail's `js` block pulls in the translation catalog at
+   `/admin/jsi18n/` and everything registered on `insert_global_admin_js` —
+   here, the org-hopper's `/admin/org-hopper.js`. Both are under the guard, so
+   both are refused for the reader of this page, and neither has anything to do
+   on a static card. Verified that no admin CSS keys off the `ready` class this
+   drops, so the page still styles correctly without it.
+{% endcomment %}
+{% block js %}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        /* The login card sizes itself around a form; this one holds prose. */
+        .gr-error .content-wrapper {
+            max-width: 32rem;
+            text-align: center;
+        }
+
+        .gr-error-code {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--w-color-text-meta);
+            margin-bottom: 0.75rem;
+        }
+
+        /* `.login h1` already sets the size, weight and centring. Only the space
+           under it needs adjusting: 2rem is judged for a form, not a paragraph. */
+        .gr-error .content-wrapper h1 {
+            margin-bottom: 1.25rem;
+        }
+
+        .gr-error p {
+            margin: 0 0 1rem;
+            line-height: 1.6;
+            color: var(--w-color-text-context);
+        }
+
+        .gr-error-identity {
+            padding: 0.75rem 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 0.375rem;
+            background: var(--w-color-surface-field-inactive);
+            font-size: 0.9375rem;
+            color: var(--w-color-text-context);
+        }
+
+        .gr-error-identity strong {
+            color: var(--w-color-text-label);
+        }
+
+        /* Mirrors `.login .form-actions`, which this page has no form to use. */
+        .gr-error-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .gr-error-hint {
+            margin-top: 2rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid var(--w-color-border-furniture);
+            font-size: 0.8125rem;
+            line-height: 1.6;
+            color: var(--w-color-text-meta);
+        }
+
+        .gr-error-hint code {
+            font-family: ui-monospace, monospace;
+            color: var(--w-color-text-label);
+        }
+    </style>
+    {% block error_css %}{% endblock %}
+{% endblock %}
+
+{% block furniture %}
+    <main class="content-wrapper" id="main">
+        {% block error_content %}{% endblock %}
+
+        {% comment %} The same partial the sign-in page's `branding_logo` block
+           includes, so the mark cannot differ in size or placement between the
+           two screens the way it did when each wrote out its own markup.
+        {% endcomment %}
+        {% include "georiva/partials/admin_brand_mark.html" %}
+    </main>
+{% endblock %}

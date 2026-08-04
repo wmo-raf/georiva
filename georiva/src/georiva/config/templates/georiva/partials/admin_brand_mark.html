@@ -1,0 +1,34 @@
+{% comment %}
+    The GeoRiva mark, as the admin's sign-in page wears it.
+
+    Shared by `wagtailadmin/login.html` and `georiva/errors/base_admin.html`
+    rather than written out in each. The error pages sit one click from the
+    sign-in page — the button on the refusal goes nowhere else — so a mark that
+    changed size between them reads as two different screens. It had, until this
+    was factored out: the error shell dropped the 70px cap and the mark filled
+    the whole 8rem `.login-logo` slot Wagtail sets.
+
+    The cap lives here rather than in an inline style so there is one number to
+    change, and `.login-logo`'s own width comes from Wagtail's `.login` styles.
+{% endcomment %}
+<div class="login-logo">
+    <figure class="georiva-logo">
+        {% include "georiva/logos/georiva.svg" %}
+    </figure>
+</div>
+<style>
+    .login-logo {
+        display: flex;
+        justify-content: center;
+    }
+
+    .georiva-logo {
+        max-height: 70px;
+        max-width: 70px;
+    }
+
+    .georiva-logo svg {
+        height: 100%;
+        width: 100%;
+    }
+</style>

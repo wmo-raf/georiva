@@ -1,0 +1,105 @@
+{% comment %} The one error page that extends nothing.
+
+   Rendered by Django's stock `server_error`, which passes an empty context: no
+   `request`, no context processors, no settings. So this page must not extend a
+   shell, must not `{% load %}` anything, must not call `{% static %}` and must
+   name no variable — anything it depended on could be the very thing that broke.
+   The brand colours are inlined from `--gr-*` in `static/css/georiva.css` and
+   have to be updated by hand if those change; that is the price of a page that
+   renders when the stylesheet does not.
+
+   Deliberately not split between the admin and public planes the way 403 and 404
+   are. A 500 has no request to inspect here, and a page that always renders
+   beats a page that matches its surroundings. {% endcomment %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Something went wrong — GeoRiva</title>
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1rem;
+            background: #f7f9fc;
+            color: #0f172a;
+            font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 34rem;
+            padding: 2.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #ffffff;
+        }
+
+        .mark {
+            width: 44px;
+            height: 44px;
+            margin-bottom: 1.5rem;
+            border-radius: 10px;
+            background: #00a896;
+        }
+
+        .code {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #00a896;
+        }
+
+        h1 {
+            margin: 0.5rem 0 1rem;
+            font-size: 1.75rem;
+            line-height: 1.3;
+        }
+
+        p {
+            margin: 0 0 1rem;
+            color: #475569;
+        }
+
+        a {
+            color: #00a896;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: #080d18;
+                color: #edf2fa;
+            }
+
+            .card {
+                background: #0d1425;
+                border-color: rgba(255, 255, 255, 0.11);
+            }
+
+            p {
+                color: #8a9bbf;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="mark"></div>
+    <div class="code">500 — Server error</div>
+    <h1>Something went wrong on our end</h1>
+    <p>
+        This wasn't your doing. The problem has been logged, and trying again in a
+        few moments often works.
+    </p>
+    <p>If it keeps happening, let whoever runs this GeoRiva instance know.</p>
+    <p><a href="/">Go to the home page</a></p>
+</div>
+</body>
+</html>

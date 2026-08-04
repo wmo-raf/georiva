@@ -11,7 +11,15 @@ from georiva.api import urls as georiva_urls
 from georiva.core.tile_auth_view import TileAuthView
 from georiva.organisations.hopper import org_hopper_script
 from georiva.organisations.pages import OrgScopedPageSearchView
-from .views import health
+from .views import health, page_not_found, permission_denied
+
+# Django's stock error pages are unbranded and, in the 403's case, a dead end for
+# the user who hits it most: a signed-in non-member turned away by
+# `OrganisationMiddleware._guard_admin`. `config.views` explains the split.
+# There is deliberately no `handler500` — the stock one renders `500.html` with
+# an empty context, which is exactly what that page is written for.
+handler403 = permission_denied
+handler404 = page_not_found
 
 # The one place the admin's mount point is written down. `OrganisationMiddleware`
 # and the page-tree guard both gate on `GEORIVA_ADMIN_PATH_PREFIX`, so the routes

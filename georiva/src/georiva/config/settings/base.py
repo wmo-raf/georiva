@@ -443,6 +443,14 @@ if "." in GEORIVA_BASE_DOMAIN:
     SESSION_COOKIE_DOMAIN = f".{GEORIVA_BASE_DOMAIN}"
     CSRF_COOKIE_DOMAIN = f".{GEORIVA_BASE_DOMAIN}"
 
+# A rejected POST gets the same branded page as the other errors. Set here rather
+# than left at Django's default because the stock page is bare, and the commonest
+# cause on this instance — a sign-in or sign-out form left open until its token
+# lapsed — is fixed by a reload the user has to be told about. The 403 and 404
+# handlers live in config/urls.py; CSRF's is a setting because it is dispatched by
+# middleware rather than by the URL resolver.
+CSRF_FAILURE_VIEW = "georiva.config.views.csrf_failure"
+
 # Wagtail settings
 
 WAGTAIL_SITE_NAME = "GeoRiva"

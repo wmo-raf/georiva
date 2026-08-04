@@ -1,0 +1,31 @@
+{% extends error_base %}
+{% comment %} A rejected POST.
+
+   The commonest cause is a form left open until its token lapsed, which a reload
+   fixes, so the page leads with that rather than with the rejection. `reason` is
+   Django's internal diagnostic and is shown only with DEBUG on — in production
+   it tells the user nothing and tells an attacker something. {% endcomment %}
+{% load i18n %}
+
+{% block error_title %}{% trans "Request rejected" %}{% endblock %}
+
+{% block error_content %}
+    <div class="gr-error-code">{% trans "403 — Request rejected" %}</div>
+    <h1>{% trans "That form couldn't be submitted" %}</h1>
+    <p>
+        {% blocktrans trimmed %}
+            Its security token was missing or had expired — usually because the
+            page sat open for a long time, or because cookies are blocked.
+            Reloading the page and submitting again normally fixes it.
+        {% endblocktrans %}
+    </p>
+
+    <div class="gr-error-actions">
+        <a class="button" href="{{ request.path }}">{% trans "Reload this page" %}</a>
+        <a href="/">{% trans "Go to the home page" %}</a>
+    </div>
+
+    {% if debug and reason %}
+        <div class="gr-error-hint"><code>{{ reason }}</code></div>
+    {% endif %}
+{% endblock %}
