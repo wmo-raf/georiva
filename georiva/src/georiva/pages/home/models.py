@@ -60,7 +60,6 @@ class HomePage(Page):
     # (decision #261), so no ORM path reaches the organisation from here.
     ORGANISATION_LOOKUP = NOT_ORM_SCOPABLE
 
-    max_count = 1
     subpage_types = ['datasets.DatasetsIndexPage']
 
     # --- Hero Section ---
