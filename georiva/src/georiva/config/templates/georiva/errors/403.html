@@ -1,11 +1,11 @@
 {% extends error_base %}
 {% comment %} Permission denied.
 
-   The page leads with the one refusal that has a specific way out — a signed-in
-   non-member on an organisation's admin, who needs to sign out — and falls back
-   to a plain refusal for anything else. `non_member` is computed in
-   `config.views.is_non_member_refusal`, which also records why a member who is
-   not an org admin never arrives here. {% endcomment %}
+    The page leads with the one refusal that has a specific way out — a signed-in
+    non-member on an organisation's admin, who needs to sign out — and falls back
+    to a plain refusal for anything else. `non_member` is computed in
+    `config.views.is_non_member_refusal`, which also records why a member who is
+    not an org admin never arrives here. {% endcomment %}
 {% load i18n %}
 
 {% block error_title %}{% trans "No access" %}{% endblock %}
@@ -15,8 +15,8 @@
 
     {% if non_member %}
         {% comment %} Signed in, but not a member of the organisation this hostname serves.
-           Sessions span every organisation's host, so arriving here usually
-           means the address is wrong rather than the account. {% endcomment %}
+            Sessions span every organisation's host, so arriving here usually
+            means the address is wrong rather than the account. {% endcomment %}
         <h1>
             {% blocktrans trimmed with name=organisation.name %}
                 You don't have access to {{ name }}

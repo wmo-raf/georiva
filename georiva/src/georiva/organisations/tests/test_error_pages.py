@@ -45,6 +45,24 @@ class NonMemberRefusalTests(TestCase):
         self.assertContains(response, "Uganda Met", status_code=403)
         self.assertContains(response, "amina", status_code=403)
 
+    def test_the_page_asks_the_admin_for_nothing_while_being_refused_by_it(self):
+        """The refusal page must not make refused subrequests of its own.
+
+        Wagtail's admin shell fetches an icon sprite from ``/admin/sprite/``, a
+        translation catalog from ``/admin/jsi18n/`` and whatever is registered on
+        ``insert_global_admin_js`` — the org-hopper, here. Every one of those is
+        under the guard, so for the one user this page exists for, every one is
+        refused. The sprite fetch was the visible failure: its script injects the
+        response into a ``<div data-sprite>``, so the refusal page was injected
+        into itself and rendered twice, one full viewport above the other.
+        """
+        response = self.client.get(reverse("wagtailadmin_home"), headers=UGANDA)
+        html = response.content.decode()
+
+        self.assertNotIn("data-sprite", html)
+        self.assertNotIn("<script", html)
+        self.assertEqual(html.count("<h1"), 1)
+
     def test_the_page_offers_a_way_out(self):
         response = self.client.get(reverse("wagtailadmin_home"), headers=UGANDA)
 

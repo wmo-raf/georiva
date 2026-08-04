@@ -13,6 +13,30 @@
 {% block titletag %}{% block error_title %}{% endblock %}{% endblock %}
 {% block bodyclass %}gr-error{% endblock %}
 
+{% comment %} No icon sprite, and not merely because this page draws no icons.
+
+   Wagtail's `icons_sprite` block emits a script that fetches `/admin/sprite/`
+   and injects the response into a `<div data-sprite>`. That URL is under the
+   membership guard, so for the very user this page exists to explain, the fetch
+   is refused — and what comes back is *this page*, which the script then injects
+   into itself. The result is a second full-height copy of the refusal rendered
+   above the real one, and a document that scrolls for no visible reason.
+
+   Overriding the block empty is the fix rather than exempting `/admin/sprite/`
+   from the guard: an error page has no business asking the admin for anything.
+{% endcomment %}
+{% block icons_sprite %}{% endblock %}
+
+{% comment %} No admin JavaScript either, for the same reason and with the same
+   shape. Wagtail's `js` block pulls in the translation catalog at
+   `/admin/jsi18n/` and everything registered on `insert_global_admin_js` —
+   here, the org-hopper's `/admin/org-hopper.js`. Both are under the guard, so
+   both are refused for the reader of this page, and neither has anything to do
+   on a static card. Verified that no admin CSS keys off the `ready` class this
+   drops, so the page still styles correctly without it.
+{% endcomment %}
+{% block js %}{% endblock %}
+
 {% block extra_css %}
     <style>
         .gr-error-wrapper {
