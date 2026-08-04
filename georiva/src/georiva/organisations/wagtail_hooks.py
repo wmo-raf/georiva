@@ -6,6 +6,7 @@ from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 
 from .access import is_org_admin
+from .dashboard import scope_dashboard_panels
 from .pages import scope_pages
 from .views import (
     organisation_member_add,
@@ -72,6 +73,17 @@ def scope_explorer_to_this_organisation(parent_page, pages, request):
 @hooks.register("construct_page_chooser_queryset")
 def scope_page_chooser_to_this_organisation(pages, request):
     return scope_pages(request, pages)
+
+
+@hooks.register("construct_homepage_panels")
+def scope_the_dashboard_to_this_organisation(request, panels):
+    """The admin dashboard's page-resolving panels — see ``dashboard``.
+
+    Registered here rather than anywhere earlier on purpose: this app is listed
+    after the apps that append panels of their own, so this hook runs last and
+    sees the finished list.
+    """
+    scope_dashboard_panels(panels)
 
 
 class OrgAdminMenuItem(MenuItem):

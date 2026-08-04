@@ -7,7 +7,7 @@ question, not an FK lookup, and pages declare ``NOT_ORM_SCOPABLE`` rather than a
 path to Organisation.
 
 That leaves the general scoping machinery in ``scoping.py`` unable to help, so
-this module is the pages-shaped equivalent, closing the same four seams:
+this module is the pages-shaped equivalent, closing four of the five seams:
 
 * the explorer listing and the sidebar's page explorer, via Wagtail's
   ``construct_explorer_page_queryset`` hook;
@@ -16,6 +16,11 @@ this module is the pages-shaped equivalent, closing the same four seams:
 * every admin URL naming a page by id — edit, delete, move, copy, history,
   add-child and the rest — via :class:`OrgPageTreeMiddleware`, because Wagtail's
   page views resolve their pk directly and expose no queryset to narrow.
+
+The fifth is the admin dashboard, in ``dashboard.py``. It is separate because it
+is the one page surface where Wagtail resolves pages with neither a queryset to
+hook nor a page id in the URL — a panel does it inside a context method — which
+is exactly why all four mechanisms above missed it.
 
 Wagtail's own page permissions (each org's group holds page permissions over its
 own root, granted at provisioning) already stop a member editing a tree they have
@@ -67,6 +72,23 @@ def org_root_page(request):
 def scope_pages(request, queryset):
     """``queryset`` narrowed to the pages under this organisation's root."""
     return queryset.descendant_of(org_root_page(request), inclusive=True)
+
+
+#: The audit-log action a page edit is recorded under. Named because two
+#: surfaces read it — the page-listing filter panel and the dashboard's
+#: recent-edits panel — and a string that means something is worth one spelling.
+PAGE_EDIT_ACTION = "wagtail.edit"
+
+
+def scope_page_log_entries(request, queryset):
+    """``queryset`` of page log entries narrowed to this organisation's tree.
+
+    A page log entry carries a real foreign key to its page, so the tree
+    narrowing reaches it through that — which is what lets the dashboard's
+    recent-edits panel apply its row limit to this organisation's rows rather
+    than to the instance's.
+    """
+    return queryset.filter(page__in=scope_pages(request, Page.objects.all()))
 
 
 def page_is_in_org_tree(root, path, depth, *, root_node_allowed=False):
@@ -122,8 +144,8 @@ def _org_page_editors(request):
     if filter_organisation(request) is None:
         return users.none()
     return users.filter(
-        pk__in=PageLogEntry.objects.filter(
-            action="wagtail.edit", page__in=scope_pages(request, Page.objects.all())
+        pk__in=scope_page_log_entries(
+            request, PageLogEntry.objects.filter(action=PAGE_EDIT_ACTION)
         )
         .order_by()
         .values_list("user_id", flat=True)

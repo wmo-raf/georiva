@@ -28,8 +28,8 @@ themselves: no base queryset to narrow, no viewset to mix into.
 
 ## Decision
 
-**The org's root page is the whole of its admin's page world**, and four seams
-enforce it. They are four because Wagtail resolves pages in four different ways,
+**The org's root page is the whole of its admin's page world**, and five seams
+enforce it. They are five because Wagtail resolves pages in five different ways,
 and each needs its own:
 
 - **Listings** — the `construct_explorer_page_queryset` hook, which both the
@@ -51,6 +51,30 @@ and each needs its own:
   including views a future Wagtail adds, as long as it keeps naming pages the
   same way. Bulk actions are the one page route that names its subjects in the
   query string rather than the path, so the same guard reads `?id=` there.
+- **The admin dashboard** — the `construct_homepage_panels` hook, which swaps
+  each of Wagtail's four page-resolving panels (recent edits, locked pages and
+  the two workflow moderation queues) for a scoped subclass, in place. This one
+  was added later (#295), and the reason it was missed is the reason it needs its
+  own seam: a panel resolves its pages *inside a context method*, with no
+  queryset to hook and no page id in the URL, so it was unreachable by all four
+  mechanisms above. The panels filter by who the signed-in user is and never by
+  which host they dialled, so a user belonging to two institutions was shown one
+  institution's page titles on the other's dashboard.
+
+  Two narrowing strategies, chosen by whether a panel's result is sliced. Recent
+  edits takes its handful of rows in the database, so it is narrowed *while the
+  query is built* — narrowing afterwards would let another organisation's edits
+  consume the limit and silently return fewer rows. The other three are unsliced
+  and are narrowed after calling Wagtail's own implementation, which duplicates
+  nothing. The object-level question the last two ask — "does this belong to the
+  active organisation?" — lives in `organisations/ownership.py`, because their
+  results are reached through a generic foreign key that no ORM path crosses.
+
+  The hook receives the assembled list and each entry is replaced by class,
+  never rebuilt: other GeoRiva modules append panels of their own and this app
+  is registered after them, so its hook runs last. A test asserts the finished
+  dashboard holds only known panels, so a Wagtail release that adds or renames
+  one fails the suite rather than appearing unscoped.
 
 Membership of the tree is a **materialised-path prefix test**, not a query per
 page: treebeard encodes ancestry in the path, so the prefix *is* the ancestor
