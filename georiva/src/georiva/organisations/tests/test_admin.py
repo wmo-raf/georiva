@@ -123,6 +123,43 @@ class FirstOrgAdminTests(TestCase):
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class OrganisationMembersButtonTests(TestCase):
+    """The hop from one organisation to the people in it.
+
+    Two halves that break independently: the button has to point somewhere, and
+    the somewhere has to actually narrow to one organisation.
+    """
+
+    def setUp(self):
+        self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        self.icpac = provision_organisation(name="ICPAC", slug="icpac")
+        add_member(make_user("amina"), self.kenya)
+        add_member(make_user("kwame"), self.icpac)
+        make_user("root", superuser=True)
+        self.client.login(username="root", password=PASSWORD)
+
+    def test_the_edit_page_links_to_this_organisations_members(self):
+        response = self.client.get(
+            reverse("organisation:edit", args=[self.kenya.pk]), headers=HOST
+        )
+        # In the header proper, not folded away into the "…" dropdown.
+        self.assertIn(
+            f"{reverse('organisation_membership:index')}?organisation={self.kenya.pk}",
+            [button.url for button in response.context["header_buttons"]],
+        )
+
+    def test_the_members_list_narrows_to_the_organisation_asked_for(self):
+        response = self.client.get(
+            reverse("organisation_membership:index"),
+            {"organisation": self.kenya.pk},
+            headers=HOST,
+        )
+        self.assertEqual(response.status_code, 200)
+        rows = response.context["object_list"]
+        self.assertEqual([m.user.username for m in rows], ["amina"])
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class OrganisationDeletionTests(TestCase):
 
     def setUp(self):
