@@ -6,10 +6,10 @@ from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 from wagtail.snippets.models import register_snippet
 
-from .summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
+from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
 from .views import add_data_select, collection_items_list, plugin_list
-from .viewsets import BoundaryChooserViewSet, admin_viewsets
-from .viewsets import ItemViewSet, AssetViewSet
+from .views.viewsets import BoundaryChooserViewSet, admin_viewsets
+from .views.viewsets import ItemViewSet, AssetViewSet
 
 
 @hooks.register('register_admin_urls')

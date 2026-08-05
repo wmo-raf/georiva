@@ -11,7 +11,7 @@ from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 
 from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
 from georiva.core.models.catalog import Topic
-from georiva.core.views import CatalogIndexView
+from .admin import CatalogIndexView
 from georiva.organisations.access import may_change_org_object, require_active_org
 from georiva.organisations.permissions import SuperuserOnlyPermissionPolicy
 from georiva.organisations.scoping import OrgScopedChooserViewSetMixin, OrgScopedViewSetMixin

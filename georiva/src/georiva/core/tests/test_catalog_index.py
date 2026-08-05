@@ -72,7 +72,7 @@ class CatalogIndexTests(TestCase):
         self.assertContains(response, "There are no collections to display for this catalog")
 
     def test_catalog_action_urls_present(self):
-        from georiva.core.viewsets import CatalogViewSet, CollectionViewSet
+        from georiva.core.views.viewsets import CatalogViewSet, CollectionViewSet
 
         cat = self._catalog("Acts", "acts")
         Collection.objects.create(catalog=cat, name="Coll", slug="coll")
@@ -89,7 +89,7 @@ class CatalogIndexTests(TestCase):
         self.assertIn(add_url, html)
 
     def test_collection_action_urls_present(self):
-        from georiva.core.viewsets import CollectionViewSet
+        from georiva.core.views.viewsets import CollectionViewSet
 
         cat = self._catalog("CollActs", "collacts")
         coll = Collection.objects.create(catalog=cat, name="Coll", slug="coll")

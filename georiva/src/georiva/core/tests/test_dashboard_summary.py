@@ -30,7 +30,7 @@ class DashboardSummaryTests(TestCase):
 
     def test_summary_item_counts(self):
         from django.conf import settings
-        from georiva.core.summary_items import (
+        from georiva.core.views.summary_items import (
             CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem,
         )
 
@@ -48,7 +48,7 @@ class DashboardSummaryTests(TestCase):
     def test_the_tiles_do_not_count_another_organisations_holdings(self):
         """A dashboard that boasts the instance's totals is quoting its
         neighbours' numbers."""
-        from georiva.core.summary_items import CatalogSummaryItem, CollectionSummaryItem
+        from georiva.core.views.summary_items import CatalogSummaryItem, CollectionSummaryItem
         from georiva.organisations.testing import make_org_tree
 
         ours = make_organisation()
@@ -62,7 +62,7 @@ class DashboardSummaryTests(TestCase):
     def test_each_organisation_is_told_its_own_totals(self):
         """The same instance, two hosts, two answers — the tiles are not merely
         smaller than the global number, they track whoever is asking."""
-        from georiva.core.summary_items import CatalogSummaryItem
+        from georiva.core.views.summary_items import CatalogSummaryItem
         from georiva.organisations.testing import make_org_tree
 
         ours = make_organisation()
@@ -79,7 +79,7 @@ class DashboardSummaryTests(TestCase):
         and ``plugin_list`` lists all of them — so the count already matches the
         page it links to and must not be narrowed."""
         from django.conf import settings
-        from georiva.core.summary_items import PluginSummaryItem
+        from georiva.core.views.summary_items import PluginSummaryItem
         from georiva.organisations.testing import make_org_tree
 
         make_org_tree(make_organisation("neighbour-org"))
