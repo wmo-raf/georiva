@@ -185,11 +185,11 @@ class OrganisationMiddleware:
         The tile-config callback, because Titiler dials it on an internal
         container name that is nobody's hostname. It is *not* exempt from
         tenancy — it carries the organisation in its own first path segment and
-        ``core.tile_config_view`` filters on it.
+        ``core.machine_plane.config_view`` filters on it.
 
         The tile gateway, because it must answer a status ``auth_request``
         understands even when the host is unknown, and a 404 raised here is not
-        one. It is not exempt from tenancy either: ``core.tile_auth_view`` denies
+        one. It is not exempt from tenancy either: ``core.machine_plane.auth_view`` denies
         every request that reaches it without an organisation, so surviving this
         404 buys such a request a 403 and nothing else.
 

@@ -21,7 +21,7 @@ one to broadcast to everybody.
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-from georiva.core.path_resolution import org_slug_from_key
+from georiva.core.storage.path_resolution import org_slug_from_key
 
 
 def _session_org_slug(session):

@@ -157,7 +157,7 @@ lands in the bucket.
 
 ```python
 from datetime import datetime, timezone
-from georiva.core.filename import build_filename
+from georiva.core.storage.filename import build_filename
 from georiva.core.storage import storage
 
 # Build the filename

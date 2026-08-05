@@ -10,7 +10,7 @@ from django.utils import timezone as dj_timezone
 from django_celery_beat.models import PeriodicTask, IntervalSchedule
 
 from georiva.config.celery import app
-from georiva.core.filename import validate_path
+from georiva.core.storage.filename import validate_path
 from georiva.core.storage import storage, BucketType
 from georiva.ingestion.models import FileIngestion
 

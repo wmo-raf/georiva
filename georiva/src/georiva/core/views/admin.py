@@ -14,7 +14,7 @@ from wagtail.admin.widgets import Button, ButtonWithDropdown
 from georiva.core.models import Catalog
 from georiva.core.models import Collection, Item
 from georiva.organisations.access import get_org_object_or_404
-from .table import LinkColumnWithIcon
+from .tables import LinkColumnWithIcon
 
 
 def get_collection_items_url(collection):
@@ -293,7 +293,7 @@ def collection_items_list(request, collection_pk):
 
 def plugin_list(request):
     """Admin page listing all installed GeoRiva plugins and their metadata."""
-    from .plugins import get_installed_plugins
+    from ..plugins import get_installed_plugins
     
     context = {
         "header_title": _("Installed Plugins"),

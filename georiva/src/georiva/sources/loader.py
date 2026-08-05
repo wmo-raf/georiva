@@ -422,7 +422,7 @@ class Loader:
            where the file exists in MinIO but has no FileIngestion entry
            (dropped event, manual upload, consumer restart, etc.).
         """
-        from georiva.core.filename import build_filename
+        from georiva.core.storage.filename import build_filename
         from georiva.core.storage import BucketType
         from georiva.ingestion.models import FileIngestion
 
@@ -565,7 +565,7 @@ class Loader:
         plugin or a remote server hands us: a crafted filename must not be able
         to land one institution's data under another's prefix.
         """
-        from georiva.core.filename import build_filename
+        from georiva.core.storage.filename import build_filename
 
         filename = build_filename(
             original_filename=request.filename,

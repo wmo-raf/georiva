@@ -32,7 +32,7 @@ from georiva.core.machine_plane import (
     titiler_variable_root,
 )
 from georiva.core.models import Item, Variable
-from georiva.core.palette_cache import (
+from georiva.core.machine_plane.palette_cache import (
     get_palette_cache_key,
     variable_cache_key,
     warm_all,

@@ -30,8 +30,17 @@ georiva/src/georiva/          # Main Django application
 ├── config/                   # Django settings, URLs, Celery, WSGI/ASGI
 │   └── settings/             # base.py, dev.py, production.py
 ├── core/                     # STAC-aligned data models (Catalog, Collection, Variable, Item, Asset)
-│   └── models/               # Split per-entity: catalog.py, collection.py, item.py, variable.py
-│   └── storage.py            # Multi-bucket StorageManager singleton
+│   ├── models/               # Split per-entity: catalog.py, collection.py, item.py, variable.py
+│   ├── storage/              # Objects in buckets and the keys naming them
+│   │                         #   manager.py (Bucket + StorageManager singleton),
+│   │                         #   path_resolution.py, filename.py, asset_cleanup.py
+│   ├── machine_plane/        # Where the tenant travels in the address (ADR 0013/0015)
+│   │                         #   addresses.py, auth_view.py, config_view.py, palette_cache.py
+│   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
+│   │                         #   definitions.py, chain.py
+│   ├── views/                # Wagtail admin surface: admin.py, viewsets.py,
+│   │                         #   tables.py, summary_items.py
+│   └── tests/                # One module per subject
 ├── ingestion/                # Data ingestion pipeline
 │   ├── service.py            # Main IngestionService (orchestrates full pipeline)
 │   ├── tasks.py              # Celery tasks (process_incoming_file, sweep_unprocessed)
@@ -121,7 +130,7 @@ Defined in `api/urls.py`:
 > endpoint. Vector tiles for zonal stats are served by Martin at `/martin/boundary_stats/{z}/{x}/{y}`,
 > which requires `org`, `catalog`, `collection` and `variable` query params. Titiler raster tiles live
 > under `/titiler/<org>/<catalog>/<collection>/<variable>/…`. Build every such URL through
-> `core/machine_plane.py` — never by hand (ADR 0013).
+> `core/machine_plane/addresses.py` — never by hand (ADR 0013).
 
 ## Key Conventions
 
@@ -136,8 +145,8 @@ Defined in `api/urls.py`:
 - **Serving visibility**: never filter `visibility` by hand — go through `Collection.objects.visible_to(request)`
   (or `visible_visibilities(request)` where you need the tiers). `public` → anyone, `private` → members of the
   host's org, `internal` → nobody. Membership is `organisations.access.may_see_private` (ADR 0014). Titiler and
-  Martin are gated at the proxy instead, by the nginx `auth_request` into `core/tile_auth_view.py` (ADR 0015) —
-  never add tenancy logic to either tile server. The one exception is `core/tile_config_view.py`: Titiler forwards
+  Martin are gated at the proxy instead, by the nginx `auth_request` into `core/machine_plane/auth_view.py` (ADR 0015) —
+  never add tenancy logic to either tile server. The one exception is `core/machine_plane/config_view.py`: Titiler forwards
   no credential on that callback, so there is nobody to ask and it stays `public`-only
 - **Tenancy declarations**: every model says where it stands via `ORGANISATION_LOOKUP` — an ORM path, or one of
   `SHARED_REFERENCE_DATA` / `ORGANISATION_SELF` / `PAGE_TREE` / `NOT_ORM_SCOPABLE` / `via_related(path)` /

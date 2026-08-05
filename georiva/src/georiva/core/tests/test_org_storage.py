@@ -7,9 +7,9 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
-from georiva.core.filename import parse_path, validate_path
+from georiva.core.storage.filename import parse_path, validate_path
 from georiva.core.models import Catalog
-from georiva.core.path_resolution import resolve_org_catalog
+from georiva.core.storage.path_resolution import resolve_org_catalog
 from georiva.core.storage import StorageManager
 from georiva.organisations.testing import make_organisation
 
