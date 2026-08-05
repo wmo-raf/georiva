@@ -49,7 +49,7 @@ from rest_framework.views import APIView
 from rest_framework import status
 
 from georiva.core.models import Collection, Variable
-from georiva.core.palette_cache import build_variable_payload
+from georiva.core.machine_plane.palette_cache import build_variable_payload
 
 
 class TileConfigView(APIView):

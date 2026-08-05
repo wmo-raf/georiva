@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytz
 
-from georiva.core.filename import parse_filename
+from georiva.core.storage.filename import parse_filename
 from georiva.formats.registry import format_registry
 
 _FORMAT_PATTERNS = {

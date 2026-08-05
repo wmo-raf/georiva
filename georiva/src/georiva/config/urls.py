@@ -8,7 +8,7 @@ from wagtail.documents import urls as wagtaildocs_urls
 from wagtail.admin.auth import require_admin_access
 
 from georiva.api import urls as georiva_urls
-from georiva.core.tile_auth_view import TileAuthView
+from georiva.core.machine_plane.auth_view import TileAuthView
 from georiva.organisations.hopper import org_hopper_script
 from georiva.organisations.pages import OrgScopedPageSearchView
 from .views import health, page_not_found, permission_denied

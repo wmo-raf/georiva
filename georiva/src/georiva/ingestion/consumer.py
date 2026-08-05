@@ -8,8 +8,8 @@ from urllib.parse import unquote
 import redis
 from django.conf import settings
 
-from georiva.core.filename import validate_path
-from georiva.core.path_resolution import resolve_org_catalog
+from georiva.core.storage.filename import validate_path
+from georiva.core.storage.path_resolution import resolve_org_catalog
 from georiva.core.storage import BucketType, get_bucket_config
 from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.tasks import process_incoming_file

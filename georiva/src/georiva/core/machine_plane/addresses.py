@@ -85,7 +85,7 @@ def scope_of(uri):
     spelling is trying to be two things at once.
 
     Recognising is all this does. Whether the collection exists, and who may see
-    it, is :mod:`georiva.core.tile_auth_view`'s question.
+    it, is :mod:`georiva.core.machine_plane.auth_view`'s question.
     """
     path, _, query = (uri or "").partition("?")
     segments = [segment for segment in path.split("/") if segment]

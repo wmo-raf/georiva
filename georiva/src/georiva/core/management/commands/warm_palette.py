@@ -2,7 +2,7 @@ import logging
 
 from django.core.management.base import BaseCommand
 
-from georiva.core.palette_cache import warm_all
+from georiva.core.machine_plane.palette_cache import warm_all
 
 logger = logging.getLogger(__name__)
 

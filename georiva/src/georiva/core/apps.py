@@ -7,12 +7,12 @@ logger = logging.getLogger(__name__)
 
 
 def on_variable_save(sender, instance, **kwargs):
-    from georiva.core.palette_cache import warm_variable
+    from georiva.core.machine_plane.palette_cache import warm_variable
     warm_variable(instance)
 
 
 def on_palette_save(sender, instance, **kwargs):
-    from georiva.core.palette_cache import warm_variable
+    from georiva.core.machine_plane.palette_cache import warm_variable
     for variable in (
             instance.variable_set
                     .filter(is_active=True)

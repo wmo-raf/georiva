@@ -1,6 +1,6 @@
 from django.urls import path, include
 
-from georiva.core.tile_config_view import TileConfigView
+from georiva.core.machine_plane.config_view import TileConfigView
 from georiva.edr import urls as edr_urls
 from georiva.ingestion.dashboard_views import upload_session_status_api
 from georiva.stac import urls as georiva_stac_urls

@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from georiva.core.filename import validate_path
+from georiva.core.storage.filename import validate_path
 from georiva.core.storage import BucketType, storage
 
 
