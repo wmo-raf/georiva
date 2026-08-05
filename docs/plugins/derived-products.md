@@ -119,7 +119,7 @@ is caught before any row is written.
 ## How edges and stages are computed
 
 The chain is a **computed DAG**, pure over your declarations
-(`core/product_chain.py`) — no DB, no run needed to draw it.
+(`core/derived_products/chain.py`) — no DB, no run needed to draw it.
 
 - **Edge rule:** product **P depends on Q** iff a **required** input of P at the
   **published** tier names a collection among Q's outputs, unioned with P's

@@ -58,7 +58,7 @@ GeoRiva uses five dedicated MinIO buckets. Each bucket has a specific role, acce
 | `georiva-zarr` | Virtual-Zarr (kerchunk) manifests | `virtual_zarr` app | Private | No |
 
 The bucket set is defined by `GEORIVA_BUCKETS` in `config/settings/base.py` and the `BucketType` enum in
-`core/storage.py`. Only `georiva-incoming` and `georiva-sources` carry `s3:ObjectCreated:*` notifications.
+`core/storage/manager.py`. Only `georiva-incoming` and `georiva-sources` carry `s3:ObjectCreated:*` notifications.
 
 **Why separate buckets instead of directories?**
 
@@ -538,7 +538,7 @@ That is all. Plugins do **not** trigger ingestion, resolve collections, or proce
 
 ```python
 from datetime import datetime, timezone
-from georiva.core.filename import build_filename
+from georiva.core.storage.filename import build_filename
 from georiva.core.storage import storage
 
 # Forecast data — build filename with reference time
@@ -677,7 +677,7 @@ storage.build_asset_path(org, catalog, collection, variable, timestamp, filename
 ## Filename API Reference
 
 ```python
-from georiva.core.filename import (
+from georiva.core.storage.filename import (
     build_filename,
     parse_filename,
     parse_path,

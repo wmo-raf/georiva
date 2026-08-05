@@ -36,7 +36,7 @@ use lives in the `sources` application layer.
 
 ### 1. The chain is a tier-aware, computed DAG
 
-`core/product_chain.py` computes the product-level dependency graph as **pure
+`core/derived_products/chain.py` computes the product-level dependency graph as **pure
 functions** over a `Sequence[DerivedProductDefinition]` — no DB, no recipe
 execution — so it is importable from both the feed layer and the engine
 (ADR-0005).
@@ -165,7 +165,7 @@ declaration. Every surface that names a product uses the display fallback.
   `OutputRef.title` / `.description` / `.visibility`.
 - **New model fields / migration:** `DerivedProduct.title` / `.description`
   overrides.
-- **New pure module** `core/product_chain.py` and **service module**
+- **New pure module** `core/derived_products/chain.py` and **service module**
   `sources/product_service.py` (the single enable/disable/provision/materialise
   write-path).
 - **CHIRPS is the blueprint:** it declares output titles/descriptions and the

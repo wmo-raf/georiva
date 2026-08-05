@@ -169,7 +169,7 @@ added to the normal fetch queue as a fallback (`requests_to_fetch`).
 {catalog_slug}/{collection_slug}/{filename}
 ```
 
-Filename follows `core/filename.py:build_filename()`:
+Filename follows `core/storage/filename.py:build_filename()`:
 
 | Has `reference_time`? | Filename pattern                       | Example                            |
 |-----------------------|----------------------------------------|------------------------------------|

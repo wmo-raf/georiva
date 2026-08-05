@@ -490,7 +490,7 @@ Organisation from a hostname there and nothing tries: the Organisation travels i
 (`/titiler/{org}/{catalog}/{collection}/{variable}/…`, Martin's required `org`/`catalog`/`collection` params,
 `georiva:palette:{org}:…`). This is the *only* place a path names the tenant, and for the one reason that justifies
 it — there is no Host to disagree with. Django decides which Organisation and writes every such URL through
-`core/machine_plane.py`, from a row it already resolved from the Host; Titiler and Martin concatenate and join.
+`core/machine_plane/addresses.py`, from a row it already resolved from the Host; Titiler and Martin concatenate and join.
 Guarded by the **Tile gateway** below, which is what makes the Visibility tier mean anything here.
 See ADR 0013.
 _Avoid_: tile plane, internal API, server-to-server tenancy

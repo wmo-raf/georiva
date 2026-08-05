@@ -56,7 +56,7 @@ Module-level singleton instances used for cross-cutting services:
 
 | Instance                          | File:Line                 | Purpose                      |
 |-----------------------------------|---------------------------|------------------------------|
-| `storage`                         | `core/storage.py:498`     | Multi-bucket storage manager |
+| `storage`                         | `core/storage/manager.py:548` | Multi-bucket storage manager |
 | `format_registry`                 | `formats/registry.py:104` | Format plugin lookup         |
 | `loader_profile_viewset_registry` | `sources/registry.py:25`  | Loader viewset lookup        |
 | `app`                             | `config/celery.py:3`      | Celery application           |
@@ -65,7 +65,7 @@ Access via import: `from georiva.core.storage import storage`
 
 ## 4. Multi-Bucket Storage Architecture
 
-`core/storage.py:242` — `StorageManager` wraps Django's storage backends with named bucket accessors.
+`core/storage/manager.py:247` — `StorageManager` wraps Django's storage backends with named bucket accessors.
 
 **Bucket types** (`BucketType`): `INCOMING`, `SOURCES`, `ARCHIVE`, `ASSETS`, `ZARR`
 
@@ -87,7 +87,7 @@ Access via import: `from georiva.core.storage import storage`
   `core/path_resolution.resolve_org_catalog()` is the only place a path's leading segments become a `Catalog`,
   and it never falls back to a default organisation
 - The one exception, and it is a process boundary rather than a second opinion: the machine plane re-spells the
-  same grammar where the ORM cannot reach. `core/machine_plane.py` builds Titiler/Martin URLs from it on the Django
+  same grammar where the ORM cannot reach. `core/machine_plane/addresses.py` builds Titiler/Martin URLs from it on the Django
   side, and `titiler-app/app/dependencies.build_cog_url()` reconstructs the key inside Titiler, which has no
   Django. Both are conventional restatements of `Catalog.storage_prefix`; a change to the grammar must touch all
   three. See ADR 0013
