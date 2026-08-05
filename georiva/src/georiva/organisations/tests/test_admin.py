@@ -75,8 +75,11 @@ class OrganisationAdminAccessTests(TestCase):
         request = response.wsgi_request
 
         top_level = admin_menu.menu_items_for_request(request)
-        group = next(item for item in top_level if item.label == "Organisations")
+        self.assertNotIn(
+            reverse("organisation_membership:index"), [item.url for item in top_level]
+        )
 
+        group = next(item for item in top_level if item.label == "Organisations")
         self.assertIsInstance(group, SubmenuMenuItem)
         self.assertEqual(
             [child.url for child in group.menu.menu_items_for_request(request)],
