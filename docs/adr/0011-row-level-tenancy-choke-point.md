@@ -45,7 +45,9 @@ implicit at the manager level — but there is exactly one implementation to aud
 or one of the declarations below, each of which is itself a decision:
 
 - `SHARED_REFERENCE_DATA` — no organisation owns it, every organisation reads it
-  (topics, units, administrative boundaries). Scoping passes it through.
+  (topics, units, administrative boundaries). Scoping passes it through. Writing
+  it is the instance admin's act alone: unowned does not mean unguarded, and a
+  row every organisation reads is one no single organisation may rewrite.
 - `ORGANISATION_SELF` — it *is* an organisation. Scoping matches on identity.
 - `PAGE_TREE` — its owner is decided by where it sits in the page tree, not by a
   field, because that is how a Wagtail page is owned (#261, ADR 0016).

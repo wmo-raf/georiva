@@ -1,5 +1,5 @@
-from adminboundarymanager.wagtail_hooks import AdminBoundaryViewSetGroup
-from django.urls import path, reverse_lazy
+from adminboundarymanager.models import AdminBoundarySettings
+from django.urls import path, reverse, reverse_lazy
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
@@ -42,9 +42,65 @@ def register_data_menu():
 @hooks.register("register_admin_viewset")
 def register_viewset():
     return admin_viewsets + [
-        AdminBoundaryViewSetGroup(),
         BoundaryChooserViewSet("boundary_chooser"),
     ]
+
+
+def boundary_settings_url():
+    """Where Wagtail edits ``AdminBoundarySettings``.
+
+    Derived from the model's own meta rather than spelled out, so it stays
+    correct if the app or model is ever renamed — and so it matches, character
+    for character, the URL ``adminboundarymanager`` builds for the same page.
+    """
+    return reverse(
+        "wagtailsettings:edit",
+        args=[AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name],
+    )
+
+
+class SuperuserMenuItem(MenuItem):
+    """Shown to the instance admin alone.
+
+    Administrative boundaries are SHARED_REFERENCE_DATA (ADR 0011): no
+    organisation owns them and every organisation reads them, so a reload
+    rewrites the dataset the whole instance depends on. That is the instance
+    admin's act, not an org admin's — and not a page editor's.
+    """
+
+    def is_shown(self, request):
+        return bool(request.user.is_superuser)
+
+
+# Boundaries are configuration, not data anybody browses: a Settings submenu,
+# not a top-level sidebar group. The two pages come from adminboundarymanager,
+# whose own ViewSetGroup existed only to draw the menu we are replacing — we no
+# longer register it, so its duplicate /boundary-loader/ URL is gone too.
+@hooks.register("register_settings_menu_item")
+def register_boundaries_menu_item():
+    return SubmenuMenuItem(
+        _("Boundaries"),
+        Menu(items=[
+            SuperuserMenuItem(_("Load Data"), reverse_lazy("adminboundarymanager_preview_boundary"),
+                              icon_name="upload", order=10),
+            SuperuserMenuItem(_("Settings"), reverse_lazy(
+                "wagtailsettings:edit",
+                args=[AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name],
+            ), icon_name="cogs", order=20),
+        ]),
+        icon_name="map",
+        order=120,
+    )
+
+
+# ``@register_setting`` puts its own "Admin boundary settings" entry in this
+# menu, which would sit beside ours pointing at the same page. Drop it, matching
+# on the URL so there is no label string to drift. Our submenu survives the
+# filter: a SubmenuMenuItem's url is "#", never the settings URL.
+@hooks.register("construct_settings_menu")
+def hide_duplicate_boundary_settings(request, menu_items):
+    settings_url = boundary_settings_url()
+    menu_items[:] = [item for item in menu_items if item.url != settings_url]
 
 
 register_snippet(ItemViewSet)
