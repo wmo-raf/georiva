@@ -350,7 +350,7 @@ def data_feed_detail(request, pk):
     # Derived-products chain panel — the primary management surface (ADR-0008).
     # A malformed plugin declaration can't be laid out into stages; degrade to an
     # empty panel rather than breaking the whole feed page.
-    from georiva.core.product_chain import ChainError
+    from georiva.core.derived_products.chain import ChainError
     from georiva.sources.product_service import build_chain
     try:
         chain = build_chain(feed)
@@ -1493,7 +1493,7 @@ def _product_chain_context(definitions, label_by_key):
     can't be laid out into stages; rather than 500, fall back to a single lane
     and return the error string so the step still renders and names the problem.
     """
-    from georiva.core.product_chain import (
+    from georiva.core.derived_products.chain import (
         ChainError,
         dependencies_closure,
         dependents_closure,

@@ -12,7 +12,7 @@ enabled product may have a disabled (or missing) dependency* holds everywhere.
 - Disabling cascades to the transitive dependent closure, atomically, with the
   closure recomputed here from the declaration (never trusted from a request).
 
-The chain math lives in the pure ``core.product_chain`` module; this layer binds
+The chain math lives in the pure ``core.derived_products.chain`` module; this layer binds
 it to the feed's ``DerivedProduct`` rows.
 """
 from __future__ import annotations
@@ -76,7 +76,7 @@ def build_chain(feed):
     (dependency chip labels), ``status`` / ``last_activity``, ``readiness`` /
     ``readiness_hint``, ``output_collections``, ``can_run``.
     """
-    from georiva.core.product_chain import product_dependencies, topological_stages
+    from georiva.core.derived_products.chain import product_dependencies, topological_stages
     from georiva.sources.derivation_tracking import product_readiness, product_status
 
     real_feed = feed.get_real_instance()
@@ -291,7 +291,7 @@ def _resolve_inputs_or_raise(feed, definition, definitions):
     first key that doesn't, so a mis-declared product fails loudly at enable time
     rather than sitting inert (this slice checks resolvability; the next pins the
     resolved ``Collection`` as rows)."""
-    from georiva.core.product_chain import collection_namespace
+    from georiva.core.derived_products.chain import collection_namespace
 
     namespace = collection_namespace(definitions, _feed_collection_keys(feed))
     for ref in definition.inputs:
@@ -315,7 +315,7 @@ def enable_product(product):
     the missing dependencies by display label) otherwise. Atomic — a gate
     failure leaves the row unchanged.
     """
-    from georiva.core.product_chain import dependencies_closure
+    from georiva.core.derived_products.chain import dependencies_closure
 
     feed, definitions, rows = _chain(product)
     definition = _definition_of(product.definition_key, definitions)
@@ -464,7 +464,7 @@ def enabled_dependents(product):
     """The currently-enabled rows that transitively depend on ``product``, in
     declaration order — the set a disable would cascade to (the confirmation
     list). Excludes ``product`` itself."""
-    from georiva.core.product_chain import dependents_closure
+    from georiva.core.derived_products.chain import dependents_closure
 
     _feed, definitions, rows = _chain(product)
     downstream = dependents_closure(definitions, product.definition_key)

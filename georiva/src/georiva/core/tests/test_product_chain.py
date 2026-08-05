@@ -23,7 +23,7 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from georiva.core.product_chain import (
+from georiva.core.derived_products.chain import (
     ChainCycleError,
     ChainError,
     dependencies_closure,
