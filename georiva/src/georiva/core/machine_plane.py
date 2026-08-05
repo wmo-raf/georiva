@@ -17,7 +17,7 @@ whose organisation was already established by the request that fetched it. Host
 and path then agree because the same request produced both.
 
 The grammar mirrors the storage grammar deliberately (``{org}/{catalog}/…``, see
-``core.path_resolution``): a Titiler tile URL and the COG key behind it differ
+``core.storage.path_resolution``): a Titiler tile URL and the COG key behind it differ
 only by prefix, so an operator reading one can find the other.
 
 Since #274 the grammar is read as well as written: the nginx gateway hands

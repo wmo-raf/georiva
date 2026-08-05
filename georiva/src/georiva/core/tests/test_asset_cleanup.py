@@ -5,7 +5,7 @@ rewrote an asset's href in place. Non-asset sidecars (.json metadata) are never
 selected, so legitimate files are safe."""
 from django.test import SimpleTestCase
 
-from georiva.core.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
+from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
 
 
 class SelectOrphanObjectsTests(SimpleTestCase):
