@@ -123,9 +123,10 @@ class OrganisationMembersButtonTests(TestCase):
         response = self.client.get(
             reverse("organisation:edit", args=[self.kenya.pk]), headers=HOST
         )
-        self.assertContains(
-            response,
+        # In the header proper, not folded away into the "…" dropdown.
+        self.assertIn(
             f"{reverse('organisation_membership:index')}?organisation={self.kenya.pk}",
+            [button.url for button in response.context["header_buttons"]],
         )
 
     def test_the_members_list_narrows_to_the_organisation_asked_for(self):

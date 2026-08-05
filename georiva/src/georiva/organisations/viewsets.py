@@ -6,8 +6,9 @@ settings, and only a superuser can reach it.
 """
 from django.urls import reverse
 from django.utils.functional import cached_property
+from django.utils.http import urlencode
 from django.utils.translation import gettext_lazy as _
-from wagtail.admin.views.generic import EditView
+from wagtail.admin.views import generic
 from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import HeaderButton
 
@@ -16,7 +17,7 @@ from .models import Organisation, OrganisationMembership
 from .permissions import SuperuserOnlyPermissionPolicy
 
 
-class OrganisationEditView(EditView):
+class OrganisationEditView(generic.EditView):
     """Adds the one hop this page was missing: over to the people in this org.
 
     The membership list is instance-wide, so the link carries the organisation
@@ -27,13 +28,14 @@ class OrganisationEditView(EditView):
 
     @cached_property
     def header_buttons(self):
-        members_url = (
-            f"{reverse('organisation_membership:index')}"
-            f"?organisation={self.object.pk}"
-        )
+        query = urlencode({"organisation": self.object.pk})
         return [
             *super().header_buttons,
-            HeaderButton(_("View members"), url=members_url, icon_name="user"),
+            HeaderButton(
+                label=_("View members"),
+                url=f"{reverse('organisation_membership:index')}?{query}",
+                icon_name="user",
+            ),
         ]
 
 
