@@ -15,12 +15,14 @@ from .views import (
     organisation_members,
     organisation_settings,
 )
-from .viewsets import organisation_membership_viewset, organisation_viewset
+from .viewsets import organisation_viewset_group
 
 
 @hooks.register("register_admin_viewset")
 def register_organisation_viewsets():
-    return [organisation_viewset, organisation_membership_viewset]
+    # Registering the group registers each of its viewsets' URLs too, under
+    # their own namespaces — only the menu item is the group's.
+    return [organisation_viewset_group]
 
 
 @hooks.register("register_admin_urls")

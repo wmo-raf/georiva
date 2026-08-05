@@ -1,6 +1,7 @@
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from wagtail.admin.menu import SubmenuMenuItem, admin_menu
 
 from georiva.organisations.models import Organisation, OrganisationMembership
 from georiva.organisations.provisioning import org_page_group_name, provision_organisation
@@ -66,6 +67,21 @@ class OrganisationAdminAccessTests(TestCase):
         add_member(user, self.kenya, role=OrganisationMembership.Role.ADMIN)
         response = self.client.get(reverse("organisation_membership:index"), headers=HOST)
         self.assertEqual(response.status_code, 302)
+
+    def test_the_two_organisation_surfaces_sit_in_one_submenu(self):
+        """Neither is a top-level sidebar item; both hang off "Organisations"."""
+        self._login("root", superuser=True)
+        response = self.client.get(reverse("wagtailadmin_home"), headers=HOST)
+        request = response.wsgi_request
+
+        top_level = admin_menu.menu_items_for_request(request)
+        group = next(item for item in top_level if item.label == "Organisations")
+
+        self.assertIsInstance(group, SubmenuMenuItem)
+        self.assertEqual(
+            [child.url for child in group.menu.menu_items_for_request(request)],
+            [reverse("organisation:index"), reverse("organisation_membership:index")],
+        )
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])

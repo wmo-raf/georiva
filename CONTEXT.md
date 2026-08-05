@@ -378,6 +378,14 @@ The Django superuser. Not a separate concept or flag. Creates Organisations and 
 membership checks entirely, and may enter any Organisation without holding a membership row.
 _Avoid_: platform admin, staff (as a synonym)
 
+**Organisations Menu**:
+The single Wagtail admin sidebar group holding the Instance admin's tenancy surfaces, in order: "Organisations" (the
+`Organisation` list) and "Organisation members" (the `OrganisationMembership` list). Neither exists as a separate
+top-level sidebar item. Superuser-only, and it hides itself whole rather than showing entries that would turn a
+member away. Distinct from the "Organisation" group in the Settings menu, which is one Organisation's own admins
+editing their own institution.
+_Avoid_: org menu, tenancy menu
+
 **Active organisation**:
 The Organisation a request is operating in, derived from its Host and nothing else: hostname → Wagtail Site →
 Organisation. There is no session-org state — the subdomain *is* the switcher. Membership is re-read on every

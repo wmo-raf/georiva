@@ -5,6 +5,8 @@ by its own admins. This viewset only creates organisations and edits their lean
 settings, and only a superuser can reach it.
 """
 from django.utils.functional import cached_property
+from django.utils.translation import gettext_lazy as _
+from wagtail.admin.viewsets.base import ViewSetGroup
 from wagtail.admin.viewsets.model import ModelViewSet
 
 from .forms import OrganisationCreateForm, OrganisationEditForm
@@ -15,11 +17,10 @@ from .permissions import SuperuserOnlyPermissionPolicy
 class OrganisationViewSet(ModelViewSet):
     model = Organisation
     icon = "group"
-    menu_label = "Organisations"
+    menu_label = _("Organisations")
     menu_icon = "group"
-    add_to_admin_menu = True
-    # Below the data menus — an instance-admin surface, not a daily one.
-    menu_order = 800
+    # Reached through OrganisationViewSetGroup, not from the top level.
+    add_to_admin_menu = False
     list_display = ["name", "slug", "hostname", "country"]
     search_fields = ["name", "slug"]
     inspect_view_enabled = True
@@ -45,10 +46,9 @@ class OrganisationMembershipViewSet(ModelViewSet):
 
     model = OrganisationMembership
     icon = "user"
-    menu_label = "Organisation members"
+    menu_label = _("Organisation members")
     menu_icon = "user"
-    add_to_admin_menu = True
-    menu_order = 810
+    add_to_admin_menu = False
     form_fields = ["user", "organisation", "role"]
     list_display = ["user", "organisation", "role"]
     search_fields = ["user__username", "organisation__name"]
@@ -60,3 +60,25 @@ class OrganisationMembershipViewSet(ModelViewSet):
 
 organisation_viewset = OrganisationViewSet("organisation")
 organisation_membership_viewset = OrganisationMembershipViewSet("organisation_membership")
+
+
+class OrganisationViewSetGroup(ViewSetGroup):
+    """The instance admin's tenancy surface, in one sidebar group.
+
+    Child order comes from ``items`` — a group numbers its children by
+    declaration order and ignores whatever ``menu_order`` they carry, which is
+    why neither viewset sets one.
+
+    Nothing here gates the group: each child's menu item asks its own
+    ``SuperuserOnlyPermissionPolicy``, and a submenu hides itself when none of
+    its children are shown. So a member sees no "Organisations" at all.
+    """
+
+    items = (organisation_viewset, organisation_membership_viewset)
+    menu_label = _("Organisations")
+    menu_icon = "group"
+    # Below the data menus — an instance-admin surface, not a daily one.
+    menu_order = 800
+
+
+organisation_viewset_group = OrganisationViewSetGroup()
