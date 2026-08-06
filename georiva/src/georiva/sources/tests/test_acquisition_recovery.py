@@ -1,13 +1,15 @@
 from datetime import timedelta
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Catalog
 from georiva.ingestion.models import LoaderJob
-from georiva.organisations.testing import make_organisation
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.acquisition_recovery import (
     INTERRUPTED_FILE_ERROR,
     MAX_AUTO_RESUMES,
@@ -244,3 +246,98 @@ class LiveCountersTests(TestCase):
 
         self.assertEqual(run.files_fetched, 5)
         self.assertEqual(run.bytes_transferred, 999)
+
+
+@patch("task_ferry.handler.get_executor")
+class RecoverRunViewTests(TestCase):
+    """The operator Recover button: confirmation page + targeted recovery."""
+
+    def setUp(self):
+        user = get_user_model().objects.create_superuser(
+            "admin_rec", "r@test.com", "pw",
+        )
+        dial_org(self.client)
+        self.client.force_login(user)
+        self.feed = _make_feed()
+
+    def _detail_url(self, run):
+        return reverse(
+            "data_feed_fetch_run_detail",
+            kwargs={"feed_pk": self.feed.pk, "run_pk": run.pk},
+        )
+
+    def _recover_url(self, run):
+        return reverse(
+            "data_feed_fetch_run_recover",
+            kwargs={"feed_pk": self.feed.pk, "run_pk": run.pk},
+        )
+
+    def test_detail_page_shows_recover_button_only_while_running(self, _executor):
+        running = _make_run(self.feed)
+        finished = _make_run(self.feed, status="completed")
+
+        self.assertContains(
+            self.client.get(self._detail_url(running)), "Recover stale run",
+        )
+        self.assertNotContains(
+            self.client.get(self._detail_url(finished)), "Recover stale run",
+        )
+
+    def test_get_renders_confirmation_with_the_duplicate_warning(self, _executor):
+        run = _make_run(self.feed)
+
+        response = self.client.get(self._recover_url(run))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "duplicate fetch")
+        run.refresh_from_db()
+        self.assertEqual(run.status, FetchRun.Status.RUNNING)
+
+    def test_get_for_a_finished_run_redirects_without_touching_it(self, _executor):
+        run = _make_run(self.feed, status="completed")
+
+        response = self.client.get(self._recover_url(run))
+
+        self.assertRedirects(response, self._detail_url(run))
+        run.refresh_from_db()
+        self.assertEqual(run.status, FetchRun.Status.COMPLETED)
+
+    def test_post_recovers_and_queues_the_resume(self, _executor):
+        run = _make_run(self.feed, hours_ago=1)
+        dangling = FetchedFile.objects.create(fetch_run=run, file_path="c/a.tif")
+        dangling.mark_fetching()
+
+        response = self.client.post(self._recover_url(run), follow=True)
+
+        run.refresh_from_db()
+        dangling.refresh_from_db()
+        self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
+        self.assertIn("operator", run.error_message)
+        self.assertEqual(dangling.status, FetchedFile.Status.FAILED)
+        self.assertTrue(LoaderJob.objects.filter(resume_of_run=run).exists())
+        self.assertContains(response, "resume queued")
+
+    def test_post_warns_when_recovery_is_already_under_way(self, _executor):
+        run = _make_run(self.feed, hours_ago=2)
+        _make_run(self.feed, hours_ago=1, status="completed")
+
+        response = self.client.post(self._recover_url(run), follow=True)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
+        self.assertFalse(LoaderJob.objects.exists())
+        self.assertContains(response, "already under way")
+
+    def test_post_warns_when_the_auto_resume_cap_is_reached(self, _executor):
+        original = _make_run(self.feed, hours_ago=30, status="interrupted")
+        first = _make_run(
+            self.feed, hours_ago=20, status="interrupted", resumed_from=original,
+        )
+        run = _make_run(self.feed, hours_ago=1, resumed_from=first)
+
+        response = self.client.post(self._recover_url(run), follow=True)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
+        self.assertFalse(LoaderJob.objects.exists())
+        self.assertContains(response, "cap")

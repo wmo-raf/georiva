@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 MAX_AUTO_RESUMES = 2
 INTERRUPTED_FILE_ERROR = "interrupted — worker stopped mid-fetch"
 
+# Reason codes returned by _maybe_resume / recover_run.
+RESUME_QUEUED = "queued"
+RESUME_CAP_REACHED = "cap_reached"
+RESUME_ALREADY_UNDER_WAY = "already_under_way"
+RESUME_ENQUEUE_FAILED = "enqueue_failed"
+
+OPERATOR_SWEEP_REASON = (
+    "Interrupted — declared dead by an operator (targeted sweep)."
+)
+
 
 def stale_after_hours() -> int:
     return getattr(settings, "GEORIVA_FETCH_RUN_STALE_AFTER_HOURS", 6)
@@ -75,7 +85,7 @@ def sweep_stale_fetch_runs(
     )
     if run_ids is not None:
         stale_runs = stale_runs.filter(pk__in=run_ids)
-        reason = "Interrupted — declared dead by an operator (targeted sweep)."
+        reason = OPERATOR_SWEEP_REASON
     else:
         stale_runs = stale_runs.filter(started_at__lt=cutoff)
         reason = (
@@ -87,7 +97,7 @@ def sweep_stale_fetch_runs(
     for run in stale_runs:
         _sweep_run(run, reason)
         swept += 1
-        if resume and _maybe_resume(run):
+        if resume and _maybe_resume(run) == RESUME_QUEUED:
             resumed += 1
 
     if swept or jobs_reaped:
@@ -130,11 +140,21 @@ def _backfill_feed_stats(run) -> None:
     feed.save(update_fields=['last_run_at', 'last_run_status', 'last_run_message'])
 
 
-def _maybe_resume(run) -> bool:
+def recover_run(run) -> str:
+    """Operator recovery of a single running FetchRun (the admin's Recover
+    button): sweep it as interrupted, then attempt the auto-resume. Returns
+    the resume reason code so the caller can tell the operator whether a new
+    fetch actually started."""
+    _sweep_run(run, OPERATOR_SWEEP_REASON)
+    return _maybe_resume(run)
+
+
+def _maybe_resume(run) -> str:
     """Enqueue a fresh full loader run for the interrupted run's feed.
 
-    Skipped when the lineage cap is reached, or when recovery is already under
-    way — a newer FetchRun for the feed, or a pending/started LoaderJob.
+    Returns a reason code: RESUME_QUEUED on success, or why it was skipped —
+    the lineage cap, recovery already under way (a newer FetchRun for the
+    feed or a pending/started LoaderJob), or a failed enqueue.
     """
     from task_ferry.handler import JobHandler
     from task_ferry.models import JOB_STATES_PENDING_OR_RUNNING
@@ -148,7 +168,7 @@ def _maybe_resume(run) -> bool:
             "FetchRun %d: auto-resume cap (%d) reached — leaving for a human",
             run.pk, MAX_AUTO_RESUMES,
         )
-        return False
+        return RESUME_CAP_REACHED
 
     feed = run.data_feed
     if FetchRun.objects.filter(
@@ -158,7 +178,7 @@ def _maybe_resume(run) -> bool:
             "FetchRun %d: newer run exists for feed %s — not resuming",
             run.pk, feed.pk,
         )
-        return False
+        return RESUME_ALREADY_UNDER_WAY
     if LoaderJob.objects.filter(
         data_feed=feed, state__in=JOB_STATES_PENDING_OR_RUNNING,
     ).exists():
@@ -167,7 +187,7 @@ def _maybe_resume(run) -> bool:
             "— not resuming",
             run.pk, feed.pk,
         )
-        return False
+        return RESUME_ALREADY_UNDER_WAY
 
     try:
         JobHandler.create_and_start(
@@ -178,13 +198,13 @@ def _maybe_resume(run) -> bool:
         )
     except Exception:
         logger.exception("FetchRun %d: failed to enqueue auto-resume", run.pk)
-        return False
+        return RESUME_ENQUEUE_FAILED
 
     logger.info(
         "FetchRun %d: auto-resume enqueued (attempt %d of %d)",
         run.pk, generation + 1, MAX_AUTO_RESUMES,
     )
-    return True
+    return RESUME_QUEUED
 
 
 def _reap_stale_loader_jobs(cutoff) -> int:

@@ -2025,6 +2025,87 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     return render(request, "georivasources/data_feed_fetch_run_detail.html", context)
 
 
+def data_feed_fetch_run_recover(request, feed_pk, run_pk):
+    """
+    Operator recovery confirmation page for a FetchRun stuck in RUNNING.
+
+    GET renders the run's facts plus the duplicate-run warning; POST performs
+    the targeted sweep (interrupt + auto-resume) via recover_run() and
+    redirects to the run detail with a message saying whether a new fetch
+    actually started. Only reachable for runs still in RUNNING — anything
+    else is already terminal and redirects straight back.
+    """
+    from georiva.sources.acquisition_recovery import (
+        RESUME_ALREADY_UNDER_WAY,
+        RESUME_CAP_REACHED,
+        RESUME_QUEUED,
+        recover_run,
+    )
+    from georiva.sources.acquisition_tracking import with_live_counters
+    from georiva.sources.models import FetchRun
+
+    feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    run = get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed)
+    detail_url = reverse(
+        "data_feed_fetch_run_detail",
+        kwargs={"feed_pk": feed.pk, "run_pk": run.pk},
+    )
+
+    if run.status != FetchRun.Status.RUNNING:
+        messages.info(
+            request,
+            _("This run is already %s — nothing to recover.")
+            % run.get_status_display().lower(),
+        )
+        return redirect(detail_url)
+
+    if request.method == "POST":
+        outcome = recover_run(run)
+        if outcome == RESUME_QUEUED:
+            messages.success(
+                request, _("Run marked as interrupted — resume queued."),
+            )
+        elif outcome == RESUME_ALREADY_UNDER_WAY:
+            messages.warning(
+                request,
+                _("Run marked as interrupted — resume not queued: "
+                  "recovery is already under way."),
+            )
+        elif outcome == RESUME_CAP_REACHED:
+            messages.warning(
+                request,
+                _("Run marked as interrupted — resume not queued: "
+                  "the auto-resume cap was reached. Use “Fetch now” on the "
+                  "feed to retry manually."),
+            )
+        else:
+            messages.error(
+                request,
+                _("Run marked as interrupted, but queuing the resume failed "
+                  "— check the logs."),
+            )
+        return redirect(detail_url)
+
+    run = with_live_counters(run)
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
+            {"url": detail_url, "label": _("Run")},
+            {"url": None, "label": _("Recover")},
+        ],
+        "header_title": _("Recover fetch run — %s") % feed.name,
+        "header_icon": "download",
+        "feed": feed,
+        "run": run,
+        "cancel_url": detail_url,
+    }
+    return render(
+        request, "georivasources/data_feed_fetch_run_recover.html", context,
+    )
+
+
 def derived_product_run_detail(request, product_pk, run_pk):
     """
     Run-detail leaf (ADR-0008, issue #212): exactly what happened for one

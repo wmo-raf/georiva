@@ -1,0 +1,100 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Recover fetch run" %} — {{ feed.name }}{% endblock %}
+
+{% block extra_css %}
+    <style>
+        .frr-warning-box {
+            background: color-mix(in srgb, var(--w-color-warning-100) 12%, transparent);
+            border: 1px solid color-mix(in srgb, var(--w-color-warning-100) 45%, transparent);
+            border-radius: 6px;
+            padding: 1.1em 1.25em;
+            margin-bottom: 1.5em;
+        }
+
+        .frr-warning-title {
+            font-weight: 700;
+            color: var(--w-color-text-label);
+            margin: 0 0 0.5em;
+            font-size: 0.95em;
+        }
+
+        .frr-warning-intro {
+            font-size: 0.9em;
+            margin: 0 0 0.6em;
+            color: var(--w-color-text-label);
+        }
+
+        .frr-facts {
+            border-collapse: collapse;
+            margin-bottom: 1.5em;
+        }
+
+        .frr-facts th {
+            text-align: left;
+            padding: 0.35em 1.5em 0.35em 0;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+            font-weight: 600;
+        }
+
+        .frr-facts td {
+            padding: 0.35em 0;
+            font-size: 0.9em;
+        }
+
+        .frr-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <div class="frr-warning-box">
+        <p class="frr-warning-title">
+            {% trans "Only recover this run if you are sure its stuck." %}
+        </p>
+        <p class="frr-warning-intro">
+            {% trans "If the run is actually still in progress, recovering will start a duplicate fetch that races it. Files already stored are skipped by the resume, but anything in flight may be downloaded twice." %}
+        </p>
+        <p class="frr-warning-intro">
+            {% trans "Recovering marks this run as interrupted, records its unfinished file as failed, and queues a fresh fetch for this feed that picks up where the run left off." %}
+        </p>
+    </div>
+
+    <table class="frr-facts">
+        <tbody>
+        <tr>
+            <th>{% trans "Feed" %}</th>
+            <td>{{ feed.name }}</td>
+        </tr>
+        <tr>
+            <th>{% trans "Started" %}</th>
+            <td>{{ run.started_at }} ({{ run.started_at|timesince }} {% trans "ago" %})</td>
+        </tr>
+        <tr>
+            <th>{% trans "Progress so far" %}</th>
+            <td>
+                {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
+                    {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
+                {% endblocktrans %}
+            </td>
+        </tr>
+        </tbody>
+    </table>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="frr-actions">
+            <button type="submit" class="button no">
+                {% trans "Yes, recover this run" %}
+            </button>
+            <a href="{{ cancel_url }}" class="button button-secondary">
+                {% trans "Cancel" %}
+            </a>
+        </div>
+    </form>
+{% endblock %}
