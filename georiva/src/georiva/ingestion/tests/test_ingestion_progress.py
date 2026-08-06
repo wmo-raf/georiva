@@ -145,7 +145,6 @@ class ProcessTimestampProgressTests(TestCase):
         handler.item_handler.get_or_create.return_value = (mock_item, True)
         handler.asset_handler = MagicMock()
         handler.asset_handler.process_variable.return_value = [MagicMock()]
-        handler.extent_handler = MagicMock()
         return handler
 
     def _make_collection(self, *var_slugs):

@@ -1,11 +1,14 @@
 """
-AssetHandler — extract, encode, and persist assets for a single variable.
+AssetHandler — extract and encode raster data for a single variable.
 
 Owns:
   - Direct and chunked raster extraction
-  - RGBA encoding
-  - COG / PNG / JSON asset writing
-  - Asset DB record creation via update_or_create
+  - RGBA encoding (block-wise for chunked extraction)
+
+Everything downstream of the extracted array — boundary masking, COG / PNG /
+JSON writing, Asset DB records, collection extent — is the shared
+AssetMaterializer (``ingestion/materialization.py``), which the derivation
+engine uses too.
 """
 import logging
 from datetime import datetime
@@ -14,16 +17,14 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from django.conf import settings
-from wagtail import hooks
 
 from georiva.core.models import Asset, Item
-from georiva.core.storage import storage
 from georiva.ingestion.asset_writer import AssetWriter
 from georiva.ingestion.clipper import BoundaryClipper
-from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from georiva.ingestion.encoder import VariableEncoder
 from georiva.ingestion.extractor import VariableExtractor
-from georiva.ingestion.utils import compute_stats, iter_windows
+from georiva.ingestion.materialization import AssetMaterializer
+from georiva.ingestion.utils import iter_windows
 
 if TYPE_CHECKING:
     from georiva.core.models import Variable
@@ -48,6 +49,7 @@ class AssetHandler:
         self.writer = writer
         self.extractor = extractor
         self.encoder = encoder
+        self.materializer = AssetMaterializer(writer, encoder)
     
     # =========================================================================
     # Public entry point
@@ -72,14 +74,13 @@ class AssetHandler:
 
         Steps:
           1. Extract raw float array + encode to RGBA
-          2. Apply geometry mask (if clipper is active)
-          3. Compute statistics
-          4. Write COG / PNG / JSON assets and create Asset DB records
+          2. Hand off to the shared AssetMaterializer (mask, write, record,
+             expand collection extent)
 
         Returns the list of Asset records created (typically 2: COG + PNG).
         """
         logger.debug("Processing variable: %s", variable.slug)
-        
+
         final_data, final_rgba = self._extract_and_encode(
             variable=variable,
             local_path=local_path,
@@ -87,28 +88,22 @@ class AssetHandler:
             width=width,
             height=height,
             clip_window=clip_window,
-            clipper=clipper,
-            bounds=bounds,
         )
-        
-        stats = compute_stats(final_data)
-        
-        assets = self._save_assets(
+
+        assets = self.materializer.materialize_variable(
             item=item,
             variable=variable,
-            final_data=final_data,
-            final_rgba=final_rgba,
-            stats=stats,
+            data=final_data,
+            rgba=final_rgba,
             bounds=bounds,
             crs=crs,
-            width=width,
-            height=height,
             timestamp=timestamp,
+            clipper=clipper,
         )
-        
+
         # Explicitly release large arrays — can be 64 MB+ for global data.
         del final_data, final_rgba
-        
+
         return assets
     
     # =========================================================================
@@ -123,8 +118,6 @@ class AssetHandler:
             width: int,
             height: int,
             clip_window: Optional[dict] = None,
-            clipper: Optional[BoundaryClipper] = None,
-            bounds: Optional[tuple] = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Extract raw data from the source file and encode it to RGBA.
@@ -139,7 +132,7 @@ class AssetHandler:
                              grid in 2048×2048 blocks to avoid OOM on
                              continental or global datasets.
 
-        After extraction applies the boundary geometry mask if configured.
+        Boundary geometry masking happens downstream in the materializer.
         """
         use_chunked = (
                 width * height > settings.GEORIVA_CHUNK_THRESHOLD_PIXELS
@@ -166,13 +159,7 @@ class AssetHandler:
                 height=height,
                 clip_window=clip_window,
             )
-        
-        if clipper and clipper.is_active:
-            final_data = clipper.apply_geometry_mask(
-                final_data, bounds, nodata=np.nan
-            )
-            final_rgba = clipper.apply_rgba_mask(final_rgba, bounds)
-        
+
         return final_data, final_rgba
     
     def _extract_direct(
@@ -222,163 +209,3 @@ class AssetHandler:
             del chunk
         
         return final_data, final_rgba
-    
-    # =========================================================================
-    # Asset writing + DB records
-    # =========================================================================
-    
-    def _save_assets(
-            self,
-            item: Item,
-            variable: "Variable",
-            final_data: np.ndarray,
-            final_rgba: np.ndarray,
-            stats: dict,
-            bounds: tuple,
-            crs: str,
-            width: int,
-            height: int,
-            timestamp: datetime,
-    ) -> list[Asset]:
-        """
-        Write processed data to storage and create Asset DB records.
-
-        Writes three asset types per variable per timestamp:
-          COG  — Cloud-Optimized GeoTIFF (primary; TiTiler + analysis layer)
-          PNG  — Encoded RGBA visual (GL web map clients)
-          JSON — Metadata sidecar (frontend + API responses)
-
-        COG failure raises immediately (PNG and JSON are skipped).
-        PNG and JSON failures are non-fatal — a warning is logged.
-        """
-        catalog = item.collection.catalog
-        collection_slug = item.collection.slug
-
-        if item.reference_time:
-            ref_str = item.reference_time.strftime("%Y%m%dT%H%M%S")
-            base_name = f"{variable.slug}_{timestamp.strftime('%H%M%S')}__ref{ref_str}"
-        else:
-            base_name = f"{variable.slug}_{timestamp.strftime('%H%M%S')}"
-        
-        base_dir = storage.build_asset_path(
-            org=catalog.organisation.slug,
-            catalog=catalog.slug,
-            collection=collection_slug,
-            variable=variable.slug,
-            timestamp=timestamp,
-            filename="",
-        ).rstrip("/")
-        
-        assets: list[Asset] = []
-        visual_asset: Optional[Asset] = None
-        
-        # ── COG ───────────────────────────────────────────────────────────────
-        cog_path = f"{base_dir}/{base_name}.tif"
-        try:
-            stored_cog = self.writer.write_cog(final_data, cog_path, bounds, crs)
-            data_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.COG,
-                defaults={
-                    "href": stored_cog,
-                    "media_type": (
-                        "image/tiff; application=geotiff; profile=cloud-optimized"
-                    ),
-                    "roles": ["data"],
-                    "file_size": self._get_file_size(storage.assets, stored_cog),
-                    "width": width,
-                    "height": height,
-                    "bands": 1,
-                    "stats_min": stats.get("min"),
-                    "stats_max": stats.get("max"),
-                    "stats_mean": stats.get("mean"),
-                    "stats_std": stats.get("std"),
-                    "extra_fields": {
-                        "compression": "deflate",
-                        "nodata": None,
-                    },
-                },
-            )
-            assets.append(data_asset)
-            self._after_save_asset(data_asset)
-        except Exception as e:
-            logger.error("COG save failed for %s: %s", variable.slug, e)
-            raise
-        
-        # ── PNG ───────────────────────────────────────────────────────────────
-        png_path = f"{base_dir}/{base_name}.png"
-        try:
-            stored_png = self.writer.write_png(final_rgba, png_path)
-            visual_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.PNG,
-                defaults={
-                    "href": stored_png,
-                    "media_type": "image/png",
-                    "roles": ["visual"],
-                    "file_size": self._get_file_size(storage.assets, stored_png),
-                    "width": width,
-                    "height": height,
-                    "bands": 4,
-                    "stats_min": stats.get("min"),
-                    "stats_max": stats.get("max"),
-                    "stats_mean": stats.get("mean"),
-                    "stats_std": stats.get("std"),
-                    "extra_fields": {
-                        "imageUnscale": [variable.value_min, variable.value_max],
-                        "scale": variable.scale_type or "linear",
-                    },
-                },
-            )
-            assets.append(visual_asset)
-            self._after_save_asset(visual_asset)
-        except Exception as e:
-            logger.error("PNG save failed for %s: %s", variable.slug, e)
-        
-        # ── JSON sidecar ──────────────────────────────────────────────────────
-        meta_path = f"{base_dir}/{base_name}.json"
-        try:
-            metadata = {
-                "variable": variable.slug,
-                "name": variable.name,
-                "units": variable.unit.symbol if variable.unit else "",
-                "timestamp": timestamp.isoformat(),
-                "reference_time": (
-                    item.reference_time.isoformat() if item.reference_time else None
-                ),
-                "bounds": list(bounds),
-                "width": width,
-                "height": height,
-                "crs": crs,
-                "transform": variable.transform_type,
-                "imageUnscale": [variable.value_min, variable.value_max],
-                "scale": variable.scale_type or "linear",
-                "stats": stats,
-            }
-            if visual_asset:
-                metadata["color_map"] = visual_asset.variable.weather_layers_palette
-            
-            self.writer.write_metadata(metadata, meta_path)
-        except Exception as e:
-            logger.warning("Metadata save failed for %s: %s", variable.slug, e)
-        
-        return assets
-    
-    # =========================================================================
-    # Helpers
-    # =========================================================================
-    
-    def _after_save_asset(self, asset: Asset) -> None:
-        try:
-            for fn in hooks.get_hooks(GEORIVA_AFTER_SAVE_ASSET):
-                return fn(asset)
-        except Exception as e:
-            logger.warning("Post-save hook failed for asset %s: %s", asset.pk, e)
-    
-    def _get_file_size(self, bucket, path: str) -> Optional[int]:
-        try:
-            return bucket.size(path)
-        except Exception:
-            return None

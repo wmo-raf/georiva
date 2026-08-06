@@ -99,7 +99,7 @@ class PromotionThroughEngineTests(_PromotionFixture):
         self.assertEqual(link.source_staging_item, self.sitem)
         self.assertIsNone(link.source_published_item)
         self.assertEqual(link.recipe_id, "promotion")
-        self.assertEqual(link.recipe_version, "3")
+        self.assertEqual(link.recipe_version, "4")
         self.assertEqual(link.input_hash, result.input_hash)
 
     def test_derivation_run_records_lifecycle(self):
@@ -247,7 +247,11 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
 
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
-        self.assertEqual(item.assets.get().format, "cog")
+        # The shared materializer writes the served pair from the one
+        # data OutputAsset — a COG plus its visual PNG.
+        self.assertEqual(
+            set(item.assets.values_list("format", flat=True)), {"cog", "png"},
+        )
         self.assertEqual(DerivationLink.objects.filter(derived_item=item).count(), 1)
         self.assertEqual(
             DerivationRun.objects.get(recipe_type="fake").status,
@@ -255,12 +259,23 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
         )
 
 
-class RegisterPngAssetTests(_PromotionFixture):
-    """The engine writes a PNG (encoded RGBA) for an array OutputAsset declared
-    with format='png', alongside the COG path for format='cog' (ADR: derived
-    products emit COG + PNG like ingestion)."""
+class RegisterAssetMaterializationTests(_PromotionFixture):
+    """An array OutputAsset materializes the full served trio (COG + visual
+    PNG + JSON sidecar) through the shared AssetMaterializer; an explicit
+    format='png' OutputAsset is redundant and skipped."""
 
-    def test_png_output_asset_is_encoded_and_written_as_png(self):
+    def _item(self):
+        return Item.objects.create(
+            collection=self.pub_col,
+            time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=2, height=3,
+        )
+
+    def _materializer(self, writer):
+        from georiva.ingestion.materialization import AssetMaterializer
+        return AssetMaterializer(writer)
+
+    def test_cog_output_asset_materializes_cog_png_and_sidecar(self):
         import numpy as np
 
         from georiva.core.models import Asset
@@ -268,27 +283,66 @@ class RegisterPngAssetTests(_PromotionFixture):
         from georiva.processing.recipe import OutputAsset
 
         writer = _mock_writer()
-        item = Item.objects.create(
-            collection=self.pub_col,
-            time=datetime(2020, 1, 1, tzinfo=timezone.utc),
-        )
+        item = self._item()
         data = np.full((3, 2), 12.0, dtype="float32")
 
-        asset = _register_asset(
+        assets, grid = _register_asset(
+            item,
+            OutputAsset(variable=self.variable, roles=["data"], format="cog",
+                        array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
+                        width=2, height=3),
+            writer,
+            self._materializer(writer),
+        )
+
+        writer.write_cog.assert_called_once()
+        writer.write_png.assert_called_once()
+        writer.write_metadata.assert_called_once()
+        rgba = writer.write_png.call_args.args[0]
+        self.assertEqual(rgba.shape, (3, 2, 4))
+        self.assertEqual(
+            {a.format for a in assets}, {Asset.Format.COG, Asset.Format.PNG},
+        )
+        # The grid the array was written with — run_unit stamps it on the item.
+        self.assertEqual(grid, ([0, 0, 1, 1], 2, 3))
+        png = item.assets.get(format=Asset.Format.PNG)
+        self.assertEqual(png.extra_fields["imageUnscale"], [0, 50])
+
+    def test_explicit_png_output_asset_is_skipped(self):
+        import numpy as np
+
+        from georiva.processing.engine import _register_asset
+        from georiva.processing.recipe import OutputAsset
+
+        writer = _mock_writer()
+        item = self._item()
+        data = np.full((3, 2), 12.0, dtype="float32")
+
+        assets, grid = _register_asset(
             item,
             OutputAsset(variable=self.variable, roles=["visual"], format="png",
                         array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
                         width=2, height=3),
             writer,
+            self._materializer(writer),
         )
 
-        writer.write_png.assert_called_once()
-        # The encoder turned the 2D data into an (H, W, 4) RGBA array.
-        rgba = writer.write_png.call_args.args[0]
-        self.assertEqual(rgba.shape, (3, 2, 4))
-        self.assertEqual(asset.format, Asset.Format.PNG)
-        self.assertEqual(asset.roles, ["visual"])
+        self.assertEqual(assets, [])
+        self.assertIsNone(grid)
+        writer.write_png.assert_not_called()
         writer.write_cog.assert_not_called()
+
+    def test_run_unit_expands_the_derived_collections_extent(self):
+        self.assertIsNone(self.pub_col.bounds)
+
+        result = self._run_promotion()
+
+        self.assertEqual(result.status, "completed")
+        self.pub_col.refresh_from_db()
+        self.assertEqual(self.pub_col.bounds, [0, 0, 1, 1])
+        self.assertEqual(
+            self.pub_col.time_start, datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
 
 
 class AssetOutputPathTests(_PromotionFixture):

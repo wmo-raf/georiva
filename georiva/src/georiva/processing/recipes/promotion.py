@@ -47,8 +47,11 @@ class PromotionRecipe(BaseRecipe):
     # v3: those assets now use the shared ingestion path scheme
     #     ({variable}_{HHMMSS}) instead of the divergent {variable}_{YYYYMMDDTHHMMSS},
     #     so href-agnostic consumers resolve them.
+    # v4: assets go through the shared AssetMaterializer (engine emits the
+    #     PNG + JSON sidecar with every COG, clipped to the catalog boundary),
+    #     and south-up staging rasters are flipped north-up on read.
     # Bumping the version re-derives already-promoted items on the next sweep.
-    version = "3"
+    version = "4"
 
     # ---- declarative surface ------------------------------------------------
 
@@ -140,17 +143,13 @@ class PromotionRecipe(BaseRecipe):
                 BucketType.STAGING, asset.href
             )
             stats = _array_stats(data)
-            # A served COG (data) + a visual PNG (encoded by the engine), the
-            # same pair ingestion writes — so promotion output is tile-servable
-            # and shows in the public catalog (which is COG-gated).
+            # One data OutputAsset per staging asset; the engine's shared
+            # materializer writes the full served trio (COG + visual PNG +
+            # JSON sidecar) from it, same as ingestion.
             out.append(OutputAsset(
                 variable=variable, roles=["data"], format="cog", array=data,
                 bounds=bounds, crs=crs, width=width, height=height,
                 stats=stats, checksum=asset.checksum,
-            ))
-            out.append(OutputAsset(
-                variable=variable, roles=["visual"], format="png", array=data,
-                bounds=bounds, crs=crs, width=width, height=height,
             ))
         return out
 
@@ -159,22 +158,11 @@ class PromotionRecipe(BaseRecipe):
     def read_raster(self, bucket_type, href):
         """Read a stored single-band raster into
         ``(data, bounds, crs, width, height)`` — the recipe's only real I/O,
-        patched in unit tests. Nodata is mapped to NaN so the COG stats and the
-        PNG alpha both skip it."""
-        import numpy as np
-        import rasterio
-        from rasterio.io import MemoryFile
+        patched in unit tests. Delegates to the shared derivation reader
+        (north-up, nodata→NaN)."""
+        from georiva.processing.raster_io import read_north_up
 
-        from georiva.core.storage import storage
-
-        raw = storage.bucket(bucket_type).read_bytes(href)
-        with MemoryFile(raw) as memfile, memfile.open() as src:
-            data = src.read(1).astype("float32")
-            if src.nodata is not None:
-                data = np.where(data == src.nodata, np.nan, data)
-            bounds = list(src.bounds)
-            crs = src.crs.to_string() if src.crs else "EPSG:4326"
-            return data, bounds, crs, src.width, src.height
+        return read_north_up(bucket_type, href)
 
     # ---- helpers ------------------------------------------------------------
 

@@ -37,6 +37,16 @@
 }
 
 /* ==========================================================================
+   Map — missing visual asset notice
+   ========================================================================== */
+
+/* Hidden until the JS finds no PNG asset for the selected variable;
+   shown with display:flex (shares .gr-map-loading's centred layout). */
+#grMapNoVisual {
+    display: none;
+}
+
+/* ==========================================================================
    Downloads
    ========================================================================== */
 

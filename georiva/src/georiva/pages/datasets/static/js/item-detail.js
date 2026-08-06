@@ -174,13 +174,14 @@ class ItemDetailMap {
             if (!res.ok) throw new Error(`EDR fetch failed: ${res.status}`);
             this.edrData = await res.json();
         } catch (e) {
+            // EDR only supplies parameter styling and the fitBounds extent —
+            // the raster itself is placed by the item bounds, so keep going.
             console.error('Failed to load EDR metadata:', e);
-            return;
         }
 
-        this.parameterNames = this.edrData.parameter_names || {};
+        this.parameterNames = this.edrData?.parameter_names || {};
 
-        const bbox = this.edrData.extent?.spatial?.bbox?.[0];
+        const bbox = this.edrData?.extent?.spatial?.bbox?.[0] || this.config.itemBounds;
         if (bbox?.length === 4) {
             this.map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {padding: 60, duration: 500});
         }
@@ -207,35 +208,19 @@ class ItemDetailMap {
 
     // ── Raster layer (WeatherLayers PNG) ───────────────────────────────────
 
-    _buildAssetUrl(varSlug) {
-        const dt = new Date(this.config.itemTime);
-        const Y = dt.getUTCFullYear();
-        const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
-        const d = String(dt.getUTCDate()).padStart(2, '0');
-        const HH = String(dt.getUTCHours()).padStart(2, '0');
-        const MM = String(dt.getUTCMinutes()).padStart(2, '0');
-        const SS = String(dt.getUTCSeconds()).padStart(2, '0');
+    // The PNG is georeferenced by the item's own bounds — the collection
+    // extent is a coincidental match for ingested items and plain wrong for
+    // anything else (a derived collection with no extent used to fall back to
+    // the whole world, stretching the overlay across the map).
+    _rasterBounds() {
+        const item = this.config.itemBounds;
+        if (item?.length === 4) return item;
+        return this.edrData?.extent?.spatial?.bbox?.[0] || [-180, -90, 180, 90];
+    }
 
-        let filename = `${varSlug}_${HH}${MM}${SS}`;
-
-        if (this.config.referenceTime) {
-            const rt = new Date(this.config.referenceTime);
-            const refStr = [
-                rt.getUTCFullYear(),
-                String(rt.getUTCMonth() + 1).padStart(2, '0'),
-                String(rt.getUTCDate()).padStart(2, '0'),
-                'T',
-                String(rt.getUTCHours()).padStart(2, '0'),
-                String(rt.getUTCMinutes()).padStart(2, '0'),
-                String(rt.getUTCSeconds()).padStart(2, '0'),
-            ].join('');
-            filename += `__ref${refStr}`;
-        }
-
-        // Org-first, matching the storage grammar every bucket key follows:
-        // catalog slugs repeat across organisations, so the leading segment is
-        // what makes the key address this portal's asset and not a namesake.
-        return `${this.config.minioBase}/${this.config.orgSlug}/${this.config.catalogSlug}/${this.config.collectionSlug}/${varSlug}/${Y}/${m}/${d}/${filename}.png`;
+    _showNoVisual(visible) {
+        const el = document.getElementById('grMapNoVisual');
+        if (el) el.style.display = visible ? 'flex' : 'none';
     }
 
     async _loadRasterLayer() {
@@ -247,15 +232,23 @@ class ItemDetailMap {
         const paletteMin = xg.palette_min ?? xg.value_min ?? 0;
         const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
         const units = param?.unit?.symbol || '';
-        const url = this._buildAssetUrl(this.currentVarSlug);
 
         this.currentPalette = {palette, paletteMin, paletteMax};
         this._clearRasterLayer();
+        this._showNoVisual(false);
+
+        // The real stored asset href, injected server-side — never rebuilt
+        // from the storage grammar here.
+        const url = this.config.pngAssets?.[this.currentVarSlug];
+        if (!url) {
+            this._showNoVisual(true);
+            return;
+        }
 
         try {
             const image = await WeatherLayers.loadTextureData(url);
             const opacity = parseInt(document.getElementById('grOpacitySlider').value, 10) / 100;
-            const bbox = this.edrData?.extent?.spatial?.bbox?.[0] || [-180, -90, 180, 90];
+            const bbox = this._rasterBounds();
 
             this.currentRasterLayer = new WeatherLayers.RasterLayer({
                 id: 'georiva-raster',
@@ -276,6 +269,7 @@ class ItemDetailMap {
         } catch (err) {
             console.error('WeatherLayers load failed:', url, err);
             this._clearRasterLayer();
+            this._showNoVisual(true);
         }
     }
 

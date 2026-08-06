@@ -67,11 +67,22 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         cls.catalog = tree["catalog"]
         cls.collection = tree["collection"]
         cls.item = tree["item"]
+        cls.variable = tree["variable"]
         # The map only offers the choropleth for a collection that has levels,
         # and only lists an item that has a COG for the active variable.
         Collection.objects.filter(pk=cls.collection.pk).update(boundary_stats_levels=[1])
         cls.collection.refresh_from_db()
         Asset.objects.filter(item=cls.item).update(format=Asset.Format.COG)
+        # The visual PNG whose stored href the config must hand to the map.
+        from georiva.core.models import Item
+
+        Item.objects.filter(pk=cls.item.pk).update(bounds=[20.0, -12.0, 52.0, 23.0])
+        cls.item.refresh_from_db()
+        cls.png = Asset.objects.create(
+            item=cls.item, variable=cls.variable,
+            format=Asset.Format.PNG, roles=["visual"],
+            href="kenya/shared/shared/shared/2026/03/01/shared_120000.png",
+        )
 
     def setUp(self):
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
@@ -97,6 +108,13 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         self.assertIn(f"catalog={self.catalog.slug}", url)
         self.assertIn(f"collection={self.collection.slug}", url)
 
-    def test_the_asset_base_carries_the_org_the_storage_keys_use(self):
-        """The map rebuilds PNG keys client-side, and keys are org-first."""
-        self.assertEqual(self._config()["orgSlug"], "kenya")
+    def test_png_asset_hrefs_are_injected_per_variable(self):
+        """The map reads stored asset URLs — it never rebuilds bucket keys."""
+        config = self._config()
+        self.assertIn(self.variable.slug, config["pngAssets"])
+        self.assertTrue(config["pngAssets"][self.variable.slug].endswith(self.png.href))
+
+    def test_item_bounds_place_the_overlay(self):
+        """The PNG is georeferenced by the item's own bounds, not the
+        collection extent (a derived collection may have none at all)."""
+        self.assertEqual(self._config()["itemBounds"], [20.0, -12.0, 52.0, 23.0])

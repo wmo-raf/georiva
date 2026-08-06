@@ -59,20 +59,42 @@ def _asset_output_path(item, variable, fmt: str) -> str:
     )
 
 
+def catalog_clipper(collection):
+    """The catalog's BoundaryClipper, or None when it doesn't clip. Derived
+    outputs follow the same clip configuration ingested ones do, so a clipped
+    catalog shows one coherent footprint across both."""
+    catalog = collection.catalog
+    if catalog.boundary_id is None or catalog.clip_mode == "none":
+        return None
+    from georiva.ingestion.clipper import BoundaryClipper
+
+    return BoundaryClipper(
+        boundary=catalog.boundary,
+        apply_mask=(catalog.clip_mode == "mask"),
+    )
+
+
 def _register_item(out_item, recipe: BaseRecipe, input_hash: str):
-    """Create or update (overwrite-in-place) the Published Item for a unit."""
+    """Create or update (overwrite-in-place) the Published Item for a unit.
+
+    Bounds are normalised here; the clip window is NOT computed here — the
+    asset materialization crops the actual arrays, and ``run_unit`` stamps
+    the item with the grid the assets really got, so the item's bounds can
+    never disagree with the PNG they place."""
     from georiva.core.models import Item
-    from georiva.ingestion.utils import ensure_utc  # tz-normalise
+    from georiva.ingestion.utils import ensure_utc, normalize_bounds
 
     time = ensure_utc(out_item.time)
     ref = ensure_utc(out_item.reference_time) if out_item.reference_time else None
+
+    bounds = normalize_bounds(out_item.bounds) if out_item.bounds is not None else None
 
     item, _ = Item.objects.get_or_create(
         collection=out_item.collection,
         time=time,
         reference_time=ref,
         defaults={
-            "bounds": out_item.bounds,
+            "bounds": bounds,
             "crs": out_item.crs,
             "width": out_item.width,
             "height": out_item.height,
@@ -80,7 +102,7 @@ def _register_item(out_item, recipe: BaseRecipe, input_hash: str):
     )
 
     # Overwrite-in-place: refresh spatial metadata + derivation provenance.
-    item.bounds = out_item.bounds if out_item.bounds is not None else item.bounds
+    item.bounds = bounds if bounds is not None else item.bounds
     item.crs = out_item.crs or item.crs
     item.width = out_item.width if out_item.width is not None else item.width
     item.height = out_item.height if out_item.height is not None else item.height
@@ -96,49 +118,77 @@ def _register_item(out_item, recipe: BaseRecipe, input_hash: str):
     return item
 
 
-def _register_asset(item, oa, writer):
-    """Write the asset bytes (COG or passthrough copy) and upsert the Asset row."""
+def _register_asset(item, oa, writer, materializer, clipper=None):
+    """Materialize an array asset through the shared ingestion sequence, or
+    copy a passthrough object as-is. Returns ``(assets, grid)`` where ``grid``
+    is the ``(bounds, width, height)`` the array was actually written with
+    (post-crop) — ``run_unit`` stamps the item with it — or None for
+    passthrough/skipped assets.
+
+    An array OutputAsset always yields the full served trio — COG + visual
+    PNG + JSON sidecar — via ``AssetMaterializer``, exactly what ingestion
+    writes; recipes no longer opt in to the PNG. A ``format="png"``
+    OutputAsset is therefore redundant and skipped."""
     from georiva.core.storage import storage
     from georiva.core.models import Asset
 
-    path = _asset_output_path(item, oa.variable, oa.format)
-
     if oa.array is not None:
         if oa.format == "png":
-            # Encode the data array to RGBA and write a PNG (the visual asset),
-            # mirroring ingestion's COG+PNG output for served items.
-            from georiva.ingestion.encoder import VariableEncoder
-            rgba = VariableEncoder().encode_to_rgba(oa.array, oa.variable)
-            href = writer.write_png(rgba, path)
-        else:
-            href = writer.write_cog(
-                oa.array, path, tuple(oa.bounds) if oa.bounds else None, oa.crs,
+            logger.info(
+                "Skipping explicit png OutputAsset for %s — the materializer "
+                "emits the visual PNG with the COG",
+                getattr(oa.variable, "slug", "?"),
             )
-    elif oa.passthrough is not None:
+            return [], None
+        bounds = oa.bounds if oa.bounds is not None else item.bounds
+        if bounds is None:
+            raise ValueError(
+                "OutputAsset needs bounds (its own or the item's) to materialize"
+            )
+        data = oa.array
+        stats = oa.stats or None
+        if clipper is not None:
+            data, bounds = materializer.clip_array(data, bounds, clipper)
+            stats = None  # full-grid stats are stale after cropping
+        assets = materializer.materialize_variable(
+            item=item,
+            variable=oa.variable,
+            data=data,
+            bounds=bounds,
+            crs=oa.crs,
+            timestamp=item.time,
+            clipper=clipper,
+            stats=stats,
+            checksum=oa.checksum,
+        )
+        height, width = data.shape[:2]
+        return assets, (list(bounds), width, height)
+
+    if oa.passthrough is not None:
+        path = _asset_output_path(item, oa.variable, oa.format)
         src_bucket_type, src_href = oa.passthrough
         data = storage.bucket(src_bucket_type).read_bytes(src_href)
         href = writer.bucket.save(path, data)
-    else:
-        raise ValueError("OutputAsset needs either `array` or `passthrough`")
+        stats = oa.stats or {}
+        asset, _ = Asset.objects.update_or_create(
+            item=item,
+            variable=oa.variable,
+            format=oa.format,
+            defaults={
+                "href": href,
+                "roles": list(oa.roles),
+                "checksum": oa.checksum,
+                "width": oa.width,
+                "height": oa.height,
+                "stats_min": stats.get("min"),
+                "stats_max": stats.get("max"),
+                "stats_mean": stats.get("mean"),
+                "stats_std": stats.get("std"),
+            },
+        )
+        return [asset], None
 
-    stats = oa.stats or {}
-    asset, _ = Asset.objects.update_or_create(
-        item=item,
-        variable=oa.variable,
-        format=oa.format,
-        defaults={
-            "href": href,
-            "roles": list(oa.roles),
-            "checksum": oa.checksum,
-            "width": oa.width,
-            "height": oa.height,
-            "stats_min": stats.get("min"),
-            "stats_max": stats.get("max"),
-            "stats_mean": stats.get("mean"),
-            "stats_std": stats.get("std"),
-        },
-    )
-    return asset
+    raise ValueError("OutputAsset needs either `array` or `passthrough`")
 
 
 def _write_links(item, resolved, recipe: BaseRecipe, input_hash: str):
@@ -317,6 +367,9 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
             from georiva.core.storage import storage
             from georiva.ingestion.asset_writer import AssetWriter
             writer = AssetWriter(storage.assets)
+        from georiva.ingestion.materialization import AssetMaterializer
+        materializer = AssetMaterializer(writer)
+        clipper = catalog_clipper(out_item.collection)
 
         logger.info("[unit %s] %s step 4/6 — computing (recipe.transform)…", pos, tag)
         t_tx = time.monotonic()
@@ -330,13 +383,21 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
                     pos, tag, len(out_assets))
         with transaction.atomic():
             item = _register_item(out_item, recipe, ihash)
+            item_grid = None
             for j, oa in enumerate(out_assets, 1):
                 logger.info(
                     "[unit %s] %s   asset %d/%d — variable=%s format=%s roles=%s",
                     pos, tag, j, len(out_assets),
                     getattr(oa.variable, "slug", "?"), oa.format, ",".join(oa.roles),
                 )
-                _register_asset(item, oa, writer)
+                _, grid = _register_asset(item, oa, writer, materializer, clipper)
+                if item_grid is None and grid is not None:
+                    item_grid = grid
+            if item_grid is not None:
+                # The grid the arrays were actually written with (post-crop) —
+                # the one source of truth the map places the PNG by.
+                item.bounds, item.width, item.height = item_grid
+                item.save(update_fields=["bounds", "width", "height"])
             _write_links(item, resolved, recipe, ihash)
             run.mark_completed(produced_item=item, input_hash=ihash)
         logger.info("[unit %s] %s registered item id=%s + %d asset(s), lineage links written",

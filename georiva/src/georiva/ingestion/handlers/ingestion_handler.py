@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Optional
 from georiva.core.models import Collection, Item, Asset
 from georiva.ingestion.handlers.asset_handler import AssetHandler
 from georiva.ingestion.handlers.context import IngestionContext
-from georiva.ingestion.handlers.extent_handler import CollectionExtentHandler
 from georiva.ingestion.handlers.item_handler import ItemHandler
 from georiva.ingestion.utils import ensure_utc, normalize_bounds
 
@@ -42,7 +41,6 @@ class IngestionHandler:
         self.ctx = ctx
         self.item_handler = ItemHandler()
         self.asset_handler = AssetHandler(ctx.writer, ctx.extractor, ctx.encoder)
-        self.extent_handler = CollectionExtentHandler()
     
     # =========================================================================
     # Public entry point
@@ -160,9 +158,9 @@ class IngestionHandler:
                 if progress is not None:
                     progress.increment(state=f"{variable.slug}: failed — {e}")
         
-        # ── Extent update ─────────────────────────────────────────────────────
-        self.extent_handler.expand(collection, ts_utc, bounds)
-        
+        # Extent expansion happens per successful variable inside the shared
+        # AssetMaterializer, so an all-failed run no longer widens the extent.
+
         # ── Orphan guard ──────────────────────────────────────────────────────
         if not assets:
             self.item_handler.delete_orphan(item)
