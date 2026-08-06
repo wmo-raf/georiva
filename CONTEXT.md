@@ -337,18 +337,18 @@ link. Sparkline data (30-day binary per-day status: success / failed / empty) is
 `FileIngestion.collections` M2M — completed runs for success days, failed runs for failure days.
 _Avoid_: ingestion dashboard, activity panel
 
-**Acquisition Feed**:
-A dedicated admin page showing a live, chronologically-ordered feed of acquisition activity — both `FetchRun`
-records (automated DataFeed executions) and `UploadSession` records (manual uploads). Each card shows the run/session
-status with per-file detail expandable. Updated in real time via SSE.
-_Avoid_: fetch feed, arrival feed, data arrival feed
-
 **Ingestion Feed**:
 A dedicated admin page showing a live, chronologically-ordered feed of `FileIngestion` records with inline
 per-job step-by-step progress and summary fields (variables discovered, valid time range, timestep count). Updated
-in real time via SSE. Covers files from any trigger — automated fetch, manual upload, or sweep. Accessible from
-the sidebar and from the Collection Health Panel.
+in real time via SSE. Covers files from any trigger — automated fetch, manual upload, or sweep. Reached from the
+Collection Health Panel's "View all" link — there is no sidebar menu entry (ADR-0019).
 _Avoid_: live feed, ingestion log, activity dashboard, Ingestion Activity Feed
+
+Acquisition monitoring (`FetchRun` / `FetchedFile`) is per-feed: each Data Feed's dashboard carries summary stat
+cards with linked fetch-run and ingestion listing pages. The former org-wide live "Acquisition Feed" page was
+retired (ADR-0019); "is anything failing to fetch" is answered by the health chips on the Data Feeds list.
+`UploadSession` history is visible per collection through the Collection Health Panel drill-down, and the manual
+upload page streams its own in-flight progress.
 
 ### Jobs
 

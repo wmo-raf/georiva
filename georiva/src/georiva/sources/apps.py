@@ -12,4 +12,3 @@ class SourcesConfig(AppConfig):
         from .job_types import LoaderJobType
 
         job_type_registry.register(LoaderJobType())
-        import georiva.sources.signals  # noqa: F401

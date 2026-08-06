@@ -66,12 +66,11 @@ NOT_ORM_SCOPABLE_MODELS = {
 
 #: Admin URLs the listing sweep must not simply GET:
 #: - failwhale is Wagtail's deliberate-500 page, where raising is the point;
-#: - the SSE feeds never close, so a test client GET would hang forever. Their
+#: - the SSE feed never closes, so a test client GET would hang forever. Its
 #:   org filtering is covered directly in ingestion's SSE tests instead.
 _SWEEP_EXEMPT_LISTINGS = frozenset({
     "admin/failwhale/",
     "admin/api/ingestion/events/",
-    "admin/api/ingestion/acquisition/events/",
 })
 
 
