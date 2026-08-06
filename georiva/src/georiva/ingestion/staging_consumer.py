@@ -219,6 +219,11 @@ def _consume_loop(stop_event=None):
     while not (stop_event is not None and stop_event.is_set()):
         try:
             result = r.blpop(STAGING_REDIS_KEY, timeout=5)
+        except redis.exceptions.TimeoutError:
+            # redis-py 8 enforces the block timeout as a socket read deadline,
+            # so an idle wait raises instead of returning None. Same meaning:
+            # nothing arrived, go around again.
+            continue
         except redis.RedisError as e:
             logger.error("Staging consumer Redis error, retry in 5s: %s", e)
             time.sleep(5)
