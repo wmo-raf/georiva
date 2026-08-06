@@ -31,21 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 def _read_cog(href):
-    """Read a stored COG into ``(data, bounds, crs)`` — north-up, nodata→NaN."""
-    import rasterio
-    from rasterio.io import MemoryFile
+    """Read a stored COG into ``(data, bounds, crs)`` — north-up, nodata→NaN.
+    A thin wrapper over the shared derivation reader; patched in tests."""
+    from georiva.core.storage import BucketType
+    from georiva.processing.raster_io import read_north_up
 
-    from georiva.core.storage import storage
-
-    raw = storage.assets.read_bytes(href)
-    with MemoryFile(raw) as memfile, memfile.open() as src:
-        data = src.read(1).astype("float32")
-        if src.nodata is not None:
-            data = np.where(data == src.nodata, np.nan, data)
-        if src.transform.e > 0:
-            data = np.flipud(data)
-        crs = src.crs.to_string() if src.crs else "EPSG:4326"
-        return data, list(src.bounds), crs
+    data, bounds, crs, _, _ = read_north_up(BucketType.ASSETS, href)
+    return data, bounds, crs
 
 
 class Command(BaseCommand):
@@ -68,7 +60,7 @@ class Command(BaseCommand):
         from georiva.core.storage import storage
         from georiva.ingestion.asset_writer import AssetWriter
         from georiva.ingestion.materialization import AssetMaterializer
-        from georiva.processing.engine import _catalog_clipper
+        from georiva.processing.engine import catalog_clipper
 
         items = (
             Item.objects
@@ -90,7 +82,7 @@ class Command(BaseCommand):
         for item in items.iterator():
             collection = item.collection
             if collection.pk not in clippers:
-                clippers[collection.pk] = _catalog_clipper(collection)
+                clippers[collection.pk] = catalog_clipper(collection)
             clipper = clippers[collection.pk]
 
             cogs = list(
@@ -101,6 +93,7 @@ class Command(BaseCommand):
             if not cogs:
                 continue
 
+            item_grid = None
             for asset in cogs:
                 label = f"{collection.slug}/{asset.variable.slug} @ {item.time:%Y-%m-%d}"
                 try:
@@ -121,16 +114,21 @@ class Command(BaseCommand):
                             clipper=clipper,
                             checksum=asset.checksum,
                         )
-                        height, width = data.shape
-                        item.bounds = list(bounds)
-                        item.width = width
-                        item.height = height
-                        item.save(update_fields=["bounds", "width", "height"])
+                        if item_grid is None:
+                            height, width = data.shape
+                            item_grid = (list(bounds), width, height)
                     done += 1
                     self.stdout.write(f"{'would rematerialize' if dry_run else 'rematerialized'}: {label}")
                 except Exception as e:
                     failed += 1
                     self.stderr.write(self.style.ERROR(f"failed: {label} — {e}"))
+
+            if item_grid is not None:
+                # Stamp once per item, from the first successfully materialized
+                # grid — mirrors the engine, and keeps a multi-variable item
+                # from being rewritten by whichever variable happened last.
+                item.bounds, item.width, item.height = item_grid
+                item.save(update_fields=["bounds", "width", "height"])
 
         self.stdout.write(self.style.SUCCESS(
             f"{'Scanned' if dry_run else 'Rematerialized'} {done} asset(s), {failed} failure(s)."

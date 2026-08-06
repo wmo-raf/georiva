@@ -175,30 +175,34 @@ class AssetMaterializer:
         cog_path = f"{base_dir}/{base_name}.tif"
         try:
             stored_cog = self.writer.write_cog(data, cog_path, tuple(bounds), crs)
+            cog_defaults = {
+                "href": stored_cog,
+                "media_type": (
+                    "image/tiff; application=geotiff; profile=cloud-optimized"
+                ),
+                "roles": ["data"],
+                "file_size": self._get_file_size(stored_cog),
+                "width": width,
+                "height": height,
+                "bands": 1,
+                "stats_min": stats.get("min"),
+                "stats_max": stats.get("max"),
+                "stats_mean": stats.get("mean"),
+                "stats_std": stats.get("std"),
+                "extra_fields": {
+                    "compression": "deflate",
+                    "nodata": None,
+                },
+            }
+            # Only stamp a checksum the caller actually supplied (derived
+            # provenance) — never clobber an existing one with "".
+            if checksum:
+                cog_defaults["checksum"] = checksum
             data_asset, _ = Asset.objects.update_or_create(
                 item=item,
                 variable=variable,
                 format=Asset.Format.COG,
-                defaults={
-                    "href": stored_cog,
-                    "media_type": (
-                        "image/tiff; application=geotiff; profile=cloud-optimized"
-                    ),
-                    "roles": ["data"],
-                    "checksum": checksum,
-                    "file_size": self._get_file_size(stored_cog),
-                    "width": width,
-                    "height": height,
-                    "bands": 1,
-                    "stats_min": stats.get("min"),
-                    "stats_max": stats.get("max"),
-                    "stats_mean": stats.get("mean"),
-                    "stats_std": stats.get("std"),
-                    "extra_fields": {
-                        "compression": "deflate",
-                        "nodata": None,
-                    },
-                },
+                defaults=cog_defaults,
             )
             assets.append(data_asset)
             self._after_save_asset(data_asset)

@@ -286,7 +286,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         item = self._item()
         data = np.full((3, 2), 12.0, dtype="float32")
 
-        assets = _register_asset(
+        assets, grid = _register_asset(
             item,
             OutputAsset(variable=self.variable, roles=["data"], format="cog",
                         array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
@@ -303,6 +303,8 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         self.assertEqual(
             {a.format for a in assets}, {Asset.Format.COG, Asset.Format.PNG},
         )
+        # The grid the array was written with — run_unit stamps it on the item.
+        self.assertEqual(grid, ([0, 0, 1, 1], 2, 3))
         png = item.assets.get(format=Asset.Format.PNG)
         self.assertEqual(png.extra_fields["imageUnscale"], [0, 50])
 
@@ -316,7 +318,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         item = self._item()
         data = np.full((3, 2), 12.0, dtype="float32")
 
-        assets = _register_asset(
+        assets, grid = _register_asset(
             item,
             OutputAsset(variable=self.variable, roles=["visual"], format="png",
                         array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
@@ -326,6 +328,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         )
 
         self.assertEqual(assets, [])
+        self.assertIsNone(grid)
         writer.write_png.assert_not_called()
         writer.write_cog.assert_not_called()
 

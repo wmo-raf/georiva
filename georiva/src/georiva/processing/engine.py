@@ -59,7 +59,7 @@ def _asset_output_path(item, variable, fmt: str) -> str:
     )
 
 
-def _catalog_clipper(collection):
+def catalog_clipper(collection):
     """The catalog's BoundaryClipper, or None when it doesn't clip. Derived
     outputs follow the same clip configuration ingested ones do, so a clipped
     catalog shows one coherent footprint across both."""
@@ -74,37 +74,20 @@ def _catalog_clipper(collection):
     )
 
 
-def _clipped_spatial_meta(bounds, width, height, clipper):
-    """Normalise recipe-supplied bounds and, for a clipping catalog, snap them
-    to the boundary's pixel window — the same numbers ingestion stamps on its
-    items, and the numbers the item-detail map places the PNG with."""
-    from georiva.ingestion.utils import normalize_bounds
+def _register_item(out_item, recipe: BaseRecipe, input_hash: str):
+    """Create or update (overwrite-in-place) the Published Item for a unit.
 
-    if bounds is None:
-        return None, width, height
-    bounds = normalize_bounds(bounds)
-    if clipper is not None and width and height:
-        try:
-            window = clipper.compute_window(tuple(bounds), width, height)
-        except ValueError as e:
-            logger.warning("Clip window failed for derived item: %s — keeping full grid", e)
-            window = None
-        if window:
-            return list(window["bounds"]), window["width"], window["height"]
-    return bounds, width, height
-
-
-def _register_item(out_item, recipe: BaseRecipe, input_hash: str, clipper=None):
-    """Create or update (overwrite-in-place) the Published Item for a unit."""
+    Bounds are normalised here; the clip window is NOT computed here — the
+    asset materialization crops the actual arrays, and ``run_unit`` stamps
+    the item with the grid the assets really got, so the item's bounds can
+    never disagree with the PNG they place."""
     from georiva.core.models import Item
-    from georiva.ingestion.utils import ensure_utc  # tz-normalise
+    from georiva.ingestion.utils import ensure_utc, normalize_bounds
 
     time = ensure_utc(out_item.time)
     ref = ensure_utc(out_item.reference_time) if out_item.reference_time else None
 
-    bounds, width, height = _clipped_spatial_meta(
-        out_item.bounds, out_item.width, out_item.height, clipper,
-    )
+    bounds = normalize_bounds(out_item.bounds) if out_item.bounds is not None else None
 
     item, _ = Item.objects.get_or_create(
         collection=out_item.collection,
@@ -113,16 +96,16 @@ def _register_item(out_item, recipe: BaseRecipe, input_hash: str, clipper=None):
         defaults={
             "bounds": bounds,
             "crs": out_item.crs,
-            "width": width,
-            "height": height,
+            "width": out_item.width,
+            "height": out_item.height,
         },
     )
 
     # Overwrite-in-place: refresh spatial metadata + derivation provenance.
     item.bounds = bounds if bounds is not None else item.bounds
     item.crs = out_item.crs or item.crs
-    item.width = width if width is not None else item.width
-    item.height = height if height is not None else item.height
+    item.width = out_item.width if out_item.width is not None else item.width
+    item.height = out_item.height if out_item.height is not None else item.height
     props = dict(item.properties or {})
     props.update(out_item.properties or {})
     props["derivation"] = {
@@ -137,7 +120,10 @@ def _register_item(out_item, recipe: BaseRecipe, input_hash: str, clipper=None):
 
 def _register_asset(item, oa, writer, materializer, clipper=None):
     """Materialize an array asset through the shared ingestion sequence, or
-    copy a passthrough object as-is.
+    copy a passthrough object as-is. Returns ``(assets, grid)`` where ``grid``
+    is the ``(bounds, width, height)`` the array was actually written with
+    (post-crop) — ``run_unit`` stamps the item with it — or None for
+    passthrough/skipped assets.
 
     An array OutputAsset always yields the full served trio — COG + visual
     PNG + JSON sidecar — via ``AssetMaterializer``, exactly what ingestion
@@ -153,7 +139,7 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
                 "emits the visual PNG with the COG",
                 getattr(oa.variable, "slug", "?"),
             )
-            return []
+            return [], None
         bounds = oa.bounds if oa.bounds is not None else item.bounds
         if bounds is None:
             raise ValueError(
@@ -164,7 +150,7 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
         if clipper is not None:
             data, bounds = materializer.clip_array(data, bounds, clipper)
             stats = None  # full-grid stats are stale after cropping
-        return materializer.materialize_variable(
+        assets = materializer.materialize_variable(
             item=item,
             variable=oa.variable,
             data=data,
@@ -175,6 +161,8 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
             stats=stats,
             checksum=oa.checksum,
         )
+        height, width = data.shape[:2]
+        return assets, (list(bounds), width, height)
 
     if oa.passthrough is not None:
         path = _asset_output_path(item, oa.variable, oa.format)
@@ -198,7 +186,7 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
                 "stats_std": stats.get("std"),
             },
         )
-        return [asset]
+        return [asset], None
 
     raise ValueError("OutputAsset needs either `array` or `passthrough`")
 
@@ -381,7 +369,7 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
             writer = AssetWriter(storage.assets)
         from georiva.ingestion.materialization import AssetMaterializer
         materializer = AssetMaterializer(writer)
-        clipper = _catalog_clipper(out_item.collection)
+        clipper = catalog_clipper(out_item.collection)
 
         logger.info("[unit %s] %s step 4/6 — computing (recipe.transform)…", pos, tag)
         t_tx = time.monotonic()
@@ -394,14 +382,22 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
         logger.info("[unit %s] %s step 5/6 — writing %d asset(s) + registering item…",
                     pos, tag, len(out_assets))
         with transaction.atomic():
-            item = _register_item(out_item, recipe, ihash, clipper=clipper)
+            item = _register_item(out_item, recipe, ihash)
+            item_grid = None
             for j, oa in enumerate(out_assets, 1):
                 logger.info(
                     "[unit %s] %s   asset %d/%d — variable=%s format=%s roles=%s",
                     pos, tag, j, len(out_assets),
                     getattr(oa.variable, "slug", "?"), oa.format, ",".join(oa.roles),
                 )
-                _register_asset(item, oa, writer, materializer, clipper)
+                _, grid = _register_asset(item, oa, writer, materializer, clipper)
+                if item_grid is None and grid is not None:
+                    item_grid = grid
+            if item_grid is not None:
+                # The grid the arrays were actually written with (post-crop) —
+                # the one source of truth the map places the PNG by.
+                item.bounds, item.width, item.height = item_grid
+                item.save(update_fields=["bounds", "width", "height"])
             _write_links(item, resolved, recipe, ihash)
             run.mark_completed(produced_item=item, input_hash=ihash)
         logger.info("[unit %s] %s registered item id=%s + %d asset(s), lineage links written",

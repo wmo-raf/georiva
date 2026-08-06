@@ -158,26 +158,11 @@ class PromotionRecipe(BaseRecipe):
     def read_raster(self, bucket_type, href):
         """Read a stored single-band raster into
         ``(data, bounds, crs, width, height)`` — the recipe's only real I/O,
-        patched in unit tests. Nodata is mapped to NaN so the COG stats and the
-        PNG alpha both skip it. A south-up raster (positive row pitch, like
-        ``formats/geotiff.py`` handles at ingestion) is flipped north-up so
-        row 0 is north — the orientation every downstream consumer assumes."""
-        import numpy as np
-        import rasterio
-        from rasterio.io import MemoryFile
+        patched in unit tests. Delegates to the shared derivation reader
+        (north-up, nodata→NaN)."""
+        from georiva.processing.raster_io import read_north_up
 
-        from georiva.core.storage import storage
-
-        raw = storage.bucket(bucket_type).read_bytes(href)
-        with MemoryFile(raw) as memfile, memfile.open() as src:
-            data = src.read(1).astype("float32")
-            if src.nodata is not None:
-                data = np.where(data == src.nodata, np.nan, data)
-            if src.transform.e > 0:
-                data = np.flipud(data)
-            bounds = list(src.bounds)
-            crs = src.crs.to_string() if src.crs else "EPSG:4326"
-            return data, bounds, crs, src.width, src.height
+        return read_north_up(bucket_type, href)
 
     # ---- helpers ------------------------------------------------------------
 

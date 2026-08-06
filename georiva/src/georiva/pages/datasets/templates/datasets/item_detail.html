@@ -237,8 +237,8 @@
                         <span>Loading layer…</span>
                     </div>
 
-                    {# No visual asset for the selected variable #}
-                    <div class="gr-map-loading" id="grMapNoVisual" style="display:none">
+                    {# No visual asset for the selected variable (hidden via CSS until JS shows it) #}
+                    <div class="gr-map-loading" id="grMapNoVisual">
                         <i class="bi bi-eye-slash"></i>
                         <span id="grMapNoVisualMsg">{% trans "No map preview available for this variable." %}</span>
                     </div>
@@ -411,12 +411,14 @@
             "itemTime":             "{{ item.time_iso }}",
             "referenceTime":        "{{ item.reference_time_iso|default:'' }}",
             "edrUrl":               "/api/edr/collections/{{ collection_slug }}/",
-            {# The PNG overlay is georeferenced by the item's own bounds — the #}
-            {# collection extent is only a fitBounds fallback (derived items    #}
-            {# with a null collection extent used to stretch across the world). #}
-            {# |safe: to_json emits double quotes, which autoescape would turn  #}
-            {# into &amp;quot; and break JSON.parse. Values are server-built asset  #}
-            {# URLs and floats — nothing user-authored.                         #}
+            {% comment %}
+                The PNG overlay is georeferenced by the item's own bounds — the
+                collection extent is only a fitBounds fallback (derived items
+                with a null collection extent used to stretch across the world).
+                |safe: to_json emits double quotes, which autoescape would break
+                JSON.parse over. Values are server-built asset URLs and floats —
+                nothing user-authored.
+            {% endcomment %}
             "itemBounds":           {{ item.bounds|to_json|default:'null'|safe }},
             "pngAssets":            {{ png_assets|to_json|default:'{}'|safe }},
             {# escapejs: the URL carries query params, and `&amp;` would break JSON.parse #}
