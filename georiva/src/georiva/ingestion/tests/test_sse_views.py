@@ -159,9 +159,9 @@ class EventForwardingRuleTests(TestCase):
             {"type": "file_ingestion.created"}, _INGESTION_EVENT_TYPES, "kenya",
         ))
 
-    def test_an_event_of_another_feeds_type_is_dropped(self):
+    def test_an_event_of_an_uncarried_type_is_dropped(self):
         self.assertFalse(should_forward(
-            {"type": "fetch_run.created", "org": "kenya"},
+            {"type": "some.other_event", "org": "kenya"},
             _INGESTION_EVENT_TYPES, "kenya",
         ))
 

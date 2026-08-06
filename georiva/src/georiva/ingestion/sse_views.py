@@ -17,16 +17,6 @@ _INGESTION_EVENT_TYPES = frozenset([
     "snapshot",
 ])
 
-_ACQUISITION_EVENT_TYPES = frozenset([
-    "fetch_run.created",
-    "fetch_run.status_changed",
-    "fetched_file.status_changed",
-    "upload_session.created",
-    "upload_session.status_changed",
-    "uploaded_file.status_changed",
-])
-
-
 def ingestion_events_sse(request):
     """Async SSE endpoint streaming ingestion (FileIngestion/Job) events."""
     # Resolved here, while the request is still in hand: the stream itself
@@ -42,36 +32,17 @@ def ingestion_events_sse(request):
     )
 
 
-def acquisition_events_sse(request):
-    """Async SSE endpoint streaming acquisition (FetchRun/UploadSession) events."""
-    org = require_active_org(request)
-    return StreamingHttpResponse(
-        _event_stream(_ACQUISITION_EVENT_TYPES, _build_acquisition_snapshot, org.slug),
-        content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
 async def _build_ingestion_snapshot(org_slug):
     from .snapshot import build_ingestion_snapshot
     return await build_ingestion_snapshot(org_slug)
 
 
-async def _build_acquisition_snapshot(org_slug):
-    from .acquisition_snapshot import build_acquisition_snapshot
-    return await build_acquisition_snapshot(org_slug)
-
-
 def should_forward(payload, allowed_types, org_slug):
     """Whether one published event belongs on this listener's stream.
 
-    Two independent reasons to drop: the event is for another feed, or it is for
-    another organisation. Everything on the channel is one or the other for
-    somebody, since a single Redis channel carries every organisation's events
-    and both SSE endpoints subscribe to all of it.
+    Two independent reasons to drop: the event type is not one this stream
+    carries, or it is for another organisation. A single Redis channel carries
+    every organisation's events and the SSE endpoint subscribes to all of it.
 
     An event carrying no organisation reaches nobody. That is not a fallback to
     "everybody" — an event whose owner could not be determined is exactly the one

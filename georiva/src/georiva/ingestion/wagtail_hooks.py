@@ -1,37 +1,17 @@
-from django.urls import path, reverse_lazy
+from django.urls import path
 from wagtail import hooks
-from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 
 from .panels import IngestionActivityPanel
 
 
-@hooks.register("register_admin_menu_item")
-def register_monitoring_menu():
-    from django.utils.translation import gettext as _
-    return SubmenuMenuItem(
-        _("Monitoring"),
-        Menu(items=[
-            MenuItem(
-                _("Ingestion Activity"),
-                reverse_lazy("ingestion_activity_feed"),
-                icon_name="history",
-                order=10,
-            ),
-            MenuItem(
-                _("Acquisition Feed"),
-                reverse_lazy("acquisition_feed"),
-                icon_name="download",
-                order=20,
-            ),
-        ]),
-        icon_name="view",
-        order=860,
-    )
+# No menu item: the Ingestion Activity page is reached through the homepage
+# activity panel, and acquisition monitoring lives on each feed's dashboard
+# (ADR 0019).
 
 
 @hooks.register("register_admin_urls")
 def register_ingestion_dashboard_urls():
-    from .activity_views import ingestion_activity_feed, acquisition_feed
+    from .activity_views import ingestion_activity_feed
     from .dashboard_views import (
         ingestion_dashboard_api,
         collection_ingestion_logs_api,
@@ -39,13 +19,11 @@ def register_ingestion_dashboard_urls():
         collection_fetch_runs_api,
         collection_upload_sessions_api,
     )
-    from .sse_views import ingestion_events_sse, acquisition_events_sse
+    from .sse_views import ingestion_events_sse
 
     return [
         path("ingestion/activity/", ingestion_activity_feed, name="ingestion_activity_feed"),
-        path("ingestion/acquisition/", acquisition_feed, name="acquisition_feed"),
         path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
-        path("api/ingestion/acquisition/events/", acquisition_events_sse, name="acquisition_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),
         path("api/ingestion/collections/<int:collection_id>/ingestion-logs/", collection_ingestion_logs_api,
              name="collection_ingestion_logs_api"),
