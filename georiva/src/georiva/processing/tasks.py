@@ -98,10 +98,16 @@ def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
             dispatch_for_trigger,
             published_item_trigger,
         )
+        from georiva.processing.signals import unit_completed
 
         item = Item.objects.filter(pk=result.item_id).select_related("collection").first()
         if item is not None:
             dispatch_for_trigger(published_item_trigger(item))
+            # Wake-up for parked dependents (ADR-0020): recipes ignore
+            # published triggers by design (double-fire guard), so units that
+            # went not_ready waiting for this item are revived through the
+            # feed layer's signal receiver instead.
+            unit_completed.send(sender=None, item=item, recipe_type=recipe_type)
 
 
 @app.task(
@@ -112,24 +118,30 @@ def sweep_derivations():
     """
     Periodic backfill sweep — the write-side mirror of ``sweep_unprocessed``.
 
-    Two independent recovery passes, neither depending on an event:
+    Three independent recovery passes, none depending on an event:
       1. ``sweep_stale_units`` — recomputes units whose inputs changed since they
          were last derived (recorded ``input_hash`` ≠ current).
       2. ``reclaim_stale_running`` — re-dispatches units stuck in RUNNING past the
          lock timeout (a worker died mid-unit), which pass 1 never inspects.
+      3. ``resurrect_not_ready_units`` — re-dispatches parked NOT_READY units
+         whose required inputs now resolve (ADR-0020), which passes 1–2 never
+         inspect either.
     """
     from georiva.processing.invocation import (
         reclaim_stale_running,
+        resurrect_not_ready_units,
         sweep_stale_units,
     )
 
     input_stale = sweep_stale_units()
     reclaimed = reclaim_stale_running()
+    revived = resurrect_not_ready_units()
     logger.info(
-        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING reclaimed",
-        input_stale, reclaimed,
+        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING "
+        "reclaimed, %d not-ready revived",
+        input_stale, reclaimed, revived,
     )
-    return {"input_stale": input_stale, "reclaimed": reclaimed}
+    return {"input_stale": input_stale, "reclaimed": reclaimed, "revived": revived}
 
 
 @app.task(

@@ -104,6 +104,56 @@ def sweep_stale_units(*, dispatch: bool = True) -> int:
     return stale
 
 
+def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=None) -> int:
+    """
+    Re-dispatch parked ``NOT_READY`` runs whose required inputs now resolve
+    (ADR-0020). A unit that went not-ready waits for an input that hadn't been
+    derived yet (e.g. an anomaly slice waiting on its climatology normal); once
+    that input exists, nothing event-shaped revives the run — its recipe never
+    re-fires on published triggers by design. This pass is the revival.
+
+    Readiness-gated: each candidate's inputs are resolved first and only units
+    whose ``recipe.readiness`` now passes are dispatched — a unit whose inputs
+    will never materialise stays parked as an honest ``not_ready`` row instead
+    of churning the queue every sweep.
+
+    ``origins`` narrows the scan to runs stamped with those origin keys (the
+    completion wake-up scopes to the dependent products); ``None`` scans all
+    parked runs (the periodic sweep). ``reason`` is recorded on the revived
+    run; defaults to ``NOT_READY_SWEEP``. Returns the number re-dispatched.
+    """
+    from .models import DerivationRun
+
+    if reason is None:
+        reason = DerivationRun.RetryReason.NOT_READY_SWEEP
+    qs = DerivationRun.objects.filter(status=DerivationRun.Status.NOT_READY)
+    if origins is not None:
+        origins = list(origins)
+        if not origins:
+            return 0
+        qs = qs.filter(origin__in=origins)
+
+    revived = 0
+    for run_rec in qs:
+        recipe = _recipe_for(run_rec.recipe_type)
+        if recipe is None:
+            continue
+        try:
+            resolved = recipe.resolve_inputs(run_rec.unit_key)
+        except Exception as e:  # a unit that can't resolve is skipped, not fatal
+            logger.warning("Resurrect: cannot resolve %s: %s", run_rec, e)
+            continue
+        if not recipe.readiness(run_rec.unit_key, resolved):
+            continue
+        _dispatch_unit(
+            run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch, reason=reason,
+        )
+        revived += 1
+    if revived:
+        logger.info("Resurrect: re-dispatched %d now-ready unit(s)", revived)
+    return revived
+
+
 def reclaim_stale_running(*, dispatch: bool = True) -> int:
     """
     Re-dispatch units stuck in RUNNING past the lock timeout.

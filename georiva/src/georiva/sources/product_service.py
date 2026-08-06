@@ -74,7 +74,7 @@ def build_chain(feed):
     Card keys: ``definition``, ``product``, ``enabled``, ``is_new``,
     ``orphaned``, ``display_label`` / ``display_description``, ``needs``
     (dependency chip labels), ``status`` / ``last_activity``, ``readiness`` /
-    ``readiness_hint``, ``output_collections``, ``can_run``.
+    ``readiness_hint``, ``output_collections``, ``can_run``, ``run_label``.
     """
     from georiva.core.derived_products.chain import product_dependencies, topological_stages
     from georiva.sources.derivation_tracking import product_readiness, product_status
@@ -103,7 +103,7 @@ def build_chain(feed):
                 "display_description": definition.description,
                 "needs": needs, "status": None, "last_activity": None,
                 "readiness": None, "readiness_hint": None,
-                "output_collections": [], "can_run": False,
+                "output_collections": [], "can_run": False, "run_label": None,
             }
         status = product_status(product)
         readiness = product_readiness(product)
@@ -123,7 +123,15 @@ def build_chain(feed):
                 b.collection
                 for b in product.output_bindings.select_related("collection")
             ],
-            "can_run": definition.trigger_mode in ("manual", "scheduled"),
+            # Every trigger mode is hand-runnable (ADR-0020): run_product_now
+            # builds a wide selector, so for an event product this is a
+            # backfill over the already-staged record — the only recovery for
+            # files that arrived while the product was disabled. The label
+            # keeps the semantics honest per mode.
+            "can_run": True,
+            "run_label": (
+                _("Backfill") if definition.trigger_mode == "event" else _("Run now")
+            ),
         }
 
     stages = [
@@ -138,7 +146,7 @@ def build_chain(feed):
             "display_label": row.display_label, "display_description": "",
             "needs": [], "status": product_status(row).status,
             "last_activity": None, "readiness": None, "readiness_hint": None,
-            "output_collections": [], "can_run": False,
+            "output_collections": [], "can_run": False, "run_label": None,
         }
         for row in rows.values() if row.definition_key not in declared_keys
     ]

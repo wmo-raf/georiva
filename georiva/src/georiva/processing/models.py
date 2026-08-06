@@ -52,6 +52,8 @@ class DerivationRun(TimeStampedModel):
         STALE_RUNNING_RECLAIM = 'stale_running_reclaim', 'Stale RUNNING reclaimed'
         INPUT_STALE = 'input_stale', 'Input changed (recompute)'
         MANUAL_RERUN = 'manual_rerun', 'Manual re-run'
+        NOT_READY_SWEEP = 'not_ready_sweep', 'Inputs ready (sweep revival)'
+        INPUT_ARRIVED = 'input_arrived', 'Required input arrived'
 
     recipe_type = models.CharField(max_length=100, db_index=True)
     recipe_version = models.CharField(max_length=50)

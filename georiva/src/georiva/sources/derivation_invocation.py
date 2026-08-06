@@ -192,6 +192,55 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
     )
 
 
+def resurrect_dependents(item, *, dispatch: bool = True) -> int:
+    """
+    Completion wake-up (ADR-0020): a just-derived Published ``item`` may be the
+    input that parked units of dependent products were waiting for (e.g. a
+    climatology normal the anomaly's units need). Recipes deliberately ignore
+    published triggers (the double-fire guard), so this revives those units
+    directly: match the item's collection against pinned *published*-tier input
+    bindings — the same indexed join ``dispatch_for_input`` uses — then
+    re-dispatch only the matching products' existing NOT_READY runs, readiness-
+    gated. No enumeration, no recipe involvement, so it cannot double-fire: a
+    run row is either parked or nothing happens. Returns the number revived.
+    """
+    from georiva.processing.invocation import resurrect_not_ready_units
+    from georiva.processing.models import DerivationRun
+
+    from georiva.sources.models import DerivedProduct, DerivedProductInput
+
+    product_ids = (
+        DerivedProductInput.objects.filter(
+            collection_id=item.collection_id, tier="published",
+            product__is_enabled=True,
+        )
+        .values_list("product_id", flat=True)
+        .distinct()
+    )
+    origins = [
+        product_origin(p)
+        for p in DerivedProduct.objects.filter(pk__in=list(product_ids))
+    ]
+    if not origins:
+        return 0
+    return resurrect_not_ready_units(
+        dispatch=dispatch, origins=origins,
+        reason=DerivationRun.RetryReason.INPUT_ARRIVED,
+    )
+
+
+def on_unit_completed(sender, *, item=None, **kwargs):
+    """Receiver for the engine's ``unit_completed`` signal (connected in
+    ``SourcesConfig.ready``). Best-effort: a wake-up failure must never fail
+    the producing task — the periodic sweep is the safety net behind it."""
+    if item is None:
+        return
+    try:
+        resurrect_dependents(item)
+    except Exception:
+        logger.exception("not-ready wake-up failed for item %s", item.pk)
+
+
 def dispatch_due_scheduled_products(*, dispatch: bool = True) -> int:
     """
     The scheduled-product beat (ADR-0008): fire every enabled DerivedProduct

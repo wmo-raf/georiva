@@ -134,12 +134,12 @@
                                 <form method="post"
                                       action="{% url 'feed_product_run' feed_pk=feed.pk product_pk=card.product.pk %}">
                                     {% csrf_token %}
-                                    <button type="submit" class="button button-small">{% trans "Run now" %}</button>
+                                    <button type="submit" class="button button-small">{{ card.run_label }}</button>
                                 </form>
                             {% else %}
                                 <button type="button" class="button button-small" disabled
                                         title="{{ card.readiness.reason }}">
-                                    {% trans "Run now" %}
+                                    {{ card.run_label }}
                                 </button>
                             {% endif %}
                         {% endif %}
