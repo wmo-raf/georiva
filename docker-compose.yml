@@ -106,6 +106,10 @@ services:
       IGNORE_STARTUP_PARAMETERS: "extra_float_digits"
       QUERY_WAIT_TIMEOUT: 60000             # 60s
       SERVER_IDLE_TIMEOUT: 600
+      # Transaction pooling means a client connect/disconnect per request or
+      # task; logging each one drowns the log. Pooler errors still log.
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
     depends_on:
       georiva-db:
         condition: service_healthy
