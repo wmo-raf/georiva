@@ -654,5 +654,15 @@ class LoaderJob(Job):
     files_failed = models.IntegerField(default=0)
     bytes_transferred = models.BigIntegerField(default=0)
 
+    resume_of_run = models.ForeignKey(
+        'georivasources.FetchRun',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="resume_jobs",
+        help_text="Set on jobs the stale-run sweep enqueued to resume an "
+                  "interrupted FetchRun; threads resume lineage to the new run.",
+    )
+
     class Meta:
         app_label = "georivaingestion"

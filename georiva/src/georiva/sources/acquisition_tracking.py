@@ -20,6 +20,21 @@ def feed_fetch_runs(feed, *, status=None):
     return runs.order_by("-started_at")
 
 
+def with_live_counters(run):
+    """Overlay derived counters onto an in-flight run, in memory only.
+
+    Stored counters are a write-once completion summary, so a run still in
+    RUNNING shows zeros while its FetchedFile rows tell the real story —
+    aggregate those instead. Finished runs are returned untouched.
+    """
+    from georiva.sources.models import FetchRun
+
+    if run.status == FetchRun.Status.RUNNING:
+        for field, value in run.derive_counters().items():
+            setattr(run, field, value)
+    return run
+
+
 def run_duration_seconds(run):
     """A run's wall-clock duration in seconds, or None if it never finished."""
     if run.started_at and run.finished_at:

@@ -666,6 +666,10 @@ class FetchRun(models.Model):
         COMPLETED = 'completed', 'Completed'
         FAILED = 'failed', 'Failed'
         CANCELLED = 'cancelled', 'Cancelled'
+        # A worker died mid-run (power loss, OOM, forced restart) and the
+        # stale-run sweep declared it dead. Distinct from FAILED because the
+        # source never rejected us — interrupted runs are safe to auto-resume.
+        INTERRUPTED = 'interrupted', 'Interrupted'
 
     ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
 
@@ -673,6 +677,15 @@ class FetchRun(models.Model):
         DataFeed,
         on_delete=models.CASCADE,
         related_name='fetch_runs',
+    )
+    resumed_from = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='resumes',
+        help_text="The interrupted run this run was auto-enqueued to resume. "
+                  "Chain depth bounds the auto-resume cap.",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -712,9 +725,22 @@ class FetchRun(models.Model):
     def mark_cancelled(self):
         self._finish(self.Status.CANCELLED)
 
-    def recompute_counters(self):
-        """Re-derive fetched/skipped/failed/bytes from this run's FetchedFiles —
-        called after a per-file retry so the run reflects current truth."""
+    def mark_interrupted(self, error=''):
+        self._finish(self.Status.INTERRUPTED, error_message=error)
+
+    def resume_generation(self):
+        """How many auto-resumes deep this run's lineage is: 0 for an original
+        run, 1 for its resume, and so on. Walked via resumed_from links."""
+        depth = 0
+        run = self
+        while run.resumed_from_id is not None:
+            depth += 1
+            run = run.resumed_from
+        return depth
+
+    def derive_counters(self):
+        """Aggregate fetched/skipped/failed/bytes from this run's FetchedFiles
+        without saving — the live truth while a run is still in flight."""
         from django.db.models import Count, Q, Sum
 
         agg = self.fetched_files.aggregate(
@@ -723,10 +749,18 @@ class FetchRun(models.Model):
             failed=Count('id', filter=Q(status=FetchedFile.Status.FAILED)),
             bytes=Sum('bytes_transferred'),
         )
-        self.files_fetched = agg['fetched']
-        self.files_skipped = agg['skipped']
-        self.files_failed = agg['failed']
-        self.bytes_transferred = agg['bytes'] or 0
+        return {
+            'files_fetched': agg['fetched'],
+            'files_skipped': agg['skipped'],
+            'files_failed': agg['failed'],
+            'bytes_transferred': agg['bytes'] or 0,
+        }
+
+    def recompute_counters(self):
+        """Re-derive fetched/skipped/failed/bytes from this run's FetchedFiles —
+        called after a per-file retry so the run reflects current truth."""
+        for field, value in self.derive_counters().items():
+            setattr(self, field, value)
         self.save(update_fields=[
             'files_fetched', 'files_skipped', 'files_failed', 'bytes_transferred',
         ])

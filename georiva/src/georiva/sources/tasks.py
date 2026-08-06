@@ -27,6 +27,21 @@ def sweep_scheduled_products():
 
 
 @app.task(
+    name="georiva.sources.tasks.sweep_stale_fetch_runs",
+    queue="georiva-default",
+)
+def sweep_stale_fetch_runs():
+    """
+    Crash-recovery sweep: mark FetchRuns stuck in RUNNING past the staleness
+    threshold as INTERRUPTED, reap wedged LoaderJobs, and auto-resume (capped).
+    See acquisition_recovery for the full policy.
+    """
+    from georiva.sources.acquisition_recovery import sweep_stale_fetch_runs
+
+    return sweep_stale_fetch_runs()
+
+
+@app.task(
     name="georiva.sources.tasks.retry_fetched_file",
     queue="georiva-ingestion",
     bind=True,
@@ -73,6 +88,25 @@ def setup_scheduled_product_beat(sender, **kwargs):
         )
     except Exception as e:  # DB may be unavailable at import/finalize time
         logger.debug("Skipped scheduled-product beat setup: %s", e)
+
+
+@app.on_after_finalize.connect
+def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
+    """Register the crash-recovery sweep (mirror of the scheduled-product beat)."""
+    try:
+        schedule_30min, _ = IntervalSchedule.objects.get_or_create(
+            every=30, period=IntervalSchedule.MINUTES,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.sources.sweep_stale_fetch_runs",
+            defaults={
+                "task": "georiva.sources.tasks.sweep_stale_fetch_runs",
+                "interval": schedule_30min,
+                "enabled": True,
+            },
+        )
+    except Exception as e:  # DB may be unavailable at import/finalize time
+        logger.debug("Skipped stale-fetch-run sweep beat setup: %s", e)
 
 
 @shared_task(
