@@ -39,32 +39,55 @@ def stale_cutoff(now=None):
     return (now or timezone.now()) - timedelta(hours=stale_after_hours())
 
 
-def sweep_stale_fetch_runs() -> dict:
+def sweep_stale_fetch_runs(
+    *,
+    stale_hours: float | None = None,
+    run_ids: list[int] | None = None,
+    resume: bool = True,
+) -> dict:
     """Sweep FetchRuns stuck in RUNNING past the staleness threshold.
 
     For each: fail its dangling file records, freeze truthful counters, mark
     the run INTERRUPTED, backfill the feed's last-run stats, and enqueue an
     auto-resume (subject to the cap and the concurrent-recovery guard). Also
     reaps LoaderJobs wedged in 'started' so they stop eating the quota.
+
+    Operator overrides (management command):
+      stale_hours — replace the settings threshold for this invocation
+                    (0 declares every running run dead — a hard sweep).
+      run_ids     — sweep exactly these runs, ignoring age entirely; the
+                    operator is asserting the runs are dead.
+      resume      — False marks runs INTERRUPTED without enqueuing resumes.
     """
     from georiva.sources.models import FetchRun
 
-    cutoff = stale_cutoff()
+    hours = stale_after_hours() if stale_hours is None else stale_hours
+    cutoff = timezone.now() - timedelta(hours=hours)
 
     # Reap zombie jobs first so a wedged LoaderJob can't veto its own resume.
     jobs_reaped = _reap_stale_loader_jobs(cutoff)
 
-    swept = resumed = 0
     stale_runs = (
         FetchRun.objects
-        .filter(status=FetchRun.Status.RUNNING, started_at__lt=cutoff)
+        .filter(status=FetchRun.Status.RUNNING)
         .select_related("data_feed")
         .order_by("started_at")
     )
+    if run_ids is not None:
+        stale_runs = stale_runs.filter(pk__in=run_ids)
+        reason = "Interrupted — declared dead by an operator (targeted sweep)."
+    else:
+        stale_runs = stale_runs.filter(started_at__lt=cutoff)
+        reason = (
+            f"Interrupted — worker stopped mid-run; still unfinished after "
+            f"{hours}h."
+        )
+
+    swept = resumed = 0
     for run in stale_runs:
-        _sweep_run(run)
+        _sweep_run(run, reason)
         swept += 1
-        if _maybe_resume(run):
+        if resume and _maybe_resume(run):
             resumed += 1
 
     if swept or jobs_reaped:
@@ -76,7 +99,7 @@ def sweep_stale_fetch_runs() -> dict:
     return {"swept": swept, "resumed": resumed, "jobs_reaped": jobs_reaped}
 
 
-def _sweep_run(run) -> None:
+def _sweep_run(run, reason) -> None:
     from georiva.sources.models import FetchedFile
 
     dangling = run.fetched_files.filter(
@@ -86,16 +109,11 @@ def _sweep_run(run) -> None:
         fetched_file.mark_failed(error=INTERRUPTED_FILE_ERROR)
 
     run.recompute_counters()
-    run.mark_interrupted(
-        error=(
-            f"Interrupted — worker stopped mid-run; still unfinished after "
-            f"{stale_after_hours()}h."
-        ),
-    )
+    run.mark_interrupted(error=reason)
     _backfill_feed_stats(run)
     logger.warning(
-        "FetchRun %d (%s): marked interrupted after %sh",
-        run.pk, run.data_feed.name, stale_after_hours(),
+        "FetchRun %d (%s): marked interrupted — %s",
+        run.pk, run.data_feed.name, reason,
     )
 
 

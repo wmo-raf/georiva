@@ -173,6 +173,38 @@ class SweepStaleFetchRunsTests(TestCase):
         self.assertIn("interrupted", zombie.error)
         self.assertEqual(fresh.state, "started")
 
+    def test_hard_sweep_with_zero_threshold(self, _executor):
+        run = _make_run(self.feed, hours_ago=0.1)
+
+        result = sweep_stale_fetch_runs(stale_hours=0)
+
+        run.refresh_from_db()
+        self.assertEqual(result["swept"], 1)
+        self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
+
+    def test_targeted_sweep_ignores_age_and_only_touches_its_target(self, _executor):
+        target = _make_run(self.feed, hours_ago=1)
+        bystander = _make_run(self.feed, hours_ago=7)
+
+        result = sweep_stale_fetch_runs(run_ids=[target.pk], resume=False)
+
+        target.refresh_from_db()
+        bystander.refresh_from_db()
+        self.assertEqual(result["swept"], 1)
+        self.assertEqual(target.status, FetchRun.Status.INTERRUPTED)
+        self.assertIn("operator", target.error_message)
+        self.assertEqual(bystander.status, FetchRun.Status.RUNNING)
+
+    def test_no_resume_marks_interrupted_without_enqueuing(self, _executor):
+        run = _make_run(self.feed, hours_ago=7)
+
+        result = sweep_stale_fetch_runs(resume=False)
+
+        run.refresh_from_db()
+        self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
+        self.assertEqual(result["resumed"], 0)
+        self.assertFalse(LoaderJob.objects.exists())
+
     def test_reaped_zombie_does_not_block_its_own_resume(self, _executor):
         run = _make_run(self.feed, hours_ago=7)
         _make_loader_job(self.feed, state="started", hours_ago=8)
