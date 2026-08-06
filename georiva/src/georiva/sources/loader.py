@@ -133,12 +133,14 @@ class Loader:
             *,
             data_feed=None,
             on_file_fetched: Optional[Callable] = None,  # Callback after each file
+            resumed_from=None,  # Interrupted FetchRun this run resumes
     ):
         self.data_source = data_source
         self.fetch_strategy = self.data_source.fetch_strategy()
         self.collection = collection
         self.on_file_fetched = on_file_fetched
         self.data_feed = data_feed
+        self.resumed_from = resumed_from
         
         self.logger = logging.getLogger(
             f"georiva.loader.{data_source.name.replace(' ', '_').lower()}"
@@ -247,7 +249,11 @@ class Loader:
         fetch_run = None
 
         if self.data_feed:
-            fetch_run = FetchRun.objects.create(data_feed=self.data_feed, status='running')
+            fetch_run = FetchRun.objects.create(
+                data_feed=self.data_feed,
+                status='running',
+                resumed_from=self.resumed_from,
+            )
 
         try:
             self.logger.info(f"Starting loader run for {self.collection.name}")
@@ -259,6 +265,13 @@ class Loader:
             # Generate requests from data source
             requests = list(self.data_source.generate_requests_for_collection(self.collection))
             result.files_requested = len(requests)
+
+            # Persist the request count up front — the finish-time summary never
+            # comes if the worker dies, and the run page should be able to say
+            # "7 of 320" for a run that is live or was interrupted.
+            if fetch_run:
+                fetch_run.files_requested = len(requests)
+                fetch_run.save(update_fields=['files_requested'])
 
             if not requests:
                 self.logger.warning("No file requests generated")

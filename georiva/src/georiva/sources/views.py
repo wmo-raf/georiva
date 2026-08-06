@@ -1786,7 +1786,11 @@ def data_feed_fetch_runs(request, feed_pk):
     """
     from django.core.paginator import Paginator
 
-    from georiva.sources.acquisition_tracking import feed_fetch_runs, run_duration_seconds
+    from georiva.sources.acquisition_tracking import (
+        feed_fetch_runs,
+        run_duration_seconds,
+        with_live_counters,
+    )
     from georiva.sources.models import FetchRun
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
@@ -1816,7 +1820,7 @@ def data_feed_fetch_runs(request, feed_pk):
     page = paginator.get_page(request.GET.get("page"))
 
     rows = [
-        {"run": run, "duration": run_duration_seconds(run)}
+        {"run": with_live_counters(run), "duration": run_duration_seconds(run)}
         for run in page
     ]
 
@@ -1947,11 +1951,16 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     bytes, timing — with per-file and bulk retry for failed files that carry
     a stored request. The run is scoped to the feed in the URL.
     """
-    from georiva.sources.acquisition_tracking import run_duration_seconds
+    from georiva.sources.acquisition_tracking import (
+        run_duration_seconds,
+        with_live_counters,
+    )
     from georiva.sources.models import FetchedFile, FetchRun
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
-    run = get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed)
+    run = with_live_counters(
+        get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed)
+    )
 
     def retryable_files(pks):
         """Only failed files of THIS run that carry a stored request may be

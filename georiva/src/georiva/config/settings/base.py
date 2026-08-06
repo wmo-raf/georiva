@@ -517,6 +517,22 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 # Prevents one worker from hoarding tasks while others are idle.
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
+# A fetch run stuck in RUNNING longer than this is declared dead by the
+# crash-recovery sweep (sources.acquisition_recovery). Must comfortably exceed
+# the longest legitimate fetch run — a false "dead" verdict enqueues a
+# duplicate run racing the live one.
+GEORIVA_FETCH_RUN_STALE_AFTER_HOURS = env.int(
+    "GEORIVA_FETCH_RUN_STALE_AFTER_HOURS", 6
+)
+
+# With acks_late, Redis redelivers an unacked message after visibility_timeout
+# (default 1h) — which would duplicate-execute any legitimate task running
+# longer than that, and race the stale-run sweep after a crash. Keep it above
+# the sweep threshold so the sweep is the sole, deliberate recovery mechanism.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": (GEORIVA_FETCH_RUN_STALE_AFTER_HOURS + 1) * 3600,
+}
+
 CELERY_BEAT_SCHEDULE = {}
 
 # ---------------------------------------------------------------------------

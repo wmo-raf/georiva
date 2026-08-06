@@ -29,6 +29,7 @@ class LoaderJobType(JobType):
         return {
             "data_feed_id": values["data_feed_id"],
             "collection_id": values.get("collection_id"),
+            "resume_of_run_id": values.get("resume_of_run_id"),
         }
 
     def run(self, job, progress) -> None:
@@ -111,6 +112,7 @@ class LoaderJobType(JobType):
                 collection=collection,
                 data_feed=data_feed,
                 on_file_fetched=on_file_fetched,
+                resumed_from=job.resume_of_run,
             )
             result = loader.run()
 
