@@ -151,50 +151,108 @@
         .gaqd-bulk {
             margin-top: 1em;
         }
+
+        .gaqd-recover {
+            margin-top: 2em;
+            padding-top: 1.25em;
+            border-top: 1px solid var(--w-color-border-furniture);
+        }
+
+        .gaqd-recover-hint {
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+            margin: 0 0 0.75em;
+            max-width: 44em;
+        }
+
+        .gaqd-liveness {
+            border: 1px solid var(--w-color-border-furniture);
+            border-left-width: 4px;
+            border-radius: 6px;
+            padding: 0.9em 1.1em;
+            margin-bottom: 1em;
+            max-width: 44em;
+        }
+
+        .gaqd-liveness--stuck {
+            border-left-color: var(--w-color-warning-100);
+            background: color-mix(in srgb, var(--w-color-warning-100) 8%, transparent);
+        }
+
+        .gaqd-liveness--slow {
+            border-left-color: var(--w-color-info-100);
+        }
+
+        .gaqd-liveness--normal {
+            border-left-color: var(--w-color-positive-100);
+        }
+
+        .gaqd-liveness--unknown {
+            border-left-color: var(--w-color-grey-400);
+        }
+
+        .gaqd-liveness-headline {
+            font-weight: 700;
+            margin: 0 0 0.5em;
+            font-size: 0.92em;
+            color: var(--w-color-text-label);
+        }
+
+        .gaqd-liveness-facts {
+            margin: 0 0 0 1.2em;
+            padding: 0;
+            font-size: 0.85em;
+            line-height: 1.7;
+            color: var(--w-color-text-label);
+        }
+
+        .gaqd-back {
+            margin-top: 2em;
+        }
     </style>
 {% endblock %}
 
 {% block main_content %}
     <table class="gaqd-grid">
         <tbody>
-            <tr>
-                <th>{% trans "Status" %}</th>
-                <td><span class="gaqd-badge gaqd-badge--{{ run.status }}">{{ run.get_status_display }}</span></td>
-            </tr>
-            <tr>
-                <th>{% trans "Started" %}</th>
-                <td class="gaqd-meta">{{ run.started_at|default:"—" }}</td>
-            </tr>
-            <tr>
-                <th>{% trans "Finished" %}</th>
-                <td class="gaqd-meta">{{ run.finished_at|default:"—" }}</td>
-            </tr>
-            <tr>
-                <th>{% trans "Duration" %}</th>
-                <td class="gaqd-meta">{% if duration is not None %}{{ duration|floatformat:1 }}s{% else %}—{% endif %}</td>
-            </tr>
-            <tr>
-                <th>{% trans "Files" %}</th>
-                <td>
-                    {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
-                        {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
-                    {% endblocktrans %}
-                </td>
-            </tr>
-            <tr>
-                <th>{% trans "Bytes" %}</th>
-                <td>{{ run.bytes_transferred|filesizeformat }}</td>
-            </tr>
-            <tr>
-                <th>{% trans "Error" %}</th>
-                <td>
-                    {% if run.error_message %}
-                        <pre class="gaqd-run-error">{{ run.error_message }}</pre>
-                    {% else %}
-                        <span class="gaqd-meta">—</span>
-                    {% endif %}
-                </td>
-            </tr>
+        <tr>
+            <th>{% trans "Status" %}</th>
+            <td><span class="gaqd-badge gaqd-badge--{{ run.status }}">{{ run.get_status_display }}</span></td>
+        </tr>
+        <tr>
+            <th>{% trans "Started" %}</th>
+            <td class="gaqd-meta">{{ run.started_at|default:"—" }}</td>
+        </tr>
+        <tr>
+            <th>{% trans "Finished" %}</th>
+            <td class="gaqd-meta">{{ run.finished_at|default:"—" }}</td>
+        </tr>
+        <tr>
+            <th>{% trans "Duration" %}</th>
+            <td class="gaqd-meta">{% if duration is not None %}{{ duration|floatformat:1 }}s{% else %}—{% endif %}</td>
+        </tr>
+        <tr>
+            <th>{% trans "Files" %}</th>
+            <td>
+                {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
+                    {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
+                {% endblocktrans %}
+            </td>
+        </tr>
+        <tr>
+            <th>{% trans "Bytes" %}</th>
+            <td>{{ run.bytes_transferred|filesizeformat }}</td>
+        </tr>
+        <tr>
+            <th>{% trans "Error" %}</th>
+            <td>
+                {% if run.error_message %}
+                    <pre class="gaqd-run-error">{{ run.error_message }}</pre>
+                {% else %}
+                    <span class="gaqd-meta">—</span>
+                {% endif %}
+            </td>
+        </tr>
         </tbody>
     </table>
 
@@ -205,55 +263,55 @@
             {% csrf_token %}
             <table class="gaqd-table">
                 <thead>
-                    <tr>
-                        <th class="gaqd-select">
-                            <input type="checkbox" id="gaqd-select-all"
-                                   aria-label="{% trans 'Select all retryable files' %}">
-                        </th>
-                        <th>{% trans "Status" %}</th>
-                        <th>{% trans "File" %}</th>
-                        <th>{% trans "Started" %}</th>
-                        <th>{% trans "Completed" %}</th>
-                        <th class="gaqd-num">{% trans "Bytes" %}</th>
-                        <th>{% trans "Detail" %}</th>
-                        <th></th>
-                    </tr>
+                <tr>
+                    <th class="gaqd-select">
+                        <input type="checkbox" id="gaqd-select-all"
+                               aria-label="{% trans 'Select all retryable files' %}">
+                    </th>
+                    <th>{% trans "Status" %}</th>
+                    <th>{% trans "File" %}</th>
+                    <th>{% trans "Started" %}</th>
+                    <th>{% trans "Completed" %}</th>
+                    <th class="gaqd-num">{% trans "Bytes" %}</th>
+                    <th>{% trans "Detail" %}</th>
+                    <th></th>
+                </tr>
                 </thead>
                 <tbody>
-                    {% for row in files %}
-                        <tr>
-                            <td class="gaqd-select">
-                                {% if row.retryable %}
-                                    <input type="checkbox" name="file_ids"
-                                           value="{{ row.file.pk }}"
-                                           aria-label="{% trans 'Select file for retry' %}">
-                                {% endif %}
-                            </td>
-                            <td>
-                                <span class="gaqd-badge gaqd-badge--{{ row.file.status }}">{{ row.file.get_status_display }}</span>
-                            </td>
-                            <td><span class="gaqd-mono">{{ row.file.file_path }}</span></td>
-                            <td class="gaqd-meta">{{ row.file.started_at|default:"—" }}</td>
-                            <td class="gaqd-meta">{{ row.file.completed_at|default:"—" }}</td>
-                            <td class="gaqd-num">{{ row.file.bytes_transferred|filesizeformat }}</td>
-                            <td>
-                                {% if row.file.error %}
-                                    <div class="gaqd-error">{{ row.file.error|truncatechars:300 }}</div>
-                                {% elif row.file.skip_reason %}
-                                    <span class="gaqd-meta">{{ row.file.skip_reason }}</span>
-                                {% else %}
-                                    <span class="gaqd-meta">—</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if row.retryable %}
-                                    <button class="button button-small button-secondary"
-                                            type="submit" name="retry_file_id"
-                                            value="{{ row.file.pk }}">{% trans "Retry" %}</button>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
+                {% for row in files %}
+                    <tr>
+                        <td class="gaqd-select">
+                            {% if row.retryable %}
+                                <input type="checkbox" name="file_ids"
+                                       value="{{ row.file.pk }}"
+                                       aria-label="{% trans 'Select file for retry' %}">
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="gaqd-badge gaqd-badge--{{ row.file.status }}">{{ row.file.get_status_display }}</span>
+                        </td>
+                        <td><span class="gaqd-mono">{{ row.file.file_path }}</span></td>
+                        <td class="gaqd-meta">{{ row.file.started_at|default:"—" }}</td>
+                        <td class="gaqd-meta">{{ row.file.completed_at|default:"—" }}</td>
+                        <td class="gaqd-num">{{ row.file.bytes_transferred|filesizeformat }}</td>
+                        <td>
+                            {% if row.file.error %}
+                                <div class="gaqd-error">{{ row.file.error|truncatechars:300 }}</div>
+                            {% elif row.file.skip_reason %}
+                                <span class="gaqd-meta">{{ row.file.skip_reason }}</span>
+                            {% else %}
+                                <span class="gaqd-meta">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.retryable %}
+                                <button class="button button-small button-secondary"
+                                        type="submit" name="retry_file_id"
+                                        value="{{ row.file.pk }}">{% trans "Retry" %}</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
                 </tbody>
             </table>
             <div class="gaqd-bulk">
@@ -266,7 +324,50 @@
         <p class="gaqd-empty">{% trans "No file records for this run." %}</p>
     {% endif %}
 
-    <p><a href="{{ runs_url }}">← {% trans "Back to Acquisition Activity" %}</a></p>
+    {% if run.status == "running" and liveness %}
+        <div class="gaqd-recover">
+            <div class="gaqd-liveness gaqd-liveness--{{ liveness.verdict }}">
+                <p class="gaqd-liveness-headline">
+                    {% if liveness.verdict == "stuck" %}
+                        {% trans "This run looks stuck." %}
+                    {% elif liveness.verdict == "slow" %}
+                        {% trans "This run is slower than usual — it may still be alive." %}
+                    {% elif liveness.verdict == "normal" %}
+                        {% trans "This run looks alive." %}
+                    {% else %}
+                        {% trans "Not enough completed files to judge this run yet." %}
+                    {% endif %}
+                </p>
+                <ul class="gaqd-liveness-facts">
+                    <li>{% blocktrans with elapsed=liveness.elapsed_display %}Running for {{ elapsed }}{% endblocktrans %}</li>
+                    <li>{% blocktrans with silence=liveness.silence_display %}Last file activity {{ silence }} ago{% endblocktrans %}</li>
+                    {% if liveness.median_seconds is not None %}
+                        <li>{% blocktrans with median=liveness.median_display samples=liveness.sample_count %}A typical file in this run takes {{ median }} ({{ samples }} completed){% endblocktrans %}</li>
+                    {% else %}
+                        <li>{% blocktrans with samples=liveness.sample_count %}Only {{ samples }} completed file(s) so far — compare against how long this feed's files usually take{% endblocktrans %}</li>
+                    {% endif %}
+                    {% if liveness.current_file %}
+                        <li>{% blocktrans with path=liveness.current_file.file_path %}Currently fetching: {{ path }}{% endblocktrans %}</li>
+                    {% else %}
+                        <li>{% trans "No file currently in flight" %}</li>
+                    {% endif %}
+                </ul>
+            </div>
+            <p class="gaqd-recover-hint">
+                {% if liveness.verdict == "stuck" %}
+                    {% trans "Recovering will mark this run as interrupted and queue a fresh fetch that picks up where it left off." %}
+                {% else %}
+                    {% trans "If you still believe the worker is dead, recovering will mark this run as interrupted and queue a fresh fetch — but recovering a live run starts a duplicate racing it." %}
+                {% endif %}
+            </p>
+            <a class="button no"
+               href="{% url 'data_feed_fetch_run_recover' feed_pk=feed.pk run_pk=run.pk %}">
+                {% trans "Recover stale run…" %}
+            </a>
+        </div>
+    {% endif %}
+
+    <p class="gaqd-back"><a href="{{ runs_url }}">← {% trans "Back to Acquisition Activity" %}</a></p>
 {% endblock %}
 
 {% block extra_js %}
