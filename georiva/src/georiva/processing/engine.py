@@ -356,7 +356,7 @@ def run_unit(recipe: BaseRecipe, unit: ProductionUnit, *, writer=None, worker_id
             missing = [ri.name for ri in resolved.values() if ri.required and not ri.present]
             logger.info(
                 "[unit %s] %s NOT READY — required input(s) absent: %s "
-                "(will retry via the 5-min sweep when inputs arrive)",
+                "(parked; revived when the input is derived, or by the periodic sweep)",
                 pos, tag, ", ".join(missing) or "unknown",
             )
             run.mark_not_ready()

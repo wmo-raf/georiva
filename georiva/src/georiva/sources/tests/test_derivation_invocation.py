@@ -524,3 +524,109 @@ class UnboundProductSkippedTests(TestCase):
 
         run.assert_not_called()
         self.assertEqual(result, [])
+
+
+class NotReadyWakeupTests(TestCase):
+    """Completion wake-up (ADR-0020): a derived Published item revives the
+    parked not_ready runs of enabled products with a pinned *published*-tier
+    input on its collection — through the engine's resurrection primitive,
+    never through candidate_units (the double-fire guard stays untouched)."""
+
+    def setUp(self):
+        self.catalog = Catalog.objects.create(organisation=make_organisation(),
+            name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
+
+    def _anomaly_product(self, *, is_enabled=True):
+        definition = _definition(
+            key="anomaly", recipe_type="chirps-anomaly",
+            inputs=(
+                InputRef(role="value", collection="rainfall", tier="staging"),
+                InputRef(role="baseline", collection="climatology", tier="published"),
+            ),
+            outputs=(OutputRef(role="anomaly", collection="anomaly"),),
+        )
+        product = DerivedProduct.objects.create(
+            data_feed=self.feed, definition_key=definition.key,
+            recipe_type=definition.recipe_type, is_enabled=is_enabled,
+        )
+        _pin(product, definition, self.catalog)
+        return product
+
+    def _completed_item(self, slug):
+        """A stand-in for the just-derived Published item — the wake-up only
+        reads ``collection_id``/``pk``."""
+        from types import SimpleNamespace
+
+        col, _ = Collection.objects.get_or_create(
+            catalog=self.catalog, slug=slug, defaults={"name": slug}
+        )
+        return SimpleNamespace(pk=99, collection_id=col.pk)
+
+    def test_published_input_match_revives_the_products_parked_runs(self):
+        from georiva.sources.derivation_invocation import resurrect_dependents
+
+        product = self._anomaly_product()
+        item = self._completed_item("climatology")
+
+        with patch(
+            "georiva.processing.invocation.resurrect_not_ready_units",
+            return_value=3,
+        ) as revive:
+            revived = resurrect_dependents(item)
+
+        self.assertEqual(revived, 3)
+        revive.assert_called_once()
+        kwargs = revive.call_args.kwargs
+        self.assertEqual(kwargs["origins"], [product_origin(product)])
+        self.assertEqual(kwargs["reason"], DerivationRun.RetryReason.INPUT_ARRIVED)
+
+    def test_a_staging_tier_binding_on_the_collection_does_not_match(self):
+        from georiva.sources.derivation_invocation import resurrect_dependents
+
+        self._anomaly_product()
+        # 'rainfall' is bound at staging tier — the loader feeds it, not a
+        # derived item, so a published arrival there wakes nothing.
+        item = self._completed_item("rainfall")
+
+        with patch(
+            "georiva.processing.invocation.resurrect_not_ready_units"
+        ) as revive:
+            self.assertEqual(resurrect_dependents(item), 0)
+        revive.assert_not_called()
+
+    def test_a_disabled_product_is_not_woken(self):
+        from georiva.sources.derivation_invocation import resurrect_dependents
+
+        self._anomaly_product(is_enabled=False)
+        item = self._completed_item("climatology")
+
+        with patch(
+            "georiva.processing.invocation.resurrect_not_ready_units"
+        ) as revive:
+            self.assertEqual(resurrect_dependents(item), 0)
+        revive.assert_not_called()
+
+    def test_the_engine_signal_reaches_the_receiver(self):
+        # SourcesConfig.ready connected on_unit_completed; sending the engine's
+        # signal must land in resurrect_dependents without any direct import.
+        from georiva.processing.signals import unit_completed
+
+        item = self._completed_item("climatology")
+        with patch(
+            "georiva.sources.derivation_invocation.resurrect_dependents"
+        ) as wake:
+            unit_completed.send(sender=None, item=item, recipe_type="chirps-climatology")
+        wake.assert_called_once_with(item)
+
+    def test_a_wakeup_failure_never_propagates_to_the_producing_task(self):
+        from georiva.processing.signals import unit_completed
+
+        item = self._completed_item("climatology")
+        with patch(
+            "georiva.sources.derivation_invocation.resurrect_dependents",
+            side_effect=RuntimeError("boom"),
+        ):
+            # Must not raise — the sweep is the safety net behind the wake-up.
+            unit_completed.send(sender=None, item=item, recipe_type="x")

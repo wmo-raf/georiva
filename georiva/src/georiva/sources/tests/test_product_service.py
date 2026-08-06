@@ -364,13 +364,26 @@ class BuildChainTests(ProductServiceBase):
         # A dependent's needs-chip uses the dependency's display label too.
         self.assertEqual(cards["anomaly"]["needs"], ["Rainfall Normals (1991–2020)"])
 
-    def test_manual_and_scheduled_products_are_runnable_event_ones_are_not(self):
-        # The fixture's products are all trigger_mode="scheduled" (see _product),
-        # so all can_run. Guard the flag exists and reflects trigger_mode.
-        with self._patch_defs():
+    def test_every_trigger_mode_is_runnable_with_a_mode_specific_label(self):
+        # ADR-0020: event products are hand-runnable too — run_product_now's
+        # wide selector makes it a backfill — so can_run is universal and only
+        # the label varies by trigger_mode.
+        defs = _chirps_defs()
+        event_defs = [
+            d if d.key != "anomaly" else DerivedProductDefinition(
+                key=d.key, recipe_type=d.recipe_type, label=d.label,
+                description=d.description, config_schema=d.config_schema,
+                inputs=d.inputs, outputs=d.outputs, trigger_mode="event",
+            )
+            for d in defs
+        ]
+        with patch.object(DataFeed, "get_derived_products", return_value=event_defs):
             cards = self._cards_by_key(build_chain(self.feed))
 
         self.assertTrue(cards["climatology"]["can_run"])
+        self.assertEqual(cards["climatology"]["run_label"], "Run now")
+        self.assertTrue(cards["anomaly"]["can_run"])
+        self.assertEqual(cards["anomaly"]["run_label"], "Backfill")
 
 
 class UpgradeLifecycleServiceTests(ProductServiceBase):
