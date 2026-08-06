@@ -49,11 +49,45 @@
             gap: 1em;
             margin-top: 1.5em;
         }
+
+        .frr-verdict {
+            font-weight: 700;
+            font-size: 0.95em;
+            margin: 0 0 0.75em;
+            padding-bottom: 0.75em;
+            border-bottom: 1px solid color-mix(in srgb, var(--w-color-warning-100) 30%, transparent);
+        }
+
+        .frr-verdict--stuck {
+            color: var(--w-color-text-label);
+        }
+
+        .frr-verdict--slow,
+        .frr-verdict--normal {
+            color: var(--w-color-critical-200);
+        }
+
+        .frr-verdict--unknown {
+            color: var(--w-color-grey-400);
+        }
     </style>
 {% endblock %}
 
 {% block main_content %}
     <div class="frr-warning-box">
+        {% if liveness %}
+            <p class="frr-verdict frr-verdict--{{ liveness.verdict }}">
+                {% if liveness.verdict == "stuck" %}
+                    {% blocktrans with silence=liveness.silence_display median=liveness.median_display %}This run looks stuck — no file activity for {{ silence }}, while a typical file takes {{ median }}.{% endblocktrans %}
+                {% elif liveness.verdict == "slow" %}
+                    {% blocktrans with silence=liveness.silence_display median=liveness.median_display %}This run is slower than usual but may still be alive — last activity {{ silence }} ago, typical file {{ median }}. Are you sure?{% endblocktrans %}
+                {% elif liveness.verdict == "normal" %}
+                    {% blocktrans with silence=liveness.silence_display %}This run looks alive — last file activity only {{ silence }} ago. Are you sure?{% endblocktrans %}
+                {% else %}
+                    {% blocktrans with silence=liveness.silence_display %}Not enough completed files to judge this run — last activity {{ silence }} ago.{% endblocktrans %}
+                {% endif %}
+            </p>
+        {% endif %}
         <p class="frr-warning-title">
             {% trans "Only recover this run if you are sure its stuck." %}
         </p>

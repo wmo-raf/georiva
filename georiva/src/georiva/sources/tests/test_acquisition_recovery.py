@@ -272,6 +272,47 @@ class RecoverRunViewTests(TestCase):
             kwargs={"feed_pk": self.feed.pk, "run_pk": run.pk},
         )
 
+    def _stamp_stored(self, run, path, *, minutes_ago, duration_seconds):
+        f = FetchedFile.objects.create(fetch_run=run, file_path=path)
+        started = timezone.now() - timedelta(minutes=minutes_ago)
+        FetchedFile.objects.filter(pk=f.pk).update(
+            status=FetchedFile.Status.STORED,
+            started_at=started,
+            completed_at=started + timedelta(seconds=duration_seconds),
+            bytes_transferred=1024,
+        )
+        return f
+
+    def test_detail_page_renders_a_stuck_verdict_with_its_evidence(self, _executor):
+        run = _make_run(self.feed, hours_ago=1)
+        for i in range(3):
+            self._stamp_stored(
+                run, f"c/f{i}.tif", minutes_ago=55 - i, duration_seconds=40,
+            )
+        stuck = FetchedFile.objects.create(fetch_run=run, file_path="c/stuck.tif")
+        FetchedFile.objects.filter(pk=stuck.pk).update(
+            status=FetchedFile.Status.FETCHING,
+            started_at=timezone.now() - timedelta(minutes=30),
+        )
+
+        response = self.client.get(self._detail_url(run))
+
+        self.assertContains(response, "looks stuck")
+        self.assertContains(response, "A typical file in this run takes")
+        self.assertContains(response, "c/stuck.tif")
+
+    def test_recover_page_pushes_back_when_the_run_looks_alive(self, _executor):
+        run = _make_run(self.feed, hours_ago=1)
+        for i in range(3):
+            self._stamp_stored(
+                run, f"c/f{i}.tif", minutes_ago=3 - i, duration_seconds=40,
+            )
+
+        response = self.client.get(self._recover_url(run))
+
+        self.assertContains(response, "looks alive")
+        self.assertContains(response, "Are you sure?")
+
     def test_detail_page_shows_recover_button_only_while_running(self, _executor):
         running = _make_run(self.feed)
         finished = _make_run(self.feed, status="completed")

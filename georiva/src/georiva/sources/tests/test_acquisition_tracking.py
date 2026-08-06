@@ -289,3 +289,148 @@ class DataFeedDetailAcquisitionCardTests(TestCase):
         self.assertNotContains(response, 'value="run_now"')
         self.assertNotContains(response, 'value="check_new_files"')
         self.assertNotContains(response, 'value="check_unprocessed"')
+
+
+class RunLivenessTests(TestCase):
+    """run_liveness: the stuck-vs-slow verdict behind the Recover button.
+
+    Self-calibrating: silence since the run's last file activity is judged
+    against the median duration of this run's own completed real fetches.
+    """
+
+    def setUp(self):
+        self.now = timezone.now()
+        self.feed = _feed()
+        self.run = _run(self.feed, FetchRun.Status.RUNNING, started_ago=30)
+
+    def _stored_file(self, path, *, started_ago, duration_seconds, bytes=1024):
+        """A completed real fetch: started `started_ago` minutes before now,
+        taking `duration_seconds`."""
+        f = FetchedFile.objects.create(fetch_run=self.run, file_path=path)
+        started = self.now - timedelta(minutes=started_ago)
+        FetchedFile.objects.filter(pk=f.pk).update(
+            status=FetchedFile.Status.STORED,
+            started_at=started,
+            completed_at=started + timedelta(seconds=duration_seconds),
+            bytes_transferred=bytes,
+        )
+        return f
+
+    def _fetching_file(self, path, *, started_ago_seconds):
+        f = FetchedFile.objects.create(fetch_run=self.run, file_path=path)
+        FetchedFile.objects.filter(pk=f.pk).update(
+            status=FetchedFile.Status.FETCHING,
+            started_at=self.now - timedelta(seconds=started_ago_seconds),
+        )
+        return f
+
+    def _three_quick_files(self, duration_seconds=40):
+        for i, ago in enumerate([25, 24, 23]):
+            self._stored_file(
+                f"c/f{i}.tif", started_ago=ago, duration_seconds=duration_seconds,
+            )
+
+    def test_stuck_when_silence_dwarfs_the_median(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        self._three_quick_files(duration_seconds=40)
+        self._fetching_file("c/stuck.tif", started_ago_seconds=20 * 60)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "stuck")
+        self.assertEqual(liveness["median_seconds"], 40)
+        self.assertEqual(liveness["sample_count"], 3)
+        self.assertEqual(liveness["silence_seconds"], 20 * 60)
+        self.assertEqual(liveness["current_file"].file_path, "c/stuck.tif")
+
+    def test_slow_between_two_and_five_times_the_median(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        self._three_quick_files(duration_seconds=60)
+        self._fetching_file("c/slowish.tif", started_ago_seconds=150)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "slow")
+
+    def test_normal_within_twice_the_median(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        self._three_quick_files(duration_seconds=60)
+        self._fetching_file("c/fine.tif", started_ago_seconds=30)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "normal")
+
+    def test_short_silence_is_never_stuck_even_on_a_fast_feed(self):
+        # Median 5s, silence 30s = 6x the median — but under the 2-minute
+        # floor, a fast feed's hiccup must not read as a death.
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        self._three_quick_files(duration_seconds=5)
+        self._fetching_file("c/hiccup.tif", started_ago_seconds=30)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "slow")
+
+    def test_died_between_files_uses_last_completion_as_activity(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        # Last file completed 20 minutes ago; nothing in flight since.
+        self._three_quick_files(duration_seconds=40)
+        self._stored_file("c/last.tif", started_ago=21, duration_seconds=60)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "stuck")
+        self.assertIsNone(liveness["current_file"])
+        self.assertEqual(liveness["silence_seconds"], 20 * 60)
+
+    def test_unknown_below_three_real_samples(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        self._stored_file("c/a.tif", started_ago=25, duration_seconds=40)
+        self._stored_file("c/b.tif", started_ago=24, duration_seconds=40)
+        self._fetching_file("c/c.tif", started_ago_seconds=20 * 60)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "unknown")
+        self.assertIsNone(liveness["median_seconds"])
+        self.assertEqual(liveness["silence_seconds"], 20 * 60)
+
+    def test_near_instant_copies_do_not_poison_the_median(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        # Three cross-collection copies (sub-second, zero bytes) + two real
+        # fetches: not enough real samples for a verdict.
+        for i, ago in enumerate([25, 24, 23]):
+            self._stored_file(
+                f"c/copy{i}.tif", started_ago=ago, duration_seconds=0, bytes=0,
+            )
+        self._stored_file("c/real1.tif", started_ago=22, duration_seconds=40)
+        self._stored_file("c/real2.tif", started_ago=21, duration_seconds=40)
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "unknown")
+        self.assertEqual(liveness["sample_count"], 2)
+
+    def test_finished_run_has_no_liveness(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        run = _run(self.feed, FetchRun.Status.COMPLETED)
+
+        self.assertIsNone(run_liveness(run))
+
+    def test_run_with_no_files_counts_silence_from_run_start(self):
+        from georiva.sources.acquisition_tracking import run_liveness
+
+        liveness = run_liveness(self.run, now=self.now)
+
+        self.assertEqual(liveness["verdict"], "unknown")
+        # _run() stamps started_at a hair after self.now — near enough.
+        self.assertAlmostEqual(liveness["silence_seconds"], 30 * 60, delta=2)

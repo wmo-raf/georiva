@@ -1953,6 +1953,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     """
     from georiva.sources.acquisition_tracking import (
         run_duration_seconds,
+        run_liveness_display,
         with_live_counters,
     )
     from georiva.sources.models import FetchedFile, FetchRun
@@ -1961,6 +1962,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     run = with_live_counters(
         get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed)
     )
+    liveness = run_liveness_display(run)
 
     def retryable_files(pks):
         """Only failed files of THIS run that carry a stored request may be
@@ -2021,6 +2023,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
         "duration": run_duration_seconds(run),
         "files": files,
         "runs_url": runs_url,
+        "liveness": liveness,
     }
     return render(request, "georivasources/data_feed_fetch_run_detail.html", context)
 
@@ -2041,7 +2044,10 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
         RESUME_QUEUED,
         recover_run,
     )
-    from georiva.sources.acquisition_tracking import with_live_counters
+    from georiva.sources.acquisition_tracking import (
+        run_liveness_display,
+        with_live_counters,
+    )
     from georiva.sources.models import FetchRun
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
@@ -2100,6 +2106,7 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
         "feed": feed,
         "run": run,
         "cancel_url": detail_url,
+        "liveness": run_liveness_display(run),
     }
     return render(
         request, "georivasources/data_feed_fetch_run_recover.html", context,
