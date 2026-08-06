@@ -47,8 +47,11 @@ class PromotionRecipe(BaseRecipe):
     # v3: those assets now use the shared ingestion path scheme
     #     ({variable}_{HHMMSS}) instead of the divergent {variable}_{YYYYMMDDTHHMMSS},
     #     so href-agnostic consumers resolve them.
+    # v4: assets go through the shared AssetMaterializer (engine emits the
+    #     PNG + JSON sidecar with every COG, clipped to the catalog boundary),
+    #     and south-up staging rasters are flipped north-up on read.
     # Bumping the version re-derives already-promoted items on the next sweep.
-    version = "3"
+    version = "4"
 
     # ---- declarative surface ------------------------------------------------
 
@@ -140,17 +143,13 @@ class PromotionRecipe(BaseRecipe):
                 BucketType.STAGING, asset.href
             )
             stats = _array_stats(data)
-            # A served COG (data) + a visual PNG (encoded by the engine), the
-            # same pair ingestion writes — so promotion output is tile-servable
-            # and shows in the public catalog (which is COG-gated).
+            # One data OutputAsset per staging asset; the engine's shared
+            # materializer writes the full served trio (COG + visual PNG +
+            # JSON sidecar) from it, same as ingestion.
             out.append(OutputAsset(
                 variable=variable, roles=["data"], format="cog", array=data,
                 bounds=bounds, crs=crs, width=width, height=height,
                 stats=stats, checksum=asset.checksum,
-            ))
-            out.append(OutputAsset(
-                variable=variable, roles=["visual"], format="png", array=data,
-                bounds=bounds, crs=crs, width=width, height=height,
             ))
         return out
 
@@ -160,7 +159,9 @@ class PromotionRecipe(BaseRecipe):
         """Read a stored single-band raster into
         ``(data, bounds, crs, width, height)`` — the recipe's only real I/O,
         patched in unit tests. Nodata is mapped to NaN so the COG stats and the
-        PNG alpha both skip it."""
+        PNG alpha both skip it. A south-up raster (positive row pitch, like
+        ``formats/geotiff.py`` handles at ingestion) is flipped north-up so
+        row 0 is north — the orientation every downstream consumer assumes."""
         import numpy as np
         import rasterio
         from rasterio.io import MemoryFile
@@ -172,6 +173,8 @@ class PromotionRecipe(BaseRecipe):
             data = src.read(1).astype("float32")
             if src.nodata is not None:
                 data = np.where(data == src.nodata, np.nan, data)
+            if src.transform.e > 0:
+                data = np.flipud(data)
             bounds = list(src.bounds)
             crs = src.crs.to_string() if src.crs else "EPSG:4326"
             return data, bounds, crs, src.width, src.height

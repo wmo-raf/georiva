@@ -154,6 +154,14 @@ def register_staging_file(bucket: str, key: str):
         collection.collection = core_collection
         collection.save(update_fields=["collection"])
 
+    # Same normalisation ingestion applies (ingestion_handler.py): 0–360
+    # longitudes wrapped to -180/180 before anything downstream reads them.
+    from georiva.ingestion.utils import normalize_bounds
+
+    bounds = spatial.get("bounds")
+    if bounds is not None and len(bounds) >= 4:
+        bounds = normalize_bounds(bounds)
+
     item = StagingItem.objects.create(
         collection=collection,
         source_file=f"{bucket}:{key}",
@@ -161,7 +169,7 @@ def register_staging_file(bucket: str, key: str):
         start_datetime=start_dt,
         end_datetime=end_dt,
         reference_time=meta.get("reference_time"),
-        bounds=spatial.get("bounds"),
+        bounds=bounds,
         crs=spatial.get("crs") or "EPSG:4326",
         width=spatial.get("width"),
         height=spatial.get("height"),
