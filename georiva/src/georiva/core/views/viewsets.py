@@ -52,7 +52,9 @@ class TopicViewSet(ModelViewSet):
     """
 
     model = Topic
-    add_to_admin_menu = True
+    # Under Settings, not the main menu: curating the instance-wide vocabulary
+    # is an instance-admin act, and the entry is superuser-only anyway.
+    add_to_settings_menu = True
     menu_order = 300
     menu_icon = "hashtag"
     exclude_form_fields = ["created_at", "updated_at"]
