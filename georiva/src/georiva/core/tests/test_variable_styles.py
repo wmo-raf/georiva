@@ -344,3 +344,30 @@ class PaletteMigrationTests(TestCase):
         self.assertEqual(
             _palette_migration.style_slug_from("Kenya Rainfall"), "kenya-rainfall"
         )
+
+    def test_a_migrated_ramp_dodges_the_seeded_catalogs_names(self):
+        # A legacy global palette named "viridis" collides with the seeded
+        # catalog; the migration suffixes rather than fails or overwrites.
+        # (`_unique_ramp_name` only reads `.objects`, so the live model
+        # stands in for the historical one.)
+        self.assertEqual(
+            _palette_migration._unique_ramp_name(ColorRamp, None, "viridis"),
+            "viridis (migrated)",
+        )
+
+    def test_an_org_palette_may_share_a_name_with_the_seeded_catalog(self):
+        # The tiers have separate namespaces: an organisation's own "viridis"
+        # does not collide with the instance-wide one.
+        organisation = make_organisation("kenya")
+        self.assertEqual(
+            _palette_migration._unique_ramp_name(
+                ColorRamp, organisation.pk, "viridis"
+            ),
+            "viridis",
+        )
+
+    def test_an_uncontested_name_survives_unsuffixed(self):
+        self.assertEqual(
+            _palette_migration._unique_ramp_name(ColorRamp, None, "Kenya Rainfall"),
+            "Kenya Rainfall",
+        )

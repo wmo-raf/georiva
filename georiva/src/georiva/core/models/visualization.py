@@ -53,19 +53,18 @@ def _rgba_to_hex(rgba) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def _ramp_colors_and_positions(ramp):
-    """The ramp as parallel (rgba colors, 0–1 positions) lists.
+def _spread_positions(stops) -> list:
+    """0–1 positions for a ramp's stops, one reading shared by previews and
+    snapshot generation — so what a preview shows is what an application
+    materializes.
 
-    Stops without explicit positions are spread evenly, and positions are
-    forced non-decreasing — the same reading ``ColorRamp.css_gradient`` uses,
-    so what a preview shows is what an application materializes.
+    Stops without explicit positions are spread evenly. Positions are forced
+    non-decreasing left to right, because CSS silently clamps out-of-order
+    gradient stops — a preview that let that happen would misrepresent the
+    ramp it is previewing.
     """
-    stops = list(ramp.stops.all())
-    if not stops:
-        return [], []
-    colors = [hex_to_rgba_list(stop.hex_value) for stop in stops]
     if len(stops) == 1:
-        return colors, [0.0]
+        return [0.0]
     last = len(stops) - 1
     positions = [
         stop.position if stop.position is not None else i / last
@@ -74,7 +73,29 @@ def _ramp_colors_and_positions(ramp):
     floor = 0.0
     for i, position in enumerate(positions):
         floor = positions[i] = max(floor, position)
-    return colors, positions
+    return positions
+
+
+def _swatch_html(gradient: str):
+    """A gradient swatch for admin listings, or "" for nothing to show."""
+    if not gradient:
+        return ""
+    return format_html(
+        '<span style="display: inline-block; '
+        'width: 120px; height: 14px; border-radius: 3px; '
+        'border: 1px solid var(--w-color-border-furniture); background: {};">'
+        '</span>',
+        gradient,
+    )
+
+
+def _ramp_colors_and_positions(ramp):
+    """The ramp as parallel (rgba colors, 0–1 positions) lists."""
+    stops = list(ramp.stops.all())
+    if not stops:
+        return [], []
+    colors = [hex_to_rgba_list(stop.hex_value) for stop in stops]
+    return colors, _spread_positions(stops)
 
 
 def _sample_ramp(colors, positions, t: float):
@@ -222,12 +243,10 @@ class ColorRamp(ClusterableModel):
     def css_gradient(self):
         """The ramp as a CSS ``linear-gradient()``, for previews.
 
-        Stops without explicit positions are spread evenly; a qualitative ramp
-        renders as hard-edged blocks rather than a blend, because its colors
-        are categories, not points on a continuum. Positions are forced
-        non-decreasing left to right, because CSS silently clamps out-of-order
-        gradient stops — a preview that let that happen would misrepresent
-        the ramp it is previewing.
+        Stops without explicit positions are spread evenly (see
+        :func:`_spread_positions`); a qualitative ramp renders as hard-edged
+        blocks rather than a blend, because its colors are categories, not
+        points on a continuum.
         """
         stops = list(self.stops.all())
         if not stops:
@@ -243,32 +262,15 @@ class ColorRamp(ClusterableModel):
                 for i, stop in enumerate(stops)
             ]
         else:
-            last = len(stops) - 1
-            positions = [
-                stop.position if stop.position is not None else i / last
-                for i, stop in enumerate(stops)
-            ]
-            floor = 0.0
-            for i, position in enumerate(positions):
-                floor = positions[i] = max(floor, position)
             parts = [
                 f"{stop.css_color()} {position * 100:g}%"
-                for stop, position in zip(stops, positions)
+                for stop, position in zip(stops, _spread_positions(stops))
             ]
         return f"linear-gradient(to right, {', '.join(parts)})"
 
     def preview(self):
         """A gradient swatch for the admin listing."""
-        gradient = self.css_gradient()
-        if not gradient:
-            return ""
-        return format_html(
-            '<span style="display: inline-block; '
-            'width: 120px; height: 14px; border-radius: 3px; '
-            'border: 1px solid var(--w-color-border-furniture); background: {};">'
-            '</span>',
-            gradient,
-        )
+        return _swatch_html(self.css_gradient())
 
     preview.short_description = "Preview"
 
@@ -467,15 +469,6 @@ class VariableStyle(TimeStampedModel):
 
     def preview(self):
         """A gradient swatch for admin listings."""
-        gradient = self.css_gradient()
-        if not gradient:
-            return ""
-        return format_html(
-            '<span style="display: inline-block; '
-            'width: 120px; height: 14px; border-radius: 3px; '
-            'border: 1px solid var(--w-color-border-furniture); background: {};">'
-            '</span>',
-            gradient,
-        )
+        return _swatch_html(self.css_gradient())
 
     preview.short_description = "Preview"

@@ -95,7 +95,13 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
                 x_georiva["palette_max"] = palette_max
                 x_georiva["palette_name"] = style.name
                 if style.ramp:
-                    x_georiva["palette_type"] = style.ramp.ramp_type
+                    # This key speaks the legacy palette vocabulary — clients
+                    # predate the ramp catalog, whose "qualitative" they knew
+                    # as "categorical" — so serving output stays unchanged
+                    # across the palette→style migration.
+                    x_georiva["palette_type"] = {
+                        "qualitative": "categorical",
+                    }.get(style.ramp.ramp_type, style.ramp.ramp_type)
             except Exception:
                 pass
         else:
