@@ -17,7 +17,6 @@ from georiva.organisations.testing import make_organisation
 def _mock_writer_cls():
     writer = MagicMock()
     writer.write_cog.side_effect = lambda arr, path, *a, **k: path
-    writer.write_png.side_effect = lambda rgba, path, *a, **k: path
     writer.write_metadata.side_effect = lambda meta, path: path
     cls = MagicMock(return_value=writer)
     return cls, writer
@@ -69,14 +68,14 @@ class RematerializeDerivedAssetsTests(TestCase):
             )
         return out.getvalue(), writer
 
-    def test_backfills_png_extra_fields_and_collection_extent(self):
+    def test_backfills_assets_and_collection_extent(self):
         output, writer = self._run()
 
-        png = self.item.assets.get(format=Asset.Format.PNG)
-        self.assertEqual(png.roles, ["visual"])
-        self.assertEqual(png.extra_fields["imageUnscale"], [-150, 150])
         writer.write_cog.assert_called_once()
-        writer.write_png.assert_called_once()
+        # No stored visual: textures are derived on demand (ADR 0021).
+        self.assertFalse(
+            self.item.assets.filter(format=Asset.Format.PNG).exists()
+        )
 
         self.collection.refresh_from_db()
         self.assertEqual(self.collection.bounds, [10, -5, 20, 5])
@@ -91,10 +90,6 @@ class RematerializeDerivedAssetsTests(TestCase):
         output, writer = self._run("--dry-run")
 
         writer.write_cog.assert_not_called()
-        writer.write_png.assert_not_called()
-        self.assertFalse(
-            self.item.assets.filter(format=Asset.Format.PNG).exists()
-        )
         self.collection.refresh_from_db()
         self.assertIsNone(self.collection.bounds)
         self.assertIn("would rematerialize", output)

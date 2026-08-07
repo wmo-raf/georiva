@@ -24,7 +24,7 @@ from typing import Optional
 
 from rest_framework import serializers
 
-from georiva.core.machine_plane import titiler_preview_url
+from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
 from georiva.core.models import Collection, visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
@@ -322,7 +322,9 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             key = f"{asset.variable.slug}_{asset.format}" if asset.format else asset.variable.slug
             assets[key] = STACAssetSerializer(asset, context=self.context).data
 
-        # Thumbnail from Titiler
+        # Computed assets from Titiler — derived on demand, never stored
+        # (ADR 0021): the colorized thumbnail and the value-encoded texture
+        # WeatherLayers unscales client-side.
         if variable:
             request = self.context.get('request')
             thumb_href = self._build_thumbnail_href(obj, variable, request)
@@ -333,11 +335,30 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
                     "title": "Thumbnail",
                     "roles": ["thumbnail"],
                 }
+            visual_href = self._build_visual_href(obj, variable, request)
+            if visual_href:
+                assets[f"{variable.slug}_visual"] = {
+                    "href": visual_href,
+                    "type": "image/png",
+                    "title": f"{variable.name} (encoded texture)",
+                    "description": (
+                        "Value-encoded texture rendered on demand from the COG; "
+                        "unscale pixels with imageUnscale."
+                    ),
+                    "roles": ["visual"],
+                    "imageUnscale": [variable.value_min, variable.value_max],
+                }
 
         return assets
 
     def _build_thumbnail_href(self, obj, variable, request) -> Optional[str]:
         path = titiler_preview_url(obj, variable.slug)
+        if request:
+            return get_full_url_by_request(request, path)
+        return path
+
+    def _build_visual_href(self, obj, variable, request) -> Optional[str]:
+        path = titiler_encoded_preview_url(obj, variable)
         if request:
             return get_full_url_by_request(request, path)
         return path
@@ -475,9 +496,10 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
         if obj.unit:
             item_assets[f"{obj.slug}_cog"]["unit"] = obj.unit.symbol
         
-        # Visual asset (PNG)
-        item_assets[f"{obj.slug}_png"] = {
-            "title": f"{obj.name} (PNG)",
+        # Visual asset — encoded texture derived on demand by Titiler
+        # (ADR 0021), advertised here as a contract, not a stored object.
+        item_assets[f"{obj.slug}_visual"] = {
+            "title": f"{obj.name} (encoded texture)",
             "description": f"{obj.name} visualization",
             "type": "image/png",
             "roles": ["visual"],

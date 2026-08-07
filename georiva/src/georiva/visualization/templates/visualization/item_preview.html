@@ -823,9 +823,10 @@
                     <div class="geo-section-title">Assets ({{ assets|length }})</div>
                     <div class="geo-asset-list">
                         {% for asset in assets %}
-                            <div class="geo-asset-card {% if not asset.is_visual %}non-visual{% endif %}"
+                            <div class="geo-asset-card {% if not asset.texture_url %}non-visual{% endif %}"
                                  data-asset-id="{{ asset.pk }}"
                                  data-asset-url="{{ asset.url }}"
+                                 data-asset-texture-url="{{ asset.texture_url|default:'' }}"
                                  data-asset-format="{{ asset.format }}"
                                  data-asset-bounds="{{ asset.item.bounds|join:',' }}"
                                  data-asset-min="{{ asset.stats_min|default:'' }}"
@@ -835,7 +836,7 @@
                                  data-asset-palette='{{ asset.variable.weather_layers_palette|to_json }}'
                                  data-asset-palette-min="{{ asset.variable.palette_value_range.0 }}"
                                  data-asset-palette-max="{{ asset.variable.palette_value_range.1 }}"
-                                 data-visualizable="{{ asset.is_visual|yesno:'true,false' }}">
+                                 data-visualizable="{% if asset.texture_url %}true{% else %}false{% endif %}">
                                 <div class="geo-asset-header">
                                     <div class="geo-asset-info">
                                         <div class="geo-asset-name">{{ asset.variable.name }}</div>
@@ -851,7 +852,7 @@
                                         </div>
                                     </div>
                                     <div class="geo-view-indicator">
-                                        {% if asset.is_visual %}
+                                        {% if asset.texture_url %}
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
                                                  stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                                  stroke-linejoin="round">
@@ -908,7 +909,7 @@
                                         </svg>
                                         Download
                                     </a>
-                                    {% if asset.is_visual %}
+                                    {% if asset.texture_url %}
                                         <button class="geo-btn geo-btn--primary geo-view-btn" type="button"
                                                 onclick="event.stopPropagation(); viewAsset(this.closest('.geo-asset-card'));">
                                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
@@ -1358,17 +1359,16 @@
             async function addWeatherRasterLayer(assetElement) {
                 if (!deckOverlay) return;
 
-                const assetUrl = assetElement.dataset.assetUrl;
+                // Titiler's on-demand encoded texture (ADR 0021) — computed
+                // server-side from the item + variable, never a stored object.
+                const textureUrl = assetElement.dataset.assetTextureUrl;
                 const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
-                const format = (assetElement.dataset.assetFormat || '').toLowerCase();
 
                 // Get palette range for imageUnscale (from palette or asset stats)
                 const paletteMin = safeParseFloat(assetElement.dataset.assetPaletteMin);
                 const paletteMax = safeParseFloat(assetElement.dataset.assetPaletteMax);
 
-                // Only handle image formats for now
-                const supported = ['png', 'webp', 'jpeg', 'jpg'];
-                if (!supported.includes(format)) {
+                if (!textureUrl) {
                     clearDeckLayers();
                     updateLayerInfo(assetElement);
                     return;
@@ -1389,7 +1389,7 @@
                     const opacity = parseInt(document.getElementById('opacitySlider').value, 10) / 100;
 
                     // Load as texture data
-                    const image = await WeatherLayers.loadTextureData(assetUrl);
+                    const image = await WeatherLayers.loadTextureData(textureUrl);
 
                     const imageUnscale = (Number.isFinite(paletteMin) && Number.isFinite(paletteMax))
                         ? [paletteMin, paletteMax]

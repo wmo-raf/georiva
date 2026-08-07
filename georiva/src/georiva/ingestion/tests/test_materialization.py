@@ -1,7 +1,7 @@
 """
-AssetMaterializer tests — the shared encode → clip → write → record → extent
-seam that both ingestion and the derivation engine call (issue: derived PNGs
-stretched on the item map because the derived flow skipped this housekeeping).
+AssetMaterializer tests — the shared clip → write → record → extent seam that
+both ingestion and the derivation engine call. Visual textures are derived on
+demand by Titiler (ADR 0021), so no PNG is written or recorded here.
 
 Mirrors processing/tests/test_engine.py: mock the writer, assert on records.
 """
@@ -19,7 +19,6 @@ from georiva.organisations.testing import make_organisation
 def _mock_writer():
     w = MagicMock()
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
-    w.write_png.side_effect = lambda rgba, path, *a, **k: path
     w.write_metadata.side_effect = lambda meta, path: path
     return w
 
@@ -33,11 +32,6 @@ class _StubClipper:
     def apply_geometry_mask(self, data, bounds, nodata=np.nan):
         out = data.copy()
         out[:, : out.shape[1] // 2] = nodata
-        return out
-
-    def apply_rgba_mask(self, rgba, bounds):
-        out = rgba.copy()
-        out[:, : out.shape[1] // 2, 3] = 0
         return out
 
 
@@ -76,24 +70,21 @@ class MaterializerFixture(TestCase):
 
 
 class MaterializeVariableTests(MaterializerFixture):
-    def test_writes_cog_png_json_and_records_assets(self):
+    def test_writes_cog_json_and_records_assets(self):
         assets = self._materialize()
 
-        self.assertEqual(len(assets), 2)
+        self.assertEqual(len(assets), 1)
         cog = self.item.assets.get(format=Asset.Format.COG)
         self.assertEqual(cog.roles, ["data"])
         self.assertEqual(cog.width, 10)
         self.assertEqual(cog.stats_min, 42.0)
 
-        png = self.item.assets.get(format=Asset.Format.PNG)
-        self.assertEqual(png.roles, ["visual"])
-        self.assertEqual(
-            png.extra_fields["imageUnscale"], [0, 300],
+        # No stored visual: textures are derived on demand (ADR 0021).
+        self.assertFalse(
+            self.item.assets.filter(format=Asset.Format.PNG).exists()
         )
-        self.assertEqual(png.extra_fields["scale"], "linear")
 
         self.writer.write_cog.assert_called_once()
-        self.writer.write_png.assert_called_once()
         self.writer.write_metadata.assert_called_once()
 
     def test_expands_collection_extent(self):
@@ -113,7 +104,7 @@ class MaterializeVariableTests(MaterializerFixture):
         written_bounds = kwargs.get("bounds") or args[2]
         self.assertEqual(list(written_bounds), [-170, -5, -160, 5])
 
-    def test_geometry_mask_applied_to_data_and_alpha(self):
+    def test_geometry_mask_applied_to_data(self):
         self._materialize(clipper=_StubClipper())
 
         cog = self.item.assets.get(format=Asset.Format.COG)
@@ -123,28 +114,10 @@ class MaterializeVariableTests(MaterializerFixture):
         self.assertTrue(np.isnan(written[:, :5]).all())
         self.assertTrue((written[:, 5:] == 42.0).all())
 
-        rgba = self.writer.write_png.call_args[0][0]
-        self.assertTrue((rgba[:, :5, 3] == 0).all())
-        self.assertTrue((rgba[:, 5:, 3] == 255).all())
-
-    def test_png_failure_is_nonfatal_and_cog_survives(self):
-        # An inverted range makes the encoder raise; the COG must still land.
-        bad = Variable.objects.create(
-            collection=self.collection, slug="broken", name="Broken",
-            unit=self.unit, value_min=10, value_max=10,
-        )
-        assets = self._materialize(variable=bad)
+    def test_sidecar_failure_is_nonfatal_and_cog_survives(self):
+        self.writer.write_metadata.side_effect = RuntimeError("bucket down")
+        assets = self._materialize()
         self.assertEqual([a.format for a in assets], [Asset.Format.COG])
-        self.assertFalse(
-            self.item.assets.filter(format=Asset.Format.PNG, variable=bad).exists()
-        )
-
-    def test_precomputed_rgba_is_used_verbatim(self):
-        rgba = np.zeros((10, 10, 4), dtype=np.uint8)
-        rgba[..., 3] = 255
-        self._materialize(rgba=rgba)
-        written = self.writer.write_png.call_args[0][0]
-        self.assertTrue((written == rgba).all())
 
 
 class ClipArrayTests(MaterializerFixture):

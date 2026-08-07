@@ -12,7 +12,6 @@ from georiva.core.storage import storage, BucketType
 from georiva.formats.registry import format_registry
 from georiva.ingestion.asset_writer import AssetWriter
 from georiva.ingestion.clipper import BoundaryClipper
-from georiva.ingestion.encoder import VariableEncoder
 from georiva.ingestion.extractor import VariableExtractor
 from georiva.ingestion.handlers import (
     IngestionContext,
@@ -194,7 +193,6 @@ class IngestionService:
                 clipper=clipper,
                 writer=AssetWriter(storage.assets),
                 extractor=VariableExtractor(plugin),
-                encoder=VariableEncoder(),
                 origin_bucket=origin_bucket,
                 reference_time=reference_time,
                 ingestion_log=ingestion_log,

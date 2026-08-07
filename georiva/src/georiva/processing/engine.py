@@ -125,18 +125,18 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
     (post-crop) — ``run_unit`` stamps the item with it — or None for
     passthrough/skipped assets.
 
-    An array OutputAsset always yields the full served trio — COG + visual
-    PNG + JSON sidecar — via ``AssetMaterializer``, exactly what ingestion
-    writes; recipes no longer opt in to the PNG. A ``format="png"``
-    OutputAsset is therefore redundant and skipped."""
+    An array OutputAsset always yields the served pair — COG + JSON sidecar —
+    via ``AssetMaterializer``, exactly what ingestion writes. Visual textures
+    are derived on demand by Titiler (ADR 0021), so a ``format="png"``
+    OutputAsset addresses nothing and is skipped."""
     from georiva.core.storage import storage
     from georiva.core.models import Asset
 
     if oa.array is not None:
         if oa.format == "png":
             logger.info(
-                "Skipping explicit png OutputAsset for %s — the materializer "
-                "emits the visual PNG with the COG",
+                "Skipping explicit png OutputAsset for %s — visual textures "
+                "are derived on demand by Titiler (ADR 0021), never stored",
                 getattr(oa.variable, "slug", "?"),
             )
             return [], None

@@ -11,6 +11,7 @@ from georiva.core.machine_plane import (
     MARTIN_PREFIX,
     martin_boundary_stats_url,
     org_slug_of,
+    titiler_encoded_preview_url,
 )
 from georiva.core.models import Catalog, Collection, Item, Asset, visible_visibilities
 from georiva.core.topics import topics_of
@@ -337,14 +338,12 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .order_by('variable__sort_order')
         )
         
-        # Visual PNG asset URLs by variable — the map reads the real hrefs
-        # instead of re-deriving bucket keys from the storage grammar, so a
-        # missing visual asset surfaces honestly rather than as a silent 404.
-        png_assets = {
-            a.variable.slug: a.url
-            for a in item.assets
-            .filter(format=Asset.Format.PNG, variable__is_active=True)
-            .select_related('variable')
+        # Encoded texture URLs by variable — derived on demand by Titiler from
+        # the COG at the variable's current render range (ADR 0021), so a
+        # min/max edit is live on the next request with nothing to regenerate.
+        texture_urls = {
+            a.variable.slug: titiler_encoded_preview_url(item, a.variable)
+            for a in cog_assets
         }
 
         # All downloadable assets for the downloads section
@@ -424,7 +423,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             'item': item,
             'active_var_slug': active_var_slug,
             'cog_assets': cog_assets,
-            'png_assets': png_assets,
+            'texture_urls': texture_urls,
             'ungrouped_cog_assets': ungrouped_cog_assets,
             'cog_asset_groups': cog_asset_groups,
             'map_layers': map_layers,

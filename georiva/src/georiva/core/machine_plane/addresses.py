@@ -27,6 +27,7 @@ for one reason — it is the exact inverse of the builders above, and an inverse
 that drifts from its function is a gate that authorises one collection while the
 tile server reads another.
 """
+import hashlib
 from collections import namedtuple
 from urllib.parse import parse_qs, urlencode
 
@@ -135,6 +136,40 @@ def titiler_preview_url(item, variable_slug) -> str:
     )
 
     return f"{root}/preview.webp?{urlencode(params)}"
+
+
+def render_config_token(variable) -> str:
+    """A short hash of everything baked into an encoded texture's pixels.
+
+    Carried as ``v=`` on :func:`titiler_encoded_preview_url` so a change to the
+    variable's render range is a *different URL* — the endpoint answers with an
+    immutable cache header, and this token is what makes that safe (ADR 0021).
+    A hash rather than a stored counter: identical config always yields the
+    same URL, and there is no version state to migrate or drift.
+    """
+    basis = f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
+    return hashlib.sha1(basis.encode()).hexdigest()[:8]
+
+
+def titiler_encoded_preview_url(item, variable) -> str:
+    """The value-encoded texture of ``item``'s ``variable`` band (ADR 0021).
+
+    The whole extent as one image, pixels rescaled to the variable's current
+    ``value_min``/``value_max`` — the machine texture WeatherLayers unscales
+    client-side. Derived at request time from the COG, so nothing behind this
+    URL can go stale; the ``v`` token turns render-config edits into new URLs.
+    The org comes from the item's own row, as in :func:`titiler_preview_url`.
+    """
+    collection = item.collection
+    params = {"time": item.time_iso}
+    if item.reference_time:
+        params["reftime"] = item.reference_time_iso
+    params["v"] = render_config_token(variable)
+    root = titiler_variable_root(
+        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
+    )
+
+    return f"{root}/encoded-preview.png?{urlencode(params)}"
 
 
 def martin_boundary_stats_url(collection, base) -> str:

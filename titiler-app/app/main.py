@@ -4,15 +4,23 @@ configure_logging()
 
 import logging
 
-from fastapi import FastAPI, Request
+from typing import Optional
+
+from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from rasterio.errors import RasterioIOError
+from rio_tiler.io import Reader
 from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.config import TTL_ROOT_PATH
-from app.dependencies import SemanticColorMap, SemanticPathParams, SemanticRescale
+from app.dependencies import (
+    SemanticColorMap,
+    SemanticPathParams,
+    SemanticRescale,
+    SemanticTileConfig,
+)
 from app.middleware import RequestLoggingMiddleware
 
 logger = logging.getLogger(__name__)
@@ -72,3 +80,39 @@ app.include_router(
     cog.router,
     prefix=TILE_ROUTE_PREFIX,
 )
+
+
+# ---------------------------------------------------------------------------
+# Encoded texture (ADR 0021)
+# ---------------------------------------------------------------------------
+
+@app.get(TILE_ROUTE_PREFIX + "/encoded-preview.png")
+def encoded_preview(
+    src_path: str = Depends(SemanticPathParams),
+    tile_config: dict = Depends(SemanticTileConfig),
+    max_size: int = Query(4096, ge=1, description="Cap on the longest image side (native grid if smaller)"),
+    v: Optional[str] = Query(None, description="Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"),
+) -> Response:
+    """The whole extent as one value-encoded texture: pixel = rescale(value, vmin→vmax, 0→255).
+
+    Never colormapped — this is the machine texture WeatherLayers unscales
+    client-side with ``imageUnscale=[vmin, vmax]``. The range comes from the
+    same always-current tile config the tile routes resolve per request, so
+    there is no encode-time state to go stale (ADR 0021); ``v`` is opaque to
+    this service and exists only to key caches. The immutable cache header is
+    safe for exactly that reason: a range change arrives as a different URL.
+    """
+    with Reader(src_path) as src:
+        img = src.preview(max_size=max_size)
+
+    img.rescale(in_range=((tile_config["vmin"], tile_config["vmax"]),))
+
+    return Response(
+        img.render(img_format="PNG"),
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Image-Unscale": f'{tile_config["vmin"]},{tile_config["vmax"]}',
+            "X-Image-Bounds": ",".join(str(b) for b in img.bounds) if img.bounds else "",
+        },
+    )

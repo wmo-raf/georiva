@@ -208,7 +208,7 @@ class ItemDetailMap {
 
     // ── Raster layer (WeatherLayers PNG) ───────────────────────────────────
 
-    // The PNG is georeferenced by the item's own bounds — the collection
+    // The texture is georeferenced by the item's own bounds — the collection
     // extent is a coincidental match for ingested items and plain wrong for
     // anything else (a derived collection with no extent used to fall back to
     // the whole world, stretching the overlay across the map).
@@ -237,9 +237,9 @@ class ItemDetailMap {
         this._clearRasterLayer();
         this._showNoVisual(false);
 
-        // The real stored asset href, injected server-side — never rebuilt
-        // from the storage grammar here.
-        const url = this.config.pngAssets?.[this.currentVarSlug];
+        // Titiler's on-demand encoded texture (ADR 0021), injected
+        // server-side — never rebuilt from the URL grammar here.
+        const url = this.config.textureUrls?.[this.currentVarSlug];
         if (!url) {
             this._showNoVisual(true);
             return;

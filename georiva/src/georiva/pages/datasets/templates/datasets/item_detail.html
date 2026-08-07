@@ -420,7 +420,7 @@
                 nothing user-authored.
             {% endcomment %}
             "itemBounds":           {{ item.bounds|to_json|default:'null'|safe }},
-            "pngAssets":            {{ png_assets|to_json|default:'{}'|safe }},
+            "textureUrls":          {{ texture_urls|to_json|default:'{}'|safe }},
             {# escapejs: the URL carries query params, and `&amp;` would break JSON.parse #}
             "martinBoundaryStatsUrl": "{{ martin_boundary_stats_url|escapejs }}",
             "boundaryStatsLevels":  {{ boundary_stats_levels|to_json }}
