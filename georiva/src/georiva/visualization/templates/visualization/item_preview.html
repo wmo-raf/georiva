@@ -834,8 +834,8 @@
                                  data-asset-units="{{ asset.units|default:'' }}"
                                  data-asset-name="{{ asset.variable.name }}"
                                  data-asset-palette='{{ asset.variable.weather_layers_palette|to_json }}'
-                                 data-asset-palette-min="{{ asset.variable.palette_value_range.0 }}"
-                                 data-asset-palette-max="{{ asset.variable.palette_value_range.1 }}"
+                                 data-asset-palette-min="{{ asset.variable.value_range.0 }}"
+                                 data-asset-palette-max="{{ asset.variable.value_range.1 }}"
                                  data-visualizable="{% if asset.texture_url %}true{% else %}false{% endif %}">
                                 <div class="geo-asset-header">
                                     <div class="geo-asset-info">

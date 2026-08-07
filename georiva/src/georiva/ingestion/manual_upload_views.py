@@ -1,4 +1,5 @@
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
@@ -134,16 +135,11 @@ def manual_upload_variable_edit(request, pk, var_pk):
         return redirect("manual_upload_config_edit", pk=config.pk)
 
     class VariableEditForm(ModelForm):
+        # Range sanity comes from Variable.clean() (ADR 0022) — a ModelForm
+        # runs it via full_clean, so no form-level copy.
         class Meta:
             model = Variable
             fields = ["name", "unit", "value_min", "value_max", "palette"]
-
-        def clean(self):
-            cleaned = super().clean()
-            value_min, value_max = cleaned.get("value_min"), cleaned.get("value_max")
-            if value_min is not None and value_max is not None and value_min >= value_max:
-                self.add_error("value_max", _("Maximum must be greater than minimum."))
-            return cleaned
 
     if request.method == "POST":
         # Scoped on both halves: the palette field offers this organisation's
@@ -203,9 +199,14 @@ def manual_upload_variable_add(request, pk):
             cleaned = super().clean()
             if not cleaned.get("unit") and not (cleaned.get("new_unit_symbol") or "").strip():
                 self.add_error("unit", _("Choose a unit or enter a symbol to create one."))
-            value_min, value_max = cleaned.get("value_min"), cleaned.get("value_max")
-            if value_min is not None and value_max is not None and value_min >= value_max:
-                self.add_error("value_max", _("Maximum must be greater than minimum."))
+            try:
+                Variable.validate_value_range(
+                    cleaned.get("value_min"), cleaned.get("value_max")
+                )
+            except ValidationError as e:
+                for field, messages_ in e.error_dict.items():
+                    for message in messages_:
+                        self.add_error(field, message)
             variable_name = (cleaned.get("variable_name") or "").strip()
             collection = cleaned.get("collection")
             if variable_name and collection:
