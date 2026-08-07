@@ -268,6 +268,13 @@ class UpsertVariableStyleSeedTests(TestCase):
         self.assertEqual(
             variable.weather_layers_palette, style.as_weatherlayers_palette()
         )
+        # ... all the way down to the payload Titiler reads.
+        from georiva.core.machine_plane.palette_cache import build_variable_payload
+
+        payload = build_variable_payload(variable)
+        self.assertIn("colormap", payload)
+        self.assertEqual(payload["vmin"], 0.0)
+        self.assertEqual(payload["vmax"], 500.0)
 
     def test_palette_prefers_the_org_tier_ramp_over_the_instance_wide_one(self):
         org = self.collection.catalog.organisation
