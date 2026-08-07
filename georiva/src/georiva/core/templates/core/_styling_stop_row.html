@@ -1,0 +1,15 @@
+{% load i18n %}
+{% comment %}
+    One stop row of the canonical styling form. Expects `value` and `color`
+    (both may be empty). Included by the server-rendered loop and by the
+    <template> element the "Add stop" button clones, so the two can never
+    drift apart.
+{% endcomment %}
+<tr class="vs-stop-row">
+    <td><input type="text" name="stop_value" value="{{ value|default_if_none:'' }}"></td>
+    <td><input type="text" name="stop_color" value="{{ color|default_if_none:'' }}"></td>
+    <td><input type="color" class="vs-stop-picker" aria-label="{% trans 'Pick color' %}"></td>
+    <td>
+        <button type="button" class="vs-inline-button vs-remove-stop">{% trans "Remove" %}</button>
+    </td>
+</tr>

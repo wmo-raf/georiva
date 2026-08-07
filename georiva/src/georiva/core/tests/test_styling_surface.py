@@ -370,6 +370,24 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "ascending")
 
+    def test_a_non_numeric_stop_value_is_rejected(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official",
+            is_default=True,
+        )
+        response = self.client.post(self.form_url, {
+            "action": "save-style",
+            "style_slug": "official",
+            "name": "Official",
+            "ramp": "",
+            "mode": VariableStyle.Mode.CONTINUOUS,
+            "steps": "",
+            "stop_value": ["zero"],
+            "stop_color": ["#000000"],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Not a number")
+
     def test_a_non_hex_color_is_rejected(self):
         VariableStyle.objects.create(
             variable=self.variable, name="Official", slug="official",

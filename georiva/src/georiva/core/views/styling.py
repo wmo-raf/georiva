@@ -22,6 +22,11 @@ DEFAULT_STEPPED_CLASSES = 7
 #: What a style-less variable renders as, shown honestly in the listing.
 GRAYSCALE_GRADIENT = "linear-gradient(to right, #000000 0%, #ffffff 100%)"
 
+#: The ``?style=`` value naming the blank "new style" pane rather than a saved
+#: style — impossible as a real slug, since slugify never yields underscores
+#: around a word.
+NEW_STYLE = "__new__"
+
 
 class VariableRangeForm(forms.Form):
     """The variable's encoding contract — delegates range sanity to the model."""
@@ -57,24 +62,31 @@ class VariableStyleForm(forms.Form):
         return cleaned
 
 
+def _stop_rows(post):
+    """The submitted stop rows verbatim, fully-empty rows skipped — the one
+    reading of the row inputs, shared by parsing and failed-form re-renders."""
+    return [
+        {"value": value.strip(), "color": color.strip()}
+        for value, color in zip(post.getlist("stop_value"), post.getlist("stop_color"))
+        if value.strip() or color.strip()
+    ]
+
+
 def _parse_stops(post):
-    """The submitted stop rows as snapshot entries, fully-empty rows skipped.
+    """The submitted stop rows as snapshot entries.
 
     Only numeric parsing happens here; color shape and value ordering are the
     model's rules and stay there (``VariableStyle.clean()``).
     """
     entries = []
-    for raw_value, color in zip(post.getlist("stop_value"), post.getlist("stop_color")):
-        raw_value, color = raw_value.strip(), color.strip()
-        if not raw_value and not color:
-            continue
+    for row in _stop_rows(post):
         try:
-            value = float(raw_value)
+            value = float(row["value"])
         except ValueError:
             raise ValidationError(
-                _("Not a number: %(value)r") % {"value": raw_value}
+                {"stops": _("Not a number: %(value)s") % {"value": row["value"]}}
             )
-        entries.append({"value": value, "color": color})
+        entries.append({"value": value, "color": row["color"]})
     return entries
 
 
@@ -172,14 +184,14 @@ def variable_styling(request, collection_pk, variable_pk):
 
     def style_url(style=None):
         if style is None:
-            return f"{form_url}?style=__new__"
+            return f"{form_url}?style={NEW_STYLE}"
         return f"{form_url}?style={style.slug}"
 
     # Which style the editor pane shows: the one asked for, else the default,
     # else the first, else a blank "new style" pane.
     requested_slug = request.POST.get("style_slug", request.GET.get("style", ""))
-    creating = requested_slug in ("", "__new__") if request.method == "POST" \
-        else requested_slug == "__new__"
+    creating = requested_slug in ("", NEW_STYLE) if request.method == "POST" \
+        else requested_slug == NEW_STYLE
     selected = None if creating else _get_style_or_none(variable, requested_slug)
     if selected is None and not creating:
         if requested_slug:
@@ -254,7 +266,7 @@ def variable_styling(request, collection_pk, variable_pk):
                     style.save()
                     messages.success(request, _("Style saved."))
                     return redirect(style_url(style))
-            stop_rows = _raw_stop_rows(request.POST)
+            stop_rows = _stop_rows(request.POST)
 
         elif action == "apply-ramp":
             if selected is None:
@@ -350,12 +362,3 @@ def variable_styling(request, collection_pk, variable_pk):
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
     }
     return render(request, "core/variable_styling.html", context)
-
-
-def _raw_stop_rows(post):
-    """The submitted stop rows verbatim, for re-rendering a failed form."""
-    return [
-        {"value": value, "color": color}
-        for value, color in zip(post.getlist("stop_value"), post.getlist("stop_color"))
-        if value.strip() or color.strip()
-    ]

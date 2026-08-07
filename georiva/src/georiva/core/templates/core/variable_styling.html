@@ -215,18 +215,7 @@
                     {% if selected %}
                         <input type="hidden" name="style_slug" value="{{ selected.slug }}">
                     {% endif %}
-                    {% if range_form.non_field_errors or range_form.errors %}
-                        <ul class="vs-errors">
-                            {% for error in range_form.non_field_errors %}
-                                <li>{{ error }}</li>
-                            {% endfor %}
-                            {% for field in range_form %}
-                                {% for error in field.errors %}
-                                    <li>{{ field.label }}: {{ error }}</li>
-                                {% endfor %}
-                            {% endfor %}
-                        </ul>
-                    {% endif %}
+                    {% include "core/_styling_form_errors.html" with form=range_form %}
                     <div class="vs-field-row">
                         <div class="vs-field">
                             <label for="{{ range_form.value_min.id_for_label }}">
@@ -271,18 +260,7 @@
                     <input type="hidden" name="style_slug"
                            value="{% if creating %}{% else %}{{ selected.slug }}{% endif %}">
 
-                    {% if style_form.non_field_errors or style_form.errors %}
-                        <ul class="vs-errors">
-                            {% for error in style_form.non_field_errors %}
-                                <li>{{ error }}</li>
-                            {% endfor %}
-                            {% for field in style_form %}
-                                {% for error in field.errors %}
-                                    <li>{{ field.label }}: {{ error }}</li>
-                                {% endfor %}
-                            {% endfor %}
-                        </ul>
-                    {% endif %}
+                    {% include "core/_styling_form_errors.html" with form=style_form %}
 
                     <div class="vs-field-row">
                         <div class="vs-field">
@@ -329,17 +307,13 @@
                         </thead>
                         <tbody id="vs-stops-body">
                         {% for stop in stop_rows %}
-                            <tr class="vs-stop-row">
-                                <td><input type="text" name="stop_value" value="{{ stop.value }}"></td>
-                                <td><input type="text" name="stop_color" value="{{ stop.color }}"></td>
-                                <td><input type="color" class="vs-stop-picker" aria-label="{% trans 'Pick color' %}"></td>
-                                <td>
-                                    <button type="button" class="vs-inline-button vs-remove-stop">{% trans "Remove" %}</button>
-                                </td>
-                            </tr>
+                            {% include "core/_styling_stop_row.html" with value=stop.value color=stop.color %}
                         {% endfor %}
                         </tbody>
                     </table>
+                    <template id="vs-stop-row-template">
+                        {% include "core/_styling_stop_row.html" with value="" color="" %}
+                    </template>
                     <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
 
                     <div class="vs-actions">
@@ -537,15 +511,9 @@
                 syncPicker(row);
             }
 
+            const rowTemplate = document.getElementById('vs-stop-row-template');
             document.getElementById('vs-add-stop').addEventListener('click', function () {
-                const template = document.createElement('tbody');
-                template.innerHTML = '<tr class="vs-stop-row">'
-                    + '<td><input type="text" name="stop_value" value=""></td>'
-                    + '<td><input type="text" name="stop_color" value=""></td>'
-                    + '<td><input type="color" class="vs-stop-picker"></td>'
-                    + '<td><button type="button" class="vs-inline-button vs-remove-stop">{% trans "Remove" %}</button></td>'
-                    + '</tr>';
-                const row = template.firstElementChild;
+                const row = rowTemplate.content.firstElementChild.cloneNode(true);
                 body.appendChild(row);
                 wireRow(row);
             });
