@@ -505,3 +505,46 @@ Titiler and Martin gain no tenancy logic, which is the property it exists to pre
 (all `auth_request` understands) and 404 to the caller; a broken key stays 401. Cached ~60s per
 collection-and-credential, so revocation lags on tiles and nowhere else. See ADR 0015.
 _Avoid_: tile auth middleware, tile permission check, signed tile URL
+
+### Styling
+
+**Color ramp** (`ColorRamp`):
+A catalog entry of pure aesthetics — ordered colors with optional 0–1 positions and a type
+(sequential/diverging/qualitative), carrying **no values**. Tiered like other shared reference data (global tier +
+org-owned); the instance seeds a curated set under matplotlib-compatible names. What "reusable" means for color:
+the ramp is reused, never the values. See ADR 0022.
+_Avoid_: palette (for the value-free thing), colormap (that's the rendered 256-entry output)
+
+**Variable style** (`VariableStyle`):
+The applied, per-variable result: a named row (one-to-many from `Variable`, exactly one `is_default`) holding the
+ramp it came from, step count/mode, and the materialized absolute value→color **stops snapshot**. Applying a ramp
+over the variable's range generates stops; the operator fine-tunes them, including pinning physical thresholds.
+See ADR 0022.
+_Avoid_: ColorPalette (retired model), style preset
+
+**Stops snapshot**:
+The concrete value→color entries a style holds. **Snapshot semantics**: a later range edit never silently rewrites
+stops — the styling surface offers "re-apply ramp", which regenerates and discards fine-tuning with a warning.
+Not live-linked. See ADR 0022.
+_Avoid_: dynamic stops, linked stops
+
+**Seed vs. tune**:
+The write policy for ranges and styling. Provisioning surfaces (source setup, upload wizard, derived-product
+recipes, plugin declarations) may **seed** — create-only, never overwriting what exists. Only the styling surface
+**tunes**. Plugin seed precedence: `palette_stops` > `palette` (ramp name) > grayscale; explicit stops derive the
+range. See ADR 0022.
+_Avoid_: sync, refresh (for re-provision behavior on styling)
+
+**Styling surface**:
+The one editing UI for ranges and styles: a collection-level Styling page (swatch + range per variable) drilling
+into the single canonical per-variable form (range, scale type, ramp picker, steps, stop fine-tuning, legend
+preview, style-set management). All other admin surfaces show styling read-only with a link. See ADR 0022.
+_Avoid_: visualization settings, palette editor (for the per-variable act)
+
+**Style selector**:
+The optional `?style=<slug>` query param on machine-plane URLs; omission means the default style. Style is a
+rendering parameter, not an addressable resource — no tenancy, no route changes; URLs still built only through
+`addresses.py`. Colorized outputs carry a per-style version token extending ADR 0021's scheme; the Redis key gains
+a style segment with the styleless key as the default's alias. Discovery via the tile-config `styles` index and the
+STAC Render extension. See ADR 0023.
+_Avoid_: style endpoint, style URL segment
