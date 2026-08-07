@@ -303,6 +303,10 @@ services:
     volumes:
       - ${GEORIVA_STATIC_VOLUME:-./docker/static}:/wagtail_static
       - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:/wagtail_media
+      # Tile-auth verdicts + immutable encoded textures survive container
+      # recreation; nginx's cache manager bounds and evicts on its own
+      # (max_size / inactive on the proxy_cache_path lines).
+      - ${GEORIVA_TILE_CACHE_VOLUME:-./docker/tile_cache}:/var/cache/nginx
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
     ports:
       - ${GEORIVA_WEB_PROXY_PORT:-80}:80
