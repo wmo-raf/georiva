@@ -7,7 +7,13 @@ from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 from wagtail.snippets.models import register_snippet
 
 from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
-from .views import add_data_select, collection_items_list, plugin_list
+from .views import (
+    add_data_select,
+    collection_items_list,
+    collection_styling,
+    plugin_list,
+    variable_styling,
+)
 from .views.viewsets import BoundaryChooserViewSet, admin_viewsets
 from .views.viewsets import ItemViewSet, AssetViewSet
 
@@ -17,6 +23,12 @@ def urlconf_georivacore():
     return [
         path('data/add/', add_data_select, name="add_data"),
         path('collection/<int:collection_pk>/items/', collection_items_list, name="collection_items_list"),
+        path('collection/<int:collection_pk>/styling/', collection_styling, name="collection_styling"),
+        path(
+            'collection/<int:collection_pk>/styling/<int:variable_pk>/',
+            variable_styling,
+            name="variable_styling",
+        ),
         path('plugins/', plugin_list, name="plugin_list"),
     ]
 

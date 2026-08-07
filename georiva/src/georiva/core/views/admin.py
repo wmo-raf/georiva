@@ -21,6 +21,10 @@ def get_collection_items_url(collection):
     return reverse("collection_items_list", args=[collection.pk])
 
 
+def get_collection_styling_url(collection):
+    return reverse("collection_styling", args=[collection.pk])
+
+
 def _build_collection_columns(collection_viewset, perms):
     """Columns for the per-catalog collections table rendered inside each
     accordion panel. Affordances the user cannot use are not rendered —
@@ -72,6 +76,7 @@ def _build_collection_columns(collection_viewset, perms):
         CollectionButtonsColumn("name", label=_("Collection"), get_url=get_url),
         BooleanColumn("is_active", label=_("Active")),
         LinkColumnWithIcon("Items", label=_("Items"), icon_name="view", get_url=get_collection_items_url),
+        LinkColumnWithIcon("Styling", label=_("Styling"), icon_name="palette", get_url=get_collection_styling_url),
     ]
 
 

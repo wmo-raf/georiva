@@ -1,0 +1,569 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with name=variable.name %}Styling — {{ name }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .vs-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 280px;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 900px) {
+            .vs-layout {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        .vs-panel {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+            background: var(--w-color-surface-page);
+        }
+
+        .vs-panel h2 {
+            margin-top: 0;
+        }
+
+        .vs-field-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+
+        .vs-field-row .w-field__wrapper {
+            margin-bottom: 0;
+        }
+
+        .vs-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .vs-field label {
+            font-weight: 600;
+        }
+
+        .vs-errors {
+            color: var(--w-color-critical-200);
+            margin: 0.5rem 0 0;
+            padding-left: 1rem;
+        }
+
+        .vs-preview {
+            height: 22px;
+            border-radius: 4px;
+            border: 1px solid var(--w-color-border-furniture);
+            margin: 0.75rem 0 0.25rem;
+        }
+
+        .vs-preview-labels {
+            display: flex;
+            justify-content: space-between;
+            color: var(--w-color-grey-400);
+            font-size: 0.85em;
+            margin-bottom: 0.75rem;
+        }
+
+        .vs-ramp-swatch {
+            display: inline-block;
+            width: 160px;
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid var(--w-color-border-furniture);
+            vertical-align: middle;
+        }
+
+        .vs-stops-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .vs-stops-table th {
+            text-align: left;
+            color: var(--w-color-grey-400);
+            font-weight: 600;
+            padding: 0.25rem 0.5rem;
+        }
+
+        .vs-stops-table td {
+            padding: 0.25rem 0.5rem;
+        }
+
+        .vs-stops-table input[type="text"],
+        .vs-stops-table input[type="number"] {
+            width: 100%;
+        }
+
+        .vs-stop-picker {
+            inline-size: 2.2rem;
+            block-size: 2.2rem;
+            padding: 0;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 3px;
+            background: none;
+        }
+
+        .vs-warning {
+            border: 1px solid var(--w-color-warning-100);
+            background: var(--w-color-warning-100);
+            border-radius: 5px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .vs-warning form {
+            display: inline-block;
+            margin-inline-end: 0.5rem;
+        }
+
+        .vs-style-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .vs-style-list li {
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            padding: 0.6rem 0;
+        }
+
+        .vs-style-list li:last-child {
+            border-bottom: none;
+        }
+
+        .vs-style-list .vs-style-swatch {
+            display: block;
+            height: 10px;
+            border-radius: 3px;
+            border: 1px solid var(--w-color-border-furniture);
+            margin: 0.35rem 0;
+        }
+
+        .vs-style-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .vs-style-actions form {
+            margin: 0;
+        }
+
+        .vs-inline-button {
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--w-color-secondary);
+            cursor: pointer;
+            text-decoration: underline;
+            font-size: 0.85em;
+        }
+
+        .vs-actions {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+
+    {% if reapply_warning %}
+        <div class="vs-warning">
+            <p>
+                <strong>{% trans "Re-applying the ramp discards your fine-tuning." %}</strong>
+                {% trans "The current stops — including any hand-edited values or pinned thresholds — will be replaced by stops regenerated from the ramp over the variable's current range." %}
+            </p>
+            <form method="post" action="{{ form_url }}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="apply-ramp">
+                <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                <input type="hidden" name="name" value="{{ style_form.name.value|default_if_none:'' }}">
+                <input type="hidden" name="ramp" value="{{ style_form.ramp.value|default_if_none:'' }}">
+                <input type="hidden" name="mode" value="{{ style_form.mode.value|default_if_none:'' }}">
+                <input type="hidden" name="steps" value="{{ style_form.steps.value|default_if_none:'' }}">
+                <input type="hidden" name="confirm_discard" value="1">
+                <button type="submit" class="button">{% trans "Discard tuning and re-apply" %}</button>
+            </form>
+            <a href="{{ form_url }}?style={{ selected.slug }}" class="button button-secondary">{% trans "Keep my stops" %}</a>
+        </div>
+    {% endif %}
+
+    <div class="vs-layout">
+        <div>
+
+            {% comment %}
+                The variable's encoding contract. Saving here never touches any
+                style's stops (ADR 0022): regeneration is only the explicit
+                re-apply gesture in the style editor below.
+            {% endcomment %}
+            <section class="vs-panel">
+                <h2 class="w-label-1">{% trans "Value range" %}</h2>
+                <form method="post" action="{{ form_url }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save-range">
+                    {% if selected %}
+                        <input type="hidden" name="style_slug" value="{{ selected.slug }}">
+                    {% endif %}
+                    {% if range_form.non_field_errors or range_form.errors %}
+                        <ul class="vs-errors">
+                            {% for error in range_form.non_field_errors %}
+                                <li>{{ error }}</li>
+                            {% endfor %}
+                            {% for field in range_form %}
+                                {% for error in field.errors %}
+                                    <li>{{ field.label }}: {{ error }}</li>
+                                {% endfor %}
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                    <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ range_form.value_min.id_for_label }}">
+                                {% trans "Minimum" %}
+                                {% if variable.units %}({{ variable.units }}){% endif %}
+                            </label>
+                            {{ range_form.value_min }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ range_form.value_max.id_for_label }}">
+                                {% trans "Maximum" %}
+                                {% if variable.units %}({{ variable.units }}){% endif %}
+                            </label>
+                            {{ range_form.value_max }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ range_form.scale_type.id_for_label }}">{% trans "Scale type" %}</label>
+                            {{ range_form.scale_type }}
+                        </div>
+                        <button type="submit" class="button">{% trans "Save range" %}</button>
+                    </div>
+                    <p class="help-text">
+                        {% trans "Changing the range never rewrites existing stops — use “Re-apply ramp” in the style editor to regenerate them over a new range." %}
+                    </p>
+                </form>
+            </section>
+
+            <section class="vs-panel">
+                <h2 class="w-label-1">
+                    {% if creating %}
+                        {% trans "New style" %}
+                    {% else %}
+                        {% blocktrans with name=selected.name %}Style: {{ name }}{% endblocktrans %}
+                        {% if selected.is_default %}
+                            <span class="w-status w-status--primary">{% trans "Default" %}</span>
+                        {% endif %}
+                    {% endif %}
+                </h2>
+
+                <form method="post" action="{{ form_url }}" id="vs-style-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="style_slug"
+                           value="{% if creating %}{% else %}{{ selected.slug }}{% endif %}">
+
+                    {% if style_form.non_field_errors or style_form.errors %}
+                        <ul class="vs-errors">
+                            {% for error in style_form.non_field_errors %}
+                                <li>{{ error }}</li>
+                            {% endfor %}
+                            {% for field in style_form %}
+                                {% for error in field.errors %}
+                                    <li>{{ field.label }}: {{ error }}</li>
+                                {% endfor %}
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+
+                    <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
+                            {{ style_form.name }}
+                        </div>
+                        <div class="vs-field">
+                            <label for="{{ style_form.ramp.id_for_label }}">{% trans "Color ramp" %}</label>
+                            {{ style_form.ramp }}
+                        </div>
+                        <span class="vs-ramp-swatch" id="vs-ramp-swatch"></span>
+                    </div>
+
+                    <div class="vs-field-row">
+                        <div class="vs-field">
+                            <label for="{{ style_form.mode.id_for_label }}">{% trans "Rendering" %}</label>
+                            {{ style_form.mode }}
+                        </div>
+                        <div class="vs-field" id="vs-steps-field">
+                            <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
+                            {{ style_form.steps }}
+                        </div>
+                    </div>
+
+                    <h3 class="w-label-2">{% trans "Preview" %}</h3>
+                    <div class="vs-preview" id="vs-preview"></div>
+                    <div class="vs-preview-labels">
+                        <span id="vs-preview-min"></span>
+                        <span id="vs-preview-max"></span>
+                    </div>
+
+                    <h3 class="w-label-2">{% trans "Stops" %}</h3>
+                    <p class="help-text">
+                        {% trans "Absolute data values mapped to colors, in ascending order. Edit values or colors to fine-tune — for example to pin a threshold like 0 °C to an exact color." %}
+                    </p>
+                    <table class="vs-stops-table" id="vs-stops-table">
+                        <thead>
+                        <tr>
+                            <th>{% trans "Value" %}{% if variable.units %} ({{ variable.units }}){% endif %}</th>
+                            <th>{% trans "Color" %}</th>
+                            <th></th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody id="vs-stops-body">
+                        {% for stop in stop_rows %}
+                            <tr class="vs-stop-row">
+                                <td><input type="text" name="stop_value" value="{{ stop.value }}"></td>
+                                <td><input type="text" name="stop_color" value="{{ stop.color }}"></td>
+                                <td><input type="color" class="vs-stop-picker" aria-label="{% trans 'Pick color' %}"></td>
+                                <td>
+                                    <button type="button" class="vs-inline-button vs-remove-stop">{% trans "Remove" %}</button>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
+
+                    <div class="vs-actions">
+                        <button type="submit" name="action" value="save-style" class="button">
+                            {% trans "Save style" %}
+                        </button>
+                        {% if not creating %}
+                            <button type="submit" name="action" value="apply-ramp"
+                                    class="button button-secondary">
+                                {% if stop_rows %}
+                                    {% trans "Re-apply ramp" %}
+                                {% else %}
+                                    {% trans "Apply ramp" %}
+                                {% endif %}
+                            </button>
+                        {% endif %}
+                    </div>
+                    {% if not creating %}
+                        <p class="help-text">
+                            {% trans "“Re-apply ramp” regenerates the stops from the selected ramp over the current range, discarding fine-tuning (you will be asked to confirm)." %}
+                        </p>
+                    {% endif %}
+                </form>
+            </section>
+        </div>
+
+        <aside>
+            <section class="vs-panel">
+                <h2 class="w-label-1">{% trans "Styles" %}</h2>
+                {% if styles %}
+                    <ul class="vs-style-list">
+                        {% for style in styles %}
+                            <li>
+                                <a href="{{ form_url }}?style={{ style.slug }}">{{ style.name }}</a>
+                                {% if style.is_default %}
+                                    <span class="w-status w-status--primary">{% trans "Default" %}</span>
+                                {% endif %}
+                                <span class="vs-style-swatch"
+                                      style="background: {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
+                                <div class="vs-style-actions">
+                                    {% if not style.is_default %}
+                                        <form method="post" action="{{ form_url }}">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="action" value="promote">
+                                            <input type="hidden" name="style_slug" value="{{ style.slug }}">
+                                            <button type="submit" class="vs-inline-button">
+                                                {% trans "Make default" %}
+                                            </button>
+                                        </form>
+                                    {% endif %}
+                                    <form method="post" action="{{ form_url }}"
+                                          data-confirm="{% trans 'Delete this style?' %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="delete-style">
+                                        <input type="hidden" name="style_slug" value="{{ style.slug }}">
+                                        <button type="submit" class="vs-inline-button">
+                                            {% trans "Delete" %}
+                                        </button>
+                                    </form>
+                                </div>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="help-text">
+                        {% trans "No styles yet — this variable renders as grayscale. Pick a ramp and save the first style." %}
+                    </p>
+                {% endif %}
+                <p>
+                    <a href="{{ new_style_url }}" class="button button-small bicolor button--icon">
+                        <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+                        {% trans "New style" %}
+                    </a>
+                </p>
+            </section>
+        </aside>
+    </div>
+
+    {{ ramp_gradients|json_script:"vs-ramp-gradients" }}
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const rampGradients = JSON.parse(
+                document.getElementById('vs-ramp-gradients').textContent
+            );
+            const form = document.getElementById('vs-style-form');
+            const rampSelect = form.querySelector('[name="ramp"]');
+            const rampSwatch = document.getElementById('vs-ramp-swatch');
+            const modeSelect = form.querySelector('[name="mode"]');
+            const stepsField = document.getElementById('vs-steps-field');
+            const stepsInput = form.querySelector('[name="steps"]');
+            const body = document.getElementById('vs-stops-body');
+            const preview = document.getElementById('vs-preview');
+            const previewMin = document.getElementById('vs-preview-min');
+            const previewMax = document.getElementById('vs-preview-max');
+
+            function renderRampSwatch() {
+                const gradient = rampGradients[rampSelect.value] || '';
+                rampSwatch.style.background = gradient;
+                rampSwatch.style.visibility = gradient ? 'visible' : 'hidden';
+            }
+
+            function toggleSteps() {
+                const stepped = modeSelect.value === 'stepped';
+                stepsField.style.display = stepped ? '' : 'none';
+                if (stepped && !stepsInput.value) {
+                    stepsInput.value = '{{ default_stepped_classes }}';
+                }
+            }
+
+            function readStops() {
+                const stops = [];
+                body.querySelectorAll('.vs-stop-row').forEach(function (row) {
+                    const value = parseFloat(row.querySelector('[name="stop_value"]').value);
+                    let color = row.querySelector('[name="stop_color"]').value.trim();
+                    if (color && !color.startsWith('#')) {
+                        color = '#' + color;
+                    }
+                    if (!Number.isNaN(value) && color) {
+                        stops.push({value: value, color: color});
+                    }
+                });
+                stops.sort(function (a, b) {
+                    return a.value - b.value;
+                });
+                return stops;
+            }
+
+            {% comment %}
+                The live preview: the current stop rows as a gradient, values
+                normalized over their own span — the same reading
+                VariableStyle.css_gradient() gives the saved snapshot.
+            {% endcomment %}
+            function renderPreview() {
+                const stops = readStops();
+                if (!stops.length) {
+                    preview.style.background = '';
+                    previewMin.textContent = '';
+                    previewMax.textContent = '';
+                    return;
+                }
+                const low = stops[0].value;
+                const high = stops[stops.length - 1].value;
+                const span = high - low;
+                let gradient;
+                if (span === 0 || stops.length === 1) {
+                    gradient = 'linear-gradient(to right, ' + stops[0].color + ', ' + stops[0].color + ')';
+                } else {
+                    const parts = stops.map(function (stop) {
+                        return stop.color + ' ' + ((stop.value - low) / span * 100) + '%';
+                    });
+                    gradient = 'linear-gradient(to right, ' + parts.join(', ') + ')';
+                }
+                preview.style.background = gradient;
+                previewMin.textContent = String(low);
+                previewMax.textContent = String(high);
+            }
+
+            function syncPicker(row) {
+                const text = row.querySelector('[name="stop_color"]');
+                const picker = row.querySelector('.vs-stop-picker');
+                if (!picker) {
+                    return;
+                }
+                const hex = text.value.trim();
+                if (/^#?[0-9a-fA-F]{6}$/.test(hex)) {
+                    picker.value = hex.startsWith('#') ? hex : '#' + hex;
+                }
+            }
+
+            function wireRow(row) {
+                row.querySelectorAll('input[type="text"]').forEach(function (input) {
+                    input.addEventListener('input', function () {
+                        syncPicker(row);
+                        renderPreview();
+                    });
+                });
+                const picker = row.querySelector('.vs-stop-picker');
+                if (picker) {
+                    picker.addEventListener('input', function () {
+                        row.querySelector('[name="stop_color"]').value = picker.value;
+                        renderPreview();
+                    });
+                }
+                const remove = row.querySelector('.vs-remove-stop');
+                if (remove) {
+                    remove.addEventListener('click', function () {
+                        row.remove();
+                        renderPreview();
+                    });
+                }
+                syncPicker(row);
+            }
+
+            document.getElementById('vs-add-stop').addEventListener('click', function () {
+                const template = document.createElement('tbody');
+                template.innerHTML = '<tr class="vs-stop-row">'
+                    + '<td><input type="text" name="stop_value" value=""></td>'
+                    + '<td><input type="text" name="stop_color" value=""></td>'
+                    + '<td><input type="color" class="vs-stop-picker"></td>'
+                    + '<td><button type="button" class="vs-inline-button vs-remove-stop">{% trans "Remove" %}</button></td>'
+                    + '</tr>';
+                const row = template.firstElementChild;
+                body.appendChild(row);
+                wireRow(row);
+            });
+
+            document.querySelectorAll('form[data-confirm]').forEach(function (confirmForm) {
+                confirmForm.addEventListener('submit', function (event) {
+                    if (!window.confirm(confirmForm.dataset.confirm)) {
+                        event.preventDefault();
+                    }
+                });
+            });
+
+            body.querySelectorAll('.vs-stop-row').forEach(wireRow);
+            rampSelect.addEventListener('change', renderRampSwatch);
+            modeSelect.addEventListener('change', toggleSteps);
+            renderRampSwatch();
+            toggleSteps();
+            renderPreview();
+        });
+    </script>
+{% endblock %}
