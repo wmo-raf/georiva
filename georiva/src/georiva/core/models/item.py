@@ -175,7 +175,7 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
         db_constraint=False,
     )
     
-    # Link to Variable (carries units, palette, visualization config)
+    # Link to Variable (carries units, styling, visualization config)
     variable = models.ForeignKey(
         'georivacore.Variable',
         on_delete=models.CASCADE,
@@ -209,10 +209,6 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     @property
     def unit(self):
         return self.variable.unit.symbol if self.variable.unit else ""
-    
-    @property
-    def palette(self):
-        return self.variable.palette
     
     # =========================================================================
     # Format checks

@@ -139,12 +139,12 @@ def manual_upload_variable_edit(request, pk, var_pk):
         # runs it via full_clean, so no form-level copy.
         class Meta:
             model = Variable
-            fields = ["name", "unit", "value_min", "value_max", "palette"]
+            fields = ["name", "unit", "value_min", "value_max"]
 
     if request.method == "POST":
-        # Scoped on both halves: the palette field offers this organisation's
-        # palettes and the instance-wide tier, and a posted id for anyone else's
-        # fails validation rather than being saved.
+        # Scoped so any relational field offers only this organisation's rows,
+        # and a posted id for anyone else's fails validation rather than being
+        # saved.
         form = scope_form_fields(request, VariableEditForm(request.POST, instance=variable))
         if form.is_valid():
             form.save()

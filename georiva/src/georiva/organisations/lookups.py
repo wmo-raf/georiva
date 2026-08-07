@@ -13,7 +13,7 @@ and a model importing ``access`` would close that circle.
 LOOKUP_ATTR = "ORGANISATION_LOOKUP"
 
 #: Declared instead of a path by a model no organisation owns and every
-#: organisation reads — topics, units, the global tier of colour palettes.
+#: organisation reads — topics, units, the global tier of colour ramps.
 #: Scoping passes these through untouched.
 SHARED_REFERENCE_DATA = "shared-reference-data"
 
@@ -154,7 +154,7 @@ def is_orm_path(declared):
 
 #: Class attribute a model sets alongside a *path* to say that a null along that
 #: path is not a broken route but a tier: a row no organisation owns, which every
-#: organisation reads and only the instance admin writes. Colour palettes are the
+#: organisation reads and only the instance admin writes. Colour ramps are the
 #: case the declaration exists for — a shipped library everybody draws on, plus
 #: each institution's own (decision #269).
 #:

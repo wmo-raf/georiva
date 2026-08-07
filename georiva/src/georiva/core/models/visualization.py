@@ -1,17 +1,140 @@
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.utils.html import format_html
+from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, InlinePanel
 from wagtail.models import Orderable
 
 #: '#RRGGBB' or '#RRGGBBAA', with the '#' and shorthand '#RGB'/'#RGBA' allowed —
-#: the same shapes ``ColorPalette.hex_to_rgba_list`` accepts.
+#: the same shapes :func:`hex_to_rgba_list` accepts.
 HEX_COLOR_VALIDATOR = RegexValidator(
     regex=r"^#?(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
     message="Enter a hex color such as '#RRGGBB' or '#RRGGBBAA'.",
 )
+
+
+def hex_to_rgba_list(hex_color: str):
+    """
+    '#RRGGBB' -> [r,g,b]
+    '#RRGGBBAA' -> [r,g,b,a]    (alpha is 0..255, exactly what WeatherLayers expects)
+    Also accepts 'RRGGBB' / 'RRGGBBAA' without '#', and shorthand '#RGB' / '#RGBA'.
+    """
+    if not hex_color:
+        raise ValueError("Empty hex color")
+
+    h = hex_color.strip().lstrip('#')
+
+    if len(h) in (3, 4):
+        h = ''.join([c * 2 for c in h])
+
+    if len(h) not in (6, 8):
+        raise ValueError(f"Invalid hex color length: {hex_color}")
+
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+
+    if len(h) == 8:
+        a = int(h[6:8], 16)
+        return [r, g, b, a]
+
+    return [r, g, b]
+
+
+def _rgba_to_hex(rgba) -> str:
+    """[r,g,b] or [r,g,b,a] -> '#rrggbb' / '#rrggbbaa' (alpha only when it says
+    something — a fully opaque channel is the default and stays implicit)."""
+    r, g, b = rgba[0], rgba[1], rgba[2]
+    if len(rgba) == 4 and rgba[3] != 255:
+        return f"#{r:02x}{g:02x}{b:02x}{rgba[3]:02x}"
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _ramp_colors_and_positions(ramp):
+    """The ramp as parallel (rgba colors, 0–1 positions) lists.
+
+    Stops without explicit positions are spread evenly, and positions are
+    forced non-decreasing — the same reading ``ColorRamp.css_gradient`` uses,
+    so what a preview shows is what an application materializes.
+    """
+    stops = list(ramp.stops.all())
+    if not stops:
+        return [], []
+    colors = [hex_to_rgba_list(stop.hex_value) for stop in stops]
+    if len(stops) == 1:
+        return colors, [0.0]
+    last = len(stops) - 1
+    positions = [
+        stop.position if stop.position is not None else i / last
+        for i, stop in enumerate(stops)
+    ]
+    floor = 0.0
+    for i, position in enumerate(positions):
+        floor = positions[i] = max(floor, position)
+    return colors, positions
+
+
+def _sample_ramp(colors, positions, t: float):
+    """The ramp's color at fraction ``t`` (0–1), interpolating linearly
+    between neighbouring stops. Clamps outside the positioned span."""
+    if t <= positions[0]:
+        return list(colors[0])
+    if t >= positions[-1]:
+        return list(colors[-1])
+    for j in range(len(positions) - 1):
+        if positions[j] <= t <= positions[j + 1]:
+            span = positions[j + 1] - positions[j]
+            frac = (t - positions[j]) / span if span > 0 else 0.0
+            a = colors[j] + [255] * (4 - len(colors[j]))
+            b = colors[j + 1] + [255] * (4 - len(colors[j + 1]))
+            return [round(a[k] + frac * (b[k] - a[k])) for k in range(4)]
+    return list(colors[-1])
+
+
+def generate_stops(ramp, value_min: float, value_max: float,
+                   mode: str = "continuous", steps: int = None) -> list:
+    """Apply ``ramp`` over a value range: the snapshot-generation seam of
+    ADR 0022. Returns ``[{"value": float, "color": "#rrggbb(aa)"}, ...]``.
+
+    Continuous mode stretches the ramp's own colors over the range, one stop
+    per color at its (evenly spread or declared) position. Stepped mode cuts
+    the range into ``steps`` equal classes and gives each one flat color —
+    sampled along the ramp, or cycled verbatim for a qualitative ramp, whose
+    colors are categories that must never blend — expressing each class as two
+    stops sharing its boundaries so the edges stay hard through any linear
+    interpolation downstream.
+    """
+    colors, positions = _ramp_colors_and_positions(ramp)
+    if not colors:
+        return []
+    val_range = value_max - value_min
+
+    if mode == VariableStyle.Mode.STEPPED:
+        count = max(int(steps or 0), 1)
+        if ramp.ramp_type == ColorRamp.RampType.QUALITATIVE:
+            class_colors = [colors[i % len(colors)] for i in range(count)]
+        else:
+            class_colors = [
+                _sample_ramp(colors, positions,
+                             i / (count - 1) if count > 1 else 0.5)
+                for i in range(count)
+            ]
+        stops = []
+        for i, color in enumerate(class_colors):
+            hex_color = _rgba_to_hex(color)
+            stops.append({"value": value_min + i * val_range / count,
+                          "color": hex_color})
+            stops.append({"value": value_min + (i + 1) * val_range / count,
+                          "color": hex_color})
+        return stops
+
+    return [
+        {"value": value_min + position * val_range, "color": _rgba_to_hex(color)}
+        for color, position in zip(colors, positions)
+    ]
 
 
 class ColorRamp(ClusterableModel):
@@ -187,152 +310,172 @@ class ColorRampStop(Orderable):
         return self.hex_value
 
 
-class ColorPalette(ClusterableModel):
+class VariableStyle(TimeStampedModel):
+    """An applied style: one variable's value→color contract, snapshotted.
+
+    The semantic half of the two-layer styling model (ADR 0022). Where a
+    :class:`ColorRamp` is value-free aesthetics, a style is that ramp *applied*
+    over one variable's range into absolute value→color stops — and then owned
+    by the operator, who may fine-tune any stop, including pinning physical
+    thresholds like 0 °C. The snapshot never live-links back to the ramp or the
+    range: editing either leaves the stops untouched until the operator
+    explicitly re-applies, which regenerates and discards tuning.
+
+    A variable may carry several named styles — an official public palette
+    beside an analyst's — with exactly one default, enforced by a partial
+    unique constraint so a second default is impossible to write, not merely
+    impolite.
     """
-    Palette definition: numeric stops + hex colors.
-    At runtime we convert hex -> [r,g,b] or [r,g,b,a] for WeatherLayers.
 
-    Global-with-org-overrides (decision #269): a palette with no organisation is
-    the instance-wide tier every organisation draws on and only the instance
-    admin edits; a palette with one belongs to that institution alone. Both tiers
-    are offered wherever a palette is chosen, which is the point — an operator
-    reuses the shipped rainfall ramp and adds their own beside it.
-    """
+    ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
-    ORGANISATION_LOOKUP = "organisation"
-    ORGANISATION_GLOBAL_TIER = True
+    class Mode(models.TextChoices):
+        CONTINUOUS = 'continuous', 'Continuous gradient'
+        STEPPED = 'stepped', 'Stepped classes'
 
-    organisation = models.ForeignKey(
-        'organisations.Organisation',
-        null=True,
-        blank=True,
+    variable = models.ForeignKey(
+        'georivacore.Variable',
         on_delete=models.CASCADE,
-        related_name='color_palettes',
-        help_text=(
-            "The organisation this palette belongs to. Left empty, it is part of "
-            "the instance-wide palette library every organisation can use."
-        ),
+        related_name='styles',
     )
     name = models.CharField(max_length=255)
-
-    class PaletteType(models.TextChoices):
-        SEQUENTIAL = 'sequential', 'Sequential'
-        DIVERGING = 'diverging', 'Diverging'
-        CATEGORICAL = 'categorical', 'Categorical'
-    
-    palette_type = models.CharField(
-        max_length=20,
-        choices=PaletteType.choices,
-        default=PaletteType.SEQUENTIAL
+    slug = models.SlugField(
+        max_length=255,
+        help_text=(
+            "URL-safe identifier for this style, used to select it on tile "
+            "and config URLs. Unique within the variable."
+        ),
     )
-    
-    center_value = models.FloatField(null=True, blank=True)
-    
-    panels = [
-        FieldPanel('name'),
-        FieldPanel('palette_type'),
-        FieldPanel('center_value'),
-        InlinePanel('stops', heading="Stops", label="Stop"),
-    ]
-    
+    is_default = models.BooleanField(
+        default=False,
+        help_text="The style served when no style is asked for by name.",
+    )
+    ramp = models.ForeignKey(
+        ColorRamp,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='+',
+        help_text=(
+            "The ramp this style was generated from — lineage and re-apply "
+            "only; the stops below are what actually renders."
+        ),
+    )
+    mode = models.CharField(
+        max_length=20,
+        choices=Mode.choices,
+        default=Mode.CONTINUOUS,
+    )
+    steps = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(2)],
+        help_text="Number of classes for stepped mode.",
+    )
+    #: The materialized snapshot: ``[{"value": float, "color": "#rrggbb(aa)"},
+    #: ...]`` in ascending value order. Absolute physical values — this is the
+    #: one place styling and the variable's semantics meet.
+    stops = models.JSONField(default=list, blank=True)
+
     class Meta:
-        ordering = ['name']
-        verbose_name = "Color Palette"
-        verbose_name_plural = "Color Palettes"
+        ordering = ['-is_default', 'name']
+        verbose_name = "Variable Style"
+        verbose_name_plural = "Variable Styles"
         constraints = [
-            # Names are how operators tell palettes apart in a chooser that mixes
-            # both tiers, so a name is unique within its tier — while different
-            # organisations may of course each have a "Rainfall". Two constraints
-            # because the first cannot cover the instance-wide tier: Postgres
-            # treats NULLs as distinct, so an unqualified pair would let any
-            # number of ownerless "Rainfall"s through.
             models.UniqueConstraint(
-                fields=['organisation', 'name'],
-                name='unique_palette_name_per_organisation',
+                fields=['variable'],
+                condition=models.Q(is_default=True),
+                name='unique_default_style_per_variable',
             ),
             models.UniqueConstraint(
-                fields=['name'],
-                condition=models.Q(organisation__isnull=True),
-                name='unique_global_palette_name',
+                fields=['variable', 'slug'],
+                name='unique_style_slug_per_variable',
             ),
         ]
-    
+
     def __str__(self):
-        return self.name
+        return f"{self.variable}:{self.slug}"
 
-    def owner_label(self):
-        """Which tier this palette is in, for a listing that shows both."""
-        return self.organisation.name if self.organisation_id else "Instance-wide"
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.mode == self.Mode.STEPPED and not self.steps:
+            errors['steps'] = "Stepped mode needs a number of classes."
+        for entry in self.stops or []:
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("value"), (int, float))
+                or not isinstance(entry.get("color"), str)
+            ):
+                errors['stops'] = (
+                    'Each stop must be {"value": <number>, "color": "#RRGGBB"}.'
+                )
+                break
+            try:
+                HEX_COLOR_VALIDATOR(entry["color"])
+            except ValidationError:
+                errors['stops'] = f"Not a hex color: {entry['color']!r}"
+                break
+        if errors:
+            raise ValidationError(errors)
 
-    owner_label.short_description = "Owner"
+    # -------- snapshot generation --------
+
+    def apply_ramp(self):
+        """Regenerate the stops snapshot from the ramp and the variable's
+        current range. Explicitly destructive: whatever fine-tuning the
+        snapshot held is discarded, which is why only a deliberate "re-apply"
+        gesture calls this."""
+        if self.ramp is None:
+            raise ValueError("This style has no ramp to apply.")
+        self.stops = generate_stops(
+            self.ramp, self.variable.value_min, self.variable.value_max,
+            mode=self.mode, steps=self.steps,
+        )
 
     # -------- runtime conversion helpers --------
-    
-    @staticmethod
-    def hex_to_rgba_list(hex_color: str):
-        """
-        '#RRGGBB' -> [r,g,b]
-        '#RRGGBBAA' -> [r,g,b,a]    (alpha is 0..255, exactly what WeatherLayers expects)
-        Also accepts 'RRGGBB' / 'RRGGBBAA' without '#'.
-        """
-        if not hex_color:
-            raise ValueError("Empty hex color")
-        
-        h = hex_color.strip().lstrip('#')
-        
-        # allow shorthand #RGB / #RGBA if you want
-        if len(h) in (3, 4):
-            h = ''.join([c * 2 for c in h])
-        
-        if len(h) not in (6, 8):
-            raise ValueError(f"Invalid hex color length: {hex_color}")
-        
-        r = int(h[0:2], 16)
-        g = int(h[2:4], 16)
-        b = int(h[4:6], 16)
-        
-        if len(h) == 8:
-            a = int(h[6:8], 16)
-            return [r, g, b, a]
-        
-        return [r, g, b]
-    
+
     def as_weatherlayers_palette(self):
-        """
-        Returns:
-          [[value, [r,g,b]], [value, [r,g,b,a]], ...]
-        """
-        stops = self.stops.all().order_by('sort_order', 'pk')
-        return [[s.value, self.hex_to_rgba_list(s.hex_value)] for s in stops]
-    
+        """The snapshot as ``[[value, [r,g,b(,a)]], ...]`` — the shape the
+        tile-config colormap builder and WeatherLayers clients consume."""
+        return [[s["value"], hex_to_rgba_list(s["color"])] for s in self.stops]
+
     def min_max_from_stops(self):
-        """
-        Extract min/max automatically from stop values.
-        """
-        stops = list(self.stops.all().order_by('sort_order', 'pk'))
-        if not stops:
+        """(min, max) of the snapshot's values, or (None, None) when empty."""
+        if not self.stops:
             return None, None
-        values = [s.value for s in stops]
+        values = [s["value"] for s in self.stops]
         return min(values), max(values)
 
+    # -------- presentation helpers --------
 
-class PaletteStop(Orderable):
-    # Owned by whoever owns the palette — including nobody, for the instance-wide
-    # tier. See ColorPalette.
-    ORGANISATION_LOOKUP = "palette__organisation"
-    ORGANISATION_GLOBAL_TIER = True
+    def css_gradient(self):
+        """The snapshot as a CSS ``linear-gradient()``, for swatches. Stop
+        values are normalized over the snapshot's own span."""
+        if not self.stops:
+            return ""
+        low, high = self.min_max_from_stops()
+        span = high - low
+        if span == 0 or len(self.stops) == 1:
+            color = self.stops[0]["color"]
+            return f"linear-gradient(to right, {color}, {color})"
+        parts = [
+            f"{s['color']} {(s['value'] - low) / span * 100:g}%"
+            for s in self.stops
+        ]
+        return f"linear-gradient(to right, {', '.join(parts)})"
 
-    palette = ParentalKey(ColorPalette, related_name='stops', on_delete=models.CASCADE)
-    value = models.FloatField(help_text="Numeric value at this stop (e.g. 11.5749)")
-    hex_value = models.CharField(
-        max_length=9,
-        help_text="Hex '#RRGGBB' or '#RRGGBBAA' (alpha optional)"
-    )
-    
-    panels = [
-        FieldPanel('value'),
-        FieldPanel('hex_value'),
-    ]
-    
-    def __str__(self):
-        return f"{self.value}: {self.hex_value}"
+    def preview(self):
+        """A gradient swatch for admin listings."""
+        gradient = self.css_gradient()
+        if not gradient:
+            return ""
+        return format_html(
+            '<span style="display: inline-block; '
+            'width: 120px; height: 14px; border-radius: 3px; '
+            'border: 1px solid var(--w-color-border-furniture); background: {};">'
+            '</span>',
+            gradient,
+        )
+
+    preview.short_description = "Preview"

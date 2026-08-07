@@ -246,7 +246,7 @@ def upload_wizard_step2(request):
 # =============================================================================
 
 def _nice_bounds(vmin: float, vmax: float) -> tuple[float, float]:
-    """Round a data range outward to bounds suitable for palette/encoding ranges."""
+    """Round a data range outward to bounds suitable for styling/encoding ranges."""
     if vmin > vmax:
         vmin, vmax = vmax, vmin
     span = vmax - vmin
@@ -744,7 +744,7 @@ def upload_wizard_provision(request):
                 )
 
                 # get_or_create: re-provisioning into an existing collection must
-                # not clobber hand-tuned Variables (palette, transform, ranges).
+                # not clobber hand-tuned Variables (styling, transform, ranges).
                 Variable.objects.get_or_create(
                     collection=collection,
                     slug=slugify(variable_name),

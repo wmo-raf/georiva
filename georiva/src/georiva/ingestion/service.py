@@ -338,8 +338,7 @@ class IngestionService:
                 queryset=Variable.objects.select_related(
                     "source_unit",
                     "unit",
-                    "palette",
-                ).order_by("sort_order"),
+                ).prefetch_related("styles").order_by("sort_order"),
             )
         )
         

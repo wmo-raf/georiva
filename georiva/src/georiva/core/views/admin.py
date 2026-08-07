@@ -183,7 +183,7 @@ def collection_items_list(request, collection_pk):
     # Variables
     # ------------------------------------------------------------------
     variable_list = list(
-        collection.variables.filter(is_active=True).select_related("palette")
+        collection.variables.filter(is_active=True).prefetch_related("styles")
     )
     
     # ------------------------------------------------------------------
