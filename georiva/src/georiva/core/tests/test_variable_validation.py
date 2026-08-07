@@ -3,7 +3,7 @@ Variable range validation (ADR 0022): `value_min < value_max` is enforced by
 the model's clean(), the single validator every form path delegates to.
 """
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.organisations.testing import make_organisation
@@ -53,7 +53,7 @@ class VariableRangeCleanTests(TestCase):
         self.assertNotIn("value_max", self._clean_errors(self._variable(0.0, None)))
 
 
-class ValidateValueRangeHelperTests(TestCase):
+class ValidateValueRangeHelperTests(SimpleTestCase):
     """The static helper is the delegation point for non-ModelForm paths
     (upload wizard dicts, plain add form) — same rule, same message."""
 
@@ -70,7 +70,7 @@ class ValidateValueRangeHelperTests(TestCase):
         Variable.validate_value_range(0.0, None)
 
 
-class RangeAccessorCollapseTests(TestCase):
+class RangeAccessorCollapseTests(SimpleTestCase):
     """Exactly one range accessor remains on Variable (ADR 0022)."""
 
     def test_value_range_is_the_canonical_accessor(self):

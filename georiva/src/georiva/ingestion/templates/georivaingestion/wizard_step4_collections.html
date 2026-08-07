@@ -280,6 +280,8 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!varError && (vmin === null || vmax === null || isNaN(vmin) || isNaN(vmax))) {
                 varError = '{% trans "Enter a value range for" %} ' + v.name + '.';
             }
+            {# Pre-submit convenience only — the rule itself lives on #}
+            {# Variable.validate_value_range (ADR 0022), enforced server-side. #}
             if (!varError && vmin >= vmax) {
                 varError = v.name + ': {% trans "min must be less than max." %}';
             }

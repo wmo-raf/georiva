@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
@@ -523,8 +524,6 @@ def upload_wizard_step4(request):
                 errors.append(
                     _("Collection '%s' has no variables assigned to it.") % collections[i].get("name", i + 1)
                 )
-
-        from django.core.exceptions import ValidationError
 
         from georiva.core.models import Variable
         from georiva.core.unit_utils import ureg

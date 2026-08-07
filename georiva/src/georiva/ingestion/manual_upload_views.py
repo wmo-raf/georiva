@@ -204,9 +204,7 @@ def manual_upload_variable_add(request, pk):
                     cleaned.get("value_min"), cleaned.get("value_max")
                 )
             except ValidationError as e:
-                for field, messages_ in e.error_dict.items():
-                    for message in messages_:
-                        self.add_error(field, message)
+                self.add_error(None, e)
             variable_name = (cleaned.get("variable_name") or "").strip()
             collection = cleaned.get("collection")
             if variable_name and collection:

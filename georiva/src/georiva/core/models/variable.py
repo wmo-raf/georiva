@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 from django.utils.functional import cached_property
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
@@ -254,7 +255,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         """
         if value_min is not None and value_max is not None and value_min >= value_max:
             raise ValidationError(
-                {"value_max": "Maximum value must be greater than minimum value."}
+                {"value_max": _("Maximum value must be greater than minimum value.")}
             )
 
     def clean(self):
