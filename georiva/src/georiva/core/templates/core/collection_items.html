@@ -69,6 +69,11 @@
             margin-bottom: 0.5rem;
         }
 
+        .ci-styling-link {
+            margin-left: 0.75rem;
+            vertical-align: middle;
+        }
+
         .ci-variables-list {
             display: flex;
             flex-wrap: wrap;
@@ -357,7 +362,13 @@
 
     {% if variable_list %}
         <div class="ci-variables-section">
-            <h2 class="w-label-2">{% trans "Variables" %}</h2>
+            <h2 class="w-label-2">
+                {% trans "Variables" %}
+                <a href="{% url 'collection_styling' collection.pk %}"
+                   class="button button-small button-secondary ci-styling-link">
+                    {% trans "Styling" %}
+                </a>
+            </h2>
             <div class="ci-variables-list">
                 {% for var in variable_list %}
                     <div class="ci-var-chip">

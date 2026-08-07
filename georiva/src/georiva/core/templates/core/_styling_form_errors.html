@@ -1,0 +1,16 @@
+{% comment %}
+    Error list for the styling forms. Expects `form`; renders nothing for a
+    clean form.
+{% endcomment %}
+{% if form.errors %}
+    <ul class="vs-errors">
+        {% for error in form.non_field_errors %}
+            <li>{{ error }}</li>
+        {% endfor %}
+        {% for field in form %}
+            {% for error in field.errors %}
+                <li>{{ field.label }}: {{ error }}</li>
+            {% endfor %}
+        {% endfor %}
+    </ul>
+{% endif %}

@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils.html import format_html
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
@@ -418,8 +418,33 @@ class VariableStyle(TimeStampedModel):
             except ValidationError:
                 errors['stops'] = f"Not a hex color: {entry['color']!r}"
                 break
+        if 'stops' not in errors and self.stops:
+            values = [entry["value"] for entry in self.stops]
+            if any(b < a for a, b in zip(values, values[1:])):
+                # Equal neighbours stay legal: stepped snapshots share their
+                # class-boundary values by construction.
+                errors['stops'] = (
+                    "Stop values must be in ascending order."
+                )
         if errors:
             raise ValidationError(errors)
+
+    # -------- default management --------
+
+    def promote_to_default(self):
+        """Make this style the variable's default, demoting the current one.
+
+        The partial unique constraint makes a second default impossible to
+        write, so the demote and the promote have to land together — anything
+        else either raises or leaves the variable defaultless mid-flight.
+        """
+        with transaction.atomic():
+            type(self).objects.filter(
+                variable=self.variable, is_default=True
+            ).exclude(pk=self.pk).update(is_default=False)
+            if not self.is_default:
+                self.is_default = True
+                self.save(update_fields=['is_default', 'modified'])
 
     # -------- snapshot generation --------
 

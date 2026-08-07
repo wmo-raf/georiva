@@ -21,3 +21,4 @@ from .admin import (  # noqa: F401
     get_collection_items_url,
     plugin_list,
 )
+from .styling import collection_styling, variable_styling  # noqa: F401

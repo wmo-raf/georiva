@@ -1,0 +1,92 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% blocktrans with name=collection.name %}Styling — {{ name }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .styling-lead {
+            color: var(--w-color-grey-400);
+            margin-bottom: 1.5rem;
+            max-width: 44rem;
+        }
+
+        .styling-swatch {
+            display: inline-block;
+            width: 120px;
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid var(--w-color-border-furniture);
+            vertical-align: middle;
+        }
+
+        .styling-swatch--grayscale {
+            opacity: 0.55;
+        }
+
+        .styling-range {
+            white-space: nowrap;
+        }
+
+        .styling-default-name {
+            color: var(--w-color-grey-400);
+            margin-left: 0.5rem;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <p class="styling-lead">
+        {% trans "Every variable in this collection with its value range and default style. A variable without a style of its own renders as grayscale until one is applied." %}
+    </p>
+
+    {% if rows %}
+        <table class="listing">
+            <thead>
+            <tr>
+                <th>{% trans "Variable" %}</th>
+                <th>{% trans "Range" %}</th>
+                <th>{% trans "Scale" %}</th>
+                <th>{% trans "Default style" %}</th>
+                <th>{% trans "Styles" %}</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td class="title">
+                        <div class="title-wrapper">
+                            <a href="{{ row.url }}">{{ row.variable.name }}</a>
+                        </div>
+                        <code class="w-font-mono help-text">{{ row.variable.slug }}</code>
+                    </td>
+                    <td class="styling-range">
+                        {{ row.variable.value_min|floatformat:"-4" }}
+                        &ndash;
+                        {{ row.variable.value_max|floatformat:"-4" }}
+                        {% if row.variable.units %}
+                            <span class="help-text">{{ row.variable.units }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ row.variable.get_scale_type_display }}</td>
+                    <td>
+                        <span class="styling-swatch{% if not row.default_style %} styling-swatch--grayscale{% endif %}"
+                              style="background: {{ row.gradient }};"></span>
+                        <span class="styling-default-name">
+                            {% if row.default_style %}
+                                {{ row.default_style.name }}
+                            {% else %}
+                                {% trans "Grayscale (no style yet)" %}
+                            {% endif %}
+                        </span>
+                    </td>
+                    <td>{{ row.style_count }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="help-text">{% trans "This collection has no variables yet." %}</p>
+    {% endif %}
+{% endblock %}
