@@ -28,6 +28,7 @@ that drifts from its function is a gate that authorises one collection while the
 tile server reads another.
 """
 import hashlib
+import json
 from collections import namedtuple
 from urllib.parse import parse_qs, urlencode
 
@@ -120,17 +121,42 @@ def titiler_variable_root(org_slug, catalog_slug, collection_slug, variable_slug
     return f"{TITILER_PREFIX}/{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
 
 
-def titiler_preview_url(item, variable_slug) -> str:
-    """A rendered preview of ``item``'s ``variable_slug`` band.
+def titiler_preview_url(item, variable, style=None) -> str:
+    """A rendered preview of ``item``'s ``variable`` band.
 
     The organisation comes from the item rather than from the caller, so a page
     cannot hand Titiler a catalog of one tenant under the org segment of
     another: the two segments are read from the same row.
+
+    ``style`` (a ``VariableStyle`` row) pins a non-default style as a query
+    param — a rendering parameter, never a path segment (ADR 0023). Omission
+    deliberately names nothing: a URL that spelled out the default's slug
+    would survive a default flip still pointing at the old default.
+
+    ``variable`` is the ``Variable`` row where the caller holds one, and the
+    URL then carries the per-style version token that makes a colorized
+    response honestly cacheable — an edited style or range is a different
+    URL. A bare slug is accepted for callers holding nothing more (the page
+    templatetag); those thumbnails are never cached, so an untokened URL
+    stays honest there.
     """
     collection = item.collection
     params = {"time": item.time_iso}
     if item.reference_time:
         params["reftime"] = item.reference_time_iso
+    if isinstance(variable, str):
+        # A pinned style knows its own variable, so even a slug-only caller
+        # gets the token then — a styled-but-untokened URL would undo the
+        # honesty the token exists for.
+        variable_slug, variable = variable, style.variable if style else None
+    else:
+        variable_slug = variable.slug
+    if style is not None:
+        params["style"] = style.slug
+    if variable is not None:
+        params["v"] = style_version_token(
+            variable, style if style is not None else variable.default_style,
+        )
     root = titiler_variable_root(
         org_slug_of(collection), collection.catalog.slug, collection.slug, variable_slug,
     )
@@ -147,7 +173,32 @@ def render_config_token(variable) -> str:
     A hash rather than a stored counter: identical config always yields the
     same URL, and there is no version state to migrate or drift.
     """
-    basis = f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
+    return hashlib.sha1(_render_range_basis(variable).encode()).hexdigest()[:8]
+
+
+def _render_range_basis(variable) -> str:
+    """The hash basis both tokens share: everything a rescale bakes in.
+
+    One spelling for the two token schemes, so a change to what "the render
+    range" means cannot move one token and not the other."""
+    return f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
+
+
+def style_version_token(variable, style=None) -> str:
+    """A short hash of everything baked into a *colorized* output's pixels.
+
+    Extends :func:`render_config_token` with the style's stops snapshot
+    (ADR 0023): a colorized preview or tile renders range, scale *and*
+    palette, so any of the three changing must change the URL for its
+    responses to be honestly cacheable. ``style`` is the one being rendered —
+    the default for a styleless URL — or ``None`` for a still-grayscale
+    variable, whose empty basis segment keeps the token stable until a first
+    style appears. Encoded textures deliberately keep the styleless token:
+    encoding bakes no palette in, and sharing this hash would churn every
+    cached texture on a palette edit.
+    """
+    stops = json.dumps(style.stops, sort_keys=True) if style is not None else ""
+    basis = f"{_render_range_basis(variable)}:{stops}"
     return hashlib.sha1(basis.encode()).hexdigest()[:8]
 
 

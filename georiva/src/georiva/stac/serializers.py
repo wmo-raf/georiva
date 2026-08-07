@@ -352,7 +352,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         return assets
 
     def _build_thumbnail_href(self, obj, variable, request) -> Optional[str]:
-        path = titiler_preview_url(obj, variable.slug)
+        path = titiler_preview_url(obj, variable)
         if request:
             return get_full_url_by_request(request, path)
         return path

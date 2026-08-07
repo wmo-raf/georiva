@@ -28,28 +28,37 @@ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 # Django fallback
 # ---------------------------------------------------------------------------
 
-def _fetch_config_from_django(org: str, catalog: str, collection: str, variable: str) -> Optional[dict]:
+def _fetch_config_from_django(
+        org: str, catalog: str, collection: str, variable: str,
+        style: Optional[str] = None,
+) -> tuple[Optional[int], Optional[dict]]:
     """Fetch rendering config from Django internal API on Redis miss.
 
     The org segment is forwarded, not resolved: this service is dialled on an
     internal container name that belongs to no organisation, so Django cannot
-    work one out from the Host and reads it from the path instead.
+    work one out from the Host and reads it from the path instead. The style
+    query param is forwarded the same way — which styles exist is Django's
+    knowledge, not this service's.
+
+    Returns ``(status_code, payload)``; the status is ``None`` when Django
+    could not be reached at all, and the payload only ever accompanies a 200.
     """
     url = f"{DJANGO_BASE_URL}/api/tile-config/{org}/{catalog}/{collection}/{variable}/"
     try:
-        resp = httpx.get(url, timeout=5.0)
+        resp = httpx.get(url, params={"style": style} if style else None, timeout=5.0)
         if resp.status_code == 200:
-            return resp.json()
+            return resp.status_code, resp.json()
         logger.warning(
-            "Django tile-config returned %d for %s/%s/%s/%s",
-            resp.status_code, org, catalog, collection, variable,
+            "Django tile-config returned %d for %s/%s/%s/%s (style=%s)",
+            resp.status_code, org, catalog, collection, variable, style,
         )
+        return resp.status_code, None
     except Exception as e:
         logger.warning(
             "Django tile-config fallback failed for %s/%s/%s/%s: %s",
             org, catalog, collection, variable, e,
         )
-    return None
+    return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -115,32 +124,50 @@ def SemanticTileConfig(
         catalog_slug: Annotated[str, Path(...)],
         collection_slug: Annotated[str, Path(...)],
         variable_slug: Annotated[str, Path(...)],
+        style: Optional[str] = Query(
+            None,
+            description="Named style to render with; omission means the variable's default style",
+        ),
 ) -> dict:
     """Resolve rendering config for a variable.
 
-    Resolution order: Redis → Django internal API → HTTP 503.
+    Resolution order: Redis → Django internal API → HTTP 404/503.
     FastAPI caches this result per request so colormap and rescale
     dependencies share a single Redis call.
 
     The Redis key is org-first because catalog slugs are only unique within an
     organisation: without that segment two institutions running a catalog of the
     same name would share one entry, and whichever Django warmed last would
-    decide how both render.
+    decide how both render. The optional ``style`` param is resolved into the
+    key's trailing segment and nothing more (ADR 0023): which styles exist,
+    and which is default, stays Django's knowledge — a styleless request reads
+    the alias key Django keeps mirroring the default. A style Django answers
+    404 for is a 404 here too, never a silent fall back to the default:
+    serving the wrong style would be worse than failing.
     """
     address = f"{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
     key = f"{PALETTE_KEY_PREFIX}:{org_slug}:{catalog_slug}:{collection_slug}:{variable_slug}"
+    if style:
+        key = f"{key}:{style}"
 
     raw = redis_client.get(key)
     if raw:
-        logger.debug("Redis cache hit: %s", address)
+        logger.debug("Redis cache hit: %s (style=%s)", address, style)
         return json.loads(raw)
 
-    config = _fetch_config_from_django(org_slug, catalog_slug, collection_slug, variable_slug)
+    status, config = _fetch_config_from_django(
+        org_slug, catalog_slug, collection_slug, variable_slug, style,
+    )
     if config is not None:
-        logger.debug("Django fallback hit: %s", address)
+        logger.debug("Django fallback hit: %s (style=%s)", address, style)
         return config
+    if status == 404:
+        raise HTTPException(
+            status_code=404,
+            detail="No rendering config for this address — unknown variable or style",
+        )
 
-    logger.warning("Tile config unavailable: %s", address)
+    logger.warning("Tile config unavailable: %s (style=%s)", address, style)
     raise HTTPException(
         status_code=503,
         detail="Tile config unavailable — Redis cold and Django fallback failed",
