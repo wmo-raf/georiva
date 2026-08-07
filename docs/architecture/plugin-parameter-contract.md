@@ -301,8 +301,17 @@ class CollectionVariable:
     components: dict[str, SourceKey] | None = None  # derived: {'u': SourceKey, 'v': SourceKey}
     description: str = ''
     value_range: tuple[float, float] | None = None
-    palette: str | None = None
+    palette: str | None = None  # ColorRamp catalog name, e.g. "viridis"
+    palette_stops: tuple[tuple[float, str], ...] | None = None  # exact (value, hex) stops
 ```
+
+`value_range`, `palette` and `palette_stops` are the **styling seed**
+(ADR 0022): create-only, precedence `palette_stops` > `palette` > grayscale.
+A ramp name is stretched over the declared range into the variable's default
+style; exact stops are materialized verbatim and the range derives from them
+(declaring both warns on disagreement). An unknown ramp or malformed stops
+degrade one tier with a logged warning — provisioning never fails on styling,
+and a re-provision never touches an existing variable's range or styles.
 
 **`SourceKey`** and **`Level`** come from `sources/parameters.py`:
 
