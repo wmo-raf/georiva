@@ -240,6 +240,10 @@ class SourceSetupService:
             "description": var_def.description,
             "unit": output_unit,
             "source_unit": source_unit,
+        }
+        # Seed-vs-tune (ADR 0022): the plugin's declared range only seeds a new
+        # Variable — an operator-tuned range must survive re-provisioning.
+        seed_defaults = {
             "value_min": var_def.value_range[0] if var_def.value_range else 0.0,
             "value_max": var_def.value_range[1] if var_def.value_range else 1.0,
         }
@@ -261,11 +265,12 @@ class SourceSetupService:
             ]
         
         defaults = {**base_defaults, "transform_type": transform, "sources": sources_data}
-        
+
         variable, created = Variable.objects.update_or_create(
             collection=collection,
             slug=slug,
             defaults=defaults,
+            create_defaults={**defaults, **seed_defaults},
         )
         action = "created" if created else "updated"
         logger.info("Variable %s: %s/%s", action, collection.slug, slug)
