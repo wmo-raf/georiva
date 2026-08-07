@@ -40,7 +40,7 @@ class IngestionHandler:
     def __init__(self, ctx: IngestionContext):
         self.ctx = ctx
         self.item_handler = ItemHandler()
-        self.asset_handler = AssetHandler(ctx.writer, ctx.extractor, ctx.encoder)
+        self.asset_handler = AssetHandler(ctx.writer, ctx.extractor)
     
     # =========================================================================
     # Public entry point

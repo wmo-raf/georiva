@@ -2,15 +2,15 @@
 Re-materialize existing derived items through the shared AssetMaterializer.
 
 Derived items written before the engine adopted the shared materialization
-sequence are missing the housekeeping ingestion always did: no visual PNG for
-anomaly/climatology items, unclipped/unmasked rasters in clipping catalogs,
-no ``imageUnscale`` extra fields, and no collection extent (which is what let
-the item-detail map stretch their PNGs across the whole world).
+sequence are missing the housekeeping ingestion always did: unclipped/unmasked
+rasters in clipping catalogs and no collection extent (which is what let the
+item-detail map stretch derived layers across the whole world).
 
 This command replays materialization for each derived item from its stored
 COG — no recipe recompute — bringing history up to the current contract:
-clipped COG + visual PNG + JSON sidecar, honest Asset rows, item bounds
-snapped to the clip window, and the derived collection's extent rebuilt.
+clipped COG + JSON sidecar, honest Asset rows, item bounds snapped to the
+clip window, and the derived collection's extent rebuilt. Visual textures are
+derived on demand by Titiler (ADR 0021), so none are written here.
 
 It also reports, per variable, the observed data range across everything it
 read next to the variable's configured ``value_min``/``value_max`` — the
@@ -43,7 +43,7 @@ def _read_cog(href):
 class Command(BaseCommand):
     help = (
         "Re-run the shared asset materialization for existing derived items "
-        "(clip + visual PNG + extra fields + collection extent) and report "
+        "(clip + extra fields + collection extent) and report "
         "observed data ranges per variable."
     )
 

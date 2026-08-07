@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from georiva.ingestion.asset_writer import AssetWriter
     from georiva.ingestion.clipper import BoundaryClipper
-    from georiva.ingestion.encoder import VariableEncoder
     from georiva.ingestion.extractor import VariableExtractor
     from georiva.ingestion.models import FileIngestion
 
@@ -32,7 +31,6 @@ class IngestionContext:
     clipper: "BoundaryClipper"
     writer: "AssetWriter"
     extractor: "VariableExtractor"
-    encoder: "VariableEncoder"
 
     # --- Run metadata --------------------------------------------------------
     origin_bucket: str

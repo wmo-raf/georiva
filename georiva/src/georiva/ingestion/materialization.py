@@ -2,13 +2,17 @@
 AssetMaterializer — the shared "array in, served assets out" step.
 
 Both pipelines that publish raster assets end at the same materialization
-sequence: normalize bounds → apply the catalog boundary mask → encode the
-visual RGBA → write COG + PNG + JSON sidecar → upsert Asset rows (with the
-``imageUnscale``/``scale`` extra fields map clients read) → expand the owning
-Collection's extent. Ingestion (``handlers/asset_handler.py``) and the
-derivation engine (``processing/engine.py``) both call this class, so derived
-items can no longer drift from ingested ones — the drift is what left derived
-collections extent-less and their PNGs stretched across the world map.
+sequence: normalize bounds → apply the catalog boundary mask → write COG +
+JSON sidecar → upsert Asset rows → expand the owning Collection's extent.
+Ingestion (``handlers/asset_handler.py``) and the derivation engine
+(``processing/engine.py``) both call this class, so derived items can no
+longer drift from ingested ones — the drift is what left derived collections
+extent-less.
+
+Visual textures are not materialized here or anywhere: they are derived on
+demand by Titiler's ``encoded-preview.png`` from the COG and the variable's
+*current* render range (ADR 0021), so nothing render-config-dependent is ever
+stored.
 
 Extraction stays per-flow: ingestion reads windowed chunks from source files,
 recipes compute arrays. This service only owns what happens after an array,
@@ -25,7 +29,6 @@ from georiva.core.models import Asset, Item
 from georiva.core.storage import storage
 from georiva.ingestion.asset_writer import AssetWriter
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
-from georiva.ingestion.encoder import VariableEncoder
 from georiva.ingestion.utils import compute_stats, normalize_bounds
 
 if TYPE_CHECKING:
@@ -37,25 +40,20 @@ logger = logging.getLogger(__name__)
 
 class AssetMaterializer:
     """
-    Persist one variable's raster array as the served asset trio
-    (COG + visual PNG + JSON sidecar) and keep the catalog metadata honest.
+    Persist one variable's raster array as the served asset pair
+    (COG + JSON sidecar) and keep the catalog metadata honest.
 
-    COG failure raises (the item is unservable without it); PNG and JSON
-    failures are non-fatal and logged, matching ingestion's long-standing
-    partial-failure contract.
+    COG failure raises (the item is unservable without it); JSON failure is
+    non-fatal and logged, matching ingestion's long-standing partial-failure
+    contract.
     """
 
-    def __init__(
-            self,
-            writer: AssetWriter,
-            encoder: Optional[VariableEncoder] = None,
-    ):
+    def __init__(self, writer: AssetWriter):
         # Late import: handlers/__init__ imports asset_handler, which imports
         # this module — importing the subpackage at module level would cycle.
         from georiva.ingestion.handlers.extent_handler import CollectionExtentHandler
 
         self.writer = writer
-        self.encoder = encoder or VariableEncoder()
         self.extent_handler = CollectionExtentHandler()
 
     # =========================================================================
@@ -98,7 +96,6 @@ class AssetMaterializer:
             bounds: list | tuple,
             crs: str,
             timestamp: datetime,
-            rgba: Optional[np.ndarray] = None,
             clipper: Optional["BoundaryClipper"] = None,
             stats: Optional[dict] = None,
             checksum: str = "",
@@ -106,8 +103,6 @@ class AssetMaterializer:
         """
         Run the shared materialization sequence for one variable's array.
 
-        ``rgba`` may be supplied pre-encoded (ingestion's chunked path builds
-        it block-by-block); otherwise it is encoded here from the masked data.
         ``clipper`` applies the precise boundary geometry mask — window
         cropping is the caller's job (``clip_array`` for full-grid arrays).
         """
@@ -115,14 +110,12 @@ class AssetMaterializer:
 
         if clipper is not None and clipper.is_active:
             data = clipper.apply_geometry_mask(data, bounds, nodata=np.nan)
-            if rgba is not None:
-                rgba = clipper.apply_rgba_mask(rgba, bounds)
 
         if stats is None:
             stats = compute_stats(data)
 
         assets = self._save_assets(
-            item=item, variable=variable, data=data, rgba=rgba,
+            item=item, variable=variable, data=data,
             stats=stats, bounds=bounds, crs=crs, timestamp=timestamp,
             checksum=checksum,
         )
@@ -140,7 +133,6 @@ class AssetMaterializer:
             item: Item,
             variable: "Variable",
             data: np.ndarray,
-            rgba: Optional[np.ndarray],
             stats: dict,
             bounds: list,
             crs: str,
@@ -148,7 +140,7 @@ class AssetMaterializer:
             checksum: str = "",
     ) -> list[Asset]:
         """
-        Write the COG / PNG / JSON trio to storage and upsert Asset rows.
+        Write the COG / JSON pair to storage and upsert Asset rows.
         """
         height, width = data.shape[:2]
         catalog = item.collection.catalog
@@ -169,7 +161,6 @@ class AssetMaterializer:
         ).rstrip("/")
 
         assets: list[Asset] = []
-        visual_asset: Optional[Asset] = None
 
         # ── COG ───────────────────────────────────────────────────────────────
         cog_path = f"{base_dir}/{base_name}.tif"
@@ -210,39 +201,6 @@ class AssetMaterializer:
             logger.error("COG save failed for %s: %s", variable.slug, e)
             raise
 
-        # ── PNG ───────────────────────────────────────────────────────────────
-        png_path = f"{base_dir}/{base_name}.png"
-        try:
-            if rgba is None:
-                rgba = self.encoder.encode_to_rgba(data, variable)
-            stored_png = self.writer.write_png(rgba, png_path)
-            visual_asset, _ = Asset.objects.update_or_create(
-                item=item,
-                variable=variable,
-                format=Asset.Format.PNG,
-                defaults={
-                    "href": stored_png,
-                    "media_type": "image/png",
-                    "roles": ["visual"],
-                    "file_size": self._get_file_size(stored_png),
-                    "width": width,
-                    "height": height,
-                    "bands": 4,
-                    "stats_min": stats.get("min"),
-                    "stats_max": stats.get("max"),
-                    "stats_mean": stats.get("mean"),
-                    "stats_std": stats.get("std"),
-                    "extra_fields": {
-                        "imageUnscale": [variable.value_min, variable.value_max],
-                        "scale": variable.scale_type or "linear",
-                    },
-                },
-            )
-            assets.append(visual_asset)
-            self._after_save_asset(visual_asset)
-        except Exception as e:
-            logger.error("PNG save failed for %s: %s", variable.slug, e)
-
         # ── JSON sidecar ──────────────────────────────────────────────────────
         meta_path = f"{base_dir}/{base_name}.json"
         try:
@@ -262,9 +220,8 @@ class AssetMaterializer:
                 "imageUnscale": [variable.value_min, variable.value_max],
                 "scale": variable.scale_type or "linear",
                 "stats": stats,
+                "color_map": variable.weather_layers_palette,
             }
-            if visual_asset:
-                metadata["color_map"] = visual_asset.variable.weather_layers_palette
             self.writer.write_metadata(metadata, meta_path)
         except Exception as e:
             logger.warning("Metadata save failed for %s: %s", variable.slug, e)

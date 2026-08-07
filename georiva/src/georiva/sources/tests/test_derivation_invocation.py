@@ -35,7 +35,6 @@ def _mock_writer():
     w = MagicMock()
     w.bucket.save.side_effect = lambda path, data: path
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
-    w.write_png.side_effect = lambda rgba, path, *a, **k: path
     return w
 
 
@@ -272,12 +271,11 @@ class EndToEndPromotionTests(TestCase):
 
         item = Item.objects.get(collection=self.pub_col)
         self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
-        # Promotion emits a served COG + a visual PNG under the shared ingestion
-        # path scheme ({variable}_{HHMMSS}).
+        # Promotion emits a served COG under the shared ingestion path
+        # scheme ({variable}_{HHMMSS}); visuals are on demand (ADR 0021).
         cog = item.assets.get(format="cog")
         self.assertTrue(cog.href.endswith("/precip_000000.tif"), cog.href)
-        png = item.assets.get(format="png")
-        self.assertTrue(png.href.endswith("/precip_000000.png"), png.href)
+        self.assertFalse(item.assets.filter(format="png").exists())
 
         run_rec = DerivationRun.objects.get(recipe_type="promotion")
         self.assertEqual(run_rec.status, DerivationRun.Status.COMPLETED)

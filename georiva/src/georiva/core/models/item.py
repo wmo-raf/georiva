@@ -121,16 +121,6 @@ class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableMod
         return self.assets.filter(roles__contains=['data'])
     
     @property
-    def visual_assets(self):
-        """Get all visual assets."""
-        return self.assets.filter(roles__contains=['visual'])
-    
-    @property
-    def thumbnail(self) -> 'Asset':
-        """Get thumbnail asset."""
-        return self.assets.filter(roles__contains=['thumbnail']).first()
-    
-    @property
     def time_iso(self) -> str:
         """ISO 8601 UTC string with Z suffix, for use in API URLs and templates."""
         return self.time.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -247,11 +237,6 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     # =========================================================================
     # Extra fields accessors
     # =========================================================================
-    
-    @property
-    def image_unscale(self):
-        """For PNG: [min, max] to unscale bytes back to data range."""
-        return self.extra_fields.get('imageUnscale')
     
     @property
     def overviews(self):

@@ -32,7 +32,6 @@ def _mock_writer():
     w = MagicMock()
     w.bucket.save.side_effect = lambda path, data: path
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
-    w.write_png.side_effect = lambda rgba, path, *a, **k: path
     return w
 
 
@@ -78,7 +77,7 @@ class _PromotionFixture(TestCase):
 
 
 class PromotionThroughEngineTests(_PromotionFixture):
-    def test_promotion_produces_cog_and_png_assets_and_link(self):
+    def test_promotion_produces_cog_asset_and_link(self):
         from georiva.core.models import Asset
 
         result = self._run_promotion()
@@ -88,12 +87,11 @@ class PromotionThroughEngineTests(_PromotionFixture):
         self.assertEqual(item.collection, self.pub_col)
         self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
 
-        # A served COG (data role) + a visual PNG — the pair the catalog needs.
+        # A served COG (data role) — visuals are derived on demand (ADR 0021).
         cog = item.assets.get(format=Asset.Format.COG)
         self.assertEqual(cog.variable, self.variable)
         self.assertEqual(cog.roles, ["data"])
-        png = item.assets.get(format=Asset.Format.PNG)
-        self.assertEqual(png.roles, ["visual"])
+        self.assertFalse(item.assets.filter(format=Asset.Format.PNG).exists())
 
         link = DerivationLink.objects.get(derived_item=item)
         self.assertEqual(link.source_staging_item, self.sitem)
@@ -247,10 +245,10 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
 
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
-        # The shared materializer writes the served pair from the one
-        # data OutputAsset — a COG plus its visual PNG.
+        # The shared materializer writes the COG from the one data
+        # OutputAsset — visuals are derived on demand (ADR 0021).
         self.assertEqual(
-            set(item.assets.values_list("format", flat=True)), {"cog", "png"},
+            set(item.assets.values_list("format", flat=True)), {"cog"},
         )
         self.assertEqual(DerivationLink.objects.filter(derived_item=item).count(), 1)
         self.assertEqual(
@@ -260,9 +258,9 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
 
 
 class RegisterAssetMaterializationTests(_PromotionFixture):
-    """An array OutputAsset materializes the full served trio (COG + visual
-    PNG + JSON sidecar) through the shared AssetMaterializer; an explicit
-    format='png' OutputAsset is redundant and skipped."""
+    """An array OutputAsset materializes the served pair (COG + JSON
+    sidecar) through the shared AssetMaterializer; an explicit
+    format='png' OutputAsset addresses nothing and is skipped."""
 
     def _item(self):
         return Item.objects.create(
@@ -275,7 +273,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         from georiva.ingestion.materialization import AssetMaterializer
         return AssetMaterializer(writer)
 
-    def test_cog_output_asset_materializes_cog_png_and_sidecar(self):
+    def test_cog_output_asset_materializes_cog_and_sidecar(self):
         import numpy as np
 
         from georiva.core.models import Asset
@@ -296,17 +294,13 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         )
 
         writer.write_cog.assert_called_once()
-        writer.write_png.assert_called_once()
         writer.write_metadata.assert_called_once()
-        rgba = writer.write_png.call_args.args[0]
-        self.assertEqual(rgba.shape, (3, 2, 4))
         self.assertEqual(
-            {a.format for a in assets}, {Asset.Format.COG, Asset.Format.PNG},
+            {a.format for a in assets}, {Asset.Format.COG},
         )
         # The grid the array was written with — run_unit stamps it on the item.
         self.assertEqual(grid, ([0, 0, 1, 1], 2, 3))
-        png = item.assets.get(format=Asset.Format.PNG)
-        self.assertEqual(png.extra_fields["imageUnscale"], [0, 50])
+        self.assertFalse(item.assets.filter(format=Asset.Format.PNG).exists())
 
     def test_explicit_png_output_asset_is_skipped(self):
         import numpy as np
@@ -329,7 +323,6 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
 
         self.assertEqual(assets, [])
         self.assertIsNone(grid)
-        writer.write_png.assert_not_called()
         writer.write_cog.assert_not_called()
 
     def test_run_unit_expands_the_derived_collections_extent(self):

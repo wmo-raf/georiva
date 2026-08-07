@@ -351,13 +351,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         For collections with reference_time, adds:
           - has_reference_time: true
           - runs: [{reference_time, valid_times[]}]
-            used by the frontend to construct asset URLs without a DB lookup.
-
-        Asset URL pattern (frontend buildAssetUrl):
-          No reference_time:
-            {catalog}/{collection}/{variable}/{vt_Y}/{vt_m}/{vt_d}/{variable}_{vt_HHMMSS}.png
-          Has reference_time:
-            {catalog}/{collection}/{variable}/{vt_Y}/{vt_m}/{vt_d}/{variable}_{vt_HHMMSS}__ref{ref_YYYYMMDDTHHmmss}.png
+            used by the frontend to pick times without a DB lookup.
         """
         catalog = collection.catalog
         meta = {

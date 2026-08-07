@@ -1,4 +1,3 @@
-import io
 import json
 import logging
 import tempfile
@@ -6,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-from PIL import Image
 from django.conf import settings
 from rasterio.transform import from_bounds
 from rio_cogeo.cogeo import cog_translate
@@ -21,10 +19,12 @@ class AssetWriter:
     """
     Writes processed geospatial data to object storage in multiple formats.
 
-    Handles three asset types per variable per timestamp:
-      PNG  — Encoded RGBA for map rendering
+    Handles two asset types per variable per timestamp:
       COG  — Cloud-Optimized GeoTIFF for TiTiler serving and analysis
       JSON — Metadata sidecar for API responses and frontend rendering
+
+    Visual textures are not written here: Titiler derives them on demand
+    from the COG (ADR 0021).
 
     COG output is fully adaptive:
       - Block size scales with raster dimensions (country → global)
@@ -40,23 +40,6 @@ class AssetWriter:
     # =========================================================================
     # Public Interface
     # =========================================================================
-    
-    def write_png(self, rgba: np.ndarray, output_path: str) -> str:
-        """
-        Write an RGBA numpy array to storage as a PNG.
-
-        Args:
-            rgba:        H×W×4 uint8 array in RGBA order.
-            output_path: Destination path in the bucket.
-
-        Returns:
-            Final stored path.
-        """
-        image = Image.fromarray(rgba, mode='RGBA')
-        buffer = io.BytesIO()
-        image.save(buffer, format='PNG', optimize=True)
-        buffer.seek(0)
-        return self.bucket.save(output_path, buffer.read())
     
     def write_cog(
             self,

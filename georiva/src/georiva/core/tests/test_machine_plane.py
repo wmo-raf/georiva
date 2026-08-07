@@ -28,6 +28,8 @@ from georiva.core.machine_plane import (
     MARTIN_PREFIX,
     martin_boundary_stats_url,
     org_slug_of,
+    render_config_token,
+    titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,
 )
@@ -75,6 +77,34 @@ class MachinePlaneAddressTests(TestCase):
         self.assertNotEqual(
             titiler_preview_url(self.kenya_tree["item"], SHARED_SLUG),
             titiler_preview_url(self.uganda_tree["item"], SHARED_SLUG),
+        )
+
+    def test_an_encoded_preview_url_carries_the_render_config_token(self):
+        """The immutable cache header on encoded-preview.png is only safe
+        because a render-range edit is a *different URL* (ADR 0021)."""
+        item = self.kenya_tree["item"]
+        variable = self.kenya_tree["variable"]
+        url = titiler_encoded_preview_url(item, variable)
+        self.assertTrue(
+            url.startswith(
+                f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}/"
+                "encoded-preview.png?"
+            ),
+            url,
+        )
+        self.assertIn(f"v={render_config_token(variable)}", url)
+
+    def test_changing_the_render_range_changes_the_url(self):
+        variable = self.kenya_tree["variable"]
+        before = render_config_token(variable)
+        variable.value_max = (variable.value_max or 0) + 1
+        self.assertNotEqual(before, render_config_token(variable))
+
+    def test_identical_render_config_yields_the_same_token(self):
+        """A hash, not a counter: no version state to migrate or drift."""
+        self.assertEqual(
+            render_config_token(self.kenya_tree["variable"]),
+            render_config_token(self.kenya_tree["variable"]),
         )
 
     def test_a_forecast_preview_carries_its_reference_time(self):

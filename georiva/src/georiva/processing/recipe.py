@@ -143,15 +143,15 @@ class OutputAsset:
     One asset the engine should write + register under the output Item.
 
     Exactly one production mode:
-      - ``array`` + ``format="cog"`` (default) → engine materializes the full
-                               served trio via the shared AssetMaterializer:
-                               COG + visual PNG + JSON sidecar, clipped to the
-                               catalog boundary — the same set ingestion writes
+      - ``array`` + ``format="cog"`` (default) → engine materializes the served
+                               pair via the shared AssetMaterializer:
+                               COG + JSON sidecar, clipped to the catalog
+                               boundary — the same set ingestion writes
       - ``passthrough`` set    → engine copies an existing object (bucket, href)
                                into the assets bucket as-is
 
-    ``format="png"`` is legacy: the PNG now ships with every array asset, so
-    an explicit png OutputAsset is skipped by the engine.
+    ``format="png"`` is legacy: visual textures are derived on demand by
+    Titiler (ADR 0021), so an explicit png OutputAsset is skipped by the engine.
     """
     variable: Any                         # core.Variable
     roles: list = field(default_factory=lambda: ["data"])

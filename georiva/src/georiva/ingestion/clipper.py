@@ -190,28 +190,3 @@ class BoundaryClipper:
         
         return result
     
-    def apply_rgba_mask(
-            self,
-            rgba: np.ndarray,
-            bounds: Tuple[float, float, float, float],
-    ) -> np.ndarray:
-        """
-        Mask RGBA array by setting alpha=0 outside boundary.
-        
-        Args:
-            rgba: RGBA array (height, width, 4)
-            bounds: Data bounds
-        
-        Returns:
-            Masked RGBA array (copy)
-        """
-        if not self.apply_mask or not self.shapely_geom:
-            return rgba
-        
-        height, width = rgba.shape[:2]
-        mask = self.create_mask(bounds, width, height)
-        
-        result = rgba.copy()
-        result[~mask, 3] = 0  # Set alpha to 0 outside boundary
-        
-        return result
