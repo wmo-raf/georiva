@@ -97,6 +97,7 @@ COLLECTIONS = {
                 "source_units": "mm",
                 "source_variable": "band_1",
                 "value_range": (0.0, 300.0),
+                "palette": "viridis",
             }
         ],
     },
@@ -113,7 +114,24 @@ Key per-variable fields:
   `name` and `level`.
 - `source_units` vs `output_units` — the raw unit as it leaves the file vs the
   unit you expose. If they differ, the ingestion pipeline converts via pint.
-- `value_range` — drives default rendering.
+- `value_range` — seeds the variable's min/max at creation. Defaults to
+  `(0.0, 1.0)` when omitted.
+- `palette` — a color ramp name from the instance catalog (matplotlib-compatible
+  names such as `"viridis"`, `"RdBu"`; your organisation's own ramps also
+  resolve, and win a name collision). The ramp is stretched over `value_range`
+  into the variable's default style. An unknown name falls back to grayscale
+  with a logged warning.
+- `palette_stops` — exact `(value, "#RRGGBB")` pairs for canonical palettes
+  whose colors pin physical thresholds. Materialized verbatim as the default
+  style, and the variable's range is **derived from the stops** — declaring
+  both `value_range` and `palette_stops` merely warns if they disagree.
+  Malformed stops fall back to `palette` (or grayscale) with a warning;
+  provisioning never fails on styling.
+
+All three styling fields are **create-only seeds** (ADR 0022): re-provisioning
+a feed never overwrites an existing variable's range or styles, so an
+operator's tuning always survives.
+
 - `transform` / `components` — for vector-derived variables
   (`vector_magnitude`, `vector_direction`).
 - `groups` — pure UX grouping in the wizard; no effect on the data model.

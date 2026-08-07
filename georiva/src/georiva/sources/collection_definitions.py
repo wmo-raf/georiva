@@ -27,6 +27,20 @@ class CollectionVariable:
     unit this variable is exposed in: when set and different from source_units,
     the ingestion pipeline converts source_units -> output_units via pint. When
     output_units is None it defaults to source_units, i.e. no conversion.
+
+    Styling seed (ADR 0022) — all optional, all create-only (a re-provision
+    never touches an existing Variable's range or styles):
+
+    - palette: a ColorRamp catalog name (e.g. "viridis"); the system stretches
+      it over the value range into the variable's default style.
+    - palette_stops: exact (value, "#RRGGBB(AA)") pairs for canonical palettes,
+      materialized verbatim as the default style; when present the variable's
+      range is derived from the stops (declaring both range and stops merely
+      warns on disagreement).
+
+    Precedence: palette_stops > palette > grayscale. An unknown ramp name or
+    malformed stops degrade one tier with a logged warning — provisioning
+    never fails on styling.
     """
     key: str
     name: str
@@ -38,6 +52,7 @@ class CollectionVariable:
     description: str = ''
     value_range: Optional[tuple[float, float]] = None
     palette: Optional[str] = None
+    palette_stops: Optional[tuple[tuple[float, str], ...]] = None
 
     def __post_init__(self):
         if self.transform == 'passthrough' and self.source_variable is None:
@@ -156,7 +171,10 @@ def parse_collection_defs(raw: dict) -> list['CollectionDefinition']:
                         "source_variable": "band_1",  # str shorthand, OR dict with name/level
                         "value_range": (0.0, 2000.0),  # optional
                         "description": "",         # optional
-                        "palette": None,           # optional
+                        "palette": "viridis",      # optional ramp name
+                        # Optional exact stops; wins over "palette" and
+                        # derives the range:
+                        "palette_stops": [(0.0, "#f7fbff"), (2000.0, "#08306b")],
                         # For derived (vector) variables:
                         "transform": "vector_magnitude",
                         "components": {"u": "10u", "v": "10v"},
@@ -202,6 +220,7 @@ def _parse_variable(v: dict) -> CollectionVariable:
             description=v.get('description', ''),
             value_range=tuple(v['value_range']) if v.get('value_range') else None,
             palette=v.get('palette'),
+            palette_stops=_freeze_palette_stops(v.get('palette_stops')),
         )
 
     # Vector-derived variable
@@ -216,7 +235,21 @@ def _parse_variable(v: dict) -> CollectionVariable:
         description=v.get('description', ''),
         value_range=tuple(v['value_range']) if v.get('value_range') else None,
         palette=v.get('palette'),
+        palette_stops=_freeze_palette_stops(v.get('palette_stops')),
     )
+
+
+def _freeze_palette_stops(raw):
+    """Best-effort conversion of declared stops to a tuple of pairs. Malformed
+    input passes through untouched: validation — and the degrade-with-warning
+    policy — belongs to provisioning, so a bad declaration must not crash the
+    wizard here (ADR 0022: provisioning never fails on styling)."""
+    if raw is None:
+        return None
+    try:
+        return tuple(tuple(stop) for stop in raw)
+    except TypeError:
+        return raw
 
 
 def _parse_source_key(source) -> Optional[SourceKey]:

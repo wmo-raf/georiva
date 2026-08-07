@@ -6,6 +6,7 @@ Idempotent: re-running updates existing records (keyed by slug) rather than
 creating duplicates, so adding new collections to a plugin is safe to re-run.
 """
 import logging
+import math
 from typing import Optional
 
 from django.db import transaction
@@ -15,6 +16,44 @@ from georiva.core.provisioning import build_source_block, resolve_unit
 from georiva.sources.collection_definitions import CollectionDefinition, CollectionVariable
 
 logger = logging.getLogger("georiva.sources.setup_service")
+
+
+def _validated_palette_stops(raw):
+    """Validate a plugin's declared ``palette_stops`` into a stops snapshot.
+
+    Returns ``(stops, error)``: on success, ``stops`` is the normalized
+    ``[{"value": float, "color": "#..."} ...]`` list in ascending value order
+    and ``error`` is None; on any malformation, ``stops`` is None and
+    ``error`` says why — the caller degrades one tier with a warning
+    (ADR 0022: provisioning never fails on styling).
+    """
+    from georiva.core.models.visualization import HEX_COLOR_VALIDATOR
+    from django.core.exceptions import ValidationError
+
+    if raw is None:
+        return None, None
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        return None, f"not a list of (value, color) pairs: {raw!r}"
+    if len(raw) < 2:
+        return None, "fewer than two stops — cannot span a range"
+    stops = []
+    for entry in raw:
+        if isinstance(entry, str) or not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            return None, f"entry is not a (value, color) pair: {entry!r}"
+        value, color = entry
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return None, f"stop value is not a finite number: {value!r}"
+        if not isinstance(color, str):
+            return None, f"stop color is not a string: {color!r}"
+        try:
+            HEX_COLOR_VALIDATOR(color)
+        except ValidationError:
+            return None, f"stop color is not a hex color: {color!r}"
+        stops.append({"value": float(value), "color": color})
+    stops.sort(key=lambda stop: stop["value"])
+    if stops[0]["value"] == stops[-1]["value"]:
+        return None, "all stop values are equal — cannot derive a range"
+    return stops, None
 
 
 class SourceSetupService:
@@ -241,12 +280,39 @@ class SourceSetupService:
             "unit": output_unit,
             "source_unit": source_unit,
         }
-        # Seed-vs-tune (ADR 0022): the plugin's declared range only seeds a new
-        # Variable — an operator-tuned range must survive re-provisioning.
-        seed_defaults = {
-            "value_min": var_def.value_range[0] if var_def.value_range else 0.0,
-            "value_max": var_def.value_range[1] if var_def.value_range else 1.0,
-        }
+        # Seed-vs-tune (ADR 0022): the plugin's declared range and styling
+        # only seed a new Variable — an operator-tuned range or style must
+        # survive re-provisioning. Canonical stops outrank the declared range:
+        # when valid palette_stops are present the range derives from them.
+        seed_stops, stops_error = _validated_palette_stops(var_def.palette_stops)
+        seed_warnings = []
+        if stops_error:
+            seed_warnings.append(
+                "Variable %s/%s: ignoring palette_stops (%s) — falling back "
+                "to %s" % (
+                    collection.slug, slug, stops_error,
+                    f"ramp {var_def.palette!r}" if var_def.palette else "grayscale",
+                )
+            )
+        if seed_stops:
+            seed_min = seed_stops[0]["value"]
+            seed_max = seed_stops[-1]["value"]
+            if var_def.value_range and not (
+                math.isclose(seed_min, var_def.value_range[0])
+                and math.isclose(seed_max, var_def.value_range[1])
+            ):
+                seed_warnings.append(
+                    "Variable %s/%s: declared value_range %s disagrees with "
+                    "palette_stops span (%s, %s) — the stops win" % (
+                        collection.slug, slug, var_def.value_range,
+                        seed_min, seed_max,
+                    )
+                )
+        elif var_def.value_range:
+            seed_min, seed_max = var_def.value_range
+        else:
+            seed_min, seed_max = 0.0, 1.0
+        seed_defaults = {"value_min": seed_min, "value_max": seed_max}
         
         if var_def.transform == 'passthrough':
             transform = Variable.TransformType.PASSTHROUGH
@@ -272,9 +338,66 @@ class SourceSetupService:
             defaults=defaults,
             create_defaults={**defaults, **seed_defaults},
         )
+        if created:
+            # Seeding (and its degradation warnings) is create-only: a
+            # re-provision neither writes styles nor nags about a declaration
+            # it is not going to apply.
+            for message in seed_warnings:
+                logger.warning(message)
+            self._seed_default_style(variable, var_def, seed_stops)
         action = "created" if created else "updated"
         logger.info("Variable %s: %s/%s", action, collection.slug, slug)
         return variable
+
+    @staticmethod
+    def _seed_default_style(variable, var_def: CollectionVariable, seed_stops):
+        """Materialize the plugin's styling seed as the new Variable's default
+        style (ADR 0022), precedence ``palette_stops`` > ``palette`` >
+        grayscale. Create-only by construction: only called for a variable
+        this provisioning run just created. The grayscale tier writes no row —
+        serving already falls back to grayscale for a style-less variable.
+        """
+        from georiva.core.models import ColorRamp, VariableStyle
+        from georiva.core.models.visualization import generate_stops
+
+        if seed_stops:
+            VariableStyle.objects.create(
+                variable=variable,
+                name="Default",
+                slug="default",
+                is_default=True,
+                stops=seed_stops,
+            )
+            return
+        if not var_def.palette:
+            return
+
+        # A plugin provisions into one organisation's catalog, so its ramp
+        # vocabulary is that organisation's tier plus the instance-wide
+        # catalog — the org's own ramp wins a name collision.
+        organisation = variable.collection.catalog.organisation
+        ramp = (
+            ColorRamp.objects.filter(
+                organisation=organisation, name__iexact=var_def.palette
+            ).first()
+            or ColorRamp.objects.filter(
+                organisation__isnull=True, name__iexact=var_def.palette
+            ).first()
+        )
+        if ramp is None:
+            logger.warning(
+                "Variable %s/%s: unknown color ramp %r — grayscale fallback",
+                variable.collection.slug, variable.slug, var_def.palette,
+            )
+            return
+        VariableStyle.objects.create(
+            variable=variable,
+            name=ramp.name,
+            slug=slugify(ramp.name) or "default",
+            is_default=True,
+            ramp=ramp,
+            stops=generate_stops(ramp, variable.value_min, variable.value_max),
+        )
     
     @staticmethod
     def _upsert_link(*, data_feed, collection, definition: CollectionDefinition, config_values: dict):

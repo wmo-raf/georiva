@@ -4,6 +4,10 @@
 > raw files; for where they sit in the wider flow see the
 > [Storage & Ingestion Architecture](plugins/georiva-storage-architecture.md), and for how the data they read maps to
 > Variables see the [Data Model Guide](georiva-data-model-guide.md).
+>
+> Format plugins carry no styling: a variable's `value_range`, `palette` (ramp name) and `palette_stops` seeds are
+> declared in the **source** plugin contract — see
+> [Writing a Source Plugin](plugins/writing-a-source-plugin.md#3-collectiondefinition--the-data-model-declaration).
 
 ## Overview
 
