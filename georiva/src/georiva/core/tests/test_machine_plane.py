@@ -35,6 +35,8 @@ from georiva.core.machine_plane import (
 )
 from georiva.core.models import Item, Variable
 from georiva.core.machine_plane.palette_cache import (
+    build_colormap_256,
+    build_variable_payload,
     get_palette_cache_key,
     variable_cache_key,
     warm_all,
@@ -218,6 +220,127 @@ class PaletteCacheSweepTests(TestCase):
         self.addCleanup(self.redis.delete, "georiva:something-else")
         warm_all()
         self.assertTrue(self.redis.exists("georiva:something-else"))
+
+
+class StyledPayloadTests(TestCase):
+    """The rendering payload under the two-layer model (ADR 0022): resolving
+    the default style must be invisible from Titiler's side of the key.
+
+    The stops a legacy palette held and the stops its migrated default style
+    holds are the same rows, so the payload built from either must be
+    byte-equivalent — that equivalence is what let the palette models retire
+    without a client noticing.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
+        cls.variable = cls.tree["variable"]
+
+    def _style(self, **overrides):
+        from georiva.core.models import VariableStyle
+
+        fields = dict(
+            variable=self.variable, name="Official", slug="official",
+            is_default=True,
+            stops=[{"value": 0.0, "color": "#000000"},
+                   {"value": 50.0, "color": "#ff0000"}],
+        )
+        fields.update(overrides)
+        return VariableStyle.objects.create(**fields)
+
+    def test_a_styled_variables_payload_is_byte_equivalent_to_the_palette_eras(self):
+        import json
+
+        self._style()
+        # What the retired builder produced for the same stops: range and
+        # scale from the variable, the colormap interpolated from the
+        # absolute value→color pairs.
+        expected = {
+            "vmin": self.variable.value_min,
+            "vmax": self.variable.value_max,
+            "scale_type": "linear",
+            "colormap": build_colormap_256(
+                [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
+                self.variable.value_min, self.variable.value_max,
+            ),
+        }
+        payload = build_variable_payload(self.variable)
+        self.assertEqual(
+            json.dumps(payload, sort_keys=True),
+            json.dumps(expected, sort_keys=True),
+        )
+
+    def test_a_styleless_variables_payload_still_omits_the_colormap(self):
+        self.assertEqual(
+            build_variable_payload(self.variable),
+            {"vmin": self.variable.value_min, "vmax": self.variable.value_max,
+             "scale_type": "linear"},
+        )
+
+    def test_a_non_default_style_does_not_color_the_payload(self):
+        self._style(is_default=False)
+        self.assertNotIn("colormap", build_variable_payload(self.variable))
+
+
+class StyleSignalTests(TestCase):
+    """Style edits are live on the next tile: save and delete both re-warm,
+    and a deleted variable's key does not wait for the next sweep."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
+        cls.variable = cls.tree["variable"]
+
+    def setUp(self):
+        from django_redis import get_redis_connection
+
+        self.redis = get_redis_connection("default")
+        self.addCleanup(self._clear)
+        self._clear()
+
+    def _clear(self):
+        keys = list(self.redis.scan_iter(match="georiva:palette:*"))
+        if keys:
+            self.redis.delete(*keys)
+
+    def _payload(self):
+        import json
+
+        raw = self.redis.get(variable_cache_key(self.variable))
+        return json.loads(raw) if raw else None
+
+    def _make_style(self):
+        from georiva.core.models import VariableStyle
+
+        return VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official",
+            is_default=True,
+            stops=[{"value": 0.0, "color": "#000000"},
+                   {"value": 50.0, "color": "#ff0000"}],
+        )
+
+    def test_saving_a_style_warms_its_variables_key(self):
+        style = self._make_style()
+        self.assertIn("colormap", self._payload())
+
+        style.stops = [{"value": 0.0, "color": "#0000ff"},
+                       {"value": 50.0, "color": "#00ff00"}]
+        style.save()
+        self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 255, 255])
+
+    def test_deleting_a_style_rewarms_the_key_without_it(self):
+        self._make_style().delete()
+        payload = self._payload()
+        self.assertIsNotNone(payload)
+        self.assertNotIn("colormap", payload)
+
+    def test_a_deleted_variables_key_does_not_wait_for_the_sweep(self):
+        warm_all()
+        key = variable_cache_key(self.variable)
+        self.assertTrue(self.redis.exists(key))
+        Variable.objects.get(pk=self.variable.pk).delete()
+        self.assertFalse(self.redis.exists(key))
 
 
 @override_settings(ALLOWED_HOSTS=["*"])

@@ -9,7 +9,7 @@ from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
 from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 
-from georiva.core.models import Item, Catalog, Collection, ColorPalette, ColorRamp, Asset
+from georiva.core.models import Item, Catalog, Collection, ColorRamp, Asset
 from georiva.core.models.catalog import Topic
 from .admin import CatalogIndexView
 from georiva.organisations.access import may_change_org_object, require_active_org
@@ -246,8 +246,14 @@ class GlobalTierIndexView(generic.IndexView):
         return may_change_org_object(self.request, instance)
 
 
-class ColorPaletteModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
-    model = ColorPalette
+class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
+    """The Color ramp catalog (ADR 0022): both tiers listed, one writable.
+
+    The instance-wide catalog is readable by every organisation and curated by
+    the instance admin; an organisation creates and edits only its own ramps.
+    """
+
+    model = ColorRamp
     icon = "palette"
     add_to_admin_menu = True
     menu_order = 600
@@ -257,30 +263,9 @@ class ColorPaletteModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
     # Wagtail's generic copy view binds its form to the *source* row, so saving
     # renames that row instead of duplicating it (verified against Wagtail 7.4.2).
     # Harmless-looking on a single-tenant instance; here it would be a member
-    # rewriting the instance-wide palette every organisation renders with. Until
-    # that is fixed upstream or worked around deliberately, palettes are copied by
+    # rewriting the instance-wide ramp every organisation renders with. Until
+    # that is fixed upstream or worked around deliberately, ramps are copied by
     # creating one.
-    copy_view_enabled = False
-    list_display = ["name", "palette_type", "owner_label"]
-
-
-class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
-    """The Color ramp catalog (ADR 0022): both tiers listed, one writable.
-
-    Same tier rules as palettes — the instance-wide catalog is readable by
-    every organisation and curated by the instance admin; an organisation
-    creates and edits only its own ramps.
-    """
-
-    model = ColorRamp
-    icon = "palette"
-    add_to_admin_menu = True
-    menu_order = 601
-    exclude_form_fields = ["created_at", "updated_at"]
-    add_view_class = GlobalTierCreateView
-    index_view_class = GlobalTierIndexView
-    # Disabled for the same reason as palettes: Wagtail's copy view saves over
-    # its source row, which here would let a member rewrite an instance-wide ramp.
     copy_view_enabled = False
     list_display = ["name", "preview", "ramp_type", "owner_label"]
 
@@ -292,6 +277,5 @@ admin_viewsets = [
     CatalogViewSet(),
     CatalogChooserViewSetObject,
     CollectionViewSet(),
-    ColorPaletteModelViewSet(),
     ColorRampModelViewSet(),
 ]

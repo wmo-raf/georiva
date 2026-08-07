@@ -85,15 +85,23 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             "transform_type": variable.transform_type,
         }
         
-        if variable.palette:
+        style = variable.default_style
+        if style:
             try:
-                palette = variable.palette.as_weatherlayers_palette()
-                palette_min, palette_max = variable.palette.min_max_from_stops()
+                palette = style.as_weatherlayers_palette()
+                palette_min, palette_max = style.min_max_from_stops()
                 x_georiva["palette"] = palette
                 x_georiva["palette_min"] = palette_min
                 x_georiva["palette_max"] = palette_max
-                x_georiva["palette_name"] = variable.palette.name
-                x_georiva["palette_type"] = variable.palette.palette_type
+                x_georiva["palette_name"] = style.name
+                if style.ramp:
+                    # This key speaks the legacy palette vocabulary — clients
+                    # predate the ramp catalog, whose "qualitative" they knew
+                    # as "categorical" — so serving output stays unchanged
+                    # across the palette→style migration.
+                    x_georiva["palette_type"] = {
+                        "qualitative": "categorical",
+                    }.get(style.ramp.ramp_type, style.ramp.ramp_type)
             except Exception:
                 pass
         else:
@@ -257,7 +265,8 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         variables = (
             collection.variables
             .filter(is_active=True)
-            .select_related('unit', 'palette')
+            .select_related('unit')
+            .prefetch_related('styles__ramp')
             .order_by('sort_order')
         )
         
@@ -407,7 +416,8 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
         variables = (
             collection.variables
             .filter(is_active=True)
-            .select_related('unit', 'palette')
+            .select_related('unit')
+            .prefetch_related('styles__ramp')
             .order_by('sort_order')
         )
         for variable in variables:

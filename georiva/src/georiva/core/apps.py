@@ -11,15 +11,34 @@ def on_variable_save(sender, instance, **kwargs):
     warm_variable(instance)
 
 
-def on_palette_save(sender, instance, **kwargs):
+def on_style_change(sender, instance, **kwargs):
+    """A style was saved or deleted: re-warm its variable's render config.
+
+    Styles are variable-owned rows, so no fan-out is needed — and because the
+    stops snapshot lives on this very row, an edit made anywhere (admin,
+    shell, API) lands here, closing the old gap where stop edits outside
+    Wagtail never re-warmed. On delete the variable may itself be mid-cascade;
+    a vanished variable has nothing to warm.
+    """
     from georiva.core.machine_plane.palette_cache import warm_variable
-    for variable in (
-            instance.variable_set
-                    .filter(is_active=True)
-                    .select_related('collection__catalog__organisation', 'palette')
-                    .prefetch_related('palette__stops')
-    ):
+    from .models import Variable
+
+    variable = (
+        Variable.objects
+        .filter(pk=instance.variable_id)
+        .select_related('collection__catalog__organisation')
+        .prefetch_related('styles')
+        .first()
+    )
+    if variable is not None:
         warm_variable(variable)
+
+
+def on_variable_delete(sender, instance, **kwargs):
+    """A deleted variable's render config must not outlive it until the next
+    sweep — the old missing-delete-signal gap."""
+    from georiva.core.machine_plane.palette_cache import prune_variable
+    prune_variable(instance)
 
 
 def _put_keep(bucket, path):
@@ -89,7 +108,7 @@ class CoreConfig(AppConfig):
     def ready(self):
         from .models import Collection, Variable
         from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
-        from .models.visualization import ColorPalette
+        from .models.visualization import VariableStyle
         from georiva.sources.models import DataFeed
 
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
@@ -109,4 +128,6 @@ class CoreConfig(AppConfig):
         post_delete.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
         
         post_save.connect(on_variable_save, sender=Variable)
-        post_save.connect(on_palette_save, sender=ColorPalette)
+        post_delete.connect(on_variable_delete, sender=Variable)
+        post_save.connect(on_style_change, sender=VariableStyle)
+        post_delete.connect(on_style_change, sender=VariableStyle)

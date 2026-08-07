@@ -361,10 +361,9 @@
             <div class="ci-variables-list">
                 {% for var in variable_list %}
                     <div class="ci-var-chip">
-                        {% if var.palette %}
+                        {% if var.default_style %}
                             <span class="ci-var-chip__swatch"
-                                  style="background: linear-gradient(to right,
-                                          {{ var.palette.css_gradient|default:'#ccc, #333' }});">
+                                  style="background: {{ var.default_style.css_gradient }};">
                         </span>
                         {% endif %}
                         <code class="w-font-mono ci-var-chip__slug">{{ var.slug }}</code>

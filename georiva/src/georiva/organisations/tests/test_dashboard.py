@@ -181,11 +181,11 @@ class DashboardScopingTests(TestCase):
         self.assertTrue(belongs_to_active_org(self.request_for(self.kenya), topic))
 
     def test_the_global_tier_of_a_nullable_owner_belongs_everywhere(self):
-        """A shipped palette is owned by nobody and read by everybody."""
-        from georiva.core.models import ColorPalette
+        """A shipped ramp is owned by nobody and read by everybody."""
+        from georiva.core.models import ColorRamp
 
-        shipped = ColorPalette.objects.create(name="Shipped rainfall")
-        theirs = ColorPalette.objects.create(name="Theirs", organisation=self.uganda)
+        shipped = ColorRamp.objects.create(name="Shipped rainfall")
+        theirs = ColorRamp.objects.create(name="Theirs", organisation=self.uganda)
         request = self.request_for(self.kenya)
         self.assertTrue(belongs_to_active_org(request, shipped))
         self.assertFalse(belongs_to_active_org(request, theirs))

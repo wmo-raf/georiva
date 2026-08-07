@@ -1,7 +1,7 @@
 """
 Variable editor for manually-provisioned Collections.
 
-Data managers tune variables (display name, unit, value range, palette) and
+Data managers tune variables (display name, unit, value range) and
 add/remove them from the Manual Uploads surface — never the raw Collection
 form, which is permission-gated away from them. Operator-is-truth: edits here
 are authoritative.

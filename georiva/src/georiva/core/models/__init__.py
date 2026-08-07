@@ -3,7 +3,7 @@ from .collection import Collection, visible_visibilities
 from .item import Item, Asset
 from .units import Unit
 from .variable import Variable
-from .visualization import ColorPalette, ColorRamp, ColorRampStop
+from .visualization import ColorRamp, ColorRampStop, VariableStyle
 
 __all__ = [
     "Topic",
@@ -11,9 +11,9 @@ __all__ = [
     "Collection",
     "Unit",
     "Variable",
-    "ColorPalette",
     "ColorRamp",
     "ColorRampStop",
+    "VariableStyle",
     "Item",
     "Asset",
 ]

@@ -37,7 +37,7 @@ VIEW_CLASS_SUFFIX = "_view_class"
 #:
 #: The distinction is invisible for everything an organisation owns outright —
 #: both mixins scope to the same rows. It decides one thing: whether the global
-#: tier of a model that has one (colour palettes) is readable here but not
+#: tier of a model that has one (colour ramps) is readable here but not
 #: editable. See ``access.require_writable_org_object``.
 READ_ONLY_VIEW_CLASS_ATTRS = frozenset({
     "index_view_class",

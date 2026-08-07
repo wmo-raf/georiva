@@ -154,17 +154,15 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     value_min = models.FloatField(
         help_text=(
             "Minimum expected data value in the variable's output units. "
-            "Used for palette mapping, COG encoding range, and legend display. "
-            "Values below this will be clipped to the palette minimum. "
-            "Must match the minimum stop value in the selected palette."
+            "Used for color mapping, COG encoding range, and legend display. "
+            "Values below this will be clipped to the style's minimum color."
         )
     )
     value_max = models.FloatField(
         help_text=(
             "Maximum expected data value in the variable's output units. "
-            "Used for palette mapping, COG encoding range, and legend display. "
-            "Values above this will be clipped to the palette maximum. "
-            "Must match the maximum stop value in the selected palette."
+            "Used for color mapping, COG encoding range, and legend display. "
+            "Values above this will be clipped to the style's maximum color."
         )
     )
     scale_type = models.CharField(
@@ -177,19 +175,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             "LOG: useful for variables with large dynamic range like precipitation. "
             "SQRT: moderate compression for skewed distributions. "
             "DIVERGING: for variables with a meaningful midpoint, e.g. temperature anomaly."
-        )
-    )
-    
-    palette = models.ForeignKey(
-        'georivacore.ColorPalette',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        help_text=(
-            "Color palette used for rendering PNG tiles and legend display. "
-            "The palette's min/max stop values must exactly match this variable's "
-            "value_min and value_max. If no palette is selected, a grayscale "
-            "fallback is used."
         )
     )
     
@@ -220,7 +205,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         FieldPanel('unit'),
         FieldPanel('value_min'),
         FieldPanel('value_max'),
-        FieldPanel('palette'),
         FieldPanel('transform_type'),
         FieldPanel('sources'),
     ]
@@ -301,15 +285,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                         f"{', '.join(sorted(missing))} source(s)."
                     )
         
-        # Palette range
-        if self.palette and self.value_min is not None and self.value_max is not None:
-            palette_min, palette_max = self.palette.min_max_from_stops()
-            if abs(palette_min - self.value_min) > 0.01 or abs(palette_max - self.value_max) > 0.01:
-                errors['palette'] = (
-                    f"Palette range ({palette_min}–{palette_max}) must match "
-                    f"value range ({self.value_min}–{self.value_max})"
-                )
-        
         if errors:
             raise ValidationError(errors)
     
@@ -323,11 +298,25 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         return [block.value['source_name'] for block in self.sources]
     
     @property
+    def default_style(self):
+        """The style served when none is asked for by name — the one
+        ``is_default`` row, or ``None`` for a still-grayscale variable.
+
+        Iterates ``styles.all()`` rather than filtering so a queryset that
+        prefetched the styles pays no extra query per variable.
+        """
+        for style in self.styles.all():
+            if style.is_default:
+                return style
+        return None
+
+    @property
     def weather_layers_palette(self):
-        """Get palette for WeatherLayers, with grayscale fallback."""
-        if self.palette:
-            return self.palette.as_weatherlayers_palette()
-        
+        """The default style's snapshot for WeatherLayers, with grayscale fallback."""
+        style = self.default_style
+        if style:
+            return style.as_weatherlayers_palette()
+
         # Fallback: grayscale
         return self._generate_grayscale_palette(self.value_min, self.value_max)
     

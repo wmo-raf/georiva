@@ -12,8 +12,8 @@ Titiler route: catalog slugs are unique only *within* an organisation (#267), so
 without it two institutions each running a ``forecast`` catalog share one cache
 entry and whichever wrote last decides how both render.
 Value format (JSON):
-  With palette:    {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...}}
-  Without palette: {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear"}
+  With a default style: {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...}}
+  Without one:          {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear"}
 """
 
 import json
@@ -85,8 +85,9 @@ def build_variable_payload(variable) -> dict:
         "scale_type": variable.scale_type or "linear",
     }
 
-    if variable.palette:
-        stops = variable.palette.as_weatherlayers_palette()
+    style = variable.default_style
+    if style:
+        stops = style.as_weatherlayers_palette()
         payload["colormap"] = build_colormap_256(stops, variable.value_min, variable.value_max)
 
     return payload
@@ -121,6 +122,25 @@ def warm_variable(variable):
     except Exception as e:
         logger.warning("Failed to warm palette cache for variable %s: %s", getattr(variable, 'slug', '?'), e)
         return None
+
+
+def prune_variable(variable) -> None:
+    """Drop one Variable's rendering config from Redis, for its deletion.
+
+    Best-effort like :func:`warm_variable`: the variable may be mid-cascade
+    with its collection already gone, in which case the key cannot even be
+    named — the periodic sweep collects it instead.
+    """
+    from django_redis import get_redis_connection
+
+    try:
+        key = variable_cache_key(variable)
+        get_redis_connection("default").delete(key)
+    except Exception as e:
+        logger.warning(
+            "Failed to prune palette cache for variable %s: %s",
+            getattr(variable, 'slug', '?'), e,
+        )
 
 
 def prune_stale_keys(live_keys) -> int:
@@ -164,8 +184,8 @@ def warm_all() -> None:
     qs = (
         Variable.objects
         .filter(is_active=True)
-        .select_related('collection__catalog__organisation', 'palette')
-        .prefetch_related('palette__stops')
+        .select_related('collection__catalog__organisation')
+        .prefetch_related('styles')
     )
 
     live_keys = {key for key in (warm_variable(v) for v in qs) if key}

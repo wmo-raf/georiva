@@ -131,7 +131,7 @@ def scoped_queryset(request, queryset):
     """``queryset`` narrowed to the organisation serving ``request``.
 
     A model with a global tier (:data:`GLOBAL_TIER_ATTR`) is narrowed to this
-    organisation's rows *plus* the ownerless ones — the shipped palettes an
+    organisation's rows *plus* the ownerless ones — the shipped color ramps an
     institution draws on alongside its own. Reading is where the two tiers meet;
     writing is not, and :func:`require_writable_org_object` keeps them apart.
     """
@@ -170,7 +170,7 @@ def require_writable_org_object(request, obj):
     """Return ``obj`` if this request may *change* it, else 404.
 
     The same rule as :func:`require_org_object` for everything an organisation
-    owns, and the tighter half of the global tier: a shipped palette is instance
+    owns, and the tighter half of the global tier: a shipped color ramp is instance
     data, so an organisation reads it and only the instance admin edits it. A
     member is told it is not there to edit rather than forbidden, which is what
     "read-only tier" means from inside one organisation's admin.
@@ -310,8 +310,7 @@ def scope_form_fields(request, form):
 
     A Wagtail edit form is more than its own fields: an inline panel carries a
     formset whose rows are forms in their own right, with relation fields of
-    their own — the variables edited inside a collection, and the palette each
-    one picks. Those are narrowed too, by :func:`scope_formset_fields`.
+    their own — the variables edited inside a collection. Those are narrowed too, by :func:`scope_formset_fields`.
 
     The dispatcher is imported here rather than at module level: ``ownership``
     reads this module and the page-tree module, so a module-level import would

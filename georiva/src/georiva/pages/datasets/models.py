@@ -334,7 +334,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         cog_assets = list(
             item.assets
             .filter(format=Asset.Format.COG, variable__is_active=True)
-            .select_related('variable', 'variable__unit', 'variable__palette')
+            .select_related('variable', 'variable__unit')
+            .prefetch_related('variable__styles')
             .order_by('variable__sort_order')
         )
         

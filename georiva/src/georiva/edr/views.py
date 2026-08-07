@@ -242,8 +242,7 @@ class EDRCollectionDetailView(EDRAPIView):
                 'catalog',
             ).prefetch_related(
                 'variables',
-                'variables__palette',
-                'variables__palette__stops',
+                'variables__styles__ramp',
             ),
             slug=collection_slug,
         )

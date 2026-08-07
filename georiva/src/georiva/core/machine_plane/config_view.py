@@ -40,8 +40,8 @@ cache miss on one is a tile that does not render rather than one that was never
 asked for.
 
 Returns the same payload structure as the Redis palette cache:
-  With palette:    {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}
-  Without palette: {"vmin", "vmax", "scale_type"}
+  With a default style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}
+  Without one:          {"vmin", "vmax", "scale_type"}
 """
 
 from rest_framework.response import Response
@@ -69,8 +69,8 @@ class TileConfigView(APIView):
         try:
             variable = (
                 Variable.objects
-                .select_related('collection__catalog__organisation', 'palette')
-                .prefetch_related('palette__stops')
+                .select_related('collection__catalog__organisation')
+                .prefetch_related('styles')
                 .get(
                     collection__catalog__organisation__slug=org_slug,
                     collection__catalog__slug=catalog_slug,
