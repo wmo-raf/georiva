@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 from django.utils.functional import cached_property
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
@@ -245,10 +246,27 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     def units(self):
         return self.unit.symbol
     
+    @staticmethod
+    def validate_value_range(value_min, value_max):
+        """
+        The single min < max validator (ADR 0022). Model clean() runs it for
+        every ModelForm path; non-model paths (upload wizard, plain forms)
+        delegate to it instead of carrying their own copy.
+        """
+        if value_min is not None and value_max is not None and value_min >= value_max:
+            raise ValidationError(
+                {"value_max": _("Maximum value must be greater than minimum value.")}
+            )
+
     def clean(self):
         super().clean()
         errors = {}
-        
+
+        try:
+            self.validate_value_range(self.value_min, self.value_max)
+        except ValidationError as e:
+            errors.update(e.error_dict)
+
         # Unit conversion compatibility
         if self.source_unit and self.unit and self.source_unit != self.unit:
             try:
@@ -296,13 +314,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             raise ValidationError(errors)
     
     @property
-    def encoding_range(self) -> tuple[float | None, float | None]:
-        """
-        Get (min, max) for encoding and viewing.
-        """
-        return self.value_min, self.value_max
-    
-    @property
     def is_derived(self):
         return self.transform_type != self.TransformType.PASSTHROUGH
     
@@ -319,15 +330,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         
         # Fallback: grayscale
         return self._generate_grayscale_palette(self.value_min, self.value_max)
-    
-    @property
-    def palette_value_range(self) -> tuple:
-        """
-        Get (min, max) for legend display.
-        - Variable has range defined: use it (consistent across all assets)
-        - No range defined: use asset stats (grayscale fallback per-asset)
-        """
-        return self.value_min, self.value_max
     
     @staticmethod
     def _generate_grayscale_palette(min_val: float, max_val: float, steps: int = 11, inverted: bool = False) -> list:
@@ -353,4 +355,6 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
     
     @property
     def value_range(self):
+        """The canonical (value_min, value_max) accessor — encoding, legend
+        display, and previews all read this one (ADR 0022)."""
         return self.value_min, self.value_max

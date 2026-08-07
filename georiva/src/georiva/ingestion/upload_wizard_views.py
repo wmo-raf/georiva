@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 
 from django.contrib import messages
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
@@ -524,6 +525,7 @@ def upload_wizard_step4(request):
                     _("Collection '%s' has no variables assigned to it.") % collections[i].get("name", i + 1)
                 )
 
+        from georiva.core.models import Variable
         from georiva.core.unit_utils import ureg
 
         for a in assignments:
@@ -532,8 +534,13 @@ def upload_wizard_step4(request):
             if not isinstance(vmin, (int, float)) or not isinstance(vmax, (int, float)) \
                     or isinstance(vmin, bool) or isinstance(vmax, bool):
                 errors.append(_("Variable '%s' needs numeric min and max values.") % var_label)
-            elif vmin >= vmax:
-                errors.append(_("Variable '%s': min value must be less than max.") % var_label)
+            else:
+                # The rule lives on the model (ADR 0022); the wizard only
+                # rewords it with the variable's label for the step summary.
+                try:
+                    Variable.validate_value_range(vmin, vmax)
+                except ValidationError:
+                    errors.append(_("Variable '%s': min value must be less than max.") % var_label)
 
             unit_id = a.get("unit_id")
             unit_create = (a.get("unit_create") or "").strip()
