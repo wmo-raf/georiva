@@ -1,6 +1,7 @@
 """
-Tests for SourceSetupService variable provisioning, focused on the
-source_units -> units split that drives ingestion-time unit conversion.
+Tests for SourceSetupService variable provisioning: the source_units -> units
+split that drives ingestion-time unit conversion, and the seed-vs-tune policy
+(ADR 0022) for value ranges.
 """
 from django.test import TestCase
 
@@ -156,5 +157,36 @@ class UpsertVariableSeedVsTuneTests(TestCase):
 
         variable.refresh_from_db()
         self.assertEqual(variable.name, "Total Precipitation")
+        self.assertEqual(variable.value_min, -5.0)
+        self.assertEqual(variable.value_max, 1200.0)
+
+    def test_reprovision_through_public_seam_preserves_tuned_range(self):
+        # Same guarantee proven at the public entry point the add-collection
+        # action uses, so a refactor of the provisioning path can't silently
+        # bypass the seed-only behaviour.
+        feed = DataFeed.objects.create(name="Feed", catalog=self.collection.catalog)
+        definition = CollectionDefinition(
+            key="rain",
+            name="Rain",
+            time_resolution="daily",
+            variables=(self.var_def,),
+        )
+        collection = self.service.provision_collection(
+            catalog=self.collection.catalog, definition=definition,
+            data_feed=feed, config_values={},
+        )
+        variable = collection.variables.get(slug="precip")
+        self.assertEqual(variable.value_max, 500.0)
+
+        variable.value_min = -5.0
+        variable.value_max = 1200.0
+        variable.save()
+
+        self.service.provision_collection(
+            catalog=self.collection.catalog, definition=definition,
+            data_feed=feed, config_values={},
+        )
+
+        variable.refresh_from_db()
         self.assertEqual(variable.value_min, -5.0)
         self.assertEqual(variable.value_max, 1200.0)
