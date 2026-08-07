@@ -1,6 +1,7 @@
 """
-Tests for SourceSetupService variable provisioning, focused on the
-source_units -> units split that drives ingestion-time unit conversion.
+Tests for SourceSetupService variable provisioning: the source_units -> units
+split that drives ingestion-time unit conversion, and the seed-vs-tune policy
+(ADR 0022) for value ranges.
 """
 from django.test import TestCase
 
@@ -91,3 +92,101 @@ class UpsertVariableUnitsTests(TestCase):
         # plus the gpdam definition (divide by 10), in a single pint conversion.
         q = ureg.Quantity(54000.0, "m2 s-2")
         self.assertAlmostEqual(q.to("gpdam").magnitude, 550.65, places=1)
+
+
+class UpsertVariableSeedVsTuneTests(TestCase):
+    """Provisioning seeds value_min/value_max only on create (ADR 0022) — a
+    re-run must never overwrite ranges the operator tuned afterwards."""
+
+    def setUp(self):
+        self.service = SourceSetupService()
+        self.collection = _collection()
+        self.var_def = CollectionVariable(
+            key="precip",
+            name="Precipitation",
+            source_units="mm",
+            source_variable=SourceKey(name="band_1"),
+            value_range=(0.0, 500.0),
+        )
+
+    def test_create_seeds_range_from_plugin_declaration(self):
+        variable = self.service._upsert_variable(self.collection, self.var_def)
+
+        self.assertEqual(variable.value_min, 0.0)
+        self.assertEqual(variable.value_max, 500.0)
+
+    def test_create_falls_back_to_default_range_when_plugin_omits_one(self):
+        var_def = CollectionVariable(
+            key="ndvi",
+            name="NDVI",
+            source_units="dimensionless",
+            source_variable=SourceKey(name="band_1"),
+        )
+
+        variable = self.service._upsert_variable(self.collection, var_def)
+
+        self.assertEqual(variable.value_min, 0.0)
+        self.assertEqual(variable.value_max, 1.0)
+
+    def test_reprovision_leaves_operator_tuned_range_untouched(self):
+        variable = self.service._upsert_variable(self.collection, self.var_def)
+        variable.value_min = -5.0
+        variable.value_max = 1200.0
+        variable.save()
+
+        self.service._upsert_variable(self.collection, self.var_def)
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.value_min, -5.0)
+        self.assertEqual(variable.value_max, 1200.0)
+
+    def test_reprovision_still_updates_non_styling_attributes(self):
+        variable = self.service._upsert_variable(self.collection, self.var_def)
+        variable.value_min = -5.0
+        variable.value_max = 1200.0
+        variable.save()
+
+        renamed = CollectionVariable(
+            key="precip",
+            name="Total Precipitation",
+            source_units="mm",
+            source_variable=SourceKey(name="band_1"),
+            value_range=(0.0, 500.0),
+        )
+        self.service._upsert_variable(self.collection, renamed)
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.name, "Total Precipitation")
+        self.assertEqual(variable.value_min, -5.0)
+        self.assertEqual(variable.value_max, 1200.0)
+
+    def test_reprovision_through_public_seam_preserves_tuned_range(self):
+        # Same guarantee proven at the public entry point the add-collection
+        # action uses, so a refactor of the provisioning path can't silently
+        # bypass the seed-only behaviour.
+        feed = DataFeed.objects.create(name="Feed", catalog=self.collection.catalog)
+        definition = CollectionDefinition(
+            key="rain",
+            name="Rain",
+            time_resolution="daily",
+            variables=(self.var_def,),
+        )
+        collection = self.service.provision_collection(
+            catalog=self.collection.catalog, definition=definition,
+            data_feed=feed, config_values={},
+        )
+        variable = collection.variables.get(slug="precip")
+        self.assertEqual(variable.value_max, 500.0)
+
+        variable.value_min = -5.0
+        variable.value_max = 1200.0
+        variable.save()
+
+        self.service.provision_collection(
+            catalog=self.collection.catalog, definition=definition,
+            data_feed=feed, config_values={},
+        )
+
+        variable.refresh_from_db()
+        self.assertEqual(variable.value_min, -5.0)
+        self.assertEqual(variable.value_max, 1200.0)
