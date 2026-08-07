@@ -34,7 +34,7 @@ PALETTE_KEY_PREFIX = "georiva:palette"
 
 def get_palette_cache_key(
     org_slug: str, catalog_slug: str, collection_slug: str, variable_slug: str,
-    style_slug: str = None,
+    style_slug: str | None = None,
 ) -> str:
     key = f"{PALETTE_KEY_PREFIX}:{org_slug}:{catalog_slug}:{collection_slug}:{variable_slug}"
     if style_slug:

@@ -145,7 +145,10 @@ def titiler_preview_url(item, variable, style=None) -> str:
     if item.reference_time:
         params["reftime"] = item.reference_time_iso
     if isinstance(variable, str):
-        variable_slug, variable = variable, None
+        # A pinned style knows its own variable, so even a slug-only caller
+        # gets the token then — a styled-but-untokened URL would undo the
+        # honesty the token exists for.
+        variable_slug, variable = variable, style.variable if style else None
     else:
         variable_slug = variable.slug
     if style is not None:
@@ -170,8 +173,15 @@ def render_config_token(variable) -> str:
     A hash rather than a stored counter: identical config always yields the
     same URL, and there is no version state to migrate or drift.
     """
-    basis = f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
-    return hashlib.sha1(basis.encode()).hexdigest()[:8]
+    return hashlib.sha1(_render_range_basis(variable).encode()).hexdigest()[:8]
+
+
+def _render_range_basis(variable) -> str:
+    """The hash basis both tokens share: everything a rescale bakes in.
+
+    One spelling for the two token schemes, so a change to what "the render
+    range" means cannot move one token and not the other."""
+    return f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
 
 
 def style_version_token(variable, style=None) -> str:
@@ -188,10 +198,7 @@ def style_version_token(variable, style=None) -> str:
     cached texture on a palette edit.
     """
     stops = json.dumps(style.stops, sort_keys=True) if style is not None else ""
-    basis = (
-        f"{variable.value_min}:{variable.value_max}"
-        f":{variable.scale_type or 'linear'}:{stops}"
-    )
+    basis = f"{_render_range_basis(variable)}:{stops}"
     return hashlib.sha1(basis.encode()).hexdigest()[:8]
 
 

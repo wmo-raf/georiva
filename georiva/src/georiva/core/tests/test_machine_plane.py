@@ -494,6 +494,14 @@ class StyleSelectorAddressTests(TestCase):
         self.assertEqual(before, render_config_token(self.variable))
         self.assertNotIn("style=", titiler_encoded_preview_url(self.tree["item"], self.variable))
 
+    def test_a_pinned_style_is_tokened_even_for_a_slug_only_caller(self):
+        """The style row knows its own variable, so a styled URL never goes
+        out untokened — styled-but-untokened would undo the honesty the
+        token exists for."""
+        url = titiler_preview_url(self.tree["item"], SHARED_SLUG, style=self.analyst)
+        self.assertIn("style=analyst", url)
+        self.assertIn(f"v={style_version_token(self.variable, self.analyst)}", url)
+
     def test_a_slug_only_caller_still_gets_the_plain_address(self):
         """The templatetag holds a slug, not a row; its thumbnails are never
         cached, so an untokened URL stays honest there."""

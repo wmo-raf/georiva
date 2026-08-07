@@ -93,6 +93,8 @@ class TileConfigView(APIView):
         style = None
         style_slug = request.query_params.get("style") or None
         if style_slug is not None:
+            # Scanned in Python, not `.filter()`: the styles are prefetched
+            # above, and cardinality is styles-per-variable (ADR 0023).
             style = next(
                 (s for s in variable.styles.all() if s.slug == style_slug), None,
             )
