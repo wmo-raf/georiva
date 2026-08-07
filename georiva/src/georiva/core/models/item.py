@@ -262,7 +262,7 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     def preview_url(self) -> str:
         """TiTiler preview URL for this asset."""
         from georiva.core.machine_plane import titiler_preview_url
-        return titiler_preview_url(self.item, self.variable.slug)
+        return titiler_preview_url(self.item, self.variable)
 
 
 # =============================================================================

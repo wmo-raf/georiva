@@ -48,6 +48,7 @@ from .addresses import (  # noqa: F401
     org_slug_of,
     render_config_token,
     scope_of,
+    style_version_token,
     titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,

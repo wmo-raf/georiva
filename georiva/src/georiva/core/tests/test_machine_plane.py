@@ -29,6 +29,7 @@ from georiva.core.machine_plane import (
     martin_boundary_stats_url,
     org_slug_of,
     render_config_token,
+    style_version_token,
     titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,
@@ -122,7 +123,7 @@ class MachinePlaneAddressTests(TestCase):
         """One grammar, not two: the model property delegates rather than repeats."""
         self.assertEqual(
             self.kenya_tree["asset"].preview_url,
-            titiler_preview_url(self.kenya_tree["item"], SHARED_SLUG),
+            titiler_preview_url(self.kenya_tree["item"], self.kenya_tree["variable"]),
         )
 
     def test_the_template_tag_ignores_slugs_it_is_not_given(self):
@@ -415,6 +416,233 @@ class TileConfigOrgSegmentTests(TestCase):
         invented = self.client.get(self._url("nowhere"), HTTP_HOST=self.kenya.hostname)
         self.assertEqual(real.status_code, invented.status_code)
         self.assertEqual(real.content, invented.content)
+
+
+def make_style(variable, slug="official", *, is_default=True, stops=None):
+    from georiva.core.models import VariableStyle
+
+    return VariableStyle.objects.create(
+        variable=variable, name=slug.title(), slug=slug, is_default=is_default,
+        stops=stops or [{"value": 0.0, "color": "#000000"},
+                        {"value": 50.0, "color": "#ff0000"}],
+    )
+
+
+#: An alternate palette, chosen so its 256-entry colormap's first color differs
+#: from :func:`make_style`'s — the tests below tell styles apart by that entry.
+ANALYST_STOPS = [{"value": 0.0, "color": "#0000ff"},
+                 {"value": 50.0, "color": "#00ff00"}]
+
+
+class StyleSelectorAddressTests(TestCase):
+    """The ``?style=`` selector and the per-style version token (ADR 0023).
+
+    Style is a rendering parameter, not an addressable resource: the path never
+    changes, so nothing about routes, the nginx location or the auth gate has
+    to. What does change is the *query* — a pinned style names itself there,
+    and every colorized URL carries a token hashed from what its pixels bake
+    in, so an edited style is a different URL rather than a stale cache entry.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
+        cls.variable = cls.tree["variable"]
+        cls.official = make_style(cls.variable, "official")
+        cls.analyst = make_style(
+            cls.variable, "analyst", is_default=False, stops=ANALYST_STOPS,
+        )
+
+    def test_a_pinned_style_travels_as_a_query_param(self):
+        url = titiler_preview_url(self.tree["item"], self.variable, style=self.analyst)
+        self.assertIn("style=analyst", url)
+        self.assertIn(f"v={style_version_token(self.variable, self.analyst)}", url)
+
+    def test_omission_names_no_style(self):
+        """The default is selected by saying nothing — a URL that named it
+        would survive a default flip pointing at the old default."""
+        url = titiler_preview_url(self.tree["item"], self.variable)
+        self.assertNotIn("style=", url)
+
+    def test_a_default_preview_carries_the_default_styles_token(self):
+        url = titiler_preview_url(self.tree["item"], self.variable)
+        self.assertIn(f"v={style_version_token(self.variable, self.official)}", url)
+
+    def test_two_styles_of_one_variable_get_different_tokens(self):
+        self.assertNotEqual(
+            style_version_token(self.variable, self.official),
+            style_version_token(self.variable, self.analyst),
+        )
+
+    def test_editing_a_styles_stops_changes_its_token(self):
+        before = style_version_token(self.variable, self.analyst)
+        self.analyst.stops = [{"value": 0.0, "color": "#123456"},
+                              {"value": 50.0, "color": "#00ff00"}]
+        self.assertNotEqual(before, style_version_token(self.variable, self.analyst))
+
+    def test_editing_the_range_changes_every_styles_token(self):
+        before = style_version_token(self.variable, self.official)
+        self.variable.value_max = (self.variable.value_max or 0) + 1
+        self.assertNotEqual(before, style_version_token(self.variable, self.official))
+
+    def test_the_encoded_texture_token_ignores_style_edits(self):
+        """Encoding is style-independent (ADR 0021): a palette edit must not
+        churn every cached texture URL on the instance."""
+        before = render_config_token(self.variable)
+        self.official.stops = ANALYST_STOPS
+        self.official.save()
+        self.assertEqual(before, render_config_token(self.variable))
+        self.assertNotIn("style=", titiler_encoded_preview_url(self.tree["item"], self.variable))
+
+    def test_a_slug_only_caller_still_gets_the_plain_address(self):
+        """The templatetag holds a slug, not a row; its thumbnails are never
+        cached, so an untokened URL stays honest there."""
+        url = titiler_preview_url(self.tree["item"], SHARED_SLUG)
+        self.assertNotIn("v=", url)
+        self.assertNotIn("style=", url)
+
+    def test_a_style_segmented_cache_key_ends_with_the_style(self):
+        self.assertEqual(
+            get_palette_cache_key("kenya", SHARED_SLUG, SHARED_SLUG, SHARED_SLUG, "analyst"),
+            "georiva:palette:kenya:forecast:forecast:forecast:analyst",
+        )
+
+    def test_a_styles_key_is_derived_from_its_own_rows(self):
+        self.assertEqual(
+            variable_cache_key(self.variable, self.analyst),
+            "georiva:palette:kenya:forecast:forecast:forecast:analyst",
+        )
+
+
+class StyleMultiplicityCacheTests(TestCase):
+    """Every style is warm, and the styleless key is the default's alias.
+
+    Titiler resolves ``?style=analyst`` into the segmented key and a styleless
+    request into the alias, so both must always exist and the alias must always
+    mirror whichever style is currently default — including in the same
+    request that flipped it. An alias that diverges is a bug in the
+    default-flip signal, not a feature (ADR 0023).
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
+        cls.variable = cls.tree["variable"]
+
+    def setUp(self):
+        from django_redis import get_redis_connection
+
+        self.redis = get_redis_connection("default")
+        self.addCleanup(self._clear)
+        self._clear()
+
+    def _clear(self):
+        keys = list(self.redis.scan_iter(match="georiva:palette:*"))
+        if keys:
+            self.redis.delete(*keys)
+
+    def _payload(self, style=None):
+        import json
+
+        raw = self.redis.get(variable_cache_key(self.variable, style))
+        return json.loads(raw) if raw else None
+
+    def test_saving_a_style_warms_its_own_segmented_key(self):
+        analyst = make_style(self.variable, "analyst", is_default=False,
+                             stops=ANALYST_STOPS)
+        self.assertEqual(self._payload(analyst)["colormap"]["0"], [0, 0, 255, 255])
+
+    def test_the_styleless_key_is_the_defaults_alias(self):
+        official = make_style(self.variable, "official")
+        make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
+        self.assertEqual(self._payload(), self._payload(official))
+        self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 0, 255])
+
+    def test_a_default_flip_rewrites_the_alias_immediately(self):
+        make_style(self.variable, "official")
+        analyst = make_style(self.variable, "analyst", is_default=False,
+                             stops=ANALYST_STOPS)
+        analyst.promote_to_default()
+        self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 255, 255])
+
+    def test_deleting_a_style_prunes_its_key(self):
+        make_style(self.variable, "official")
+        analyst = make_style(self.variable, "analyst", is_default=False,
+                             stops=ANALYST_STOPS)
+        key = variable_cache_key(self.variable, analyst)
+        self.assertTrue(self.redis.exists(key))
+        analyst.delete()
+        self.assertFalse(self.redis.exists(key))
+        # The alias still mirrors the surviving default.
+        self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 0, 255])
+
+    def test_deleting_the_variable_prunes_its_style_keys_too(self):
+        analyst = make_style(self.variable, "analyst", is_default=False,
+                             stops=ANALYST_STOPS)
+        key = variable_cache_key(self.variable, analyst)
+        self.assertTrue(self.redis.exists(key))
+        Variable.objects.get(pk=self.variable.pk).delete()
+        self.assertFalse(self.redis.exists(key))
+
+    def test_the_sweep_iterates_styles_not_just_variables(self):
+        make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
+        stale = variable_cache_key(self.variable) + ":retired"
+        self.redis.set(stale, "{}")
+        warm_all()
+        self.assertFalse(self.redis.exists(stale))
+        self.assertTrue(self.redis.exists(variable_cache_key(self.variable) + ":analyst"))
+
+    def test_a_neighbouring_variables_key_survives_a_prune(self):
+        """`forecast`'s per-style sweep must not eat `forecast2`'s keys: the
+        style segment is colon-separated, not prefix-matched."""
+        from georiva.core.models import Asset  # noqa: F401 — tree import side
+
+        neighbour_key = variable_cache_key(self.variable) + "2"
+        self.redis.set(neighbour_key, "{}")
+        self.addCleanup(self.redis.delete, neighbour_key)
+        Variable.objects.get(pk=self.variable.pk).delete()
+        self.assertTrue(self.redis.exists(neighbour_key))
+
+
+@override_settings(ALLOWED_HOSTS=["*"])
+class TileConfigStyleParamTests(TestCase):
+    """`?style=` on the tile-config endpoint: the seam Titiler resolves through.
+
+    Omission serves the default; a named style serves that style; an unknown
+    slug is a 404 and never a fallback — silently serving the wrong style
+    would be worse than failing (ADR 0023).
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
+        cls.variable = cls.tree["variable"]
+        cls.official = make_style(cls.variable, "official")
+        cls.analyst = make_style(
+            cls.variable, "analyst", is_default=False, stops=ANALYST_STOPS,
+        )
+
+    def _get(self, query=""):
+        url = reverse("tile_config", args=["kenya", SHARED_SLUG, SHARED_SLUG, SHARED_SLUG])
+        return self.client.get(f"{url}{query}", HTTP_HOST="georiva:8000")
+
+    def test_omission_serves_the_default_style(self):
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["colormap"]["0"], [0, 0, 0, 255])
+
+    def test_a_named_style_serves_that_style(self):
+        response = self._get("?style=analyst")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["colormap"]["0"], [0, 0, 255, 255])
+
+    def test_an_unknown_style_is_not_found_never_a_fallback(self):
+        self.assertEqual(self._get("?style=nowhere").status_code, 404)
+
+    def test_an_empty_style_param_reads_as_omission(self):
+        response = self._get("?style=")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["colormap"]["0"], [0, 0, 0, 255])
 
 
 class CogKeyGrammarTests(TestCase):

@@ -39,9 +39,16 @@ is when this matters: a private variable's tiles now reach Titiler, so a palette
 cache miss on one is a tile that does not render rather than one that was never
 asked for.
 
+``?style=<slug>`` selects one of the variable's named styles; omission means
+the default (ADR 0023). An unknown slug is a 404 and never a fallback —
+silently serving the wrong style would be worse than failing — and 404 rather
+than anything more talkative for the same reason the org mismatch above is:
+which styles a variable carries is nobody's business but a caller who can
+already see it.
+
 Returns the same payload structure as the Redis palette cache:
-  With a default style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}
-  Without one:          {"vmin", "vmax", "scale_type"}
+  With a style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}
+  Without one:  {"vmin", "vmax", "scale_type"}
 """
 
 from rest_framework.response import Response
@@ -83,4 +90,13 @@ class TileConfigView(APIView):
         except Variable.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
-        return Response(build_variable_payload(variable))
+        style = None
+        style_slug = request.query_params.get("style") or None
+        if style_slug is not None:
+            style = next(
+                (s for s in variable.styles.all() if s.slug == style_slug), None,
+            )
+            if style is None:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+
+        return Response(build_variable_payload(variable, style))

@@ -17,8 +17,12 @@ def on_style_change(sender, instance, **kwargs):
     Styles are variable-owned rows, so no fan-out is needed — and because the
     stops snapshot lives on this very row, an edit made anywhere (admin,
     shell, API) lands here, closing the old gap where stop edits outside
-    Wagtail never re-warmed. On delete the variable may itself be mid-cascade;
-    a vanished variable has nothing to warm.
+    Wagtail never re-warmed. Warming writes the per-style keys and the
+    styleless alias together (ADR 0023), which is also what rewrites the alias
+    on a default flip: ``promote_to_default`` saves the promoted row, and this
+    handler re-derives the alias from whoever is default now. On delete the
+    variable may itself be mid-cascade; a vanished variable has nothing to
+    warm.
     """
     from georiva.core.machine_plane.palette_cache import warm_variable
     from .models import Variable
@@ -32,6 +36,15 @@ def on_style_change(sender, instance, **kwargs):
     )
     if variable is not None:
         warm_variable(variable)
+
+
+def on_style_delete(sender, instance, **kwargs):
+    """A deleted style's segmented key must not outlive it until the next
+    sweep — re-warming alone rewrites the survivors but never removes."""
+    from georiva.core.machine_plane.palette_cache import prune_style
+
+    prune_style(instance)
+    on_style_change(sender, instance, **kwargs)
 
 
 def on_variable_delete(sender, instance, **kwargs):
@@ -130,4 +143,4 @@ class CoreConfig(AppConfig):
         post_save.connect(on_variable_save, sender=Variable)
         post_delete.connect(on_variable_delete, sender=Variable)
         post_save.connect(on_style_change, sender=VariableStyle)
-        post_delete.connect(on_style_change, sender=VariableStyle)
+        post_delete.connect(on_style_delete, sender=VariableStyle)
