@@ -1,0 +1,21 @@
+{% load i18n %}
+{% comment %}
+    Read-only styling summary (issue #323): the swatch idiom matches
+    _swatch_html in core/models/visualization.py — the gradient must be
+    inline because it is data, not styling.
+{% endcomment %}
+{% if styling_note %}
+    <p class="w-help-text">{{ styling_note }}</p>
+{% else %}
+    <p>
+        <span class="w-help-text">{% trans "Range:" %}</span>
+        {{ variable.value_min }} &ndash; {{ variable.value_max }} {{ variable.unit.symbol }}
+        <span style="display: inline-block; width: 120px; height: 14px; border-radius: 3px; border: 1px solid var(--w-color-border-furniture); vertical-align: middle; margin-inline-start: 0.75em; background: {{ gradient }};"></span>
+        {% if is_grayscale %}
+            <span class="w-help-text">{% trans "Grayscale — no style applied yet" %}</span>
+        {% else %}
+            <span class="w-help-text">{{ default_style.name }}</span>
+        {% endif %}
+    </p>
+    <p><a href="{{ styling_url }}">{% trans "Edit styling" %}</a></p>
+{% endif %}
