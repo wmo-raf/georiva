@@ -80,11 +80,18 @@ next texture request.
 
 - Changing `value_min`/`value_max` is an ordinary config edit: instantly
   live, nothing to regenerate, no admin ceremony.
-- First-view latency per texture is the on-demand generation cost (~700 ms
-  for a mid-size grid), paid once per URL per browser thanks to `immutable`.
-  A shared nginx `proxy_cache` for `/titiler/` images is a deliberate
-  **non-decision**: the URL contract already supports it, and it can be added
-  as pure ops tuning if real traffic warrants.
+- First-view latency per texture is the on-demand generation cost (~400–700 ms
+  for a mid-size grid), paid once per URL *instance-wide*: nginx runs a shared
+  body cache (`tile_content` zone) on `/titiler/`, keyed on the full request
+  line, header-driven — no `proxy_cache_valid` is set, so only responses that
+  declare their own cacheability are stored, and the sole route that does is
+  `encoded-preview.png`, whose `v` token makes `immutable` honest. Tiles and
+  colorized previews send no cache headers and keep rendering per request
+  (their URLs carry no version, so caching them would pin a superseded
+  palette). The `auth_request` gate runs on every request, hit or miss, so
+  the shared cache does not bypass tenancy (ADR 0015). Cached hits serve in
+  single-digit milliseconds; `proxy_cache_lock` collapses concurrent misses
+  on one URL into a single upstream render.
 - Existing baked PNG objects and their Asset rows are cleaned up manually
   (nothing is deployed yet); no migration or management command exists, and
   none should be added later without revisiting this ADR.
