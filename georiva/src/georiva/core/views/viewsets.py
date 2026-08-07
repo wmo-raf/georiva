@@ -9,7 +9,7 @@ from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
 from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
 
-from georiva.core.models import Item, Catalog, Collection, ColorPalette, Asset
+from georiva.core.models import Item, Catalog, Collection, ColorPalette, ColorRamp, Asset
 from georiva.core.models.catalog import Topic
 from .admin import CatalogIndexView
 from georiva.organisations.access import may_change_org_object, require_active_org
@@ -196,16 +196,16 @@ class AssetViewSet(OrgScopedViewSetMixin, SnippetViewSet):
     list_filter = ["format", "variable"]
 
 
-class ColorPaletteCreateView(generic.CreateView):
-    """Creating a palette, in whichever tier the creator may write to.
+class GlobalTierCreateView(generic.CreateView):
+    """Creating a tiered row, in whichever tier the creator may write to.
 
-    For an operator there is no choice to make and none is offered: a palette
+    For an operator there is no choice to make and none is offered: a row
     they create belongs to the organisation whose admin they are in. An editable
     organisation would be a way to file one under another institution, or under
     none — the instance-wide tier, which is not theirs to add to.
 
     The instance admin is the one who curates that tier, so they get the field:
-    blank makes an instance-wide palette, and their own organisation is still
+    blank makes an instance-wide row, and their own organisation is still
     the host's, so routine work on a tenant's host lands where it should.
     """
 
@@ -227,10 +227,10 @@ class ColorPaletteCreateView(generic.CreateView):
         return super().save_instance()
 
 
-class ColorPaletteIndexView(generic.IndexView):
+class GlobalTierIndexView(generic.IndexView):
     """The listing, showing both tiers and offering edits on only one.
 
-    The instance-wide palettes are listed because an operator needs to see what
+    The instance-wide rows are listed because an operator needs to see what
     they already have before making another; their edit and delete links are
     withheld because ``require_writable_org_object`` would refuse them. The
     listing asks that helper rather than re-deriving the rule.
@@ -252,8 +252,8 @@ class ColorPaletteModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
     add_to_admin_menu = True
     menu_order = 600
     exclude_form_fields = ["created_at", "updated_at"]
-    add_view_class = ColorPaletteCreateView
-    index_view_class = ColorPaletteIndexView
+    add_view_class = GlobalTierCreateView
+    index_view_class = GlobalTierIndexView
     # Wagtail's generic copy view binds its form to the *source* row, so saving
     # renames that row instead of duplicating it (verified against Wagtail 7.4.2).
     # Harmless-looking on a single-tenant instance; here it would be a member
@@ -264,6 +264,27 @@ class ColorPaletteModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
     list_display = ["name", "palette_type", "owner_label"]
 
 
+class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
+    """The Color ramp catalog (ADR 0022): both tiers listed, one writable.
+
+    Same tier rules as palettes — the instance-wide catalog is readable by
+    every organisation and curated by the instance admin; an organisation
+    creates and edits only its own ramps.
+    """
+
+    model = ColorRamp
+    icon = "palette"
+    add_to_admin_menu = True
+    menu_order = 601
+    exclude_form_fields = ["created_at", "updated_at"]
+    add_view_class = GlobalTierCreateView
+    index_view_class = GlobalTierIndexView
+    # Disabled for the same reason as palettes: Wagtail's copy view saves over
+    # its source row, which here would let a member rewrite an instance-wide ramp.
+    copy_view_enabled = False
+    list_display = ["name", "preview", "ramp_type", "owner_label"]
+
+
 CatalogChooserViewSetObject = CatalogChooserViewSet("catalog_chooser")
 
 admin_viewsets = [
@@ -271,5 +292,6 @@ admin_viewsets = [
     CatalogViewSet(),
     CatalogChooserViewSetObject,
     CollectionViewSet(),
-    ColorPaletteModelViewSet()
+    ColorPaletteModelViewSet(),
+    ColorRampModelViewSet(),
 ]
