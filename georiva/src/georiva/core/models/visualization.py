@@ -101,7 +101,10 @@ class ColorRamp(ClusterableModel):
 
         Stops without explicit positions are spread evenly; a qualitative ramp
         renders as hard-edged blocks rather than a blend, because its colors
-        are categories, not points on a continuum.
+        are categories, not points on a continuum. Positions are forced
+        non-decreasing left to right, because CSS silently clamps out-of-order
+        gradient stops — a preview that let that happen would misrepresent
+        the ramp it is previewing.
         """
         stops = list(self.stops.all())
         if not stops:
@@ -118,10 +121,16 @@ class ColorRamp(ClusterableModel):
             ]
         else:
             last = len(stops) - 1
-            parts = [
-                f"{stop.css_color()} "
-                f"{(stop.position if stop.position is not None else i / last) * 100:g}%"
+            positions = [
+                stop.position if stop.position is not None else i / last
                 for i, stop in enumerate(stops)
+            ]
+            floor = 0.0
+            for i, position in enumerate(positions):
+                floor = positions[i] = max(floor, position)
+            parts = [
+                f"{stop.css_color()} {position * 100:g}%"
+                for stop, position in zip(stops, positions)
             ]
         return f"linear-gradient(to right, {', '.join(parts)})"
 

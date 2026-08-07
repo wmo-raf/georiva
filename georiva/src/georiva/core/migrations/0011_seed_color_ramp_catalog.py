@@ -1,8 +1,11 @@
 # Seed the instance-wide Color ramp catalog (ADR 0022): a curated,
 # colorblind-aware set under matplotlib-compatible names, so plugins and
-# operators always have a base vocabulary. Colors are sampled from matplotlib's
-# own colormaps (9 even samples for continuous ramps; Set2's 8 discrete
-# colors). Positions are left empty: even spacing is the ramp's default.
+# operators always have a base vocabulary. Colors are 9 even samples from
+# matplotlib's own colormaps; every entry is colorblind-safe per ColorBrewer /
+# the perceptually-uniform matplotlib families, which is why there is no
+# qualitative seed — the common qualitative sets (Set2, tab10) fail that bar
+# beyond a few classes. Positions are left empty: even spacing is the ramp's
+# default.
 from django.db import migrations
 
 SEED_RAMPS = [
@@ -63,9 +66,13 @@ SEED_RAMPS = [
         "#67001f", "#bb2a34", "#e58368", "#fbceb7", "#f6f7f7",
         "#c0dceb", "#68abd0", "#2870b1", "#053061",
     ]),
-    ("RdYlBu", "diverging", [
-        "#a50026", "#de402e", "#f98e52", "#fed485", "#feffc0",
-        "#d1ecf4", "#8ec2dc", "#4f81ba", "#313695",
+    ("PiYG", "diverging", [
+        "#8e0152", "#cb3289", "#e897c4", "#fad6ea", "#f7f7f6",
+        "#d9f0bc", "#9acd61", "#589b28", "#276419",
+    ]),
+    ("PRGn", "diverging", [
+        "#40004b", "#7f3c8d", "#ae8bbd", "#dec9e2", "#f6f7f6",
+        "#cbeac5", "#7ec37f", "#298440", "#00441b",
     ]),
     ("BrBG", "diverging", [
         "#543005", "#995d13", "#cfa256", "#f1dfb3", "#f4f5f5",
@@ -74,10 +81,6 @@ SEED_RAMPS = [
     ("PuOr", "diverging", [
         "#7f3b08", "#be630a", "#ef9e3c", "#fed7a2", "#f6f6f7",
         "#cecde4", "#988dbe", "#5d3790", "#2d004b",
-    ]),
-    ("Set2", "qualitative", [
-        "#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854",
-        "#ffd92f", "#e5c494", "#b3b3b3",
     ]),
 ]
 

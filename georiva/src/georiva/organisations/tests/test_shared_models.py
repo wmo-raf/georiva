@@ -12,7 +12,6 @@ Three verdicts are under test here (decision #269), and they differ:
 What is asserted is external behavior on the real admin URLs: which rows a
 listing shows, which edits are refused, which options a form offers.
 """
-from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -23,17 +22,9 @@ from georiva.organisations.ownership import is_shared_reference
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
 
-from .factories import PASSWORD, add_member, make_user
+from .factories import PASSWORD, add_member, grant_everything, make_user
 
 KENYA_HOST = "kenya.georiva.test"
-
-
-def grant_everything(user):
-    """Every capability Wagtail knows, so only tenancy decides the outcome."""
-    group = Group.objects.create(name=f"{user.username} everything")
-    group.permissions.add(*Permission.objects.all())
-    user.groups.add(group)
-    return user
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])

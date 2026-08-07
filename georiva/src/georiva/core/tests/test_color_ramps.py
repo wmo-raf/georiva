@@ -11,7 +11,6 @@ Three subjects, each at its agreed seam:
 """
 from importlib import import_module
 
-from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import NoReverseMatch, reverse
@@ -20,7 +19,12 @@ from georiva.core.models import ColorRamp, ColorRampStop
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
 
-from georiva.organisations.tests.factories import PASSWORD, add_member, make_user
+from georiva.organisations.tests.factories import (
+    PASSWORD,
+    add_member,
+    grant_everything,
+    make_user,
+)
 
 KENYA_HOST = "kenya.georiva.test"
 
@@ -30,14 +34,6 @@ KENYA_HOST = "kenya.georiva.test"
 SEED_RAMPS = import_module(
     "georiva.core.migrations.0011_seed_color_ramp_catalog"
 ).SEED_RAMPS
-
-
-def grant_everything(user):
-    """Every capability Wagtail knows, so only tenancy decides the outcome."""
-    group = Group.objects.create(name=f"{user.username} everything")
-    group.permissions.add(*Permission.objects.all())
-    user.groups.add(group)
-    return user
 
 
 class ColorRampModelTests(TestCase):
@@ -63,6 +59,17 @@ class ColorRampModelTests(TestCase):
         self.assertEqual(
             ramp.css_gradient(),
             "linear-gradient(to right, #000000 0%, #ff0000 90%, #ffffff 100%)",
+        )
+
+    def test_out_of_order_positions_are_clamped_non_decreasing(self):
+        # CSS silently clamps out-of-order gradient stops, so a preview built
+        # from them would misrepresent the ramp; the gradient does the
+        # clamping itself instead. Here the evenly-spread middle color (50%)
+        # would fall behind the pinned 90% first stop.
+        ramp = self._ramp(["#000000", "#ff0000", "#ffffff"], positions=[0.9, None, 1])
+        self.assertEqual(
+            ramp.css_gradient(),
+            "linear-gradient(to right, #000000 90%, #ff0000 90%, #ffffff 100%)",
         )
 
     def test_a_qualitative_ramp_renders_hard_edged_blocks(self):
@@ -264,8 +271,9 @@ class ColorRampAdminTierTests(TestCase):
                 "stops-1-ORDER": "1",
             },
         )
-        self.assertEqual(response.status_code, 302, response.context.get("form").errors
-                         if response.status_code == 200 else "")
+        if response.status_code == 200:
+            self.fail(f"form did not save: {response.context['form'].errors}")
+        self.assertEqual(response.status_code, 302)
         created = ColorRamp.objects.get(name="Kenya Temperature")
         self.assertEqual(created.organisation, self.kenya)
         self.assertEqual(
