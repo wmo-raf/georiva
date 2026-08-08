@@ -1,8 +1,8 @@
 from django.contrib import messages
-from django.core.exceptions import ValidationError
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
+from wagtail.admin import messages as wagtail_messages
 
 from georiva.organisations.access import (
     get_org_object_or_404,
@@ -99,7 +99,12 @@ def manual_upload_config_delete(request, pk):
 # Variable editor — data managers tune variables on manually-provisioned
 # Collections from here (the raw Collection form is permission-gated).
 # Operator-is-truth: edits are authoritative; nothing resets them.
+#
+# Ranges and styling are read-only here (issue #323): the Styling surface is
+# the one place that tunes them (ADR 0022). These forms show the range and the
+# default style's swatch and link there.
 # =============================================================================
+
 
 def _core_variable_for(mcv):
     """The core Variable a ManualUploadConfigVariable routes to (by collection + slug)."""
@@ -125,6 +130,7 @@ def manual_upload_variable_edit(request, pk, var_pk):
     from django.forms import ModelForm
 
     from georiva.core.models import Variable
+    from georiva.core.views.styling import styling_summary
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
 
     config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
@@ -135,11 +141,9 @@ def manual_upload_variable_edit(request, pk, var_pk):
         return redirect("manual_upload_config_edit", pk=config.pk)
 
     class VariableEditForm(ModelForm):
-        # Range sanity comes from Variable.clean() (ADR 0022) — a ModelForm
-        # runs it via full_clean, so no form-level copy.
         class Meta:
             model = Variable
-            fields = ["name", "unit", "value_min", "value_max"]
+            fields = ["name", "unit"]
 
     if request.method == "POST":
         # Scoped so any relational field offers only this organisation's rows,
@@ -164,6 +168,7 @@ def manual_upload_variable_edit(request, pk, var_pk):
         "mcv": mcv,
         "variable": variable,
         "form": form,
+        **styling_summary(variable),
     })
 
 
@@ -192,19 +197,11 @@ def manual_upload_variable_add(request, pk):
             label=_("Or create a unit"), required=False,
             help_text=_("A unit symbol such as hPa or mm — used when the unit is not in the list."),
         )
-        value_min = forms.FloatField(label=_("Minimum value"))
-        value_max = forms.FloatField(label=_("Maximum value"))
 
         def clean(self):
             cleaned = super().clean()
             if not cleaned.get("unit") and not (cleaned.get("new_unit_symbol") or "").strip():
                 self.add_error("unit", _("Choose a unit or enter a symbol to create one."))
-            try:
-                Variable.validate_value_range(
-                    cleaned.get("value_min"), cleaned.get("value_max")
-                )
-            except ValidationError as e:
-                self.add_error(None, e)
             variable_name = (cleaned.get("variable_name") or "").strip()
             collection = cleaned.get("collection")
             if variable_name and collection:
@@ -224,14 +221,14 @@ def manual_upload_variable_add(request, pk):
             collection = data["collection"]
             unit = data["unit"] or resolve_unit(data["new_unit_symbol"].strip())
 
-            Variable.objects.create(
+            # No range here (issue #323): the variable comes up on the model's
+            # grayscale 0–1 seeding default, tuned on the Styling page.
+            variable = Variable.objects.create(
                 collection=collection,
                 slug=slugify(variable_name),
                 name=data["long_name"] or variable_name,
                 transform_type=Variable.TransformType.PASSTHROUGH,
                 unit=unit,
-                value_min=data["value_min"],
-                value_max=data["value_max"],
                 sources=passthrough_sources(variable_name),
             )
             ManualUploadConfigVariable.objects.create(
@@ -241,7 +238,20 @@ def manual_upload_variable_add(request, pk):
                 long_name=data["long_name"],
                 units=unit.symbol[:50],
             )
-            messages.success(request, _("Variable '%s' added.") % variable_name)
+            wagtail_messages.success(
+                request,
+                _("Variable '%s' added — set its value range and style on the Styling page.")
+                % variable_name,
+                buttons=[
+                    wagtail_messages.button(
+                        reverse(
+                            "variable_styling",
+                            args=[collection.pk, variable.pk],
+                        ),
+                        _("Set styling"),
+                    ),
+                ],
+            )
             return redirect("manual_upload_config_edit", pk=config.pk)
     else:
         form = VariableAddForm()

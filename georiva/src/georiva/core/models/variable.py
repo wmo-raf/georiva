@@ -18,6 +18,8 @@ from wagtail.blocks import (
 from wagtail.fields import StreamField
 from wagtail.models import Orderable
 
+from georiva.core.panels import StylingSummaryPanel
+
 
 class SourceBlock(StructBlock):
     source_name = CharBlock(
@@ -150,8 +152,12 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         help_text="Units of this variable's output after any conversion."
     )
     
-    # Visualization
+    # Visualization. The 0–1 defaults are the seeding fallback (ADR 0022): a
+    # variable provisioned with no declared range comes up grayscale over 0–1
+    # until the Styling surface tunes it — provisioning surfaces may seed a
+    # better range on create, but only the Styling page edits it after.
     value_min = models.FloatField(
+        default=0.0,
         help_text=(
             "Minimum expected data value in the variable's output units. "
             "Used for color mapping, COG encoding range, and legend display. "
@@ -159,6 +165,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         )
     )
     value_max = models.FloatField(
+        default=1.0,
         help_text=(
             "Maximum expected data value in the variable's output units. "
             "Used for color mapping, COG encoding range, and legend display. "
@@ -203,8 +210,9 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         FieldPanel('description'),
         FieldPanel('source_unit'),
         FieldPanel('unit'),
-        FieldPanel('value_min'),
-        FieldPanel('value_max'),
+        # Range and styling are read-only here (issue #323): the Styling
+        # surface is the one place that tunes them (ADR 0022).
+        StylingSummaryPanel(heading="Styling"),
         FieldPanel('transform_type'),
         FieldPanel('sources'),
     ]

@@ -1,0 +1,16 @@
+{% load i18n %}
+{% if styling_note %}
+    <p class="w-help-text">{{ styling_note }}</p>
+{% else %}
+    <p>
+        <span class="w-help-text">{% trans "Range:" %}</span>
+        {{ variable.value_min }} &ndash; {{ variable.value_max }} {{ variable.unit.symbol }}
+        {{ swatch }}
+        {% if default_style %}
+            <span class="w-help-text">{{ default_style.name }}</span>
+        {% else %}
+            <span class="w-help-text">{% trans "Grayscale — no style applied yet" %}</span>
+        {% endif %}
+    </p>
+    <p><a href="{{ styling_url }}">{% trans "Edit styling" %}</a></p>
+{% endif %}

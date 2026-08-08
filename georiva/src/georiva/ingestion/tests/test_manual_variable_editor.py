@@ -1,10 +1,11 @@
 """
 Variable editor for manually-provisioned Collections.
 
-Data managers tune variables (display name, unit, value range) and
-add/remove them from the Manual Uploads surface — never the raw Collection
-form, which is permission-gated away from them. Operator-is-truth: edits here
-are authoritative.
+Data managers tune variables (display name, unit) and add/remove them from
+the Manual Uploads surface — never the raw Collection form, which is
+permission-gated away from them. Operator-is-truth: edits here are
+authoritative. Ranges and styling are read-only here since issue #323: the
+Styling surface is the one place that tunes them (ADR 0022).
 
 All tests run as a Data Managers group member (no raw model add/change
 permissions), proving the editor never depends on them.
@@ -49,15 +50,13 @@ class ManualVariableEditorTestCase(TestCase):
 
 
 class EditVariableTests(ManualVariableEditorTestCase):
-    def test_data_manager_edits_display_name_unit_and_value_range(self):
+    def test_data_manager_edits_display_name_and_unit(self):
         celsius, _ = Unit.objects.get_or_create(symbol="degC", defaults={"name": "degree Celsius"})
         url = reverse("manual_upload_variable_edit", args=[self.config.pk, self.mcv.pk])
 
         response = self.client.post(url, {
             "name": "Temperature (2 m)",
             "unit": celsius.pk,
-            "value_min": "-60",
-            "value_max": "60",
         })
 
         self.assertRedirects(
@@ -67,28 +66,42 @@ class EditVariableTests(ManualVariableEditorTestCase):
         self.variable.refresh_from_db()
         self.assertEqual(self.variable.name, "Temperature (2 m)")
         self.assertEqual(self.variable.unit, celsius)
-        self.assertEqual(self.variable.value_min, -60.0)
-        self.assertEqual(self.variable.value_max, 60.0)
         # Display name stays consistent on the config's own row
         self.mcv.refresh_from_db()
         self.assertEqual(self.mcv.long_name, "Temperature (2 m)")
 
-    def test_inverted_value_range_is_rejected_and_nothing_saved(self):
+    def test_a_posted_range_is_ignored_not_saved(self):
+        """Demoted surface (issue #323): only the Styling page writes the
+        range, so range values smuggled into the POST change nothing."""
         url = reverse("manual_upload_variable_edit", args=[self.config.pk, self.mcv.pk])
-        response = self.client.post(url, {
+        self.client.post(url, {
             "name": "2m temperature",
             "unit": self.kelvin.pk,
-            "value_min": "100",
-            "value_max": "0",
+            "value_min": "-60",
+            "value_max": "60",
         })
-        self.assertEqual(response.status_code, 200)  # re-rendered with errors
         self.variable.refresh_from_db()
         self.assertEqual(self.variable.value_min, -40.0)
         self.assertEqual(self.variable.value_max, 50.0)
 
+    def test_the_edit_page_shows_the_range_read_only_and_links_to_styling(self):
+        url = reverse("manual_upload_variable_edit", args=[self.config.pk, self.mcv.pk])
+        response = self.client.get(url)
+        self.assertNotContains(response, 'name="value_min"')
+        self.assertNotContains(response, 'name="value_max"')
+        self.assertContains(response, "-40")
+        self.assertContains(response, "50")
+        self.assertContains(
+            response,
+            reverse("variable_styling", args=[self.collection.pk, self.variable.pk]),
+        )
+
 
 class AddVariableTests(ManualVariableEditorTestCase):
-    def test_data_manager_adds_a_variable(self):
+    def test_data_manager_adds_a_variable_without_a_range(self):
+        """Demoted surface (issue #323): the add form seeds no range — the
+        variable comes up on the grayscale 0–1 default, tuned on the Styling
+        page."""
         url = reverse("manual_upload_variable_add", args=[self.config.pk])
 
         response = self.client.post(url, {
@@ -96,8 +109,6 @@ class AddVariableTests(ManualVariableEditorTestCase):
             "long_name": "10m U wind",
             "collection": self.collection.pk,
             "unit": self.kelvin.pk,
-            "value_min": "-50",
-            "value_max": "50",
         })
 
         self.assertRedirects(
@@ -107,11 +118,18 @@ class AddVariableTests(ManualVariableEditorTestCase):
         variable = Variable.objects.get(collection=self.collection, slug="10u")
         self.assertEqual(variable.name, "10m U wind")
         self.assertEqual(variable.transform_type, Variable.TransformType.PASSTHROUGH)
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 1.0))
         self.assertEqual(variable.sources[0].block_type, "primary")
         self.assertEqual(variable.sources[0].value["source_name"], "10u")
         mcv = ManualUploadConfigVariable.objects.get(config=self.config, variable_name="10u")
         self.assertEqual(mcv.collection, self.collection)
         self.assertEqual(mcv.long_name, "10m U wind")
+
+    def test_the_add_page_offers_no_range_inputs(self):
+        url = reverse("manual_upload_variable_add", args=[self.config.pk])
+        response = self.client.get(url)
+        self.assertNotContains(response, 'name="value_min"')
+        self.assertNotContains(response, 'name="value_max"')
 
     def test_adding_a_duplicate_variable_is_rejected(self):
         url = reverse("manual_upload_variable_add", args=[self.config.pk])
@@ -120,8 +138,6 @@ class AddVariableTests(ManualVariableEditorTestCase):
             "long_name": "Duplicate",
             "collection": self.collection.pk,
             "unit": self.kelvin.pk,
-            "value_min": "0",
-            "value_max": "1",
         })
         self.assertEqual(response.status_code, 200)  # re-rendered with error
         self.assertEqual(Variable.objects.filter(collection=self.collection, slug="2t").count(), 1)
@@ -136,8 +152,6 @@ class AddVariableTests(ManualVariableEditorTestCase):
             "long_name": "Mean sea level pressure",
             "collection": self.collection.pk,
             "new_unit_symbol": "hPa",
-            "value_min": "900",
-            "value_max": "1100",
         })
         variable = Variable.objects.get(collection=self.collection, slug="msl")
         self.assertEqual(variable.unit.symbol.lower(), "hpa")

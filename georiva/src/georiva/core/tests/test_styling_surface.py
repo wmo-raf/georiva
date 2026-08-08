@@ -532,3 +532,46 @@ class StyleSetManagementTests(StylingSurfaceTestCase):
         self.assertFalse(
             VariableStyle.objects.filter(variable=self.variable).exists()
         )
+
+
+class DemotedCollectionFormTests(StylingSurfaceTestCase):
+    """The Wagtail collection form's inline variables panel after issue #323:
+    range and styling are read-only there — a swatch, the range, and a link to
+    the Styling surface. Exactly one surface tunes styling (ADR 0022)."""
+
+    @property
+    def edit_url(self):
+        return reverse("collection:edit", args=[self.collection.pk])
+
+    def test_the_inline_variables_panel_has_no_range_inputs(self):
+        response = self.client.get(self.edit_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "value_min")
+        self.assertNotContains(response, "value_max")
+
+    def test_the_inline_variables_panel_links_to_the_styling_form(self):
+        response = self.client.get(self.edit_url)
+        self.assertContains(response, self.form_url)
+
+    def test_the_inline_variables_panel_shows_the_range_and_default_swatch(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official",
+            is_default=True,
+            stops=[
+                {"value": 0.0, "color": "#123456"},
+                {"value": 50.0, "color": "#654321"},
+            ],
+        )
+        response = self.client.get(self.edit_url)
+        self.assertContains(response, "#123456")
+        self.assertContains(response, "Official")
+
+    def test_a_variable_created_without_a_range_gets_the_grayscale_default(self):
+        """The seeding fallback the demoted surfaces rely on: a variable
+        provisioned with no declared range comes up 0–1 grayscale, to be tuned
+        on the Styling page."""
+        variable = Variable.objects.create(
+            collection=self.collection, name="Fresh", slug="fresh",
+            unit=self.variable.unit,
+        )
+        self.assertEqual((variable.value_min, variable.value_max), (0.0, 1.0))
