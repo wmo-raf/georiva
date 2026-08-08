@@ -25,8 +25,43 @@ from typing import Optional
 from rest_framework import serializers
 
 from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
+from georiva.core.machine_plane.palette_cache import build_colormap_256
 from georiva.core.models import Collection, visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
+
+#: The standard Render extension (ADR 0023): named styles are discovered
+#: through `renders`, which STAC Browser and Titiler-based clients already
+#: understand, rather than through any bespoke vocabulary. Declared only where
+#: a `renders` object actually appears — the extension requires the field.
+RENDER_EXTENSION_SCHEMA = "https://stac-extensions.github.io/render/v2.0.0/schema.json"
+
+
+def build_style_renders(variable, *, with_colormap: bool) -> dict:
+    """``variable``'s named styles as a Render extension ``renders`` object.
+
+    One entry per style, keyed by slug, rendering the variable's COG asset
+    over its encoding range. The default carries a marker key — the spec has
+    no vocabulary for "served when unnamed", and clients need to know. The
+    colormap is included on the collection, where each style appears once,
+    and left off items, which list by the hundred; the render name is the
+    join back to the collection's entry.
+    """
+    renders = {}
+    for style in variable.styles.all():
+        entry = {
+            "title": style.name,
+            "assets": [f"{variable.slug}_cog"],
+            "rescale": [[variable.value_min, variable.value_max]],
+        }
+        if with_colormap:
+            entry["colormap"] = build_colormap_256(
+                style.as_weatherlayers_palette(),
+                variable.value_min, variable.value_max,
+            )
+        if style.is_default:
+            entry["georiva:default"] = True
+        renders[style.slug] = entry
+    return renders
 
 
 class STACBaseURLMixin:
@@ -138,8 +173,11 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
             extensions.append(
                 "https://stac-extensions.github.io/forecast/v0.1.0/schema.json"
             )
+        variable = self._get_variable()
+        if variable is not None and variable.styles.all():
+            extensions.append(RENDER_EXTENSION_SCHEMA)
         return extensions
-    
+
     def get_id(self, obj):
         time_str = obj.time.strftime('%Y%m%dT%H%M%SZ')
         if obj.reference_time:
@@ -209,10 +247,17 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         if obj.resolution_x and obj.resolution_y:
             props["proj:transform"] = self._build_transform(obj)
         
+        # Render extension — the same names the parent collection's
+        # `renders` enumerates, without repeating its colormaps.
+        if variable is not None:
+            renders = build_style_renders(variable, with_colormap=False)
+            if renders:
+                props["renders"] = renders
+
         # Merge custom properties
         if obj.properties:
             props.update(obj.properties)
-        
+
         return {k: v for k, v in props.items() if v is not None}
     
     def _get_time_range(self, obj):
@@ -398,13 +443,22 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
     providers = serializers.SerializerMethodField()
     keywords = serializers.SerializerMethodField()
     item_assets = serializers.SerializerMethodField()
-    
+    renders = serializers.SerializerMethodField()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # A styleless variable carries neither the field nor the extension
+        # URI: `renders` is required wherever the extension is declared.
+        if not data.get('renders'):
+            data.pop('renders', None)
+        return data
+
     def get_type(self, obj):
         return "Collection"
-    
+
     def get_stac_version(self, obj):
         return "1.0.0"
-    
+
     def get_stac_extensions(self, obj):
         extensions = [
             "https://stac-extensions.github.io/item-assets/v1.0.0/schema.json",
@@ -413,8 +467,13 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
             extensions.append(
                 "https://stac-extensions.github.io/forecast/v0.1.0/schema.json"
             )
+        if obj.styles.all():
+            extensions.append(RENDER_EXTENSION_SCHEMA)
         return extensions
-    
+
+    def get_renders(self, obj):
+        return build_style_renders(obj, with_colormap=True)
+
     def get_id(self, obj):
         return f"{obj.collection.slug}/{obj.slug}"
     

@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
+from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.testing import dial_org, make_organisation
 
 
@@ -94,3 +95,25 @@ class EDRStyledParameterTests(TestCase):
         self.assertEqual(len(x_georiva["palette"]), 11)
         self.assertEqual(x_georiva["palette_min"], self.variable.value_min)
         self.assertNotIn("palette_name", x_georiva)
+
+    def test_an_alternate_style_leaves_the_output_on_the_default(self):
+        """EDR serves the default style only (ADR 0023): a second named style
+        must change nothing — same palette, same keys, and no index of the
+        styles the machine plane knows about."""
+        make_style(
+            self.variable, "official",
+            stops=[{"value": 0.0, "color": "#000000"},
+                   {"value": 50.0, "color": "#ffffff"}],
+        )
+        make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
+        response = self.client.get(
+            reverse("edr:collection-detail", args=[self.variable.collection.slug])
+        )
+        parameter = response.json()["parameter_names"][self.variable.slug]
+        x_georiva = parameter["x-georiva"]
+        self.assertEqual(
+            x_georiva["palette"], [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]]
+        )
+        self.assertEqual(x_georiva["palette_name"], "Official")
+        self.assertNotIn("styles", x_georiva)
+        self.assertNotIn("renders", parameter)

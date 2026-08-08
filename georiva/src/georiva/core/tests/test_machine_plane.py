@@ -35,6 +35,7 @@ from georiva.core.machine_plane import (
     titiler_variable_root,
 )
 from georiva.core.models import Item, Variable
+from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.core.machine_plane.palette_cache import (
     build_colormap_256,
     build_variable_payload,
@@ -418,22 +419,6 @@ class TileConfigOrgSegmentTests(TestCase):
         self.assertEqual(real.content, invented.content)
 
 
-def make_style(variable, slug="official", *, is_default=True, stops=None):
-    from georiva.core.models import VariableStyle
-
-    return VariableStyle.objects.create(
-        variable=variable, name=slug.title(), slug=slug, is_default=is_default,
-        stops=stops or [{"value": 0.0, "color": "#000000"},
-                        {"value": 50.0, "color": "#ff0000"}],
-    )
-
-
-#: An alternate palette, chosen so its 256-entry colormap's first color differs
-#: from :func:`make_style`'s — the tests below tell styles apart by that entry.
-ANALYST_STOPS = [{"value": 0.0, "color": "#0000ff"},
-                 {"value": 50.0, "color": "#00ff00"}]
-
-
 class StyleSelectorAddressTests(TestCase):
     """The ``?style=`` selector and the per-style version token (ADR 0023).
 
@@ -651,6 +636,72 @@ class TileConfigStyleParamTests(TestCase):
         response = self._get("?style=")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["colormap"]["0"], [0, 0, 0, 255])
+
+
+@override_settings(ALLOWED_HOSTS=["*"])
+class TileConfigStylesIndexTests(TestCase):
+    """Discovery rides the existing endpoint, not a new one (ADR 0023).
+
+    The payload is the resolved style's config plus an index of every style
+    the variable carries, so a client can build a style picker from the same
+    response it renders with. The index is the same whichever style was asked
+    for — it describes the variable, not the answer.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.kenya = make_organisation("kenya")
+        cls.tree = build_tree(cls.kenya, variable_name="Kenya Forecast")
+        cls.variable = cls.tree["variable"]
+        cls.official = make_style(cls.variable, "official")
+        cls.analyst = make_style(
+            cls.variable, "analyst", is_default=False, stops=ANALYST_STOPS,
+        )
+
+    def _get(self, query=""):
+        url = reverse("tile_config", args=["kenya", SHARED_SLUG, SHARED_SLUG, SHARED_SLUG])
+        return self.client.get(f"{url}{query}", HTTP_HOST="georiva:8000")
+
+    INDEX = [
+        {"slug": "official", "title": "Official", "is_default": True},
+        {"slug": "analyst", "title": "Analyst", "is_default": False},
+    ]
+
+    def test_the_default_config_carries_the_index_default_first(self):
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["styles"], self.INDEX)
+
+    def test_a_named_styles_config_carries_the_same_index(self):
+        response = self._get("?style=analyst")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["colormap"]["0"], [0, 0, 255, 255])
+        self.assertEqual(payload["styles"], self.INDEX)
+
+    def test_a_styleless_variable_carries_an_empty_index(self):
+        build_tree(make_organisation("uganda"), variable_name="Uganda Forecast")
+        url = reverse("tile_config", args=["uganda", SHARED_SLUG, SHARED_SLUG, SHARED_SLUG])
+        response = self.client.get(url, HTTP_HOST="georiva:8000")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["styles"], [])
+
+    def test_the_index_stays_out_of_titilers_cache_payload(self):
+        """The Redis value is Titiler's rendering config and nothing more —
+        discovery is this endpoint's addition, not the cache's."""
+        self.assertNotIn("styles", build_variable_payload(self.variable))
+
+    def test_a_private_collections_styles_are_exactly_as_invisible_as_it_is(self):
+        """Visibility is the collection's, inherited (ADR 0023): the
+        public-only constraint on this callback applies to styles identically,
+        named or not."""
+        from georiva.core.models import Collection
+
+        Collection.objects.filter(pk=self.tree["collection"].pk).update(
+            visibility=Collection.Visibility.PRIVATE,
+        )
+        self.assertEqual(self._get().status_code, 404)
+        self.assertEqual(self._get("?style=analyst").status_code, 404)
 
 
 class CogKeyGrammarTests(TestCase):

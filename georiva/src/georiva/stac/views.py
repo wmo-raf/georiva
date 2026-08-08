@@ -98,7 +98,10 @@ def _resolve_variable(
         _org_variables(request).filter(
             collection__slug=collection_slug,
             collection__catalog__slug=catalog_slug,
-        ).select_related('collection', 'collection__catalog'),
+        ).select_related('collection', 'collection__catalog')
+        # The Render extension enumerates the variable's styles, once per
+        # response however many items ride along.
+        .prefetch_related('styles'),
         slug=variable_slug,
     )
 
@@ -248,7 +251,7 @@ class STACCollectionListView(STACAPIView):
             collection__catalog=catalog,
         ).select_related(
             'collection', 'collection__catalog'
-        ).order_by('collection__sort_order', 'sort_order')
+        ).prefetch_related('styles').order_by('collection__sort_order', 'sort_order')
 
         data = STACVariableCollectionListSerializer(
             {

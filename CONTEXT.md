@@ -546,5 +546,7 @@ The optional `?style=<slug>` query param on machine-plane URLs; omission means t
 rendering parameter, not an addressable resource — no tenancy, no route changes; URLs still built only through
 `addresses.py`. Colorized outputs carry a per-style version token extending ADR 0021's scheme; the Redis key gains
 a style segment with the styleless key as the default's alias. Discovery via the tile-config `styles` index and the
-STAC Render extension. See ADR 0023.
+STAC Render extension (`renders`): the default style's render entry carries a vendor `georiva:default: true` marker —
+the Render spec has no vocabulary for "served when unnamed" — and items reference render names without repeating the
+collection's colormaps. See ADR 0023.
 _Avoid_: style endpoint, style URL segment
