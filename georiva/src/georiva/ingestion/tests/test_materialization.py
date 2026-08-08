@@ -87,6 +87,23 @@ class MaterializeVariableTests(MaterializerFixture):
         self.writer.write_cog.assert_called_once()
         self.writer.write_metadata.assert_called_once()
 
+    def test_sidecar_carries_no_render_config(self):
+        # Render config (color map, unscale range, scale) is derived at
+        # request time, never stored (ADR 0021) — a snapshot would go stale
+        # on edit and is wrong by design with multiple styles (ADR 0023).
+        self._materialize()
+
+        sidecar = self.writer.write_metadata.call_args[0][0]
+        for stale_key in ("imageUnscale", "scale", "color_map"):
+            self.assertNotIn(stale_key, sidecar)
+        # The descriptive payload survives unchanged.
+        self.assertEqual(sidecar["variable"], "precip")
+        self.assertEqual(sidecar["units"], "mm")
+        self.assertEqual(sidecar["bounds"], [10, -5, 20, 5])
+        self.assertEqual(sidecar["crs"], "EPSG:4326")
+        self.assertEqual(sidecar["timestamp"], self.ts.isoformat())
+        self.assertIn("stats", sidecar)
+
     def test_expands_collection_extent(self):
         self.assertIsNone(self.collection.bounds)
         self._materialize()
