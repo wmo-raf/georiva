@@ -94,8 +94,15 @@ class MaterializeVariableTests(MaterializerFixture):
         self._materialize()
 
         sidecar = self.writer.write_metadata.call_args[0][0]
-        for stale_key in ("imageUnscale", "scale", "color_map"):
-            self.assertNotIn(stale_key, sidecar)
+        # Pin the full key set so render config cannot sneak back in under
+        # any name — only descriptive metadata is allowed here.
+        self.assertEqual(
+            set(sidecar),
+            {
+                "variable", "name", "units", "timestamp", "reference_time",
+                "bounds", "width", "height", "crs", "transform", "stats",
+            },
+        )
         # The descriptive payload survives unchanged.
         self.assertEqual(sidecar["variable"], "precip")
         self.assertEqual(sidecar["units"], "mm")
