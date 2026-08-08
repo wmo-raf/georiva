@@ -8,6 +8,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from georiva.core.models import Asset, Catalog, Collection
+from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.provisioning import provision_organisation
 from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
 
@@ -118,3 +119,23 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         """The texture is georeferenced by the item's own bounds, not the
         collection extent (a derived collection may have none at all)."""
         self.assertEqual(self._config()["itemBounds"], [20.0, -12.0, 52.0, 23.0])
+
+    def test_the_map_serves_the_default_style_only(self):
+        """Dataset pages stay on the default style (ADR 0023): an alternate
+        named style must not change the palette the map layer carries."""
+        make_style(
+            self.variable, "official",
+            stops=[{"value": 0.0, "color": "#000000"},
+                   {"value": 50.0, "color": "#ffffff"}],
+        )
+        make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
+        url = f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/items/{self.item.pk}/"
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        layers = {
+            layer["slug"]: layer for layer in response.context["map_layers"]
+        }
+        self.assertEqual(
+            layers[self.variable.slug]["palette"],
+            [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]],
+        )

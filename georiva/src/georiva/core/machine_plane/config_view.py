@@ -46,9 +46,14 @@ than anything more talkative for the same reason the org mismatch above is:
 which styles a variable carries is nobody's business but a caller who can
 already see it.
 
-Returns the same payload structure as the Redis palette cache:
-  With a style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries}}
-  Without one:  {"vmin", "vmax", "scale_type"}
+Returns the Redis palette cache's payload structure plus a ``styles`` index —
+discovery rides this endpoint rather than a new one (ADR 0023), so a client
+holding a tile-config response can build a style picker from it. The index
+lists every style whichever one was resolved; the Redis values themselves stay
+index-free, being Titiler's rendering config and nothing more:
+  With a style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries},
+                 "styles": [{"slug", "title", "is_default"}, ...]}
+  Without one:  {"vmin", "vmax", "scale_type", "styles": []}
 """
 
 from rest_framework.response import Response
@@ -101,4 +106,9 @@ class TileConfigView(APIView):
             if style is None:
                 return Response(status=status.HTTP_404_NOT_FOUND)
 
-        return Response(build_variable_payload(variable, style))
+        payload = build_variable_payload(variable, style)
+        payload["styles"] = [
+            {"slug": s.slug, "title": s.name, "is_default": s.is_default}
+            for s in variable.styles.all()
+        ]
+        return Response(payload)
