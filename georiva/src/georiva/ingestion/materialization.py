@@ -217,10 +217,7 @@ class AssetMaterializer:
                 "height": height,
                 "crs": crs,
                 "transform": variable.transform_type,
-                "imageUnscale": [variable.value_min, variable.value_max],
-                "scale": variable.scale_type or "linear",
                 "stats": stats,
-                "color_map": variable.weather_layers_palette,
             }
             self.writer.write_metadata(metadata, meta_path)
         except Exception as e:

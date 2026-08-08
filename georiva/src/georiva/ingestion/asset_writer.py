@@ -21,7 +21,9 @@ class AssetWriter:
 
     Handles two asset types per variable per timestamp:
       COG  — Cloud-Optimized GeoTIFF for TiTiler serving and analysis
-      JSON — Metadata sidecar for API responses and frontend rendering
+      JSON — Descriptive metadata sidecar (identity, geometry, stats);
+             carries no render config — that is derived at request time
+             (ADR 0021)
 
     Visual textures are not written here: Titiler derives them on demand
     from the COG (ADR 0021).
