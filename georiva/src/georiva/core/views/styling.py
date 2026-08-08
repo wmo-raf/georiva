@@ -14,6 +14,7 @@ from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 
 from georiva.core.models import Collection, ColorRamp, Variable, VariableStyle
+from georiva.core.models.visualization import _swatch_html
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
 #: The stepped-mode class count preselected for a fresh style (ADR 0022).
@@ -26,6 +27,25 @@ GRAYSCALE_GRADIENT = "linear-gradient(to right, #000000 0%, #ffffff 100%)"
 #: style — impossible as a real slug, since slugify never yields underscores
 #: around a word.
 NEW_STYLE = "__new__"
+
+
+def styling_summary(variable):
+    """The read-only summary a demoted surface shows (issue #323): the default
+    style, its swatch, and the link here — the one place styling is tuned.
+
+    Shared by the collection form's inline variables panel and the
+    manual-upload variable forms, so every demoted surface shows the same
+    thing the same way.
+    """
+    default = variable.default_style
+    gradient = default.css_gradient() if default else GRAYSCALE_GRADIENT
+    return {
+        "default_style": default,
+        "swatch": _swatch_html(gradient),
+        "styling_url": reverse(
+            "variable_styling", args=[variable.collection_id, variable.pk]
+        ),
+    }
 
 
 class VariableRangeForm(forms.Form):

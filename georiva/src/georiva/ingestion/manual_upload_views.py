@@ -106,22 +106,6 @@ def manual_upload_config_delete(request, pk):
 # =============================================================================
 
 
-def _styling_context(variable):
-    """The read-only styling summary a demoted form shows: swatch + link."""
-    from georiva.core.views.styling import GRAYSCALE_GRADIENT
-
-    default = variable.default_style
-    return {
-        "default_style": default,
-        "styling_gradient": (
-            default.css_gradient() if default else GRAYSCALE_GRADIENT
-        ),
-        "styling_url": reverse(
-            "variable_styling", args=[variable.collection_id, variable.pk]
-        ),
-    }
-
-
 def _core_variable_for(mcv):
     """The core Variable a ManualUploadConfigVariable routes to (by collection + slug)."""
     from django.utils.text import slugify
@@ -146,6 +130,7 @@ def manual_upload_variable_edit(request, pk, var_pk):
     from django.forms import ModelForm
 
     from georiva.core.models import Variable
+    from georiva.core.views.styling import styling_summary
     from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
 
     config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)
@@ -183,7 +168,7 @@ def manual_upload_variable_edit(request, pk, var_pk):
         "mcv": mcv,
         "variable": variable,
         "form": form,
-        **_styling_context(variable),
+        **styling_summary(variable),
     })
 
 

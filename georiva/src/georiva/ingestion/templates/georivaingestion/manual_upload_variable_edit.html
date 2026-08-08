@@ -17,15 +17,6 @@
         padding-top: 1.5em;
         border-top: 1px solid var(--w-color-border-furniture);
     }
-    .muv-styling-swatch {
-        display: inline-block;
-        width: 120px;
-        height: 14px;
-        border-radius: 3px;
-        border: 1px solid var(--w-color-border-furniture);
-        vertical-align: middle;
-        margin-inline-start: 0.75em;
-    }
     .muv-styling-name { color: var(--w-color-grey-400); margin-inline-start: 0.5em; }
 </style>
 {% endblock %}
@@ -61,11 +52,7 @@
     <p>
         {% trans "Range:" %}
         {{ variable.value_min }} &ndash; {{ variable.value_max }} {{ variable.unit.symbol }}
-        {% comment %}
-            The gradient is data, not styling — same idiom as the Styling
-            page's swatches.
-        {% endcomment %}
-        <span class="muv-styling-swatch" style="background: {{ styling_gradient }};"></span>
+        {{ swatch }}
         {% if default_style %}
             <span class="muv-styling-name">{{ default_style.name }}</span>
         {% else %}
