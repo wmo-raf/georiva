@@ -1,0 +1,166 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{{ collection.name }} — {% trans "Virtual Zarr" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .vz-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .vz-header h2 {
+            margin: 0;
+        }
+
+        .vz-lead {
+            margin: 0 0 1rem;
+        }
+
+        .vz-count-sep {
+            color: var(--w-color-grey-400);
+            padding: 0 0.15rem;
+        }
+
+        .vz-missing {
+            color: var(--w-color-critical-200);
+            font-weight: 600;
+        }
+
+        .vz-extra {
+            color: var(--w-color-warning-100);
+        }
+
+        .vz-muted {
+            color: var(--w-color-grey-400);
+        }
+
+        .vz-status-help {
+            cursor: help;
+        }
+
+        .vz-note {
+            display: block;
+            font-size: 0.7rem;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+
+    {% include "core/includes/collection_tabs.html" with collection_tab="virtual_zarr" %}
+
+    <div class="vz-header">
+        <h2 class="w-label-1">
+            {% trans "Virtual Zarr" %}
+            <span class="w-status w-status--label w-ml-3">{{ reports|length }}</span>
+        </h2>
+    </div>
+    <p class="help-text vz-lead">
+        {% trans "Per-variable Icechunk repo state, compared live against the ingested catalog. The repo tip is the source of truth — coverage is never cached." %}
+    </p>
+
+    {% if reports %}
+        <table class="listing">
+            <thead>
+            <tr>
+                <th>{% trans "Variable" %}</th>
+                <th>{% trans "Status" %}</th>
+                <th>{% trans "Coverage (repo / catalog)" %}</th>
+                <th>{% trans "Items without COG" %}</th>
+                <th>{% trans "Lag" %}</th>
+                <th>{% trans "Repo size" %}</th>
+                <th>{% trans "Built" %}</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for report in reports %}
+                <tr>
+                    <td class="w-text-14">
+                        <code class="w-font-mono">{{ report.variable.slug }}</code>
+                        <span class="vz-note">{{ report.variable.name }}</span>
+                    </td>
+
+                    <td>
+                        {% if report.display_status == "no_manifest" %}
+                            <span class="w-status-tag">{% trans "Not tracked" %}</span>
+                        {% elif report.display_status == "stuck" %}
+                            <span class="w-status-tag w-status-tag--critical vz-status-help"
+                                  title="{% trans 'Building with an expired lock — the worker likely died. The next sweep resets and retries it.' %}">
+                                {% trans "Stuck" %}
+                            </span>
+                        {% elif report.display_status == "ready" %}
+                            <span class="w-status-tag w-status-tag--primary">{{ report.manifest.get_status_display }}</span>
+                        {% elif report.display_status == "building" %}
+                            <span class="w-status-tag w-status-tag--secondary">{{ report.manifest.get_status_display }}</span>
+                        {% elif report.display_status == "failed" %}
+                            <span class="w-status-tag w-status-tag--critical vz-status-help"
+                                  title="{{ report.error }}">{{ report.manifest.get_status_display }}</span>
+                        {% else %}
+                            <span class="w-status-tag">{{ report.manifest.get_status_display }}</span>
+                        {% endif %}
+                        {% if report.repo_read_error %}
+                            <span class="w-status-tag w-status-tag--warning vz-status-help"
+                                  title="{{ report.repo_read_error }}">
+                                {% trans "Repo unreadable" %}
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td class="w-text-14 w-font-mono" data-coverage="{{ report.repo_count }}/{{ report.catalog_count }}">
+                        {{ report.repo_count }}<span class="vz-count-sep">/</span>{{ report.catalog_count }}
+                        {% if report.missing_count %}
+                            <span class="vz-missing">{{ report.missing_count }} {% trans "missing" %}</span>
+                        {% endif %}
+                        {% if report.extra_count %}
+                            <span class="vz-extra">{{ report.extra_count }} {% trans "extra" %}</span>
+                        {% endif %}
+                    </td>
+
+                    <td class="w-text-14">
+                        {% if report.skipped_count %}
+                            <span class="vz-missing">{{ report.skipped_count }}</span>
+                        {% else %}
+                            <span class="vz-muted">0</span>
+                        {% endif %}
+                    </td>
+
+                    <td class="w-text-14">
+                        {% if report.lag is None %}
+                            <span class="vz-muted">—</span>
+                        {% else %}
+                            {{ report.lag_label }}
+                        {% endif %}
+                    </td>
+
+                    <td class="w-text-14">
+                        {% if report.repo_size_bytes %}
+                            {{ report.repo_size_bytes|filesizeformat }}
+                            <span class="vz-note">{{ report.repo_object_count }} {% trans "objects" %}</span>
+                        {% else %}
+                            <span class="vz-muted">—</span>
+                        {% endif %}
+                    </td>
+
+                    <td class="w-text-14">
+                        {% if report.manifest.built_at %}
+                            {{ report.manifest.built_at|timesince }} {% trans "ago" %}
+                        {% else %}
+                            <span class="vz-muted">{% trans "never" %}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p class="help-text">{% trans "This collection has no variables yet." %}</p>
+    {% endif %}
+
+{% endblock %}

@@ -130,20 +130,6 @@ class CollectionDeleteView(generic.DeleteView):
         return reverse("catalog:index")
 
 
-class CollectionIndexView(generic.IndexView):
-    def get_list_more_buttons(self, instance):
-        buttons = super().get_list_more_buttons(instance)
-        # buttons.append(
-        #     ListingButton(
-        #         _("Zarr Store"),
-        #         url=reverse("zarr_collection_detail", args=[instance.pk]),
-        #         icon_name="resubmit",
-        #         attrs={"title": _("View Zarr Store Details")},
-        #     )
-        # )
-        return buttons
-
-
 class CollectionViewSet(OrgScopedViewSetMixin, ModelViewSet):
     model = Collection
     icon = "folder-open-inverse"
@@ -152,7 +138,6 @@ class CollectionViewSet(OrgScopedViewSetMixin, ModelViewSet):
     add_view_class = CollectionCreateView
     edit_view_class = CollectionEditView
     delete_view_class = CollectionDeleteView
-    index_view_class = CollectionIndexView
 
 
 class ItemIndexView(IndexView):

@@ -344,6 +344,14 @@ in real time via SSE. Covers files from any trigger — automated fetch, manual 
 Collection Health Panel's "View all" link — there is no sidebar menu entry (ADR-0019).
 _Avoid_: live feed, ingestion log, activity dashboard, Ingestion Activity Feed
 
+**Virtual Zarr tab**:
+A per-collection admin page (a tab beside the items listing — ADR-0019, no sidebar entry) listing every Variable
+with its manifest status, catalog-vs-repo coverage counts, items lacking a COG asset, and freshness lag. A stuck
+build (BUILDING with an expired lock) is surfaced as its own condition, distinct from an active build. Rendered
+over the coverage service (`virtual_zarr/coverage.py`), which computes the report live — the Icechunk tip is the
+source of truth; nothing per-timestamp is persisted.
+_Avoid_: zarr dashboard, manifest page
+
 Acquisition monitoring (`FetchRun` / `FetchedFile`) is per-feed: each Data Feed's dashboard carries summary stat
 cards with linked fetch-run and ingestion listing pages. The former org-wide live "Acquisition Feed" page was
 retired (ADR-0019); "is anything failing to fetch" is answered by the health chips on the Data Feeds list.

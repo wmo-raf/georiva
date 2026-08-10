@@ -1,5 +1,6 @@
 import logging
 
+from django.urls import path
 from wagtail import hooks
 from wagtail.admin.panels import FieldPanel
 from wagtail.snippets.models import register_snippet
@@ -34,6 +35,19 @@ class VirtualZarrManifestViewSet(OrgScopedViewSetMixin, SnippetViewSet):
 
 
 register_snippet(VirtualZarrManifestViewSet)
+
+
+@hooks.register("register_admin_urls")
+def register_virtual_zarr_admin_urls():
+    from georiva.virtual_zarr.views import collection_virtual_zarr
+
+    return [
+        path(
+            "collection/<int:collection_pk>/virtual-zarr/",
+            collection_virtual_zarr,
+            name="collection_virtual_zarr",
+        ),
+    ]
 
 
 @hooks.register(GEORIVA_AFTER_SAVE_ASSET)
