@@ -1,0 +1,23 @@
+{% load i18n %}
+{% comment %}
+    Page-level tab strip for the per-collection admin surfaces: the items
+    listing and the Virtual Zarr coverage tab (ADR-0019 — monitoring lives
+    where the objects live). Callers pass `collection` and `collection_tab`
+    ("items" or "virtual_zarr").
+{% endcomment %}
+<div class="w-tabs">
+    <div class="w-tabs__list" role="tablist">
+        <a href="{% url 'collection_items_list' collection.pk %}"
+           class="w-tabs__tab {% if collection_tab == 'items' %}w-tabs__tab--active{% endif %}"
+           role="tab"
+           aria-selected="{% if collection_tab == 'items' %}true{% else %}false{% endif %}">
+            {% trans "Items" %}
+        </a>
+        <a href="{% url 'collection_virtual_zarr' collection.pk %}"
+           class="w-tabs__tab {% if collection_tab == 'virtual_zarr' %}w-tabs__tab--active{% endif %}"
+           role="tab"
+           aria-selected="{% if collection_tab == 'virtual_zarr' %}true{% else %}false{% endif %}">
+            {% trans "Virtual Zarr" %}
+        </a>
+    </div>
+</div>
