@@ -56,22 +56,21 @@ def _serialise_codecs(codecs) -> tuple[str, ...]:
     return tuple(out)
 
 
-def spec_from_zarr_array(arr) -> ArraySpec:
-    """Signature of the repo's committed (time, y, x) array — spatial dims."""
+def _spec(arr) -> ArraySpec:
+    """Spatial-dims signature of any array exposing shape/chunks/dtype/metadata."""
     return ArraySpec(
         shape=tuple(arr.shape[-2:]),
         chunks=tuple(arr.chunks[-2:]),
         dtype=str(arr.dtype),
         codecs=_serialise_codecs(arr.metadata.codecs),
     )
+
+
+def spec_from_zarr_array(arr) -> ArraySpec:
+    """Signature of the repo's committed (time, y, x) array — spatial dims."""
+    return _spec(arr)
 
 
 def spec_from_virtual_variable(vds, name: str) -> ArraySpec:
     """Signature of one virtualized COG's data variable (y, x)."""
-    arr = vds[name].data  # virtualizarr ManifestArray
-    return ArraySpec(
-        shape=tuple(arr.shape[-2:]),
-        chunks=tuple(arr.chunks[-2:]),
-        dtype=str(arr.dtype),
-        codecs=_serialise_codecs(arr.metadata.codecs),
-    )
+    return _spec(vds[name].data)  # virtualizarr ManifestArray

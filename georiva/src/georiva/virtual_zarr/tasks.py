@@ -154,12 +154,14 @@ def _run_build(manifest: VirtualZarrManifest) -> None:
     """
     variable = manifest.variable
     collection = variable.collection
-    build_start = timezone.now()
 
     config = MinioStoreConfig.from_django_settings()
     repo_path = manifest.get_repo_path()
 
     rows = _collect_rows(manifest, config)
+    # Captured after row collection: to_icechunk's last_updated_at checksum
+    # must be ≥ every included COG's Last-Modified, or reads fail instantly.
+    build_start = timezone.now()
     if not rows:
         raise ValueError(
             f"No COG assets found for {collection}/{variable.slug}. "
@@ -318,9 +320,11 @@ def sweep_virtual_zarr_pending() -> None:
 
 @app.task(
     name="georiva.virtual_zarr.tasks.gc_virtual_zarr_repos",
+    bind=True,
+    acks_late=True,
     queue="georiva-default",
 )
-def gc_virtual_zarr_repos() -> None:
+def gc_virtual_zarr_repos(self) -> None:
     """
     Daily retention pass over every variable's Icechunk repo.
 

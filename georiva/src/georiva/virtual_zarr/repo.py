@@ -46,12 +46,16 @@ def _endpoint_url(internal: bool) -> str:
     return settings.AWS_S3_ENDPOINT_URL if internal else _public_endpoint_url()
 
 
-def _storage(repo_path: str, *, internal: bool) -> icechunk.Storage:
+def _storage(repo_path: str) -> icechunk.Storage:
+    # Repo metadata always travels over the internal endpoint — open_repo()
+    # runs inside the container, whatever endpoint the *chunk* reads use.
+    # Only the virtual chunk container (below) switches on `internal`,
+    # mirroring the old kerchunk remote_options late binding.
     return icechunk.s3_storage(
         bucket=settings.GEORIVA_ZARR_BUCKET,
         prefix=repo_path,
         region=settings.AWS_S3_REGION_NAME,
-        endpoint_url=_endpoint_url(internal),
+        endpoint_url=_endpoint_url(internal=True),
         allow_http=True,
         access_key_id=settings.AWS_ACCESS_KEY_ID,
         secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
@@ -95,14 +99,14 @@ def open_repo(
     """
     opener = icechunk.Repository.open_or_create if create else icechunk.Repository.open
     return opener(
-        _storage(repo_path, internal=internal),
+        _storage(repo_path),
         config=_config(internal=internal),
         authorize_virtual_chunk_access=_credentials(),
     )
 
 
 def repo_exists(repo_path: str) -> bool:
-    return icechunk.Repository.exists(_storage(repo_path, internal=True))
+    return icechunk.Repository.exists(_storage(repo_path))
 
 
 # ---------------------------------------------------------------------------
@@ -124,12 +128,18 @@ def commit_metadata(
     }
 
 
-def latest_snapshot_id(repo: icechunk.Repository) -> Optional[str]:
-    """Snapshot id at the tip of ``main``, or None on an empty repo."""
+def _tip_snapshot(repo: icechunk.Repository):
+    """Latest snapshot on ``main``, or None on an empty repo."""
     try:
-        return next(iter(repo.ancestry(branch="main"))).id
+        return next(iter(repo.ancestry(branch="main")))
     except StopIteration:
         return None
+
+
+def latest_snapshot_id(repo: icechunk.Repository) -> Optional[str]:
+    """Snapshot id at the tip of ``main``, or None on an empty repo."""
+    snapshot = _tip_snapshot(repo)
+    return snapshot.id if snapshot else None
 
 
 def latest_committed_state(repo: icechunk.Repository) -> Optional[CommittedState]:
@@ -140,9 +150,8 @@ def latest_committed_state(repo: icechunk.Repository) -> Optional[CommittedState
     repo whose tip predates this metadata scheme) — the caller then falls
     back to a full rebuild.
     """
-    try:
-        snapshot = next(iter(repo.ancestry(branch="main")))
-    except StopIteration:
+    snapshot = _tip_snapshot(repo)
+    if snapshot is None:
         return None
 
     metadata = snapshot.metadata or {}
