@@ -32,6 +32,10 @@ class VirtualZarrManifest(TimeStampedModel):
         READY = "ready", "Ready"
         STALE = "stale", "Stale"
         FAILED = "failed", "Failed"
+        # Terminal until data arrives: the variable has no COG assets, so
+        # there is nothing to build.  The sweep skips NO_DATA; the COG
+        # save/delete signals flip it back to STALE when reality changes.
+        NO_DATA = "no_data", "No data"
     
     # -------------------------------------------------------------------------
     # Identity — one manifest per variable
@@ -195,17 +199,32 @@ class VirtualZarrManifest(TimeStampedModel):
             error=error[:2000],
         )
     
+    def mark_no_data(self) -> None:
+        """
+        Park the manifest when its variable has no COG assets at all.
+
+        Unlike FAILED, NO_DATA is not retried by the sweep — retrying cannot
+        succeed until data actually arrives, at which point the COG save
+        signal transitions it back to STALE.
+        """
+        self.__class__.objects.filter(pk=self.pk).update(
+            status=self.Status.NO_DATA,
+            locked_at=None,
+            locked_by="",
+            error="",
+        )
+
     def mark_stale(self) -> None:
         """
-        Mark as stale when new COG assets are added.
+        Mark as stale when the variable's COG assets changed.
 
-        Only transitions READY → STALE.  A manifest already PENDING, BUILDING,
-        or FAILED is left untouched — it will be rebuilt by the next sweep
-        anyway.
+        Only transitions READY or NO_DATA → STALE.  A manifest already
+        PENDING, BUILDING, or FAILED is left untouched — it will be rebuilt
+        by the next sweep anyway.
         """
         self.__class__.objects.filter(
             pk=self.pk,
-            status=self.Status.READY,
+            status__in=[self.Status.READY, self.Status.NO_DATA],
         ).update(status=self.Status.STALE)
     
     # -------------------------------------------------------------------------
@@ -343,6 +362,7 @@ class VirtualZarrBuildLog(models.Model):
         REBUILD = "rebuild", "Rebuild"
         APPEND = "append", "Append"
         UP_TO_DATE = "up_to_date", "Up to date"
+        NO_DATA = "no_data", "No data"
 
     ORGANISATION_LOOKUP = "manifest__variable__collection__catalog__organisation"
 

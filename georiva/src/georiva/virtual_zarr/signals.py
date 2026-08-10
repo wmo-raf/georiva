@@ -1,6 +1,6 @@
 import logging
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from georiva.core.models import Asset
@@ -47,5 +47,35 @@ def mark_manifest_stale_on_cog_save(sender, instance: Asset, created: bool, **kw
     except Exception as exc:
         logger.warning(
             "Failed to update manifest for asset %s: %s",
+            instance.pk, exc,
+        )
+
+
+@receiver(post_delete, sender=Asset)
+def mark_manifest_stale_on_cog_delete(sender, instance: Asset, **kwargs):
+    """
+    When a COG Asset is deleted, mark the manifest STALE so the next sweep
+    reconciles the repo: classify() detects the shrunken axis and rebuilds,
+    or — if this was the variable's last COG — the build parks the manifest
+    as NO_DATA instead of failing forever.
+
+    Filtered by variable_id (never the related object): during a cascade
+    delete of the Variable the related rows may already be gone, and the
+    manifest itself cascades away with them anyway.
+    """
+    if instance.format != Asset.Format.COG:
+        return
+
+    try:
+        VirtualZarrManifest.objects.filter(
+            variable_id=instance.variable_id,
+            status__in=[
+                VirtualZarrManifest.Status.READY,
+                VirtualZarrManifest.Status.NO_DATA,
+            ],
+        ).update(status=VirtualZarrManifest.Status.STALE)
+    except Exception as exc:
+        logger.warning(
+            "Failed to mark manifest stale on delete of asset %s: %s",
             instance.pk, exc,
         )
