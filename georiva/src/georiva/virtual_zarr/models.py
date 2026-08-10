@@ -267,6 +267,11 @@ class VirtualZarrManifest(TimeStampedModel):
         entries = storage.zarr.list_files(
             self.get_repo_path().rstrip("/"), recursive=True
         )
+        if not entries:
+            # list_files swallows storage errors into an empty list; a repo
+            # that has ever committed is never empty, so keep the previous
+            # (stale but correct) cache rather than zeroing it.
+            return
         self.__class__.objects.filter(pk=self.pk).update(
             repo_size_bytes=sum(e.get("size") or 0 for e in entries),
             repo_object_count=len(entries),
@@ -377,6 +382,20 @@ class VirtualZarrBuildLog(models.Model):
         return (
             f"{self.manifest_id} {self.kind}/{self.outcome} "
             f"@ {self.started_at:%Y-%m-%d %H:%M}"
+        )
+
+    @classmethod
+    def record(
+            cls, manifest, kind, outcome, started_at, **fields,
+    ) -> "VirtualZarrBuildLog":
+        """One attempt/run row, stamped finished now."""
+        return cls.objects.create(
+            manifest=manifest,
+            kind=kind,
+            outcome=outcome,
+            started_at=started_at,
+            finished_at=timezone.now(),
+            **fields,
         )
 
     @classmethod

@@ -34,13 +34,18 @@ from .models import VirtualZarrBuildLog, VirtualZarrManifest
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class BuildReport:
-    """What one successful build cycle did, for the build log."""
-    mode: BuildMode
-    items_written: int
-    items_skipped: int
-    snapshot_id: str
+    """
+    What one build cycle did, for the build log.
+
+    Mutable and filled in as _run_build progresses, so a failing build still
+    reports whatever it learned before dying (skip count, classified mode).
+    """
+    mode: str = ""
+    items_written: int = 0
+    items_skipped: int = 0
+    snapshot_id: str = ""
 
 # Retention for design decision 4: expire snapshots older than this (the
 # latest is always kept) and garbage-collect unreachable icechunk objects.
@@ -97,34 +102,38 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
     )
 
     started_at = timezone.now()
+    report = BuildReport()
     try:
-        report = _run_build(manifest)
+        _run_build(manifest, report)
     except Exception as exc:
         logger.exception(
             "build_virtual_zarr_manifest: failed for manifest %d", manifest_id
         )
         manifest.mark_failed(str(exc))
-        VirtualZarrBuildLog.objects.create(
-            manifest=manifest,
-            kind=VirtualZarrBuildLog.Kind.BUILD,
-            outcome=VirtualZarrBuildLog.Outcome.FAILURE,
-            started_at=started_at,
-            finished_at=timezone.now(),
+        VirtualZarrBuildLog.record(
+            manifest,
+            VirtualZarrBuildLog.Kind.BUILD,
+            VirtualZarrBuildLog.Outcome.FAILURE,
+            started_at,
+            mode=report.mode,
+            items_skipped=report.items_skipped,
             error=str(exc),
         )
     else:
-        VirtualZarrBuildLog.objects.create(
-            manifest=manifest,
-            kind=VirtualZarrBuildLog.Kind.BUILD,
-            outcome=VirtualZarrBuildLog.Outcome.SUCCESS,
-            mode=report.mode.value,
-            started_at=started_at,
-            finished_at=timezone.now(),
+        VirtualZarrBuildLog.record(
+            manifest,
+            VirtualZarrBuildLog.Kind.BUILD,
+            VirtualZarrBuildLog.Outcome.SUCCESS,
+            started_at,
+            mode=report.mode,
             items_written=report.items_written,
             items_skipped=report.items_skipped,
             snapshot_id=report.snapshot_id,
         )
-        manifest.refresh_repo_stats()
+        # Only a real commit changes the repo prefix; skip the listing on
+        # up-to-date cycles.
+        if report.mode != BuildMode.UP_TO_DATE.value:
+            manifest.refresh_repo_stats()
 
 
 def _collect_rows(
@@ -184,11 +193,19 @@ def _to_url_df(rows) -> pd.DataFrame:
     )
 
 
-def _run_build(manifest: VirtualZarrManifest) -> BuildReport:
+def _run_build(
+        manifest: VirtualZarrManifest,
+        report: BuildReport | None = None,
+) -> BuildReport:
     """
     Core build logic: classify against the repo's committed state, then
     append or rebuild as a new commit in place.
+
+    ``report`` is filled in as the build progresses so the caller can log
+    partial facts even when the build raises.
     """
+    if report is None:
+        report = BuildReport()
     variable = manifest.variable
     collection = variable.collection
 
@@ -196,6 +213,7 @@ def _run_build(manifest: VirtualZarrManifest) -> BuildReport:
     repo_path = manifest.get_repo_path()
 
     rows, skipped = _collect_rows(manifest, config)
+    report.items_skipped = skipped
     # Captured after row collection: to_icechunk's last_updated_at checksum
     # must be ≥ every included COG's Last-Modified, or reads fail instantly.
     build_start = timezone.now()
@@ -217,6 +235,7 @@ def _run_build(manifest: VirtualZarrManifest) -> BuildReport:
         repo = open_repo(repo_path, create=True)
 
     plan = classify(committed, rows)
+    report.mode = plan.mode.value
 
     time_start = min(r.time for r in rows)
     time_end = max(r.time for r in rows)
@@ -235,12 +254,8 @@ def _run_build(manifest: VirtualZarrManifest) -> BuildReport:
             snapshot_id=latest_snapshot_id(repo) or "",
             watermark=committed.watermark,
         )
-        return BuildReport(
-            mode=plan.mode,
-            items_written=0,
-            items_skipped=skipped,
-            snapshot_id=latest_snapshot_id(repo) or "",
-        )
+        report.snapshot_id = latest_snapshot_id(repo) or ""
+        return report
 
     builder = VirtualZarrBuilder(config)
     metadata = commit_metadata(
@@ -277,12 +292,9 @@ def _run_build(manifest: VirtualZarrManifest) -> BuildReport:
         plan.mode.value, item_count, time_start.date(), time_end.date(), snapshot_id,
     )
 
-    return BuildReport(
-        mode=plan.mode,
-        items_written=len(plan.rows),
-        items_skipped=skipped,
-        snapshot_id=snapshot_id,
-    )
+    report.items_written = len(plan.rows)
+    report.snapshot_id = snapshot_id
+    return report
 
 
 def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> str:
@@ -392,6 +404,8 @@ def gc_virtual_zarr_repos(self) -> None:
         started_at = timezone.now()
         try:
             if not repo_exists(repo_path):
+                # Nothing ran, nothing to record — the repo has simply not
+                # been built yet.
                 continue
             repo = open_repo(repo_path)
             expired = repo.expire_snapshots(older_than=cutoff)
@@ -405,21 +419,21 @@ def gc_virtual_zarr_repos(self) -> None:
                 "gc_virtual_zarr_repos: retention failed for %s: %s",
                 repo_path, exc,
             )
-            VirtualZarrBuildLog.objects.create(
-                manifest=manifest,
-                kind=VirtualZarrBuildLog.Kind.GC,
-                outcome=VirtualZarrBuildLog.Outcome.FAILURE,
-                started_at=started_at,
-                finished_at=timezone.now(),
+            VirtualZarrBuildLog.record(
+                manifest,
+                VirtualZarrBuildLog.Kind.GC,
+                VirtualZarrBuildLog.Outcome.FAILURE,
+                started_at,
                 error=str(exc),
             )
+            # A partially completed GC may still have deleted objects.
+            manifest.refresh_repo_stats()
         else:
-            VirtualZarrBuildLog.objects.create(
-                manifest=manifest,
-                kind=VirtualZarrBuildLog.Kind.GC,
-                outcome=VirtualZarrBuildLog.Outcome.SUCCESS,
-                started_at=started_at,
-                finished_at=timezone.now(),
+            VirtualZarrBuildLog.record(
+                manifest,
+                VirtualZarrBuildLog.Kind.GC,
+                VirtualZarrBuildLog.Outcome.SUCCESS,
+                started_at,
             )
             manifest.refresh_repo_stats()
 
