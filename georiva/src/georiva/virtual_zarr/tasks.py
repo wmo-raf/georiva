@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 
 import pandas as pd
@@ -28,9 +29,18 @@ from georiva.virtual_zarr.virtual_zarr import (
     write_append,
     write_rebuild,
 )
-from .models import VirtualZarrManifest
+from .models import VirtualZarrBuildLog, VirtualZarrManifest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BuildReport:
+    """What one successful build cycle did, for the build log."""
+    mode: BuildMode
+    items_written: int
+    items_skipped: int
+    snapshot_id: str
 
 # Retention for design decision 4: expire snapshots older than this (the
 # latest is always kept) and garbage-collect unreachable icechunk objects.
@@ -86,17 +96,44 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
         manifest.variable.slug,
     )
 
+    started_at = timezone.now()
     try:
-        _run_build(manifest)
+        report = _run_build(manifest)
     except Exception as exc:
         logger.exception(
             "build_virtual_zarr_manifest: failed for manifest %d", manifest_id
         )
         manifest.mark_failed(str(exc))
+        VirtualZarrBuildLog.objects.create(
+            manifest=manifest,
+            kind=VirtualZarrBuildLog.Kind.BUILD,
+            outcome=VirtualZarrBuildLog.Outcome.FAILURE,
+            started_at=started_at,
+            finished_at=timezone.now(),
+            error=str(exc),
+        )
+    else:
+        VirtualZarrBuildLog.objects.create(
+            manifest=manifest,
+            kind=VirtualZarrBuildLog.Kind.BUILD,
+            outcome=VirtualZarrBuildLog.Outcome.SUCCESS,
+            mode=report.mode.value,
+            started_at=started_at,
+            finished_at=timezone.now(),
+            items_written=report.items_written,
+            items_skipped=report.items_skipped,
+            snapshot_id=report.snapshot_id,
+        )
+        manifest.refresh_repo_stats()
 
 
-def _collect_rows(manifest: VirtualZarrManifest, config: MinioStoreConfig) -> list[SourceRow]:
-    """COG asset rows for this variable, one per Item, ordered by item time."""
+def _collect_rows(
+        manifest: VirtualZarrManifest, config: MinioStoreConfig,
+) -> tuple[list[SourceRow], int]:
+    """
+    COG asset rows for this variable, one per Item, ordered by item time,
+    plus the count of Items skipped for having no COG asset.
+    """
     variable = manifest.variable
     collection = variable.collection
 
@@ -138,7 +175,7 @@ def _collect_rows(manifest: VirtualZarrManifest, config: MinioStoreConfig) -> li
             skipped, collection.slug, variable.slug,
         )
 
-    return rows
+    return rows, skipped
 
 
 def _to_url_df(rows) -> pd.DataFrame:
@@ -147,7 +184,7 @@ def _to_url_df(rows) -> pd.DataFrame:
     )
 
 
-def _run_build(manifest: VirtualZarrManifest) -> None:
+def _run_build(manifest: VirtualZarrManifest) -> BuildReport:
     """
     Core build logic: classify against the repo's committed state, then
     append or rebuild as a new commit in place.
@@ -158,7 +195,7 @@ def _run_build(manifest: VirtualZarrManifest) -> None:
     config = MinioStoreConfig.from_django_settings()
     repo_path = manifest.get_repo_path()
 
-    rows = _collect_rows(manifest, config)
+    rows, skipped = _collect_rows(manifest, config)
     # Captured after row collection: to_icechunk's last_updated_at checksum
     # must be ≥ every included COG's Last-Modified, or reads fail instantly.
     build_start = timezone.now()
@@ -198,7 +235,12 @@ def _run_build(manifest: VirtualZarrManifest) -> None:
             snapshot_id=latest_snapshot_id(repo) or "",
             watermark=committed.watermark,
         )
-        return
+        return BuildReport(
+            mode=plan.mode,
+            items_written=0,
+            items_skipped=skipped,
+            snapshot_id=latest_snapshot_id(repo) or "",
+        )
 
     builder = VirtualZarrBuilder(config)
     metadata = commit_metadata(
@@ -233,6 +275,13 @@ def _run_build(manifest: VirtualZarrManifest) -> None:
     logger.info(
         "build_virtual_zarr_manifest: READY (%s) — %d items, %s → %s, snapshot %s",
         plan.mode.value, item_count, time_start.date(), time_end.date(), snapshot_id,
+    )
+
+    return BuildReport(
+        mode=plan.mode,
+        items_written=len(plan.rows),
+        items_skipped=skipped,
+        snapshot_id=snapshot_id,
     )
 
 
@@ -340,6 +389,7 @@ def gc_virtual_zarr_repos(self) -> None:
 
     for manifest in manifests:
         repo_path = manifest.get_repo_path()
+        started_at = timezone.now()
         try:
             if not repo_exists(repo_path):
                 continue
@@ -355,6 +405,29 @@ def gc_virtual_zarr_repos(self) -> None:
                 "gc_virtual_zarr_repos: retention failed for %s: %s",
                 repo_path, exc,
             )
+            VirtualZarrBuildLog.objects.create(
+                manifest=manifest,
+                kind=VirtualZarrBuildLog.Kind.GC,
+                outcome=VirtualZarrBuildLog.Outcome.FAILURE,
+                started_at=started_at,
+                finished_at=timezone.now(),
+                error=str(exc),
+            )
+        else:
+            VirtualZarrBuildLog.objects.create(
+                manifest=manifest,
+                kind=VirtualZarrBuildLog.Kind.GC,
+                outcome=VirtualZarrBuildLog.Outcome.SUCCESS,
+                started_at=started_at,
+                finished_at=timezone.now(),
+            )
+            manifest.refresh_repo_stats()
+
+    pruned = VirtualZarrBuildLog.prune_expired()
+    if pruned:
+        logger.info(
+            "gc_virtual_zarr_repos: pruned %d expired build-log row(s)", pruned
+        )
 
 
 @app.on_after_finalize.connect

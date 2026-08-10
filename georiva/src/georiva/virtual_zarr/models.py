@@ -73,7 +73,21 @@ class VirtualZarrManifest(TimeStampedModel):
         max_length=100, blank=True, default="", editable=False,
         help_text="Icechunk snapshot id of the last successful commit.",
     )
-    
+
+    # -------------------------------------------------------------------------
+    # Repo storage stats (derived cache — refreshed after builds and GC runs,
+    # never computed during a page view)
+    # -------------------------------------------------------------------------
+
+    repo_size_bytes = models.BigIntegerField(
+        default=0, editable=False,
+        help_text="Total bytes under the repo prefix at the last refresh.",
+    )
+    repo_object_count = models.PositiveIntegerField(
+        default=0, editable=False,
+        help_text="Object count under the repo prefix at the last refresh.",
+    )
+
     # -------------------------------------------------------------------------
     # State machine
     # -------------------------------------------------------------------------
@@ -239,6 +253,26 @@ class VirtualZarrManifest(TimeStampedModel):
         )
     
     # -------------------------------------------------------------------------
+    # Repo stats refresh
+    # -------------------------------------------------------------------------
+
+    def refresh_repo_stats(self) -> None:
+        """
+        Recount the repo prefix on the zarr bucket and persist the size and
+        object-count caches.  Called after a successful build commit and after
+        each GC run — the listing is too slow for a page view.
+        """
+        from georiva.core.storage import storage
+
+        entries = storage.zarr.list_files(
+            self.get_repo_path().rstrip("/"), recursive=True
+        )
+        self.__class__.objects.filter(pk=self.pk).update(
+            repo_size_bytes=sum(e.get("size") or 0 for e in entries),
+            repo_object_count=len(entries),
+        )
+
+    # -------------------------------------------------------------------------
     # Dataset access
     # -------------------------------------------------------------------------
     
@@ -276,3 +310,78 @@ class VirtualZarrManifest(TimeStampedModel):
         repo = open_repo(self.get_repo_path(), internal=internal)
         session = repo.readonly_session(branch="main")
         return xr.open_zarr(session.store, consolidated=False, chunks=chunks)
+
+
+class VirtualZarrBuildLog(models.Model):
+    """
+    Durable record of one build attempt or GC run on a manifest.
+
+    The manifest row only ever holds the *latest* state (a failed build
+    overwrites the previous error in place); these rows are the history an
+    operator inspects afterwards.  Rows older than RETENTION are pruned by
+    the daily GC task.
+    """
+
+    RETENTION = timedelta(days=30)
+
+    class Kind(models.TextChoices):
+        BUILD = "build", "Build"
+        GC = "gc", "Garbage collection"
+
+    class Outcome(models.TextChoices):
+        SUCCESS = "success", "Success"
+        FAILURE = "failure", "Failure"
+
+    class Mode(models.TextChoices):
+        # Mirrors classify.BuildMode values; blank on GC rows and on build
+        # failures that die before classification.
+        REBUILD = "rebuild", "Rebuild"
+        APPEND = "append", "Append"
+        UP_TO_DATE = "up_to_date", "Up to date"
+
+    ORGANISATION_LOOKUP = "manifest__variable__collection__catalog__organisation"
+
+    manifest = models.ForeignKey(
+        VirtualZarrManifest,
+        on_delete=models.CASCADE,
+        related_name="build_logs",
+    )
+
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    outcome = models.CharField(max_length=10, choices=Outcome.choices)
+    mode = models.CharField(
+        max_length=20, choices=Mode.choices, blank=True, default="",
+    )
+
+    started_at = models.DateTimeField()
+    finished_at = models.DateTimeField()
+
+    items_written = models.PositiveIntegerField(default=0)
+    items_skipped = models.PositiveIntegerField(
+        default=0,
+        help_text="Items skipped for missing COG asset.",
+    )
+    error = models.TextField(blank=True)
+    snapshot_id = models.CharField(
+        max_length=100, blank=True, default="",
+        help_text="Icechunk snapshot id the build resulted in, if any.",
+    )
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [
+            models.Index(fields=["started_at"], name="idx_vzbl_started_at"),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.manifest_id} {self.kind}/{self.outcome} "
+            f"@ {self.started_at:%Y-%m-%d %H:%M}"
+        )
+
+    @classmethod
+    def prune_expired(cls) -> int:
+        """Delete rows older than RETENTION; returns the number removed."""
+        cutoff = timezone.now() - cls.RETENTION
+        deleted, _ = cls.objects.filter(started_at__lt=cutoff).delete()
+        return deleted
