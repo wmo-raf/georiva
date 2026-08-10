@@ -225,6 +225,30 @@ class VirtualZarrManifest(TimeStampedModel):
             status__in=[self.Status.READY, self.Status.NO_DATA],
         ).update(status=self.Status.STALE)
     
+    def queue_rebuild(self) -> bool:
+        """
+        Flip to PENDING so the next sweep rebuilds — the operator's manual
+        re-queue (issue #346).
+
+        Never dispatches a task itself: the sweep's ``get_buildable`` picks
+        the row up on its normal cadence, so this path shares the sweep's
+        locking exactly.  The guard mirrors ``get_buildable``'s exclusion —
+        a BUILDING row with a fresh lock is left to its worker (returns
+        False); a stuck one (expired or missing lock stamp) is reset like
+        ``reset_stale_locks`` would.  Single conditional UPDATE, so it
+        cannot race a concurrent ``mark_building``.
+        """
+        stale_cutoff = timezone.now() - self.LOCK_TIMEOUT
+        updated = self.__class__.objects.filter(pk=self.pk).exclude(
+            status=self.Status.BUILDING,
+            locked_at__gte=stale_cutoff,
+        ).update(
+            status=self.Status.PENDING,
+            locked_at=None,
+            locked_by="",
+        )
+        return bool(updated)
+
     # -------------------------------------------------------------------------
     # Bulk helpers
     # -------------------------------------------------------------------------

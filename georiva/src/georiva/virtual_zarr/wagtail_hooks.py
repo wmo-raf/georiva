@@ -42,6 +42,7 @@ def register_virtual_zarr_admin_urls():
     from georiva.virtual_zarr.views import (
         collection_virtual_zarr,
         variable_virtual_zarr,
+        variable_virtual_zarr_queue_rebuild,
     )
 
     return [
@@ -54,6 +55,11 @@ def register_virtual_zarr_admin_urls():
             "virtual-zarr/variable/<int:variable_pk>/",
             variable_virtual_zarr,
             name="variable_virtual_zarr",
+        ),
+        path(
+            "virtual-zarr/variable/<int:variable_pk>/queue-rebuild/",
+            variable_virtual_zarr_queue_rebuild,
+            name="variable_virtual_zarr_queue_rebuild",
         ),
     ]
 

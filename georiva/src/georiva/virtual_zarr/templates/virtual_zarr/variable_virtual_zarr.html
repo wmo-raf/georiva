@@ -98,6 +98,16 @@
             font-size: 0.75rem;
             color: var(--w-color-grey-400);
         }
+
+        .vz-queue-form {
+            display: inline;
+            margin: 0;
+        }
+
+        .vz-summary-actions {
+            margin-left: auto;
+            align-self: center;
+        }
     </style>
 {% endblock %}
 
@@ -143,6 +153,11 @@
             <div class="vz-summary-item">
                 <span class="vz-summary-label">{% trans "Snapshot" %}</span>
                 <code class="w-font-mono">{{ report.manifest.snapshot_id|truncatechars:14 }}</code>
+            </div>
+        {% endif %}
+        {% if can_queue_rebuild %}
+            <div class="vz-summary-actions">
+                {% include "virtual_zarr/includes/queue_rebuild_button.html" %}
             </div>
         {% endif %}
     </div>
