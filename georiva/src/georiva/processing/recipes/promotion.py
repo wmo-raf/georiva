@@ -144,8 +144,7 @@ class PromotionRecipe(BaseRecipe):
             )
             stats = _array_stats(data)
             # One data OutputAsset per staging asset; the engine's shared
-            # materializer writes the full served trio (COG + visual PNG +
-            # JSON sidecar) from it, same as ingestion.
+            # materializer writes the served COG from it, same as ingestion.
             out.append(OutputAsset(
                 variable=variable, roles=["data"], format="cog", array=data,
                 bounds=bounds, crs=crs, width=width, height=height,

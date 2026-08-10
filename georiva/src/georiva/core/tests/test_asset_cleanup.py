@@ -1,8 +1,8 @@
 """Pure orphaned-asset-object selection (used by the cleanup_asset_orphans
 management command). An orphan is a *raster/visual* object in the assets bucket
 that no live Asset.href references — e.g. a file left behind when a re-derivation
-rewrote an asset's href in place. Non-asset sidecars (.json metadata) are never
-selected, so legitimate files are safe."""
+rewrote an asset's href in place. Non-asset objects (e.g. legacy .json metadata
+sidecars, pre-ADR-0024) are never selected, so legitimate files are safe."""
 from django.test import SimpleTestCase
 
 from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
@@ -29,9 +29,10 @@ class SelectOrphanObjectsTests(SimpleTestCase):
         ])
 
     def test_never_selects_non_asset_sidecars(self):
-        # A .json metadata sidecar (ingestion writes these; they are NOT Asset
-        # rows) must never be treated as an orphan, even though no href points at
-        # it.
+        # Legacy .json metadata sidecars (ingestion wrote these before
+        # ADR 0024; they were never Asset rows) remain on the buckets
+        # indefinitely and must never be treated as orphans, even though no
+        # href points at them.
         objects = [
             "cat/coll/v/2026/05/01/v_000000.tif",       # live
             "cat/coll/v/2026/05/01/v_000000.json",      # sidecar — keep

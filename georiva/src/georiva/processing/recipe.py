@@ -144,9 +144,9 @@ class OutputAsset:
 
     Exactly one production mode:
       - ``array`` + ``format="cog"`` (default) → engine materializes the served
-                               pair via the shared AssetMaterializer:
-                               COG + JSON sidecar, clipped to the catalog
-                               boundary — the same set ingestion writes
+                               COG via the shared AssetMaterializer, clipped
+                               to the catalog boundary — the same as
+                               ingestion writes
       - ``passthrough`` set    → engine copies an existing object (bucket, href)
                                into the assets bucket as-is
 

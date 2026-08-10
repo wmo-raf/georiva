@@ -8,9 +8,10 @@ asset's ``href`` in place (e.g. a filename-scheme change) while the old object
 lingers in the bucket, or when items/assets are deleted without a storage sweep.
 
 Only object types that correspond to an ``Asset`` (COG/GeoTIFF, PNG, WebP, JPEG)
-are ever selected — a non-asset sidecar such as the ``.json`` metadata ingestion
-writes alongside each asset is deliberately left alone, so a sweep can never
-remove a legitimate file that simply isn't modelled as an ``Asset`` row.
+are ever selected — a non-asset object such as the legacy ``.json`` metadata
+sidecars ingestion wrote alongside each asset before ADR 0024 is deliberately
+left alone, so a sweep can never remove a legitimate file that simply isn't
+modelled as an ``Asset`` row.
 
 Kept dependency-free so it is unit-testable without a live bucket; the command
 supplies the object listing and the live-href set.
@@ -21,7 +22,8 @@ import os
 
 # Extensions of objects that ARE registered as Assets (mirrors the format→ext
 # mapping the engine/ingestion writers use). Anything else in the bucket — most
-# notably the ``.json`` metadata sidecar — is never a deletion candidate.
+# notably the legacy ``.json`` metadata sidecars written before ADR 0024 —
+# is never a deletion candidate.
 DELETABLE_EXTENSIONS = (".tif", ".tiff", ".png", ".webp", ".jpeg", ".jpg")
 
 

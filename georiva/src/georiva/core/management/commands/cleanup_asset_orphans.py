@@ -8,8 +8,8 @@ Safe by default:
   * previews only — pass ``--apply`` to actually delete;
   * a scope is required — ``--catalog`` (optionally with ``--collection``) or the
     explicit ``--all``, so an accidental bare run can't sweep the whole bucket;
-  * only known asset object types are ever removed — ``.json`` metadata sidecars
-    and any other non-asset files are left untouched.
+  * only known asset object types are ever removed — legacy ``.json`` metadata
+    sidecars (pre-ADR-0024) and any other non-asset files are left untouched.
 
 Examples::
 

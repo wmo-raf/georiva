@@ -2,8 +2,8 @@
 AssetMaterializer — the shared "array in, served assets out" step.
 
 Both pipelines that publish raster assets end at the same materialization
-sequence: normalize bounds → apply the catalog boundary mask → write COG +
-JSON sidecar → upsert Asset rows → expand the owning Collection's extent.
+sequence: normalize bounds → apply the catalog boundary mask → write COG →
+upsert Asset rows → expand the owning Collection's extent.
 Ingestion (``handlers/asset_handler.py``) and the derivation engine
 (``processing/engine.py``) both call this class, so derived items can no
 longer drift from ingested ones — the drift is what left derived collections
@@ -40,12 +40,10 @@ logger = logging.getLogger(__name__)
 
 class AssetMaterializer:
     """
-    Persist one variable's raster array as the served asset pair
-    (COG + JSON sidecar) and keep the catalog metadata honest.
+    Persist one variable's raster array as its served COG asset and keep
+    the catalog metadata honest.
 
-    COG failure raises (the item is unservable without it); JSON failure is
-    non-fatal and logged, matching ingestion's long-standing partial-failure
-    contract.
+    COG failure raises — the item is unservable without it.
     """
 
     def __init__(self, writer: AssetWriter):
@@ -140,7 +138,7 @@ class AssetMaterializer:
             checksum: str = "",
     ) -> list[Asset]:
         """
-        Write the COG / JSON pair to storage and upsert Asset rows.
+        Write the COG to storage and upsert its Asset row.
         """
         height, width = data.shape[:2]
         catalog = item.collection.catalog
@@ -200,28 +198,6 @@ class AssetMaterializer:
         except Exception as e:
             logger.error("COG save failed for %s: %s", variable.slug, e)
             raise
-
-        # ── JSON sidecar ──────────────────────────────────────────────────────
-        meta_path = f"{base_dir}/{base_name}.json"
-        try:
-            metadata = {
-                "variable": variable.slug,
-                "name": variable.name,
-                "units": variable.unit.symbol if variable.unit else "",
-                "timestamp": timestamp.isoformat(),
-                "reference_time": (
-                    item.reference_time.isoformat() if item.reference_time else None
-                ),
-                "bounds": list(bounds),
-                "width": width,
-                "height": height,
-                "crs": crs,
-                "transform": variable.transform_type,
-                "stats": stats,
-            }
-            self.writer.write_metadata(metadata, meta_path)
-        except Exception as e:
-            logger.warning("Metadata save failed for %s: %s", variable.slug, e)
 
         return assets
 
