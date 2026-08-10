@@ -351,3 +351,71 @@ class BuildTaskEndToEndTests(TestCase):
 
         ds = manifest.open_dataset(chunks=None)
         self.assertEqual(ds.sizes["time"], 3)
+
+    def test_build_and_gc_tasks_record_build_logs_and_size_caches(self):
+        from georiva.core.models import Item
+        from georiva.virtual_zarr.models import (
+            VirtualZarrBuildLog,
+            VirtualZarrManifest,
+        )
+        from georiva.virtual_zarr.tasks import (
+            build_virtual_zarr_manifest,
+            gc_virtual_zarr_repos,
+        )
+
+        self._add_item(1)
+        self._add_item(2)
+        # An Item with no COG asset for this variable: skipped during builds.
+        Item.objects.create(
+            collection=self.collection,
+            time=datetime(2026, 3, 5, tzinfo=dt_timezone.utc),
+            bounds=list(BOUNDS), crs="EPSG:4326", width=64, height=64,
+        )
+        manifest = self._manifest()
+
+        # --- first build: rebuild, with the skip counted -------------------
+        build_virtual_zarr_manifest.apply(args=[manifest.pk])
+        manifest.refresh_from_db()
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
+
+        log = manifest.build_logs.get()
+        self.assertEqual(log.kind, VirtualZarrBuildLog.Kind.BUILD)
+        self.assertEqual(log.outcome, VirtualZarrBuildLog.Outcome.SUCCESS)
+        self.assertEqual(log.mode, VirtualZarrBuildLog.Mode.REBUILD)
+        self.assertEqual(log.items_written, 2)
+        self.assertEqual(log.items_skipped, 1)
+        self.assertEqual(log.snapshot_id, manifest.snapshot_id)
+        self.assertEqual(log.error, "")
+        self.assertLessEqual(log.started_at, log.finished_at)
+
+        self.assertGreater(manifest.repo_size_bytes, 0)
+        self.assertGreater(manifest.repo_object_count, 0)
+
+        # --- append cycle: its own row, tail count only --------------------
+        self._add_item(3)
+        build_virtual_zarr_manifest.apply(args=[manifest.pk])
+        manifest.refresh_from_db()
+
+        append_log = manifest.build_logs.order_by("-started_at").first()
+        self.assertEqual(append_log.mode, VirtualZarrBuildLog.Mode.APPEND)
+        self.assertEqual(append_log.items_written, 1)
+        self.assertEqual(append_log.snapshot_id, manifest.snapshot_id)
+
+        # --- up-to-date cycle: recorded, nothing written -------------------
+        build_virtual_zarr_manifest.apply(args=[manifest.pk])
+        uptodate_log = manifest.build_logs.order_by("-started_at").first()
+        self.assertEqual(uptodate_log.mode, VirtualZarrBuildLog.Mode.UP_TO_DATE)
+        self.assertEqual(uptodate_log.items_written, 0)
+
+        # --- GC leaves a per-repo record and refreshes the caches ----------
+        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
+            repo_size_bytes=0, repo_object_count=0
+        )
+        gc_virtual_zarr_repos.apply()
+
+        gc_log = manifest.build_logs.get(kind=VirtualZarrBuildLog.Kind.GC)
+        self.assertEqual(gc_log.outcome, VirtualZarrBuildLog.Outcome.SUCCESS)
+
+        manifest.refresh_from_db()
+        self.assertGreater(manifest.repo_size_bytes, 0)
+        self.assertGreater(manifest.repo_object_count, 0)
