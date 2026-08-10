@@ -165,7 +165,7 @@ def _collect_rows(
 
     rows = []
     skipped = 0
-    for item in items_qs.iterator(chunk_size=500):
+    for item in items_qs:
         if not item.cog_assets:
             # COG missing for this timestep (ingestion gap or partial failure)
             skipped += 1

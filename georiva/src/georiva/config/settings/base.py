@@ -206,7 +206,10 @@ ASGI_APPLICATION = "georiva.config.asgi.application"
 
 DB_CONNECTION_MAX_AGE = env.int("DB_CONNECTION_MAX_AGE", default=0)
 DB_CONN_HEALTH_CHECKS = env.bool("DB_CONN_HEALTH_CHECKS", default=False)
-DB_DISABLE_SERVER_SIDE_CURSORS = env.bool("DB_DISABLE_SERVER_SIDE_CURSORS", default=False)
+# Default True: the app always connects through PgBouncer in transaction pooling
+# mode, where server-side cursors break mid-iteration (InvalidCursorName).
+# Set to False only when connecting to Postgres directly.
+DB_DISABLE_SERVER_SIDE_CURSORS = env.bool("DB_DISABLE_SERVER_SIDE_CURSORS", default=True)
 DB_SSL_REQUIRE = env.bool("DB_SSL_REQUIRE", default=False)
 
 DATABASES = {
