@@ -6,9 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "georiva"
 authors = [{ name = "Erick Otenyo", email = "otenyo.erick@gmail.com" }]
 description = """A modular geospatial backend for gridded data ingesting, processing, visualization, and analysis"""
-
-# TODO: pick a license and add a LICENSE file before publishing, then restore:
-#   license = "MIT"   (or license = { file = "LICENSE" })
+license = "MIT"
 requires-python = ">=3.12"
 dynamic = ["version"]
 classifiers = []
