@@ -4,7 +4,8 @@ Big-bang migration to Icechunk (design decision 8).
 Every manifest row is flipped to PENDING with its coverage cleared; the
 5-minute sweep then rebuilds each variable's repo from scratch.  Accepted
 cost: one build-cycle of not-READY per variable.  The retired kerchunk JSON
-keys are removed separately by the `cleanup_kerchunk_manifests` command.
+keys ({org}/{catalog}/{collection}/{variable}.json on the zarr bucket) are
+deleted one-off from storage, outside this migration.
 """
 
 from django.db import migrations
