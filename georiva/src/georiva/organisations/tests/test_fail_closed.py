@@ -35,6 +35,7 @@ from georiva.sources.models import (
     FetchRun,
 )
 from georiva.sources.tests.support import ensure_base_datafeed_viewset
+from georiva.virtual_zarr.models import VirtualZarrManifest
 
 from .factories import PASSWORD, add_member, make_user
 from .urlsweep import flatten_url_patterns
@@ -117,6 +118,7 @@ def build_org_tree(organisation, *, name):
     )
     item = Item.objects.create(collection=collection, time="2026-01-01T00:00:00Z")
     asset = Asset.objects.create(item=item, variable=variable, href="x.tif")
+    manifest = VirtualZarrManifest.objects.create(variable=variable)
     feed = DataFeed.objects.create(name=name, catalog=catalog)
     link = DataFeedCollectionLink.objects.create(
         data_feed=feed, collection=collection, definition_key=SHARED_SLUG
@@ -138,6 +140,7 @@ def build_org_tree(organisation, *, name):
         "variable": variable,
         "item": item,
         "asset": asset,
+        "manifest": manifest,
         "feed": feed,
         "link": link,
         "product": product,
@@ -330,6 +333,9 @@ class AdminUrlSweepTests(TestCase):
             "config": tree["config"].pk,
             "session": tree["session"].pk,
             "session_id": tree["session"].pk,
+            # Matched by URL prefix: the manifest snippet's admin paths use a
+            # bare <pk>, and "manifest" appears in the model's URL segment.
+            "manifest": tree["manifest"].pk,
             "var": tree["config_variable"].pk,
             "var_pk": tree["config_variable"].pk,
             # Matches page_id, parent_page_id and page_to_move_id by substring;

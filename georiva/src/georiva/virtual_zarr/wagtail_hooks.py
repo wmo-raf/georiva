@@ -1,12 +1,39 @@
 import logging
 
 from wagtail import hooks
+from wagtail.admin.panels import FieldPanel
+from wagtail.snippets.models import register_snippet
+from wagtail.snippets.views.snippets import SnippetViewSet
 
 from georiva.core.models import Asset
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
+from georiva.organisations.scoping import OrgScopedViewSetMixin
 
 logger = logging.getLogger(__name__)
 from georiva.virtual_zarr.models import VirtualZarrManifest
+
+
+class VirtualZarrManifestViewSet(OrgScopedViewSetMixin, SnippetViewSet):
+    """The manifest admin: a low-level escape hatch, org-scoped like Items/Assets.
+
+    The state machine is driven by signals and the sweep; the one thing an
+    operator legitimately writes here is ``status`` (e.g. forcing STALE to
+    trigger a rebuild). Everything else — coverage caches, lock bookkeeping,
+    the derived repo path — is output, so the form does not offer it.
+    """
+
+    model = VirtualZarrManifest
+    icon = "table"
+    list_display = ["variable", "status", "built_at", "item_count"]
+    list_filter = ["status"]
+    panels = [
+        FieldPanel("variable"),
+        FieldPanel("status"),
+        FieldPanel("error", read_only=True),
+    ]
+
+
+register_snippet(VirtualZarrManifestViewSet)
 
 
 @hooks.register(GEORIVA_AFTER_SAVE_ASSET)

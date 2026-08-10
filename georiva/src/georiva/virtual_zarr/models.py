@@ -3,10 +3,8 @@ from datetime import timedelta
 from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
-from wagtail.snippets.models import register_snippet
 
 
-@register_snippet
 class VirtualZarrManifest(TimeStampedModel):
     """
     Tracks the build state of one Icechunk repository per Variable.
