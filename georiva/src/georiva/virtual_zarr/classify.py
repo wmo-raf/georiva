@@ -24,6 +24,9 @@ class BuildMode(Enum):
     REBUILD = "rebuild"
     APPEND = "append"
     UP_TO_DATE = "up_to_date"
+    # Set by the build task when the variable has no COG assets at all;
+    # classify() itself never returns it (it requires at least one row).
+    NO_DATA = "no_data"
 
 
 @dataclass(frozen=True)

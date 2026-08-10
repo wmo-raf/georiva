@@ -95,15 +95,42 @@ class VirtualZarrManifestTests(TestCase):
         self.assertEqual(manifest.locked_by, "")
         self.assertIsNone(manifest.locked_at)
 
-    def test_mark_stale_only_transitions_ready(self):
+    def test_mark_stale_only_transitions_ready_or_no_data(self):
         manifest = self._manifest()
         manifest.mark_stale()
         manifest.refresh_from_db()
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.PENDING)
 
+        for status in (
+                VirtualZarrManifest.Status.READY,
+                VirtualZarrManifest.Status.NO_DATA,
+        ):
+            VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
+                status=status
+            )
+            manifest.mark_stale()
+            manifest.refresh_from_db()
+            self.assertEqual(manifest.status, VirtualZarrManifest.Status.STALE)
+
+    # -- NO_DATA parking -----------------------------------------------------
+
+    def test_mark_no_data_clears_lock_and_error(self):
+        manifest = self._manifest()
         VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
-            status=VirtualZarrManifest.Status.READY
+            status=VirtualZarrManifest.Status.BUILDING,
+            locked_by="celery-x", error="boom",
         )
-        manifest.mark_stale()
+        manifest.mark_no_data()
         manifest.refresh_from_db()
-        self.assertEqual(manifest.status, VirtualZarrManifest.Status.STALE)
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.NO_DATA)
+        self.assertEqual(manifest.locked_by, "")
+        self.assertIsNone(manifest.locked_at)
+        self.assertEqual(manifest.error, "")
+
+    def test_no_data_is_excluded_from_buildable(self):
+        manifest = self._manifest()
+        manifest.mark_no_data()
+        self.assertNotIn(
+            manifest.pk,
+            VirtualZarrManifest.get_buildable().values_list("pk", flat=True),
+        )

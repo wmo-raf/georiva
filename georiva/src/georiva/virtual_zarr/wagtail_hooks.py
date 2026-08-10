@@ -22,7 +22,10 @@ def after_save_asset(asset, **kwargs):
         try:
             VirtualZarrManifest.objects.filter(
                 variable=variable,
-                status=VirtualZarrManifest.Status.READY,
+                status__in=[
+                    VirtualZarrManifest.Status.READY,
+                    VirtualZarrManifest.Status.NO_DATA,
+                ],
             ).update(status=VirtualZarrManifest.Status.STALE)
         except Exception as exc:
             logger.warning(

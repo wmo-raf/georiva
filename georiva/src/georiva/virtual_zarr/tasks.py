@@ -131,8 +131,10 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
             snapshot_id=report.snapshot_id,
         )
         # Only a real commit changes the repo prefix; skip the listing on
-        # up-to-date cycles.
-        if report.mode != BuildMode.UP_TO_DATE.value:
+        # up-to-date and no-data cycles.
+        if report.mode not in (
+                BuildMode.UP_TO_DATE.value, BuildMode.NO_DATA.value,
+        ):
             manifest.refresh_repo_stats()
 
 
@@ -218,10 +220,17 @@ def _run_build(
     # must be ≥ every included COG's Last-Modified, or reads fail instantly.
     build_start = timezone.now()
     if not rows:
-        raise ValueError(
-            f"No COG assets found for {collection}/{variable.slug}. "
-            "Ingest data before building the manifest."
+        # Nothing to build and retrying cannot help — park the manifest as
+        # NO_DATA so the sweep stops re-dispatching it.  The COG save signal
+        # flips it back to STALE when data arrives.
+        logger.info(
+            "build_virtual_zarr_manifest: no COG assets for %s/%s — "
+            "marking NO_DATA",
+            collection.slug, variable.slug,
         )
+        manifest.mark_no_data()
+        report.mode = BuildMode.NO_DATA.value
+        return report
 
     # ------------------------------------------------------------------
     # Classify against the repo's committed state (decision 5: the

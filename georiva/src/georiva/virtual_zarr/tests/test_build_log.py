@@ -1,7 +1,7 @@
 """
-Build-log model tests plus the task seams that need no MinIO: a failing
-build leaves a durable failure row, and the daily GC task prunes expired
-build-log rows.
+Build-log model tests plus the task seams that need no MinIO: a build with
+no COG assets parks the manifest as NO_DATA with a durable log row, and the
+daily GC task prunes expired build-log rows.
 """
 
 from datetime import timedelta
@@ -70,27 +70,38 @@ class BuildLogModelTests(BuildLogTestCase):
         self.assertNotIn(expired.pk, remaining)
 
 
-class BuildTaskFailureLogTests(BuildLogTestCase):
-    def test_failed_build_leaves_durable_failure_row(self):
+class BuildTaskNoDataLogTests(BuildLogTestCase):
+    def test_no_cog_build_parks_manifest_as_no_data(self):
         from georiva.virtual_zarr.tasks import build_virtual_zarr_manifest
 
-        # No Items at all → the build fails before touching object storage.
+        # No Items at all → nothing to build; the manifest is parked as
+        # NO_DATA (not FAILED) so the sweep stops re-dispatching it.
         build_virtual_zarr_manifest.apply(args=[self.manifest.pk])
 
         self.manifest.refresh_from_db()
         self.assertEqual(
-            self.manifest.status, VirtualZarrManifest.Status.FAILED
+            self.manifest.status, VirtualZarrManifest.Status.NO_DATA
         )
+        self.assertEqual(self.manifest.error, "")
 
         log = self.manifest.build_logs.get()
         self.assertEqual(log.kind, VirtualZarrBuildLog.Kind.BUILD)
-        self.assertEqual(log.outcome, VirtualZarrBuildLog.Outcome.FAILURE)
-        self.assertIn("No COG assets", log.error)
-        self.assertEqual(log.mode, "")
+        self.assertEqual(log.outcome, VirtualZarrBuildLog.Outcome.SUCCESS)
+        self.assertEqual(log.mode, VirtualZarrBuildLog.Mode.NO_DATA)
         self.assertEqual(log.items_written, 0)
         self.assertLessEqual(log.started_at, log.finished_at)
 
-    def test_each_failure_gets_its_own_row(self):
+    def test_no_data_manifest_is_not_buildable(self):
+        from georiva.virtual_zarr.tasks import build_virtual_zarr_manifest
+
+        build_virtual_zarr_manifest.apply(args=[self.manifest.pk])
+
+        self.assertNotIn(
+            self.manifest.pk,
+            VirtualZarrManifest.get_buildable().values_list("pk", flat=True),
+        )
+
+    def test_each_attempt_gets_its_own_row(self):
         from georiva.virtual_zarr.tasks import build_virtual_zarr_manifest
 
         build_virtual_zarr_manifest.apply(args=[self.manifest.pk])
