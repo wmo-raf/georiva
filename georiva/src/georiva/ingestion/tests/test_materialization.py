@@ -17,9 +17,8 @@ from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
-    w = MagicMock()
+    w = MagicMock(spec=["write_cog"])
     w.write_cog.side_effect = lambda arr, path, *a, **k: path
-    w.write_metadata.side_effect = lambda meta, path: path
     return w
 
 
@@ -70,7 +69,7 @@ class MaterializerFixture(TestCase):
 
 
 class MaterializeVariableTests(MaterializerFixture):
-    def test_writes_cog_json_and_records_assets(self):
+    def test_writes_cog_and_records_asset(self):
         assets = self._materialize()
 
         self.assertEqual(len(assets), 1)
@@ -84,32 +83,9 @@ class MaterializeVariableTests(MaterializerFixture):
             self.item.assets.filter(format=Asset.Format.PNG).exists()
         )
 
+        # The COG is the only object written — no JSON sidecar (ADR 0024).
+        # The spec'd writer mock raises if any other method is touched.
         self.writer.write_cog.assert_called_once()
-        self.writer.write_metadata.assert_called_once()
-
-    def test_sidecar_carries_no_render_config(self):
-        # Render config (color map, unscale range, scale) is derived at
-        # request time, never stored (ADR 0021) — a snapshot would go stale
-        # on edit and is wrong by design with multiple styles (ADR 0023).
-        self._materialize()
-
-        sidecar = self.writer.write_metadata.call_args[0][0]
-        # Pin the full key set so render config cannot sneak back in under
-        # any name — only descriptive metadata is allowed here.
-        self.assertEqual(
-            set(sidecar),
-            {
-                "variable", "name", "units", "timestamp", "reference_time",
-                "bounds", "width", "height", "crs", "transform", "stats",
-            },
-        )
-        # The descriptive payload survives unchanged.
-        self.assertEqual(sidecar["variable"], "precip")
-        self.assertEqual(sidecar["units"], "mm")
-        self.assertEqual(sidecar["bounds"], [10, -5, 20, 5])
-        self.assertEqual(sidecar["crs"], "EPSG:4326")
-        self.assertEqual(sidecar["timestamp"], self.ts.isoformat())
-        self.assertIn("stats", sidecar)
 
     def test_expands_collection_extent(self):
         self.assertIsNone(self.collection.bounds)
@@ -137,12 +113,6 @@ class MaterializeVariableTests(MaterializerFixture):
         written = self.writer.write_cog.call_args[0][0]
         self.assertTrue(np.isnan(written[:, :5]).all())
         self.assertTrue((written[:, 5:] == 42.0).all())
-
-    def test_sidecar_failure_is_nonfatal_and_cog_survives(self):
-        self.writer.write_metadata.side_effect = RuntimeError("bucket down")
-        assets = self._materialize()
-        self.assertEqual([a.format for a in assets], [Asset.Format.COG])
-
 
 class ClipArrayTests(MaterializerFixture):
     def test_clip_array_crops_to_window(self):

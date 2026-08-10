@@ -125,8 +125,8 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
     (post-crop) — ``run_unit`` stamps the item with it — or None for
     passthrough/skipped assets.
 
-    An array OutputAsset always yields the served pair — COG + JSON sidecar —
-    via ``AssetMaterializer``, exactly what ingestion writes. Visual textures
+    An array OutputAsset always yields the served COG via
+    ``AssetMaterializer``, exactly what ingestion writes. Visual textures
     are derived on demand by Titiler (ADR 0021), so a ``format="png"``
     OutputAsset addresses nothing and is skipped."""
     from georiva.core.storage import storage

@@ -8,7 +8,7 @@ item-detail map stretch derived layers across the whole world).
 
 This command replays materialization for each derived item from its stored
 COG — no recipe recompute — bringing history up to the current contract:
-clipped COG + JSON sidecar, honest Asset rows, item bounds snapped to the
+clipped COG, honest Asset rows, item bounds snapped to the
 clip window, and the derived collection's extent rebuilt. Visual textures are
 derived on demand by Titiler (ADR 0021), so none are written here.
 

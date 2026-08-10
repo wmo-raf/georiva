@@ -258,9 +258,9 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
 
 
 class RegisterAssetMaterializationTests(_PromotionFixture):
-    """An array OutputAsset materializes the served pair (COG + JSON
-    sidecar) through the shared AssetMaterializer; an explicit
-    format='png' OutputAsset addresses nothing and is skipped."""
+    """An array OutputAsset materializes the served COG through the shared
+    AssetMaterializer; an explicit format='png' OutputAsset addresses
+    nothing and is skipped."""
 
     def _item(self):
         return Item.objects.create(
@@ -273,7 +273,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         from georiva.ingestion.materialization import AssetMaterializer
         return AssetMaterializer(writer)
 
-    def test_cog_output_asset_materializes_cog_and_sidecar(self):
+    def test_cog_output_asset_materializes_cog(self):
         import numpy as np
 
         from georiva.core.models import Asset
@@ -294,7 +294,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         )
 
         writer.write_cog.assert_called_once()
-        writer.write_metadata.assert_called_once()
+        writer.write_metadata.assert_not_called()
         self.assertEqual(
             {a.format for a in assets}, {Asset.Format.COG},
         )

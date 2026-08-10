@@ -1,4 +1,3 @@
-import json
 import logging
 import tempfile
 from pathlib import Path
@@ -17,13 +16,10 @@ logger = logging.getLogger(__name__)
 
 class AssetWriter:
     """
-    Writes processed geospatial data to object storage in multiple formats.
+    Writes processed geospatial data to object storage.
 
-    Handles two asset types per variable per timestamp:
-      COG  — Cloud-Optimized GeoTIFF for TiTiler serving and analysis
-      JSON — Descriptive metadata sidecar (identity, geometry, stats);
-             carries no render config — that is derived at request time
-             (ADR 0021)
+    One asset per variable per timestamp:
+      COG — Cloud-Optimized GeoTIFF for TiTiler serving and analysis
 
     Visual textures are not written here: Titiler derives them on demand
     from the COG (ADR 0021).
@@ -146,20 +142,6 @@ class AssetWriter:
                 Path(tmp_path).unlink(missing_ok=True)
             if cog_path:
                 Path(cog_path).unlink(missing_ok=True)
-    
-    def write_metadata(self, metadata: dict, output_path: str) -> str:
-        """
-        Serialise a metadata dict to JSON and write it to storage.
-
-        Args:
-            metadata:    Dict of variable/asset metadata.
-            output_path: Destination path in the bucket.
-
-        Returns:
-            Final stored path.
-        """
-        content = json.dumps(metadata, indent=2).encode('utf-8')
-        return self.bucket.save(output_path, content)
     
     # =========================================================================
     # Private Helpers
