@@ -183,11 +183,10 @@ class TimeseriesService:
     
     def _open_dataset(self, variable: "Variable"):
         """
-        Open the virtual Zarr manifest for a variable as a lazy xarray Dataset.
+        Open the variable's virtual Zarr (Icechunk) repo as a lazy xarray Dataset.
 
         Raises ManifestNotReady if the manifest does not exist or is not READY.
-        Downloads the manifest JSON from MinIO to a temp file, then opens it
-        via the kerchunk engine.
+        Opens a read-only session at the tip of the repo's main branch.
         """
         from georiva.virtual_zarr.models import VirtualZarrManifest
         

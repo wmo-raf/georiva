@@ -141,7 +141,7 @@ class Command(BaseCommand):
             obj, created = VirtualZarrManifest.objects.get_or_create(
                 variable=variable,
                 defaults={
-                    "manifest_path": VirtualZarrManifest.make_manifest_path(variable),
+                    "repo_path": VirtualZarrManifest.make_repo_path(variable),
                 },
             )
             if created:

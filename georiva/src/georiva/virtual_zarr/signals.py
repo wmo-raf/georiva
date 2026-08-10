@@ -25,7 +25,7 @@ def mark_manifest_stale_on_cog_save(sender, instance: Asset, created: bool, **kw
         manifest, created = VirtualZarrManifest.objects.get_or_create(
             variable=instance.variable,
             defaults={
-                "manifest_path": VirtualZarrManifest.make_manifest_path(instance.variable),
+                "repo_path": VirtualZarrManifest.make_repo_path(instance.variable),
             },
         )
         col = instance.variable.collection
