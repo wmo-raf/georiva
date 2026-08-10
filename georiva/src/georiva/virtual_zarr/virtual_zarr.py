@@ -1,20 +1,23 @@
 """
-Core building blocks for virtual Zarr manifests over GeoRiva COG assets.
+Core building blocks for virtual Zarr (Icechunk) repos over GeoRiva COG assets.
 
     MinioStoreConfig     — connection parameters + store factory methods
     MinioVirtualTIFF     — VirtualTIFF subclass that correctly wires AsyncS3Store
                            for MinIO (bypasses the broken obstore → async-tiff
                            conversion that panics on missing aws_ prefix)
-    VirtualZarrBuilder   — scans COG headers, builds and serialises a kerchunk
-                           manifest to a local path
-    open_kerchunk_dataset — opens a kerchunk manifest as a lazy xarray Dataset
+    VirtualZarrBuilder   — scans COG headers and builds a virtual xarray
+                           Dataset (virtual chunk refs only, no pixel data)
+    write_rebuild / write_append
+                         — commit a virtual dataset into an Icechunk repo
 """
 
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
-from pathlib import Path
+from datetime import datetime
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -156,11 +159,11 @@ class MinioStoreConfig:
     def s3_uri_for(self, internal_url: str) -> str:
         """
         Convert an internal ``http(s)://host/bucket/key`` URL to an
-        ``s3://bucket/key`` URI for embedding in the kerchunk manifest.
+        ``s3://bucket/key`` URI for the committed virtual chunk refs.
 
-        fsspec resolves ``s3://`` URIs using ``remote_options`` supplied at
-        open time, so the actual endpoint is injected then rather than baked
-        into every chunk reference.
+        Icechunk resolves ``s3://`` URIs through the virtual chunk container
+        supplied at ``Repository.open()`` time, so the actual endpoint is
+        injected then rather than baked into every chunk reference.
         """
         for prefix in (
                 f"{self.internal_endpoint}/{self.bucket}/",
@@ -170,28 +173,6 @@ class MinioStoreConfig:
                 return f"s3://{self.bucket}/{internal_url[len(prefix):]}"
         return internal_url  # already s3:// or unrecognised
     
-    # ------------------------------------------------------------------
-    # fsspec remote options (for open_kerchunk_dataset)
-    # ------------------------------------------------------------------
-    
-    @property
-    def fsspec_remote_options(self) -> dict:
-        """Options for fsspec when reading chunks from *outside* the container."""
-        return {
-            "key": self.access_key,
-            "secret": self.secret_key,
-            "client_kwargs": {"endpoint_url": self.public_endpoint},
-        }
-    
-    @property
-    def fsspec_remote_options_internal(self) -> dict:
-        """Options for fsspec when reading chunks from *inside* the container."""
-        return {
-            "key": self.access_key,
-            "secret": self.secret_key,
-            "client_kwargs": {"endpoint_url": self.internal_endpoint},
-        }
-
 
 # ---------------------------------------------------------------------------
 # VirtualTIFF parser
@@ -241,84 +222,91 @@ class MinioVirtualTIFF(VirtualTIFF):
 @dataclass
 class VirtualZarrBuilder:
     """
-    Builds a kerchunk JSON manifest from a collection of GeoRiva COGs.
+    Builds a virtual xarray Dataset from a collection of GeoRiva COGs.
 
     Scans COG IFD headers (range requests only — no pixel data downloaded),
-    assigns geographic coordinates from the affine geotransform, rewrites
-    chunk URLs to ``s3://`` URIs, and writes the manifest to a local path.
+    assigns geographic coordinates from the affine geotransform, and rewrites
+    chunk URLs to ``s3://`` URIs ready for committing into an Icechunk repo.
     """
-    
+
     config: MinioStoreConfig
     _registry: ObjectStoreRegistry = field(init=False, repr=False)
     _parser: MinioVirtualTIFF = field(init=False, repr=False)
-    
+
     def __post_init__(self) -> None:
         self._registry = self.config.build_registry()
         self._parser = MinioVirtualTIFF(self.config)
-    
+
     def build(
             self,
             url_df: pd.DataFrame,
-            output_path: str | Path,
             variable_name: str = "data",
-    ) -> Path:
+            per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
+    ) -> xr.Dataset:
         """
-        Build and serialise a kerchunk manifest.
+        Build a virtual dataset of chunk references over the given COGs.
 
         Parameters
         ----------
         url_df : pd.DataFrame
             Columns: ``date`` (datetime-like, tz-naive UTC) and ``url`` (str).
-        output_path : str or Path
-            Local filesystem path for the output JSON manifest.
         variable_name : str
             Name for the data variable in the output dataset.  The raw IFD
             index variable (``"0"``) is renamed to this value.
+        per_cog_check : callable, optional
+            Called with each raw single-COG virtual dataset and its URL before
+            concatenation — the append path uses this for the heterogeneity
+            guard, so a mismatch fails naming the offending asset.
 
         Returns
         -------
-        Path
-            Absolute path to the written manifest file.
+        xr.Dataset
+            Virtual dataset (time, lat, lon) whose chunk refs are s3:// URIs.
         """
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
         logger.info("Scanning %d COG headers…", len(url_df))
-        combined = self._build_virtual_dataset(url_df)
-        
+        combined = self._build_virtual_dataset(url_df, per_cog_check)
+
         logger.info("Reading geotransform from sample COG…")
         combined = self._assign_geo_coords(combined, url_df.iloc[0]["url"])
-        
+
         raw_var = list(combined.data_vars)[0]
         if raw_var != variable_name:
             combined = combined.rename({raw_var: variable_name})
-        
+
         logger.info("Rewriting chunk URLs to s3:// URIs…")
-        combined = combined.vz.rename_paths(self.config.s3_uri_for)
-        
-        logger.info("Writing manifest → %s", output_path)
-        combined.vz.to_kerchunk(str(output_path), format="json")
-        
-        return output_path
-    
+        return combined.vz.rename_paths(self.config.s3_uri_for)
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
-    
-    def _build_virtual_dataset(self, url_df: pd.DataFrame) -> xr.Dataset:
+
+    def _build_virtual_dataset(
+            self,
+            url_df: pd.DataFrame,
+            per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
+    ) -> xr.Dataset:
         virtual_datasets = []
         for _, row in url_df.iterrows():
-            vds = open_virtual_dataset(
-                url=row["url"],
-                registry=self._registry,
-                parser=self._parser,
-            )
+            with warnings.catch_warnings():
+                # virtual-tiff's predictor codecs are outside the zarr v3
+                # spec and warn on every COG — expected noise, keep worker
+                # logs readable.
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, module="virtual_tiff"
+                )
+                vds = open_virtual_dataset(
+                    url=row["url"],
+                    registry=self._registry,
+                    parser=self._parser,
+                )
+            if per_cog_check is not None:
+                per_cog_check(vds, row["url"])
             # Normalise to tz-naive UTC — TimescaleDB returns timezone-aware
             # datetime64[us, UTC] which numpy/xarray cannot use as a coord dtype.
             ts = pd.Timestamp(row["date"])
             if ts.tzinfo is not None:
                 ts = ts.tz_convert("UTC").tz_localize(None)
-            
+
             vds = vds.assign_coords(time=ts).expand_dims("time")
             virtual_datasets.append(vds)
         return xr.concat(virtual_datasets, dim="time")
@@ -345,55 +333,64 @@ class VirtualZarrBuilder:
 
 
 # ---------------------------------------------------------------------------
-# Reader
+# Icechunk writers
 # ---------------------------------------------------------------------------
 
-def open_kerchunk_dataset(
-        manifest_path: str | Path,
-        config: MinioStoreConfig,
+def write_rebuild(
+        repo,
+        vds: xr.Dataset,
         *,
-        internal: bool = True,
-        chunks: dict | None = {},
-) -> xr.Dataset:
+        last_updated_at: datetime,
+        metadata: dict,
+        message: str,
+) -> str:
     """
-    Open a kerchunk manifest as a lazy xarray Dataset.
+    Commit a full rebuild as a new commit in place — never delete the prefix.
 
-    Parameters
-    ----------
-    manifest_path : str or Path
-        Local path to the kerchunk JSON manifest.
-    config : MinioStoreConfig
-        Supplies S3 credentials and the correct endpoint URL.
-    internal : bool
-        True  → resolve chunks via the internal container endpoint.
-        False → resolve chunks via the public endpoint (external callers).
-    chunks : dict or None
-        Passed to ``xr.open_dataset``.
-        ``{}``   = dask-backed lazy arrays.
-        ``None`` = eager loading.
+    The session's store is cleared before the virtual dataset is written, so
+    arrays from the previous commit can't survive a shrunk time axis — but
+    the clearing happens inside the uncommitted session, so readers pinned
+    to prior snapshots keep working and the swap is atomic at commit.
 
-    Returns
-    -------
-    xr.Dataset
+    Returns the new snapshot id.
     """
-    # kerchunk registers its xarray backend via an entry point that may not
-    # have been scanned if the package was installed after interpreter start.
-    import kerchunk.xarray_backend  # noqa: F401  registers the engine
-    from xarray.backends import plugins as xr_plugins
-    
-    xr_plugins.list_engines.cache_clear()
-    
-    remote_options = (
-        config.fsspec_remote_options_internal if internal
-        else config.fsspec_remote_options
+    from zarr.core.sync import sync
+
+    session = repo.writable_session("main")
+    sync(session.store.clear())
+    vds.vz.to_icechunk(session.store, last_updated_at=last_updated_at)
+    return session.commit(message, metadata=metadata)
+
+
+def write_append(
+        repo,
+        vds: xr.Dataset,
+        *,
+        last_updated_at: datetime,
+        metadata: dict,
+        message: str,
+) -> str:
+    """
+    Append new timesteps along ``time`` and commit.  Returns the snapshot id.
+    """
+    session = repo.writable_session("main")
+    vds.vz.to_icechunk(
+        session.store, append_dim="time", last_updated_at=last_updated_at
     )
-    
-    return xr.open_dataset(
-        str(manifest_path),
-        engine="kerchunk",
-        storage_options={
-            "remote_protocol": "s3",
-            "remote_options": remote_options,
-        },
-        chunks=chunks,
-    )
+    return session.commit(message, metadata=metadata)
+
+
+def last_committed_time(repo) -> pd.Timestamp | None:
+    """
+    Last value of the committed time coordinate at the tip of ``main``.
+
+    Belt-and-braces for the append path (design decision 5): the caller
+    asserts every appended timestep is strictly after this, independently of
+    the commit-metadata watermark.  Reads only the native time array — no
+    virtual chunks are touched.
+    """
+    ro = repo.readonly_session(branch="main")
+    ds = xr.open_zarr(ro.store, consolidated=False, chunks=None)
+    if "time" not in ds.coords or ds["time"].size == 0:
+        return None
+    return pd.Timestamp(ds["time"].values[-1])

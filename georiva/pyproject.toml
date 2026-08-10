@@ -59,8 +59,8 @@ dependencies = [
     "pint==0.25.3",
     "virtual-tiff==0.5.0",
     "virtualizarr==2.6.2",
-    "kerchunk==0.2.10",
     "eccodeslib>=2.47.3.22",
+    "icechunk==2.1.2",
 ]
 
 [project.scripts]

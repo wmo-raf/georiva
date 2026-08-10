@@ -9,13 +9,19 @@ from wagtail.snippets.models import register_snippet
 @register_snippet
 class VirtualZarrManifest(TimeStampedModel):
     """
-    Tracks the build state of one kerchunk manifest per Variable.
+    Tracks the build state of one Icechunk repository per Variable.
 
-    One manifest per variable.
+    One repo per variable, holding only virtual references to COG bytes.
 
-    The manifest covers the full available time axis — every COG Asset with
-    format=COG for this variable.  It is rebuilt from scratch whenever marked
-    stale (debounced via sweep_virtual_zarr_pending).
+    The repo covers the full available time axis — every COG Asset with
+    format=COG for this variable.  New items strictly after the committed
+    time_end are appended; anything earlier/overlapping triggers a full
+    rebuild as a new commit in place (never a prefix delete), so readers
+    pinned to a prior snapshot keep working.
+
+    The Django fields (repo_path, watermark, snapshot_id, coverage) are
+    derived caches — the source of truth for what the repo contains is the
+    latest Icechunk commit's metadata (design decision 5).
     """
     
     LOCK_TIMEOUT = timedelta(minutes=30)
@@ -43,22 +49,30 @@ class VirtualZarrManifest(TimeStampedModel):
     # Storage
     # -------------------------------------------------------------------------
     
-    manifest_path = models.CharField(
+    repo_path = models.CharField(
         max_length=500,
         blank=True,
         help_text=(
-            "MinIO key for the kerchunk JSON, relative to the georiva-assets bucket. "
-            "e.g. __manifests__/chirps/chirps-monthly/precipitation.json"
+            "Icechunk repository prefix on the zarr bucket, org slug first. "
+            "e.g. kenya/chirps/chirps-monthly/precipitation/"
         ),
     )
-    
+
     # -------------------------------------------------------------------------
-    # Coverage (populated on successful build)
+    # Coverage (derived cache — populated on successful build)
     # -------------------------------------------------------------------------
-    
+
     time_start = models.DateTimeField(null=True, blank=True, editable=False)
     time_end = models.DateTimeField(null=True, blank=True, editable=False)
     item_count = models.PositiveIntegerField(default=0, editable=False)
+    watermark = models.DateTimeField(
+        null=True, blank=True, editable=False,
+        help_text="Max Asset.modified at the last successful commit.",
+    )
+    snapshot_id = models.CharField(
+        max_length=100, blank=True, default="", editable=False,
+        help_text="Icechunk snapshot id of the last successful commit.",
+    )
     
     # -------------------------------------------------------------------------
     # State machine
@@ -106,22 +120,23 @@ class VirtualZarrManifest(TimeStampedModel):
     # -------------------------------------------------------------------------
     
     @classmethod
-    def make_manifest_path(cls, variable: "Variable") -> str:
+    def make_repo_path(cls, variable: "Variable") -> str:
         """
-        Canonical MinIO key for a manifest, derived from the variable's
-        collection and catalog — org slug first, like every other bucket key.
+        Canonical Icechunk repo prefix on the zarr bucket, derived from the
+        variable's collection and catalog — org slug first, like every other
+        bucket key.  Trailing slash: this names a prefix, not an object.
         """
         collection = variable.collection
         return (
             f"{collection.catalog.storage_prefix}/"
-            f"{collection.slug}/{variable.slug}.json"
+            f"{collection.slug}/{variable.slug}/"
         )
-    
-    def get_manifest_path(self) -> str:
-        """Return (or derive) the manifest path for this record."""
-        if self.manifest_path:
-            return self.manifest_path
-        return self.make_manifest_path(self.variable)
+
+    def get_repo_path(self) -> str:
+        """Return (or derive) the repo prefix for this record."""
+        if self.repo_path:
+            return self.repo_path
+        return self.make_repo_path(self.variable)
     
     # -------------------------------------------------------------------------
     # State transitions
@@ -137,17 +152,21 @@ class VirtualZarrManifest(TimeStampedModel):
     
     def mark_ready(
             self,
-            manifest_path: str,
+            repo_path: str,
             item_count: int,
             time_start,
             time_end,
+            snapshot_id: str = "",
+            watermark=None,
     ) -> None:
         self.__class__.objects.filter(pk=self.pk).update(
             status=self.Status.READY,
-            manifest_path=manifest_path,
+            repo_path=repo_path,
             item_count=item_count,
             time_start=time_start,
             time_end=time_end,
+            snapshot_id=snapshot_id,
+            watermark=watermark,
             built_at=timezone.now(),
             locked_at=None,
             locked_by="",
@@ -225,7 +244,11 @@ class VirtualZarrManifest(TimeStampedModel):
     
     def open_dataset(self, *, internal: bool = True, chunks: dict | None = {}):
         """
-        Open this manifest as a lazy xarray Dataset.
+        Open this variable's Icechunk repo as a lazy xarray Dataset.
+
+        A read-only session is opened at the tip of ``main``; the container
+        endpoint/credentials for the virtual COG chunks are supplied here at
+        open time (late binding), not baked into the committed refs.
 
         Parameters
         ----------
@@ -233,38 +256,23 @@ class VirtualZarrManifest(TimeStampedModel):
             True  → use the internal container endpoint (georiva-minio:9000).
             False → use the public endpoint (for external callers).
         chunks : dict or None
-            Passed to xr.open_dataset.  {} = dask-backed lazy, None = eager.
+            Passed to xr.open_zarr.  {} = dask-backed lazy, None = eager.
 
         Raises
         ------
         ValueError
-            If the manifest is not in READY state or has no manifest_path.
+            If the manifest is not in READY state.
         """
         if self.status != self.Status.READY:
             raise ValueError(
                 f"Manifest {self} is not ready (status={self.status}). "
                 "Trigger a build first."
             )
-        if not self.manifest_path:
-            raise ValueError(f"Manifest {self} has no manifest_path recorded.")
-        
-        from georiva.virtual_zarr.virtual_zarr import (
-            MinioStoreConfig,
-            open_kerchunk_dataset,
-        )
-        
-        config = MinioStoreConfig.from_django_settings()
-        
-        # The manifest is stored in MinIO — download it to a temp file so
-        # xarray/kerchunk can read it as a local JSON path.
-        import tempfile
-        from georiva.core.storage import storage
-        
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-            tmp_path = tmp.name
-        
-        manifest_bytes = storage.zarr.read_bytes(self.manifest_path)
-        with open(tmp_path, "wb") as f:
-            f.write(manifest_bytes)
-        
-        return open_kerchunk_dataset(tmp_path, config, internal=internal, chunks=chunks)
+
+        import xarray as xr
+
+        from georiva.virtual_zarr.repo import open_repo
+
+        repo = open_repo(self.get_repo_path(), internal=internal)
+        session = repo.readonly_session(branch="main")
+        return xr.open_zarr(session.store, consolidated=False, chunks=chunks)
