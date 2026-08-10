@@ -17,6 +17,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from georiva.core.models import Variable
+
+    from .models import VirtualZarrManifest
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +102,8 @@ def is_lock_expired(
 class VariableCoverage:
     """Everything a monitoring surface shows about one variable's repo."""
 
-    variable: object
-    manifest: object | None
+    variable: "Variable"
+    manifest: "VirtualZarrManifest | None"
     status: str            # manifest status value; "" when no manifest row
     stuck: bool            # BUILDING with an expired lock
     catalog_timestamps: tuple[datetime, ...]
@@ -231,12 +237,15 @@ def _catalog_state(collection, variables) -> dict[int, _CatalogState]:
     states = {}
     for variable in variables:
         item_ids = covered[variable.pk]
+        # Deduplicated: forecast Items may share a valid time across reference
+        # times, but the repo's time axis holds each timestamp once — counts
+        # must agree with the set arithmetic in diff_timestamps.
         states[variable.pk] = _CatalogState(
             timestamps=tuple(sorted(
-                as_utc(item_times[i]) for i in item_ids
+                {as_utc(item_times[i]) for i in item_ids}
             )),
             items_without_cog=tuple(sorted(
-                as_utc(t) for i, t in item_times.items() if i not in item_ids
+                {as_utc(t) for i, t in item_times.items() if i not in item_ids}
             )),
             newest_asset_modified=newest.get(variable.pk),
         )

@@ -212,6 +212,22 @@ class CoverageServiceTests(TestCase):
         # The temp-only item has no COG for precip: a skip, not coverage.
         self.assertEqual(report.items_without_cog, (_t(24),))
 
+    def test_forecast_items_sharing_a_valid_time_count_once(self):
+        # Two reference times, one valid time: the repo's axis holds the
+        # timestamp once, so the catalog side must count it once too.
+        variable = self._variable("precip")
+        for ref_hours in (0, 6):
+            item = Item.objects.create(
+                collection=self.collection, time=_t(24),
+                reference_time=_t(ref_hours),
+            )
+            self._cog(item, variable)
+
+        report = variable_coverage(variable)
+
+        self.assertEqual(report.catalog_count, 1)
+        self.assertEqual(report.missing, (_t(24),))
+
     def test_stuck_build_is_distinct_from_active_build(self):
         variable = self._variable("precip")
         manifest = VirtualZarrManifest.objects.create(

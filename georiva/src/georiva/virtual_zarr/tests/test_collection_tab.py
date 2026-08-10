@@ -135,6 +135,16 @@ class CollectionVirtualZarrTabTests(TestCase):
         self.assertContains(response, "Stuck")
         self.assertContains(response, "Building")
 
+    def test_stale_manifest_renders_its_status(self):
+        variable = add_variable(self.collection, slug="gone-stale")
+        VirtualZarrManifest.objects.create(
+            variable=variable, status=VirtualZarrManifest.Status.STALE,
+        )
+
+        response = self._get()
+
+        self.assertContains(response, "Stale")
+
     def test_failed_manifest_shows_its_error(self):
         variable = add_variable(self.collection, slug="broken")
         manifest = VirtualZarrManifest.objects.create(variable=variable)
