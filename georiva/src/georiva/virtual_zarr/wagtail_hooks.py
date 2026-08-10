@@ -39,13 +39,21 @@ register_snippet(VirtualZarrManifestViewSet)
 
 @hooks.register("register_admin_urls")
 def register_virtual_zarr_admin_urls():
-    from georiva.virtual_zarr.views import collection_virtual_zarr
+    from georiva.virtual_zarr.views import (
+        collection_virtual_zarr,
+        variable_virtual_zarr,
+    )
 
     return [
         path(
             "collection/<int:collection_pk>/virtual-zarr/",
             collection_virtual_zarr,
             name="collection_virtual_zarr",
+        ),
+        path(
+            "virtual-zarr/variable/<int:variable_pk>/",
+            variable_virtual_zarr,
+            name="variable_virtual_zarr",
         ),
     ]
 

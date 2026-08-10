@@ -402,6 +402,10 @@ class VirtualZarrBuildLog(models.Model):
             f"@ {self.started_at:%Y-%m-%d %H:%M}"
         )
 
+    @property
+    def duration(self) -> timedelta:
+        return self.finished_at - self.started_at
+
     @classmethod
     def record(
             cls, manifest, kind, outcome, started_at, **fields,

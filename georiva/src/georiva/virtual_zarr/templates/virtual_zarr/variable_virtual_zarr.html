@@ -1,0 +1,358 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{{ variable.slug }} — {% trans "Virtual Zarr" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .vz-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: var(--w-color-grey-50);
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+        }
+
+        .vz-summary-item .vz-summary-label {
+            display: block;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--w-color-grey-400);
+        }
+
+        .vz-section {
+            margin-bottom: 2rem;
+        }
+
+        .vz-section h3 {
+            margin-bottom: 0.5rem;
+        }
+
+        .vz-error-panel {
+            padding: 0.75rem 1rem;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid var(--w-color-critical-200);
+            background: var(--w-color-grey-50);
+        }
+
+        .vz-error-panel pre {
+            margin: 0.25rem 0 0;
+            white-space: pre-wrap;
+        }
+
+        .vz-warning-panel {
+            padding: 0.75rem 1rem;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid var(--w-color-warning-100);
+            background: var(--w-color-grey-50);
+        }
+
+        .vz-ts-columns {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+        }
+
+        .vz-ts-column {
+            flex: 1 1 14rem;
+        }
+
+        .vz-ts-list {
+            max-height: 16rem;
+            overflow-y: auto;
+            margin: 0;
+            padding: 0.5rem 0.75rem;
+            list-style: none;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 5px;
+        }
+
+        .vz-missing {
+            color: var(--w-color-critical-200);
+        }
+
+        .vz-extra {
+            color: var(--w-color-warning-100);
+        }
+
+        .vz-muted {
+            color: var(--w-color-grey-400);
+        }
+
+        .vz-note {
+            display: block;
+            font-size: 0.7rem;
+            color: var(--w-color-grey-400);
+        }
+
+        .vz-status-help {
+            cursor: help;
+        }
+
+        .vz-snapshot-meta {
+            font-size: 0.75rem;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+
+    {% comment %}
+        Summary strip: the coverage-report facts an operator scans first,
+        before deciding which section below explains the problem.
+    {% endcomment %}
+    <div class="vz-summary">
+        <div class="vz-summary-item">
+            <span class="vz-summary-label">{% trans "Status" %}</span>
+            {% include "virtual_zarr/includes/status_tag.html" %}
+        </div>
+        <div class="vz-summary-item">
+            <span class="vz-summary-label">{% trans "Coverage (repo / catalog)" %}</span>
+            <span class="w-font-mono" data-coverage="{{ report.repo_count }}/{{ report.catalog_count }}">
+                {{ report.repo_count }} / {{ report.catalog_count }}
+            </span>
+        </div>
+        <div class="vz-summary-item">
+            <span class="vz-summary-label">{% trans "Lag" %}</span>
+            {% if report.lag is None %}<span class="vz-muted">—</span>{% else %}{{ report.lag_label }}{% endif %}
+        </div>
+        <div class="vz-summary-item">
+            <span class="vz-summary-label">{% trans "Repo size" %}</span>
+            {% if report.repo_size_bytes %}
+                {{ report.repo_size_bytes|filesizeformat }}
+                <span class="vz-note">{{ report.repo_object_count }} {% trans "objects" %}</span>
+            {% else %}
+                <span class="vz-muted">—</span>
+            {% endif %}
+        </div>
+        <div class="vz-summary-item">
+            <span class="vz-summary-label">{% trans "Built" %}</span>
+            {% if report.manifest.built_at %}
+                {{ report.manifest.built_at|timesince }} {% trans "ago" %}
+            {% else %}
+                <span class="vz-muted">{% trans "never" %}</span>
+            {% endif %}
+        </div>
+        {% if report.manifest.snapshot_id %}
+            <div class="vz-summary-item">
+                <span class="vz-summary-label">{% trans "Snapshot" %}</span>
+                <code class="w-font-mono">{{ report.manifest.snapshot_id|truncatechars:14 }}</code>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if report.error %}
+        <div class="vz-error-panel">
+            <strong>{% trans "Last error" %}</strong>
+            {% if detail.last_failure_at %}
+                <span class="vz-last-failure vz-muted">
+                    — {% blocktrans with when=detail.last_failure_at|timesince %}failed {{ when }} ago{% endblocktrans %}
+                    ({{ detail.last_failure_at|date:"Y-m-d H:i" }} UTC)
+                </span>
+            {% endif %}
+            <pre class="w-font-mono w-text-14">{{ report.error }}</pre>
+        </div>
+    {% endif %}
+
+    {% if report.repo_read_error or detail.detail_read_error %}
+        <div class="vz-warning-panel">
+            <strong>{% trans "Repo read problem" %}</strong>
+            <pre class="w-font-mono w-text-14">{% firstof report.repo_read_error detail.detail_read_error %}</pre>
+        </div>
+    {% endif %}
+
+    <section class="vz-section">
+        <h3 class="w-label-1">{% trans "Timestamp coverage" %}</h3>
+        <div class="vz-ts-columns">
+            <div class="vz-ts-column">
+                <h4>
+                    {% trans "Missing from repo" %}
+                    <span class="w-status w-status--label">{{ report.missing_count }}</span>
+                </h4>
+                {% if report.missing %}
+                    <ul class="vz-ts-list w-font-mono w-text-14">
+                        {% for ts in report.missing %}
+                            <li class="vz-missing">{{ ts|date:"Y-m-d H:i" }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="help-text">{% trans "Nothing missing — the repo covers every catalog timestamp." %}</p>
+                {% endif %}
+            </div>
+            <div class="vz-ts-column">
+                <h4>
+                    {% trans "Extra in repo" %}
+                    <span class="w-status w-status--label">{{ report.extra_count }}</span>
+                </h4>
+                {% if report.extra %}
+                    <ul class="vz-ts-list w-font-mono w-text-14">
+                        {% for ts in report.extra %}
+                            <li class="vz-extra">{{ ts|date:"Y-m-d H:i" }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="help-text">{% trans "No repo timestamps unmatched by the catalog." %}</p>
+                {% endif %}
+            </div>
+            <div class="vz-ts-column">
+                <h4>
+                    {% trans "Items without COG" %}
+                    <span class="w-status w-status--label">{{ report.skipped_count }}</span>
+                </h4>
+                {% if report.items_without_cog %}
+                    <p class="help-text">{% trans "Silently skipped during builds — no COG asset exists for this variable at these times." %}</p>
+                    <ul class="vz-ts-list w-font-mono w-text-14">
+                        {% for ts in report.items_without_cog %}
+                            <li>{{ ts|date:"Y-m-d H:i" }}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="help-text">{% trans "Every item carries a COG asset for this variable." %}</p>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="vz-section">
+        <h3 class="w-label-1">{% trans "Build history" %}</h3>
+        <p class="vz-gc-status help-text">
+            {% if detail.last_gc %}
+                {% blocktrans with when=detail.last_gc.finished_at|timesince outcome=detail.last_gc.get_outcome_display %}Last GC: {{ outcome }}, {{ when }} ago.{% endblocktrans %}
+                {% if detail.last_gc.error %}<span class="vz-missing">{{ detail.last_gc.error }}</span>{% endif %}
+            {% else %}
+                {% trans "GC has not run for this repo yet." %}
+            {% endif %}
+        </p>
+        {% if detail.build_history %}
+            <table class="listing">
+                <thead>
+                <tr>
+                    <th>{% trans "Started" %}</th>
+                    <th>{% trans "Outcome" %}</th>
+                    <th>{% trans "Mode" %}</th>
+                    <th>{% trans "Written" %}</th>
+                    <th>{% trans "Skipped" %}</th>
+                    <th>{% trans "Duration" %}</th>
+                    <th>{% trans "Snapshot" %}</th>
+                    <th>{% trans "Error" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for log in detail.build_history %}
+                    <tr>
+                        <td class="w-text-14">
+                            {{ log.started_at|date:"Y-m-d H:i:s" }}
+                            <span class="vz-note">{{ log.started_at|timesince }} {% trans "ago" %}</span>
+                        </td>
+                        <td>
+                            {% if log.outcome == "success" %}
+                                <span class="w-status-tag w-status-tag--primary">{{ log.get_outcome_display }}</span>
+                            {% else %}
+                                <span class="w-status-tag w-status-tag--critical">{{ log.get_outcome_display }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="w-text-14">{{ log.get_mode_display|default:"—" }}</td>
+                        <td class="w-text-14">{{ log.items_written }}</td>
+                        <td class="w-text-14">
+                            {% if log.items_skipped %}
+                                <span class="vz-missing">{{ log.items_skipped }}</span>
+                            {% else %}
+                                <span class="vz-muted">0</span>
+                            {% endif %}
+                        </td>
+                        <td class="w-text-14">{{ log.duration }}</td>
+                        <td class="w-text-14">
+                            {% if log.snapshot_id %}
+                                <code class="w-font-mono">{{ log.snapshot_id|truncatechars:14 }}</code>
+                            {% else %}
+                                <span class="vz-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="w-text-14">
+                            {% if log.error %}
+                                <span class="vz-missing vz-status-help" title="{{ log.error }}">{{ log.error|truncatechars:80 }}</span>
+                            {% else %}
+                                <span class="vz-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="help-text">{% trans "No build attempts recorded yet." %}</p>
+        {% endif %}
+    </section>
+
+    <section class="vz-section">
+        <h3 class="w-label-1">{% trans "Snapshot history" %}</h3>
+        {% if detail.snapshots %}
+            <table class="listing">
+                <thead>
+                <tr>
+                    <th>{% trans "Snapshot" %}</th>
+                    <th>{% trans "Committed" %}</th>
+                    <th>{% trans "Message" %}</th>
+                    <th>{% trans "Committed coverage" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for snapshot in detail.snapshots %}
+                    <tr>
+                        <td><code class="w-font-mono w-text-14">{{ snapshot.id|truncatechars:14 }}</code></td>
+                        <td class="w-text-14">
+                            {{ snapshot.written_at|date:"Y-m-d H:i:s" }}
+                            <span class="vz-note">{{ snapshot.written_at|timesince }} {% trans "ago" %}</span>
+                        </td>
+                        <td class="w-text-14">{{ snapshot.message }}</td>
+                        <td class="vz-snapshot-meta w-font-mono">
+                            {% for key, value in snapshot.metadata.items %}
+                                {{ key }}={{ value }}{% if not forloop.last %}<br>{% endif %}
+                            {% empty %}
+                                <span class="vz-muted">—</span>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="help-text">{% trans "No snapshots yet — the repo has not been built." %}</p>
+        {% endif %}
+    </section>
+
+    <section class="vz-section">
+        <h3 class="w-label-1">{% trans "Store structure at tip" %}</h3>
+        {% if detail.store_arrays %}
+            <table class="listing">
+                <thead>
+                <tr>
+                    <th>{% trans "Array" %}</th>
+                    <th>{% trans "Shape" %}</th>
+                    <th>{% trans "Dtype" %}</th>
+                    <th>{% trans "Chunks" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for array in detail.store_arrays %}
+                    <tr>
+                        <td><code class="w-font-mono w-text-14">{{ array.name }}</code></td>
+                        <td class="w-text-14 w-font-mono">{{ array.shape|join:" × " }}</td>
+                        <td class="w-text-14 w-font-mono">{{ array.dtype }}</td>
+                        <td class="w-text-14 w-font-mono">{{ array.chunks|join:" × " }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="help-text">{% trans "No arrays yet — the repo has not been built." %}</p>
+        {% endif %}
+    </section>
+
+{% endblock %}

@@ -1,0 +1,28 @@
+{% load i18n %}
+{% comment %}
+    The status chip for one coverage report — shared between the collection
+    tab rows and the drill-down summary.  Expects ``report`` in context.
+{% endcomment %}
+{% if report.display_status == "no_manifest" %}
+    <span class="w-status-tag">{% trans "Not tracked" %}</span>
+{% elif report.display_status == "stuck" %}
+    <span class="w-status-tag w-status-tag--critical vz-status-help"
+          title="{% trans 'Building with an expired lock — the worker likely died. The next sweep resets and retries it.' %}">
+        {% trans "Stuck" %}
+    </span>
+{% elif report.display_status == "ready" %}
+    <span class="w-status-tag w-status-tag--primary">{{ report.manifest.get_status_display }}</span>
+{% elif report.display_status == "building" %}
+    <span class="w-status-tag w-status-tag--secondary">{{ report.manifest.get_status_display }}</span>
+{% elif report.display_status == "failed" %}
+    <span class="w-status-tag w-status-tag--critical vz-status-help"
+          title="{{ report.error }}">{{ report.manifest.get_status_display }}</span>
+{% else %}
+    <span class="w-status-tag">{{ report.manifest.get_status_display }}</span>
+{% endif %}
+{% if report.repo_read_error %}
+    <span class="w-status-tag w-status-tag--warning vz-status-help"
+          title="{{ report.repo_read_error }}">
+        {% trans "Repo unreadable" %}
+    </span>
+{% endif %}

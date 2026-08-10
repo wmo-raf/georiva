@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from georiva.core.models import Variable
 
-    from .models import VirtualZarrManifest
+    from .models import VirtualZarrBuildLog, VirtualZarrManifest
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +288,147 @@ def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCo
         error=manifest.error if manifest is not None else "",
         repo_read_error=repo_read_error,
     )
+
+
+# ---------------------------------------------------------------------------
+# The per-variable detail (drill-down page / future status API)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SnapshotEntry:
+    """One commit in the repo's ancestry, tip first."""
+
+    id: str
+    written_at: datetime | None
+    message: str
+    metadata: dict  # committed coverage: watermark, item_count, time range
+
+
+@dataclass(frozen=True)
+class StoreArray:
+    """One array in the store at the repo tip."""
+
+    name: str
+    shape: tuple[int, ...]
+    dtype: str
+    chunks: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class VariableDetail:
+    """The drill-down report: coverage plus history and repo internals."""
+
+    coverage: VariableCoverage
+    build_history: tuple["VirtualZarrBuildLog", ...]  # builds only, newest first
+    last_failure_at: datetime | None   # latest failed build's finish stamp
+    last_gc: "VirtualZarrBuildLog | None"
+    snapshots: tuple[SnapshotEntry, ...]     # ancestry of main, tip first
+    store_arrays: tuple[StoreArray, ...]     # structure at the tip
+    detail_read_error: str  # non-empty when the ancestry/store read failed
+
+
+def variable_detail(variable, *, now=None, history_limit=50) -> VariableDetail:
+    """
+    Everything the drill-down page shows about one variable.
+
+    Extends ``variable_coverage`` with the durable build/GC history and two
+    live repo reads — snapshot ancestry and store structure at the tip.
+    Reading the repo twice (once for coverage, once here) is acceptable for
+    a single-variable page; the collection tab never pays this cost.
+    """
+    from .models import VirtualZarrBuildLog
+
+    coverage = variable_coverage(variable, now=now)
+    manifest = coverage.manifest
+
+    if manifest is None:
+        return VariableDetail(
+            coverage=coverage,
+            build_history=(),
+            last_failure_at=None,
+            last_gc=None,
+            snapshots=(),
+            store_arrays=(),
+            detail_read_error="",
+        )
+
+    logs = manifest.build_logs
+    build_history = tuple(
+        logs.filter(kind=VirtualZarrBuildLog.Kind.BUILD)[:history_limit]
+    )
+    last_failure_at = (
+        logs.filter(
+            kind=VirtualZarrBuildLog.Kind.BUILD,
+            outcome=VirtualZarrBuildLog.Outcome.FAILURE,
+        )
+        .values_list("finished_at", flat=True)
+        .first()
+    )
+    last_gc = logs.filter(kind=VirtualZarrBuildLog.Kind.GC).first()
+
+    snapshots, store_arrays, detail_read_error = _read_repo_detail(manifest)
+
+    return VariableDetail(
+        coverage=coverage,
+        build_history=build_history,
+        last_failure_at=last_failure_at,
+        last_gc=last_gc,
+        snapshots=snapshots,
+        store_arrays=store_arrays,
+        detail_read_error=detail_read_error,
+    )
+
+
+def _read_repo_detail(manifest):
+    """
+    The live repo internals: (ancestry of main, store structure at the tip,
+    read error).
+
+    Same degradation contract as ``_read_repo_state``: a blank ``repo_path``
+    or an absent repo means empty history — not an error — and a failing
+    read lands in the third slot instead of raising.
+    """
+    from .repo import open_repo, repo_exists
+
+    if not manifest.repo_path:
+        return (), (), ""
+
+    try:
+        import zarr
+
+        repo_path = manifest.get_repo_path()
+        if not repo_exists(repo_path):
+            return (), (), ""
+        repo = open_repo(repo_path)
+
+        snapshots = tuple(
+            SnapshotEntry(
+                id=snapshot.id,
+                written_at=snapshot.written_at,
+                message=snapshot.message,
+                metadata=dict(snapshot.metadata or {}),
+            )
+            for snapshot in repo.ancestry(branch="main")
+        )
+
+        session = repo.readonly_session(branch="main")
+        group = zarr.open_group(session.store, mode="r")
+        store_arrays = tuple(
+            StoreArray(
+                name=name,
+                shape=tuple(array.shape),
+                dtype=str(array.dtype),
+                chunks=tuple(array.chunks),
+            )
+            for name, array in sorted(group.arrays())
+        )
+        return snapshots, store_arrays, ""
+    except Exception as exc:
+        logger.warning(
+            "virtual_zarr coverage: repo detail read failed for manifest %s: %s",
+            manifest.pk, exc,
+        )
+        return (), (), str(exc)
 
 
 def _read_repo_state(manifest):

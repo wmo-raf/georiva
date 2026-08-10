@@ -352,6 +352,15 @@ over the coverage service (`virtual_zarr/coverage.py`), which computes the repor
 source of truth; nothing per-timestamp is persisted.
 _Avoid_: zarr dashboard, manifest page
 
+**Virtual Zarr drill-down**:
+The per-variable page reached from a Virtual Zarr tab row, answering "what exactly is wrong with this variable"
+without shell access: the exact missing/extra timestamp lists, the silently-skipped items (no COG asset), the
+current error with its last-failure time, build history from the durable build log, last-GC status, Icechunk
+snapshot history with committed coverage metadata, cached repo size, and the store structure read on demand at
+the repo tip. Rendered over `variable_detail` in the same coverage service; a variable whose repo does not exist
+yet degrades to empty history rather than an error.
+_Avoid_: variable page, manifest detail
+
 Acquisition monitoring (`FetchRun` / `FetchedFile`) is per-feed: each Data Feed's dashboard carries summary stat
 cards with linked fetch-run and ingestion listing pages. The former org-wide live "Acquisition Feed" page was
 retired (ADR-0019); "is anything failing to fetch" is answered by the health chips on the Data Feeds list.
