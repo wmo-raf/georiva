@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from django.db.models import Prefetch
@@ -15,21 +18,18 @@ from georiva.virtual_zarr.compat import (
     spec_from_virtual_variable,
     spec_from_zarr_array,
 )
-from georiva.virtual_zarr.repo import (
-    commit_metadata,
-    latest_committed_state,
-    latest_snapshot_id,
-    open_repo,
-    repo_exists,
-)
-from georiva.virtual_zarr.virtual_zarr import (
-    MinioStoreConfig,
-    VirtualZarrBuilder,
-    last_committed_time,
-    write_append,
-    write_rebuild,
-)
 from .models import VirtualZarrBuildLog, VirtualZarrManifest
+
+if TYPE_CHECKING:
+    from georiva.virtual_zarr.virtual_zarr import MinioStoreConfig
+
+# ``georiva.virtual_zarr.repo`` (icechunk) and ``.virtual_zarr`` (obstore /
+# async-tiff / virtualizarr) are imported inside the task bodies, never at
+# module level: this module loads in the Celery worker *parent* at task
+# discovery, and those libraries start a Rust/tokio runtime whose threads do
+# not survive the prefork fork — the child then deadlocks on its first
+# icechunk call.  Importing late keeps the parent runtime-free so each pool
+# child initialises its own.
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +206,19 @@ def _run_build(
     ``report`` is filled in as the build progresses so the caller can log
     partial facts even when the build raises.
     """
+    from georiva.virtual_zarr.repo import (
+        commit_metadata,
+        latest_committed_state,
+        latest_snapshot_id,
+        open_repo,
+        repo_exists,
+    )
+    from georiva.virtual_zarr.virtual_zarr import (
+        MinioStoreConfig,
+        VirtualZarrBuilder,
+        write_rebuild,
+    )
+
     if report is None:
         report = BuildReport()
     variable = manifest.variable
@@ -313,6 +326,8 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
     """
     import zarr
 
+    from georiva.virtual_zarr.virtual_zarr import last_committed_time, write_append
+
     # Committed array signature for the hard heterogeneity guard (decision 7)
     ro = repo.readonly_session(branch="main")
     group = zarr.open_group(ro.store, mode="r")
@@ -402,6 +417,8 @@ def gc_virtual_zarr_repos(self) -> None:
     kept), then garbage-collects unreachable icechunk-native objects.  GC can
     never touch COG bytes — all chunks in these repos are virtual.
     """
+    from georiva.virtual_zarr.repo import open_repo, repo_exists
+
     cutoff = timezone.now() - SNAPSHOT_RETENTION
 
     manifests = VirtualZarrManifest.objects.exclude(repo_path="").select_related(
