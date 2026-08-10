@@ -1,0 +1,28 @@
+{% load i18n %}
+{% comment %}
+    The queue-rebuild control for one coverage report — shared between the
+    collection tab rows and the drill-down summary.  Expects ``report`` and
+    ``can_queue_rebuild`` in context.  An actively building manifest gets an
+    explanation instead of a button: the POST view would refuse it anyway
+    (a fresh lock is never yanked from its worker), so the surface says so
+    up front.
+{% endcomment %}
+{% if can_queue_rebuild %}
+    {% if report.display_status == "building" %}
+        <span class="vz-muted vz-status-help"
+              title="{% trans 'A worker holds a fresh lock on this build. If it dies, the sweep resets and retries it automatically.' %}">
+            {% trans "Build in progress" %}
+        </span>
+    {% else %}
+        <form method="post"
+              action="{% url 'variable_virtual_zarr_queue_rebuild' report.variable.pk %}"
+              class="vz-queue-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="button button-small button-secondary"
+                    title="{% trans 'Flips the manifest to Pending build; the sweep dispatches the rebuild within 5 minutes.' %}">
+                {% trans "Queue rebuild" %}
+            </button>
+        </form>
+    {% endif %}
+{% endif %}

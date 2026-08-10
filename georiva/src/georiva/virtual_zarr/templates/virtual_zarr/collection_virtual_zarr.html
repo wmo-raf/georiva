@@ -49,6 +49,11 @@
             font-size: 0.7rem;
             color: var(--w-color-grey-400);
         }
+
+        .vz-queue-form {
+            display: inline;
+            margin: 0;
+        }
     </style>
 {% endblock %}
 
@@ -77,6 +82,9 @@
                 <th>{% trans "Lag" %}</th>
                 <th>{% trans "Repo size" %}</th>
                 <th>{% trans "Built" %}</th>
+                {% if can_queue_rebuild %}
+                    <th>{% trans "Actions" %}</th>
+                {% endif %}
             </tr>
             </thead>
             <tbody>
@@ -135,6 +143,12 @@
                             <span class="vz-muted">{% trans "never" %}</span>
                         {% endif %}
                     </td>
+
+                    {% if can_queue_rebuild %}
+                        <td class="w-text-14">
+                            {% include "virtual_zarr/includes/queue_rebuild_button.html" %}
+                        </td>
+                    {% endif %}
                 </tr>
             {% endfor %}
             </tbody>
