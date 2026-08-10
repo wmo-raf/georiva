@@ -96,7 +96,7 @@ class ManifestAdminTests(TestCase):
 
     def test_listing_offers_a_status_filter(self):
         self.kenya_manifest.mark_ready(
-            repo_path="kenya/kenya-forecast/kenya-forecast/kenya-forecast/",
+            repo_path=VirtualZarrManifest.make_repo_path(self.kenya_manifest.variable),
             item_count=1,
             time_start="2026-01-01T00:00:00Z",
             time_end="2026-01-02T00:00:00Z",
