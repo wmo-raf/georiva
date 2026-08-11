@@ -32,7 +32,7 @@ LOG_ARGS ?= --tail 100
 	dev-up dev-up-d dev-down dev-stop dev-restart dev-build dev-ps dev-config dev-logs \
 	dev-app-logs dev-worker-default-logs dev-worker-ingestion-logs dev-beat-logs dev-titiler-logs \
 	dev-shell dev-worker-default-shell dev-worker-ingestion-shell dev-beat-shell dev-titiler-shell \
-	dev-migrate dev-makemigrations dev-test \
+	dev-migrate dev-makemigrations dev-test titiler-test \
 	uv-add uv-add-dev uv-remove uv-lock uv-sync
 
 # ======================
@@ -167,6 +167,12 @@ dev-test:
 	$(DEV_DC) exec \
 	  -e "DATABASE_URL=timescalegis://$$GEORIVA_DB_USER:$$GEORIVA_DB_PASSWORD@georiva-db:5432/$$GEORIVA_DB_NAME" \
 	  $(APP) georiva test --keepdb $(TEST_ARGS)
+
+# Titiler app tests run on the host (the image ships no tests): pytest at the
+# HTTP boundary with Redis, Django and storage faked — see titiler-app/tests/.
+# Usage: make titiler-test TEST_ARGS="tests/test_wmts_kvp_gettile.py -v"
+titiler-test:
+	cd titiler-app && uv run --no-project --with-requirements requirements-dev.txt pytest $(TEST_ARGS)
 
 
 # ======================
