@@ -497,6 +497,16 @@ CACHES = {
     },
 }
 
+# How long one organisation's anonymous WMTS capabilities document is held
+# (#361). Legacy clients re-fetch it on every connection and it enumerates
+# every valid time and every run of every visible collection, so it is built
+# once and shared. The cost is a document that lags: an item ingested now
+# appears when the entry expires and no sooner — minutes, not hours, so the
+# newest run is never far behind. 0 switches the cache off entirely.
+GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS = env.int(
+    "GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS", default=300
+)
+
 CELERY_BROKER_URL = REDIS_URL
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
