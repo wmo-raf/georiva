@@ -27,16 +27,14 @@ from georiva.core.models import (
 from georiva.organisations.testing import (
     dial_org, join_org, make_organisation, org_host,
 )
-
-NS = {
-    "wmts": "http://www.opengis.net/wmts/1.0",
-    "ows": "http://www.opengis.net/ows/1.1",
-    "xlink": "http://www.w3.org/1999/xlink",
-}
+from georiva.wmts.testing import (
+    NS, CapabilitiesReader, IsolatedCapabilitiesCache, make_tiered_catalog,
+)
 
 
-class WMTSCapabilitiesTests(TestCase):
+class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
     def setUp(self):
+        super().setUp()
         dial_org(self.client)
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
@@ -190,7 +188,7 @@ class WMTSCapabilitiesTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
 
-class WMTSDimensionTests(TestCase):
+class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
     """Time and Reftime dimensions, enumerated from the organisation's Items (#358).
 
     One observation collection and one forecast collection under the same org:
@@ -201,6 +199,7 @@ class WMTSDimensionTests(TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         dial_org(self.client)
         self.organisation = make_organisation()
         catalog = Catalog.objects.create(
@@ -342,7 +341,7 @@ class WMTSDimensionTests(TestCase):
         )
 
 
-class WMTSStyleTests(TestCase):
+class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
     """Named styles in the capabilities document (#359).
 
     Following the styling-surface pattern: which styles exist is Django's
@@ -355,6 +354,7 @@ class WMTSStyleTests(TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         dial_org(self.client)
         self.organisation = make_organisation()
         catalog = Catalog.objects.create(
@@ -477,7 +477,7 @@ class WMTSStyleTests(TestCase):
         self.assertNotIn("style=", template)
 
 
-class WMTSCredentialTests(TestCase):
+class WMTSCredentialTests(CapabilitiesReader, TestCase):
     """Private layers and API-key propagation (#360).
 
     A valid key widens the document through the collection manager's
@@ -488,45 +488,14 @@ class WMTSCredentialTests(TestCase):
     so to caches.
     """
 
-    PUBLIC = "forecast:temperature:t2m"
-    PRIVATE = "forecast:members-only:t2m"
-
     def setUp(self):
+        super().setUp()
         dial_org(self.client)
         self.organisation = make_organisation()
-        catalog = Catalog.objects.create(
-            organisation=self.organisation,
-            name="Forecast", slug="forecast", file_format="geotiff",
-        )
-        unit = Unit.objects.create(name="Celsius", symbol="C")
-
-        public = Collection.objects.create(
-            catalog=catalog, name="Temperature", slug="temperature",
-            visibility=Collection.Visibility.PUBLIC,
-        )
-        Variable.objects.create(
-            collection=public, slug="t2m", name="2m Temperature",
-            unit=unit, value_min=0, value_max=50,
-        )
-        private = Collection.objects.create(
-            catalog=catalog, name="Members only", slug="members-only",
-            visibility=Collection.Visibility.PRIVATE,
-        )
-        Variable.objects.create(
-            collection=private, slug="t2m", name="private t2m",
-            unit=unit, value_min=0, value_max=50,
-        )
+        tiers = make_tiered_catalog(self.organisation)
         Item.objects.create(
-            collection=private,
+            collection=tiers["private"],
             time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
-        )
-        internal = Collection.objects.create(
-            catalog=catalog, name="Intermediate", slug="intermediate",
-            visibility=Collection.Visibility.INTERNAL,
-        )
-        Variable.objects.create(
-            collection=internal, slug="t2m", name="internal t2m",
-            unit=unit, value_min=0, value_max=50,
         )
 
         User = get_user_model()
@@ -538,29 +507,6 @@ class WMTSCredentialTests(TestCase):
         _, self.outsider_key = ApiKey.objects.mint(user=outsider, name="qgis")
         admin = User.objects.create_superuser("admin", password="x")
         _, self.admin_key = ApiKey.objects.mint(user=admin, name="ops")
-
-    def fetch(self, params=None, **extra):
-        response = self.client.get(
-            reverse("wmts:capabilities", args=[self.organisation.slug]),
-            params or {}, **extra,
-        )
-        self.assertEqual(response.status_code, 200)
-        return response
-
-    def identifiers(self, response):
-        document = ET.fromstring(response.content)
-        return [
-            layer.findtext("ows:Identifier", namespaces=NS)
-            for layer in document.findall("wmts:Contents/wmts:Layer", NS)
-        ]
-
-    def templates(self, response):
-        document = ET.fromstring(response.content)
-        return {
-            layer.findtext("ows:Identifier", namespaces=NS):
-                layer.find("wmts:ResourceURL", NS).get("template")
-            for layer in document.findall("wmts:Contents/wmts:Layer", NS)
-        }
 
     def test_anonymous_discovery_stays_public_only(self):
         self.assertEqual(self.identifiers(self.fetch()), [self.PUBLIC])
@@ -661,13 +607,7 @@ class WMTSCredentialTests(TestCase):
         the advertised defaults and the resulting URL — key included, exactly
         as nginx forwards the original query onto the auth subrequest — is
         authorised for the private layer."""
-        response = self.fetch({"api_key": self.member_key})
-        document = ET.fromstring(response.content)
-        for layer in document.findall("wmts:Contents/wmts:Layer", NS):
-            if layer.findtext("ows:Identifier", namespaces=NS) == self.PRIVATE:
-                break
-        else:
-            self.fail("No private layer in the keyed document")
+        layer = self.layer(self.fetch({"api_key": self.member_key}), self.PRIVATE)
         template = layer.find("wmts:ResourceURL", NS).get("template")
         time = layer.find("wmts:Dimension/wmts:Default", NS).text
         split = urlsplit(template.format(TileMatrix=1, TileCol=0, TileRow=1, Time=time))

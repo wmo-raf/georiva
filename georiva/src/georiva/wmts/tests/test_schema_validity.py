@@ -16,6 +16,7 @@ from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
 from georiva.organisations.testing import dial_org, make_organisation
+from georiva.wmts.testing import IsolatedCapabilitiesCache
 
 try:
     from lxml import etree
@@ -27,7 +28,7 @@ ENTRY_SCHEMA = SCHEMA_ROOT / "schemas.opengis.net/wmts/1.0/wmtsGetCapabilities_r
 
 
 @skipUnless(etree is not None, "lxml unavailable")
-class WMTSSchemaValidityTests(TestCase):
+class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -45,6 +46,7 @@ class WMTSSchemaValidityTests(TestCase):
         cls.schema = etree.XMLSchema(etree.parse(str(ENTRY_SCHEMA), parser))
 
     def setUp(self):
+        super().setUp()
         dial_org(self.client)
         self.organisation = make_organisation()
         catalog = Catalog.objects.create(

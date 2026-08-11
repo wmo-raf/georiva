@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 
 from georiva.organisations.access import require_active_org
 
-from .capabilities import build_capabilities
+from .cache import capabilities_document, is_personal
 
 
 class OneRepresentation(BaseContentNegotiation):
@@ -47,14 +47,14 @@ class WMTSCapabilitiesView(APIView):
         if organisation.slug != org_slug:
             raise Http404
         response = HttpResponse(
-            build_capabilities(request, organisation),
+            capabilities_document(request, organisation),
             content_type="application/xml",
         )
-        if request.user.is_authenticated:
-            # A credentialed document may list private layers and may carry
-            # the caller's own key in its URLs; whatever the transport, it is
-            # personal and must never enter a shared cache (#360). Only the
-            # anonymous document is left cacheable — the shared Redis cache of
-            # #361 holds that one alone.
+        if is_personal(request):
+            # A credentialed document may list private layers and may carry the
+            # caller's own key in its URLs; whatever the transport, it is
+            # personal and must never enter a shared cache (#360). The same
+            # predicate keeps it out of the shared Redis entry (#361), so the
+            # header and the cache cannot come to disagree.
             patch_cache_control(response, private=True)
         return response
