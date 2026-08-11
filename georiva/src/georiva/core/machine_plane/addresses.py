@@ -325,12 +325,22 @@ def wmts_layer_identifier(variable) -> str:
     return f"{collection.catalog.slug}:{collection.slug}:{variable.slug}"
 
 
+#: The WMTS dimension identifiers the capabilities document may advertise
+#: (#358). Named here, beside the template builder that turns them into
+#: placeholders, so the document's writer imports them rather than spelling
+#: them again.
+WMTS_TIME_DIMENSION = "Time"
+WMTS_REFTIME_DIMENSION = "Reftime"
+
 #: The tile-route query parameter each advertised WMTS dimension drives —
 #: identifier as the capabilities document spells it, parameter as the tile
 #: route reads it (and as the KVP shim forwards it). One mapping, because the
 #: document's ``{Time}``/``{Reftime}`` placeholders and the route's
 #: ``time``/``reftime`` are two spellings of the same axis and may not drift.
-WMTS_DIMENSION_PARAMS = {"Time": "time", "Reftime": "reftime"}
+WMTS_DIMENSION_PARAMS = {
+    WMTS_TIME_DIMENSION: "time",
+    WMTS_REFTIME_DIMENSION: "reftime",
+}
 
 
 def wmts_rest_tile_template(variable, dimensions=()) -> str:

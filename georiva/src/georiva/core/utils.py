@@ -26,6 +26,14 @@ def get_full_url_by_request(request, path):
     return base_url + path
 
 
+def iso_utc_z(dt) -> str:
+    """ISO 8601 UTC with a ``Z`` suffix — the one spelling of a timestamp in
+    API URLs, storage-facing addresses and WMTS dimension values. ``Item``'s
+    ``time_iso`` properties and the WMTS capabilities document both write
+    through this, so the spelling cannot drift between them."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def get_base_stac_api_url(request=None):
     path = "/api/stac/"
     

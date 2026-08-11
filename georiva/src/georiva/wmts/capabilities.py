@@ -22,12 +22,14 @@ later slices of #354.
 from xml.etree import ElementTree as ET
 
 from georiva.core.machine_plane import (
+    WMTS_REFTIME_DIMENSION,
+    WMTS_TIME_DIMENSION,
     wmts_capabilities_url,
     wmts_layer_identifier,
     wmts_rest_tile_template,
 )
 from georiva.core.models import Collection, Item, Variable
-from georiva.core.utils import get_full_url_by_request
+from georiva.core.utils import get_full_url_by_request, iso_utc_z
 from georiva.organisations.access import scoped_queryset
 
 WMTS_NS = "http://www.opengis.net/wmts/1.0"
@@ -107,13 +109,6 @@ def build_capabilities(request, organisation) -> bytes:
     return ET.tostring(root, encoding="UTF-8", xml_declaration=True)
 
 
-def _iso(dt) -> str:
-    """The one time spelling the document uses — ISO 8601 UTC with ``Z``,
-    matching ``Item.time_iso`` so an advertised value pasted into a tile URL
-    names the same asset the item wrote."""
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def layer_dimensions(collection):
     """The WMTS dimensions a layer over ``collection`` advertises (#358).
 
@@ -141,7 +136,10 @@ def layer_dimensions(collection):
             .order_by("time")
             .values_list("time", flat=True)
         )
-        return {"Time": (times, times[0]), "Reftime": (reftimes, reftimes[0])}
+        return {
+            WMTS_TIME_DIMENSION: (times, times[0]),
+            WMTS_REFTIME_DIMENSION: (reftimes, reftimes[0]),
+        }
     times = list(
         Item.objects.filter(collection=collection)
         .order_by("time")
@@ -149,7 +147,7 @@ def layer_dimensions(collection):
     )
     if not times:
         return {}
-    return {"Time": (times, times[-1])}
+    return {WMTS_TIME_DIMENSION: (times, times[-1])}
 
 
 def _append_layer(contents, request, variable, dimensions):
@@ -176,9 +174,9 @@ def _append_layer(contents, request, variable, dimensions):
     for identifier, (values, default) in dimensions.items():
         dimension = ET.SubElement(layer, _wmts("Dimension"))
         ET.SubElement(dimension, _ows("Identifier")).text = identifier
-        ET.SubElement(dimension, _wmts("Default")).text = _iso(default)
+        ET.SubElement(dimension, _wmts("Default")).text = iso_utc_z(default)
         for value in values:
-            ET.SubElement(dimension, _wmts("Value")).text = _iso(value)
+            ET.SubElement(dimension, _wmts("Value")).text = iso_utc_z(value)
 
     link = ET.SubElement(layer, _wmts("TileMatrixSetLink"))
     ET.SubElement(link, _wmts("TileMatrixSet")).text = TILE_MATRIX_SET
