@@ -21,7 +21,11 @@ in later slices of #354.
 """
 from xml.etree import ElementTree as ET
 
-from georiva.core.machine_plane import wmts_capabilities_url, wmts_rest_tile_template
+from georiva.core.machine_plane import (
+    wmts_capabilities_url,
+    wmts_layer_identifier,
+    wmts_rest_tile_template,
+)
 from georiva.core.models import Collection, Item, Variable
 from georiva.core.utils import get_full_url_by_request
 from georiva.organisations.access import scoped_queryset
@@ -74,13 +78,6 @@ def visible_variables(request):
     )
 
 
-def layer_identifier(variable) -> str:
-    """``catalog:collection:variable`` — the grammar ``scope_of`` reads back
-    out of a KVP ``LAYER`` parameter (#355)."""
-    collection = variable.collection
-    return f"{collection.catalog.slug}:{collection.slug}:{variable.slug}"
-
-
 def build_capabilities(request, organisation) -> bytes:
     """The WMTSCapabilities.xml body for ``organisation``, as ``request`` may see it."""
     root = ET.Element(_wmts("Capabilities"), {"version": "1.0.0"})
@@ -121,7 +118,7 @@ def _append_layer(contents, request, variable, latest_item):
         ET.SubElement(bbox, _ows("LowerCorner")).text = f"{extent[0]} {extent[1]}"
         ET.SubElement(bbox, _ows("UpperCorner")).text = f"{extent[2]} {extent[3]}"
 
-    ET.SubElement(layer, _ows("Identifier")).text = layer_identifier(variable)
+    ET.SubElement(layer, _ows("Identifier")).text = wmts_layer_identifier(variable)
 
     # One placeholder style until #354's styles slice: the schema requires a
     # default, and the tile route already renders the variable's real default

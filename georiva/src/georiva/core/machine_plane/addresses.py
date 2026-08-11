@@ -311,6 +311,20 @@ def wmts_kvp_endpoint(organisation) -> str:
     return f"{TITILER_PREFIX}/{organisation.slug}/{WMTS_KVP_SEGMENT}"
 
 
+def wmts_layer_identifier(variable) -> str:
+    """The WMTS layer identifier a capabilities document advertises (#354).
+
+    ``catalog:collection:variable`` — the organisation stays in the URL path,
+    never in the identifier, because the document is already per-organisation
+    and a second spelling of the tenant could disagree with the first. Not a
+    URL, but machine-plane grammar all the same: :func:`_wmts_scope` splits a
+    KVP ``LAYER`` parameter back into this triple, and a writer living
+    anywhere else is an inverse waiting to drift.
+    """
+    collection = variable.collection
+    return f"{collection.catalog.slug}:{collection.slug}:{variable.slug}"
+
+
 def wmts_rest_tile_template(variable, item=None) -> str:
     """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
 

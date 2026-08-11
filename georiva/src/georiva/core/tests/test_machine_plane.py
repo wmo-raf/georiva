@@ -35,6 +35,7 @@ from georiva.core.machine_plane import (
     titiler_variable_root,
     wmts_capabilities_url,
     wmts_kvp_endpoint,
+    wmts_layer_identifier,
     wmts_rest_tile_template,
 )
 from georiva.core.models import Item, Variable
@@ -246,6 +247,18 @@ class WmtsRestTileTemplateTests(TestCase):
         self.assertNotEqual(
             wmts_rest_tile_template(self.kenya_tree["variable"], self.kenya_tree["item"]),
             wmts_rest_tile_template(self.uganda_tree["variable"], self.uganda_tree["item"]),
+        )
+
+    def test_a_layer_identifier_is_the_triple_a_kvp_layer_param_carries(self):
+        """Writer and reader of the ``LAYER`` grammar live side by side: what
+        this writes, ``scope_of`` splits back into the same collection."""
+        from georiva.core.machine_plane import MachineScope, scope_of
+
+        identifier = wmts_layer_identifier(self.kenya_tree["variable"])
+        self.assertEqual(identifier, f"{SHARED_SLUG}:{SHARED_SLUG}:{SHARED_SLUG}")
+        self.assertEqual(
+            scope_of(f"/titiler/kenya/wmts?REQUEST=GetTile&LAYER={identifier}"),
+            MachineScope("kenya", SHARED_SLUG, SHARED_SLUG),
         )
 
     def test_a_filled_template_scopes_back_to_its_own_collection(self):
