@@ -4,10 +4,12 @@ from georiva.core.machine_plane.config_view import TileConfigView
 from georiva.edr import urls as edr_urls
 from georiva.ingestion.dashboard_views import upload_session_status_api
 from georiva.stac import urls as georiva_stac_urls
+from georiva.wmts import urls as georiva_wmts_urls
 
 urlpatterns = [
     path('stac/', include(georiva_stac_urls), name='stac'),
     path('edr/', include(edr_urls), name='edr'),
+    path('wmts/', include(georiva_wmts_urls), name='wmts'),
     path('jobs/', include('task_ferry.api.urls', namespace='task_ferry')),
     path(
         'tile-config/<slug:org_slug>/<slug:catalog_slug>/<slug:collection_slug>/<slug:variable_slug>/',

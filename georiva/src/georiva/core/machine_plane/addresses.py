@@ -311,6 +311,34 @@ def wmts_kvp_endpoint(organisation) -> str:
     return f"{TITILER_PREFIX}/{organisation.slug}/{WMTS_KVP_SEGMENT}"
 
 
+def wmts_rest_tile_template(variable, item=None) -> str:
+    """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
+
+    The existing per-variable tile route, spelt as a WMTS template: the
+    ``{TileMatrix}``/``{TileCol}``/``{TileRow}`` placeholders are the client's
+    to fill, everything around them is the grammar the rest of this module
+    writes — org read from the variable's own row, ``WebMercatorQuad`` because
+    it is the only TileMatrixSet the document advertises.
+
+    ``item`` pins the query to one concrete time (and reference time, for a
+    forecast) — the newest the caller holds — because the tile route requires
+    ``time`` and dimensions only join the document in a later slice (#357).
+    A variable with no items yet gets a bare template: there is no honest time
+    to name, and a layer without data cannot serve tiles under any spelling.
+    """
+    collection = variable.collection
+    root = titiler_variable_root(
+        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
+    )
+    template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}.png"
+    if item is None:
+        return template
+    params = {"time": item.time_iso}
+    if item.reference_time:
+        params["reftime"] = item.reference_time_iso
+    return f"{template}?{urlencode(params)}"
+
+
 def wmts_capabilities_url(organisation) -> str:
     """The REST capabilities document on the metadata plane (#354).
 

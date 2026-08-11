@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     "georiva.api",
     "georiva.stac",
     "georiva.edr",
+    "georiva.wmts",
     "georiva.visualization",
     "georiva.sources",
     "georiva.organisations",

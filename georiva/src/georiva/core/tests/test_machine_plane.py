@@ -35,6 +35,7 @@ from georiva.core.machine_plane import (
     titiler_variable_root,
     wmts_capabilities_url,
     wmts_kvp_endpoint,
+    wmts_rest_tile_template,
 )
 from georiva.core.models import Item, Variable
 from georiva.core.testing import ANALYST_STOPS, make_style
@@ -198,6 +199,66 @@ class WmtsAddressTests(TestCase):
     def test_two_organisations_get_different_capabilities_urls(self):
         self.assertNotEqual(
             wmts_capabilities_url(self.kenya), wmts_capabilities_url(self.uganda),
+        )
+
+
+class WmtsRestTileTemplateTests(TestCase):
+    """The ResourceURL template a capabilities Layer advertises (#356).
+
+    Unlike the two endpoints above it is variable-level — it names one
+    variable's existing tile route — so it is held to the same promises as
+    every other variable-level address: org read from the row, colliding slugs
+    across organisations kept apart, and readable back by ``scope_of`` as the
+    collection it addresses.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.kenya_tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
+        cls.uganda_tree = build_tree(make_organisation("uganda"), variable_name="Uganda Forecast")
+
+    def test_the_template_is_the_existing_tile_route_org_first(self):
+        template = wmts_rest_tile_template(
+            self.kenya_tree["variable"], self.kenya_tree["item"],
+        )
+        self.assertEqual(
+            template,
+            f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}"
+            "/tiles/WebMercatorQuad/{TileMatrix}/{TileCol}/{TileRow}.png"
+            "?time=2026-03-01T12%3A00%3A00Z",
+        )
+
+    def test_a_forecast_item_pins_its_reference_time_too(self):
+        item = Item.objects.create(
+            collection=self.kenya_tree["collection"],
+            time=datetime(2026, 3, 2, tzinfo=timezone.utc),
+            reference_time=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        )
+        template = wmts_rest_tile_template(self.kenya_tree["variable"], item)
+        self.assertIn("reftime=2026-03-01T00%3A00%3A00Z", template)
+
+    def test_a_variable_without_items_gets_a_bare_template(self):
+        template = wmts_rest_tile_template(self.kenya_tree["variable"])
+        self.assertNotIn("?", template)
+        self.assertTrue(template.endswith("/{TileMatrix}/{TileCol}/{TileRow}.png"))
+
+    def test_two_organisations_sharing_a_slug_get_different_templates(self):
+        self.assertNotEqual(
+            wmts_rest_tile_template(self.kenya_tree["variable"], self.kenya_tree["item"]),
+            wmts_rest_tile_template(self.uganda_tree["variable"], self.uganda_tree["item"]),
+        )
+
+    def test_a_filled_template_scopes_back_to_its_own_collection(self):
+        """The gate reads what this writes: substituting the placeholders must
+        yield a URI ``scope_of`` resolves to the advertising collection."""
+        from georiva.core.machine_plane import MachineScope, scope_of
+
+        template = wmts_rest_tile_template(
+            self.uganda_tree["variable"], self.uganda_tree["item"],
+        )
+        uri = template.format(TileMatrix=6, TileCol=38, TileRow=32)
+        self.assertEqual(
+            scope_of(uri), MachineScope("uganda", SHARED_SLUG, SHARED_SLUG),
         )
 
 
