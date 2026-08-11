@@ -19,7 +19,9 @@ from georiva.core.machine_plane import (
     wmts_capabilities_url,
     wmts_rest_tile_template,
 )
-from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.core.models import (
+    Catalog, Collection, Item, Unit, Variable, VariableStyle,
+)
 from georiva.organisations.testing import dial_org, make_organisation, org_host
 
 NS = {
@@ -334,3 +336,129 @@ class WMTSDimensionTests(TestCase):
                 reference_time=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
             ).exists()
         )
+
+
+class WMTSStyleTests(TestCase):
+    """Named styles in the capabilities document (#359).
+
+    Following the styling-surface pattern: which styles exist is Django's
+    knowledge (ADR 0023), so the document lists a variable's real named styles
+    — identifiers being the style slugs the tile route's ``?style=`` reads —
+    with the actual default marked, and the REST template carries a
+    ``{Style}`` placeholder wired to that same parameter. A variable with no
+    named styles keeps a valid placeholder default entry and no style
+    parameter, mirroring the no-items/no-dimensions precedent.
+    """
+
+    def setUp(self):
+        dial_org(self.client)
+        self.organisation = make_organisation()
+        catalog = Catalog.objects.create(
+            organisation=self.organisation,
+            name="Weather", slug="weather", file_format="geotiff",
+        )
+        unit = Unit.objects.create(name="Celsius", symbol="C")
+        collection = Collection.objects.create(
+            catalog=catalog, name="Temperature", slug="temperature",
+            visibility=Collection.Visibility.PUBLIC,
+        )
+        self.styled = Variable.objects.create(
+            collection=collection, slug="t2m", name="2m Temperature",
+            unit=unit, value_min=0, value_max=50,
+        )
+        VariableStyle.objects.create(
+            variable=self.styled, name="Analyst", slug="analyst",
+            stops=[{"value": 0.0, "color": "#000000"},
+                   {"value": 50.0, "color": "#ffffff"}],
+        )
+        VariableStyle.objects.create(
+            variable=self.styled, name="Official", slug="official",
+            is_default=True,
+            stops=[{"value": 0.0, "color": "#0000ff"},
+                   {"value": 50.0, "color": "#ff0000"}],
+        )
+        self.styleless = Variable.objects.create(
+            collection=collection, slug="rh", name="Relative Humidity",
+            unit=unit, value_min=0, value_max=100,
+        )
+        Item.objects.create(
+            collection=collection,
+            time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+        )
+
+    def layer(self, identifier):
+        response = self.client.get(
+            reverse("wmts:capabilities", args=[self.organisation.slug])
+        )
+        self.assertEqual(response.status_code, 200)
+        document = ET.fromstring(response.content)
+        for layer in document.findall("wmts:Contents/wmts:Layer", NS):
+            if layer.findtext("ows:Identifier", namespaces=NS) == identifier:
+                return layer
+        self.fail(f"No layer {identifier!r} in the document")
+
+    def styles(self, layer):
+        return layer.findall("wmts:Style", NS)
+
+    def test_every_named_style_appears_under_its_layer(self):
+        styles = self.styles(self.layer("weather:temperature:t2m"))
+        self.assertEqual(
+            [s.findtext("ows:Identifier", namespaces=NS) for s in styles],
+            ["official", "analyst"],
+        )
+        self.assertEqual(
+            [s.findtext("ows:Title", namespaces=NS) for s in styles],
+            ["Official", "Analyst"],
+        )
+
+    def test_the_actual_default_is_the_one_marked_default(self):
+        styles = self.styles(self.layer("weather:temperature:t2m"))
+        marked = {
+            s.findtext("ows:Identifier", namespaces=NS): s.get("isDefault")
+            for s in styles
+        }
+        self.assertEqual(marked, {"official": "true", "analyst": None})
+
+    def test_identifiers_are_style_slugs_not_the_literal_default(self):
+        styles = self.styles(self.layer("weather:temperature:t2m"))
+        self.assertNotIn(
+            "default",
+            [s.findtext("ows:Identifier", namespaces=NS) for s in styles],
+        )
+
+    def test_a_styled_template_carries_the_style_placeholder(self):
+        layer = self.layer("weather:temperature:t2m")
+        template = layer.find("wmts:ResourceURL", NS).get("template")
+        self.assertIn("style={Style}", template)
+
+    def test_a_filled_styled_template_scopes_back_to_the_collection(self):
+        """Substituting every placeholder — style included — must yield a URI
+        the gate reads as this collection: the picker's choice lands on the
+        same route the gateway authorises."""
+        layer = self.layer("weather:temperature:t2m")
+        template = layer.find("wmts:ResourceURL", NS).get("template")
+        split = urlsplit(template.format(
+            TileMatrix=6, TileCol=38, TileRow=32,
+            Style="analyst", Time="2026-03-01T00:00:00Z",
+        ))
+        self.assertEqual(
+            scope_of(f"{split.path}?{split.query}"),
+            MachineScope("test-org", "weather", "temperature"),
+        )
+
+    def test_a_variable_without_styles_keeps_a_valid_default_entry(self):
+        styles = self.styles(self.layer("weather:temperature:rh"))
+        (placeholder,) = styles
+        self.assertEqual(placeholder.get("isDefault"), "true")
+        self.assertEqual(
+            placeholder.findtext("ows:Identifier", namespaces=NS), "default",
+        )
+
+    def test_a_styleless_template_carries_no_style_parameter(self):
+        """The placeholder identifier is not a slug the tile route knows, so
+        the template must not invite a client to substitute it — the styleless
+        request already renders the default (ADR 0023)."""
+        layer = self.layer("weather:temperature:rh")
+        template = layer.find("wmts:ResourceURL", NS).get("template")
+        self.assertNotIn("{Style}", template)
+        self.assertNotIn("style=", template)

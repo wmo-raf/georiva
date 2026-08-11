@@ -14,10 +14,10 @@ builders (ADR 0013) — this module only makes them absolute against the host
 the request dialled.
 
 The document advertises ``WebMercatorQuad`` as the only TileMatrixSet,
-``image/png`` as the only format, a placeholder default style, and per-layer
-``Time``/``Reftime`` dimensions enumerated from the organisation's Items
-(#358). Named styles and credentialed (private-layer) documents arrive in
-later slices of #354.
+``image/png`` as the only format, per-layer ``Time``/``Reftime`` dimensions
+enumerated from the organisation's Items (#358), and each variable's named
+styles with the real default marked (#359). Credentialed (private-layer)
+documents arrive in later slices of #354.
 """
 from xml.etree import ElementTree as ET
 
@@ -75,7 +75,7 @@ def visible_variables(request):
             collection__catalog__is_active=True,
             collection__in=Collection.objects.visible_to(request),
         ),
-    ).select_related("collection__catalog").order_by(
+    ).select_related("collection__catalog").prefetch_related("styles").order_by(
         "collection__catalog__slug", "collection__slug", "slug",
     )
 
@@ -163,11 +163,21 @@ def _append_layer(contents, request, variable, dimensions):
 
     ET.SubElement(layer, _ows("Identifier")).text = wmts_layer_identifier(variable)
 
-    # One placeholder style until #354's styles slice: the schema requires a
-    # default, and the tile route already renders the variable's real default
-    # when no style is named.
-    style = ET.SubElement(layer, _wmts("Style"), {"isDefault": "true"})
-    ET.SubElement(style, _ows("Identifier")).text = "default"
+    # Named styles (#359): identifiers are the style slugs the tile route's
+    # ``?style=`` reads — which styles exist stays Django's knowledge (ADR
+    # 0023) — with the actual default marked. Prefetched rows, and the model's
+    # ordering already puts the default first. A variable with no styles keeps
+    # a placeholder entry: the schema requires a default, and the styleless
+    # tile route already renders the variable's default.
+    styles = list(variable.styles.all())
+    for named in styles:
+        attributes = {"isDefault": "true"} if named.is_default else {}
+        style = ET.SubElement(layer, _wmts("Style"), attributes)
+        ET.SubElement(style, _ows("Title")).text = named.name
+        ET.SubElement(style, _ows("Identifier")).text = named.slug
+    if not styles:
+        style = ET.SubElement(layer, _wmts("Style"), {"isDefault": "true"})
+        ET.SubElement(style, _ows("Identifier")).text = "default"
 
     ET.SubElement(layer, _wmts("Format")).text = TILE_FORMAT
 
@@ -185,7 +195,8 @@ def _append_layer(contents, request, variable, dimensions):
         "format": TILE_FORMAT,
         "resourceType": "tile",
         "template": get_full_url_by_request(
-            request, wmts_rest_tile_template(variable, dimensions),
+            request,
+            wmts_rest_tile_template(variable, dimensions, styled=bool(styles)),
         ),
     })
 
