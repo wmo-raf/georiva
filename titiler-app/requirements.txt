@@ -2,5 +2,10 @@ fastapi
 uvicorn[standard]
 gunicorn
 titiler.core
+# Both arrive with titiler.core; named here because the WMTS shim imports them
+# directly — the tile grid it reads an identify pixel off, and the
+# out-of-footprint error it answers that click with (#363).
+morecantile
+rio-tiler
 redis
 httpx

@@ -103,14 +103,6 @@ class TestInvalidParameters:
 
 
 class TestOperations:
-    def test_a_later_slice_operation_answers_operation_not_supported(self, client):
-        response = get(client, REQUEST="GetFeatureInfo")
-
-        assert response.status_code == 501
-        exc = exception_of(response)
-        assert exc.get("exceptionCode") == "OperationNotSupported"
-        assert exc.get("locator") == "REQUEST"
-
     def test_an_unknown_operation_is_refused(self, client):
         response = get(client, REQUEST="GetLunch")
 

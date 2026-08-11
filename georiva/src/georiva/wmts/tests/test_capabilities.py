@@ -29,7 +29,8 @@ from georiva.organisations.testing import (
     dial_org, join_org, make_organisation, org_host,
 )
 from georiva.wmts.testing import (
-    NS, CapabilitiesReader, IsolatedCapabilitiesCache, make_tiered_catalog,
+    NS, PUBLIC_LAYER, CapabilitiesReader, IsolatedCapabilitiesCache,
+    make_tiered_catalog,
 )
 
 
@@ -112,6 +113,20 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
             visibility=Collection.Visibility.PRIVATE,
         )
         self.assertEqual(self.layer_identifiers(self.fetch()), [])
+
+    def test_layers_advertise_json_as_their_only_info_format(self):
+        """What an identify tool is promised it may ask for (#363).
+
+        The KVP endpoint answers GetFeatureInfo as ``application/json`` and
+        nothing else, so the layer offers exactly that: a client shown a
+        format the endpoint refuses would send its identify into an exception
+        it had been told would work.
+        """
+        (layer,) = self.layers(self.fetch())
+        self.assertEqual(
+            [f.text for f in layer.findall("wmts:InfoFormat", NS)],
+            ["application/json"],
+        )
 
     def test_layers_advertise_webmercatorquad_and_png_only(self):
         document = self.fetch()
@@ -212,7 +227,12 @@ class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
             f"http://{org_host()}{wmts_kvp_endpoint(self.organisation)}?"
         )
         self.assertEqual(
-            operations, {"GetCapabilities": expected, "GetTile": expected},
+            operations,
+            {
+                "GetCapabilities": expected,
+                "GetTile": expected,
+                "GetFeatureInfo": expected,
+            },
         )
 
     def test_the_href_carries_the_separator_a_client_appends_after(self):
@@ -226,7 +246,7 @@ class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
         gets = document.findall(
             "ows:OperationsMetadata/ows:Operation/ows:DCP/ows:HTTP/ows:Get", NS,
         )
-        self.assertEqual(len(gets), 2)
+        self.assertEqual(len(gets), 3)
         for get in gets:
             constraint = get.find("ows:Constraint", NS)
             self.assertEqual(constraint.get("name"), "GetEncoding")
@@ -237,10 +257,19 @@ class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
                 ["KVP"],
             )
 
-    def test_an_operation_not_yet_answered_is_not_advertised(self):
-        """GetFeatureInfo arrives in #363. Advertising it now would send a
-        client's identify into an exception it had been promised would work."""
-        self.assertNotIn("GetFeatureInfo", self.operations(self.fetch()))
+    def test_a_getfeatureinfo_built_on_the_advertised_endpoint_scopes_to_its_layer(self):
+        """The identify address a client builds from this document is one the
+        gate reads as the layer's own collection (#363) — the same arm of
+        ``scope_of`` GetTile travels, so identify opens no side door."""
+        href = self.operations(self.fetch())["GetFeatureInfo"]
+        split = urlsplit(
+            f"{href}SERVICE=WMTS&REQUEST=GetFeatureInfo"
+            f"&LAYER={PUBLIC_LAYER}&INFOFORMAT=application/json"
+        )
+        self.assertEqual(
+            scope_of(f"{split.path}?{split.query}"),
+            MachineScope("test-org", "forecast", "temperature"),
+        )
 
     def test_a_request_built_on_the_advertised_endpoint_scopes_to_the_org(self):
         """What the gate makes of a client that follows this document: the

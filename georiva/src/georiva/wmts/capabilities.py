@@ -14,7 +14,8 @@ builders (ADR 0013) — this module only makes them absolute against the host
 the request dialled.
 
 The document advertises ``WebMercatorQuad`` as the only TileMatrixSet,
-``image/png`` as the only format, per-layer ``Time``/``Reftime`` dimensions
+``image/png`` as the only format, ``application/json`` as the only InfoFormat
+an identify may ask for (#363), per-layer ``Time``/``Reftime`` dimensions
 enumerated from the organisation's Items (#358), and each variable's named
 styles with the real default marked (#359). A credentialed request widens the
 listing through the same ``visible_to``, and a key that travelled as
@@ -54,6 +55,11 @@ ET.register_namespace("xlink", XLINK_NS)
 TILE_FORMAT = "image/png"
 TILE_MATRIX_SET = "WebMercatorQuad"
 
+#: The one media type an identify answer comes back as (#363), matching
+#: ``INFO_FORMAT`` in the KVP shim that answers it. Advertising a second would
+#: promise a rendering that endpoint refuses.
+INFO_FORMAT = "application/json"
+
 #: WebMercatorQuad as OGC defines it: 256px tiles from one world-covering tile
 #: at level 0, halving in scale per level. 0–24 matches the morecantile
 #: definition Titiler serves, so every TileMatrix advertised here is answerable.
@@ -62,10 +68,9 @@ SCALE_DENOMINATOR_0 = 559082264.0287178
 MAX_ZOOM = 24
 
 #: The operations the KVP endpoint answers, in the order the document lists
-#: them (#362). GetFeatureInfo joins them when it exists (#363): advertising an
-#: operation the endpoint does not answer would send a client's identify
-#: straight into an exception it had been promised would work.
-KVP_OPERATIONS = ("GetCapabilities", "GetTile")
+#: them (#362, #363). All three are on the one org-scoped address, so a client
+#: that pasted a single URL discovers layers, draws them and clicks them.
+KVP_OPERATIONS = ("GetCapabilities", "GetTile", "GetFeatureInfo")
 
 
 def _ows(tag):
@@ -247,6 +252,12 @@ def _append_layer(contents, request, variable, dimensions, api_key=None):
         ET.SubElement(style, _ows("Identifier")).text = "default"
 
     ET.SubElement(layer, _wmts("Format")).text = TILE_FORMAT
+
+    # What an identify may ask for (#363). A layer that lists no InfoFormat is
+    # a layer whose clients hide their identify tool, so this is what makes
+    # the operation reachable at all; listing only what the KVP endpoint
+    # actually answers is what keeps the offer honest.
+    ET.SubElement(layer, _wmts("InfoFormat")).text = INFO_FORMAT
 
     for identifier, (values, default) in dimensions.items():
         dimension = ET.SubElement(layer, _wmts("Dimension"))
