@@ -33,6 +33,8 @@ from georiva.core.machine_plane import (
     titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,
+    wmts_capabilities_url,
+    wmts_kvp_endpoint,
 )
 from georiva.core.models import Item, Variable
 from georiva.core.testing import ANALYST_STOPS, make_style
@@ -162,6 +164,40 @@ class MachinePlaneAddressTests(TestCase):
         self.assertEqual(
             variable_cache_key(self.uganda_tree["variable"]),
             "georiva:palette:uganda:forecast:forecast:forecast",
+        )
+
+
+class WmtsAddressTests(TestCase):
+    """The two WMTS addresses Django writes (#355).
+
+    Both are org-level rather than variable-level — the whole point of WMTS is
+    one paste-able URL per organisation — so the org segment is the only
+    varying part, and the tests hold it to the same promise as every other
+    machine-plane address: read from the row, distinct across tenants.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.kenya = make_organisation("kenya")
+        cls.uganda = make_organisation("uganda")
+
+    def test_the_kvp_endpoint_sits_under_the_titiler_proxy_org_first(self):
+        self.assertEqual(wmts_kvp_endpoint(self.kenya), "/titiler/kenya/wmts")
+
+    def test_two_organisations_get_different_kvp_endpoints(self):
+        self.assertNotEqual(
+            wmts_kvp_endpoint(self.kenya), wmts_kvp_endpoint(self.uganda),
+        )
+
+    def test_the_capabilities_url_lives_on_the_metadata_plane_org_first(self):
+        self.assertEqual(
+            wmts_capabilities_url(self.uganda),
+            "/api/wmts/uganda/WMTSCapabilities.xml",
+        )
+
+    def test_two_organisations_get_different_capabilities_urls(self):
+        self.assertNotEqual(
+            wmts_capabilities_url(self.kenya), wmts_capabilities_url(self.uganda),
         )
 
 

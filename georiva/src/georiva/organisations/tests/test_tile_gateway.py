@@ -59,6 +59,22 @@ def titiler_uri(collection_slug, org="kenya", catalog="forecast", variable=None)
     )
 
 
+def wmts_uri(collection_slug, org="kenya", catalog="forecast", request="GetTile",
+             layer=None, extra=""):
+    """A KVP request against the org-scoped WMTS endpoint under the proxy."""
+    layer = layer if layer is not None else f"{catalog}:{collection_slug}:{collection_slug}"
+    return (
+        f"/titiler/{org}/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST={request}"
+        f"&LAYER={layer}&TILEMATRIXSET=WebMercatorQuad"
+        f"&TILEMATRIX=6&TILEROW=32&TILECOL=38&FORMAT=image/png{extra}"
+    )
+
+
+def wmts_capabilities_uri(org="kenya"):
+    """The bare discovery request: no LAYER, because it asks about them all."""
+    return f"/titiler/{org}/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetCapabilities"
+
+
 def martin_uri(collection_slug, org="kenya", catalog="forecast"):
     """A Martin zonal-stats tile URL, triple in the query as ADR 0013 requires."""
     return (
@@ -137,6 +153,113 @@ class ScopeOfTests(TestCase):
         trying to be two things at once."""
         scope = scope_of("/titiler/kenya/forecast/priv%61te/v/preview.webp")
         self.assertEqual(scope.collection, "priv%61te")
+
+
+class WmtsScopeOfTests(TestCase):
+    """The WMTS arm of the address reader (#355).
+
+    A KVP GetTile names its data in the ``LAYER`` parameter rather than the
+    path, so the reader has one new place to look — and the same posture
+    everywhere it looks: anything ambiguous, repeated or half-spelt scopes to
+    nothing and is denied.
+    """
+
+    def test_a_gettile_scopes_to_the_layers_collection(self):
+        self.assertEqual(
+            tuple(scope_of(wmts_uri("rainfall"))),
+            ("kenya", "forecast", "rainfall"),
+        )
+
+    def test_a_getfeatureinfo_scopes_the_same_way_as_a_gettile(self):
+        self.assertEqual(
+            tuple(scope_of(wmts_uri("rainfall", request="GetFeatureInfo"))),
+            ("kenya", "forecast", "rainfall"),
+        )
+
+    def test_the_org_comes_from_the_path_not_the_layer(self):
+        """The layer identifier never carries the organisation (#354)."""
+        scope = scope_of(wmts_uri("rainfall", org="uganda"))
+        self.assertEqual(scope.org, "uganda")
+
+    def test_kvp_parameter_names_are_read_case_insensitively(self):
+        """OGC KVP names are case-insensitive, and legacy clients exercise that."""
+        uri = "/titiler/kenya/wmts?request=GetTile&layer=forecast:rainfall:rain"
+        self.assertEqual(tuple(scope_of(uri)), ("kenya", "forecast", "rainfall"))
+
+    def test_the_request_value_is_read_case_insensitively_too(self):
+        uri = "/titiler/kenya/wmts?REQUEST=gettile&LAYER=forecast:rainfall:rain"
+        self.assertEqual(tuple(scope_of(uri)), ("kenya", "forecast", "rainfall"))
+
+    def test_a_getcapabilities_scopes_to_the_organisation_alone(self):
+        """Discovery names no collection: per-layer filtering is Django's."""
+        scope = scope_of(wmts_capabilities_uri())
+        self.assertEqual(scope.org, "kenya")
+        self.assertIsNone(scope.catalog)
+        self.assertIsNone(scope.collection)
+
+    def test_a_missing_request_parameter_scopes_to_nothing(self):
+        self.assertIsNone(scope_of("/titiler/kenya/wmts?LAYER=a:b:c"))
+
+    def test_an_unknown_request_scopes_to_nothing(self):
+        self.assertIsNone(
+            scope_of("/titiler/kenya/wmts?REQUEST=GetLegendGraphic&LAYER=a:b:c")
+        )
+
+    def test_a_gettile_without_a_layer_scopes_to_nothing(self):
+        self.assertIsNone(scope_of("/titiler/kenya/wmts?REQUEST=GetTile"))
+
+    def test_a_layer_short_of_three_parts_scopes_to_nothing(self):
+        self.assertIsNone(
+            scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast:rainfall")
+        )
+
+    def test_a_layer_with_a_blank_part_scopes_to_nothing(self):
+        self.assertIsNone(
+            scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast::rain")
+        )
+
+    def test_a_repeated_layer_scopes_to_nothing(self):
+        """Which duplicate the shim would pick is not visible from here."""
+        self.assertIsNone(
+            scope_of(
+                "/titiler/kenya/wmts?REQUEST=GetTile"
+                "&LAYER=forecast:public:rain&LAYER=forecast:private:rain"
+            )
+        )
+
+    def test_a_layer_repeated_across_spellings_scopes_to_nothing(self):
+        """Case-insensitive names make ``layer`` and ``LAYER`` the same
+        parameter, so two spellings are a repetition, not two parameters."""
+        self.assertIsNone(
+            scope_of(
+                "/titiler/kenya/wmts?REQUEST=GetTile"
+                "&layer=forecast:public:rain&LAYER=forecast:private:rain"
+            )
+        )
+
+    def test_a_repeated_request_scopes_to_nothing(self):
+        self.assertIsNone(
+            scope_of(
+                "/titiler/kenya/wmts?REQUEST=GetCapabilities&REQUEST=GetTile"
+                "&LAYER=a:b:c"
+            )
+        )
+
+    def test_a_path_below_the_endpoint_scopes_to_nothing(self):
+        self.assertIsNone(scope_of("/titiler/kenya/wmts/extra?REQUEST=GetCapabilities"))
+
+    def test_an_encoded_layer_decodes_like_every_query_value(self):
+        """Path slugs stay encoded; query values decode — the shim behind the
+        proxy reads the same decoded LAYER, so what is authorised is what
+        will be read. Martin's triple already behaves this way."""
+        uri = "/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast%3Apriv%61te%3Arain"
+        self.assertEqual(scope_of(uri).collection, "private")
+
+    def test_a_catalog_named_wmts_still_scopes_as_a_tile_route(self):
+        """The endpoint is exactly three segments; a five-segment path whose
+        catalog happens to be called ``wmts`` keeps the tile grammar."""
+        uri = "/titiler/kenya/wmts/rainfall/rain/preview.webp"
+        self.assertEqual(tuple(scope_of(uri)), ("kenya", "wmts", "rainfall"))
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
@@ -344,6 +467,98 @@ class ApiKeysReachPrivateTilesTests(TileGatewayTestCase):
         self.assertEqual(
             self.ask_with_key(titiler_uri(PUBLIC_SLUG), "grv_not-a-real-key"), 401,
         )
+
+
+class WmtsGatewayTests(TileGatewayTestCase):
+    """The WMTS grammar through the gate: same tiers, same audiences (#355).
+
+    A KVP GetTile is the same tile as the path-addressed one, reached through a
+    different spelling — so every answer below must match the Titiler tests
+    above tier for tier. GetCapabilities is the one genuinely new shape: it
+    addresses the organisation rather than a collection, and the gate's whole
+    job for it is the org+host agreement, with per-layer filtering left to
+    Django's ``visible_to``.
+    """
+
+    def test_a_public_gettile_is_served_anonymously(self):
+        self.assertEqual(self.ask(wmts_uri(PUBLIC_SLUG)), ALLOW)
+
+    def test_a_private_gettile_is_refused_anonymously(self):
+        self.assertEqual(self.ask(wmts_uri(PRIVATE_SLUG)), DENY)
+
+    def test_a_private_gettile_is_served_to_a_member(self):
+        self.login(self.member)
+        self.assertEqual(self.ask(wmts_uri(PRIVATE_SLUG)), ALLOW)
+
+    def test_a_private_gettile_is_refused_to_another_organisations_member(self):
+        self.login(self.outsider)
+        self.assertEqual(self.ask(wmts_uri(PRIVATE_SLUG)), DENY)
+
+    def test_an_internal_gettile_is_refused_even_to_a_member(self):
+        self.login(self.member)
+        self.assertEqual(self.ask(wmts_uri(INTERNAL_SLUG)), DENY)
+
+    def test_a_private_getfeatureinfo_is_gated_like_its_tile(self):
+        self.assertEqual(
+            self.ask(wmts_uri(PRIVATE_SLUG, request="GetFeatureInfo")), DENY,
+        )
+        self.login(self.member)
+        self.assertEqual(
+            self.ask(wmts_uri(PRIVATE_SLUG, request="GetFeatureInfo")), ALLOW,
+        )
+
+    def test_a_members_key_reaches_a_private_gettile(self):
+        self.assertEqual(
+            self.client.get(
+                reverse("tile_auth"), {"api_key": self.member_key},
+                HTTP_X_ORIGINAL_URI=wmts_uri(PRIVATE_SLUG),
+            ).status_code,
+            ALLOW,
+        )
+
+    def test_getcapabilities_is_served_anonymously_on_the_orgs_own_host(self):
+        """Allowed without asking who is calling: the document itself filters
+        per layer inside Django, so the gate holds nothing back here."""
+        self.assertEqual(self.ask(wmts_capabilities_uri()), ALLOW)
+
+    def test_getcapabilities_for_another_organisation_is_refused(self):
+        self.assertEqual(self.ask(wmts_capabilities_uri(org="uganda")), DENY)
+
+    def test_getcapabilities_on_a_host_belonging_to_no_organisation_is_refused(self):
+        self.client.defaults["HTTP_HOST"] = "nobody.georiva.test"
+        self.assertEqual(self.ask(wmts_capabilities_uri()), DENY)
+
+    def test_a_gettile_naming_another_organisation_in_the_path_is_refused(self):
+        """The LAYER may spell Kenya's collection; the path segment loses to
+        the Host all the same."""
+        self.assertEqual(self.ask(wmts_uri(PUBLIC_SLUG, org="uganda")), DENY)
+
+    def test_a_layer_borrowed_from_another_organisation_reads_this_hosts_rows(self):
+        """Uganda's private slug under Kenya's org resolves against Kenya's
+        catalog — the triple decides, and the triple is host-checked."""
+        self.login(self.member)
+        self.assertEqual(self.ask(wmts_uri(PRIVATE_SLUG)), ALLOW)
+        self.login(self.outsider)
+        self.assertEqual(self.ask(wmts_uri(PRIVATE_SLUG)), DENY)
+
+    def test_a_malformed_layer_is_refused(self):
+        self.assertEqual(
+            self.ask(f"/titiler/kenya/wmts?REQUEST=GetTile&LAYER={PUBLIC_SLUG}"),
+            DENY,
+        )
+
+    def test_a_repeated_layer_is_refused_even_when_both_are_public(self):
+        self.assertEqual(
+            self.ask(
+                "/titiler/kenya/wmts?REQUEST=GetTile"
+                f"&LAYER=forecast:{PUBLIC_SLUG}:{PUBLIC_SLUG}"
+                f"&LAYER=forecast:{PUBLIC_SLUG}:{PUBLIC_SLUG}"
+            ),
+            DENY,
+        )
+
+    def test_a_gettile_for_a_collection_that_does_not_exist_is_refused(self):
+        self.assertEqual(self.ask(wmts_uri("no-such-collection")), DENY)
 
 
 class ThePublicFastPathTests(TileGatewayTestCase):
