@@ -564,11 +564,17 @@ def _translate_capabilities_error(status_code: int) -> WMTSException:
 
     Behind the nginx gateway most of these are settled before this service is
     reached: the ``auth_request`` subrequest asks Django the same questions
-    first, so an unknown organisation is denied there and a broken key comes
-    back as nginx's own bare 401 rather than as a report — a gap on this
-    whole endpoint, GetTile included, and one to close in the gateway rather
-    than here (#372). These branches are what a direct caller gets,
-    and what stays right if the gate's answers and Django's ever part.
+    first, so an unknown organisation is denied there and a broken key is
+    refused there. Those two now answer a report of their own, rendered by the
+    gateway (#372). The 401 it renders is *this* branch's, word for word —
+    ``test_wmts_gateway_exceptions`` renders it from here and asserts the
+    gateway matches, so the wording below cannot change without
+    ``deploy/nginx/nginx.conf`` changing with it. Its 404 is deliberately
+    broader than this one: the gate refuses a collection the caller may not see
+    with the same status it refuses an unknown organisation, and a text as
+    specific as this branch's would narrow an answer that must stay ambiguous
+    (ADR 0014). These branches are what a direct caller gets, and what stays
+    right if the gate's answers and Django's ever part.
     """
     if status_code == 404:
         return WMTSException(

@@ -40,10 +40,16 @@ in neither queryset, so it is denied without a rule of its own.
 Denials are 403, which nginx turns into the 404 the other planes already give:
 a private tile a caller may not see does not exist, and a status that
 distinguished "forbidden" from "absent" would answer precisely the question the
-tier exists to keep quiet. A *broken* key still surfaces as 401 — nginx passes
-that through untouched — because that answer is the same whether the collection
-is there or not, and it is what tells a QGIS user their key expired rather than
-leaving them debugging a dataset that appears to have vanished (ADR 0014).
+tier exists to keep quiet. A *broken* key still surfaces as 401 — nginx keeps
+that status — because that answer is the same whether the collection is there or
+not, and it is what tells a QGIS user their key expired rather than leaving them
+debugging a dataset that appears to have vanished (ADR 0014).
+
+Neither answer carries a body from here, and on one address that was not enough.
+The WMTS KVP endpoint is reached by clients that parse OGC XML and nothing else,
+so both statuses are given an ExceptionReport body by the gateway on that path
+alone (#372). The decision is still entirely this view's; the gateway only
+spells it in a dialect those clients can read.
 """
 from rest_framework import status
 from rest_framework.response import Response

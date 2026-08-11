@@ -519,8 +519,10 @@ request line and the caller's own credentials (session cookie, `Authorization`, 
 address through `machine_plane.scope_of` — the inverse of the URL builders beside it — checks the org segment
 against the Host, and answers from the same `public()` / `visible_to()` vocabulary every other serving plane uses.
 Titiler and Martin gain no tenancy logic, which is the property it exists to preserve. Denials are 403 on the wire
-(all `auth_request` understands) and 404 to the caller; a broken key stays 401. Cached ~60s per
-collection-and-credential, so revocation lags on tiles and nowhere else. See ADR 0015.
+(all `auth_request` understands) and 404 to the caller; a broken key stays 401. Both carry an OWS
+ExceptionReport body on the WMTS KVP endpoint alone, whose clients parse nothing else, and nginx's own error page
+everywhere else. Cached ~60s per collection-and-credential, so revocation lags on tiles and nowhere else.
+See ADR 0015.
 _Avoid_: tile auth middleware, tile permission check, signed tile URL
 
 ### Styling
