@@ -166,9 +166,13 @@ def _append_layer(contents, request, variable, dimensions):
     # Named styles (#359): identifiers are the style slugs the tile route's
     # ``?style=`` reads — which styles exist stays Django's knowledge (ADR
     # 0023) — with the actual default marked. Prefetched rows, and the model's
-    # ordering already puts the default first. A variable with no styles keeps
-    # a placeholder entry: the schema requires a default, and the styleless
-    # tile route already renders the variable's default.
+    # ordering already puts the default first. The database forbids a second
+    # default but not a missing one; then nothing is marked — ``isDefault``
+    # defaults to false in the schema, and marking a style the styleless route
+    # would not render is exactly the silent lie ADR 0023 rules out. A
+    # variable with no styles at all keeps a placeholder entry instead: the
+    # document needs a default, and the styleless tile route already renders
+    # the variable's default.
     styles = list(variable.styles.all())
     for named in styles:
         attributes = {"isDefault": "true"} if named.is_default else {}

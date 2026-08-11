@@ -446,6 +446,15 @@ class WMTSStyleTests(TestCase):
             MachineScope("test-org", "weather", "temperature"),
         )
 
+    def test_styles_with_no_default_flagged_mark_nothing(self):
+        """The database forbids a second default, not a missing one. Then no
+        entry is marked: the styleless route renders grayscale, so marking a
+        named style would advertise a default it is not (ADR 0023)."""
+        VariableStyle.objects.filter(variable=self.styled).update(is_default=False)
+        styles = self.styles(self.layer("weather:temperature:t2m"))
+        self.assertEqual(len(styles), 2)
+        self.assertEqual([s.get("isDefault") for s in styles], [None, None])
+
     def test_a_variable_without_styles_keeps_a_valid_default_entry(self):
         styles = self.styles(self.layer("weather:temperature:rh"))
         (placeholder,) = styles
