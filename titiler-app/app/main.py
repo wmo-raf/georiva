@@ -22,6 +22,7 @@ from app.dependencies import (
     SemanticTileConfig,
 )
 from app.middleware import RequestLoggingMiddleware
+from app.wmts import router as wmts_router
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,9 @@ app.add_middleware(
 @app.exception_handler(RasterioIOError)
 async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> JSONResponse:
     msg = str(exc)
-    if "404" in msg or "HTTP response code: 404" in msg:
+    # MinIO answers a missing object with HTTP 404; a local-filesystem backend
+    # says ENOENT. Both mean the same thing: no asset at this time/reftime.
+    if "404" in msg or "HTTP response code: 404" in msg or "No such file or directory" in msg:
         logger.warning("COG not found: %s", request.url)
         return JSONResponse(
             status_code=404,
@@ -80,6 +83,11 @@ app.include_router(
     cog.router,
     prefix=TILE_ROUTE_PREFIX,
 )
+
+#: The KVP WMTS endpoint, `/{org}/wmts` — two segments, so it can never be
+#: read as the four-segment tile grammar above. Like every other route here
+#: the org is carried, never resolved (ADR 0013).
+app.include_router(wmts_router)
 
 
 # ---------------------------------------------------------------------------
