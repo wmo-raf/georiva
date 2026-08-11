@@ -349,7 +349,20 @@ WMTS_STYLE_PLACEHOLDER = "Style"
 WMTS_STYLE_PARAM = "style"
 
 
-def wmts_rest_tile_template(variable, dimensions=(), styled=False) -> str:
+def _api_key_pair(api_key):
+    """The ``api_key=…`` query pair a keyed WMTS document writes, encoded.
+
+    The parameter is the one credential transport the tile gate reads from a
+    URL (``accounts.authentication.QUERY_PARAM``, forwarded onto the nginx
+    auth subrequest, ADR 0015). Imported late: this module is a leaf the model
+    layer loads early, and the authentication module reaches back into models.
+    """
+    from georiva.accounts.authentication import QUERY_PARAM
+
+    return urlencode({QUERY_PARAM: api_key})
+
+
+def wmts_rest_tile_template(variable, dimensions=(), styled=False, api_key=None) -> str:
     """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
 
     The existing per-variable tile route, spelt as a WMTS template: the
@@ -371,6 +384,11 @@ def wmts_rest_tile_template(variable, dimensions=(), styled=False) -> str:
     placeholder invites the client to substitute an advertised identifier and
     the no-styles placeholder entry names no slug the tile route knows: a
     styleless request already renders the default (ADR 0023).
+
+    ``api_key`` writes the caller's own credential into the template (#360) —
+    the transport a legacy client needs, because it can fill placeholders but
+    cannot append parameters. Only a document already personal to that caller
+    may pass it, and such documents never enter a shared cache.
     """
     collection = variable.collection
     root = titiler_variable_root(
@@ -384,11 +402,14 @@ def wmts_rest_tile_template(variable, dimensions=(), styled=False) -> str:
         (WMTS_DIMENSION_PARAMS[identifier], identifier)
         for identifier in dimensions
     ]
-    query = "&".join(f"{param}={{{placeholder}}}" for param, placeholder in params)
+    parts = [f"{param}={{{placeholder}}}" for param, placeholder in params]
+    if api_key:
+        parts.append(_api_key_pair(api_key))
+    query = "&".join(parts)
     return f"{template}?{query}" if query else template
 
 
-def wmts_capabilities_url(organisation) -> str:
+def wmts_capabilities_url(organisation, api_key=None) -> str:
     """The REST capabilities document on the metadata plane (#354).
 
     What Titiler itself fetches when proxying a KVP GetCapabilities, and what
@@ -396,5 +417,10 @@ def wmts_capabilities_url(organisation) -> str:
     the same reason ``tile_config`` is: Titiler dials it on an internal
     hostname that belongs to no organisation, so the path is the only copy of
     the tenant (ADR 0013).
+
+    ``api_key`` keys the address as it keys the tile templates (#360): a keyed
+    document advertises this as its own refresh URL, and a bare spelling there
+    would silently drop the caller back to the public-only view.
     """
-    return f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml"
+    url = f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml"
+    return f"{url}?{_api_key_pair(api_key)}" if api_key else url

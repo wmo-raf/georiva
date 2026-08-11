@@ -202,6 +202,14 @@ class WmtsAddressTests(TestCase):
             wmts_capabilities_url(self.kenya), wmts_capabilities_url(self.uganda),
         )
 
+    def test_a_keyed_capabilities_url_carries_the_credential_param(self):
+        """#360: the keyed document advertises this as its own refresh URL, on
+        the same ``api_key`` parameter the tile gate reads (ADR 0015)."""
+        self.assertEqual(
+            wmts_capabilities_url(self.kenya, api_key="grv_secret"),
+            "/api/wmts/kenya/WMTSCapabilities.xml?api_key=grv_secret",
+        )
+
 
 class WmtsRestTileTemplateTests(TestCase):
     """The ResourceURL template a capabilities Layer advertises (#356).
@@ -250,6 +258,24 @@ class WmtsRestTileTemplateTests(TestCase):
     def test_a_styled_variable_without_dimensions_still_gets_the_placeholder(self):
         template = wmts_rest_tile_template(self.kenya_tree["variable"], styled=True)
         self.assertTrue(template.endswith(".png?style={Style}"))
+
+    def test_a_keyed_template_appends_the_credential_after_the_placeholders(self):
+        """#360: the key rides the same ``api_key`` parameter the auth
+        subrequest reads, last so the placeholder grammar stays untouched —
+        and it is written encoded, unlike the literal ``{…}`` placeholders."""
+        template = wmts_rest_tile_template(
+            self.kenya_tree["variable"], ("Time",), styled=True,
+            api_key="grv_secret",
+        )
+        self.assertTrue(
+            template.endswith("?style={Style}&time={Time}&api_key=grv_secret")
+        )
+
+    def test_a_keyed_template_without_dimensions_still_carries_the_key(self):
+        template = wmts_rest_tile_template(
+            self.kenya_tree["variable"], api_key="grv_secret",
+        )
+        self.assertTrue(template.endswith(".png?api_key=grv_secret"))
 
     def test_two_organisations_sharing_a_slug_get_different_templates(self):
         self.assertNotEqual(

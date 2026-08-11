@@ -9,10 +9,12 @@ back verbatim.
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 from xml.etree import ElementTree as ET
 
+from georiva.accounts.models import ApiKey
 from georiva.core.machine_plane import (
     MachineScope,
     scope_of,
@@ -22,7 +24,9 @@ from georiva.core.machine_plane import (
 from georiva.core.models import (
     Catalog, Collection, Item, Unit, Variable, VariableStyle,
 )
-from georiva.organisations.testing import dial_org, make_organisation, org_host
+from georiva.organisations.testing import (
+    dial_org, join_org, make_organisation, org_host,
+)
 
 NS = {
     "wmts": "http://www.opengis.net/wmts/1.0",
@@ -471,3 +475,210 @@ class WMTSStyleTests(TestCase):
         template = layer.find("wmts:ResourceURL", NS).get("template")
         self.assertNotIn("{Style}", template)
         self.assertNotIn("style=", template)
+
+
+class WMTSCredentialTests(TestCase):
+    """Private layers and API-key propagation (#360).
+
+    A valid key widens the document through the collection manager's
+    ``visible_to`` and nothing looser (ADR 0014); a key that travelled as
+    ``?api_key=`` is additionally written into every advertised URL, so a
+    legacy client — which can fill placeholders but cannot append parameters —
+    reaches private tiles from one paste. Keyed documents are personal and say
+    so to caches.
+    """
+
+    PUBLIC = "forecast:temperature:t2m"
+    PRIVATE = "forecast:members-only:t2m"
+
+    def setUp(self):
+        dial_org(self.client)
+        self.organisation = make_organisation()
+        catalog = Catalog.objects.create(
+            organisation=self.organisation,
+            name="Forecast", slug="forecast", file_format="geotiff",
+        )
+        unit = Unit.objects.create(name="Celsius", symbol="C")
+
+        public = Collection.objects.create(
+            catalog=catalog, name="Temperature", slug="temperature",
+            visibility=Collection.Visibility.PUBLIC,
+        )
+        Variable.objects.create(
+            collection=public, slug="t2m", name="2m Temperature",
+            unit=unit, value_min=0, value_max=50,
+        )
+        private = Collection.objects.create(
+            catalog=catalog, name="Members only", slug="members-only",
+            visibility=Collection.Visibility.PRIVATE,
+        )
+        Variable.objects.create(
+            collection=private, slug="t2m", name="private t2m",
+            unit=unit, value_min=0, value_max=50,
+        )
+        Item.objects.create(
+            collection=private,
+            time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+        )
+        internal = Collection.objects.create(
+            catalog=catalog, name="Intermediate", slug="intermediate",
+            visibility=Collection.Visibility.INTERNAL,
+        )
+        Variable.objects.create(
+            collection=internal, slug="t2m", name="internal t2m",
+            unit=unit, value_min=0, value_max=50,
+        )
+
+        User = get_user_model()
+        member = User.objects.create_user("member", password="x")
+        join_org(member)
+        _, self.member_key = ApiKey.objects.mint(user=member, name="qgis")
+        outsider = User.objects.create_user("outsider", password="x")
+        join_org(outsider, "other-org")
+        _, self.outsider_key = ApiKey.objects.mint(user=outsider, name="qgis")
+        admin = User.objects.create_superuser("admin", password="x")
+        _, self.admin_key = ApiKey.objects.mint(user=admin, name="ops")
+
+    def fetch(self, params=None, **extra):
+        response = self.client.get(
+            reverse("wmts:capabilities", args=[self.organisation.slug]),
+            params or {}, **extra,
+        )
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    def identifiers(self, response):
+        document = ET.fromstring(response.content)
+        return [
+            layer.findtext("ows:Identifier", namespaces=NS)
+            for layer in document.findall("wmts:Contents/wmts:Layer", NS)
+        ]
+
+    def templates(self, response):
+        document = ET.fromstring(response.content)
+        return {
+            layer.findtext("ows:Identifier", namespaces=NS):
+                layer.find("wmts:ResourceURL", NS).get("template")
+            for layer in document.findall("wmts:Contents/wmts:Layer", NS)
+        }
+
+    def test_anonymous_discovery_stays_public_only(self):
+        self.assertEqual(self.identifiers(self.fetch()), [self.PUBLIC])
+
+    def test_a_members_key_adds_the_orgs_private_layers_and_never_internal(self):
+        response = self.fetch({"api_key": self.member_key})
+        self.assertEqual(
+            self.identifiers(response), [self.PRIVATE, self.PUBLIC],
+        )
+
+    def test_another_organisations_member_sees_public_only(self):
+        response = self.fetch({"api_key": self.outsider_key})
+        self.assertEqual(self.identifiers(response), [self.PUBLIC])
+
+    def test_the_instance_admin_sees_private_layers(self):
+        response = self.fetch({"api_key": self.admin_key})
+        self.assertEqual(
+            self.identifiers(response), [self.PRIVATE, self.PUBLIC],
+        )
+
+    def test_a_broken_key_is_unauthorised_rather_than_public_only(self):
+        """The same 401 the tile gate answers (ADR 0014): a silently
+        public-only document would send a key holder debugging a dataset that
+        appears to have vanished."""
+        response = self.client.get(
+            reverse("wmts:capabilities", args=[self.organisation.slug]),
+            {"api_key": "grv_not-a-real-key"},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_a_query_key_is_written_into_every_tile_template(self):
+        templates = self.templates(self.fetch({"api_key": self.member_key}))
+        self.assertEqual(len(templates), 2)
+        for template in templates.values():
+            self.assertIn(f"api_key={self.member_key}", template)
+
+    def test_the_service_metadata_url_keeps_the_key(self):
+        """The document advertises its own address; without the key a client
+        refreshing capabilities through it would silently drop to the
+        public-only view."""
+        response = self.fetch({"api_key": self.member_key})
+        document = ET.fromstring(response.content)
+        href = document.find("wmts:ServiceMetadataURL", NS).get(
+            f"{{{NS['xlink']}}}href"
+        )
+        self.assertIn(f"api_key={self.member_key}", href)
+
+    def test_an_anonymous_document_carries_no_key_anywhere(self):
+        self.assertNotIn(b"api_key", self.fetch().content)
+
+    def test_a_header_key_widens_visibility_but_marks_no_urls(self):
+        """A caller who can send an Authorization header can send it on tile
+        requests too — only the query transport needs propagating, and a
+        credential should not move to a weaker transport uninvited."""
+        response = self.fetch(
+            HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+        )
+        self.assertIn(self.PRIVATE, self.identifiers(response))
+        self.assertNotIn(b"api_key", response.content)
+
+    def test_a_query_string_the_authenticator_ignored_is_not_propagated(self):
+        """With a Bearer header presented, the header is the judged credential
+        and the query value was never validated — writing it into the document
+        would advertise a string nobody checked."""
+        response = self.fetch(
+            {"api_key": "grv_never-checked"},
+            HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+        )
+        self.assertIn(self.PRIVATE, self.identifiers(response))
+        self.assertNotIn(b"api_key=grv_never-checked", response.content)
+
+    def test_a_keyed_document_is_private_to_caches(self):
+        response = self.fetch({"api_key": self.member_key})
+        self.assertIn("private", response.get("Cache-Control", ""))
+
+    def test_a_session_document_is_private_to_caches_too(self):
+        """Any credentialed document may list private layers; none of them may
+        enter a shared cache, whatever the transport."""
+        self.client.login(username="member", password="x")
+        response = self.fetch()
+        self.assertIn("private", response.get("Cache-Control", ""))
+
+    def test_an_anonymous_document_is_not_marked_private(self):
+        """The shareable document stays shareable — the shared cache of #361
+        must be allowed to hold it."""
+        self.assertNotIn("private", self.fetch().get("Cache-Control", ""))
+
+    def test_legacy_accept_headers_are_not_negotiated_away(self):
+        """A legacy client asking for XML (or anything else) gets the one
+        representation this document has, never a 406."""
+        response = self.fetch(
+            {"api_key": self.member_key}, HTTP_ACCEPT="application/xml",
+        )
+        self.assertEqual(response["Content-Type"], "application/xml")
+
+    def test_private_tiles_pass_the_gate_using_only_document_urls(self):
+        """The end-to-end promise of #360: fill the advertised template with
+        the advertised defaults and the resulting URL — key included, exactly
+        as nginx forwards the original query onto the auth subrequest — is
+        authorised for the private layer."""
+        response = self.fetch({"api_key": self.member_key})
+        document = ET.fromstring(response.content)
+        for layer in document.findall("wmts:Contents/wmts:Layer", NS):
+            if layer.findtext("ows:Identifier", namespaces=NS) == self.PRIVATE:
+                break
+        else:
+            self.fail("No private layer in the keyed document")
+        template = layer.find("wmts:ResourceURL", NS).get("template")
+        time = layer.find("wmts:Dimension/wmts:Default", NS).text
+        split = urlsplit(template.format(TileMatrix=1, TileCol=0, TileRow=1, Time=time))
+
+        gate = self.client.get(
+            f"{reverse('tile_auth')}?{split.query}",
+            HTTP_X_ORIGINAL_URI=f"{split.path}?{split.query}",
+        )
+        self.assertEqual(gate.status_code, 204)
+
+        anonymous = self.client.get(
+            reverse("tile_auth"), HTTP_X_ORIGINAL_URI=split.path,
+        )
+        self.assertEqual(anonymous.status_code, 403)

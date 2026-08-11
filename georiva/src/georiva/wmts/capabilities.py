@@ -16,11 +16,15 @@ the request dialled.
 The document advertises ``WebMercatorQuad`` as the only TileMatrixSet,
 ``image/png`` as the only format, per-layer ``Time``/``Reftime`` dimensions
 enumerated from the organisation's Items (#358), and each variable's named
-styles with the real default marked (#359). Credentialed (private-layer)
-documents arrive in later slices of #354.
+styles with the real default marked (#359). A credentialed request widens the
+listing through the same ``visible_to``, and a key that travelled as
+``?api_key=`` is written into every advertised URL (#360) — so a legacy
+client, which can fill placeholders but cannot append parameters, reaches its
+private layers from one paste.
 """
 from xml.etree import ElementTree as ET
 
+from georiva.accounts.authentication import QUERY_PARAM, presented_secret
 from georiva.core.machine_plane import (
     WMTS_REFTIME_DIMENSION,
     WMTS_TIME_DIMENSION,
@@ -63,10 +67,11 @@ def visible_variables(request):
     """The variables ``request`` may discover, in a stable reading order.
 
     Visibility is the collection manager's ``visible_to`` and nothing looser
-    (ADR 0014): anonymous callers see ``public`` collections only, and this
-    slice serves no other kind of caller. ``scoped_queryset`` then pins the
-    rows to the dialled organisation — the same double filter the STAC views
-    apply.
+    (ADR 0014): anonymous callers see ``public`` collections only, a member of
+    the dialled organisation — by session, header or ``?api_key=`` — sees its
+    ``private`` collections too, and ``internal`` goes nowhere.
+    ``scoped_queryset`` then pins the rows to the dialled organisation — the
+    same double filter the STAC views apply.
     """
     return scoped_queryset(
         request,
@@ -80,8 +85,26 @@ def visible_variables(request):
     )
 
 
+def propagated_api_key(request):
+    """The key to write into advertised URLs, or ``None`` (#360).
+
+    Only a key that travelled as ``?api_key=`` propagates: a caller who can
+    send an ``Authorization`` header can send it on tile requests too, and a
+    credential should not move to the weaker transport uninvited. The value is
+    propagated only when it is the secret the authenticator actually judged —
+    with a Bearer header presented, the header wins and a query string nobody
+    validated must not be advertised. An *invalid* key never reaches this
+    module at all: authentication already answered 401.
+    """
+    secret = request.query_params.get(QUERY_PARAM)
+    if secret and presented_secret(request) == secret:
+        return secret
+    return None
+
+
 def build_capabilities(request, organisation) -> bytes:
     """The WMTSCapabilities.xml body for ``organisation``, as ``request`` may see it."""
+    api_key = propagated_api_key(request)
     root = ET.Element(_wmts("Capabilities"), {"version": "1.0.0"})
 
     service = ET.SubElement(root, _ows("ServiceIdentification"))
@@ -96,13 +119,14 @@ def build_capabilities(request, organisation) -> bytes:
         if collection.pk not in dimensions_by_collection:
             dimensions_by_collection[collection.pk] = layer_dimensions(collection)
         _append_layer(
-            contents, request, variable, dimensions_by_collection[collection.pk],
+            contents, request, variable,
+            dimensions_by_collection[collection.pk], api_key,
         )
     _append_tile_matrix_set(contents)
 
     ET.SubElement(root, _wmts("ServiceMetadataURL"), {
         f"{{{XLINK_NS}}}href": get_full_url_by_request(
-            request, wmts_capabilities_url(organisation),
+            request, wmts_capabilities_url(organisation, api_key=api_key),
         ),
     })
 
@@ -150,7 +174,7 @@ def layer_dimensions(collection):
     return {WMTS_TIME_DIMENSION: (times, times[-1])}
 
 
-def _append_layer(contents, request, variable, dimensions):
+def _append_layer(contents, request, variable, dimensions, api_key=None):
     collection = variable.collection
     layer = ET.SubElement(contents, _wmts("Layer"))
     ET.SubElement(layer, _ows("Title")).text = f"{collection.name} — {variable.name}"
@@ -200,7 +224,9 @@ def _append_layer(contents, request, variable, dimensions):
         "resourceType": "tile",
         "template": get_full_url_by_request(
             request,
-            wmts_rest_tile_template(variable, dimensions, styled=bool(styles)),
+            wmts_rest_tile_template(
+                variable, dimensions, styled=bool(styles), api_key=api_key,
+            ),
         ),
     })
 
