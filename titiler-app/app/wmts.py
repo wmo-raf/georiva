@@ -319,14 +319,38 @@ def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -
     return WMTSException(status_code, "NoApplicableCode", None, detail or "Tile request failed")
 
 
-async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, str]) -> Response:
-    """Answer GetTile by re-entering the existing semantic tile route.
+async def _reenter(request: Request, path: str, query: dict[str, str]) -> httpx.Response:
+    """Ask this same application one of its own semantic routes.
 
-    The KVP triple and the org segment are joined back into the very URL the
-    capabilities document's REST templates advertise, and the request is
-    dispatched through this same ASGI application — the two bindings cannot
-    drift apart because one is defined as the other.
+    How both KVP operations reach the data: the org segment and the ``LAYER``
+    triple are joined back into the very URL the capabilities document
+    advertises, and the request is dispatched through this application rather
+    than reimplemented beside it — the KVP binding cannot drift from the REST
+    one because one is defined as the other.
+
+    The base URL names nothing real: nothing leaves the process, and the
+    reader that answers is the same reader a browser's tile request reaches.
     """
+    transport = httpx.ASGITransport(app=request.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://wmts-kvp-shim") as client:
+        return await client.get(path, params=query)
+
+
+def _detail_of(response: httpx.Response) -> str:
+    """The ``detail`` a refused semantic route explains itself with.
+
+    FastAPI's own error shape, and the wording :func:`_translate_tile_error`
+    reads a locator out of. A body that is not that shape yields nothing
+    rather than a guess.
+    """
+    try:
+        return response.json().get("detail", "")
+    except ValueError:
+        return ""
+
+
+async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, str]) -> Response:
+    """Answer GetTile by re-entering the existing semantic tile route."""
     _validate_service_and_version(params)
     _validate_tile_choices(params)
     catalog, collection, variable = _parse_layer(params)
@@ -338,18 +362,11 @@ async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, 
         query["style"] = style
 
     path = f"/{org_slug}/{catalog}/{collection}/{variable}/tiles/{TILE_MATRIX_SET}/{zoom}/{col}/{row}.png"
-    transport = httpx.ASGITransport(app=request.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://wmts-kvp-shim") as client:
-        resp = await client.get(path, params=query)
+    resp = await _reenter(request, path, query)
 
     if resp.status_code == 200:
         return Response(resp.content, media_type=resp.headers.get("content-type", TILE_FORMAT))
-
-    try:
-        detail = resp.json().get("detail", "")
-    except ValueError:
-        detail = ""
-    raise _translate_tile_error(resp.status_code, detail, style)
+    raise _translate_tile_error(resp.status_code, _detail_of(resp), style)
 
 
 def _validate_info_format(params: dict[str, str]) -> None:
@@ -440,7 +457,7 @@ async def _tile_config_for(address: tuple[str, str, str, str], style: Optional[s
             variable_slug=variable, style=style,
         )
     except HTTPException as exc:
-        raise _translate_tile_error(exc.status_code, str(exc.detail or ""), style)
+        raise _translate_tile_error(exc.status_code, str(exc.detail or ""), style) from exc
 
 
 async def _read_point(
@@ -449,12 +466,11 @@ async def _read_point(
 ) -> Optional[float]:
     """The raw physical value under ``(lon, lat)``, or ``None`` where there is none.
 
-    Re-enters this application's own point route, as GetTile re-enters its
-    tile route: the COG address comes from the same semantic path translation,
-    so an identify reads the very file the tile under the cursor was drawn
-    from. That route applies neither colormap nor rescale, which is what makes
-    the number returned here the physical one rather than the 0–255 a pixel
-    was painted with.
+    Read through the point route, so the COG address comes from the same
+    semantic path translation the tile did and an identify reads the very file
+    the pixel under the cursor was drawn from. That route applies neither
+    colormap nor rescale, which is what makes the number returned here the
+    physical one rather than the 0–255 a pixel was painted with.
 
     ``None`` is the answer to a click that found no data — a nodata pixel,
     which arrives already masked, or a point outside the COG's own footprint,
@@ -465,19 +481,13 @@ async def _read_point(
     not hold rather than a place the grid does not cover.
     """
     path = f"/{'/'.join(address)}/point/{lon},{lat}"
-    transport = httpx.ASGITransport(app=request.app)
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://wmts-kvp-shim") as client:
-            resp = await client.get(path, params=query)
+        resp = await _reenter(request, path, query)
     except PointOutsideBounds:
         return None
 
     if resp.status_code != 200:
-        try:
-            detail = resp.json().get("detail", "")
-        except ValueError:
-            detail = ""
-        raise _translate_tile_error(resp.status_code, detail, style)
+        raise _translate_tile_error(resp.status_code, _detail_of(resp), style)
 
     # The first band, because the whole pipeline behind this address is
     # one-band-per-variable: the rescale and colormap a tile is drawn with
