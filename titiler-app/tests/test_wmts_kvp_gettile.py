@@ -5,43 +5,12 @@ request must answer exactly what the REST spelling answers — same bytes on
 success, same status on refusal — with only the error vocabulary changing.
 """
 import json
-import xml.etree.ElementTree as ET
 
-from tests.conftest import CATALOG, COLLECTION, ORG, TILE_CONFIG, VARIABLE
+from tests.conftest import (
+    CATALOG, COLLECTION, ORG, TILE_CONFIG, VARIABLE, exception_of, kvp,
+)
 
-LAYER = f"{CATALOG}:{COLLECTION}:{VARIABLE}"
 TIME = "2026-03-23T12:00:00Z"
-
-KVP_BASE = {
-    "SERVICE": "WMTS",
-    "VERSION": "1.0.0",
-    "REQUEST": "GetTile",
-    "LAYER": LAYER,
-    "STYLE": "",
-    "TILEMATRIXSET": "WebMercatorQuad",
-    "TILEMATRIX": "0",
-    "TILEROW": "0",
-    "TILECOL": "0",
-    "FORMAT": "image/png",
-    "TIME": TIME,
-}
-
-
-def kvp(**overrides):
-    params = dict(KVP_BASE)
-    for name, value in overrides.items():
-        if value is None:
-            params.pop(name, None)
-        else:
-            params[name] = value
-    return params
-
-
-def exception_of(response):
-    assert response.headers["content-type"].startswith("application/xml")
-    root = ET.fromstring(response.content)
-    assert root.tag == "{http://www.opengis.net/ows/1.1}ExceptionReport"
-    return root.find("{http://www.opengis.net/ows/1.1}Exception")
 
 
 def seed_default(fake_redis, seed_cog, **cog_kwargs):
@@ -149,7 +118,9 @@ class TestStyle:
         assert response.status_code == 404
         exc = exception_of(response)
         assert exc.get("exceptionCode") == "InvalidParameterValue"
-        assert exc.get("locator") == "STYLE"
+        assert "style" in exc.findtext(
+            "{http://www.opengis.net/ows/1.1}ExceptionText"
+        ).lower()
 
     def test_an_unknown_layer_is_a_404_exception_report(self, client, fake_redis, seed_cog):
         response = client.get(f"/{ORG}/wmts", params=kvp(LAYER="no:such:layer"))
@@ -158,3 +129,14 @@ class TestStyle:
         exc = exception_of(response)
         assert exc.get("exceptionCode") == "InvalidParameterValue"
         assert exc.get("locator") == "LAYER"
+
+    def test_an_unknown_layer_with_a_named_style_accuses_neither_alone(self, client, fake_redis, seed_cog):
+        # The config 404 cannot say whether the layer or the style was the
+        # stranger, so the report names both and pins no locator.
+        response = client.get(f"/{ORG}/wmts", params=kvp(LAYER="no:such:layer", STYLE="analyst"))
+
+        assert response.status_code == 404
+        exc = exception_of(response)
+        assert exc.get("locator") is None
+        text = exc.findtext("{http://www.opengis.net/ows/1.1}ExceptionText").lower()
+        assert "layer" in text and "style" in text

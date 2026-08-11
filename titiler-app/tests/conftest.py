@@ -18,6 +18,7 @@ real services answer at, and assertions live on responses.
 import os
 import shutil
 import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 # The app reads these at import time, so they are pinned before any test
@@ -39,6 +40,41 @@ from app.main import app
 
 #: The address every test speaks unless it says otherwise.
 ORG, CATALOG, COLLECTION, VARIABLE = "kenya", "forecasts", "gfs", "temperature"
+
+#: A complete, valid KVP GetTile query for that address.
+KVP_BASE = {
+    "SERVICE": "WMTS",
+    "VERSION": "1.0.0",
+    "REQUEST": "GetTile",
+    "LAYER": f"{CATALOG}:{COLLECTION}:{VARIABLE}",
+    "STYLE": "",
+    "TILEMATRIXSET": "WebMercatorQuad",
+    "TILEMATRIX": "0",
+    "TILEROW": "0",
+    "TILECOL": "0",
+    "FORMAT": "image/png",
+    "TIME": "2026-03-23T12:00:00Z",
+}
+
+
+def kvp(**overrides):
+    """``KVP_BASE`` with parameters replaced, or removed via ``NAME=None``."""
+    params = dict(KVP_BASE)
+    for name, value in overrides.items():
+        if value is None:
+            params.pop(name, None)
+        else:
+            params[name] = value
+    return params
+
+
+def exception_of(response):
+    """The single ``ows:Exception`` element of an ExceptionReport response."""
+    assert response.headers["content-type"].startswith("application/xml")
+    root = ET.fromstring(response.content)
+    assert root.tag == "{http://www.opengis.net/ows/1.1}ExceptionReport"
+    return root.find("{http://www.opengis.net/ows/1.1}Exception")
+
 
 #: The rendering config Django would answer with — vmin/vmax/colormap in the
 #: shape ``palette_cache.build_variable_payload`` writes.

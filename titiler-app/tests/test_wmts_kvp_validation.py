@@ -8,8 +8,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from tests.test_wmts_kvp_gettile import exception_of, kvp
-from tests.conftest import ORG
+from tests.conftest import ORG, exception_of, kvp
 
 
 def get(client, **overrides):

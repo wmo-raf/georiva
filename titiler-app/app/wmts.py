@@ -194,8 +194,14 @@ def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -
     detail_lower = detail.lower()
     if status_code == 404:
         if "config" in detail_lower:
-            locator = "STYLE" if style else "LAYER"
-            text = "Unknown style for this layer" if style else "Unknown layer"
+            # A config 404 does not say whether the layer or the style was the
+            # stranger — that distinction is catalog knowledge this service
+            # deliberately lacks — so a styled request names both suspects and
+            # no locator, rather than accusing the style of the layer's crime.
+            if style:
+                locator, text = None, "Unknown layer, or unknown style for it"
+            else:
+                locator, text = "LAYER", "Unknown layer"
         elif "storage" in detail_lower or "time" in detail_lower:
             locator = "TIME"
             text = "No tile for this TIME/REFTIME combination"
