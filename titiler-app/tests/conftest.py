@@ -57,15 +57,25 @@ KVP_BASE = {
 }
 
 
-def kvp(**overrides):
-    """``KVP_BASE`` with parameters replaced, or removed via ``NAME=None``."""
-    params = dict(KVP_BASE)
+def overriding(base, **overrides):
+    """``base`` with parameters replaced, or removed via ``NAME=None``.
+
+    How every suite here varies a complete, valid query one parameter at a
+    time: a test says what is different about its request and nothing else, so
+    what it is actually exercising is the line you can read.
+    """
+    params = dict(base)
     for name, value in overrides.items():
         if value is None:
             params.pop(name, None)
         else:
             params[name] = value
     return params
+
+
+def kvp(**overrides):
+    """``KVP_BASE`` with parameters replaced, or removed via ``NAME=None``."""
+    return overriding(KVP_BASE, **overrides)
 
 
 def exception_of(response):

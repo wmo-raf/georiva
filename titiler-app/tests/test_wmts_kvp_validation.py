@@ -103,9 +103,8 @@ class TestInvalidParameters:
 
 
 class TestOperations:
-    @pytest.mark.parametrize("operation", ["GetCapabilities", "GetFeatureInfo"])
-    def test_later_slice_operations_answer_operation_not_supported(self, client, operation):
-        response = get(client, REQUEST=operation)
+    def test_a_later_slice_operation_answers_operation_not_supported(self, client):
+        response = get(client, REQUEST="GetFeatureInfo")
 
         assert response.status_code == 501
         exc = exception_of(response)

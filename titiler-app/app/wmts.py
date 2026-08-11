@@ -10,10 +10,15 @@ authorised this request against the same decoded value before nginx let it
 through — the two readers must agree, or the gate authorises one collection
 while this shim reads another.
 
+``REQUEST=GetCapabilities`` is answered from the same endpoint by fetching
+Django's document and handing it on unread (#362) — which layers exist and who
+may see them is exactly the knowledge ADR 0013 keeps out of this service — so
+one pasted URL discovers layers and then serves their tiles.
+
 Errors answer OGC ExceptionReport XML (OWS 1.1), never framework JSON: the
 clients on this endpoint are legacy KVP speakers that can parse nothing else.
-GetCapabilities (proxied to Django, #362) and GetFeatureInfo (#363) are later
-slices; until then they answer an honest OperationNotSupported.
+GetFeatureInfo (#363) is a later slice; until then it answers an honest
+OperationNotSupported.
 """
 import logging
 import re
@@ -22,6 +27,8 @@ from xml.sax.saxutils import escape, quoteattr
 
 import httpx
 from fastapi import APIRouter, Request, Response
+
+from app import dependencies
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +48,29 @@ MAX_ZOOM = 24
 #: mirroring the actual default (ADR 0023). Only an *unknown* style is a hard
 #: 404 — these two spellings are the default, not a fallback to it.
 DEFAULT_STYLE_ALIASES = ("", "default")
+
+#: Every path segment this shim splices into another URL must be slug-shaped:
+#: the org it was dialled on, and the three parts of ``LAYER``. Deliberately
+#: looser than Django's own ``slug`` converter, which is ASCII — this service
+#: is not the one deciding what exists, and a segment that gets past here
+#: still has to match a row on the other side. What it must not get past is
+#: anything that could re-shape a path, which would let the gate authorise
+#: one address while this reads another.
+SLUG_RE = re.compile(r"[\w-]+")
+
+#: Django's REST capabilities address — the spelling
+#: ``core.machine_plane.addresses.wmts_capabilities_url`` writes. The second
+#: and last piece of Django URL grammar this service holds; the tile-config
+#: callback in ``app.dependencies`` is the first, and both carry the
+#: organisation in the path because that is where Django put it. Neither can
+#: be pinned to its Django author by a test — the two services share a repo
+#: and nothing else — so both are spellings to change in pairs.
+CAPABILITIES_PATH = "/api/wmts/{org_slug}/WMTSCapabilities.xml"
+
+#: The credential parameter a keyed document's own URLs carry
+#: (``accounts.authentication.QUERY_PARAM``). Forwarded verbatim and never
+#: read: whether it names anybody is Django's question.
+API_KEY_PARAM = "api_key"
 
 
 class WMTSException(Exception):
@@ -98,6 +128,23 @@ def _require(params: dict[str, str], name: str) -> str:
     return value
 
 
+def _check_org_slug(org_slug: str) -> None:
+    """Refuse an organisation segment that could re-shape a URL it is spliced into.
+
+    The segment arrives in this endpoint's own path and leaves in two more —
+    the tile route GetTile dispatches to, and the Django address
+    GetCapabilities is fetched from — so its shape is the same question
+    :func:`_parse_layer` asks of the ``LAYER`` triple, asked once at the door
+    because both branches splice it. Reported as absent rather than invalid:
+    no organisation is spelt this way, and which institutions exist here is
+    not this caller's business.
+    """
+    if not SLUG_RE.fullmatch(org_slug):
+        raise WMTSException(
+            404, "InvalidParameterValue", None, "No WMTS service at this address",
+        )
+
+
 def _parse_layer(params: dict[str, str]) -> tuple[str, str, str]:
     """Split ``LAYER`` into the ``catalog:collection:variable`` triple.
 
@@ -110,7 +157,7 @@ def _parse_layer(params: dict[str, str]) -> tuple[str, str, str]:
     # Slug-shaped parts only: the triple is spliced into the tile route's
     # *path*, and the gate authorised the decoded LAYER value — a part that
     # could re-shape the path would let the two read different addresses.
-    if len(parts) != 3 or not all(re.fullmatch(r"[\w-]+", part) for part in parts):
+    if len(parts) != 3 or not all(SLUG_RE.fullmatch(part) for part in parts):
         raise WMTSException(
             400, "InvalidParameterValue", "LAYER",
             f"Layer identifier must be catalog:collection:variable, got {layer!r}",
@@ -152,12 +199,12 @@ def _parse_tile_coords(params: dict[str, str]) -> tuple[int, int, int]:
     return zoom, coords["tilerow"], coords["tilecol"]
 
 
-def _validate_fixed_choices(params: dict[str, str]) -> None:
-    """The parameters with exactly one honest value on this service.
+def _validate_service_and_version(params: dict[str, str]) -> None:
+    """The two parameters every operation on this endpoint shares.
 
-    SERVICE and VERSION are validated only when sent: requiring them would
-    lock out the sloppier legacy clients this endpoint exists for, while a
-    *wrong* value still means the client wants something this is not.
+    Validated only when sent: requiring them would lock out the sloppier
+    legacy clients this endpoint exists for, while a *wrong* value still means
+    the client wants something this is not.
     """
     service = params.get("service")
     if service is not None and service.lower() != "wmts":
@@ -169,6 +216,16 @@ def _validate_fixed_choices(params: dict[str, str]) -> None:
         raise WMTSException(
             400, "InvalidParameterValue", "VERSION", f"Version {version!r} not supported — only 1.0.0",
         )
+
+
+def _validate_tile_choices(params: dict[str, str]) -> None:
+    """The grid and format a tile may name — exactly one honest value each.
+
+    Asked of GetTile alone. A client sending GetCapabilities has not yet been
+    told which matrix set exists, so requiring one there would refuse every
+    honest discovery request, and the FORMAT such a client sends names the
+    document's own media type rather than a tile's.
+    """
     tms = _require(params, "tilematrixset")
     if tms != TILE_MATRIX_SET:
         raise WMTSException(
@@ -224,7 +281,8 @@ async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, 
     dispatched through this same ASGI application — the two bindings cannot
     drift apart because one is defined as the other.
     """
-    _validate_fixed_choices(params)
+    _validate_service_and_version(params)
+    _validate_tile_choices(params)
     catalog, collection, variable = _parse_layer(params)
     zoom, row, col = _parse_tile_coords(params)
 
@@ -254,6 +312,117 @@ async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, 
     raise _translate_tile_error(resp.status_code, detail, style)
 
 
+def _translate_capabilities_error(status_code: int) -> WMTSException:
+    """Re-spell Django's refusal of the document as a WMTS exception.
+
+    The 404 and the 401 carry through, because each is an answer to the client
+    rather than a failure of this service. 404 is what Django gives for an
+    organisation it does not serve, or one whose name disagrees with the host
+    that was dialled — reported as absent there, and reported as absent here.
+    401 is a credential Django refused, which is the one thing the caller can
+    actually fix and so the one worth a locator. Anything else is Django
+    misbehaving rather than the client, and this says so as the gateway it is
+    being on this request.
+
+    Behind the nginx gateway most of these are settled before this service is
+    reached: the ``auth_request`` subrequest asks Django the same questions
+    first, so an unknown organisation is denied there and a broken key comes
+    back as nginx's own bare 401 rather than as a report — a gap on this
+    whole endpoint, GetTile included, and one to close in the gateway rather
+    than here (#372). These branches are what a direct caller gets,
+    and what stays right if the gate's answers and Django's ever part.
+    """
+    if status_code == 404:
+        return WMTSException(
+            404, "InvalidParameterValue", None, "No WMTS service for this organisation",
+        )
+    if status_code in (401, 403):
+        return WMTSException(
+            status_code, "InvalidParameterValue", API_KEY_PARAM.upper(),
+            "The presented credential was refused",
+        )
+    return WMTSException(
+        502, "NoApplicableCode", None,
+        f"The capabilities document could not be built (upstream status {status_code})",
+    )
+
+
+async def _proxy_get_capabilities(request: Request, org_slug: str, params: dict[str, str]) -> Response:
+    """Answer GetCapabilities with Django's document, fetched and not read.
+
+    Django owns the document because it is pure metadata (ADR 0013), and this
+    endpoint answers with it so that discovery and tiles share the one URL a
+    legacy client is given. Proxied rather than redirected: those clients are
+    flaky on redirects, and this is one request per session.
+
+    Three things travel with the fetch, and nothing else does. The
+    organisation, in the path, spelt as ``wmts_capabilities_url`` writes it.
+    The Host the client dialled, because Django resolves the organisation from
+    it and makes every URL in the document absolute against that
+    organisation's own site — fetched on a bare internal container name, the
+    document would come back addressed to whichever site Django falls back to.
+    And the caller's credential — the ``api_key`` parameter or an
+    ``Authorization`` header — so a keyed request gets the private-inclusive,
+    key-propagated document (#360); which credentials are worth anything, and
+    which transport wins when both are presented, stays Django's decision.
+
+    Not a session cookie, which is the third transport Django's own planes
+    accept. Nothing on this endpoint is reached by a browser holding one — its
+    clients are desktop GIS carrying a key — and forwarding a cookie would
+    mean forwarding a ``Set-Cookie`` back through a proxy that has no session
+    of its own to keep. A signed-in browser therefore gets the anonymous
+    document here, and the REST capabilities URL is where its cookie counts.
+
+    What comes back is handed on unparsed, unrewritten and uncached. This
+    service holds no catalog knowledge to check it against, and a copy of a
+    document that lists layers and their times would be a second, staler
+    answer to a question Django already caches its own answer to (#361).
+    """
+    query = {}
+    api_key = params.get(API_KEY_PARAM)
+    if api_key:
+        query[API_KEY_PARAM] = api_key
+    forwarded = {
+        name: value
+        for name, value in (
+            ("host", request.headers.get("host")),
+            ("authorization", request.headers.get("authorization")),
+        )
+        if value
+    }
+
+    try:
+        async with dependencies.django_client() as client:
+            response = await client.get(
+                CAPABILITIES_PATH.format(org_slug=org_slug),
+                params=query, headers=forwarded,
+            )
+    except httpx.HTTPError as e:
+        logger.warning("WMTS capabilities fetch failed for %s: %s", org_slug, e)
+        raise WMTSException(
+            503, "NoApplicableCode", None,
+            "The capabilities document is unavailable — the metadata service could not be reached",
+        )
+
+    if response.status_code != 200:
+        raise _translate_capabilities_error(response.status_code)
+
+    headers = {}
+    cache_control = response.headers.get("cache-control")
+    if cache_control:
+        # Django's own directive, carried rather than restated: a keyed
+        # document is marked private there, and dropping that would leave a
+        # caller's private layer listing cacheable by everything between the
+        # two services. Nothing is added when Django sends nothing — deciding
+        # how long its document keeps is not this side's decision to take.
+        headers["Cache-Control"] = cache_control
+    return Response(
+        response.content,
+        media_type=response.headers.get("content-type", "application/xml"),
+        headers=headers,
+    )
+
+
 @router.get("/{org_slug}/wmts")
 async def wmts_kvp(org_slug: str, request: Request) -> Response:
     """The org-scoped KVP endpoint, ``/titiler/{org}/wmts`` behind the proxy.
@@ -264,11 +433,15 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
     collection before it got here (ADR 0015).
     """
     try:
+        _check_org_slug(org_slug)
         params = _collect_params(request)
         operation = _require(params, "request").lower()
         if operation == "gettile":
             return await _dispatch_get_tile(request, org_slug, params)
-        if operation in ("getcapabilities", "getfeatureinfo"):
+        if operation == "getcapabilities":
+            _validate_service_and_version(params)
+            return await _proxy_get_capabilities(request, org_slug, params)
+        if operation == "getfeatureinfo":
             raise WMTSException(
                 501, "OperationNotSupported", "REQUEST",
                 f"{params['request']} is not implemented yet on this endpoint",

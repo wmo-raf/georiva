@@ -19,6 +19,7 @@ from georiva.core.machine_plane import (
     MachineScope,
     scope_of,
     wmts_capabilities_url,
+    wmts_kvp_endpoint,
     wmts_rest_tile_template,
 )
 from georiva.core.models import (
@@ -186,6 +187,71 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
     def test_an_unknown_org_segment_is_absent_too(self):
         response = self.client.get(reverse("wmts:capabilities", args=["nowhere"]))
         self.assertEqual(response.status_code, 404)
+
+
+class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
+    """The KVP binding a legacy client reads out of the document (#362).
+
+    A modern client follows the per-layer REST templates; a KVP-only one reads
+    ``OperationsMetadata`` and learns the single org-scoped endpoint under the
+    Titiler prefix, which proxies GetCapabilities back to this very view. Both
+    together are what "one pasted URL and nothing else" means — a document
+    without this section advertises layers a KVP client has no address to
+    fetch.
+    """
+
+    def setUp(self):
+        super().setUp()
+        dial_org(self.client)
+        self.organisation = make_organisation()
+        make_tiered_catalog(self.organisation)
+
+    def test_the_kvp_operations_point_at_the_org_scoped_endpoint(self):
+        operations = self.operations(self.fetch())
+        expected = (
+            f"http://{org_host()}{wmts_kvp_endpoint(self.organisation)}?"
+        )
+        self.assertEqual(
+            operations, {"GetCapabilities": expected, "GetTile": expected},
+        )
+
+    def test_the_href_carries_the_separator_a_client_appends_after(self):
+        """OWS clients concatenate their parameters onto this href rather than
+        parse it, so the separator has to already be there."""
+        for href in self.operations(self.fetch()).values():
+            self.assertTrue(href.endswith("?"), href)
+
+    def test_each_operation_declares_the_kvp_encoding(self):
+        document = ET.fromstring(self.fetch().content)
+        gets = document.findall(
+            "ows:OperationsMetadata/ows:Operation/ows:DCP/ows:HTTP/ows:Get", NS,
+        )
+        self.assertEqual(len(gets), 2)
+        for get in gets:
+            constraint = get.find("ows:Constraint", NS)
+            self.assertEqual(constraint.get("name"), "GetEncoding")
+            self.assertEqual(
+                [v.text for v in constraint.findall(
+                    "ows:AllowedValues/ows:Value", NS,
+                )],
+                ["KVP"],
+            )
+
+    def test_an_operation_not_yet_answered_is_not_advertised(self):
+        """GetFeatureInfo arrives in #363. Advertising it now would send a
+        client's identify into an exception it had been promised would work."""
+        self.assertNotIn("GetFeatureInfo", self.operations(self.fetch()))
+
+    def test_a_request_built_on_the_advertised_endpoint_scopes_to_the_org(self):
+        """What the gate makes of a client that follows this document: the
+        href with a GetCapabilities query concatenated on is an address
+        ``scope_of`` reads as this organisation and no collection."""
+        href = self.operations(self.fetch())["GetCapabilities"]
+        split = urlsplit(f"{href}SERVICE=WMTS&REQUEST=GetCapabilities")
+        self.assertEqual(
+            scope_of(f"{split.path}?{split.query}"),
+            MachineScope("test-org", None, None),
+        )
 
 
 class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
@@ -553,6 +619,14 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
             f"{{{NS['xlink']}}}href"
         )
         self.assertIn(f"api_key={self.member_key}", href)
+
+    def test_the_kvp_endpoint_keeps_the_key_and_its_separator(self):
+        """The paste-able URL is one of the advertised URLs (#362): a KVP
+        client appends its parameters to this href on every later request, so
+        a bare spelling would drop it to public-only tiles."""
+        for href in self.operations(self.fetch({"api_key": self.member_key})).values():
+            self.assertIn(f"api_key={self.member_key}", href)
+            self.assertTrue(href.endswith("&"), href)
 
     def test_an_anonymous_document_carries_no_key_anywhere(self):
         self.assertNotIn(b"api_key", self.fetch().content)

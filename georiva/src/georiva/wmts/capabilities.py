@@ -21,6 +21,12 @@ listing through the same ``visible_to``, and a key that travelled as
 ``?api_key=`` is written into every advertised URL (#360) — so a legacy
 client, which can fill placeholders but cannot append parameters, reaches its
 private layers from one paste.
+
+Two bindings are advertised, and a client reads whichever it speaks: modern
+clients follow the per-layer REST ``ResourceURL`` templates, while a KVP-only
+client reads ``OperationsMetadata`` for the org-scoped endpoint under the
+Titiler prefix — the same address it fetched this document from, since that
+endpoint proxies GetCapabilities straight back here (#362).
 """
 from xml.etree import ElementTree as ET
 
@@ -29,6 +35,7 @@ from georiva.core.machine_plane import (
     WMTS_REFTIME_DIMENSION,
     WMTS_TIME_DIMENSION,
     wmts_capabilities_url,
+    wmts_kvp_endpoint,
     wmts_layer_identifier,
     wmts_rest_tile_template,
 )
@@ -53,6 +60,12 @@ TILE_MATRIX_SET = "WebMercatorQuad"
 TOP_LEFT_CORNER = "-20037508.3427892 20037508.3427892"
 SCALE_DENOMINATOR_0 = 559082264.0287178
 MAX_ZOOM = 24
+
+#: The operations the KVP endpoint answers, in the order the document lists
+#: them (#362). GetFeatureInfo joins them when it exists (#363): advertising an
+#: operation the endpoint does not answer would send a client's identify
+#: straight into an exception it had been promised would work.
+KVP_OPERATIONS = ("GetCapabilities", "GetTile")
 
 
 def _ows(tag):
@@ -98,6 +111,8 @@ def build_capabilities(request, organisation) -> bytes:
     ET.SubElement(service, _ows("ServiceType")).text = "OGC WMTS"
     ET.SubElement(service, _ows("ServiceTypeVersion")).text = "1.0.0"
 
+    _append_operations_metadata(root, request, organisation, api_key)
+
     contents = ET.SubElement(root, _wmts("Contents"))
     dimensions_by_collection = {}
     for variable in visible_variables(request):
@@ -117,6 +132,44 @@ def build_capabilities(request, organisation) -> bytes:
     })
 
     return ET.tostring(root, encoding="UTF-8", xml_declaration=True)
+
+
+def kvp_dcp_href(request, organisation, api_key=None) -> str:
+    """The KVP endpoint as an OWS DCP href — the prefix a client appends to.
+
+    OWS 1.1 has clients concatenate their KVP parameters onto this href rather
+    than parse it (the WMTS examples spell it ``…/maps.cgi?``), so it carries
+    its own separator: ``?`` on a bare address, ``&`` after a keyed one, whose
+    credential is already in the query (#360). The address itself still comes
+    from the machine-plane builder (ADR 0013); only the trailing character is
+    this document's, because it belongs to the encoding rather than the URL.
+    """
+    url = get_full_url_by_request(
+        request, wmts_kvp_endpoint(organisation, api_key=api_key),
+    )
+    return f"{url}&" if "?" in url else f"{url}?"
+
+
+def _append_operations_metadata(root, request, organisation, api_key=None):
+    """Where a KVP-only client sends everything it asks for next (#362).
+
+    The REST binding rides the per-layer ``ResourceURL`` templates, which a
+    modern client reads; a KVP client learns its one address from here, and
+    without this section it would discover layers it has no way to fetch. Both
+    operations point at the same org-scoped endpoint under the Titiler prefix —
+    the single paste-able URL, which proxies GetCapabilities back to this very
+    view — and each declares KVP, because that endpoint answers no other
+    encoding.
+    """
+    href = kvp_dcp_href(request, organisation, api_key)
+    metadata = ET.SubElement(root, _ows("OperationsMetadata"))
+    for name in KVP_OPERATIONS:
+        operation = ET.SubElement(metadata, _ows("Operation"), {"name": name})
+        http = ET.SubElement(ET.SubElement(operation, _ows("DCP")), _ows("HTTP"))
+        get = ET.SubElement(http, _ows("Get"), {f"{{{XLINK_NS}}}href": href})
+        constraint = ET.SubElement(get, _ows("Constraint"), {"name": "GetEncoding"})
+        allowed = ET.SubElement(constraint, _ows("AllowedValues"))
+        ET.SubElement(allowed, _ows("Value")).text = "KVP"
 
 
 def layer_dimensions(collection):
