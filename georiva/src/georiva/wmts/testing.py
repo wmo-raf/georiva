@@ -95,6 +95,18 @@ class CapabilitiesReader(IsolatedCapabilitiesCache):
                 return layer
         self.fail(f"No layer {identifier!r} in the document")
 
+    def operations(self, response):
+        """Advertised KVP endpoint per operation name (#362)."""
+        document = ET.fromstring(response.content)
+        return {
+            operation.get("name"):
+                operation.find("ows:DCP/ows:HTTP/ows:Get", NS)
+                .get(f"{{{NS['xlink']}}}href")
+            for operation in document.findall(
+                "ows:OperationsMetadata/ows:Operation", NS,
+            )
+        }
+
     def templates(self, response):
         """Advertised tile-URL template per layer identifier."""
         return {

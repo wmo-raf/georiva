@@ -191,6 +191,15 @@ class WmtsAddressTests(TestCase):
             wmts_kvp_endpoint(self.kenya), wmts_kvp_endpoint(self.uganda),
         )
 
+    def test_a_keyed_kvp_endpoint_carries_the_credential_param(self):
+        """#362: the keyed document advertises this endpoint as where its
+        reader asks everything next, on the same ``api_key`` parameter the
+        tile gate reads (ADR 0015)."""
+        self.assertEqual(
+            wmts_kvp_endpoint(self.kenya, api_key="grv_secret"),
+            "/titiler/kenya/wmts?api_key=grv_secret",
+        )
+
     def test_the_capabilities_url_lives_on_the_metadata_plane_org_first(self):
         self.assertEqual(
             wmts_capabilities_url(self.uganda),

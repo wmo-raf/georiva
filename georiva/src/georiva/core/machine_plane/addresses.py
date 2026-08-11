@@ -298,7 +298,7 @@ def martin_boundary_stats_url(collection, base) -> str:
     return f"{base.rstrip('/')}/{MARTIN_BOUNDARY_STATS_SOURCE}/{{z}}/{{x}}/{{y}}?{params}"
 
 
-def wmts_kvp_endpoint(organisation) -> str:
+def wmts_kvp_endpoint(organisation, api_key=None) -> str:
     """The org-scoped KVP WMTS endpoint under the Titiler proxy (#354).
 
     The one paste-able URL a legacy client needs: GetCapabilities, GetTile and
@@ -307,8 +307,14 @@ def wmts_kvp_endpoint(organisation) -> str:
     point of WMTS is that one URL per organisation discovers everything — so
     the argument is the ``Organisation`` row itself, not something to walk an
     org out of.
+
+    ``api_key`` keys the address exactly as it keys the tile templates and the
+    capabilities URL (#360): a keyed document advertises this endpoint as the
+    one its reader should keep asking on, and a bare spelling there would drop
+    a legacy client — which appends parameters but cannot edit the ones it was
+    given — back to the public-only view on its very next request.
     """
-    return f"{TITILER_PREFIX}/{organisation.slug}/{WMTS_KVP_SEGMENT}"
+    return _keyed(f"{TITILER_PREFIX}/{organisation.slug}/{WMTS_KVP_SEGMENT}", api_key)
 
 
 def wmts_layer_identifier(variable) -> str:
@@ -360,6 +366,18 @@ def _api_key_pair(api_key):
     from georiva.accounts.authentication import QUERY_PARAM
 
     return urlencode({QUERY_PARAM: api_key})
+
+
+def _keyed(url, api_key):
+    """``url`` with the caller's credential opening its query, or unchanged.
+
+    The two org-level WMTS addresses a keyed document advertises — where to
+    refresh capabilities, and where to ask everything else — carry the key the
+    same way and must keep carrying it the same way, so they say it once here.
+    Only for addresses with no query of their own; the tile template appends
+    to one it is already building.
+    """
+    return f"{url}?{_api_key_pair(api_key)}" if api_key else url
 
 
 def wmts_rest_tile_template(variable, dimensions=(), styled=False, api_key=None) -> str:
@@ -422,5 +440,6 @@ def wmts_capabilities_url(organisation, api_key=None) -> str:
     document advertises this as its own refresh URL, and a bare spelling there
     would silently drop the caller back to the public-only view.
     """
-    url = f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml"
-    return f"{url}?{_api_key_pair(api_key)}" if api_key else url
+    return _keyed(
+        f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml", api_key,
+    )

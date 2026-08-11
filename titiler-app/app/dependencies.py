@@ -61,6 +61,25 @@ def _fetch_config_from_django(
     return None, None
 
 
+def django_client() -> httpx.AsyncClient:
+    """The client an async route makes its own call to Django through.
+
+    Separate from the fetch above only because that one runs inside a *sync*
+    FastAPI dependency and can await nothing; both dial the same internal base
+    URL, and this is the seam a test swaps a transport in at.
+
+    Bounding the call is the point of it. This service must answer the client
+    it is holding even when Django does not answer this one, so both ends are
+    timed: a short connect, because an unreachable container should fail at
+    once rather than hold a legacy client open, and a long read, because the
+    one document fetched through here enumerates a whole archive's worth of
+    timestamps and is deliberately uncapped (#354).
+    """
+    return httpx.AsyncClient(
+        base_url=DJANGO_BASE_URL, timeout=httpx.Timeout(30.0, connect=5.0),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
