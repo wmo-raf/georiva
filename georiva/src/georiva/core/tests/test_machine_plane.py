@@ -238,6 +238,19 @@ class WmtsRestTileTemplateTests(TestCase):
         self.assertNotIn("?", template)
         self.assertTrue(template.endswith("/{TileMatrix}/{TileCol}/{TileRow}.png"))
 
+    def test_a_styled_variable_gets_the_style_placeholder_on_the_style_param(self):
+        """#359: the ``{Style}`` placeholder rides the same ``style`` query
+        param every other styled URL uses (ADR 0023) — one spelling, wired
+        beside the dimension params so a client fills them all alike."""
+        template = wmts_rest_tile_template(
+            self.kenya_tree["variable"], ("Time",), styled=True,
+        )
+        self.assertTrue(template.endswith("?style={Style}&time={Time}"))
+
+    def test_a_styled_variable_without_dimensions_still_gets_the_placeholder(self):
+        template = wmts_rest_tile_template(self.kenya_tree["variable"], styled=True)
+        self.assertTrue(template.endswith(".png?style={Style}"))
+
     def test_two_organisations_sharing_a_slug_get_different_templates(self):
         self.assertNotEqual(
             wmts_rest_tile_template(self.kenya_tree["variable"], ("Time",)),

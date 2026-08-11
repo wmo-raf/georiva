@@ -342,8 +342,14 @@ WMTS_DIMENSION_PARAMS = {
     WMTS_REFTIME_DIMENSION: "reftime",
 }
 
+#: The WMTS ``{Style}`` placeholder and the tile-route query parameter it
+#: fills (#359) — the same ``?style=`` every styled machine-plane URL carries
+#: (ADR 0023), paired here for the same no-drift reason as the dimensions.
+WMTS_STYLE_PLACEHOLDER = "Style"
+WMTS_STYLE_PARAM = "style"
 
-def wmts_rest_tile_template(variable, dimensions=()) -> str:
+
+def wmts_rest_tile_template(variable, dimensions=(), styled=False) -> str:
     """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
 
     The existing per-variable tile route, spelt as a WMTS template: the
@@ -359,16 +365,26 @@ def wmts_rest_tile_template(variable, dimensions=()) -> str:
     landing on the same route the gate authorises. A layer with no items
     advertises no dimensions and gets a bare template: there is no honest time
     to name, and a layer without data cannot serve tiles under any spelling.
+
+    ``styled`` adds a ``{Style}`` placeholder on the ``style`` query parameter
+    (#359) — set only when the layer advertises real named styles, because the
+    placeholder invites the client to substitute an advertised identifier and
+    the no-styles placeholder entry names no slug the tile route knows: a
+    styleless request already renders the default (ADR 0023).
     """
     collection = variable.collection
     root = titiler_variable_root(
         org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
     )
     template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}.png"
-    query = "&".join(
-        f"{WMTS_DIMENSION_PARAMS[identifier]}={{{identifier}}}"
+    params = [
+        (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
+    ] if styled else []
+    params += [
+        (WMTS_DIMENSION_PARAMS[identifier], identifier)
         for identifier in dimensions
-    )
+    ]
+    query = "&".join(f"{param}={{{placeholder}}}" for param, placeholder in params)
     return f"{template}?{query}" if query else template
 
 
