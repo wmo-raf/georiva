@@ -219,34 +219,29 @@ class WmtsRestTileTemplateTests(TestCase):
         cls.uganda_tree = build_tree(make_organisation("uganda"), variable_name="Uganda Forecast")
 
     def test_the_template_is_the_existing_tile_route_org_first(self):
-        template = wmts_rest_tile_template(
-            self.kenya_tree["variable"], self.kenya_tree["item"],
-        )
+        template = wmts_rest_tile_template(self.kenya_tree["variable"], ("Time",))
         self.assertEqual(
             template,
             f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}"
             "/tiles/WebMercatorQuad/{TileMatrix}/{TileCol}/{TileRow}.png"
-            "?time=2026-03-01T12%3A00%3A00Z",
+            "?time={Time}",
         )
 
-    def test_a_forecast_item_pins_its_reference_time_too(self):
-        item = Item.objects.create(
-            collection=self.kenya_tree["collection"],
-            time=datetime(2026, 3, 2, tzinfo=timezone.utc),
-            reference_time=datetime(2026, 3, 1, tzinfo=timezone.utc),
+    def test_a_forecast_layer_carries_the_reftime_placeholder_too(self):
+        template = wmts_rest_tile_template(
+            self.kenya_tree["variable"], ("Time", "Reftime"),
         )
-        template = wmts_rest_tile_template(self.kenya_tree["variable"], item)
-        self.assertIn("reftime=2026-03-01T00%3A00%3A00Z", template)
+        self.assertTrue(template.endswith("?time={Time}&reftime={Reftime}"))
 
-    def test_a_variable_without_items_gets_a_bare_template(self):
+    def test_a_variable_without_dimensions_gets_a_bare_template(self):
         template = wmts_rest_tile_template(self.kenya_tree["variable"])
         self.assertNotIn("?", template)
         self.assertTrue(template.endswith("/{TileMatrix}/{TileCol}/{TileRow}.png"))
 
     def test_two_organisations_sharing_a_slug_get_different_templates(self):
         self.assertNotEqual(
-            wmts_rest_tile_template(self.kenya_tree["variable"], self.kenya_tree["item"]),
-            wmts_rest_tile_template(self.uganda_tree["variable"], self.uganda_tree["item"]),
+            wmts_rest_tile_template(self.kenya_tree["variable"], ("Time",)),
+            wmts_rest_tile_template(self.uganda_tree["variable"], ("Time",)),
         )
 
     def test_a_layer_identifier_is_the_triple_a_kvp_layer_param_carries(self):
@@ -267,9 +262,12 @@ class WmtsRestTileTemplateTests(TestCase):
         from georiva.core.machine_plane import MachineScope, scope_of
 
         template = wmts_rest_tile_template(
-            self.uganda_tree["variable"], self.uganda_tree["item"],
+            self.uganda_tree["variable"], ("Time", "Reftime"),
         )
-        uri = template.format(TileMatrix=6, TileCol=38, TileRow=32)
+        uri = template.format(
+            TileMatrix=6, TileCol=38, TileRow=32,
+            Time="2026-03-01T12:00:00Z", Reftime="2026-03-01T00:00:00Z",
+        )
         self.assertEqual(
             scope_of(uri), MachineScope("uganda", SHARED_SLUG, SHARED_SLUG),
         )

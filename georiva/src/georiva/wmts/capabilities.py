@@ -13,11 +13,11 @@ spellings disagree. Every URL in the document comes from the machine-plane
 builders (ADR 0013) — this module only makes them absolute against the host
 the request dialled.
 
-This slice advertises the skeleton: ``WebMercatorQuad`` as the only
-TileMatrixSet, ``image/png`` as the only format, a placeholder default style,
-and a REST ``ResourceURL`` per layer pinned to the newest item's time. Time and
-run dimensions, named styles, and credentialed (private-layer) documents arrive
-in later slices of #354.
+The document advertises ``WebMercatorQuad`` as the only TileMatrixSet,
+``image/png`` as the only format, a placeholder default style, and per-layer
+``Time``/``Reftime`` dimensions enumerated from the organisation's Items
+(#358). Named styles and credentialed (private-layer) documents arrive in
+later slices of #354.
 """
 from xml.etree import ElementTree as ET
 
@@ -88,13 +88,13 @@ def build_capabilities(request, organisation) -> bytes:
     ET.SubElement(service, _ows("ServiceTypeVersion")).text = "1.0.0"
 
     contents = ET.SubElement(root, _wmts("Contents"))
-    latest_by_collection = {}
+    dimensions_by_collection = {}
     for variable in visible_variables(request):
         collection = variable.collection
-        if collection.pk not in latest_by_collection:
-            latest_by_collection[collection.pk] = Item.objects.latest(collection)
+        if collection.pk not in dimensions_by_collection:
+            dimensions_by_collection[collection.pk] = layer_dimensions(collection)
         _append_layer(
-            contents, request, variable, latest_by_collection[collection.pk],
+            contents, request, variable, dimensions_by_collection[collection.pk],
         )
     _append_tile_matrix_set(contents)
 
@@ -107,7 +107,52 @@ def build_capabilities(request, organisation) -> bytes:
     return ET.tostring(root, encoding="UTF-8", xml_declaration=True)
 
 
-def _append_layer(contents, request, variable, latest_item):
+def _iso(dt) -> str:
+    """The one time spelling the document uses — ISO 8601 UTC with ``Z``,
+    matching ``Item.time_iso`` so an advertised value pasted into a tile URL
+    names the same asset the item wrote."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def layer_dimensions(collection):
+    """The WMTS dimensions a layer over ``collection`` advertises (#358).
+
+    Identifier → ``(values, default)``, in document order. A collection whose
+    items carry a ``reference_time`` is a forecast and advertises two axes:
+    ``Reftime`` lists every run newest-first and defaults to the newest, and
+    ``Time`` lists that default run's valid times — so a dimension-ignorant
+    client substituting defaults gets coherent latest-forecast tiles, never a
+    time from one run against another run's reference. ``Time`` defaults to
+    the run's first valid time (the analysis — the run's "now"), while an
+    observation collection advertises ``Time`` alone, defaulting to the newest
+    value it has. Enumeration is complete on purpose — the accepted
+    document-size trade-off of #354 — and a collection with no items yet
+    advertises nothing: there are no honest values to list.
+    """
+    reftimes = list(
+        Item.objects.filter(collection=collection, reference_time__isnull=False)
+        .order_by("-reference_time")
+        .values_list("reference_time", flat=True)
+        .distinct()
+    )
+    if reftimes:
+        times = list(
+            Item.objects.filter(collection=collection, reference_time=reftimes[0])
+            .order_by("time")
+            .values_list("time", flat=True)
+        )
+        return {"Time": (times, times[0]), "Reftime": (reftimes, reftimes[0])}
+    times = list(
+        Item.objects.filter(collection=collection)
+        .order_by("time")
+        .values_list("time", flat=True)
+    )
+    if not times:
+        return {}
+    return {"Time": (times, times[-1])}
+
+
+def _append_layer(contents, request, variable, dimensions):
     collection = variable.collection
     layer = ET.SubElement(contents, _wmts("Layer"))
     ET.SubElement(layer, _ows("Title")).text = f"{collection.name} — {variable.name}"
@@ -128,6 +173,13 @@ def _append_layer(contents, request, variable, latest_item):
 
     ET.SubElement(layer, _wmts("Format")).text = TILE_FORMAT
 
+    for identifier, (values, default) in dimensions.items():
+        dimension = ET.SubElement(layer, _wmts("Dimension"))
+        ET.SubElement(dimension, _ows("Identifier")).text = identifier
+        ET.SubElement(dimension, _wmts("Default")).text = _iso(default)
+        for value in values:
+            ET.SubElement(dimension, _wmts("Value")).text = _iso(value)
+
     link = ET.SubElement(layer, _wmts("TileMatrixSetLink"))
     ET.SubElement(link, _wmts("TileMatrixSet")).text = TILE_MATRIX_SET
 
@@ -135,7 +187,7 @@ def _append_layer(contents, request, variable, latest_item):
         "format": TILE_FORMAT,
         "resourceType": "tile",
         "template": get_full_url_by_request(
-            request, wmts_rest_tile_template(variable, latest_item),
+            request, wmts_rest_tile_template(variable, dimensions),
         ),
     })
 

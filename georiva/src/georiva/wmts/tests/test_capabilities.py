@@ -52,7 +52,7 @@ class WMTSCapabilitiesTests(TestCase):
             collection=self.public,
             time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
         )
-        self.latest_item = Item.objects.create(
+        Item.objects.create(
             collection=self.public,
             time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
         )
@@ -135,17 +135,19 @@ class WMTSCapabilitiesTests(TestCase):
         self.assertEqual(
             resource.get("template"),
             f"http://{org_host()}"
-            + wmts_rest_tile_template(self.variable, self.latest_item),
+            + wmts_rest_tile_template(self.variable, ("Time",)),
         )
 
     def test_a_filled_template_scopes_back_to_the_advertised_collection(self):
         """The templates must resolve against the routes the gateway actually
-        authorises: substituting the placeholders yields a URI ``scope_of``
-        reads as this collection, so a client following the document lands on
-        a working tile route."""
+        authorises: substituting the placeholders — dimensions included — yields
+        a URI ``scope_of`` reads as this collection, so a client following the
+        document lands on a working tile route."""
         (layer,) = self.layers(self.fetch())
         template = layer.find("wmts:ResourceURL", NS).get("template")
-        split = urlsplit(template.format(TileMatrix=6, TileCol=38, TileRow=32))
+        split = urlsplit(template.format(
+            TileMatrix=6, TileCol=38, TileRow=32, Time="2026-03-01T12:00:00Z",
+        ))
         self.assertEqual(
             scope_of(f"{split.path}?{split.query}"),
             MachineScope("test-org", "forecast", "temperature"),
@@ -180,3 +182,155 @@ class WMTSCapabilitiesTests(TestCase):
     def test_an_unknown_org_segment_is_absent_too(self):
         response = self.client.get(reverse("wmts:capabilities", args=["nowhere"]))
         self.assertEqual(response.status_code, 404)
+
+
+class WMTSDimensionTests(TestCase):
+    """Time and Reftime dimensions, enumerated from the organisation's Items (#358).
+
+    One observation collection and one forecast collection under the same org:
+    the forecast advertises both axes with the newest run as the default and
+    that run's valid times as the Time list, the observation advertises Time
+    alone — so a dimension-ignorant client substituting defaults into the
+    ResourceURL template lands on coherent latest tiles for either kind.
+    """
+
+    def setUp(self):
+        dial_org(self.client)
+        self.organisation = make_organisation()
+        catalog = Catalog.objects.create(
+            organisation=self.organisation,
+            name="Weather", slug="weather", file_format="geotiff",
+        )
+        unit = Unit.objects.create(name="Celsius", symbol="C")
+
+        observations = Collection.objects.create(
+            catalog=catalog, name="Station Temperature", slug="obs-temperature",
+            visibility=Collection.Visibility.PUBLIC,
+        )
+        Variable.objects.create(
+            collection=observations, slug="t2m", name="2m Temperature",
+            unit=unit, value_min=0, value_max=50,
+        )
+        for hour in (0, 6, 12):
+            Item.objects.create(
+                collection=observations,
+                time=datetime(2026, 3, 1, hour, 0, tzinfo=timezone.utc),
+            )
+
+        forecast = Collection.objects.create(
+            catalog=catalog, name="Model Temperature", slug="fc-temperature",
+            visibility=Collection.Visibility.PUBLIC,
+        )
+        Variable.objects.create(
+            collection=forecast, slug="t2m", name="Forecast 2m Temperature",
+            unit=unit, value_min=0, value_max=50,
+        )
+        for day, hours in ((1, (0, 6, 12)), (2, (0, 6))):
+            run = datetime(2026, 3, day, 0, 0, tzinfo=timezone.utc)
+            for hour in hours:
+                Item.objects.create(
+                    collection=forecast,
+                    time=run.replace(hour=hour),
+                    reference_time=run,
+                )
+
+    def layer(self, identifier):
+        response = self.client.get(
+            reverse("wmts:capabilities", args=[self.organisation.slug])
+        )
+        self.assertEqual(response.status_code, 200)
+        document = ET.fromstring(response.content)
+        for layer in document.findall("wmts:Contents/wmts:Layer", NS):
+            if layer.findtext("ows:Identifier", namespaces=NS) == identifier:
+                return layer
+        self.fail(f"No layer {identifier!r} in the document")
+
+    def dimensions(self, layer):
+        return {
+            dimension.findtext("ows:Identifier", namespaces=NS): dimension
+            for dimension in layer.findall("wmts:Dimension", NS)
+        }
+
+    def values(self, dimension):
+        return [value.text for value in dimension.findall("wmts:Value", NS)]
+
+    def test_a_forecast_layer_carries_time_and_reftime(self):
+        dimensions = self.dimensions(self.layer("weather:fc-temperature:t2m"))
+        self.assertEqual(list(dimensions), ["Time", "Reftime"])
+
+    def test_an_observation_layer_carries_time_only(self):
+        dimensions = self.dimensions(self.layer("weather:obs-temperature:t2m"))
+        self.assertEqual(list(dimensions), ["Time"])
+
+    def test_reftime_lists_every_run_and_defaults_to_the_newest(self):
+        dimensions = self.dimensions(self.layer("weather:fc-temperature:t2m"))
+        reftime = dimensions["Reftime"]
+        self.assertEqual(
+            self.values(reftime),
+            ["2026-03-02T00:00:00Z", "2026-03-01T00:00:00Z"],
+        )
+        self.assertEqual(
+            reftime.findtext("wmts:Default", namespaces=NS),
+            "2026-03-02T00:00:00Z",
+        )
+
+    def test_forecast_time_lists_the_default_runs_valid_times(self):
+        """Only the newest run's valid times — a Time from one run against
+        another run's Reftime would advertise combinations that do not exist."""
+        dimensions = self.dimensions(self.layer("weather:fc-temperature:t2m"))
+        time = dimensions["Time"]
+        self.assertEqual(
+            self.values(time),
+            ["2026-03-02T00:00:00Z", "2026-03-02T06:00:00Z"],
+        )
+        self.assertEqual(
+            time.findtext("wmts:Default", namespaces=NS), "2026-03-02T00:00:00Z",
+        )
+
+    def test_observation_time_lists_everything_and_defaults_to_the_newest(self):
+        dimensions = self.dimensions(self.layer("weather:obs-temperature:t2m"))
+        time = dimensions["Time"]
+        self.assertEqual(
+            self.values(time),
+            [
+                "2026-03-01T00:00:00Z",
+                "2026-03-01T06:00:00Z",
+                "2026-03-01T12:00:00Z",
+            ],
+        )
+        self.assertEqual(
+            time.findtext("wmts:Default", namespaces=NS), "2026-03-01T12:00:00Z",
+        )
+
+    def test_templates_carry_exactly_the_advertised_dimension_placeholders(self):
+        forecast = self.layer("weather:fc-temperature:t2m")
+        self.assertTrue(
+            forecast.find("wmts:ResourceURL", NS).get("template")
+            .endswith("?time={Time}&reftime={Reftime}")
+        )
+        observation = self.layer("weather:obs-temperature:t2m")
+        self.assertTrue(
+            observation.find("wmts:ResourceURL", NS).get("template")
+            .endswith("?time={Time}")
+        )
+
+    def test_default_substitution_names_an_item_that_exists(self):
+        """The dimension-ignorant client's path: filling the template with the
+        advertised defaults must address a (time, reftime) pair the collection
+        actually holds, or the no-dimensions client 404s by construction."""
+        forecast = self.layer("weather:fc-temperature:t2m")
+        dimensions = self.dimensions(forecast)
+        template = forecast.find("wmts:ResourceURL", NS).get("template")
+        url = template.format(
+            TileMatrix=0, TileCol=0, TileRow=0,
+            Time=dimensions["Time"].findtext("wmts:Default", namespaces=NS),
+            Reftime=dimensions["Reftime"].findtext("wmts:Default", namespaces=NS),
+        )
+        self.assertIn("time=2026-03-02T00:00:00Z", url)
+        self.assertTrue(
+            Item.objects.filter(
+                collection__slug="fc-temperature",
+                time=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
+                reference_time=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
+            ).exists()
+        )
