@@ -15,18 +15,25 @@ Django's document and handing it on unread (#362) — which layers exist and who
 may see them is exactly the knowledge ADR 0013 keeps out of this service — so
 one pasted URL discovers layers and then serves their tiles.
 
+``REQUEST=GetFeatureInfo`` answers the identify click (#363): the tile
+coordinate and the ``I``/``J`` pixel within it become a lon/lat, and the COG
+behind the same semantic address is point-read for the raw physical value.
+
 Errors answer OGC ExceptionReport XML (OWS 1.1), never framework JSON: the
 clients on this endpoint are legacy KVP speakers that can parse nothing else.
-GetFeatureInfo (#363) is a later slice; until then it answers an honest
-OperationNotSupported.
 """
 import logging
+import math
 import re
 from typing import Optional
 from xml.sax.saxutils import escape, quoteattr
 
 import httpx
-from fastapi import APIRouter, Request, Response
+import morecantile
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from rio_tiler.errors import PointOutsideBounds
+from starlette.concurrency import run_in_threadpool
 
 from app import dependencies
 
@@ -41,6 +48,17 @@ OWS_NS = "http://www.opengis.net/ows/1.1"
 TILE_MATRIX_SET = "WebMercatorQuad"
 TILE_FORMAT = "image/png"
 MAX_ZOOM = 24
+
+#: The one InfoFormat GetFeatureInfo answers, and the only one the
+#: capabilities document offers a client (#363).
+INFO_FORMAT = "application/json"
+
+#: The grid itself, from the same library that cuts the tiles this endpoint
+#: serves — so the pixel an identify click names is read off the very geometry
+#: the pixel was drawn on. Reading it from a second implementation of the
+#: Mercator formulae would be an identify that lands beside the pixel a client
+#: sees rather than on it.
+TILE_GRID = morecantile.tms.get(TILE_MATRIX_SET)
 
 #: What the capabilities document advertises as the default style's
 #: identifier, and what dimension-ignorant clients send on their own: both
@@ -221,10 +239,11 @@ def _validate_service_and_version(params: dict[str, str]) -> None:
 def _validate_tile_choices(params: dict[str, str]) -> None:
     """The grid and format a tile may name — exactly one honest value each.
 
-    Asked of GetTile alone. A client sending GetCapabilities has not yet been
-    told which matrix set exists, so requiring one there would refuse every
-    honest discovery request, and the FORMAT such a client sends names the
-    document's own media type rather than a tile's.
+    Asked of the two operations that address a tile: GetTile, and the
+    GetFeatureInfo whose pixel is read off one. A client sending
+    GetCapabilities has not yet been told which matrix set exists, so requiring
+    one there would refuse every honest discovery request, and the FORMAT such
+    a client sends names the document's own media type rather than a tile's.
     """
     tms = _require(params, "tilematrixset")
     if tms != TILE_MATRIX_SET:
@@ -239,12 +258,39 @@ def _validate_tile_choices(params: dict[str, str]) -> None:
         )
 
 
-def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -> WMTSException:
-    """Re-spell the semantic tile route's refusal as a WMTS exception.
+def _resolve_style(params: dict[str, str]) -> Optional[str]:
+    """The style a request names, with the two default spellings resolved away.
 
-    The status carries through untouched — a nonexistent (time, reftime)
-    combination and an unknown style stay hard 404s here exactly as on the
-    REST route (ADR 0023) — only the vocabulary changes. The locator is read
+    Read the same way by both operations that take one, so a client cannot be
+    shown one rendering and told the value of another (ADR 0023).
+    """
+    style = params.get("style", "")
+    return None if style in DEFAULT_STYLE_ALIASES else style
+
+
+def _time_query(params: dict[str, str]) -> dict[str, str]:
+    """The time and reftime query the semantic routes address a COG by.
+
+    ``TIME`` is required — every asset in the archive is a moment — while
+    ``REFTIME`` is sent only when the client named one, because an observation
+    collection has no forecast run and asking for a blank one would address
+    nothing.
+    """
+    query = {"time": _require(params, "time")}
+    reftime = params.get("reftime")
+    if reftime:
+        query["reftime"] = reftime
+    return query
+
+
+def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -> WMTSException:
+    """Re-spell the semantic routes' refusal as a WMTS exception.
+
+    Shared by both operations, which is what keeps an address that will not
+    render from identifying with a different story. The status carries through
+    untouched — a nonexistent (time, reftime) combination and an unknown style
+    stay hard 404s here exactly as on the REST route (ADR 0023) — only the
+    vocabulary changes. The locator is read
     from the detail's own wording, which lives two files away in this same
     service; a detail we cannot place still reports honestly, just without one.
     """
@@ -273,43 +319,235 @@ def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -
     return WMTSException(status_code, "NoApplicableCode", None, detail or "Tile request failed")
 
 
-async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, str]) -> Response:
-    """Answer GetTile by re-entering the existing semantic tile route.
+async def _reenter(request: Request, path: str, query: dict[str, str]) -> httpx.Response:
+    """Ask this same application one of its own semantic routes.
 
-    The KVP triple and the org segment are joined back into the very URL the
-    capabilities document's REST templates advertise, and the request is
-    dispatched through this same ASGI application — the two bindings cannot
-    drift apart because one is defined as the other.
+    How both KVP operations reach the data: the org segment and the ``LAYER``
+    triple are joined back into the very URL the capabilities document
+    advertises, and the request is dispatched through this application rather
+    than reimplemented beside it — the KVP binding cannot drift from the REST
+    one because one is defined as the other.
+
+    The base URL names nothing real: nothing leaves the process, and the
+    reader that answers is the same reader a browser's tile request reaches.
     """
+    transport = httpx.ASGITransport(app=request.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://wmts-kvp-shim") as client:
+        return await client.get(path, params=query)
+
+
+def _detail_of(response: httpx.Response) -> str:
+    """The ``detail`` a refused semantic route explains itself with.
+
+    FastAPI's own error shape, and the wording :func:`_translate_tile_error`
+    reads a locator out of. A body that is not that shape yields nothing
+    rather than a guess.
+    """
+    try:
+        return response.json().get("detail", "")
+    except ValueError:
+        return ""
+
+
+async def _dispatch_get_tile(request: Request, org_slug: str, params: dict[str, str]) -> Response:
+    """Answer GetTile by re-entering the existing semantic tile route."""
     _validate_service_and_version(params)
     _validate_tile_choices(params)
     catalog, collection, variable = _parse_layer(params)
     zoom, row, col = _parse_tile_coords(params)
 
-    style: Optional[str] = params.get("style", "")
-    if style in DEFAULT_STYLE_ALIASES:
-        style = None
-
-    query = {"time": _require(params, "time")}
-    reftime = params.get("reftime")
-    if reftime:
-        query["reftime"] = reftime
+    style = _resolve_style(params)
+    query = _time_query(params)
     if style:
         query["style"] = style
 
     path = f"/{org_slug}/{catalog}/{collection}/{variable}/tiles/{TILE_MATRIX_SET}/{zoom}/{col}/{row}.png"
-    transport = httpx.ASGITransport(app=request.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://wmts-kvp-shim") as client:
-        resp = await client.get(path, params=query)
+    resp = await _reenter(request, path, query)
 
     if resp.status_code == 200:
         return Response(resp.content, media_type=resp.headers.get("content-type", TILE_FORMAT))
+    raise _translate_tile_error(resp.status_code, _detail_of(resp), style)
 
+
+def _validate_info_format(params: dict[str, str]) -> None:
+    """The one media type an identify answer may be asked for.
+
+    Validated only when sent, as SERVICE and VERSION are: the capabilities
+    document offers exactly one InfoFormat, so a client that omitted it can
+    only have meant that one, and refusing it would lock out a sloppy legacy
+    client over a parameter with no second choice. A *named* format this does
+    not serve is refused, because that client asked for something it will not
+    get and would otherwise be handed JSON labelled as GML.
+    """
+    info_format = params.get("infoformat")
+    if info_format and info_format != INFO_FORMAT:
+        raise WMTSException(
+            400, "InvalidParameterValue", "INFOFORMAT",
+            f"InfoFormat {info_format!r} not served — only {INFO_FORMAT}",
+        )
+
+
+def _parse_pixel(params: dict[str, str], zoom: int) -> tuple[int, int]:
+    """The ``I``/``J`` pixel within the tile, held to that tile's size.
+
+    ``PointIJOutOfRange`` is WMTS 1.0's own exception code for a pixel outside
+    the tile (Table 30), and this is a request that cannot be answered rather
+    than a click that found nothing: a pixel off the tile names no point on
+    the map at all, while a pixel *on* it that finds no data answers 200 with
+    an empty value.
+    """
+    matrix = TILE_GRID.matrix(zoom)
+    sizes = {"i": matrix.tileWidth, "j": matrix.tileHeight}
+    pixel = {}
+    for name, size in sizes.items():
+        value = _require(params, name)
+        if not value.isdigit():
+            raise WMTSException(
+                400, "InvalidParameterValue", name.upper(),
+                f"{name.upper()} must be a non-negative integer",
+            )
+        if int(value) >= size:
+            raise WMTSException(
+                400, "PointIJOutOfRange", name.upper(),
+                f"{name.upper()} {value} outside the tile (0..{size - 1})",
+            )
+        pixel[name] = int(value)
+    return pixel["i"], pixel["j"]
+
+
+def _pixel_lonlat(zoom: int, row: int, col: int, i: int, j: int) -> tuple[float, float]:
+    """The lon/lat at the centre of pixel ``(i, j)`` of tile ``(col, row, zoom)``.
+
+    Interpolated in the grid's own projected metres and only then converted,
+    because the pixel grid is linear there and not in degrees — stepping
+    across a tile in latitude directly would drift further from the pixel a
+    client clicked the nearer the tile sits to a pole. The centre rather than
+    the corner: the value being read belongs to the whole pixel, and its
+    centre is the point furthest from mistaking a neighbour for it, at every
+    zoom and on either edge of the grid.
+    """
+    matrix = TILE_GRID.matrix(zoom)
+    bounds = TILE_GRID.xy_bounds(morecantile.Tile(x=col, y=row, z=zoom))
+    x = bounds.left + (i + 0.5) * (bounds.right - bounds.left) / matrix.tileWidth
+    y = bounds.top - (j + 0.5) * (bounds.top - bounds.bottom) / matrix.tileHeight
+    lon, lat = TILE_GRID.lnglat(x, y)
+    return lon, lat
+
+
+async def _tile_config_for(address: tuple[str, str, str, str], style: Optional[str]) -> dict:
+    """The rendering config for this layer, resolved as a tile request resolves it.
+
+    Fetched for two reasons, neither of them rendering. It is what makes an
+    unknown layer or an unknown style say so on this operation exactly as it
+    does on GetTile (ADR 0023) — a point read alone would find no COG and
+    blame the TIME. And it is the only per-request metadata this service
+    holds, so a ``units`` or ``label`` Django one day puts in that payload
+    reaches an identify answer without a second channel being built for it
+    (#363); until it does, the answer carries the value alone.
+
+    Run off the event loop because the underlying resolution is the tile
+    routes' synchronous dependency, Redis call and all — the same function, so
+    an address that renders is an address that identifies.
+    """
+    org_slug, catalog, collection, variable = address
     try:
-        detail = resp.json().get("detail", "")
-    except ValueError:
-        detail = ""
-    raise _translate_tile_error(resp.status_code, detail, style)
+        return await run_in_threadpool(
+            dependencies.SemanticTileConfig,
+            org_slug=org_slug, catalog_slug=catalog, collection_slug=collection,
+            variable_slug=variable, style=style,
+        )
+    except HTTPException as exc:
+        raise _translate_tile_error(exc.status_code, str(exc.detail or ""), style) from exc
+
+
+async def _read_point(
+        request: Request, address: tuple[str, str, str, str],
+        lon: float, lat: float, query: dict[str, str], style: Optional[str],
+) -> Optional[float]:
+    """The raw physical value under ``(lon, lat)``, or ``None`` where there is none.
+
+    Read through the point route, so the COG address comes from the same
+    semantic path translation the tile did and an identify reads the very file
+    the pixel under the cursor was drawn from. That route applies neither
+    colormap nor rescale, which is what makes the number returned here the
+    physical one rather than the 0–255 a pixel was painted with.
+
+    ``None`` is the answer to a click that found no data — a nodata pixel,
+    which arrives already masked, or a point outside the COG's own footprint,
+    which the reader refuses. Neither is an error: a forecaster clicking the
+    sea beside a land-only grid has done nothing wrong, and legacy identify
+    tools read an error as a broken layer (#363). A *missing* file is
+    different and stays a 404, because that is a TIME/REFTIME the archive does
+    not hold rather than a place the grid does not cover.
+    """
+    path = f"/{'/'.join(address)}/point/{lon},{lat}"
+    try:
+        resp = await _reenter(request, path, query)
+    except PointOutsideBounds:
+        return None
+
+    if resp.status_code != 200:
+        raise _translate_tile_error(resp.status_code, _detail_of(resp), style)
+
+    # The first band, because the whole pipeline behind this address is
+    # one-band-per-variable: the rescale and colormap a tile is drawn with
+    # describe band 1 and nothing else, so a second band would be a value no
+    # rendering on the instance has ever shown.
+    values = resp.json().get("values") or [None]
+    value = values[0]
+    # A masked pixel arrives as None already; a NaN one does not, and would
+    # leave this endpoint as a token no strict JSON parser accepts. Both mean
+    # the same thing to the person who clicked.
+    if value is None or not math.isfinite(value):
+        return None
+    return value
+
+
+async def _dispatch_get_feature_info(
+        request: Request, org_slug: str, params: dict[str, str],
+) -> Response:
+    """Answer GetFeatureInfo with the value under the clicked pixel (#363).
+
+    The answer echoes what was asked — layer, time, reftime and the lon/lat
+    the tile coordinate and pixel resolved to — beside the value, so a
+    forecaster can see that the number belongs to the point they clicked and
+    the run they picked. Times are echoed as the client spelt them: this is a
+    receipt for a request, not a restatement of the catalog.
+
+    A click that found nothing keeps that whole shape and carries a null
+    value. The client asked a well-formed question about a real place and the
+    honest answer is "nothing here" — an exception would tell it the layer is
+    broken.
+    """
+    _validate_service_and_version(params)
+    _validate_tile_choices(params)
+    _validate_info_format(params)
+    catalog, collection, variable = _parse_layer(params)
+    zoom, row, col = _parse_tile_coords(params)
+    i, j = _parse_pixel(params, zoom)
+
+    style = _resolve_style(params)
+    query = _time_query(params)
+    address = (org_slug, catalog, collection, variable)
+
+    lon, lat = _pixel_lonlat(zoom, row, col, i, j)
+    config = await _tile_config_for(address, style)
+    value = await _read_point(request, address, lon, lat, query, style)
+
+    payload = {
+        "layer": params["layer"],
+        "time": query["time"],
+        "reftime": query.get("reftime"),
+        "longitude": lon,
+        "latitude": lat,
+        "value": value,
+    }
+    # Only what the payload already holds (#363): this service invents no
+    # metadata, and an identify answer is not worth a channel of its own.
+    for name in ("units", "label"):
+        if config.get(name):
+            payload[name] = config[name]
+    return JSONResponse(payload, media_type=INFO_FORMAT)
 
 
 def _translate_capabilities_error(status_code: int) -> WMTSException:
@@ -442,10 +680,7 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
             _validate_service_and_version(params)
             return await _proxy_get_capabilities(request, org_slug, params)
         if operation == "getfeatureinfo":
-            raise WMTSException(
-                501, "OperationNotSupported", "REQUEST",
-                f"{params['request']} is not implemented yet on this endpoint",
-            )
+            return await _dispatch_get_feature_info(request, org_slug, params)
         raise WMTSException(
             400, "InvalidParameterValue", "REQUEST",
             f"Unknown request {params['request']!r}",

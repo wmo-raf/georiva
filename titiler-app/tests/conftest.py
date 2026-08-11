@@ -94,6 +94,19 @@ TILE_CONFIG = {
     "colormap": {str(i): [i, 0, 255 - i, 255] for i in range(256)},
 }
 
+#: The world in WebMercator metres — what a seeded COG covers unless a test
+#: hands ``seed_cog`` a smaller box to sit in.
+WORLD_EXTENT = 20037508.342789244
+
+#: The seeded grid's side, and the values on it: a 64×64 ramp from 0 to 50,
+#: read row-major. Small enough to write per test, and every cell distinct, so
+#: a test asserting "the value under this pixel" is asserting the pixel too —
+#: a read one cell off answers a different number.
+COG_SIZE = 64
+COG_VALUES = numpy.linspace(0, 50, COG_SIZE * COG_SIZE, dtype="float32").reshape(
+    COG_SIZE, COG_SIZE,
+)
+
 
 class FakeRedis:
     """The one method the app calls on its Redis client."""
@@ -151,10 +164,16 @@ def seed_cog():
     Uses the same filename grammar as ``build_cog_url`` on purpose: a test
     that seeds ``time=X`` and requests ``TIME=X`` exercises the real
     time-to-key derivation end to end.
+
+    ``bounds`` narrows the footprint in WebMercator metres, for the tests that
+    need somewhere a click can honestly land outside the data; ``data`` and
+    ``nodata`` replace the ramp and declare a no-data value, for the tests that
+    need a pixel holding nothing.
     """
 
     def write(time="2026-03-23T12:00:00Z", reftime=None,
-              org=ORG, catalog=CATALOG, collection=COLLECTION, variable=VARIABLE):
+              org=ORG, catalog=CATALOG, collection=COLLECTION, variable=VARIABLE,
+              bounds=None, data=None, nodata=None):
         time_dt = datetime.fromisoformat(time.replace("Z", "+00:00")).astimezone(timezone.utc)
         date_path = time_dt.strftime("%Y/%m/%d")
         time_str = time_dt.strftime("%H%M%S")
@@ -170,12 +189,16 @@ def seed_cog():
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        bound = 20037508.342789244  # WebMercator world extent
-        data = numpy.linspace(0, 50, 64 * 64, dtype="float32").reshape(64, 64)
+        if data is None:
+            data = COG_VALUES
+        height, width = data.shape
+        left, bottom, right, top = bounds or (
+            -WORLD_EXTENT, -WORLD_EXTENT, WORLD_EXTENT, WORLD_EXTENT
+        )
         with rasterio.open(
-            path, "w", driver="GTiff", width=64, height=64, count=1,
-            dtype="float32", crs="EPSG:3857",
-            transform=from_bounds(-bound, -bound, bound, bound, 64, 64),
+            path, "w", driver="GTiff", width=width, height=height, count=1,
+            dtype="float32", crs="EPSG:3857", nodata=nodata,
+            transform=from_bounds(left, bottom, right, top, width, height),
         ) as dst:
             dst.write(data, 1)
         return path
