@@ -43,6 +43,24 @@ def presented_secret(request):
     return request.query_params.get(QUERY_PARAM) or None
 
 
+def query_presented_secret(request):
+    """The judged secret, when it travelled as ``?api_key=`` — else ``None``.
+
+    For surfaces that write the caller's credential back into URLs (the keyed
+    WMTS capabilities document, #360). Only the query transport qualifies: a
+    caller who can send an ``Authorization`` header can send it on the next
+    request too, and a credential should not move to the weaker transport
+    uninvited. And only the secret :func:`presented_secret` actually judged —
+    with a Bearer header presented the header wins, so a query string nobody
+    validated must never be advertised. Lives here so the header-over-query
+    precedence has one author.
+    """
+    secret = request.query_params.get(QUERY_PARAM) or None
+    if secret is not None and presented_secret(request) == secret:
+        return secret
+    return None
+
+
 class ApiKeyAuthentication(BaseAuthentication):
     """Authenticate ``Authorization: Bearer grv_…`` or ``?api_key=grv_…``."""
 
