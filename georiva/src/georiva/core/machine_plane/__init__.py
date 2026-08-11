@@ -52,4 +52,6 @@ from .addresses import (  # noqa: F401
     titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,
+    wmts_capabilities_url,
+    wmts_kvp_endpoint,
 )

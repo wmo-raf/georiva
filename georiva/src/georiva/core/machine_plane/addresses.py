@@ -38,10 +38,18 @@ MARTIN_PREFIX = "/martin"
 #: Martin's function source, mounted under its own tile path.
 MARTIN_BOUNDARY_STATS_SOURCE = "boundary_stats"
 
+#: The path segment closing the org-scoped KVP WMTS endpoint,
+#: ``/titiler/{org}/wmts`` — three segments exactly, so it can never be read
+#: as the ``{org}/{catalog}/{collection}/{variable}`` tile grammar.
+WMTS_KVP_SEGMENT = "wmts"
+
 #: The organisation, catalog and collection a machine-plane URL addresses —
 #: everything needed to decide whether it may be served, and nothing more. The
 #: variable is deliberately absent: ``visibility`` is a property of the
 #: collection, so naming the variable here would imply a check that is not made.
+#: A WMTS GetCapabilities scopes to the organisation alone — catalog and
+#: collection are ``None`` — because discovery addresses no collection: the
+#: document itself filters per layer inside Django (#354).
 MachineScope = namedtuple("MachineScope", "org catalog collection")
 
 
@@ -76,15 +84,58 @@ def _martin_scope(query):
     return MachineScope(*(v[0] for v in values))
 
 
+def _wmts_scope(org, query):
+    """The scope of a KVP request on ``/titiler/{org}/wmts``.
+
+    KVP parameter *names* are case-insensitive (OGC 06-121r3, and legacy
+    clients exercise that), so ``layer`` and ``LAYER`` are one parameter — and
+    two spellings of it are a repetition, refused for the same reason Martin's
+    duplicates are: which one the shim would read is not visible from here.
+
+    ``GetTile`` and ``GetFeatureInfo`` name their data in ``LAYER`` as
+    ``catalog:collection:variable`` — the organisation stays in the path, never
+    in the identifier (#354). ``GetCapabilities`` names no collection at all
+    and scopes to the organisation alone; anything else, or anything
+    half-spelt, scopes to nothing.
+
+    Unlike path slugs, ``LAYER`` percent-decodes here (``parse_qs``), exactly
+    as Martin's query triple does: the shim on the other side of the proxy
+    reads the same decoded value, so the collection this authorises is still
+    the collection that will be read.
+    """
+    params = {}
+    for name, values in parse_qs(query, keep_blank_values=True).items():
+        params.setdefault(name.lower(), []).extend(values)
+
+    requests = params.get("request", [])
+    if len(requests) != 1:
+        return None
+    operation = requests[0].lower()
+    if operation == "getcapabilities":
+        return MachineScope(org, None, None)
+    if operation not in ("gettile", "getfeatureinfo"):
+        return None
+
+    layers = params.get("layer", [])
+    if len(layers) != 1:
+        return None
+    parts = layers[0].split(":")
+    if len(parts) != 3 or not all(parts):
+        return None
+    return MachineScope(org, parts[0], parts[1])
+
+
 def scope_of(uri):
     """The collection a machine-plane ``uri`` addresses, or ``None``.
 
     Takes the original request line as nginx received it — path and query, still
     percent-encoded — and returns the triple that decides whether it may be
     served. Anything this does not recognise returns ``None``, and the caller
-    treats that as "no". Encoded slugs are left encoded on purpose: they then
-    match no row and are denied, which is the right answer for an address whose
-    spelling is trying to be two things at once.
+    treats that as "no". Encoded *path* slugs are left encoded on purpose: they
+    then match no row and are denied, which is the right answer for an address
+    whose spelling is trying to be two things at once. Query values — Martin's
+    triple, the WMTS ``LAYER`` — decode instead, because the service behind the
+    proxy decodes them identically before reading.
 
     Recognising is all this does. Whether the collection exists, and who may see
     it, is :mod:`georiva.core.machine_plane.auth_view`'s question.
@@ -94,6 +145,8 @@ def scope_of(uri):
     if not segments:
         return None
     if segments[0] == TITILER_PREFIX.strip("/"):
+        if len(segments) == 3 and segments[2] == WMTS_KVP_SEGMENT:
+            return _wmts_scope(segments[1], query)
         return _titiler_scope(segments)
     if segments[:2] == [MARTIN_PREFIX.strip("/"), MARTIN_BOUNDARY_STATS_SOURCE]:
         return _martin_scope(query)
@@ -243,3 +296,28 @@ def martin_boundary_stats_url(collection, base) -> str:
         "collection": collection.slug,
     })
     return f"{base.rstrip('/')}/{MARTIN_BOUNDARY_STATS_SOURCE}/{{z}}/{{x}}/{{y}}?{params}"
+
+
+def wmts_kvp_endpoint(organisation) -> str:
+    """The org-scoped KVP WMTS endpoint under the Titiler proxy (#354).
+
+    The one paste-able URL a legacy client needs: GetCapabilities, GetTile and
+    GetFeatureInfo all answer here, addressed by KVP parameters rather than
+    path segments. Org-level rather than variable-level on purpose — the whole
+    point of WMTS is that one URL per organisation discovers everything — so
+    the argument is the ``Organisation`` row itself, not something to walk an
+    org out of.
+    """
+    return f"{TITILER_PREFIX}/{organisation.slug}/{WMTS_KVP_SEGMENT}"
+
+
+def wmts_capabilities_url(organisation) -> str:
+    """The REST capabilities document on the metadata plane (#354).
+
+    What Titiler itself fetches when proxying a KVP GetCapabilities, and what
+    API tooling reads without speaking KVP. Org-in-path on a Django plane for
+    the same reason ``tile_config`` is: Titiler dials it on an internal
+    hostname that belongs to no organisation, so the path is the only copy of
+    the tenant (ADR 0013).
+    """
+    return f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml"

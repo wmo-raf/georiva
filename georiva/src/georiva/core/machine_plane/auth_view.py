@@ -77,6 +77,14 @@ class TileAuthView(APIView):
             # answer.
             return self.deny()
 
+        if scope.collection is None:
+            # A WMTS GetCapabilities: it addresses the organisation, not a
+            # collection, and the org+host agreement above is the whole
+            # question. What the document may *list* is filtered per layer
+            # inside Django by ``visible_to`` — the gate holds nothing back
+            # here because there is nothing here to hold back (#354).
+            return self.allow()
+
         collections = Collection.objects.filter(
             catalog__organisation=active_org,
             catalog__slug=scope.catalog,
