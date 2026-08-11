@@ -301,7 +301,11 @@ class PublicApiUrlSweepTests(TestCase):
     #: an internal hostname belonging to no organisation, so it takes its org
     #: from its own first path segment rather than the Host this sweep varies.
     #: ``core.test_machine_plane`` scopes it the way it is actually addressed.
-    _SWEEP_EXEMPT_PREFIXES = ("api/jobs/", "api/tile-config/")
+    #: wmts carries the *organisation* slug in its path for the same
+    #: machine-plane reason (#356), so filling it with a data slug can never
+    #: answer on any host; ``wmts.tests.test_capabilities`` drives the
+    #: host-vs-path rule and the per-layer visibility this sweep exists for.
+    _SWEEP_EXEMPT_PREFIXES = ("api/jobs/", "api/tile-config/", "api/wmts/")
 
     @classmethod
     def setUpTestData(cls):
