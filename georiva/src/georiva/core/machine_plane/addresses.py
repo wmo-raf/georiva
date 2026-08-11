@@ -325,7 +325,25 @@ def wmts_layer_identifier(variable) -> str:
     return f"{collection.catalog.slug}:{collection.slug}:{variable.slug}"
 
 
-def wmts_rest_tile_template(variable, item=None) -> str:
+#: The WMTS dimension identifiers the capabilities document may advertise
+#: (#358). Named here, beside the template builder that turns them into
+#: placeholders, so the document's writer imports them rather than spelling
+#: them again.
+WMTS_TIME_DIMENSION = "Time"
+WMTS_REFTIME_DIMENSION = "Reftime"
+
+#: The tile-route query parameter each advertised WMTS dimension drives —
+#: identifier as the capabilities document spells it, parameter as the tile
+#: route reads it (and as the KVP shim forwards it). One mapping, because the
+#: document's ``{Time}``/``{Reftime}`` placeholders and the route's
+#: ``time``/``reftime`` are two spellings of the same axis and may not drift.
+WMTS_DIMENSION_PARAMS = {
+    WMTS_TIME_DIMENSION: "time",
+    WMTS_REFTIME_DIMENSION: "reftime",
+}
+
+
+def wmts_rest_tile_template(variable, dimensions=()) -> str:
     """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
 
     The existing per-variable tile route, spelt as a WMTS template: the
@@ -334,10 +352,12 @@ def wmts_rest_tile_template(variable, item=None) -> str:
     writes — org read from the variable's own row, ``WebMercatorQuad`` because
     it is the only TileMatrixSet the document advertises.
 
-    ``item`` pins the query to one concrete time (and reference time, for a
-    forecast) — the newest the caller holds — because the tile route requires
-    ``time`` and dimensions only join the document in a later slice (#357).
-    A variable with no items yet gets a bare template: there is no honest time
+    ``dimensions`` names the layer's advertised dimension identifiers (#358):
+    each becomes a ``{Identifier}`` placeholder on the query parameter the tile
+    route reads, so a client's time slider fills ``{Time}`` and a
+    dimension-ignorant client substitutes the document's defaults — either way
+    landing on the same route the gate authorises. A layer with no items
+    advertises no dimensions and gets a bare template: there is no honest time
     to name, and a layer without data cannot serve tiles under any spelling.
     """
     collection = variable.collection
@@ -345,12 +365,11 @@ def wmts_rest_tile_template(variable, item=None) -> str:
         org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
     )
     template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}.png"
-    if item is None:
-        return template
-    params = {"time": item.time_iso}
-    if item.reference_time:
-        params["reftime"] = item.reference_time_iso
-    return f"{template}?{urlencode(params)}"
+    query = "&".join(
+        f"{WMTS_DIMENSION_PARAMS[identifier]}={{{identifier}}}"
+        for identifier in dimensions
+    )
+    return f"{template}?{query}" if query else template
 
 
 def wmts_capabilities_url(organisation) -> str:

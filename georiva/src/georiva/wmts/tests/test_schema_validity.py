@@ -66,6 +66,23 @@ class WMTSSchemaValidityTests(TestCase):
             time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
         )
 
+        # A forecast collection too, so the two-dimension (Time + Reftime)
+        # layer shape is held to the schema alongside the Time-only one.
+        forecast = Collection.objects.create(
+            catalog=catalog, name="Model Temperature", slug="model-temperature",
+            visibility=Collection.Visibility.PUBLIC,
+            bounds=[20.0, -12.0, 52.0, 23.0],
+        )
+        Variable.objects.create(
+            collection=forecast, slug="t2m", name="Forecast 2m Temperature",
+            unit=unit, value_min=0, value_max=50,
+        )
+        Item.objects.create(
+            collection=forecast,
+            time=datetime(2026, 3, 1, 18, 0, tzinfo=timezone.utc),
+            reference_time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+        )
+
     def validate(self):
         response = self.client.get(
             reverse("wmts:capabilities", args=[self.organisation.slug])

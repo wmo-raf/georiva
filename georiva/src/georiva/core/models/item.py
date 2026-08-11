@@ -14,6 +14,8 @@ from modelcluster.models import ClusterableModel
 from timescale.db.models.models import TimescaleModel
 from wagtail.models import Orderable
 
+from georiva.core.utils import iso_utc_z
+
 from .base import AbstractAsset, AbstractSpatialItem
 
 
@@ -123,13 +125,13 @@ class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableMod
     @property
     def time_iso(self) -> str:
         """ISO 8601 UTC string with Z suffix, for use in API URLs and templates."""
-        return self.time.strftime('%Y-%m-%dT%H:%M:%SZ')
-    
+        return iso_utc_z(self.time)
+
     @property
     def reference_time_iso(self) -> str | None:
         """ISO 8601 UTC string with Z suffix for reference_time, or None."""
         if self.reference_time:
-            return self.reference_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            return iso_utc_z(self.reference_time)
         return None
     
     def display_time(self, time_resolution: str = '') -> str:

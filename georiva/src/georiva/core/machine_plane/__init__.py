@@ -43,6 +43,8 @@ from .addresses import (  # noqa: F401
     MARTIN_BOUNDARY_STATS_SOURCE,
     MARTIN_PREFIX,
     TITILER_PREFIX,
+    WMTS_REFTIME_DIMENSION,
+    WMTS_TIME_DIMENSION,
     MachineScope,
     martin_boundary_stats_url,
     org_slug_of,
