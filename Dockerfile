@@ -202,9 +202,16 @@ USER $UID:$GID
 COPY --from=builder --chown=$UID:$GID /georiva/venv /georiva/venv
 COPY --from=builder --chown=$UID:$GID /georiva/plugins /georiva/plugins
 
+# Tools only this image needs. `watchfiles` drives the auto-reloaders; `lxml`
+# is what the XSD-validating tests need to run rather than skip — the WMTS
+# capabilities document is held to OGC's own schema, and a skipped schema test
+# reads exactly like a passing one. Installed here rather than declared as a
+# dependency group because the builder syncs `--no-dev` and prod copies that
+# same venv: a group would install nowhere, and the runtime image must not
+# carry test-only packages.
 ENV PIP_CACHE_DIR=/tmp/georiva_pip_cache
 RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID \
-    /georiva/venv/bin/pip install --no-cache-dir watchfiles
+    /georiva/venv/bin/pip install --no-cache-dir watchfiles lxml
 
 # Source is bind-mounted — add it to PYTHONPATH directly
 ENV PYTHONPATH="/georiva/app/src:$PYTHONPATH"
