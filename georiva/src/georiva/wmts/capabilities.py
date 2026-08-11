@@ -24,7 +24,7 @@ private layers from one paste.
 """
 from xml.etree import ElementTree as ET
 
-from georiva.accounts.authentication import QUERY_PARAM, presented_secret
+from georiva.accounts.authentication import query_presented_secret
 from georiva.core.machine_plane import (
     WMTS_REFTIME_DIMENSION,
     WMTS_TIME_DIMENSION,
@@ -85,26 +85,12 @@ def visible_variables(request):
     )
 
 
-def propagated_api_key(request):
-    """The key to write into advertised URLs, or ``None`` (#360).
-
-    Only a key that travelled as ``?api_key=`` propagates: a caller who can
-    send an ``Authorization`` header can send it on tile requests too, and a
-    credential should not move to the weaker transport uninvited. The value is
-    propagated only when it is the secret the authenticator actually judged —
-    with a Bearer header presented, the header wins and a query string nobody
-    validated must not be advertised. An *invalid* key never reaches this
-    module at all: authentication already answered 401.
-    """
-    secret = request.query_params.get(QUERY_PARAM)
-    if secret and presented_secret(request) == secret:
-        return secret
-    return None
-
-
 def build_capabilities(request, organisation) -> bytes:
     """The WMTSCapabilities.xml body for ``organisation``, as ``request`` may see it."""
-    api_key = propagated_api_key(request)
+    # Only a query-carried key is written into the advertised URLs (#360) —
+    # the accounts module owns which transports qualify. An *invalid* key
+    # never reaches here at all: authentication already answered 401.
+    api_key = query_presented_secret(request)
     root = ET.Element(_wmts("Capabilities"), {"version": "1.0.0"})
 
     service = ET.SubElement(root, _ows("ServiceIdentification"))
