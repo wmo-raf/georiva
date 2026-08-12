@@ -1,0 +1,40 @@
+# Ruff governs the whole repository — the core package and the Titiler app —
+# so the config sits at the root rather than inside either project. It is a
+# dedicated file rather than a [tool.ruff] table in the root pyproject.toml,
+# because that file describes itself as a local dev overlay that is "NOT a
+# package, NOT published, NOT used by Docker", and the style contract is none
+# of those things.
+
+# 120, not ruff's default 88. The code was written to about 120 and 88 would
+# flag well over a thousand lines that are fine as they stand.
+line-length = 120
+target-version = "py312"
+
+extend-exclude = [
+    # Cookiecutter templates: jinja placeholders in the paths and the files.
+    "source-plugin-boilerplate",
+    # Plugin repos checked out for local development; each owns its own style.
+    "dev-plugins",
+    # Django writes these. Excluded from formatting as well as linting, so that
+    # `makemigrations` output never needs a reformat pass before it can land.
+    "**/migrations/**",
+]
+
+[lint]
+select = ["E", "W", "F", "I"]
+
+[lint.per-file-ignores]
+# Settings modules layer with `from .base import *`; the star import and every
+# name it carries are the design, not an oversight.
+"georiva/src/georiva/config/settings/*.py" = ["F403", "F405"]
+
+# `access.py` re-exports the tenancy vocabulary from `.lookups` so that
+# enforcement code has one import to reach for — the import block says so in a
+# comment. The names are unused *here* by construction, and plugins outside this
+# repository import them from this module.
+"georiva/src/georiva/organisations/access.py" = ["F401"]
+
+# Both pin environment variables before importing the app, which reads them at
+# import time. The imports cannot move above that setup.
+"titiler-app/app/main.py" = ["E402"]
+"titiler-app/tests/conftest.py" = ["E402"]
