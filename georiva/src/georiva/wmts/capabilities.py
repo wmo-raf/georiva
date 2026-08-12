@@ -182,31 +182,39 @@ def layer_dimensions(collection):
 
     Identifier → ``(values, default)``, in document order. A collection whose
     items carry a ``reference_time`` is a forecast and advertises two axes:
-    ``Reftime`` lists every run newest-first and defaults to the newest, and
-    ``Time`` lists that default run's valid times — so a dimension-ignorant
-    client substituting defaults gets coherent latest-forecast tiles, never a
-    time from one run against another run's reference. ``Time`` defaults to
-    the run's first valid time (the analysis — the run's "now"), while an
+    ``Reftime`` lists every run and defaults to the newest, and ``Time`` lists
+    that default run's valid times — so a dimension-ignorant client
+    substituting defaults gets coherent latest-forecast tiles, never a time
+    from one run against another run's reference. ``Time`` defaults to the
+    run's first valid time (the analysis — the run's "now"), while an
     observation collection advertises ``Time`` alone, defaulting to the newest
     value it has. Enumeration is complete on purpose — the accepted
     document-size trade-off of #354 — and a collection with no items yet
     advertises nothing: there are no honest values to list.
+
+    Both axes ascend (#378). WMTS 1.0 mandates no ordering and every axis here
+    carries an explicit ``Default``, but a client turning a ``Dimension`` into
+    a slider ordinarily reads document order — and two axes on one layer
+    running in opposite directions is worse than either direction alone.
+    Ascending is the spelling inherited from WMS 1.3 dimension declarations, so
+    the newest run is the *last* ``Reftime`` value rather than the first, which
+    is precisely what the ``Default`` element exists to say instead of position.
     """
     reftimes = list(
         Item.objects.filter(collection=collection, reference_time__isnull=False)
-        .order_by("-reference_time")
+        .order_by("reference_time")
         .values_list("reference_time", flat=True)
         .distinct()
     )
     if reftimes:
         times = list(
-            Item.objects.filter(collection=collection, reference_time=reftimes[0])
+            Item.objects.filter(collection=collection, reference_time=reftimes[-1])
             .order_by("time")
             .values_list("time", flat=True)
         )
         return {
             WMTS_TIME_DIMENSION: (times, times[0]),
-            WMTS_REFTIME_DIMENSION: (reftimes, reftimes[0]),
+            WMTS_REFTIME_DIMENSION: (reftimes, reftimes[-1]),
         }
     times = list(
         Item.objects.filter(collection=collection)

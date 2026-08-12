@@ -367,12 +367,25 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         reftime = dimensions["Reftime"]
         self.assertEqual(
             self.values(reftime),
-            ["2026-03-02T00:00:00Z", "2026-03-01T00:00:00Z"],
+            ["2026-03-01T00:00:00Z", "2026-03-02T00:00:00Z"],
         )
         self.assertEqual(
             reftime.findtext("wmts:Default", namespaces=NS),
             "2026-03-02T00:00:00Z",
         )
+
+    def test_both_axes_of_one_layer_run_the_same_way(self):
+        """#378: a client ordinarily builds its slider from document order, so
+        two dimensions on one layer running in opposite directions show the run
+        axis backwards beside a forward valid-time axis. Asserted against
+        ``sorted`` rather than a literal list, because what must hold is the
+        direction and not this fixture's particular runs — and asserted on both
+        axes together, because either one alone was already ascending once
+        while the pair disagreed."""
+        dimensions = self.dimensions(self.layer("weather:fc-temperature:t2m"))
+        for identifier in ("Time", "Reftime"):
+            values = self.values(dimensions[identifier])
+            self.assertEqual(values, sorted(values), identifier)
 
     def test_forecast_time_lists_the_default_runs_valid_times(self):
         """Only the newest run's valid times — a Time from one run against

@@ -20,9 +20,10 @@ under the same slug. A key, a path or a lookup that drops the org segment stops
 distinguishing them, and each test below is written so that dropping it fails.
 """
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import resolve, reverse
 
 from georiva.core.machine_plane import (
     MARTIN_PREFIX,
@@ -205,6 +206,31 @@ class WmtsAddressTests(TestCase):
             wmts_capabilities_url(self.uganda),
             "/api/wmts/uganda/WMTSCapabilities.xml",
         )
+
+    def test_the_capabilities_url_resolves_to_the_view_that_serves_it(self):
+        """#378: this is the one address the document advertises for itself, and
+        the only proof it had was a literal equal to another literal — rename
+        the route and both spellings agree while every client following
+        ``ServiceMetadataURL`` gets a silent 404. The tile template earns its
+        proof by being run through ``scope_of``; this earns the same by being
+        run through the URLconf that has to answer it.
+
+        Titiler holds a third spelling of this path (``CAPABILITIES_PATH`` in
+        ``titiler-app/app/wmts.py``) which no test on either side can reach —
+        that one stays a change-in-pairs, and every KVP GetCapabilities
+        exercises it.
+        """
+        match = resolve(wmts_capabilities_url(self.kenya))
+        self.assertEqual(match.view_name, "wmts:capabilities")
+        self.assertEqual(match.kwargs["org_slug"], self.kenya.slug)
+
+    def test_a_keyed_capabilities_url_still_resolves_to_that_view(self):
+        """The keyed spelling is the one a legacy client actually follows
+        (#360), and a credential in the query may not move the address."""
+        keyed = wmts_capabilities_url(self.kenya, api_key="grv_secret")
+        match = resolve(urlsplit(keyed).path)
+        self.assertEqual(match.view_name, "wmts:capabilities")
+        self.assertEqual(match.kwargs["org_slug"], self.kenya.slug)
 
     def test_two_organisations_get_different_capabilities_urls(self):
         self.assertNotEqual(
