@@ -1,5 +1,11 @@
 # The organisation travels in the path on the machine plane
 
+> **Amended by [ADR-0015](0015-nginx-auth-request-gateway-for-tiles.md).**
+> A request that reaches Titiler or Martin *through the proxy* now does carry a
+> Host, and the gate checks the org segment against it. The segment is how the
+> organisation reaches a service that resolves none — not, any longer, the only
+> statement of it. See the amendment under **Decision**.
+
 ## Status
 
 accepted
@@ -76,6 +82,36 @@ The two planes stay consistent in practice because the same request produces
 both: Django writes the tile URL while serving a page it resolved from the Host,
 so host and path agree by construction rather than by check.
 
+**Amended: there is a second source now, and it is checked.** "Here there is
+none" was true when it was written and stopped being true with #274. Every
+machine-plane request arriving through the proxy is preceded by an
+`auth_request` into `TileAuthView`, and that subrequest carries the browser's
+own Host — so the Host resolves an organisation there, and the view denies when
+`active_org.slug != scope.org` (ADR 0015). Host and path no longer merely agree
+by construction; on the public route they are made to agree by check, and a
+hand-edited org segment is refused rather than served.
+
+What the amendment does *not* change is the decision. The segment stays,
+because it was never the tenancy check — it is the transport. Nginx strips
+`/titiler/` before proxying, so the segment is the only thing left carrying the
+organisation into a service that resolves none, and it is also what
+`machine_plane.scope_of` reads to know which collection an address names. Both
+of those survive the gate's existence intact. And the "no Host at all" case
+survives too, in the one place it always genuinely applied: the tile-config
+callback Titiler dials on `georiva:8000`, an internal container name that is
+nobody's hostname and reaches no gate.
+
+The concrete question this is usually asked as: why does the pasted WMTS
+endpoint read `https://<org-host>/titiler/{org}/wmts` (#354) when the host
+already names that organisation? Because the alternative is nginx splicing the
+slug in — from a static host→org map, which is tenancy logic in a fourth
+service, or from the gate's own response, which makes the request line stop
+saying which organisation it addressed until after the subrequest. Either way
+the instance would carry two spellings of every tile address, which is the drift
+this ADR exists to prevent, and it would buy a shorter URL for the one caller
+that types one by hand. The endpoint is long on purpose; if it is ever tedious
+to type, the fix is somewhere to copy it from, not a second address for it.
+
 ## Consequences
 
 - Titiler and Martin hold no tenancy logic at all, and gain none as tenancy
@@ -87,7 +123,10 @@ so host and path agree by construction rather than by check.
   private tier addresses the machine plane through the nginx `auth_request`
   gateway (#274), not through path guessing. Martin's function reads only what
   the triple names. The Django endpoint is the one that *does* have a Host to
-  check against on public calls, and does.
+  check against on public calls, and does. **Amended by ADR 0015:** so does
+  every proxied tile request, at the gate rather than in the tile server. Editing
+  the org segment by hand is now refused on the public route; it remains possible
+  only where nothing sits in front of the tile servers to ask.
 - Existing palette keys are in the old format and can never be read again.
   `warm_all` now sweeps every `georiva:palette:*` key it did not just write, so
   the format change clears itself on the next startup — and so do the keys of
