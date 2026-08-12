@@ -9,7 +9,6 @@ For direct HTTP/HTTPS downloads from:
 
 import time
 from pathlib import Path
-from typing import Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -58,7 +57,7 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         self.custom_headers = self.config.get("headers", {})
         self.user_agent = self.config.get("user_agent", "GeoRiva/1.0")
 
-        self._session: Optional[requests.Session] = None
+        self._session: requests.Session | None = None
 
     @property
     def mode(self) -> FetchMode:
@@ -211,7 +210,7 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             result.status = "failed"
             self.logger.error(f"Request failed for {url}: {e}")
 
-        except IOError as e:
+        except OSError as e:
             result.success = False
             result.error = f"IO error writing file: {e}"
             result.status = "failed"

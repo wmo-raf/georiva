@@ -13,7 +13,7 @@ uses:
 
 import unittest
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from datetime import timezone as dt_timezone
 
 from django.conf import settings
@@ -33,7 +33,7 @@ from georiva.virtual_zarr.coverage import (
 )
 from georiva.virtual_zarr.models import VirtualZarrManifest
 
-UTC = dt_timezone.utc
+UTC = UTC
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 S3_READY = bool(

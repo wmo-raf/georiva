@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytz
 from django.contrib.contenttypes.models import ContentType
@@ -138,11 +138,11 @@ class FileIngestionSummaryFieldTests(TestCase):
     """Processing summary fields are stored and readable."""
 
     def test_summary_fields_persist(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         log, _ = FileIngestion.register(bucket="incoming", file_path="summary/file.nc")
-        t_start = datetime(2024, 6, 1, 0, 0, tzinfo=timezone.utc)
-        t_end = datetime(2024, 6, 30, 0, 0, tzinfo=timezone.utc)
+        t_start = datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
+        t_end = datetime(2024, 6, 30, 0, 0, tzinfo=UTC)
 
         log.variables_discovered = 5
         log.valid_time_start = t_start
@@ -157,11 +157,11 @@ class FileIngestionSummaryFieldTests(TestCase):
         self.assertEqual(log.timestep_count, 30)
 
     def test_mark_completed_writes_summary_fields(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         FileIngestion.register(bucket="incoming", file_path="mark/file.nc")
-        t_start = datetime(2024, 7, 1, tzinfo=timezone.utc)
-        t_end = datetime(2024, 7, 31, tzinfo=timezone.utc)
+        t_start = datetime(2024, 7, 1, tzinfo=UTC)
+        t_end = datetime(2024, 7, 31, tzinfo=UTC)
 
         FileIngestion.mark_completed(
             bucket="incoming",

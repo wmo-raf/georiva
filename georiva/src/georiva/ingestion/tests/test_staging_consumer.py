@@ -9,7 +9,7 @@ verify that one raw file becomes exactly ONE StagingItem + ONE source asset
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -34,7 +34,7 @@ def _fake_temp(content=b"netcdf-bytes" * 200):
 
 
 def _ts(*days):
-    return [datetime(2020, 1, d, tzinfo=timezone.utc) for d in days]
+    return [datetime(2020, 1, d, tzinfo=UTC) for d in days]
 
 
 class RegisterStagingFileTests(TestCase):
@@ -77,8 +77,8 @@ class RegisterStagingFileTests(TestCase):
 
         # Range extent, no single datetime.
         self.assertIsNone(item.datetime)
-        self.assertEqual(item.start_datetime, datetime(2020, 1, 1, tzinfo=timezone.utc))
-        self.assertEqual(item.end_datetime, datetime(2020, 1, 5, tzinfo=timezone.utc))
+        self.assertEqual(item.start_datetime, datetime(2020, 1, 1, tzinfo=UTC))
+        self.assertEqual(item.end_datetime, datetime(2020, 1, 5, tzinfo=UTC))
         self.assertEqual(item.source_file, "staging:test-org/cmip6/tas-ssp245/series.nc")
         self.assertEqual(item.bounds, [0, 0, 1, 1])
 
@@ -88,7 +88,7 @@ class RegisterStagingFileTests(TestCase):
 
     def test_single_timestamp_uses_datetime(self):
         item = self._register(_ts(7), key="test-org/cmip6/tas-ssp245/slice.nc")
-        self.assertEqual(item.datetime, datetime(2020, 1, 7, tzinfo=timezone.utc))
+        self.assertEqual(item.datetime, datetime(2020, 1, 7, tzinfo=UTC))
         self.assertIsNone(item.start_datetime)
 
     def test_source_asset_has_role_format_and_checksum(self):

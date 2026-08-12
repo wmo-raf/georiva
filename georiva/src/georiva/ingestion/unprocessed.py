@@ -18,7 +18,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
@@ -29,7 +28,7 @@ class UnprocessedFile:
     bucket: str
     file_path: str
     reason: str  # 'untracked' | 'pending' | 'reingest'
-    reference_time: Optional[datetime] = None
+    reference_time: datetime | None = None
 
 
 def ingest_unprocessed(found: list[UnprocessedFile]) -> int:

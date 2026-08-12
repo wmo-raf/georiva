@@ -123,7 +123,7 @@ def validate_unit(unit):
         raise ValidationError(
             _("'%(unit)s' is not defined in the unit registry"),
             params={"unit": unit},
-        )
+        ) from None
 
 
 TEMPERATURE_UNITS = [

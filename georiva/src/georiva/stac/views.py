@@ -33,7 +33,6 @@ Implements STAC API v1.0.0
 """
 
 from datetime import datetime
-from typing import Optional
 
 from django.db.models import Q
 from rest_framework import status
@@ -446,7 +445,7 @@ class STACItemsView(STACGeoAPIView):
             pass
         return queryset
 
-    def _parse_datetime(self, dt_string: str) -> Optional[datetime]:
+    def _parse_datetime(self, dt_string: str) -> datetime | None:
         try:
             return datetime.fromisoformat(dt_string.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
@@ -495,7 +494,7 @@ class STACItemDetailView(STACGeoAPIView):
 
         return Response(data)
 
-    def _find_item(self, collection: Collection, item_id: str) -> Optional[Item]:
+    def _find_item(self, collection: Collection, item_id: str) -> Item | None:
         parts = item_id.split("_")
 
         # Base queryset — respect forecast past-item policy
@@ -804,7 +803,7 @@ class STACSearchView(STACGeoAPIView):
         except (ValueError, TypeError):
             return self.DEFAULT_LIMIT
 
-    def _parse_datetime(self, dt_string: str) -> Optional[datetime]:
+    def _parse_datetime(self, dt_string: str) -> datetime | None:
         try:
             return datetime.fromisoformat(dt_string.replace("Z", "+00:00"))
         except (ValueError, AttributeError):

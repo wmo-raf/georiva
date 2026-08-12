@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -308,7 +308,7 @@ class VariableExtractor:
         sources: list,
         file_path: Path,
         timestamp: datetime,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
         Compute stats using open_variable() for lazy/dask-backed access.
 

@@ -29,8 +29,8 @@ See docs/adr/0005-generic-derivation-engine.md and issue #123.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
 
 from georiva.geoprocessing import anomaly, climatology, trend
 from georiva.processing.recipe import (
@@ -96,7 +96,7 @@ class ClimatologyRecipe(BaseRecipe):
 
     # ---- input resolution ---------------------------------------------------
 
-    def resolve_inputs(self, unit: ProductionUnit) -> "dict[str, ResolvedInput]":
+    def resolve_inputs(self, unit: ProductionUnit) -> dict[str, ResolvedInput]:
         items = self._staging_items(unit)
         assets = [a for si in items for a in si.assets.all()]
         resolved = {
@@ -116,7 +116,7 @@ class ClimatologyRecipe(BaseRecipe):
         start = unit["period"][0]
         return OutputItem(
             collection=collection,
-            time=datetime(start, 1, 1, tzinfo=timezone.utc),
+            time=datetime(start, 1, 1, tzinfo=UTC),
             bounds=si.bounds,
             crs=si.crs,
             width=si.width,
@@ -133,7 +133,7 @@ class ClimatologyRecipe(BaseRecipe):
 
     # ---- transform ----------------------------------------------------------
 
-    def transform(self, unit: ProductionUnit, resolved) -> "list[OutputAsset]":
+    def transform(self, unit: ProductionUnit, resolved) -> list[OutputAsset]:
         season = unit["season"]
         quantity = unit["quantity"]
 

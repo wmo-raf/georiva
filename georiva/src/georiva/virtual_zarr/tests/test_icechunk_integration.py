@@ -10,8 +10,7 @@ under a unique scratch prefix and purges it afterwards.
 import time
 import unittest
 import uuid
-from datetime import datetime
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -146,7 +145,9 @@ class IcechunkStorageChecks(SimpleTestCase):
 
         fresh = open_repo(self.repo_path)
         with self.assertRaises(Exception) as ctx:
-            self._open_tip(fresh)["precip"].isel(time=0).values
+            # Reading .values is what forces the lazy read that must fail, so
+            # B018's "useless attribute access" is exactly the assertion.
+            self._open_tip(fresh)["precip"].isel(time=0).values  # noqa: B018
         self.assertIn("checksum", str(ctx.exception).lower())
 
     # -- check 3: predictor round-trip ---------------------------------------
@@ -192,13 +193,13 @@ class IcechunkStorageChecks(SimpleTestCase):
         keys = [self._cog(f"step-{i}.tif", d) for i, d in enumerate(stack)]
 
         repo = open_repo(self.repo_path, create=True)
-        vds = self._build_vds(list(zip(dates[:2], keys[:2])))
+        vds = self._build_vds(list(zip(dates[:2], keys[:2], strict=True)))
         c1 = self._commit_rebuild(repo, vds, 2)
 
         self.assertEqual(last_committed_time(repo), dates[1])
 
         now = timezone.now()
-        vds_new = self._build_vds(list(zip(dates[2:], keys[2:])))
+        vds_new = self._build_vds(list(zip(dates[2:], keys[2:], strict=True)))
         c2 = write_append(
             repo,
             vds_new,
@@ -261,7 +262,7 @@ class BuildTaskEndToEndTests(TestCase):
     def _add_item(self, day: int):
         from georiva.core.models import Asset, Item
 
-        ts = datetime(2026, 3, day, tzinfo=dt_timezone.utc)
+        ts = datetime(2026, 3, day, tzinfo=UTC)
         item = Item.objects.create(
             collection=self.collection,
             time=ts,
@@ -360,7 +361,7 @@ class BuildTaskEndToEndTests(TestCase):
         # An Item with no COG asset for this variable: skipped during builds.
         Item.objects.create(
             collection=self.collection,
-            time=datetime(2026, 3, 5, tzinfo=dt_timezone.utc),
+            time=datetime(2026, 3, 5, tzinfo=UTC),
             bounds=list(BOUNDS),
             crs="EPSG:4326",
             width=64,

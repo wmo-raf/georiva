@@ -17,11 +17,11 @@ Design:
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Generator, Optional
 
 import cfgrib
 import numpy as np
@@ -41,7 +41,7 @@ class VariableKey:
 
     short_name: str
     type_of_level: str
-    level: Optional[int] = None
+    level: int | None = None
 
     def to_filter(self) -> dict:
         """Convert to cfgrib filter_by_keys."""
@@ -121,7 +121,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         return results
 
     def get_timestamps(
-        self, file_path: PathLike, variable_name: str, *, key: Optional[VariableKey] = None
+        self, file_path: PathLike, variable_name: str, *, key: VariableKey | None = None
     ) -> list[datetime]:
         """
         Get timestamps for a specific variable.
@@ -147,9 +147,9 @@ class GRIBFormatPlugin(BaseFormatPlugin):
         file_path: PathLike,
         variable_name: str,
         *,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
-        key: Optional[VariableKey] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
+        key: VariableKey | None = None,
     ) -> Generator[VariableInfo, None, None]:
         """
         Open a GRIB variable lazily.
@@ -227,7 +227,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     # Internal: opening GRIB files
     # ------------------------------------------------------------------
 
-    def _open(self, file_path: Path, filter_by_keys: dict) -> Optional[xr.Dataset]:
+    def _open(self, file_path: Path, filter_by_keys: dict) -> xr.Dataset | None:
         """Open a single GRIB view. Returns None if no data matches."""
         try:
             ds = xr.open_dataset(
@@ -272,7 +272,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     # Internal: variable lookup
     # ------------------------------------------------------------------
 
-    def _find_xr_name(self, ds: xr.Dataset, short_name: str) -> Optional[str]:
+    def _find_xr_name(self, ds: xr.Dataset, short_name: str) -> str | None:
         """Find the xarray variable name matching a GRIB shortName."""
         for var_name in ds.data_vars:
             if var_name == short_name:
@@ -281,7 +281,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 return var_name
         return None
 
-    def _find_by_name(self, file_path: Path, variable_name: str) -> tuple[Optional[xr.Dataset], Optional[str]]:
+    def _find_by_name(self, file_path: Path, variable_name: str) -> tuple[xr.Dataset | None, str | None]:
         """Fallback: search all datasets for a variable by name or shortName."""
         for ds in self._open_all(file_path):
             if variable_name in ds.data_vars:
@@ -292,7 +292,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
             ds.close()
         return None, None
 
-    def _extract_level(self, var, attrs: dict) -> Optional[int]:
+    def _extract_level(self, var, attrs: dict) -> int | None:
         """Extract the level value from a variable's coordinates."""
         type_of_level = attrs.get("GRIB_typeOfLevel", "")
         if type_of_level and type_of_level in var.coords:
@@ -307,7 +307,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
 
     _TIME_DIMS = ("time", "valid_time", "forecast_time")
 
-    def _time_dim(self, var) -> Optional[str]:
+    def _time_dim(self, var) -> str | None:
         for d in var.dims:
             if d in self._TIME_DIMS:
                 return d
@@ -337,7 +337,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 t = ds.coords[coord_name].values
                 if isinstance(t, np.datetime64):
                     return pd.Timestamp(t).to_pydatetime()
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     # ------------------------------------------------------------------
     # Internal: spatial helpers
@@ -346,7 +346,7 @@ class GRIBFormatPlugin(BaseFormatPlugin):
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}
 
-    def _spatial_dims(self, var) -> tuple[Optional[str], Optional[str]]:
+    def _spatial_dims(self, var) -> tuple[str | None, str | None]:
         y_dim = x_dim = None
         for d in var.dims:
             dl = d.lower()

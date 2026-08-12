@@ -30,7 +30,7 @@ class Command(BaseCommand):
         try:
             moves = sync_site_domains(options["old_domain"], options["base_domain"])
         except ValueError as exc:
-            raise CommandError(str(exc))
+            raise CommandError(str(exc)) from exc
 
         if not moves:
             self.stdout.write(f"No organisation Site is on {options['old_domain']}; nothing to move.")

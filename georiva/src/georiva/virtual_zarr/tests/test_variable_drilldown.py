@@ -7,8 +7,7 @@ assertions stay at the level a client sees — timestamp lists, build-history
 rows, GC status, graceful degradation when no repo exists yet.
 """
 
-from datetime import datetime, timedelta
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime, timedelta
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -25,7 +24,7 @@ from georiva.organisations.tests.factories import (
 )
 from georiva.virtual_zarr.models import VirtualZarrBuildLog, VirtualZarrManifest
 
-UTC = dt_timezone.utc
+UTC = UTC
 
 
 def build_collection(organisation, *, slug):

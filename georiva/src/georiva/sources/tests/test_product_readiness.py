@@ -7,7 +7,7 @@ exists and is non-empty. Gates the "Run now" button and names the blocker when
 not ready. The engine's per-unit readiness + min-count guard are unchanged.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -27,7 +27,7 @@ from georiva.sources.models import (
 )
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
-_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
+_TIME = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def _definition(**overrides):

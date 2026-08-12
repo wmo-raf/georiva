@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,8 +41,8 @@ def as_utc(ts: datetime) -> datetime:
     equal.
     """
     if ts.tzinfo is None:
-        return ts.replace(tzinfo=dt_timezone.utc)
-    return ts.astimezone(dt_timezone.utc)
+        return ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -105,8 +104,8 @@ def is_lock_expired(
 class VariableCoverage:
     """Everything a monitoring surface shows about one variable's repo."""
 
-    variable: "Variable"
-    manifest: "VirtualZarrManifest | None"
+    variable: Variable
+    manifest: VirtualZarrManifest | None
     status: str  # manifest status value; "" when no manifest row
     stuck: bool  # BUILDING with an expired lock
     catalog_timestamps: tuple[datetime, ...]
@@ -312,9 +311,9 @@ class VariableDetail:
     """The drill-down report: coverage plus history and repo internals."""
 
     coverage: VariableCoverage
-    build_history: tuple["VirtualZarrBuildLog", ...]  # builds only, newest first
+    build_history: tuple[VirtualZarrBuildLog, ...]  # builds only, newest first
     last_failure_at: datetime | None  # latest failed build's finish stamp
-    last_gc: "VirtualZarrBuildLog | None"
+    last_gc: VirtualZarrBuildLog | None
     snapshots: tuple[SnapshotEntry, ...]  # ancestry of main, tip first
     store_arrays: tuple[StoreArray, ...]  # structure at the tip
     detail_read_error: str  # non-empty when the ancestry/store read failed

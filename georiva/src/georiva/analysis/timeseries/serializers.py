@@ -69,7 +69,7 @@ class VariablePathField(serializers.CharField):
                 collection__catalog__slug=catalog_slug,
             )
         except Variable.DoesNotExist:
-            raise serializers.ValidationError(f"Variable not found or inactive: {value!r}")
+            raise serializers.ValidationError(f"Variable not found or inactive: {value!r}") from None
 
 
 # ---------------------------------------------------------------------------

@@ -709,8 +709,8 @@ class ProductEditViewTests(ProductServiceBase):
                 {
                     "title": "Rainfall Normals (1991–2020)",
                     "description": "Operator note.",
-                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                    "col-%d-description" % self.clim_col.pk: "",
+                    f"col-{self.clim_col.pk}-name": self.clim_col.name,
+                    f"col-{self.clim_col.pk}-description": "",
                 },
             )
 
@@ -728,8 +728,8 @@ class ProductEditViewTests(ProductServiceBase):
                 {
                     "title": "",
                     "description": "",
-                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                    "col-%d-description" % self.clim_col.pk: "",
+                    f"col-{self.clim_col.pk}-name": self.clim_col.name,
+                    f"col-{self.clim_col.pk}-description": "",
                 },
             )
             self.clim.refresh_from_db()
@@ -744,8 +744,8 @@ class ProductEditViewTests(ProductServiceBase):
                 {
                     "title": "",
                     "description": "",
-                    "col-%d-name" % self.clim_col.pk: "My Normals",
-                    "col-%d-description" % self.clim_col.pk: "Catalog blurb.",
+                    f"col-{self.clim_col.pk}-name": "My Normals",
+                    f"col-{self.clim_col.pk}-description": "Catalog blurb.",
                 },
             )
 
@@ -763,8 +763,8 @@ class ProductEditViewTests(ProductServiceBase):
                     "description": "",
                     "config-min_count": "35",
                     "interval_minutes": "1440",
-                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                    "col-%d-description" % self.clim_col.pk: "",
+                    f"col-{self.clim_col.pk}-name": self.clim_col.name,
+                    f"col-{self.clim_col.pk}-description": "",
                 },
             )
 
@@ -781,8 +781,8 @@ class ProductEditViewTests(ProductServiceBase):
                     "title": "",
                     "description": "",
                     "config-quantity": "trend",  # not among choices
-                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                    "col-%d-description" % self.clim_col.pk: "",
+                    f"col-{self.clim_col.pk}-name": self.clim_col.name,
+                    f"col-{self.clim_col.pk}-description": "",
                 },
             )
 

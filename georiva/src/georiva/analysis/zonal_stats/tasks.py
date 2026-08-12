@@ -68,7 +68,7 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
             asset.href,
             exc,
         )
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
 
     for level, boundaries in boundaries_by_level.items():
         stats_rows = compute_stats_from_cog_bytes(cog_bytes, boundaries)

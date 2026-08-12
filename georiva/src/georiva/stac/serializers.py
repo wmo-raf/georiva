@@ -20,7 +20,6 @@ Implements STAC Spec v1.0.0
 
 import calendar
 from datetime import timedelta
-from typing import Optional
 
 from rest_framework import serializers
 
@@ -320,7 +319,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
 
         return None, None
 
-    def _parse_epsg(self, crs: str) -> Optional[int]:
+    def _parse_epsg(self, crs: str) -> int | None:
         if crs and crs.upper().startswith("EPSG:"):
             try:
                 return int(crs.split(":")[1])
@@ -328,7 +327,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
                 pass
         return None
 
-    def _crs_to_wkt2(self, crs: str) -> Optional[str]:
+    def _crs_to_wkt2(self, crs: str) -> str | None:
         try:
             from rasterio.crs import CRS
 
@@ -336,7 +335,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
         except Exception:
             return None
 
-    def _build_transform(self, obj) -> Optional[list]:
+    def _build_transform(self, obj) -> list | None:
         if obj.bounds and obj.resolution_x:
             west, south, east, north = obj.bounds
             return [obj.resolution_x, 0, west, 0, -abs(obj.resolution_y), north]
@@ -399,13 +398,13 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
 
         return assets
 
-    def _build_thumbnail_href(self, obj, variable, request) -> Optional[str]:
+    def _build_thumbnail_href(self, obj, variable, request) -> str | None:
         path = titiler_preview_url(obj, variable)
         if request:
             return get_full_url_by_request(request, path)
         return path
 
-    def _build_visual_href(self, obj, variable, request) -> Optional[str]:
+    def _build_visual_href(self, obj, variable, request) -> str | None:
         path = titiler_encoded_preview_url(obj, variable)
         if request:
             return get_full_url_by_request(request, path)
@@ -533,7 +532,7 @@ class STACVariableCollectionSerializer(serializers.Serializer, STACBaseURLMixin)
 
         return summaries
 
-    def _parse_epsg(self, crs: str) -> Optional[int]:
+    def _parse_epsg(self, crs: str) -> int | None:
         if crs and crs.upper().startswith("EPSG:"):
             try:
                 return int(crs.split(":")[1])

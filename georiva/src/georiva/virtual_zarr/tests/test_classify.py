@@ -6,7 +6,7 @@ strictly after the committed time_end append; anything earlier/overlapping
 (backfill, out-of-order, overwrite) falls back to a full rebuild.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from django.test import SimpleTestCase
 
@@ -17,7 +17,7 @@ from georiva.virtual_zarr.classify import (
     classify,
 )
 
-UTC = timezone.utc
+UTC = UTC
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 

@@ -479,7 +479,8 @@ class OrgOwnedLookupDeclarationTests(TestCase):
             checked += 1
             with self.subTest(model=model._meta.label):
                 # Raises FieldError if any segment of the declared path is wrong.
-                model._default_manager.filter(**{f"{lookup}__isnull": True}).query
+                # Reading .query is what forces that, so B018 is the point here.
+                model._default_manager.filter(**{f"{lookup}__isnull": True}).query  # noqa: B018
         self.assertGreater(checked, 5)
 
     def test_every_model_declares_something_the_dispatcher_understands(self):

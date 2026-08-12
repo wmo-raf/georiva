@@ -13,7 +13,7 @@ the target collection's first Variable.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from georiva.processing.recipe import (
     BaseRecipe,
@@ -92,7 +92,7 @@ class PromotionRecipe(BaseRecipe):
             return []
         return self.enumerate_units(trigger)
 
-    def resolve_inputs(self, unit: ProductionUnit) -> "dict[str, ResolvedInput]":
+    def resolve_inputs(self, unit: ProductionUnit) -> dict[str, ResolvedInput]:
         from georiva.staging.models import StagingItem
 
         si = StagingItem.objects.filter(pk=unit["staging_item_id"]).select_related("collection__catalog").first()
@@ -116,7 +116,7 @@ class PromotionRecipe(BaseRecipe):
             height=si.height,
         )
 
-    def transform(self, unit: ProductionUnit, resolved) -> "list[OutputAsset]":
+    def transform(self, unit: ProductionUnit, resolved) -> list[OutputAsset]:
         from georiva.core.storage import BucketType
 
         ri = resolved["source"]

@@ -14,8 +14,7 @@ store structure at the tip.  Two layers, mirroring test_coverage:
 
 import unittest
 import uuid
-from datetime import datetime, timedelta
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime, timedelta
 
 from django.conf import settings
 from django.test import TestCase
@@ -26,7 +25,7 @@ from georiva.organisations.testing import make_organisation
 from georiva.virtual_zarr.coverage import variable_detail
 from georiva.virtual_zarr.models import VirtualZarrBuildLog, VirtualZarrManifest
 
-UTC = dt_timezone.utc
+UTC = UTC
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 S3_READY = bool(

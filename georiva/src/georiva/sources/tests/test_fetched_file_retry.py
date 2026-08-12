@@ -7,8 +7,7 @@ the SAME record in place, and recomputes the parent FetchRun's counters.
 Records without a stored request refuse retry gracefully.
 """
 
-from datetime import datetime
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -31,8 +30,8 @@ class FileRequestRoundTripTests(TestCase):
         request = FileRequest(
             identifier="gfs-2026071406-t2m",
             filename="t2m.grib2",
-            valid_time=datetime(2026, 7, 14, 12, 0, tzinfo=dt_timezone.utc),
-            reference_time=datetime(2026, 7, 14, 6, 0, tzinfo=dt_timezone.utc),
+            valid_time=datetime(2026, 7, 14, 12, 0, tzinfo=UTC),
+            reference_time=datetime(2026, 7, 14, 6, 0, tzinfo=UTC),
             params={"level": "surface", "step": 6},
             expected_format="grib",
             variables=["t2m"],

@@ -3,7 +3,7 @@ rematerialize_derived_assets — replays the shared materialization over
 existing derived items (the backfill for pre-materializer history).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -49,7 +49,7 @@ class RematerializeDerivedAssetsTests(TestCase):
         )
         self.item = Item.objects.create(
             collection=self.collection,
-            time=datetime(2024, 5, 1, tzinfo=timezone.utc),
+            time=datetime(2024, 5, 1, tzinfo=UTC),
             bounds=[10, -5, 20, 5],
             crs="EPSG:4326",
             width=10,
@@ -66,7 +66,7 @@ class RematerializeDerivedAssetsTests(TestCase):
         # A non-derived item in the same collection must be left alone.
         self.plain_item = Item.objects.create(
             collection=self.collection,
-            time=datetime(2024, 6, 1, tzinfo=timezone.utc),
+            time=datetime(2024, 6, 1, tzinfo=UTC),
         )
 
     def _run(self, *args, **kwargs):

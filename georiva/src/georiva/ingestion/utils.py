@@ -1,5 +1,5 @@
+from collections.abc import Generator
 from datetime import datetime
-from typing import Generator, Optional
 
 import numpy as np
 import pandas as pd
@@ -50,7 +50,7 @@ def normalize_bounds(bounds: list | tuple) -> list:
     return [west, south, east, north]
 
 
-def ensure_utc(dt) -> Optional[datetime]:
+def ensure_utc(dt) -> datetime | None:
     """
     Coerce any datetime-like value to a timezone-aware UTC datetime.
 

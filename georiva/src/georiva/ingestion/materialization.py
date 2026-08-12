@@ -96,7 +96,7 @@ class AssetMaterializer:
         crs: str,
         timestamp: datetime,
         clipper: Optional["BoundaryClipper"] = None,
-        stats: Optional[dict] = None,
+        stats: dict | None = None,
         checksum: str = "",
     ) -> list[Asset]:
         """
@@ -216,7 +216,7 @@ class AssetMaterializer:
         except Exception as e:
             logger.warning("Post-save hook failed for asset %s: %s", asset.pk, e)
 
-    def _get_file_size(self, path: str) -> Optional[int]:
+    def _get_file_size(self, path: str) -> int | None:
         try:
             return int(self.writer.bucket.size(path))
         except Exception:

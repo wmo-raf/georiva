@@ -417,7 +417,7 @@ def pin_bindings(product, definition, feed, output_collections):
     failure here."""
     from georiva.sources.models import DerivedProductInput, DerivedProductOutput
 
-    for ref, collection in zip(definition.outputs, output_collections):
+    for ref, collection in zip(definition.outputs, output_collections, strict=True):
         DerivedProductOutput.objects.update_or_create(
             product=product,
             role=ref.role,

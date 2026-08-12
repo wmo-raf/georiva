@@ -31,7 +31,9 @@ class Command(BaseCommand):
                 country=options["country"],
             )
         except ValidationError as exc:
-            raise CommandError("; ".join(f"{field}: {', '.join(errors)}" for field, errors in exc.message_dict.items()))
+            raise CommandError(
+                "; ".join(f"{field}: {', '.join(errors)}" for field, errors in exc.message_dict.items())
+            ) from exc
 
         self.stdout.write(self.style.SUCCESS(f"Provisioned {organisation.name} at {organisation.hostname}"))
 

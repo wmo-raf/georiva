@@ -103,7 +103,7 @@ def _stop_rows(post):
     reading of the row inputs, shared by parsing and failed-form re-renders."""
     return [
         {"value": value.strip(), "color": color.strip()}
-        for value, color in zip(post.getlist("stop_value"), post.getlist("stop_color"))
+        for value, color in zip(post.getlist("stop_value"), post.getlist("stop_color"), strict=True)
         if value.strip() or color.strip()
     ]
 
@@ -119,7 +119,7 @@ def _parse_stops(post):
         try:
             value = float(row["value"])
         except ValueError:
-            raise ValidationError({"stops": _("Not a number: %(value)s") % {"value": row["value"]}})
+            raise ValidationError({"stops": _("Not a number: %(value)s") % {"value": row["value"]}}) from None
         entries.append({"value": value, "color": row["color"]})
     return entries
 

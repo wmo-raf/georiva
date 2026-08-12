@@ -3,7 +3,6 @@ from app.logging_config import configure_logging
 configure_logging()
 
 import logging
-from typing import Optional
 
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -107,7 +106,7 @@ def encoded_preview(
     src_path: str = Depends(SemanticPathParams),
     tile_config: dict = Depends(SemanticTileConfig),
     max_size: int = Query(4096, ge=1, description="Cap on the longest image side (native grid if smaller)"),
-    v: Optional[str] = Query(
+    v: str | None = Query(
         None,
         description=(
             "Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"

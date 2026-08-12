@@ -21,7 +21,21 @@ extend-exclude = [
 ]
 
 [lint]
-select = ["E", "W", "F", "I"]
+select = ["E", "W", "F", "I", "UP", "B"]
+
+ignore = [
+    # `class X(str, Enum)` → `StrEnum` is not the pure modernisation it looks
+    # like: the two disagree about `str(x)`, which returns "X.Y" for the mixin
+    # and the bare value for StrEnum. The two classes it would rewrite —
+    # FetchMode and DataSourceType — are part of the source-plugin contract,
+    # so the blast radius includes repositories that are not this one.
+    "UP042",
+]
+
+[lint.flake8-bugbear]
+# `Depends(...)` in an argument default is FastAPI's whole calling convention,
+# not the mutable-default bug B008 exists to catch.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [lint.per-file-ignores]
 # Settings modules layer with `from .base import *`; the star import and every

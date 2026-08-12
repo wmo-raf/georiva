@@ -6,7 +6,7 @@ bucket) instead of a kerchunk JSON key.  Django fields are derived caches;
 the repo's commit metadata is the source of truth (design decision 5).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.test import TestCase
 
@@ -14,7 +14,7 @@ from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.organisations.testing import make_organisation
 from georiva.virtual_zarr.models import VirtualZarrManifest
 
-UTC = timezone.utc
+UTC = UTC
 
 
 class VirtualZarrManifestTests(TestCase):

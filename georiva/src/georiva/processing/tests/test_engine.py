@@ -4,7 +4,7 @@ and the AssetWriter mocked. Mirrors sources/tests/test_loader_fetchrun.py
 (mock I/O, assert on produced records).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from django.db import IntegrityError, transaction
@@ -54,7 +54,7 @@ class _PromotionFixture(TestCase):
         self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
-            datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            datetime=datetime(2020, 1, 1, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=10,
@@ -93,7 +93,7 @@ class PromotionThroughEngineTests(_PromotionFixture):
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
         self.assertEqual(item.collection, self.pub_col)
-        self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=UTC))
 
         # A served COG (data role) — visuals are derived on demand (ADR 0021).
         cog = item.assets.get(format=Asset.Format.COG)
@@ -164,7 +164,7 @@ class PromotionThroughEngineTests(_PromotionFixture):
     def test_dispatch_fans_out_one_task_per_unit(self):
         StagingItem.objects.create(
             collection=self.scol,
-            datetime=datetime(2020, 1, 2, tzinfo=timezone.utc),
+            datetime=datetime(2020, 1, 2, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=10,
@@ -197,7 +197,7 @@ class DerivationLinkConstraintTests(_PromotionFixture):
     def _item(self):
         return Item.objects.create(
             collection=self.pub_col,
-            time=datetime(2021, 1, 1, tzinfo=timezone.utc),
+            time=datetime(2021, 1, 1, tzinfo=UTC),
         )
 
     def test_rejects_zero_sources(self):
@@ -240,7 +240,7 @@ class _FakeRecipe(BaseRecipe):
     def outputs(self, unit):
         return OutputItem(
             collection=self._c,
-            time=datetime(2022, 6, 1, tzinfo=timezone.utc),
+            time=datetime(2022, 6, 1, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=4,
@@ -292,7 +292,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
     def _item(self):
         return Item.objects.create(
             collection=self.pub_col,
-            time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            time=datetime(2020, 1, 1, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=2,
@@ -380,7 +380,7 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         self.assertEqual(self.pub_col.bounds, [0, 0, 1, 1])
         self.assertEqual(
             self.pub_col.time_start,
-            datetime(2020, 1, 1, tzinfo=timezone.utc),
+            datetime(2020, 1, 1, tzinfo=UTC),
         )
 
 
@@ -392,14 +392,14 @@ class AssetOutputPathTests(_PromotionFixture):
     consumer (built for the ingestion scheme) could resolve."""
 
     def test_non_forecast_asset_path_matches_the_ingestion_scheme(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Item
         from georiva.processing.engine import _asset_output_path
 
         item = Item.objects.create(
             collection=self.pub_col,
-            time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=UTC),
         )
         path = _asset_output_path(item, self.variable, "cog")
         self.assertEqual(path, "test-org/cmip6/tas/tas/2026/05/01/tas_000000.tif")
@@ -408,15 +408,15 @@ class AssetOutputPathTests(_PromotionFixture):
         self.assertEqual(png, "test-org/cmip6/tas/tas/2026/05/01/tas_000000.png")
 
     def test_forecast_asset_path_carries_the_reference_time(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Item
         from georiva.processing.engine import _asset_output_path
 
         item = Item.objects.create(
             collection=self.pub_col,
-            time=datetime(2026, 5, 1, 6, 0, 0, tzinfo=timezone.utc),
-            reference_time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 5, 1, 6, 0, 0, tzinfo=UTC),
+            reference_time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=UTC),
         )
         path = _asset_output_path(item, self.variable, "cog")
         self.assertEqual(path, "test-org/cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif")

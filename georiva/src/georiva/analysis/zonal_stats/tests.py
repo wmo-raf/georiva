@@ -15,7 +15,7 @@ what the assertions read.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from adminboundarymanager.models import AdminBoundary
 from django.contrib.gis.geos import MultiPolygon, Polygon
@@ -32,7 +32,7 @@ from georiva.organisations.testing import (
     make_organisation,
 )
 
-VALID_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+VALID_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 
 
 def _whole_world_boundary():

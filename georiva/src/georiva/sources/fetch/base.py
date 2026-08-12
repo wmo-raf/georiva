@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -21,15 +20,15 @@ class FileRequest:
     filename: str  # Desired filename
 
     # Temporal context
-    valid_time: Optional[datetime] = None  # What time the data represents
-    reference_time: Optional[datetime] = None  # Forecast run time (if applicable)
+    valid_time: datetime | None = None  # What time the data represents
+    reference_time: datetime | None = None  # Forecast run time (if applicable)
 
     # Source-specific parameters (e.g., CDS request params, URL template vars)
     params: dict = field(default_factory=dict)
 
     # Metadata
-    expected_size: Optional[int] = None
-    expected_format: Optional[str] = None  # 'grib', 'netcdf', etc.
+    expected_size: int | None = None
+    expected_format: str | None = None  # 'grib', 'netcdf', etc.
     variables: list[str] = field(default_factory=list)  # Variables in this file
 
     def to_dict(self) -> dict:
@@ -57,7 +56,7 @@ class FileRequest:
         return self.reference_time is not None
 
     @property
-    def forecast_hour(self) -> Optional[int]:
+    def forecast_hour(self) -> int | None:
         if self.reference_time and self.valid_time:
             delta = self.valid_time - self.reference_time
             return int(delta.total_seconds() / 3600)
@@ -77,14 +76,14 @@ class FetchResult:
     """Result of fetching a single file."""
 
     request: FileRequest
-    local_path: Optional[Path] = None
+    local_path: Path | None = None
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     bytes_transferred: int = 0
     duration_seconds: float = 0.0
 
     # For async/queued fetches
-    job_id: Optional[str] = None
+    job_id: str | None = None
     status: str = "pending"  # pending, queued, downloading, complete, failed
 
     @property

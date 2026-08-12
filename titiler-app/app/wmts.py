@@ -34,7 +34,6 @@ caller is a WMTS client too, whatever the encoding it fetched with.
 import logging
 import math
 import re
-from typing import Optional
 from xml.sax.saxutils import escape, quoteattr
 
 import httpx
@@ -109,7 +108,7 @@ API_KEY_PARAM = "api_key"
 class WMTSException(Exception):
     """An error owed to the client as an OWS 1.1 ExceptionReport."""
 
-    def __init__(self, status_code: int, code: str, locator: Optional[str], text: str):
+    def __init__(self, status_code: int, code: str, locator: str | None, text: str):
         super().__init__(text)
         self.status_code = status_code
         self.code = code
@@ -303,7 +302,7 @@ def _validate_tile_choices(params: dict[str, str]) -> None:
         )
 
 
-def _resolve_style(params: dict[str, str]) -> Optional[str]:
+def _resolve_style(params: dict[str, str]) -> str | None:
     """The style a request names, with the two default spellings resolved away.
 
     Read the same way by both operations that take one, so a client cannot be
@@ -328,7 +327,7 @@ def _time_query(params: dict[str, str]) -> dict[str, str]:
     return query
 
 
-def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -> WMTSException:
+def _translate_tile_error(status_code: int, detail: str, style: str | None) -> WMTSException:
     """Re-spell the semantic routes' refusal as a WMTS exception.
 
     Shared by both operations, which is what keeps an address that will not
@@ -485,7 +484,7 @@ def _pixel_lonlat(zoom: int, row: int, col: int, i: int, j: int) -> tuple[float,
     return lon, lat
 
 
-async def _tile_config_for(address: tuple[str, str, str, str], style: Optional[str]) -> dict:
+async def _tile_config_for(address: tuple[str, str, str, str], style: str | None) -> dict:
     """The rendering config for this layer, resolved as a tile request resolves it.
 
     Fetched for two reasons, neither of them rendering. It is what makes an
@@ -520,8 +519,8 @@ async def _read_point(
     lon: float,
     lat: float,
     query: dict[str, str],
-    style: Optional[str],
-) -> Optional[float]:
+    style: str | None,
+) -> float | None:
     """The raw physical value under ``(lon, lat)``, or ``None`` where there is none.
 
     Read through the point route, so the COG address comes from the same
@@ -569,7 +568,7 @@ async def _identify(
     col: int,
     i: int,
     j: int,
-    style: Optional[str],
+    style: str | None,
     query: dict[str, str],
 ) -> dict:
     """The identify answer for one pixel, whichever binding asked (#363, #379).
@@ -743,7 +742,7 @@ async def _proxy_get_capabilities(request: Request, org_slug: str, params: dict[
             "NoApplicableCode",
             None,
             "The capabilities document is unavailable — the metadata service could not be reached",
-        )
+        ) from e
 
     if response.status_code != 200:
         raise _translate_capabilities_error(response.status_code)

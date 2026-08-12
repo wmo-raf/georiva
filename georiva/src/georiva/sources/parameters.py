@@ -4,7 +4,6 @@ Parameter manifest contract for GeoRiva source plugins.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -12,9 +11,9 @@ class Level:
     """A point on a vertical dimension."""
 
     type: str  # 'surface' | 'pressure' | 'heightAboveGround'
-    value: Optional[float] = None  # 850, 2, 10
-    dimension: Optional[str] = None  # GRIB key: 'isobaricInhPa', 'heightAboveGround'
-    unit: Optional[str] = None  # 'hPa', 'm'
+    value: float | None = None  # 850, 2, 10
+    dimension: str | None = None  # GRIB key: 'isobaricInhPa', 'heightAboveGround'
+    unit: str | None = None  # 'hPa', 'm'
 
 
 @dataclass(frozen=True)
@@ -22,7 +21,7 @@ class SourceKey:
     """How to locate the raw band inside a source file."""
 
     name: str  # GRIB shortName / NetCDF var / 'band_1'
-    level: Optional[Level] = None
+    level: Level | None = None
 
 
 @dataclass(frozen=True)
@@ -34,9 +33,9 @@ class Parameter:
     units: str
     source: SourceKey
     description: str = ""
-    standard_name: Optional[str] = None  # CF standard name
-    value_range: Optional[tuple[float, float]] = None
-    palette: Optional[str] = None  # palette slug
+    standard_name: str | None = None  # CF standard name
+    value_range: tuple[float, float] | None = None
+    palette: str | None = None  # palette slug
 
 
 @dataclass(frozen=True)
@@ -49,8 +48,8 @@ class DerivedParameter:
     transform: str  # must match Variable.TransformType values
     components: dict[str, SourceKey]  # {'u': SourceKey(...), 'v': SourceKey(...)}
     description: str = ""
-    value_range: Optional[tuple[float, float]] = None
-    palette: Optional[str] = None
+    value_range: tuple[float, float] | None = None
+    palette: str | None = None
 
 
 @dataclass(frozen=True)

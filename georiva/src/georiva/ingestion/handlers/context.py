@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from georiva.ingestion.asset_writer import AssetWriter
@@ -29,11 +29,11 @@ class IngestionContext:
 
     # --- Processing objects (constructed once per file) ----------------------
     plugin: object
-    clipper: "BoundaryClipper"
-    writer: "AssetWriter"
-    extractor: "VariableExtractor"
+    clipper: BoundaryClipper
+    writer: AssetWriter
+    extractor: VariableExtractor
 
     # --- Run metadata --------------------------------------------------------
     origin_bucket: str
-    reference_time: Optional[datetime] = None
-    ingestion_log: Optional["FileIngestion"] = None
+    reference_time: datetime | None = None
+    ingestion_log: FileIngestion | None = None

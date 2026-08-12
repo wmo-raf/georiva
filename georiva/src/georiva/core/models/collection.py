@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from django import forms
 from django.contrib.postgres.fields import ArrayField
@@ -326,7 +325,7 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
             source_vars.extend(variable_sources_params)
         return source_vars
 
-    def get_latest_item_date(self) -> Optional[datetime]:
+    def get_latest_item_date(self) -> datetime | None:
         """
         Latest valid_time in this collection (Item.time).
         """

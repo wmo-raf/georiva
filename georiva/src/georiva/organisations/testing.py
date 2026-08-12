@@ -10,7 +10,7 @@ Not a test module itself: it lives beside the app so any app's tests can import
 it without reaching into another app's ``tests`` package.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from wagtail.models import Page, Site
 
@@ -119,7 +119,7 @@ def make_org_tree(organisation, *, name=None, slug=SHARED_TREE_SLUG):
     )
     item = Item.objects.create(
         collection=collection,
-        time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+        time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
     )
     asset = Asset.objects.create(item=item, variable=variable, href="x.tif")
     return {

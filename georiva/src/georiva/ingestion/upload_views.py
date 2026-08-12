@@ -190,7 +190,7 @@ def manual_upload_submit(request, pk):
 
     # For GeoTIFF, validate that each file has a corresponding variable.
     if is_geotiff:
-        for i, uploaded in enumerate(uploaded_files):
+        for i, _uploaded in enumerate(uploaded_files):
             vid = variable_ids[i] if i < len(variable_ids) else None
             if not vid or not config.variables.filter(pk=vid).exists():
                 return JsonResponse({"error": str(_("Please choose a variable for each file."))}, status=400)

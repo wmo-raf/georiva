@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 import icechunk
 from django.conf import settings
@@ -142,13 +141,13 @@ def _tip_snapshot(repo: icechunk.Repository):
         return None
 
 
-def latest_snapshot_id(repo: icechunk.Repository) -> Optional[str]:
+def latest_snapshot_id(repo: icechunk.Repository) -> str | None:
     """Snapshot id at the tip of ``main``, or None on an empty repo."""
     snapshot = _tip_snapshot(repo)
     return snapshot.id if snapshot else None
 
 
-def latest_committed_state(repo: icechunk.Repository) -> Optional[CommittedState]:
+def latest_committed_state(repo: icechunk.Repository) -> CommittedState | None:
     """
     Read the committed state from the latest commit on ``main``.
 

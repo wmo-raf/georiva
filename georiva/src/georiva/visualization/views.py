@@ -26,7 +26,7 @@ def item_preview(request, item_id):
 
     context = {
         "breadcrumbs_items": breadcrumbs_items,
-        "header_title": "Item Preview - {}".format(item),
+        "header_title": f"Item Preview - {item}",
         "item": item,
         "assets": assets,
     }

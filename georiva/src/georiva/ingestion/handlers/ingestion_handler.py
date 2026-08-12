@@ -9,7 +9,7 @@ import logging
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from georiva.core.models import Asset, Collection, Item
 from georiva.ingestion.handlers.asset_handler import AssetHandler
@@ -55,7 +55,7 @@ class IngestionHandler:
         timestamp: datetime,
         source_file: str,
         progress=None,
-    ) -> tuple[Optional[Item], list[Asset], dict, list[str]]:
+    ) -> tuple[Item | None, list[Asset], dict, list[str]]:
         """
         Process all Variables for *collection* at *timestamp*.
 

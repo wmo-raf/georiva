@@ -20,7 +20,7 @@ import os
 import shutil
 import tempfile
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # The app reads these at import time, so they are pinned before any test
 # module can pull in ``app.main``.
@@ -183,11 +183,11 @@ def seed_cog():
         data=None,
         nodata=None,
     ):
-        time_dt = datetime.fromisoformat(time.replace("Z", "+00:00")).astimezone(timezone.utc)
+        time_dt = datetime.fromisoformat(time.replace("Z", "+00:00")).astimezone(UTC)
         date_path = time_dt.strftime("%Y/%m/%d")
         time_str = time_dt.strftime("%H%M%S")
         if reftime:
-            ref_dt = datetime.fromisoformat(reftime.replace("Z", "+00:00")).astimezone(timezone.utc)
+            ref_dt = datetime.fromisoformat(reftime.replace("Z", "+00:00")).astimezone(UTC)
             filename = f"{variable}_{time_str}__ref{ref_dt.strftime('%Y%m%dT%H%M%S')}.tif"
         else:
             filename = f"{variable}_{time_str}.tif"

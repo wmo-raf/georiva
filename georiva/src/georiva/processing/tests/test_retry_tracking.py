@@ -8,7 +8,7 @@ directly — the highest seam — plus the synchronous `dispatch=False` paths th
 thread a reason down to it, so no Celery broker is needed.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
@@ -49,7 +49,7 @@ class _CompletingRecipe(BaseRecipe):
 
         return OutputItem(
             collection=Collection.objects.get(slug="retry-out"),
-            time=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            time=datetime(2020, 1, 1, tzinfo=UTC),
         )
 
     def transform(self, unit, resolved):

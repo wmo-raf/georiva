@@ -213,7 +213,7 @@ def gateway(tmp_path_factory):
             except httpx.HTTPError:
                 if time.monotonic() > deadline:
                     logs = _run("docker", "logs", containers[2])
-                    raise AssertionError(f"gateway never came up: {logs.stderr}")
+                    raise AssertionError(f"gateway never came up: {logs.stderr}") from None
                 time.sleep(0.2)
         yield base_url
     finally:

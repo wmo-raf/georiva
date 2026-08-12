@@ -8,7 +8,6 @@ creating duplicates, so adding new collections to a plugin is safe to re-run.
 
 import logging
 import math
-from typing import Optional
 
 from django.db import transaction
 from django.utils.text import slugify
@@ -86,7 +85,7 @@ class SourceSetupService:
         catalog,
         feed_name: str,
         feed_interval: int = 360,
-        global_config: Optional[dict] = None,
+        global_config: dict | None = None,
         selected_definitions: list[tuple[CollectionDefinition, dict]],
     ) -> tuple:
         """
@@ -202,7 +201,7 @@ class SourceSetupService:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: Optional[dict] = None):
+    def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: dict | None = None):
         defaults = {**model_cls.get_wizard_defaults(), **(extra_data or {})}
         data_feed = model_cls(
             name=name,
@@ -286,15 +285,10 @@ class SourceSetupService:
         seed_stops, stops_error = _validated_palette_stops(var_def.palette_stops)
         seed_warnings = []
         if stops_error:
+            fallback = f"ramp {var_def.palette!r}" if var_def.palette else "grayscale"
             seed_warnings.append(
-                "Variable %s/%s: ignoring palette_stops (%s) — falling back "
-                "to %s"
-                % (
-                    collection.slug,
-                    slug,
-                    stops_error,
-                    f"ramp {var_def.palette!r}" if var_def.palette else "grayscale",
-                )
+                f"Variable {collection.slug}/{slug}: ignoring palette_stops "
+                f"({stops_error}) — falling back to {fallback}"
             )
         if seed_stops:
             seed_min = seed_stops[0]["value"]
@@ -303,15 +297,9 @@ class SourceSetupService:
                 math.isclose(seed_min, var_def.value_range[0]) and math.isclose(seed_max, var_def.value_range[1])
             ):
                 seed_warnings.append(
-                    "Variable %s/%s: declared value_range %s disagrees with "
-                    "palette_stops span (%s, %s) — the stops win"
-                    % (
-                        collection.slug,
-                        slug,
-                        var_def.value_range,
-                        seed_min,
-                        seed_max,
-                    )
+                    f"Variable {collection.slug}/{slug}: declared value_range "
+                    f"{var_def.value_range} disagrees with palette_stops span "
+                    f"({seed_min}, {seed_max}) — the stops win"
                 )
         elif var_def.value_range:
             seed_min, seed_max = var_def.value_range

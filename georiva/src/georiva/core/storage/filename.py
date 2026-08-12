@@ -24,7 +24,6 @@ Examples:
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import pytz
 
@@ -90,7 +89,7 @@ def parse_filename(filename: str) -> dict:
 
 def build_filename(
     original_filename: str,
-    reference_time: Optional[datetime] = None,
+    reference_time: datetime | None = None,
 ) -> str:
     """
     Build a filename, adding GR-- prefix only if reference_time is provided.
