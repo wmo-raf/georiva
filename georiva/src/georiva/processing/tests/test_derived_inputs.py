@@ -11,7 +11,7 @@ Mirrors the fixture style of test_multi_input.py (real catalog/staging rows,
 asserting the resolved result).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.test import TestCase
 
@@ -21,7 +21,7 @@ from georiva.organisations.testing import make_organisation
 from georiva.processing.recipe import BaseRecipe, resolve_declared_inputs
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
-_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
+_TIME = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 class ResolveDeclaredInputsTests(TestCase):

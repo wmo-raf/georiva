@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import logging
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -72,7 +72,7 @@ class MinioStoreConfig:
             self.public_endpoint = self.internal_endpoint
 
     @classmethod
-    def from_django_settings(cls) -> "MinioStoreConfig":
+    def from_django_settings(cls) -> MinioStoreConfig:
         """
         Construct from Django settings.
 

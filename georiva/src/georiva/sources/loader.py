@@ -8,10 +8,10 @@ import logging
 import shutil
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 from django.conf import settings
 from django.utils import timezone
@@ -35,7 +35,7 @@ class LoaderRunResult:
     """Result of a complete loader run."""
 
     started_at: datetime = field(default_factory=timezone.now)
-    finished_at: Optional[datetime] = None
+    finished_at: datetime | None = None
 
     # Counts
     files_requested: int = 0
@@ -51,7 +51,7 @@ class LoaderRunResult:
     stored_paths: list[str] = field(default_factory=list)  # storage paths of successfully fetched files
 
     # Context
-    run_time: Optional[datetime] = None  # For forecasts: which model run
+    run_time: datetime | None = None  # For forecasts: which model run
 
     @property
     def success(self) -> bool:
@@ -133,7 +133,7 @@ class Loader:
         collection,  # GeoRiva collection model
         *,
         data_feed=None,
-        on_file_fetched: Optional[Callable] = None,  # Callback after each file
+        on_file_fetched: Callable | None = None,  # Callback after each file
         resumed_from=None,  # Interrupted FetchRun this run resumes
     ):
         self.data_source = data_source
@@ -144,7 +144,7 @@ class Loader:
         self.resumed_from = resumed_from
 
         self.logger = logging.getLogger(f"georiva.loader.{data_source.name.replace(' ', '_').lower()}")
-        self._temp_dir: Optional[str] = None
+        self._temp_dir: str | None = None
 
     # =========================================================================
     # Target tier routing
@@ -225,7 +225,7 @@ class Loader:
         self,
         *,
         dry_run: bool = False,
-        max_files: Optional[int] = None,
+        max_files: int | None = None,
         skip_existing: bool = True,
     ) -> LoaderRunResult:
         """

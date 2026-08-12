@@ -26,10 +26,10 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Generator, Optional
 
 import numpy as np
 import xarray as xr
@@ -78,7 +78,7 @@ class ExtractedVariable:
     resolution: tuple[float, float]  # x, y
     timestamp: datetime
     variable_name: str
-    units: Optional[str] = None
+    units: str | None = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -137,8 +137,8 @@ class BaseFormatPlugin(ABC):
         file_path: PathLike,
         variable_name: str,
         *,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> Generator[VariableInfo, None, None]:
         """
@@ -169,8 +169,8 @@ class BaseFormatPlugin(ABC):
         self,
         file_path: PathLike,
         variable_name: str,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> ExtractedVariable:
         """
@@ -208,7 +208,7 @@ class BaseFormatPlugin(ABC):
         file_path: PathLike,
         variable_name: str,
         *,
-        timestamp: Optional[datetime] = None,
+        timestamp: datetime | None = None,
         **kwargs,
     ) -> dict:
         """

@@ -23,7 +23,7 @@ Flow:
 
 import logging
 from datetime import datetime
-from typing import BinaryIO, Optional
+from typing import BinaryIO
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -208,7 +208,7 @@ class Bucket:
         path: str,
         expiration: int = 3600,
         method: str = "get_object",
-    ) -> Optional[str]:
+    ) -> str | None:
         """Generate a presigned URL for download or upload."""
         if not self.is_s3:
             return None
@@ -224,7 +224,7 @@ class Bucket:
             logger.error("Failed to generate presigned URL: %s", e)
             return None
 
-    def get_upload_url(self, path: str, expiration: int = 3600) -> Optional[str]:
+    def get_upload_url(self, path: str, expiration: int = 3600) -> str | None:
         """Convenience: presigned URL for PUT upload."""
         return self.get_presigned_url(path, expiration, method="put_object")
 
@@ -351,7 +351,7 @@ class StorageManager:
         source: Bucket,
         dest: Bucket,
         src_path: str,
-        dest_path: Optional[str] = None,
+        dest_path: str | None = None,
     ) -> str:
         """
         Copy a file between buckets.
@@ -408,7 +408,7 @@ class StorageManager:
         source: Bucket,
         dest: Bucket,
         src_path: str,
-        dest_path: Optional[str] = None,
+        dest_path: str | None = None,
     ) -> str:
         """Copy between buckets, then delete from source."""
         saved = self.transfer(source, dest, src_path, dest_path)

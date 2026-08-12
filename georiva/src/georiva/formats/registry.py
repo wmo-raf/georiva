@@ -7,7 +7,6 @@ and extracting variables for datasets.
 
 import logging
 from pathlib import Path
-from typing import Optional, Type
 
 from georiva.utils.path import PathLike
 
@@ -24,11 +23,11 @@ class FormatRegistry:
     by name or by file extension.
     """
 
-    _plugins: dict[str, Type[BaseFormatPlugin]] = {}
+    _plugins: dict[str, type[BaseFormatPlugin]] = {}
     _extension_map: dict[str, str] = {}  # extension -> format name
 
     @classmethod
-    def register(cls, plugin_class: Type[BaseFormatPlugin]) -> Type[BaseFormatPlugin]:
+    def register(cls, plugin_class: type[BaseFormatPlugin]) -> type[BaseFormatPlugin]:
         """
         Decorator to register a format plugin.
 
@@ -49,7 +48,7 @@ class FormatRegistry:
         return plugin_class
 
     @classmethod
-    def get(cls, name: str) -> Optional[BaseFormatPlugin]:
+    def get(cls, name: str) -> BaseFormatPlugin | None:
         """Get a plugin instance by format name."""
         plugin_class = cls._plugins.get(name)
         if plugin_class:
@@ -57,7 +56,7 @@ class FormatRegistry:
         return None
 
     @classmethod
-    def get_by_extension(cls, extension: str) -> Optional[BaseFormatPlugin]:
+    def get_by_extension(cls, extension: str) -> BaseFormatPlugin | None:
         """Get a plugin instance by file extension."""
         ext_lower = extension.lower().lstrip(".")
         format_name = cls._extension_map.get(ext_lower)
@@ -66,7 +65,7 @@ class FormatRegistry:
         return None
 
     @classmethod
-    def get_for_file(cls, file_path: PathLike) -> Optional[BaseFormatPlugin]:
+    def get_for_file(cls, file_path: PathLike) -> BaseFormatPlugin | None:
         """
         Get the appropriate plugin for a file.
 
@@ -89,7 +88,7 @@ class FormatRegistry:
         return None
 
     @classmethod
-    def all(cls) -> dict[str, Type[BaseFormatPlugin]]:
+    def all(cls) -> dict[str, type[BaseFormatPlugin]]:
         """Get all registered plugins."""
         return cls._plugins.copy()
 

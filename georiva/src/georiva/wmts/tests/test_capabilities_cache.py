@@ -14,7 +14,7 @@ happens across organisations or across credentials.
 import importlib
 import pkgutil
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
 from django.contrib.auth import get_user_model
@@ -56,7 +56,7 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
         self.unit = tiers["unit"]
         Item.objects.create(
             collection=self.public,
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
         )
 
         User = get_user_model()
@@ -94,7 +94,7 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
             self.assertEqual(self.times(self.fetch()), ["2026-03-01T00:00:00Z"])
             Item.objects.create(
                 collection=self.public,
-                time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+                time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
             )
             time.sleep(1.2)
             self.assertEqual(

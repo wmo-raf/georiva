@@ -7,7 +7,7 @@ would serve this caller, and every URL in it is the machine-plane grammar read
 back verbatim.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 from xml.etree import ElementTree as ET
 
@@ -77,11 +77,11 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         )
         Item.objects.create(
             collection=self.public,
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
         )
         Item.objects.create(
             collection=self.public,
-            time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
 
         private = Collection.objects.create(
@@ -402,7 +402,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         for hour in (0, 6, 12):
             Item.objects.create(
                 collection=observations,
-                time=datetime(2026, 3, 1, hour, 0, tzinfo=timezone.utc),
+                time=datetime(2026, 3, 1, hour, 0, tzinfo=UTC),
             )
 
         forecast = Collection.objects.create(
@@ -420,7 +420,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             value_max=50,
         )
         for day, hours in ((1, (0, 6, 12)), (2, (0, 6))):
-            run = datetime(2026, 3, day, 0, 0, tzinfo=timezone.utc)
+            run = datetime(2026, 3, day, 0, 0, tzinfo=UTC)
             for hour in hours:
                 Item.objects.create(
                     collection=forecast,
@@ -535,8 +535,8 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         self.assertTrue(
             Item.objects.filter(
                 collection__slug="fc-temperature",
-                time=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
-                reference_time=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
+                time=datetime(2026, 3, 2, 0, 0, tzinfo=UTC),
+                reference_time=datetime(2026, 3, 2, 0, 0, tzinfo=UTC),
             ).exists()
         )
 
@@ -601,7 +601,7 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
         )
         Item.objects.create(
             collection=collection,
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
         )
 
     def layer(self, identifier):
@@ -710,7 +710,7 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
         tiers = make_tiered_catalog(self.organisation)
         Item.objects.create(
             collection=tiers["private"],
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
         )
 
         User = get_user_model()

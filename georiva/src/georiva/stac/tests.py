@@ -3,7 +3,7 @@ STAC serving must expose only `public` collections — `internal` derivation
 intermediates are read by the engine but never served.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.test import TestCase
 from django.urls import reverse
@@ -109,7 +109,7 @@ class STACRenderExtensionTests(TestCase):
         )
         self.item = Item.objects.create(
             collection=collection,
-            time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
         make_style(self.variable, "official")
         make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
@@ -206,7 +206,7 @@ class STACRenderExtensionTests(TestCase):
         )
         Item.objects.create(
             collection=other,
-            time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
         response = self.client.get(reverse("stac:item-detail", args=["cmip6", "pr", "pr", "20260301T120000Z"])).json()
         self.assertNotIn("renders", response["properties"])

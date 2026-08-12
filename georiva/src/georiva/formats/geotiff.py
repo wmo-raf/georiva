@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Generator, Optional
 
 import numpy as np
 import rasterio
@@ -109,8 +109,8 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         file_path: PathLike,
         variable_name: str,
         *,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> Generator[VariableInfo, None, None]:
         """
@@ -165,7 +165,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             valid_time = timestamp
             if valid_time is None:
                 ts = self.get_timestamps(file_path)
-                valid_time = ts[0] if ts else datetime.now(timezone.utc)
+                valid_time = ts[0] if ts else datetime.now(UTC)
 
             yield VariableInfo(
                 data=var,
@@ -193,8 +193,8 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         self,
         file_path: PathLike,
         variable_name: str,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> ExtractedVariable:
         """
@@ -229,7 +229,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             valid_time = timestamp
             if valid_time is None:
                 ts = self.get_timestamps(file_path)
-                valid_time = ts[0] if ts else datetime.now(timezone.utc)
+                valid_time = ts[0] if ts else datetime.now(UTC)
 
             descriptions = list(getattr(src, "descriptions", []) or [])
             units = list(getattr(src, "units", []) or [])
@@ -260,7 +260,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         file_path: PathLike,
         variable_name: str,
         *,
-        timestamp: Optional[datetime] = None,
+        timestamp: datetime | None = None,
         **kwargs,
     ) -> dict:
         """Override: use rasterio directly — faster than opening xarray."""
@@ -300,7 +300,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}
 
-    def _spatial_dims(self, var) -> tuple[Optional[str], Optional[str]]:
+    def _spatial_dims(self, var) -> tuple[str | None, str | None]:
         y_dim = x_dim = None
         for d in var.dims:
             dl = d.lower()
@@ -312,7 +312,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
 
     @staticmethod
     def _spatial_from_rasterio(
-        src, window: Optional[tuple[int, int, int, int]]
+        src, window: tuple[int, int, int, int] | None
     ) -> tuple[tuple[float, ...], tuple[float, float], str, bool]:
         """
         Extract bounds, resolution, CRS, and flip flag from a rasterio source.
@@ -348,7 +348,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
     ]
 
     @classmethod
-    def _parse_timestamp_from_filename(cls, filename: str) -> Optional[datetime]:
+    def _parse_timestamp_from_filename(cls, filename: str) -> datetime | None:
         for pattern, fmt in cls._TIMESTAMP_PATTERNS:
             match = re.search(pattern, filename)
             if not match:

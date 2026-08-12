@@ -7,7 +7,7 @@ The UI knows about products; the engine still does not (it only stored the
 origin).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -77,8 +77,8 @@ class ProductStatusTests(TestCase):
         self.assertEqual(product_status(self.product).status, "running")
 
     def test_only_completed_runs_report_completed_with_last_completed_at(self):
-        earlier = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        latest = datetime(2026, 3, 1, tzinfo=timezone.utc)
+        earlier = datetime(2026, 1, 1, tzinfo=UTC)
+        latest = datetime(2026, 3, 1, tzinfo=UTC)
         _run(self._origin(), DerivationRun.Status.COMPLETED, completed_at=earlier, unit={"n": 1})
         _run(self._origin(), DerivationRun.Status.COMPLETED, completed_at=latest, unit={"n": 2})
 
@@ -150,8 +150,8 @@ class ProductRunsTests(TestCase):
     def test_returns_the_products_runs_most_recently_modified_first(self):
         older = _run(self._origin(), DerivationRun.Status.COMPLETED, unit={"n": 1})
         newer = _run(self._origin(), DerivationRun.Status.FAILED, unit={"n": 2})
-        _touch_modified(older, datetime(2026, 1, 1, tzinfo=timezone.utc))
-        _touch_modified(newer, datetime(2026, 6, 1, tzinfo=timezone.utc))
+        _touch_modified(older, datetime(2026, 1, 1, tzinfo=UTC))
+        _touch_modified(newer, datetime(2026, 6, 1, tzinfo=UTC))
 
         runs = list(product_runs(self.product))
 
@@ -336,12 +336,12 @@ class RunDetailViewTests(TestCase):
         self.assertContains(response, "Stale RUNNING reclaimed")  # reason label
 
     def test_completed_run_links_to_produced_item_and_lineage(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Item
 
         col = Collection.objects.create(catalog=self.catalog, slug="out", name="out")
-        item = Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
+        item = Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=UTC))
         run = self._run_rec(status=DerivationRun.Status.COMPLETED, produced_item=item)
 
         response = self.client.get(self._url(run))

@@ -8,7 +8,7 @@ application-layer dispatcher is the only place that knows about DerivedProduct;
 the engine stays generic.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
@@ -241,7 +241,7 @@ class EndToEndPromotionTests(TestCase):
         )
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
-            datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            datetime=datetime(2020, 1, 1, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=10,
@@ -289,7 +289,7 @@ class EndToEndPromotionTests(TestCase):
             dispatch_for_input(trigger, dispatch=False)
 
         item = Item.objects.get(collection=self.pub_col)
-        self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual(item.time, datetime(2020, 1, 1, tzinfo=UTC))
         # Promotion emits a served COG under the shared ingestion path
         # scheme ({variable}_{HHMMSS}); visuals are on demand (ADR 0021).
         cog = item.assets.get(format="cog")
@@ -312,7 +312,7 @@ class StagingArrivalRoutesToProductsTests(TestCase):
         self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
-            datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            datetime=datetime(2020, 1, 1, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=10,

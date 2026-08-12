@@ -10,8 +10,7 @@ under a unique scratch prefix and purges it afterwards.
 import time
 import unittest
 import uuid
-from datetime import datetime
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -261,7 +260,7 @@ class BuildTaskEndToEndTests(TestCase):
     def _add_item(self, day: int):
         from georiva.core.models import Asset, Item
 
-        ts = datetime(2026, 3, day, tzinfo=dt_timezone.utc)
+        ts = datetime(2026, 3, day, tzinfo=UTC)
         item = Item.objects.create(
             collection=self.collection,
             time=ts,
@@ -360,7 +359,7 @@ class BuildTaskEndToEndTests(TestCase):
         # An Item with no COG asset for this variable: skipped during builds.
         Item.objects.create(
             collection=self.collection,
-            time=datetime(2026, 3, 5, tzinfo=dt_timezone.utc),
+            time=datetime(2026, 3, 5, tzinfo=UTC),
             bounds=list(BOUNDS),
             crs="EPSG:4326",
             width=64,

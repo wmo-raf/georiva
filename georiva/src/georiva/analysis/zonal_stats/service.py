@@ -27,8 +27,8 @@ def compute_stats_from_array(
     data: np.ndarray,
     transform,
     crs: str,
-    boundaries: "list[AdminBoundary]",
-) -> "list[dict]":
+    boundaries: list[AdminBoundary],
+) -> list[dict]:
     """
     Compute zonal statistics for all boundaries against one 2-D numpy array.
 
@@ -63,8 +63,8 @@ def compute_stats_from_array(
 
 def compute_stats_from_cog_bytes(
     cog_bytes: bytes,
-    boundaries: "list[AdminBoundary]",
-) -> "list[dict]":
+    boundaries: list[AdminBoundary],
+) -> list[dict]:
     """
     Compute zonal statistics from raw COG bytes (used by backfill task).
 
@@ -90,9 +90,9 @@ def compute_stats_from_cog_bytes(
 
 
 def persist_stats(
-    item: "Item",
-    variable: "Variable",
-    stats_rows: "list[dict]",
+    item: Item,
+    variable: Variable,
+    stats_rows: list[dict],
     overwrite: bool = False,
 ) -> int:
     """
@@ -167,7 +167,7 @@ def persist_stats(
 # ---------------------------------------------------------------------------
 
 
-def get_boundaries_for_collection(collection) -> "dict[int, list[AdminBoundary]]":
+def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
     """
     Return AdminBoundary objects grouped by level for a collection.
 

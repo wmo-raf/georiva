@@ -7,6 +7,7 @@ readiness — the seam the server-rendered chain view draws. Declaration-driven,
 no recipe execution, so configured-but-unrun (blocked) edges appear too.
 """
 
+from datetime import UTC
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -155,7 +156,7 @@ class BuildChainGraphTests(TestCase):
 
 class ItemLineageTests(TestCase):
     def test_lineage_returns_the_source_items_of_a_produced_item(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Collection, Item
         from georiva.staging.models import (
@@ -164,7 +165,7 @@ class ItemLineageTests(TestCase):
             StagingItem,
         )
 
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        t = datetime(2020, 1, 1, tzinfo=UTC)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
 
         # The produced (derived) item.
@@ -256,7 +257,7 @@ class ItemLineageViewTests(TestCase):
         self.client.force_login(self.user)
 
     def test_lineage_page_lists_a_produced_items_inputs(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from django.urls import reverse
 
@@ -267,7 +268,7 @@ class ItemLineageViewTests(TestCase):
             StagingItem,
         )
 
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        t = datetime(2020, 1, 1, tzinfo=UTC)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         out_col = Collection.objects.create(catalog=catalog, slug="anomaly", name="Anomaly")
         derived = Item.objects.create(collection=out_col, time=t)

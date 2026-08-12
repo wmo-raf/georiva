@@ -1,5 +1,4 @@
 import logging
-from typing import Optional, Tuple
 
 import numpy as np
 from adminboundarymanager.models import AdminBoundary
@@ -34,7 +33,7 @@ class BoundaryClipper:
         return self.boundary is not None
 
     @property
-    def bbox(self) -> Optional[Tuple[float, float, float, float]]:
+    def bbox(self) -> tuple[float, float, float, float] | None:
         """Get bounding box [west, south, east, north]."""
         if not self.boundary:
             return None
@@ -51,10 +50,10 @@ class BoundaryClipper:
 
     def compute_window(
         self,
-        src_bounds: Tuple[float, float, float, float],
+        src_bounds: tuple[float, float, float, float],
         src_width: int,
         src_height: int,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """
         Compute pixel window for clipped extraction.
 
@@ -118,7 +117,7 @@ class BoundaryClipper:
 
     def create_mask(
         self,
-        bounds: Tuple[float, float, float, float],
+        bounds: tuple[float, float, float, float],
         width: int,
         height: int,
     ) -> np.ndarray:
@@ -154,7 +153,7 @@ class BoundaryClipper:
     def apply_geometry_mask(
         self,
         data: np.ndarray,
-        bounds: Tuple[float, float, float, float],
+        bounds: tuple[float, float, float, float],
         nodata: float = np.nan,
     ) -> np.ndarray:
         """

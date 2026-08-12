@@ -14,7 +14,7 @@ Three seams:
   contract the page hands it.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -770,22 +770,22 @@ class PreviewItemChoiceTests(TestCase):
         return item
 
     def test_a_forecast_feed_previews_the_newest_runs_earliest_horizon(self):
-        old_run = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        new_run = datetime(2026, 3, 2, tzinfo=timezone.utc)
-        self._item(datetime(2026, 3, 10, tzinfo=timezone.utc), old_run)
+        old_run = datetime(2026, 3, 1, tzinfo=UTC)
+        new_run = datetime(2026, 3, 2, tzinfo=UTC)
+        self._item(datetime(2026, 3, 10, tzinfo=UTC), old_run)
         analysis = self._item(new_run, new_run)
         # The furthest horizon of the newest run: newest valid time overall,
         # and the wrong answer.
-        self._item(datetime(2026, 3, 12, tzinfo=timezone.utc), new_run)
+        self._item(datetime(2026, 3, 12, tzinfo=UTC), new_run)
         self.assertEqual(Item.objects.latest_for_variable(self.variable), analysis)
 
     def test_a_feed_without_reference_times_previews_the_newest_valid_time(self):
-        self._item(datetime(2026, 3, 1, tzinfo=timezone.utc))
-        newest = self._item(datetime(2026, 3, 3, tzinfo=timezone.utc))
+        self._item(datetime(2026, 3, 1, tzinfo=UTC))
+        newest = self._item(datetime(2026, 3, 3, tzinfo=UTC))
         self.assertEqual(Item.objects.latest_for_variable(self.variable), newest)
 
     def test_an_item_carrying_no_cog_is_not_a_candidate(self):
-        self._item(datetime(2026, 3, 3, tzinfo=timezone.utc), fmt=Asset.Format.PNG)
+        self._item(datetime(2026, 3, 3, tzinfo=UTC), fmt=Asset.Format.PNG)
         self.assertIsNone(Item.objects.latest_for_variable(self.variable))
 
     def test_another_variables_item_is_not_a_candidate(self):
@@ -797,7 +797,7 @@ class PreviewItemChoiceTests(TestCase):
             value_min=0,
             value_max=1,
         )
-        self._item(datetime(2026, 3, 3, tzinfo=timezone.utc), variable=other)
+        self._item(datetime(2026, 3, 3, tzinfo=UTC), variable=other)
         self.assertIsNone(Item.objects.latest_for_variable(self.variable))
 
     def test_a_variable_with_no_items_previews_nothing(self):
@@ -810,7 +810,7 @@ class PreviewPanelTests(StylingSurfaceTestCase):
     def _cog_item(self, bounds=(0.0, 0.0, 10.0, 10.0)):
         item = Item.objects.create(
             collection=self.collection,
-            time=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            time=datetime(2026, 4, 1, tzinfo=UTC),
             bounds=list(bounds) if bounds else None,
         )
         Asset.objects.create(

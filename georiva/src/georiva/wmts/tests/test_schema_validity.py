@@ -7,7 +7,7 @@ vendored under ``schemas/`` and every absolute ``schemaLocation`` resolves
 there, so the test never touches the network.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import skipUnless
 from urllib.parse import urlsplit
@@ -74,7 +74,7 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
         )
         Item.objects.create(
             collection=collection,
-            time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
 
         # A forecast collection too, so the two-dimension (Time + Reftime)
@@ -96,8 +96,8 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
         )
         Item.objects.create(
             collection=forecast,
-            time=datetime(2026, 3, 1, 18, 0, tzinfo=timezone.utc),
-            reference_time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 1, 18, 0, tzinfo=UTC),
+            reference_time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
 
     def validate(self):

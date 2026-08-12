@@ -8,7 +8,6 @@ creating duplicates, so adding new collections to a plugin is safe to re-run.
 
 import logging
 import math
-from typing import Optional
 
 from django.db import transaction
 from django.utils.text import slugify
@@ -86,7 +85,7 @@ class SourceSetupService:
         catalog,
         feed_name: str,
         feed_interval: int = 360,
-        global_config: Optional[dict] = None,
+        global_config: dict | None = None,
         selected_definitions: list[tuple[CollectionDefinition, dict]],
     ) -> tuple:
         """
@@ -202,7 +201,7 @@ class SourceSetupService:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: Optional[dict] = None):
+    def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: dict | None = None):
         defaults = {**model_cls.get_wizard_defaults(), **(extra_data or {})}
         data_feed = model_cls(
             name=name,

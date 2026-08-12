@@ -51,7 +51,7 @@ class TimeseriesService:
 
     def point(
         self,
-        variable: "Variable",
+        variable: Variable,
         lat: float,
         lon: float,
         time_start: datetime | None = None,
@@ -97,7 +97,7 @@ class TimeseriesService:
 
     def area(
         self,
-        variable: "Variable",
+        variable: Variable,
         geometry: dict,
         aggregation: str = "mean",
         time_start: datetime | None = None,
@@ -176,7 +176,7 @@ class TimeseriesService:
     # Private helpers
     # -------------------------------------------------------------------------
 
-    def _open_dataset(self, variable: "Variable"):
+    def _open_dataset(self, variable: Variable):
         """
         Open the variable's virtual Zarr (Icechunk) repo as a lazy xarray Dataset.
 

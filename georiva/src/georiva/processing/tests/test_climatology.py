@@ -6,7 +6,7 @@ the declarative pieces (enumeration, outputs mapping, input resolution) and that
 running a unit produces the right Published records.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -51,8 +51,8 @@ class _ClimatologyFixture(TestCase):
         self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
-            start_datetime=datetime(2011, 1, 1, tzinfo=timezone.utc),
-            end_datetime=datetime(2012, 12, 31, tzinfo=timezone.utc),
+            start_datetime=datetime(2011, 1, 1, tzinfo=UTC),
+            end_datetime=datetime(2012, 12, 31, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=2,
@@ -117,7 +117,7 @@ class ValueQuantityTests(_ClimatologyFixture):
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
         self.assertEqual(item.collection.slug, "tas_jja_value")
-        self.assertEqual(item.time, datetime(2011, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual(item.time, datetime(2011, 1, 1, tzinfo=UTC))
 
         asset = item.assets.get()
         self.assertIn("data", asset.roles)
@@ -272,8 +272,8 @@ class CalendarFromFileContentTests(_ClimatologyFixture):
     def test_slices_by_year_from_file_axis_not_staging_bounds(self):
         # Staging index bounds lie (say 2099); the authoritative time is the
         # file's own 360-day axis spanning 2011-2013.
-        self.sitem.start_datetime = datetime(2099, 1, 1, tzinfo=timezone.utc)
-        self.sitem.end_datetime = datetime(2099, 12, 31, tzinfo=timezone.utc)
+        self.sitem.start_datetime = datetime(2099, 1, 1, tzinfo=UTC)
+        self.sitem.end_datetime = datetime(2099, 12, 31, tzinfo=UTC)
         self.sitem.save()
 
         time = xr.date_range(

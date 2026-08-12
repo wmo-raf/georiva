@@ -7,6 +7,7 @@ per-unit compute (``run_unit_task``) mocked.
 See issue #125 and docs/adr/0005-generic-derivation-engine.md.
 """
 
+from datetime import UTC
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -151,7 +152,7 @@ class DispatchForTriggerTests(_RegistryIsolationMixin, TestCase):
 
 class _StagingFixture(TestCase):
     def setUp(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Catalog
         from georiva.staging.models import (
@@ -166,7 +167,7 @@ class _StagingFixture(TestCase):
         self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
-            datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            datetime=datetime(2020, 1, 1, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=10,
@@ -186,7 +187,7 @@ class PromotionCandidateUnitsTests(_StagingFixture):
     item maps 1:1 to its promotion unit; a wide selector still enumerates."""
 
     def test_staging_trigger_maps_to_single_unit(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.processing.recipes.promotion import PromotionRecipe
         from georiva.staging.models import StagingItem
@@ -194,7 +195,7 @@ class PromotionCandidateUnitsTests(_StagingFixture):
         # A second staging item that must NOT be triggered by the first's event.
         StagingItem.objects.create(
             collection=self.scol,
-            datetime=datetime(2020, 1, 2, tzinfo=timezone.utc),
+            datetime=datetime(2020, 1, 2, tzinfo=UTC),
             bounds=[0, 0, 1, 1],
             crs="EPSG:4326",
             width=10,
@@ -228,13 +229,13 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
     fake_recipes = [_RelevantRecipe]
 
     def _published_item(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Catalog, Collection, Item
 
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
-        return Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
+        return Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=UTC))
 
     def test_completed_unit_chains_downstream_trigger(self):
         from georiva.processing.engine import UnitResult
@@ -355,7 +356,7 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
     def test_sweep_propagates_through_intermediates(self):
         """A stale unit's recompute also invalidates items derived from its
         output — in one pass, before the intermediate has recomputed."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Catalog, Collection, Item
         from georiva.processing.models import DerivationRun
@@ -363,7 +364,7 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
         from georiva.processing.tasks import sweep_derivations
         from georiva.staging.models import DerivationLink
 
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        t = datetime(2020, 1, 1, tzinfo=UTC)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C2", slug="c2", file_format="geotiff")
 
         # B is the stale unit's product (sweep_fake, recorded ≠ current).
@@ -475,7 +476,7 @@ class ForwardInvalidationTests(TestCase):
     DerivationLink forward through internal intermediates (A → B → C)."""
 
     def setUp(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Catalog, Collection, Item
         from georiva.processing.models import DerivationRun
@@ -486,7 +487,7 @@ class ForwardInvalidationTests(TestCase):
             StagingItem,
         )
 
-        t = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        t = datetime(2020, 1, 1, tzinfo=UTC)
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
 
         # A: staging input.
@@ -587,14 +588,14 @@ class TriggerBuilderTests(TestCase):
     instead of by slug. The slug stays for display and unmigrated recipes."""
 
     def test_published_item_trigger_carries_collection_id_and_slug(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from georiva.core.models import Catalog, Collection, Item
         from georiva.processing.invocation import published_item_trigger
 
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
-        item = Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
+        item = Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=UTC))
 
         trigger = published_item_trigger(item)
 

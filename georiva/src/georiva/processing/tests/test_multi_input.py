@@ -13,7 +13,7 @@ AssetWriter, assert produced records).
 See issue #124 and docs/adr/0005-generic-derivation-engine.md.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -37,7 +37,7 @@ from georiva.staging.models import (
     StagingItem,
 )
 
-_TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
+_TIME = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def _mock_writer():

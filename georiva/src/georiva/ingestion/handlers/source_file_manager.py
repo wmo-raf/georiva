@@ -11,7 +11,7 @@ import logging
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from georiva.core.storage import storage
 
@@ -55,7 +55,7 @@ class SourceFileManager:
     # Archive
     # =========================================================================
 
-    def archive(self, origin: "Bucket", file_path: str) -> Optional[str]:
+    def archive(self, origin: "Bucket", file_path: str) -> str | None:
         """
         Copy the raw source file to georiva-archive.
 

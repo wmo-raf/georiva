@@ -6,7 +6,7 @@ demand by Titiler (ADR 0021), so no PNG is written or recorded here.
 Mirrors processing/tests/test_engine.py: mock the writer, assert on records.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -60,7 +60,7 @@ class MaterializerFixture(TestCase):
             value_min=0,
             value_max=300,
         )
-        self.ts = datetime(2024, 5, 1, tzinfo=timezone.utc)
+        self.ts = datetime(2024, 5, 1, tzinfo=UTC)
         self.item = Item.objects.create(
             collection=self.collection,
             time=self.ts,

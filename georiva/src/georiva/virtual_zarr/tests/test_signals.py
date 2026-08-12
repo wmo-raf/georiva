@@ -4,7 +4,7 @@ in sync with reality, so NO_DATA manifests wake up when data arrives and
 READY manifests go STALE when data is removed.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.test import TestCase
 
@@ -12,7 +12,7 @@ from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.organisations.testing import make_organisation
 from georiva.virtual_zarr.models import VirtualZarrManifest
 
-UTC = timezone.utc
+UTC = UTC
 
 
 class AssetSignalTestCase(TestCase):

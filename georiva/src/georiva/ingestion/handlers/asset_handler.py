@@ -13,7 +13,7 @@ engine uses too.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 from django.conf import settings
@@ -63,8 +63,8 @@ class AssetHandler:
         crs: str,
         width: int,
         height: int,
-        clipper: Optional[BoundaryClipper] = None,
-        clip_window: Optional[dict] = None,
+        clipper: BoundaryClipper | None = None,
+        clip_window: dict | None = None,
     ) -> list[Asset]:
         """
         Run the full pipeline for *variable* at *timestamp*.
@@ -113,7 +113,7 @@ class AssetHandler:
         timestamp: datetime,
         width: int,
         height: int,
-        clip_window: Optional[dict] = None,
+        clip_window: dict | None = None,
     ) -> np.ndarray:
         """
         Extract raw data from the source file.
@@ -154,7 +154,7 @@ class AssetHandler:
         variable: "Variable",
         local_path: Path,
         timestamp: datetime,
-        clip_window: Optional[dict] = None,
+        clip_window: dict | None = None,
     ) -> np.ndarray:
         """Read the full (or windowed) array at once."""
         window = None

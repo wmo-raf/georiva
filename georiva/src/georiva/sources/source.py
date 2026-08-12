@@ -1,9 +1,10 @@
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, Optional, Protocol, Tuple, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from georiva.sources.fetch.base import BaseFetchStrategy, FileRequest
 
@@ -42,7 +43,7 @@ class DataSource(Protocol):
         ...
 
     def generate_requests(
-        self, start_time: datetime, end_time: datetime, variables: Optional[list[str]] = None, **kwargs
+        self, start_time: datetime, end_time: datetime, variables: list[str] | None = None, **kwargs
     ) -> Iterator[FileRequest]:
         """
         Generate file requests for a time range.
@@ -52,7 +53,7 @@ class DataSource(Protocol):
         """
         ...
 
-    def get_latest_available(self) -> Optional[datetime]:
+    def get_latest_available(self) -> datetime | None:
         """
         Get the timestamp of the latest available data.
 
@@ -98,11 +99,11 @@ class BaseDataSource(ABC):
 
     @abstractmethod
     def generate_requests(
-        self, start_time: datetime, end_time: datetime, variables: Optional[list[str]] = None, **kwargs
+        self, start_time: datetime, end_time: datetime, variables: list[str] | None = None, **kwargs
     ) -> Iterator[FileRequest]:
         pass
 
-    def get_latest_available(self) -> Optional[datetime]:
+    def get_latest_available(self) -> datetime | None:
         """Default implementation - subclasses should override for accuracy."""
         return None
 
@@ -115,14 +116,14 @@ class BaseDataSource(ABC):
         Default backfill start date.
         Override per-source or pull from profile/config.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     def get_default_end_date(self, *, collection=None) -> datetime:
         """Default end date (usually now)."""
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
-    def get_latest_from_db(self, *, collection=None) -> Optional[datetime]:
+    def get_latest_from_db(self, *, collection=None) -> datetime | None:
         """
         Latest stored valid_time for this collection.
 
@@ -152,7 +153,7 @@ class BaseDataSource(ABC):
         """
         return latest
 
-    def get_time_window(self, *, collection=None) -> Tuple[datetime, datetime]:
+    def get_time_window(self, *, collection=None) -> tuple[datetime, datetime]:
         """
         Default logic:
           - end_time = get_default_end_date()
@@ -213,7 +214,7 @@ class BaseDataSource(ABC):
         """Generate list of forecast hours."""
         return list(range(start_hour, max_hour + 1, step))
 
-    def post_process_fetched_file(self, request, local_path: Path) -> Tuple[Path, Optional[str]]:
+    def post_process_fetched_file(self, request, local_path: Path) -> tuple[Path, str | None]:
         """
         Optional hook.
         Return (new_path_to_store, new_filename_override).

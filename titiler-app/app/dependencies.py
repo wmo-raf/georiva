@@ -1,7 +1,7 @@
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 
 import httpx
 import redis
@@ -34,8 +34,8 @@ def _fetch_config_from_django(
     catalog: str,
     collection: str,
     variable: str,
-    style: Optional[str] = None,
-) -> tuple[Optional[int], Optional[dict]]:
+    style: str | None = None,
+) -> tuple[int | None, dict | None]:
     """Fetch rendering config from Django internal API on Redis miss.
 
     The org segment is forwarded, not resolved: this service is dialled on an
@@ -105,7 +105,7 @@ def build_cog_url(
     collection: str,
     variable: str,
     time_dt: datetime,
-    reftime_dt: Optional[datetime],
+    reftime_dt: datetime | None,
 ) -> str:
     """
     Construct the MinIO COG URL from path components.
@@ -141,7 +141,7 @@ def parse_iso_datetime(value: str, param_name: str) -> datetime:
     """Parse ISO 8601 UTC datetime string, raising 400 on failure."""
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt.astimezone(timezone.utc)
+        return dt.astimezone(UTC)
     except (ValueError, AttributeError):
         raise HTTPException(
             status_code=400,
@@ -159,7 +159,7 @@ def SemanticTileConfig(
     catalog_slug: Annotated[str, Path(...)],
     collection_slug: Annotated[str, Path(...)],
     variable_slug: Annotated[str, Path(...)],
-    style: Optional[str] = Query(
+    style: str | None = Query(
         None,
         description="Named style to render with; omission means the variable's default style",
     ),
@@ -219,7 +219,7 @@ def SemanticPathParams(
     collection_slug: Annotated[str, Path(...)],
     variable_slug: Annotated[str, Path(...)],
     time: str = Query(..., description="Valid time in ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)"),
-    reftime: Optional[str] = Query(None, description="Forecast reference time in ISO 8601 UTC"),
+    reftime: str | None = Query(None, description="Forecast reference time in ISO 8601 UTC"),
 ) -> str:
     """Resolve the COG URL from semantic path params and time query params."""
     time_dt = parse_iso_datetime(time, "time")
@@ -231,7 +231,7 @@ def SemanticPathParams(
 
 def SemanticColorMap(
     tile_config: dict = Depends(SemanticTileConfig),
-) -> Optional[ColorMapType]:
+) -> ColorMapType | None:
     """Return the 256-entry colormap from Redis config, or grayscale fallback."""
     raw = tile_config.get("colormap")
     if raw:
@@ -252,6 +252,6 @@ class RescaleAlgorithm(BaseAlgorithm):
 
 def SemanticRescale(
     tile_config: dict = Depends(SemanticTileConfig),
-) -> Optional[BaseAlgorithm]:
+) -> BaseAlgorithm | None:
     """Return a rescale algorithm using vmin/vmax from the tile config."""
     return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"])

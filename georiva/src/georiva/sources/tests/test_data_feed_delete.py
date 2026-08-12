@@ -8,7 +8,7 @@ other feeds' derived products bound to the doomed collections — and only
 delete after an explicit POST. The cascade semantics themselves are unchanged.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -29,7 +29,7 @@ User = get_user_model()
 def _make_item(collection, n):
     return Item.objects.create(
         collection=collection,
-        time=datetime(2024, 1, 1 + n, tzinfo=timezone.utc),
+        time=datetime(2024, 1, 1 + n, tzinfo=UTC),
         source_file=f"src/{collection.slug}/{n}.tif",
     )
 

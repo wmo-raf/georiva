@@ -31,7 +31,7 @@ class ItemHandler:
         *,
         collection: Collection,
         timestamp: datetime,
-        reference_time: Optional[datetime],
+        reference_time: datetime | None,
         source_file: str,
         ingestion_log: Optional["FileIngestion"],
         bounds: tuple | list,

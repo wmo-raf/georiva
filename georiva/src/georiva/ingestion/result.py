@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +40,17 @@ class IngestionResult:
     archive_path: str = ""
 
     # Processing summary — populated after the ingestion loop completes
-    variables_discovered: Optional[int] = None
-    valid_time_start: Optional[datetime] = None
-    valid_time_end: Optional[datetime] = None
-    timestep_count: Optional[int] = None
+    variables_discovered: int | None = None
+    valid_time_start: datetime | None = None
+    valid_time_end: datetime | None = None
+    timestep_count: int | None = None
 
     def add_error(self, msg: str):
         self.errors.append(msg)
         logger.error(msg)
 
     @property
-    def size_reduction_percent(self) -> Optional[float]:
+    def size_reduction_percent(self) -> float | None:
         """Storage reduction achieved by clipping, as a percentage."""
         if self.original_size and self.clipped_size:
             original_pixels = self.original_size[0] * self.original_size[1]

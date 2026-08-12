@@ -8,7 +8,6 @@ service uses it to provision Collection + Variable + DataFeedCollectionLink reco
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from georiva.sources.parameters import SourceKey
 
@@ -47,14 +46,14 @@ class CollectionVariable:
     key: str
     name: str
     source_units: str
-    output_units: Optional[str] = None
-    source_variable: Optional[SourceKey] = None
+    output_units: str | None = None
+    source_variable: SourceKey | None = None
     transform: str = "passthrough"
-    components: Optional[dict[str, SourceKey]] = None
+    components: dict[str, SourceKey] | None = None
     description: str = ""
-    value_range: Optional[tuple[float, float]] = None
-    palette: Optional[str] = None
-    palette_stops: Optional[tuple[tuple[float, str], ...]] = None
+    value_range: tuple[float, float] | None = None
+    palette: str | None = None
+    palette_stops: tuple[tuple[float, str], ...] | None = None
 
     def __post_init__(self):
         if self.transform == "passthrough" and self.source_variable is None:
@@ -116,7 +115,7 @@ class CollectionDefinition:
     groups: tuple[VariableGroup, ...] = field(default_factory=tuple)
     description: str = ""
     is_forecast: bool = False
-    default_interval_minutes: Optional[int] = None
+    default_interval_minutes: int | None = None
 
     def __init__(
         self,
@@ -127,7 +126,7 @@ class CollectionDefinition:
         groups=(),
         description: str = "",
         is_forecast: bool = False,
-        default_interval_minutes: Optional[int] = None,
+        default_interval_minutes: int | None = None,
     ):
         object.__setattr__(self, "key", key)
         object.__setattr__(self, "name", name)
@@ -257,7 +256,7 @@ def _freeze_palette_stops(raw):
         return raw
 
 
-def _parse_source_key(source) -> Optional[SourceKey]:
+def _parse_source_key(source) -> SourceKey | None:
     """Accept a string shorthand or a dict with name/level."""
     from georiva.sources.parameters import Level
 

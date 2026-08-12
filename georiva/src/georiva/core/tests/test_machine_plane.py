@@ -20,7 +20,7 @@ under the same slug. A key, a path or a lookup that drops the org segment stops
 distinguishing them, and each test below is written so that dropping it fails.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from django.test import TestCase, override_settings
@@ -120,8 +120,8 @@ class MachinePlaneAddressTests(TestCase):
     def test_a_forecast_preview_carries_its_reference_time(self):
         item = Item.objects.create(
             collection=self.kenya_tree["collection"],
-            time=datetime(2026, 3, 2, tzinfo=timezone.utc),
-            reference_time=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 2, tzinfo=UTC),
+            reference_time=datetime(2026, 3, 1, tzinfo=UTC),
         )
         url = titiler_preview_url(item, SHARED_SLUG)
         self.assertIn("reftime=2026-03-01T00", url)
@@ -985,7 +985,7 @@ class CogKeyGrammarTests(TestCase):
             catalog.slug,
             SHARED_SLUG,
             SHARED_SLUG,
-            datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
         self.assertTrue(
             key.startswith(catalog.storage_prefix.rstrip("/") + "/"),
@@ -1000,6 +1000,6 @@ class CogKeyGrammarTests(TestCase):
             SHARED_SLUG,
             SHARED_SLUG,
             SHARED_SLUG,
-            datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
         self.assertEqual(route, f"/titiler/{'/'.join(key.split('/')[:4])}")

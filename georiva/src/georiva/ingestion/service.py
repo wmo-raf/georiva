@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-from typing import Optional
 
 import pytz
 from django.db.models import Prefetch
@@ -333,7 +332,7 @@ class IngestionService:
 
         return list(base_qs.filter(catalog=catalog, is_active=True))
 
-    def _get_first_variable_name(self, collection: Collection) -> Optional[str]:
+    def _get_first_variable_name(self, collection: Collection) -> str | None:
         for variable in collection.variables.all():
             if not variable.is_active:
                 continue

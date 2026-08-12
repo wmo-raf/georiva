@@ -15,10 +15,10 @@ Design:
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Generator, Optional
 
 import numpy as np
 import pandas as pd
@@ -107,8 +107,8 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         file_path: PathLike,
         variable_name: str,
         *,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
         **kwargs,
     ) -> Generator[VariableInfo, None, None]:
         """Open a NetCDF variable lazily."""
@@ -182,10 +182,10 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         self,
         file_path: PathLike,
         variable_name: str,
-        timestamp: Optional[datetime] = None,
-        window: Optional[tuple[int, int, int, int]] = None,
+        timestamp: datetime | None = None,
+        window: tuple[int, int, int, int] | None = None,
         **kwargs,
-    ) -> "ExtractedVariable":
+    ) -> ExtractedVariable:
         """Override to apply fill-value replacement after materialization."""
         with self.open_variable(
             file_path,
@@ -229,7 +229,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
 
     _TIME_NAMES = {"time", "valid_time", "t", "datetime", "xtime"}
 
-    def _time_dim(self, var) -> Optional[str]:
+    def _time_dim(self, var) -> str | None:
         for d in var.dims:
             if d.lower() in self._TIME_NAMES:
                 return d
@@ -243,7 +243,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                 timestamps.append(pd.Timestamp(t).to_pydatetime())
         return sorted(timestamps)
 
-    def _resolve_valid_time(self, var, ds: xr.Dataset, requested_time: Optional[datetime]) -> datetime:
+    def _resolve_valid_time(self, var, ds: xr.Dataset, requested_time: datetime | None) -> datetime:
         if requested_time is not None:
             return requested_time
 
@@ -260,7 +260,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                 except Exception:
                     pass
 
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     # ------------------------------------------------------------------
     # Internal: spatial helpers
@@ -269,7 +269,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}
 
-    def _spatial_dims(self, var) -> tuple[Optional[str], Optional[str]]:
+    def _spatial_dims(self, var) -> tuple[str | None, str | None]:
         y_dim = x_dim = None
         for d in var.dims:
             dl = d.lower()
@@ -304,7 +304,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         crs = self._detect_crs(ds)
         return bounds, (lon_res, lat_res), crs
 
-    def _find_lat_lon_coords(self, var) -> tuple[Optional[str], Optional[str]]:
+    def _find_lat_lon_coords(self, var) -> tuple[str | None, str | None]:
         lat_name = lon_name = None
         for name in var.coords:
             nl = name.lower()
