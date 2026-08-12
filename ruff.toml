@@ -38,3 +38,8 @@ select = ["E", "W", "F", "I"]
 # import time. The imports cannot move above that setup.
 "titiler-app/app/main.py" = ["E402"]
 "titiler-app/tests/conftest.py" = ["E402"]
+
+# Carries Martin's tile-source metadata as JSON inside a dollar-quoted SQL
+# string. A JSON string cannot span a raw newline, so the long lines cannot be
+# wrapped, and a `# noqa` inside a string literal is just more string.
+"georiva/src/georiva/analysis/zonal_stats/management/commands/create_martin_function.py" = ["E501"]

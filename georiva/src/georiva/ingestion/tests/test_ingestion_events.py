@@ -5,7 +5,6 @@ from django.conf import settings
 from django.test import TestCase
 
 from georiva.ingestion.events import CHANNEL
-from georiva.organisations.testing import make_organisation
 
 
 class IngestionEventsTestCase(TestCase):

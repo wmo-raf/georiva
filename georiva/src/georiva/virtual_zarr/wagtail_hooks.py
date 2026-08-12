@@ -9,9 +9,9 @@ from wagtail.snippets.views.snippets import SnippetViewSet
 from georiva.core.models import Asset
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from georiva.organisations.scoping import OrgScopedViewSetMixin
+from georiva.virtual_zarr.models import VirtualZarrManifest
 
 logger = logging.getLogger(__name__)
-from georiva.virtual_zarr.models import VirtualZarrManifest
 
 
 class VirtualZarrManifestViewSet(OrgScopedViewSetMixin, SnippetViewSet):

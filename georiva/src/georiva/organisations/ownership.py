@@ -75,7 +75,6 @@ from .access import (
     ORM_PATH,
     PAGE_TREE,
     SHARED_REFERENCE_DATA,
-    VIA_CONTENT_OBJECT,
     VIA_RELATED,
     content_object_fields,
     declared_lookup,

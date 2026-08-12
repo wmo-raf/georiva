@@ -15,8 +15,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from georiva.core.models import Variable
 
 logger = logging.getLogger(__name__)
 

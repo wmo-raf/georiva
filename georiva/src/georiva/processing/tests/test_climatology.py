@@ -328,4 +328,4 @@ class RunThroughEngineTests(_ClimatologyFixture):
 
         self.assertEqual(Item.objects.filter(collection__slug__startswith="tas_").count(), 4)
         self.assertEqual(DerivationLink.objects.count(), 4)
-        self.assertTrue(all(l.source_staging_item_id == self.sitem.pk for l in DerivationLink.objects.all()))
+        self.assertTrue(all(link.source_staging_item_id == self.sitem.pk for link in DerivationLink.objects.all()))

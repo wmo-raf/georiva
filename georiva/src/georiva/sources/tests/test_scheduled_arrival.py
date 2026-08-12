@@ -56,7 +56,7 @@ class ScheduledRunCreatesFetchRunTests(TestCase):
 
     def test_successful_run_creates_completed_fetch_run(self):
         req = _mock_request("rain.grib")
-        result = self._run(
+        self._run(
             [req],
             [FetchResult(request=req, success=True, status="success", bytes_transferred=4096)],
         )

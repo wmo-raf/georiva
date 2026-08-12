@@ -26,7 +26,7 @@ from rest_framework import serializers
 
 from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
 from georiva.core.machine_plane.palette_cache import build_colormap_256
-from georiva.core.models import Collection, visible_visibilities
+from georiva.core.models import visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
 #: The standard Render extension (ADR 0023): named styles are discovered

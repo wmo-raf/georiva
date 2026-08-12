@@ -3,7 +3,6 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
-from django.utils import timezone
 
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
@@ -91,10 +90,10 @@ class DashboardCatalogGroupedTests(TestCase):
 
     def test_catalog_summary_counts_are_accurate(self):
         col2 = Collection.objects.create(name="Monthly", slug="monthly", catalog=self.catalog)
-        col3 = Collection.objects.create(name="Weekly", slug="weekly", catalog=self.catalog)
+        # A third collection, deliberately left with no FileIngestion → empty.
+        Collection.objects.create(name="Weekly", slug="weekly", catalog=self.catalog)
         _make_file_ingestion(self.collection, status=FileIngestion.Status.COMPLETED)
         _make_file_ingestion(col2, status=FileIngestion.Status.FAILED)
-        # col3 has no FileIngestion → empty
 
         response = self.client.get(DASHBOARD_URL)
         cat = next(c for c in response.json()["catalogs"] if c["id"] == self.catalog.pk)
@@ -416,7 +415,7 @@ class CollectionIngestionLogsAPITests(TestCase):
 
         response = self.client.get(LOGS_URL.format(self.collection.pk))
         logs = response.json()["logs"]
-        statuses = [l["status"] for l in logs]
+        statuses = [entry["status"] for entry in logs]
         failed_indices = [i for i, s in enumerate(statuses) if s == "failed"]
         non_failed_indices = [i for i, s in enumerate(statuses) if s != "failed"]
         self.assertTrue(all(f < nf for f in failed_indices for nf in non_failed_indices))
@@ -611,7 +610,7 @@ def _make_upload_session(catalog, user=None, file_path=None, collection=None):
 
     session = UploadSession.objects.create(catalog=catalog, user=user)
     fp = file_path or f"{catalog.slug}/file.grib2"
-    uf = UploadedFile.objects.create(session=session, original_filename="file.grib2", file_path=fp)
+    UploadedFile.objects.create(session=session, original_filename="file.grib2", file_path=fp)
     if collection is not None:
         fi = FileIngestion.objects.create(bucket=BucketType.SOURCES, file_path=fp)
         fi.collections.add(collection)
@@ -650,7 +649,6 @@ class CollectionUploadSessionsAPITests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_upload_sessions_duration_seconds_set_when_completed(self):
-        from georiva.ingestion.models import UploadSession
 
         session = _make_upload_session(self.catalog, collection=self.collection)
         session.completed_at = session.started_at + timedelta(seconds=30)

@@ -643,7 +643,6 @@ def upload_wizard_step4(request):
 
 
 def upload_wizard_step5(request):
-    from georiva.core.models import Catalog
 
     session = _session(request)
     if not session.get("assignments"):

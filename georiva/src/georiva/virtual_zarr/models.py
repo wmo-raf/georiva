@@ -1,8 +1,12 @@
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
+
+if TYPE_CHECKING:
+    from georiva.core.models import Variable
 
 
 class VirtualZarrManifest(TimeStampedModel):

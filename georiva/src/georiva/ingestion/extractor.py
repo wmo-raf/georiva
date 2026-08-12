@@ -2,13 +2,16 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
 from georiva.core.models import Variable
 from georiva.formats.base import BaseFormatPlugin
 from georiva.ingestion.utils import apply_unit_conversion
+
+if TYPE_CHECKING:
+    from wagtail.blocks import StructValue
 
 logger = logging.getLogger(__name__)
 

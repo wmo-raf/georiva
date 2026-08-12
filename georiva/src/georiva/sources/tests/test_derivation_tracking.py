@@ -222,8 +222,8 @@ class RunListViewTests(TestCase):
     def test_status_filter_querystring_narrows_the_list(self):
         from georiva.processing.recipe import unit_hash
 
-        completed = _run(product_origin(self.product), DerivationRun.Status.COMPLETED, unit={"n": 1})
-        failed = _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 2})
+        _run(product_origin(self.product), DerivationRun.Status.COMPLETED, unit={"n": 1})
+        _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 2})
         completed_tag = unit_hash({"n": 1})[:8]
         failed_tag = unit_hash({"n": 2})[:8]
 

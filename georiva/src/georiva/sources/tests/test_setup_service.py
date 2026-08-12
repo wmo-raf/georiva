@@ -6,7 +6,7 @@ split that drives ingestion-time unit conversion, and the seed-vs-tune policy
 
 from django.test import TestCase
 
-from georiva.core.models import Catalog, Collection, ColorRamp, ColorRampStop, VariableStyle
+from georiva.core.models import Catalog, Collection, ColorRamp, ColorRampStop
 from georiva.core.models.visualization import generate_stops
 from georiva.core.unit_utils import ureg
 from georiva.organisations.testing import make_organisation

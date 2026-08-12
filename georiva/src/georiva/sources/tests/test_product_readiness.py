@@ -17,7 +17,7 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.core.models import Catalog, Collection
 from georiva.organisations.testing import make_organisation
 from georiva.sources.derivation_tracking import product_readiness
 from georiva.sources.models import (

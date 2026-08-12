@@ -32,7 +32,9 @@ TIME = "2026-03-23T12:00:00Z"
 LAYER = f"{CATALOG}:{COLLECTION}:{VARIABLE}"
 
 #: The tile the clicks below land in, and the pixel within it.
-ZOOM, COL, ROW, I, J = "0", "0", "0", "128", "128"
+#: I and J are named for the WMTS GetFeatureInfo parameters they carry, so
+#: they keep the spec's spelling rather than one ruff finds unambiguous.
+ZOOM, COL, ROW, I, J = "0", "0", "0", "128", "128"  # noqa: E741
 
 
 def rest_url(

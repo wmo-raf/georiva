@@ -84,7 +84,6 @@ class Command(BaseCommand):
         time_end = self._parse_date(options.get("time_end"))
 
         total_written = 0
-        total_skipped = 0
 
         for collection in collections:
             boundaries_by_level = get_boundaries_for_collection(collection)

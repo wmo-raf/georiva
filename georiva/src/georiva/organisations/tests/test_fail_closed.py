@@ -17,7 +17,6 @@ from django.contrib.auth.models import Group, Permission
 from django.db import models
 from django.test import TestCase, override_settings
 from django.urls import get_resolver, reverse
-from wagtail import hooks
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import (

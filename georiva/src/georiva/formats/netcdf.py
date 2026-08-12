@@ -26,7 +26,7 @@ import xarray as xr
 
 from georiva.utils.path import PathLike
 
-from .base import BaseFormatPlugin, VariableInfo
+from .base import BaseFormatPlugin, ExtractedVariable, VariableInfo
 
 logger = logging.getLogger(__name__)
 
@@ -187,8 +187,6 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         **kwargs,
     ) -> "ExtractedVariable":
         """Override to apply fill-value replacement after materialization."""
-        from .base import ExtractedVariable
-
         with self.open_variable(
             file_path,
             variable_name,

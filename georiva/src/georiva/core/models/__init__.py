@@ -9,6 +9,7 @@ __all__ = [
     "Topic",
     "Catalog",
     "Collection",
+    "visible_visibilities",
     "Unit",
     "Variable",
     "ColorRamp",

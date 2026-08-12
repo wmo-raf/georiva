@@ -7,10 +7,14 @@ One path grammar, no per-bucket exceptions: the first segment of every key is
 the owning organisation's slug.
 
 Bucket layout:
-    georiva-incoming/   User-uploaded raw data       {org}/{catalog}/{collection}/file.ext
-    georiva-sources/    Plugin-collected data        {org}/{catalog}/{collection}/file.ext
-    georiva-archive/    Raw copy before processing   {org}/{incoming|sources}/{catalog}/{collection}/file.ext
-    georiva-assets/     Final processed datasets     {org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/file.ext
+    georiva-incoming/  User-uploaded raw data
+        {org}/{catalog}/{collection}/file.ext
+    georiva-sources/   Plugin-collected data
+        {org}/{catalog}/{collection}/file.ext
+    georiva-archive/   Raw copy before processing
+        {org}/{incoming|sources}/{catalog}/{collection}/file.ext
+    georiva-assets/    Final processed datasets
+        {org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/file.ext
 
 Flow:
     incoming/sources → process → assets

@@ -6,7 +6,12 @@ class ConditionalCheckbox(widgets.CheckboxInput):
     A checkbox that shows/hides a target panel when toggled.
 
     Usage:
-        FieldPanel('is_forecast', widget=ConditionalCheckbox(target_panel_id='panel-child-details-forecast_configuration-section'))
+        FieldPanel(
+            'is_forecast',
+            widget=ConditionalCheckbox(
+                target_panel_id='panel-child-details-forecast_configuration-section'
+            ),
+        )
     """
 
     def __init__(self, target_panel_id: str, *args, **kwargs):

@@ -334,7 +334,7 @@ class CrossTierLineageTests(_MultiInputFixture):
 
         # …two from the Published tier, spanning different collections.
         published = links.filter(source_published_item__isnull=False)
-        self.assertEqual({l.source_published_item_id for l in published}, {soil.pk, veg.pk})
+        self.assertEqual({link.source_published_item_id for link in published}, {soil.pk, veg.pk})
 
     def test_internal_collection_is_read_as_an_input(self):
         self._add_precip()

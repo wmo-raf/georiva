@@ -109,7 +109,9 @@ def encoded_preview(
     max_size: int = Query(4096, ge=1, description="Cap on the longest image side (native grid if smaller)"),
     v: Optional[str] = Query(
         None,
-        description="Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range",
+        description=(
+            "Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"
+        ),
     ),
 ) -> Response:
     """The whole extent as one value-encoded texture: pixel = rescale(value, vmin→vmax, 0→255).

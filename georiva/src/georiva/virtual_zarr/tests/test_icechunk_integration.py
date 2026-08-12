@@ -152,7 +152,6 @@ class IcechunkStorageChecks(SimpleTestCase):
     # -- check 3: predictor round-trip ---------------------------------------
 
     def test_predictor_roundtrip_bit_equal_to_rasterio(self):
-        from georiva.virtual_zarr.repo import open_repo
 
         rng = np.random.default_rng(1)
         cases = {

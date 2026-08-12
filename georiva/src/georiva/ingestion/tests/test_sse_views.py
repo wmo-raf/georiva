@@ -4,7 +4,7 @@ from django.test import TestCase
 
 from georiva.ingestion.sse_views import _INGESTION_EVENT_TYPES, should_forward
 from georiva.organisations.models import Organisation
-from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG, dial_org
+from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG
 
 User = get_user_model()
 

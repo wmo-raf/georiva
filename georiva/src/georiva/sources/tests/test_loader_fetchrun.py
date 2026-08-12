@@ -6,7 +6,7 @@ the point is to verify FetchRun/FetchedFile records are written correctly,
 not to test network or storage I/O.
 """
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 

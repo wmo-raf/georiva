@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from georiva.sources.derivation_invocation import definition_for
-
 
 @dataclass
 class ChainNode:

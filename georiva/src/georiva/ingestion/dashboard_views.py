@@ -20,7 +20,7 @@ def ingestion_dashboard_api(request):
     """
     Returns collections grouped under their parent Catalog with health roll-ups.
     """
-    from georiva.core.models import Catalog, Collection
+    from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestion
     from georiva.sources.models import DataFeedCollectionLink
 

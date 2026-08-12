@@ -3,7 +3,7 @@ GeoRiva Ingestion Celery Tasks
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from django.utils import timezone as dj_timezone

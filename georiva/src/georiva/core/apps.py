@@ -121,7 +121,6 @@ class CoreConfig(AppConfig):
     verbose_name = "GeoRIVA Core"
 
     def ready(self):
-        from georiva.sources.models import DataFeed
         from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
 
         from .models import Collection, Variable
