@@ -91,10 +91,20 @@ jobs:
       # The expensive layer is keyed on georiva/uv.lock alone, so a source-only
       # change re-runs nothing more than the cheap project-level sync.
       #
-      # Only shard 0 writes the cache. All three build the same layers, so three
-      # concurrent exports of a multi-gigabyte result would race to write bytes
-      # that are already identical, against a repository cache budget they also
-      # share. The other two read it.
+      # Only the run on main writes the cache, and only from shard 0. PR runs
+      # read it and write nothing.
+      #
+      # This is what the trigger comment at the top already argues: a cache
+      # written on a PR branch is visible only to that PR, so PR writes buy
+      # almost nothing. They cost something real, though — the first sharded
+      # run had shard 0 exporting multi-gigabyte layers while two other shards
+      # read the same cache, and GitHub's cache service answered 503. buildx
+      # treats that as fatal rather than falling back to a cold build, so a
+      # cache hiccup failed a job whose code was fine.
+      #
+      # ignore-error keeps the remaining write from ever doing that again: a
+      # failed cache export should cost the next run some time, not fail this
+      # one.
       - name: Build dev image
         uses: docker/build-push-action@v6
         with:
@@ -106,7 +116,7 @@ jobs:
             UID=${{ steps.ids.outputs.uid }}
             GID=${{ steps.ids.outputs.gid }}
           cache-from: type=gha
-          cache-to: ${{ matrix.shard == 0 && 'type=gha,mode=max' || '' }}
+          cache-to: ${{ (github.event_name == 'push' && matrix.shard == 0) && 'type=gha,mode=max,ignore-error=true' || '' }}
 
       # prod shares builder and runtime-base with dev, so this is a couple of
       # COPY layers. It is what actually deploys, and it differs from dev in
@@ -123,7 +133,7 @@ jobs:
             UID=${{ steps.ids.outputs.uid }}
             GID=${{ steps.ids.outputs.gid }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,ignore-error=true' || '' }}
 
       - name: Write container environment
         run: |
