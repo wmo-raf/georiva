@@ -25,14 +25,26 @@ def register_ingestion_dashboard_urls():
         path("ingestion/activity/", ingestion_activity_feed, name="ingestion_activity_feed"),
         path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),
-        path("api/ingestion/collections/<int:collection_id>/ingestion-logs/", collection_ingestion_logs_api,
-             name="collection_ingestion_logs_api"),
-        path("api/ingestion/collections/<int:collection_id>/ingestion-jobs/", collection_ingestion_jobs_api,
-             name="collection_ingestion_jobs_api"),
-        path("api/ingestion/collections/<int:collection_id>/fetch-runs/", collection_fetch_runs_api,
-             name="collection_fetch_runs_api"),
-        path("api/ingestion/collections/<int:collection_id>/upload-sessions/", collection_upload_sessions_api,
-             name="collection_upload_sessions_api"),
+        path(
+            "api/ingestion/collections/<int:collection_id>/ingestion-logs/",
+            collection_ingestion_logs_api,
+            name="collection_ingestion_logs_api",
+        ),
+        path(
+            "api/ingestion/collections/<int:collection_id>/ingestion-jobs/",
+            collection_ingestion_jobs_api,
+            name="collection_ingestion_jobs_api",
+        ),
+        path(
+            "api/ingestion/collections/<int:collection_id>/fetch-runs/",
+            collection_fetch_runs_api,
+            name="collection_fetch_runs_api",
+        ),
+        path(
+            "api/ingestion/collections/<int:collection_id>/upload-sessions/",
+            collection_upload_sessions_api,
+            name="collection_upload_sessions_api",
+        ),
     ]
 
 
@@ -55,19 +67,28 @@ def register_manual_upload_config_urls():
         manual_upload_extract_times,
         manual_upload_submit,
     )
+
     return [
         path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
         path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
-        path("manual-uploads/<int:pk>/variables/add/", manual_upload_variable_add,
-             name="manual_upload_variable_add"),
-        path("manual-uploads/<int:pk>/variables/<int:var_pk>/edit/", manual_upload_variable_edit,
-             name="manual_upload_variable_edit"),
-        path("manual-uploads/<int:pk>/variables/<int:var_pk>/remove/", manual_upload_variable_remove,
-             name="manual_upload_variable_remove"),
+        path("manual-uploads/<int:pk>/variables/add/", manual_upload_variable_add, name="manual_upload_variable_add"),
+        path(
+            "manual-uploads/<int:pk>/variables/<int:var_pk>/edit/",
+            manual_upload_variable_edit,
+            name="manual_upload_variable_edit",
+        ),
+        path(
+            "manual-uploads/<int:pk>/variables/<int:var_pk>/remove/",
+            manual_upload_variable_remove,
+            name="manual_upload_variable_remove",
+        ),
         path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
         path("manual-uploads/<int:pk>/upload/", manual_upload_page, name="manual_upload_page"),
-        path("manual-uploads/<int:pk>/upload/extract-times/", manual_upload_extract_times,
-             name="manual_upload_extract_times"),
+        path(
+            "manual-uploads/<int:pk>/upload/extract-times/",
+            manual_upload_extract_times,
+            name="manual_upload_extract_times",
+        ),
         path("manual-uploads/<int:pk>/upload/submit/", manual_upload_submit, name="manual_upload_submit"),
     ]
 
@@ -95,6 +116,6 @@ def register_upload_wizard_urls():
     ]
 
 
-@hooks.register('construct_homepage_panels')
+@hooks.register("construct_homepage_panels")
 def add_ingestion_activity_panel(request, panels):
     panels.append(IngestionActivityPanel())

@@ -19,17 +19,23 @@ class AssetSignalTestCase(TestCase):
     def setUp(self):
         self.catalog = Catalog.objects.create(
             organisation=make_organisation(),
-            name="CHIRPS", slug="chirps", file_format="geotiff",
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Monthly", slug="chirps-monthly",
+            catalog=self.catalog,
+            name="Monthly",
+            slug="chirps-monthly",
         )
-        unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precipitation",
-            name="Precipitation", unit=unit, value_min=0, value_max=500,
+            collection=self.collection,
+            slug="precipitation",
+            name="Precipitation",
+            unit=unit,
+            value_min=0,
+            value_max=500,
         )
         self.item = Item.objects.create(
             collection=self.collection,
@@ -38,8 +44,11 @@ class AssetSignalTestCase(TestCase):
 
     def _cog(self, href="k/a.tif") -> Asset:
         return Asset.objects.create(
-            item=self.item, variable=self.variable,
-            format=Asset.Format.COG, roles=["data"], href=href,
+            item=self.item,
+            variable=self.variable,
+            format=Asset.Format.COG,
+            roles=["data"],
+            href=href,
         )
 
     def _set_status(self, manifest, status) -> None:
@@ -73,8 +82,11 @@ class AssetSignalTestCase(TestCase):
     def test_non_cog_delete_leaves_manifest_alone(self):
         self._cog()
         png = Asset.objects.create(
-            item=self.item, variable=self.variable,
-            format=Asset.Format.PNG, roles=["data"], href="k/a.png",
+            item=self.item,
+            variable=self.variable,
+            format=Asset.Format.PNG,
+            roles=["data"],
+            href="k/a.png",
         )
         manifest = self.variable.virtual_zarr_manifest
         self._set_status(manifest, VirtualZarrManifest.Status.READY)

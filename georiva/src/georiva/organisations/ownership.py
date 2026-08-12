@@ -54,6 +54,7 @@ This module imports both the access helpers and the page-tree helpers, which is
 why it is neither of them: ``pages`` already imports ``access``, and folding this
 into ``access`` would close that circle.
 """
+
 from functools import reduce
 from operator import or_
 
@@ -153,16 +154,12 @@ def scope_rows(request, queryset, _seen=frozenset()):
     if kind in (ORM_PATH, ORGANISATION_SELF):
         return scoped_queryset(request, queryset)
     if kind == NO_ROUTE:
-        raise _no_route(
-            model, declared, "Its rows cannot be listed on a scoped surface."
-        )
+        raise _no_route(model, declared, "Its rows cannot be listed on a scoped surface.")
 
     seen = _visit(model, _seen)
     if kind == VIA_RELATED:
         return _scope_via_related(request, queryset, related_path(declared), seen)
-    return _scope_via_content_object(
-        request, queryset, *content_object_fields(declared), seen
-    )
+    return _scope_via_content_object(request, queryset, *content_object_fields(declared), seen)
 
 
 def _scope_via_related(request, queryset, path, seen):
@@ -198,9 +195,7 @@ def _scope_via_content_object(request, queryset, content_type_field, object_id_f
     rows are dropped: they name a subject nobody can produce, so no organisation
     can be shown to own them.
     """
-    content_type_ids = set(
-        queryset.order_by().values_list(f"{content_type_field}_id", flat=True).distinct()
-    )
+    content_type_ids = set(queryset.order_by().values_list(f"{content_type_field}_id", flat=True).distinct())
     clauses = []
     for content_type in ContentType.objects.filter(pk__in=content_type_ids):
         subject = content_type.model_class()
@@ -216,11 +211,7 @@ def _scope_via_content_object(request, queryset, content_type_field, object_id_f
             continue
         allowed = scope_rows(request, subject._default_manager.all(), seen)
         clauses.append(
-            here & Q(**{
-                f"{object_id_field}__in": [
-                    str(pk) for pk in allowed.order_by().values_list("pk", flat=True)
-                ]
-            })
+            here & Q(**{f"{object_id_field}__in": [str(pk) for pk in allowed.order_by().values_list("pk", flat=True)]})
         )
     if not clauses:
         return queryset.none()
@@ -312,9 +303,7 @@ def belongs_to_active_org(request, obj, _seen=frozenset()):
         # would make the two halves disagree about a dangling id — and would
         # also be the one place this module fetches a row it does not need.
         return True
-    subject = subject_model._default_manager.filter(
-        pk=getattr(obj, object_id_field, None)
-    ).first()
+    subject = subject_model._default_manager.filter(pk=getattr(obj, object_id_field, None)).first()
     return False if subject is None else belongs_to_active_org(request, subject, seen)
 
 

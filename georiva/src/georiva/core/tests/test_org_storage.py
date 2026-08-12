@@ -1,4 +1,5 @@
 """Org ownership of catalogs, and the org-first storage path grammar (#267)."""
+
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -28,30 +29,28 @@ class CatalogOwnershipTests(TestCase):
         kenya = make_organisation("kenya")
         uganda = make_organisation("uganda")
 
-        Catalog.objects.create(
-            organisation=kenya, name="Forecast", slug="forecast", file_format="grib2"
-        )
-        Catalog.objects.create(
-            organisation=uganda, name="Forecast", slug="forecast", file_format="grib2"
-        )
+        Catalog.objects.create(organisation=kenya, name="Forecast", slug="forecast", file_format="grib2")
+        Catalog.objects.create(organisation=uganda, name="Forecast", slug="forecast", file_format="grib2")
 
         self.assertEqual(Catalog.objects.filter(slug="forecast").count(), 2)
 
     def test_one_organisation_may_not_reuse_a_slug(self):
         kenya = make_organisation("kenya")
-        Catalog.objects.create(
-            organisation=kenya, name="Forecast", slug="forecast", file_format="grib2"
-        )
+        Catalog.objects.create(organisation=kenya, name="Forecast", slug="forecast", file_format="grib2")
 
         with self.assertRaises(IntegrityError), transaction.atomic():
             Catalog.objects.create(
-                organisation=kenya, name="Forecast again", slug="forecast",
+                organisation=kenya,
+                name="Forecast again",
+                slug="forecast",
                 file_format="grib2",
             )
 
     def test_storage_prefix_is_org_then_catalog(self):
         catalog = Catalog.objects.create(
-            organisation=make_organisation("kenya"), name="CHIRPS", slug="chirps",
+            organisation=make_organisation("kenya"),
+            name="CHIRPS",
+            slug="chirps",
             file_format="geotiff",
         )
         self.assertEqual(catalog.storage_prefix, "kenya/chirps")
@@ -123,25 +122,34 @@ class AssetPathTests(TestCase):
 
     def test_org_is_the_first_segment(self):
         path = StorageManager.build_asset_path(
-            org="kenya", catalog="chirps", collection="rainfall",
-            variable="precip", timestamp=self.TIMESTAMP, filename="precip_060000.tif",
+            org="kenya",
+            catalog="chirps",
+            collection="rainfall",
+            variable="precip",
+            timestamp=self.TIMESTAMP,
+            filename="precip_060000.tif",
         )
-        self.assertEqual(
-            path, "kenya/chirps/rainfall/precip/2025/01/15/precip_060000.tif"
-        )
+        self.assertEqual(path, "kenya/chirps/rainfall/precip/2025/01/15/precip_060000.tif")
 
     def test_org_is_a_required_argument(self):
         with self.assertRaises(TypeError):
             StorageManager.build_asset_path(
-                catalog="chirps", collection="rainfall", variable="precip",
-                timestamp=self.TIMESTAMP, filename="precip_060000.tif",
+                catalog="chirps",
+                collection="rainfall",
+                variable="precip",
+                timestamp=self.TIMESTAMP,
+                filename="precip_060000.tif",
             )
 
     def test_an_empty_org_is_refused_rather_than_written_at_the_root(self):
         with self.assertRaises(ValueError):
             StorageManager.build_asset_path(
-                org="", catalog="chirps", collection="rainfall", variable="precip",
-                timestamp=self.TIMESTAMP, filename="precip_060000.tif",
+                org="",
+                catalog="chirps",
+                collection="rainfall",
+                variable="precip",
+                timestamp=self.TIMESTAMP,
+                filename="precip_060000.tif",
             )
 
 

@@ -25,10 +25,10 @@ def hex_to_rgba_list(hex_color: str):
     if not hex_color:
         raise ValueError("Empty hex color")
 
-    h = hex_color.strip().lstrip('#')
+    h = hex_color.strip().lstrip("#")
 
     if len(h) in (3, 4):
-        h = ''.join([c * 2 for c in h])
+        h = "".join([c * 2 for c in h])
 
     if len(h) not in (6, 8):
         raise ValueError(f"Invalid hex color length: {hex_color}")
@@ -66,10 +66,7 @@ def _spread_positions(stops) -> list:
     if len(stops) == 1:
         return [0.0]
     last = len(stops) - 1
-    positions = [
-        stop.position if stop.position is not None else i / last
-        for i, stop in enumerate(stops)
-    ]
+    positions = [stop.position if stop.position is not None else i / last for i, stop in enumerate(stops)]
     floor = 0.0
     for i, position in enumerate(positions):
         floor = positions[i] = max(floor, position)
@@ -82,9 +79,9 @@ def _swatch_html(gradient: str):
         return ""
     return format_html(
         '<span style="display: inline-block; '
-        'width: 120px; height: 14px; border-radius: 3px; '
+        "width: 120px; height: 14px; border-radius: 3px; "
         'border: 1px solid var(--w-color-border-furniture); background: {};">'
-        '</span>',
+        "</span>",
         gradient,
     )
 
@@ -115,8 +112,7 @@ def _sample_ramp(colors, positions, t: float):
     return list(colors[-1])
 
 
-def generate_stops(ramp, value_min: float, value_max: float,
-                   mode: str = "continuous", steps: int = None) -> list:
+def generate_stops(ramp, value_min: float, value_max: float, mode: str = "continuous", steps: int = None) -> list:
     """Apply ``ramp`` over a value range: the snapshot-generation seam of
     ADR 0022. Returns ``[{"value": float, "color": "#rrggbb(aa)"}, ...]``.
 
@@ -139,17 +135,13 @@ def generate_stops(ramp, value_min: float, value_max: float,
             class_colors = [colors[i % len(colors)] for i in range(count)]
         else:
             class_colors = [
-                _sample_ramp(colors, positions,
-                             i / (count - 1) if count > 1 else 0.5)
-                for i in range(count)
+                _sample_ramp(colors, positions, i / (count - 1) if count > 1 else 0.5) for i in range(count)
             ]
         stops = []
         for i, color in enumerate(class_colors):
             hex_color = _rgba_to_hex(color)
-            stops.append({"value": value_min + i * val_range / count,
-                          "color": hex_color})
-            stops.append({"value": value_min + (i + 1) * val_range / count,
-                          "color": hex_color})
+            stops.append({"value": value_min + i * val_range / count, "color": hex_color})
+            stops.append({"value": value_min + (i + 1) * val_range / count, "color": hex_color})
         return stops
 
     return [
@@ -178,11 +170,11 @@ class ColorRamp(ClusterableModel):
     ORGANISATION_GLOBAL_TIER = True
 
     organisation = models.ForeignKey(
-        'organisations.Organisation',
+        "organisations.Organisation",
         null=True,
         blank=True,
         on_delete=models.CASCADE,
-        related_name='color_ramps',
+        related_name="color_ramps",
         help_text=(
             "The organisation this ramp belongs to. Left empty, it is part of "
             "the instance-wide ramp catalog every organisation can use."
@@ -191,9 +183,9 @@ class ColorRamp(ClusterableModel):
     name = models.CharField(max_length=255)
 
     class RampType(models.TextChoices):
-        SEQUENTIAL = 'sequential', 'Sequential'
-        DIVERGING = 'diverging', 'Diverging'
-        QUALITATIVE = 'qualitative', 'Qualitative'
+        SEQUENTIAL = "sequential", "Sequential"
+        DIVERGING = "diverging", "Diverging"
+        QUALITATIVE = "qualitative", "Qualitative"
 
     ramp_type = models.CharField(
         max_length=20,
@@ -202,13 +194,13 @@ class ColorRamp(ClusterableModel):
     )
 
     panels = [
-        FieldPanel('name'),
-        FieldPanel('ramp_type'),
-        InlinePanel('stops', heading="Colors", label="Color"),
+        FieldPanel("name"),
+        FieldPanel("ramp_type"),
+        InlinePanel("stops", heading="Colors", label="Color"),
     ]
 
     class Meta:
-        ordering = ['name']
+        ordering = ["name"]
         verbose_name = "Color Ramp"
         verbose_name_plural = "Color Ramps"
         constraints = [
@@ -219,13 +211,13 @@ class ColorRamp(ClusterableModel):
             # tier: Postgres treats NULLs as distinct, so an unqualified pair
             # would let any number of ownerless "viridis"es through.
             models.UniqueConstraint(
-                fields=['organisation', 'name'],
-                name='unique_ramp_name_per_organisation',
+                fields=["organisation", "name"],
+                name="unique_ramp_name_per_organisation",
             ),
             models.UniqueConstraint(
-                fields=['name'],
+                fields=["name"],
                 condition=models.Q(organisation__isnull=True),
-                name='unique_global_ramp_name',
+                name="unique_global_ramp_name",
             ),
         ]
 
@@ -257,14 +249,10 @@ class ColorRamp(ClusterableModel):
 
         if self.ramp_type == self.RampType.QUALITATIVE:
             width = 100 / len(stops)
-            parts = [
-                f"{stop.css_color()} {i * width:g}% {(i + 1) * width:g}%"
-                for i, stop in enumerate(stops)
-            ]
+            parts = [f"{stop.css_color()} {i * width:g}% {(i + 1) * width:g}%" for i, stop in enumerate(stops)]
         else:
             parts = [
-                f"{stop.css_color()} {position * 100:g}%"
-                for stop, position in zip(stops, _spread_positions(stops))
+                f"{stop.css_color()} {position * 100:g}%" for stop, position in zip(stops, _spread_positions(stops))
             ]
         return f"linear-gradient(to right, {', '.join(parts)})"
 
@@ -281,7 +269,7 @@ class ColorRampStop(Orderable):
     ORGANISATION_LOOKUP = "ramp__organisation"
     ORGANISATION_GLOBAL_TIER = True
 
-    ramp = ParentalKey(ColorRamp, related_name='stops', on_delete=models.CASCADE)
+    ramp = ParentalKey(ColorRamp, related_name="stops", on_delete=models.CASCADE)
     hex_value = models.CharField(
         max_length=9,
         validators=[HEX_COLOR_VALIDATOR],
@@ -291,20 +279,17 @@ class ColorRampStop(Orderable):
         null=True,
         blank=True,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
-        help_text=(
-            "Where along the ramp this color sits, 0–1. Left empty, colors "
-            "are spread evenly."
-        ),
+        help_text=("Where along the ramp this color sits, 0–1. Left empty, colors are spread evenly."),
     )
 
     panels = [
-        FieldPanel('hex_value'),
-        FieldPanel('position'),
+        FieldPanel("hex_value"),
+        FieldPanel("position"),
     ]
 
     def css_color(self):
         value = self.hex_value.strip()
-        return value if value.startswith('#') else f"#{value}"
+        return value if value.startswith("#") else f"#{value}"
 
     def __str__(self):
         if self.position is not None:
@@ -332,20 +317,19 @@ class VariableStyle(TimeStampedModel):
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
     class Mode(models.TextChoices):
-        CONTINUOUS = 'continuous', 'Continuous gradient'
-        STEPPED = 'stepped', 'Stepped classes'
+        CONTINUOUS = "continuous", "Continuous gradient"
+        STEPPED = "stepped", "Stepped classes"
 
     variable = models.ForeignKey(
-        'georivacore.Variable',
+        "georivacore.Variable",
         on_delete=models.CASCADE,
-        related_name='styles',
+        related_name="styles",
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(
         max_length=255,
         help_text=(
-            "URL-safe identifier for this style, used to select it on tile "
-            "and config URLs. Unique within the variable."
+            "URL-safe identifier for this style, used to select it on tile and config URLs. Unique within the variable."
         ),
     )
     is_default = models.BooleanField(
@@ -357,7 +341,7 @@ class VariableStyle(TimeStampedModel):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='+',
+        related_name="+",
         help_text=(
             "The ramp this style was generated from — lineage and re-apply "
             "only; the stops below are what actually renders."
@@ -380,18 +364,18 @@ class VariableStyle(TimeStampedModel):
     stops = models.JSONField(default=list, blank=True)
 
     class Meta:
-        ordering = ['-is_default', 'name']
+        ordering = ["-is_default", "name"]
         verbose_name = "Variable Style"
         verbose_name_plural = "Variable Styles"
         constraints = [
             models.UniqueConstraint(
-                fields=['variable'],
+                fields=["variable"],
                 condition=models.Q(is_default=True),
-                name='unique_default_style_per_variable',
+                name="unique_default_style_per_variable",
             ),
             models.UniqueConstraint(
-                fields=['variable', 'slug'],
-                name='unique_style_slug_per_variable',
+                fields=["variable", "slug"],
+                name="unique_style_slug_per_variable",
             ),
         ]
 
@@ -402,30 +386,26 @@ class VariableStyle(TimeStampedModel):
         super().clean()
         errors = {}
         if self.mode == self.Mode.STEPPED and not self.steps:
-            errors['steps'] = "Stepped mode needs a number of classes."
+            errors["steps"] = "Stepped mode needs a number of classes."
         for entry in self.stops or []:
             if (
                 not isinstance(entry, dict)
                 or not isinstance(entry.get("value"), (int, float))
                 or not isinstance(entry.get("color"), str)
             ):
-                errors['stops'] = (
-                    'Each stop must be {"value": <number>, "color": "#RRGGBB"}.'
-                )
+                errors["stops"] = 'Each stop must be {"value": <number>, "color": "#RRGGBB"}.'
                 break
             try:
                 HEX_COLOR_VALIDATOR(entry["color"])
             except ValidationError:
-                errors['stops'] = f"Not a hex color: {entry['color']!r}"
+                errors["stops"] = f"Not a hex color: {entry['color']!r}"
                 break
-        if 'stops' not in errors and self.stops:
+        if "stops" not in errors and self.stops:
             values = [entry["value"] for entry in self.stops]
             if any(b < a for a, b in zip(values, values[1:])):
                 # Equal neighbours stay legal: stepped snapshots share their
                 # class-boundary values by construction.
-                errors['stops'] = (
-                    "Stop values must be in ascending order."
-                )
+                errors["stops"] = "Stop values must be in ascending order."
         if errors:
             raise ValidationError(errors)
 
@@ -439,12 +419,12 @@ class VariableStyle(TimeStampedModel):
         else either raises or leaves the variable defaultless mid-flight.
         """
         with transaction.atomic():
-            type(self).objects.filter(
-                variable=self.variable, is_default=True
-            ).exclude(pk=self.pk).update(is_default=False)
+            type(self).objects.filter(variable=self.variable, is_default=True).exclude(pk=self.pk).update(
+                is_default=False
+            )
             if not self.is_default:
                 self.is_default = True
-                self.save(update_fields=['is_default', 'modified'])
+                self.save(update_fields=["is_default", "modified"])
 
     # -------- snapshot generation --------
 
@@ -456,8 +436,11 @@ class VariableStyle(TimeStampedModel):
         if self.ramp is None:
             raise ValueError("This style has no ramp to apply.")
         self.stops = generate_stops(
-            self.ramp, self.variable.value_min, self.variable.value_max,
-            mode=self.mode, steps=self.steps,
+            self.ramp,
+            self.variable.value_min,
+            self.variable.value_max,
+            mode=self.mode,
+            steps=self.steps,
         )
 
     # -------- runtime conversion helpers --------
@@ -486,10 +469,7 @@ class VariableStyle(TimeStampedModel):
         if span == 0 or len(self.stops) == 1:
             color = self.stops[0]["color"]
             return f"linear-gradient(to right, {color}, {color})"
-        parts = [
-            f"{s['color']} {(s['value'] - low) / span * 100:g}%"
-            for s in self.stops
-        ]
+        parts = [f"{s['color']} {(s['value'] - low) / span * 100:g}%" for s in self.stops]
         return f"linear-gradient(to right, {', '.join(parts)})"
 
     def preview(self):

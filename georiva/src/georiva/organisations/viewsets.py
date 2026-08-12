@@ -4,6 +4,7 @@ Deliberately thin: an organisation's *contents* are managed from its own host,
 by its own admins. This viewset only creates organisations and edits their lean
 settings, and only a superuser can reach it.
 """
+
 from django.urls import reverse
 from django.utils.functional import cached_property
 from django.utils.http import urlencode

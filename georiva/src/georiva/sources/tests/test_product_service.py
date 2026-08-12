@@ -9,6 +9,7 @@ transitive dependency closure; disabling cascades to the transitive dependent
 closure atomically. Data availability is a *separate* runtime gate, not checked
 here — a whole chain may be enabled before any upstream data exists.
 """
+
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -48,8 +49,9 @@ from georiva.organisations.testing import dial_org, make_organisation
 User = get_user_model()
 
 
-def _product(key, *, inputs=(), outputs=(), recipe_type="recipe", config_schema=(),
-             trigger_mode="scheduled", description=""):
+def _product(
+    key, *, inputs=(), outputs=(), recipe_type="recipe", config_schema=(), trigger_mode="scheduled", description=""
+):
     return DerivedProductDefinition(
         key=key,
         recipe_type=recipe_type,
@@ -91,21 +93,21 @@ def _chirps_defs():
 
 class ProductServiceBase(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
         self.rows = {}
         for defn in _chirps_defs():
             self.rows[defn.key] = DerivedProduct.objects.create(
-                data_feed=self.feed, definition_key=defn.key,
-                recipe_type=defn.recipe_type, is_enabled=True,
+                data_feed=self.feed,
+                definition_key=defn.key,
+                recipe_type=defn.recipe_type,
+                is_enabled=True,
             )
 
     def _patch_defs(self):
-        return patch.object(
-            DataFeed, "get_derived_products", return_value=_chirps_defs()
-        )
+        return patch.object(DataFeed, "get_derived_products", return_value=_chirps_defs())
 
 
 class EnableGateTests(ProductServiceBase):
@@ -158,8 +160,10 @@ class EnableGateTests(ProductServiceBase):
             outputs=(OutputRef(role="o", collection="broken-out"),),
         )
         row = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="broken",
-            recipe_type="recipe", is_enabled=False,
+            data_feed=self.feed,
+            definition_key="broken",
+            recipe_type="recipe",
+            is_enabled=False,
         )
 
         with patch.object(DataFeed, "get_derived_products", return_value=[broken]):
@@ -175,18 +179,12 @@ class EnableGateTests(ProductServiceBase):
         # before any recipe run.
         self.rows["anomaly"].is_enabled = False
         self.rows["anomaly"].save(update_fields=["is_enabled"])
-        self.assertFalse(
-            Collection.objects.filter(slug="chirps-monthly-anomaly").exists()
-        )
+        self.assertFalse(Collection.objects.filter(slug="chirps-monthly-anomaly").exists())
 
         with self._patch_defs():
             enable_product(self.rows["anomaly"])
 
-        self.assertTrue(
-            Collection.objects.filter(
-                catalog=self.catalog, slug="chirps-monthly-anomaly"
-            ).exists()
-        )
+        self.assertTrue(Collection.objects.filter(catalog=self.catalog, slug="chirps-monthly-anomaly").exists())
 
 
 class DisableCascadeTests(ProductServiceBase):
@@ -194,9 +192,7 @@ class DisableCascadeTests(ProductServiceBase):
         with self._patch_defs():
             dependents = enabled_dependents(self.rows["climatology"])
 
-        self.assertEqual(
-            [d.definition_key for d in dependents], ["anomaly"]
-        )
+        self.assertEqual([d.definition_key for d in dependents], ["anomaly"])
 
     def test_enabled_dependents_excludes_already_disabled_rows(self):
         self.rows["anomaly"].is_enabled = False
@@ -210,9 +206,7 @@ class DisableCascadeTests(ProductServiceBase):
             disabled = disable_product(self.rows["climatology"])
 
         # climatology and its dependent anomaly both go down, in one pass.
-        self.assertEqual(
-            sorted(d.definition_key for d in disabled), ["anomaly", "climatology"]
-        )
+        self.assertEqual(sorted(d.definition_key for d in disabled), ["anomaly", "climatology"])
         for row in self.rows.values():
             row.refresh_from_db()
         self.assertFalse(self.rows["climatology"].is_enabled)
@@ -231,9 +225,7 @@ class DisableCascadeTests(ProductServiceBase):
     def test_disable_is_atomic_no_partial_write_on_error(self):
         # If the save of a cascaded row blows up, nothing is left half-disabled.
         with self._patch_defs():
-            with patch.object(
-                DerivedProduct, "save", side_effect=RuntimeError("boom")
-            ):
+            with patch.object(DerivedProduct, "save", side_effect=RuntimeError("boom")):
                 with self.assertRaises(RuntimeError):
                     disable_product(self.rows["climatology"])
 
@@ -245,8 +237,8 @@ class DisableCascadeTests(ProductServiceBase):
 
 class MaterialiseOutputCollectionsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
 
@@ -254,13 +246,22 @@ class MaterialiseOutputCollectionsTests(TestCase):
         return _product("anomaly", outputs=outputs)
 
     def test_creates_a_collection_per_output_with_declared_metadata(self):
-        definition = self._definition((
-            OutputRef(role="anomaly", collection="chirps-monthly-anomaly",
-                      title="CHIRPS Monthly Anomaly",
-                      description="Absolute rainfall anomaly."),
-            OutputRef(role="climatology", collection="chirps-monthly-climatology",
-                      title="CHIRPS Monthly Climatology", visibility="internal"),
-        ))
+        definition = self._definition(
+            (
+                OutputRef(
+                    role="anomaly",
+                    collection="chirps-monthly-anomaly",
+                    title="CHIRPS Monthly Anomaly",
+                    description="Absolute rainfall anomaly.",
+                ),
+                OutputRef(
+                    role="climatology",
+                    collection="chirps-monthly-climatology",
+                    title="CHIRPS Monthly Climatology",
+                    visibility="internal",
+                ),
+            )
+        )
 
         materialise_output_collections(self.feed, definition)
 
@@ -273,9 +274,7 @@ class MaterialiseOutputCollectionsTests(TestCase):
         self.assertEqual(clim.visibility, Collection.Visibility.INTERNAL)
 
     def test_name_falls_back_to_slug_when_no_title_declared(self):
-        definition = self._definition((
-            OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),
-        ))
+        definition = self._definition((OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),))
 
         materialise_output_collections(self.feed, definition)
 
@@ -286,15 +285,23 @@ class MaterialiseOutputCollectionsTests(TestCase):
         # The operator renamed the collection and flipped its visibility after the
         # first materialisation; a subsequent enable/upgrade must not clobber that.
         Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly-anomaly",
-            name="My Renamed Anomaly", description="Operator note.",
+            catalog=self.catalog,
+            slug="chirps-monthly-anomaly",
+            name="My Renamed Anomaly",
+            description="Operator note.",
             visibility=Collection.Visibility.INTERNAL,
         )
-        definition = self._definition((
-            OutputRef(role="anomaly", collection="chirps-monthly-anomaly",
-                      title="CHIRPS Monthly Anomaly", description="Declared.",
-                      visibility="public"),
-        ))
+        definition = self._definition(
+            (
+                OutputRef(
+                    role="anomaly",
+                    collection="chirps-monthly-anomaly",
+                    title="CHIRPS Monthly Anomaly",
+                    description="Declared.",
+                    visibility="public",
+                ),
+            )
+        )
 
         materialise_output_collections(self.feed, definition)
 
@@ -313,9 +320,7 @@ class BuildChainTests(ProductServiceBase):
         with self._patch_defs():
             chain = build_chain(self.feed)
 
-        keys_by_stage = [
-            [c["product"].definition_key for c in lane] for lane in chain["stages"]
-        ]
+        keys_by_stage = [[c["product"].definition_key for c in lane] for lane in chain["stages"]]
         # promotion + climatology have no dependencies -> stage 1; anomaly -> 2.
         self.assertEqual(keys_by_stage, [["promotion", "climatology"], ["anomaly"]])
 
@@ -327,12 +332,15 @@ class BuildChainTests(ProductServiceBase):
         # anomaly's output collection is materialised and pinned -> the card
         # links it via its DerivedProductOutput binding (ADR-0010 §2).
         collection = Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly-anomaly",
+            catalog=self.catalog,
+            slug="chirps-monthly-anomaly",
             name="CHIRPS Monthly Anomaly",
         )
         DerivedProductOutput.objects.create(
-            product=self.rows["anomaly"], role="anomaly",
-            output_key="chirps-monthly-anomaly", collection=collection,
+            product=self.rows["anomaly"],
+            role="anomaly",
+            output_key="chirps-monthly-anomaly",
+            collection=collection,
         )
 
         with self._patch_defs():
@@ -340,7 +348,7 @@ class BuildChainTests(ProductServiceBase):
 
         anomaly = cards["anomaly"]
         self.assertTrue(anomaly["enabled"])
-        self.assertEqual(anomaly["status"], "idle")          # no runs yet
+        self.assertEqual(anomaly["status"], "idle")  # no runs yet
         self.assertEqual(anomaly["definition"].label, "Anomaly")
         self.assertEqual(
             [c.slug for c in anomaly["output_collections"]],
@@ -355,8 +363,7 @@ class BuildChainTests(ProductServiceBase):
 
         with self._patch_defs():
             cards = self._cards_by_key(build_chain(self.feed))
-            self.assertEqual(product_label(self.rows["climatology"]),
-                             "Rainfall Normals (1991–2020)")
+            self.assertEqual(product_label(self.rows["climatology"]), "Rainfall Normals (1991–2020)")
 
         clim = cards["climatology"]
         self.assertEqual(clim["display_label"], "Rainfall Normals (1991–2020)")
@@ -370,10 +377,17 @@ class BuildChainTests(ProductServiceBase):
         # the label varies by trigger_mode.
         defs = _chirps_defs()
         event_defs = [
-            d if d.key != "anomaly" else DerivedProductDefinition(
-                key=d.key, recipe_type=d.recipe_type, label=d.label,
-                description=d.description, config_schema=d.config_schema,
-                inputs=d.inputs, outputs=d.outputs, trigger_mode="event",
+            d
+            if d.key != "anomaly"
+            else DerivedProductDefinition(
+                key=d.key,
+                recipe_type=d.recipe_type,
+                label=d.label,
+                description=d.description,
+                config_schema=d.config_schema,
+                inputs=d.inputs,
+                outputs=d.outputs,
+                trigger_mode="event",
             )
             for d in defs
         ]
@@ -392,8 +406,7 @@ class UpgradeLifecycleServiceTests(ProductServiceBase):
     'orphan' (issue #171)."""
 
     def _cards(self, chain):
-        return {c["definition"].key: c
-                for lane in chain["stages"] for c in lane if c["definition"]}
+        return {c["definition"].key: c for lane in chain["stages"] for c in lane if c["definition"]}
 
     def test_declared_definition_without_a_row_is_a_new_card(self):
         # A plugin update added 'anomaly' — drop its row to simulate the pre-run
@@ -444,7 +457,7 @@ class UpgradeLifecycleServiceTests(ProductServiceBase):
 
 class EnableNewDefinitionTests(ProductServiceBase):
     def test_provisions_the_row_enforces_the_gate_and_materialises(self):
-        self.rows["anomaly"].delete()   # 'anomaly' is a new (rowless) definition
+        self.rows["anomaly"].delete()  # 'anomaly' is a new (rowless) definition
         definition = next(d for d in _chirps_defs() if d.key == "anomaly")
 
         with self._patch_defs():
@@ -453,11 +466,7 @@ class EnableNewDefinitionTests(ProductServiceBase):
         self.assertTrue(product.is_enabled)
         self.assertEqual(product.definition_key, "anomaly")
         # Its declared output collection materialised on enable.
-        self.assertTrue(
-            Collection.objects.filter(
-                catalog=self.catalog, slug="chirps-monthly-anomaly"
-            ).exists()
-        )
+        self.assertTrue(Collection.objects.filter(catalog=self.catalog, slug="chirps-monthly-anomaly").exists())
 
     def test_is_gated_on_dependencies_being_enabled(self):
         self.rows["anomaly"].delete()
@@ -471,18 +480,14 @@ class EnableNewDefinitionTests(ProductServiceBase):
 
         # No half-provisioned enabled row left behind.
         self.assertFalse(
-            DerivedProduct.objects.filter(
-                data_feed=self.feed, definition_key="anomaly", is_enabled=True
-            ).exists()
+            DerivedProduct.objects.filter(data_feed=self.feed, definition_key="anomaly", is_enabled=True).exists()
         )
 
 
 class DeleteOrphanTests(ProductServiceBase):
     def test_deletes_only_the_row_keeping_collections(self):
         # 'promotion' orphaned; its output collection already published.
-        Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
-        )
+        Collection.objects.create(catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly")
         promotion = self.rows["promotion"]
 
         with patch.object(DataFeed, "get_derived_products", return_value=[]):
@@ -504,19 +509,20 @@ class BuildChainReadinessTests(TestCase):
     """Readiness reason + the staging-gap hint on a blocked card."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
         self.definition = _product(
             "climatology",
             inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
-            outputs=(OutputRef(role="climatology",
-                               collection="chirps-monthly-climatology"),),
+            outputs=(OutputRef(role="climatology", collection="chirps-monthly-climatology"),),
         )
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="climatology",
-            recipe_type="recipe", is_enabled=True,
+            data_feed=self.feed,
+            definition_key="climatology",
+            recipe_type="recipe",
+            is_enabled=True,
         )
 
     def test_blocked_on_staging_input_shows_the_backfill_hint(self):
@@ -541,9 +547,7 @@ class ProductChainPartialTests(ProductServiceBase):
     def _render(self, ready=False):
         with self._patch_defs():
             if ready:
-                with patch(
-                    "georiva.sources.derivation_tracking.product_readiness"
-                ) as readiness:
+                with patch("georiva.sources.derivation_tracking.product_readiness") as readiness:
                     readiness.return_value.ready = True
                     chain = build_chain(self.feed)
             else:
@@ -555,43 +559,44 @@ class ProductChainPartialTests(ProductServiceBase):
 
     def test_renders_labels_dependency_chips_and_outputs(self):
         collection = Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly-anomaly",
+            catalog=self.catalog,
+            slug="chirps-monthly-anomaly",
             name="CHIRPS Monthly Anomaly",
         )
         DerivedProductOutput.objects.create(
-            product=self.rows["anomaly"], role="anomaly",
-            output_key="chirps-monthly-anomaly", collection=collection,
+            product=self.rows["anomaly"],
+            role="anomaly",
+            output_key="chirps-monthly-anomaly",
+            collection=collection,
         )
         # Fully bind anomaly's inputs so it renders as a normal (not unbound) card.
         for role, slug, tier in (
             ("value", "chirps-monthly", "staging"),
             ("baseline", "chirps-monthly-climatology", "published"),
         ):
-            col, _ = Collection.objects.get_or_create(
-                catalog=self.catalog, slug=slug, defaults={"name": slug}
-            )
+            col, _ = Collection.objects.get_or_create(catalog=self.catalog, slug=slug, defaults={"name": slug})
             DerivedProductInput.objects.create(
-                product=self.rows["anomaly"], role=role, tier=tier,
-                required=True, source_key=slug, collection=col,
+                product=self.rows["anomaly"],
+                role=role,
+                tier=tier,
+                required=True,
+                source_key=slug,
+                collection=col,
             )
 
         html = self._render()
 
-        self.assertIn("Anomaly", html)                     # card label
-        self.assertIn("Climatology", html)                 # needs chip
-        self.assertIn("CHIRPS Monthly Anomaly", html)      # output collection
+        self.assertIn("Anomaly", html)  # card label
+        self.assertIn("Climatology", html)  # needs chip
+        self.assertIn("CHIRPS Monthly Anomaly", html)  # output collection
 
     def test_renders_per_product_toggle_and_run_actions(self):
         # Toggle is always available; the Run-now form appears only for a ready
         # product (a blocked one shows a disabled button instead).
         html = self._render(ready=True)
 
-        self.assertIn(
-            f"/products/{self.rows['anomaly'].pk}/toggle/", html
-        )
-        self.assertIn(
-            f"/products/{self.rows['climatology'].pk}/run/", html
-        )
+        self.assertIn(f"/products/{self.rows['anomaly'].pk}/toggle/", html)
+        self.assertIn(f"/products/{self.rows['climatology'].pk}/run/", html)
 
     def test_renders_new_card_and_orphan_lane(self):
         # anomaly's row deleted -> "new"; promotion dropped from the declaration
@@ -615,12 +620,11 @@ class ProductChainPartialTests(ProductServiceBase):
             chain = build_chain(self.feed)
         html = render_to_string(
             "georivasources/includes/product_chain.html",
-            {"stage_lanes": chain["stages"], "orphans": chain["orphans"],
-             "mode": "manage", "feed": self.feed},
+            {"stage_lanes": chain["stages"], "orphans": chain["orphans"], "mode": "manage", "feed": self.feed},
         )
 
         self.assertIn("New — not enabled", html)
-        self.assertIn("/products/enable/anomaly/", html)     # inline enable link
+        self.assertIn("/products/enable/anomaly/", html)  # inline enable link
         self.assertIn("No longer provided", html)
         self.assertIn(f"/products/{promotion_pk}/delete/", html)  # orphan delete link
 
@@ -634,13 +638,15 @@ class SemanticSurvivalTests(ProductServiceBase):
         clim.title = "Rainfall Normals (1991–2020)"
         clim.save(update_fields=["title"])
         renamed = Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly-climatology",
-            name="My Renamed Normals", description="Operator blurb.",
+            catalog=self.catalog,
+            slug="chirps-monthly-climatology",
+            name="My Renamed Normals",
+            description="Operator blurb.",
         )
 
         with self._patch_defs():
-            disable_product(clim)      # cascades to anomaly
-            enable_product(clim)       # re-materialises its outputs
+            disable_product(clim)  # cascades to anomaly
+            enable_product(clim)  # re-materialises its outputs
 
         clim.refresh_from_db()
         renamed.refresh_from_db()
@@ -662,7 +668,8 @@ class ProductEditViewTests(ProductServiceBase):
         # climatology's output collection is materialised, so the edit view can
         # expose its catalog-facing name/description.
         self.clim_col = Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly-climatology",
+            catalog=self.catalog,
+            slug="chirps-monthly-climatology",
             name="Declared clim name",
         )
         self.clim = self.rows["climatology"]
@@ -677,10 +684,10 @@ class ProductEditViewTests(ProductServiceBase):
         # A climatology definition (with an optional config schema) plus the
         # other two, so the chain resolves.
         clim = _product(
-            "climatology", config_schema=config_schema,
+            "climatology",
+            config_schema=config_schema,
             inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
-            outputs=(OutputRef(role="climatology",
-                               collection="chirps-monthly-climatology"),),
+            outputs=(OutputRef(role="climatology", collection="chirps-monthly-climatology"),),
         )
         return patch.object(DataFeed, "get_derived_products", return_value=[clim])
 
@@ -697,12 +704,15 @@ class ProductEditViewTests(ProductServiceBase):
 
     def test_saves_display_overrides(self):
         with self._clim_defs():
-            self.client.post(self._url(self.clim), {
-                "title": "Rainfall Normals (1991–2020)",
-                "description": "Operator note.",
-                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                "col-%d-description" % self.clim_col.pk: "",
-            })
+            self.client.post(
+                self._url(self.clim),
+                {
+                    "title": "Rainfall Normals (1991–2020)",
+                    "description": "Operator note.",
+                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                    "col-%d-description" % self.clim_col.pk: "",
+                },
+            )
 
         self.clim.refresh_from_db()
         self.assertEqual(self.clim.title, "Rainfall Normals (1991–2020)")
@@ -713,11 +723,15 @@ class ProductEditViewTests(ProductServiceBase):
         self.clim.save(update_fields=["title"])
 
         with self._clim_defs():
-            self.client.post(self._url(self.clim), {
-                "title": "", "description": "",
-                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                "col-%d-description" % self.clim_col.pk: "",
-            })
+            self.client.post(
+                self._url(self.clim),
+                {
+                    "title": "",
+                    "description": "",
+                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                    "col-%d-description" % self.clim_col.pk: "",
+                },
+            )
             self.clim.refresh_from_db()
             self.assertEqual(self.clim.title, "")
             # Blank override -> the declared label shows again.
@@ -725,11 +739,15 @@ class ProductEditViewTests(ProductServiceBase):
 
     def test_saves_output_collection_name_and_description(self):
         with self._clim_defs():
-            self.client.post(self._url(self.clim), {
-                "title": "", "description": "",
-                "col-%d-name" % self.clim_col.pk: "My Normals",
-                "col-%d-description" % self.clim_col.pk: "Catalog blurb.",
-            })
+            self.client.post(
+                self._url(self.clim),
+                {
+                    "title": "",
+                    "description": "",
+                    "col-%d-name" % self.clim_col.pk: "My Normals",
+                    "col-%d-description" % self.clim_col.pk: "Catalog blurb.",
+                },
+            )
 
         self.clim_col.refresh_from_db()
         self.assertEqual(self.clim_col.name, "My Normals")
@@ -738,30 +756,37 @@ class ProductEditViewTests(ProductServiceBase):
     def test_saves_config_and_interval(self):
         schema = (ConfigField(key="min_count", type="int", default=20),)
         with self._clim_defs(config_schema=schema):
-            self.client.post(self._url(self.clim), {
-                "title": "", "description": "",
-                "config-min_count": "35",
-                "interval_minutes": "1440",
-                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                "col-%d-description" % self.clim_col.pk: "",
-            })
+            self.client.post(
+                self._url(self.clim),
+                {
+                    "title": "",
+                    "description": "",
+                    "config-min_count": "35",
+                    "interval_minutes": "1440",
+                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                    "col-%d-description" % self.clim_col.pk: "",
+                },
+            )
 
         self.clim.refresh_from_db()
         self.assertEqual(self.clim.config["min_count"], 35)
         self.assertEqual(self.clim.interval_minutes, 1440)
 
     def test_invalid_config_is_rejected_and_not_saved(self):
-        schema = (ConfigField(key="quantity", type="choice",
-                              choices=("anomaly", "value")),)
+        schema = (ConfigField(key="quantity", type="choice", choices=("anomaly", "value")),)
         with self._clim_defs(config_schema=schema):
-            response = self.client.post(self._url(self.clim), {
-                "title": "", "description": "",
-                "config-quantity": "trend",   # not among choices
-                "col-%d-name" % self.clim_col.pk: self.clim_col.name,
-                "col-%d-description" % self.clim_col.pk: "",
-            })
+            response = self.client.post(
+                self._url(self.clim),
+                {
+                    "title": "",
+                    "description": "",
+                    "config-quantity": "trend",  # not among choices
+                    "col-%d-name" % self.clim_col.pk: self.clim_col.name,
+                    "col-%d-description" % self.clim_col.pk: "",
+                },
+            )
 
-        self.assertEqual(response.status_code, 200)   # re-rendered, not redirected
+        self.assertEqual(response.status_code, 200)  # re-rendered, not redirected
         self.clim.refresh_from_db()
         self.assertNotIn("quantity", self.clim.config)
 
@@ -778,8 +803,7 @@ class UpgradeLifecycleEndpointTests(ProductServiceBase):
 
     def test_enable_new_get_shows_the_config_form(self):
         self.rows["anomaly"].delete()
-        url = reverse("feed_product_enable_new",
-                      kwargs={"feed_pk": self.feed.pk, "definition_key": "anomaly"})
+        url = reverse("feed_product_enable_new", kwargs={"feed_pk": self.feed.pk, "definition_key": "anomaly"})
 
         with self._patch_defs():
             response = self.client.get(url)
@@ -789,23 +813,19 @@ class UpgradeLifecycleEndpointTests(ProductServiceBase):
 
     def test_enable_new_post_provisions_enables_and_materialises(self):
         self.rows["anomaly"].delete()
-        url = reverse("feed_product_enable_new",
-                      kwargs={"feed_pk": self.feed.pk, "definition_key": "anomaly"})
+        url = reverse("feed_product_enable_new", kwargs={"feed_pk": self.feed.pk, "definition_key": "anomaly"})
 
         with self._patch_defs():
             self.client.post(url, {})
 
-        product = DerivedProduct.objects.get(
-            data_feed=self.feed, definition_key="anomaly"
-        )
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
         self.assertTrue(product.is_enabled)
-        self.assertTrue(
-            Collection.objects.filter(slug="chirps-monthly-anomaly").exists()
-        )
+        self.assertTrue(Collection.objects.filter(slug="chirps-monthly-anomaly").exists())
 
     def test_delete_orphan_get_shows_data_kept_confirmation(self):
-        url = reverse("feed_product_delete_orphan",
-                      kwargs={"feed_pk": self.feed.pk, "product_pk": self.rows["promotion"].pk})
+        url = reverse(
+            "feed_product_delete_orphan", kwargs={"feed_pk": self.feed.pk, "product_pk": self.rows["promotion"].pk}
+        )
 
         with patch.object(DataFeed, "get_derived_products", return_value=[]):
             response = self.client.get(url)
@@ -815,12 +835,9 @@ class UpgradeLifecycleEndpointTests(ProductServiceBase):
         self.assertContains(response, "kept")
 
     def test_delete_orphan_post_removes_only_the_row(self):
-        Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
-        )
+        Collection.objects.create(catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly")
         promotion_pk = self.rows["promotion"].pk
-        url = reverse("feed_product_delete_orphan",
-                      kwargs={"feed_pk": self.feed.pk, "product_pk": promotion_pk})
+        url = reverse("feed_product_delete_orphan", kwargs={"feed_pk": self.feed.pk, "product_pk": promotion_pk})
 
         with patch.object(DataFeed, "get_derived_products", return_value=[]):
             self.client.post(url)
@@ -829,16 +846,15 @@ class UpgradeLifecycleEndpointTests(ProductServiceBase):
         self.assertTrue(Collection.objects.filter(slug="chirps-monthly").exists())
 
     def test_delete_orphan_refuses_a_still_declared_product(self):
-        url = reverse("feed_product_delete_orphan",
-                      kwargs={"feed_pk": self.feed.pk, "product_pk": self.rows["promotion"].pk})
+        url = reverse(
+            "feed_product_delete_orphan", kwargs={"feed_pk": self.feed.pk, "product_pk": self.rows["promotion"].pk}
+        )
 
         with self._patch_defs():
             self.client.post(url)
 
         # Still declared -> not deleted.
-        self.assertTrue(
-            DerivedProduct.objects.filter(pk=self.rows["promotion"].pk).exists()
-        )
+        self.assertTrue(DerivedProduct.objects.filter(pk=self.rows["promotion"].pk).exists())
 
 
 class FeedProductEndpointTests(ProductServiceBase):
@@ -873,9 +889,7 @@ class FeedProductEndpointTests(ProductServiceBase):
         ):
             readiness.return_value.ready = False
             readiness.return_value.reason = "value empty"
-            response = self.client.post(
-                self._url("feed_product_run", self.rows["climatology"])
-            )
+            response = self.client.post(self._url("feed_product_run", self.rows["climatology"]))
 
         run_now.assert_not_called()
         msgs = " ".join(str(m) for m in get_messages(response.wsgi_request))
@@ -888,9 +902,7 @@ class FeedProductEndpointTests(ProductServiceBase):
         self.rows["anomaly"].save(update_fields=["is_enabled"])
 
         with self._patch_defs():
-            response = self.client.post(
-                self._url("feed_product_toggle", self.rows["anomaly"])
-            )
+            response = self.client.post(self._url("feed_product_toggle", self.rows["anomaly"]))
 
         self.rows["anomaly"].refresh_from_db()
         self.assertFalse(self.rows["anomaly"].is_enabled)
@@ -899,9 +911,7 @@ class FeedProductEndpointTests(ProductServiceBase):
 
     def test_toggle_disable_with_dependents_shows_confirmation(self):
         with self._patch_defs():
-            response = self.client.post(
-                self._url("feed_product_toggle", self.rows["climatology"])
-            )
+            response = self.client.post(self._url("feed_product_toggle", self.rows["climatology"]))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Anomaly")
@@ -941,29 +951,28 @@ class PinBindingsBase(TestCase):
     gate fixtures above deliberately skip this — here we exercise the pinning."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
         # Raw collection + link, keyed on the definition key the declarations use.
-        self.raw = Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
-        )
+        self.raw = Collection.objects.create(catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly")
         DataFeedCollectionLink.objects.create(
-            data_feed=self.feed, collection=self.raw,
+            data_feed=self.feed,
+            collection=self.raw,
             definition_key="chirps-monthly",
         )
         self.rows = {}
         for defn in _chirps_defs():
             self.rows[defn.key] = DerivedProduct.objects.create(
-                data_feed=self.feed, definition_key=defn.key,
-                recipe_type=defn.recipe_type, is_enabled=True,
+                data_feed=self.feed,
+                definition_key=defn.key,
+                recipe_type=defn.recipe_type,
+                is_enabled=True,
             )
 
     def _patch_defs(self):
-        return patch.object(
-            DataFeed, "get_derived_products", return_value=_chirps_defs()
-        )
+        return patch.object(DataFeed, "get_derived_products", return_value=_chirps_defs())
 
 
 class PinOutputBindingsTests(PinBindingsBase):
@@ -1012,9 +1021,7 @@ class PinInputBindingsTests(PinBindingsBase):
             enable_product(self.rows["climatology"])  # materialises clim output
             enable_product(anomaly)
 
-        clim_collection = Collection.objects.get(
-            catalog=self.catalog, slug="chirps-monthly-climatology"
-        )
+        clim_collection = Collection.objects.get(catalog=self.catalog, slug="chirps-monthly-climatology")
         baseline = DerivedProductInput.objects.get(product=anomaly, role="baseline")
         self.assertEqual(baseline.tier, "published")
         self.assertEqual(baseline.collection, clim_collection)
@@ -1026,14 +1033,10 @@ class PinBindingsIdempotencyTests(PinBindingsBase):
 
         with self._patch_defs():
             enable_product(clim)
-            enable_product(clim)   # re-run (e.g. a wizard revisit / upgrade)
+            enable_product(clim)  # re-run (e.g. a wizard revisit / upgrade)
 
-        self.assertEqual(
-            DerivedProductOutput.objects.filter(product=clim).count(), 1
-        )
-        self.assertEqual(
-            DerivedProductInput.objects.filter(product=clim).count(), 1
-        )
+        self.assertEqual(DerivedProductOutput.objects.filter(product=clim).count(), 1)
+        self.assertEqual(DerivedProductInput.objects.filter(product=clim).count(), 1)
 
     def test_a_changed_declaration_re_pins_the_same_role_in_place(self):
         clim = self.rows["climatology"]
@@ -1044,14 +1047,13 @@ class PinBindingsIdempotencyTests(PinBindingsBase):
         upgraded = _product(
             "climatology",
             inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
-            outputs=(OutputRef(role="climatology",
-                               collection="chirps-monthly-climatology-v2"),),
+            outputs=(OutputRef(role="climatology", collection="chirps-monthly-climatology-v2"),),
         )
         with patch.object(DataFeed, "get_derived_products", return_value=[upgraded]):
             enable_product(clim)
 
         bindings = DerivedProductOutput.objects.filter(product=clim, role="climatology")
-        self.assertEqual(bindings.count(), 1)          # same role row, updated
+        self.assertEqual(bindings.count(), 1)  # same role row, updated
         self.assertEqual(bindings.first().output_key, "chirps-monthly-climatology-v2")
 
 
@@ -1072,12 +1074,9 @@ class BuildChainOutputBindingTests(PinBindingsBase):
             chain = build_chain(self.feed)
 
         card = next(
-            c for lane in chain["stages"] for c in lane
-            if c["product"] and c["product"].definition_key == "climatology"
+            c for lane in chain["stages"] for c in lane if c["product"] and c["product"].definition_key == "climatology"
         )
-        self.assertEqual(
-            [c.pk for c in card["output_collections"]], [collection.pk]
-        )
+        self.assertEqual([c.pk for c in card["output_collections"]], [collection.pk])
 
 
 class BindingCascadeTests(PinBindingsBase):
@@ -1086,15 +1085,11 @@ class BindingCascadeTests(PinBindingsBase):
         with self._patch_defs():
             enable_product(clim)
         collection = Collection.objects.get(slug="chirps-monthly-climatology")
-        self.assertTrue(
-            DerivedProductOutput.objects.filter(collection=collection).exists()
-        )
+        self.assertTrue(DerivedProductOutput.objects.filter(collection=collection).exists())
 
         collection.delete()
 
-        self.assertFalse(
-            DerivedProductOutput.objects.filter(product=clim, role="climatology").exists()
-        )
+        self.assertFalse(DerivedProductOutput.objects.filter(product=clim, role="climatology").exists())
         # The product row itself survives — only the binding cascaded.
         self.assertTrue(DerivedProduct.objects.filter(pk=clim.pk).exists())
 
@@ -1103,16 +1098,12 @@ class BindingCascadeTests(PinBindingsBase):
             enable_product(self.rows["climatology"])
             enable_product(self.rows["promotion"])
         feed_pk = self.feed.pk
-        self.assertTrue(
-            DerivedProductInput.objects.filter(product__data_feed_id=feed_pk).exists()
-        )
+        self.assertTrue(DerivedProductInput.objects.filter(product__data_feed_id=feed_pk).exists())
 
         self.feed.delete()
 
         self.assertFalse(DerivedProduct.objects.filter(data_feed_id=feed_pk).exists())
-        self.assertFalse(
-            DerivedProductInput.objects.filter(product__data_feed_id=feed_pk).exists()
-        )
+        self.assertFalse(DerivedProductInput.objects.filter(product__data_feed_id=feed_pk).exists())
 
 
 class ProvisionPinsBindingsTests(PinBindingsBase):
@@ -1125,16 +1116,10 @@ class ProvisionPinsBindingsTests(PinBindingsBase):
         clim_def = next(d for d in _chirps_defs() if d.key == "climatology")
 
         with self._patch_defs():
-            SourceSetupService().provision_derived_products(
-                self.feed, [(clim_def, {}, True)]
-            )
+            SourceSetupService().provision_derived_products(self.feed, [(clim_def, {}, True)])
 
-        product = DerivedProduct.objects.get(
-            data_feed=self.feed, definition_key="climatology"
-        )
-        self.assertTrue(
-            DerivedProductOutput.objects.filter(product=product, role="climatology").exists()
-        )
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="climatology")
+        self.assertTrue(DerivedProductOutput.objects.filter(product=product, role="climatology").exists())
         self.assertEqual(
             DerivedProductInput.objects.get(product=product, role="value").collection,
             self.raw,
@@ -1147,13 +1132,9 @@ class ProvisionPinsBindingsTests(PinBindingsBase):
         clim_def = next(d for d in _chirps_defs() if d.key == "climatology")
 
         with self._patch_defs():
-            SourceSetupService().provision_derived_products(
-                self.feed, [(clim_def, {}, False)]
-            )
+            SourceSetupService().provision_derived_products(self.feed, [(clim_def, {}, False)])
 
-        product = DerivedProduct.objects.get(
-            data_feed=self.feed, definition_key="climatology"
-        )
+        product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="climatology")
         self.assertFalse(DerivedProductOutput.objects.filter(product=product).exists())
         self.assertFalse(DerivedProductInput.objects.filter(product=product).exists())
 
@@ -1171,9 +1152,7 @@ class BackfillBindingsTests(PinBindingsBase):
             backfill_bindings()
 
         clim = self.rows["climatology"]
-        self.assertTrue(
-            DerivedProductOutput.objects.filter(product=clim, role="climatology").exists()
-        )
+        self.assertTrue(DerivedProductOutput.objects.filter(product=clim, role="climatology").exists())
         self.assertEqual(
             DerivedProductInput.objects.get(product=clim, role="value").collection,
             self.raw,
@@ -1187,9 +1166,7 @@ class BackfillBindingsTests(PinBindingsBase):
             backfill_bindings()
 
         self.assertEqual(
-            DerivedProductOutput.objects.filter(
-                product=self.rows["climatology"]
-            ).count(),
+            DerivedProductOutput.objects.filter(product=self.rows["climatology"]).count(),
             1,
         )
 
@@ -1204,8 +1181,10 @@ class EnableFailureLeavesNoBindingsTests(PinBindingsBase):
             outputs=(OutputRef(role="o", collection="broken-out"),),
         )
         row = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="broken",
-            recipe_type="recipe", is_enabled=False,
+            data_feed=self.feed,
+            definition_key="broken",
+            recipe_type="recipe",
+            is_enabled=False,
         )
 
         with patch.object(DataFeed, "get_derived_products", return_value=[broken]):
@@ -1273,10 +1252,11 @@ class UnboundStateTests(PinBindingsBase):
         clim = self.rows["climatology"]
         with self._patch_defs():
             enable_product(clim)
-        self.raw.delete()   # deletes the raw collection + its input binding + link
+        self.raw.delete()  # deletes the raw collection + its input binding + link
 
         trigger = {
-            "staging_item_id": 1, "collection_id": self.raw.pk,
+            "staging_item_id": 1,
+            "collection_id": self.raw.pk,
             "collection_slug": "chirps-monthly",
         }
         with patch("georiva.processing.engine.run") as run:
@@ -1296,11 +1276,7 @@ class RebindProductTests(PinBindingsBase):
             rebind_product(clim)
             self.assertFalse(is_unbound(clim))
         # Output collection re-materialised and the binding restored.
-        self.assertTrue(
-            Collection.objects.filter(
-                catalog=self.catalog, slug="chirps-monthly-climatology"
-            ).exists()
-        )
+        self.assertTrue(Collection.objects.filter(catalog=self.catalog, slug="chirps-monthly-climatology").exists())
 
     def test_rebind_raises_when_a_required_input_cannot_resolve(self):
         from georiva.sources.product_service import rebind_product
@@ -1349,7 +1325,7 @@ class RebindEndpointTests(PinBindingsBase):
         clim = self.rows["climatology"]
         with self._patch_defs():
             enable_product(clim)
-            self.raw.delete()   # raw input collection gone -> can't re-resolve
+            self.raw.delete()  # raw input collection gone -> can't re-resolve
             url = reverse(
                 "feed_product_rebind",
                 kwargs={"feed_pk": self.feed.pk, "product_pk": clim.pk},
@@ -1377,8 +1353,4 @@ class UpgradeRepinTests(PinBindingsBase):
             DerivedProductInput.objects.get(product=product, role="value").collection,
             self.raw,
         )
-        self.assertTrue(
-            DerivedProductOutput.objects.filter(
-                product=product, role="climatology"
-            ).exists()
-        )
+        self.assertTrue(DerivedProductOutput.objects.filter(product=product, role="climatology").exists())

@@ -19,9 +19,7 @@ from .models import VirtualZarrManifest
 
 def _can_queue_rebuild(user) -> bool:
     """The action gate, shared by the POST view and the buttons' visibility."""
-    return ModelPermissionPolicy(VirtualZarrManifest).user_has_permission(
-        user, "change"
-    )
+    return ModelPermissionPolicy(VirtualZarrManifest).user_has_permission(user, "change")
 
 
 def collection_virtual_zarr(request, collection_pk):
@@ -115,10 +113,7 @@ def variable_virtual_zarr_queue_rebuild(request, variable_pk):
     if manifest.queue_rebuild():
         messages.success(
             request,
-            _(
-                "Rebuild queued for '%s' — the sweep dispatches it within "
-                "5 minutes."
-            ) % variable.slug,
+            _("Rebuild queued for '%s' — the sweep dispatches it within 5 minutes.") % variable.slug,
         )
     else:
         messages.warning(
@@ -127,12 +122,14 @@ def variable_virtual_zarr_queue_rebuild(request, variable_pk):
                 "'%s' is already building under a fresh lock — leave the "
                 "worker to finish. If it dies, the sweep resets and retries "
                 "it automatically."
-            ) % variable.slug,
+            )
+            % variable.slug,
         )
 
     next_url = request.POST.get("next", "")
     if next_url and url_has_allowed_host_and_scheme(
-            next_url, allowed_hosts={request.get_host()},
+        next_url,
+        allowed_hosts={request.get_host()},
     ):
         return redirect(next_url)
     return redirect(reverse("variable_virtual_zarr", args=[variable.pk]))

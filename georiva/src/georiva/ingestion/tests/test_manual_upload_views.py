@@ -22,7 +22,9 @@ def _make_collection(catalog, slug="col"):
 
 def _make_config(catalog, name="Surface variables", fmt="YYYYMMDD"):
     return ManualUploadConfig.objects.create(
-        catalog=catalog, name=name, valid_time_format=fmt,
+        catalog=catalog,
+        name=name,
+        valid_time_format=fmt,
     )
 
 
@@ -47,12 +49,8 @@ class ManualUploadConfigListTests(TestCase):
         catalog = _make_catalog()
         col = _make_collection(catalog)
         config = _make_config(catalog)
-        ManualUploadConfigVariable.objects.create(
-            config=config, collection=col, variable_name="2t"
-        )
-        ManualUploadConfigVariable.objects.create(
-            config=config, collection=col, variable_name="tp"
-        )
+        ManualUploadConfigVariable.objects.create(config=config, collection=col, variable_name="2t")
+        ManualUploadConfigVariable.objects.create(config=config, collection=col, variable_name="tp")
         response = self.client.get(LIST_URL)
         self.assertContains(response, "2")
 
@@ -79,21 +77,27 @@ class ManualUploadConfigEditTests(TestCase):
         self.assertContains(response, "Surface variables")
 
     def test_edit_valid_post_saves_and_redirects_to_list(self):
-        response = self.client.post(EDIT_URL.format(self.config.pk), {
-            "name": "Updated name",
-            "is_forecast": False,
-            "valid_time_format": "DDMMYYYY",
-        })
+        response = self.client.post(
+            EDIT_URL.format(self.config.pk),
+            {
+                "name": "Updated name",
+                "is_forecast": False,
+                "valid_time_format": "DDMMYYYY",
+            },
+        )
         self.assertRedirects(response, LIST_URL, fetch_redirect_response=False)
         self.config.refresh_from_db()
         self.assertEqual(self.config.name, "Updated name")
         self.assertEqual(self.config.valid_time_format, "DDMMYYYY")
 
     def test_edit_invalid_post_rerenders_with_errors(self):
-        response = self.client.post(EDIT_URL.format(self.config.pk), {
-            "name": "",
-            "valid_time_format": "YYYYMMDD",
-        })
+        response = self.client.post(
+            EDIT_URL.format(self.config.pk),
+            {
+                "name": "",
+                "valid_time_format": "YYYYMMDD",
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_edit_unknown_pk_returns_404(self):
@@ -103,17 +107,18 @@ class ManualUploadConfigEditTests(TestCase):
     def test_edit_lists_variables_with_editor_actions(self):
         col = _make_collection(self.catalog, slug="surface")
         mcv = ManualUploadConfigVariable.objects.create(
-            config=self.config, collection=col, variable_name="2t",
-            long_name="2m temperature", units="K",
+            config=self.config,
+            collection=col,
+            variable_name="2t",
+            long_name="2m temperature",
+            units="K",
         )
         response = self.client.get(EDIT_URL.format(self.config.pk))
         self.assertContains(response, "2t")
         self.assertContains(response, "2m temperature")
         # Variables are managed through the manual variable editor, never a
         # link into the raw Collection form (permission-gated for data managers).
-        self.assertContains(
-            response, f"/admin/manual-uploads/{self.config.pk}/variables/{mcv.pk}/edit/"
-        )
+        self.assertContains(response, f"/admin/manual-uploads/{self.config.pk}/variables/{mcv.pk}/edit/")
         self.assertNotContains(response, f"/admin/collection/edit/{col.pk}/")
 
 
@@ -138,9 +143,7 @@ class ManualUploadConfigDeleteTests(TestCase):
 
     def test_delete_cascades_to_variables(self):
         col = _make_collection(self.catalog)
-        ManualUploadConfigVariable.objects.create(
-            config=self.config, collection=col, variable_name="2t"
-        )
+        ManualUploadConfigVariable.objects.create(config=self.config, collection=col, variable_name="2t")
         self.client.post(DELETE_URL.format(self.config.pk))
         self.assertEqual(ManualUploadConfigVariable.objects.count(), 0)
 

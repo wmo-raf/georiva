@@ -12,6 +12,7 @@ subclass; core ships none (they come from plugins), so these tests drive the
 base DataFeed as the model, patching model resolution and the feed's declared
 products.
 """
+
 import re
 
 from django.test import TestCase
@@ -43,8 +44,7 @@ def _definition(**overrides):
         label="Rainfall anomaly",
         description="Anomaly vs a baseline.",
         config_schema=(
-            ConfigField(key="quantity", type="choice",
-                        choices=("anomaly", "value"), default="anomaly"),
+            ConfigField(key="quantity", type="choice", choices=("anomaly", "value"), default="anomaly"),
             ConfigField(key="min_years", type="int", default=30),
         ),
         inputs=(InputRef(role="value", collection="rainfall", tier="staging"),),
@@ -63,8 +63,7 @@ def _chain_defs():
         label="Climatology",
         config_schema=(),
         inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
-        outputs=(OutputRef(role="climatology",
-                           collection="chirps-monthly-climatology"),),
+        outputs=(OutputRef(role="climatology", collection="chirps-monthly-climatology"),),
     )
     anomaly = _definition(
         key="anomaly",
@@ -72,8 +71,7 @@ def _chain_defs():
         config_schema=(),
         inputs=(
             InputRef(role="value", collection="chirps-monthly", tier="staging"),
-            InputRef(role="baseline",
-                     collection="chirps-monthly-climatology", tier="published"),
+            InputRef(role="baseline", collection="chirps-monthly-climatology", tier="published"),
         ),
         outputs=(OutputRef(role="anomaly", collection="chirps-monthly-anomaly"),),
     )
@@ -82,9 +80,7 @@ def _chain_defs():
 
 def _checkbox_is_checked(html, key):
     """Whether the enable checkbox for ``key`` is rendered ``checked``."""
-    match = re.search(
-        rf'<input[^>]*name="products"[^>]*value="{key}"[^>]*>', html
-    )
+    match = re.search(rf'<input[^>]*name="products"[^>]*value="{key}"[^>]*>', html)
     assert match, f"no enable checkbox rendered for product '{key}'"
     return "checked" in match.group(0)
 
@@ -97,8 +93,8 @@ class WizardStepBase(TestCase):
         # The wizard only offers (and accepts) catalogs of the org serving the
         # request, so dial the host that owns this fixture.
         self.client.defaults["HTTP_HOST"] = org_host()
-        self.catalog = Catalog.objects.create(organisation=make_organisation(),
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
 
     def _set_session(self, **extra):
@@ -148,25 +144,28 @@ class Step4EnableCheckboxTests(WizardStepBase):
 class Step4PostTests(WizardStepBase):
     def test_post_records_the_selection_and_only_validates_ticked_products(self):
         self._set_session()
-        ticked = _definition(key="ticked", config_schema=(
-            ConfigField(key="min_years", type="int", default=30),
-        ))
-        optout = _definition(key="optout", config_schema=(
-            ConfigField(key="quantity", type="choice",
-                        choices=("anomaly", "value"), default="anomaly"),
-        ))
+        ticked = _definition(key="ticked", config_schema=(ConfigField(key="min_years", type="int", default=30),))
+        optout = _definition(
+            key="optout",
+            config_schema=(
+                ConfigField(key="quantity", type="choice", choices=("anomaly", "value"), default="anomaly"),
+            ),
+        )
 
         with (
             patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             patch.object(DataFeed, "get_derived_products", return_value=[ticked, optout]),
         ):
-            response = self.client.post(self._step4_url(), {
-                "products": ["ticked"],          # optout is unticked
-                "ticked-min_years": "40",
-                # An out-of-choices value that WOULD fail validation if optout
-                # were validated — it must be ignored because optout is unticked.
-                "optout-quantity": "trend",
-            })
+            response = self.client.post(
+                self._step4_url(),
+                {
+                    "products": ["ticked"],  # optout is unticked
+                    "ticked-min_years": "40",
+                    # An out-of-choices value that WOULD fail validation if optout
+                    # were validated — it must be ignored because optout is unticked.
+                    "optout-quantity": "trend",
+                },
+            )
 
         # No validation error -> straight through to provisioning.
         self.assertRedirects(
@@ -182,19 +181,24 @@ class Step4PostTests(WizardStepBase):
 
     def test_post_reports_a_bad_config_on_a_ticked_product(self):
         self._set_session()
-        ticked = _definition(key="ticked", config_schema=(
-            ConfigField(key="quantity", type="choice",
-                        choices=("anomaly", "value"), default="anomaly"),
-        ))
+        ticked = _definition(
+            key="ticked",
+            config_schema=(
+                ConfigField(key="quantity", type="choice", choices=("anomaly", "value"), default="anomaly"),
+            ),
+        )
 
         with (
             patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             patch.object(DataFeed, "get_derived_products", return_value=[ticked]),
         ):
-            response = self.client.post(self._step4_url(), {
-                "products": ["ticked"],
-                "ticked-quantity": "trend",   # not among choices
-            })
+            response = self.client.post(
+                self._step4_url(),
+                {
+                    "products": ["ticked"],
+                    "ticked-quantity": "trend",  # not among choices
+                },
+            )
 
         # Re-renders the step (no redirect) because a ticked product is invalid.
         self.assertEqual(response.status_code, 200)
@@ -212,9 +216,12 @@ class Step4DependencyTests(WizardStepBase):
             patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             patch.object(DataFeed, "get_derived_products", return_value=_chain_defs()),
         ):
-            response = self.client.post(self._step4_url(), {
-                "products": ["anomaly"],   # climatology missing
-            })
+            response = self.client.post(
+                self._step4_url(),
+                {
+                    "products": ["anomaly"],  # climatology missing
+                },
+            )
 
         # Re-renders (no redirect) and names the missing dependency.
         self.assertEqual(response.status_code, 200)
@@ -228,9 +235,12 @@ class Step4DependencyTests(WizardStepBase):
             patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             patch.object(DataFeed, "get_derived_products", return_value=_chain_defs()),
         ):
-            response = self.client.post(self._step4_url(), {
-                "products": ["anomaly", "climatology"],
-            })
+            response = self.client.post(
+                self._step4_url(),
+                {
+                    "products": ["anomaly", "climatology"],
+                },
+            )
 
         self.assertRedirects(
             response,
@@ -281,7 +291,7 @@ class WizardProvisionSeamTests(WizardStepBase):
         anomaly = _definition(key="anomaly", config_schema=())
         promotion = _definition(key="promotion", recipe_type="promotion", config_schema=())
         self._complete_session(
-            selected_product_keys=["anomaly"],   # promotion unticked
+            selected_product_keys=["anomaly"],  # promotion unticked
             derived_products_config={"anomaly": {}, "promotion": {}},
         )
 
@@ -289,9 +299,7 @@ class WizardProvisionSeamTests(WizardStepBase):
             patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             patch.object(DataFeed, "get_derived_products", return_value=[anomaly, promotion]),
         ):
-            response = self.client.get(
-                reverse("wizard_provision", kwargs={"model_name": MODEL_NAME})
-            )
+            response = self.client.get(reverse("wizard_provision", kwargs={"model_name": MODEL_NAME}))
 
         self.assertEqual(response.status_code, 302)
         rows = {p.definition_key: p for p in DerivedProduct.objects.all()}
@@ -311,20 +319,14 @@ class WizardProvisionSeamTests(WizardStepBase):
             patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             patch.object(DataFeed, "get_derived_products", return_value=[anomaly, promotion]),
         ):
-            self.client.get(
-                reverse("wizard_provision", kwargs={"model_name": MODEL_NAME})
-            )
+            self.client.get(reverse("wizard_provision", kwargs={"model_name": MODEL_NAME}))
             feed = DerivedProduct.objects.get(definition_key="promotion").data_feed
-            response = self.client.get(
-                reverse("data_feed_detail", kwargs={"pk": feed.pk})
-            )
+            response = self.client.get(reverse("data_feed_detail", kwargs={"pk": feed.pk}))
 
         # The opted-out product is inert but still listed (disabled), ready to be
         # enabled later with one toggle.
         self.assertContains(response, "promotion")
-        self.assertFalse(
-            DerivedProduct.objects.get(definition_key="promotion").is_enabled
-        )
+        self.assertFalse(DerivedProduct.objects.get(definition_key="promotion").is_enabled)
 
 
 class WizardCatalogScopingTests(WizardStepBase):
@@ -339,7 +341,9 @@ class WizardCatalogScopingTests(WizardStepBase):
     def setUp(self):
         super().setUp()
         self.other_orgs_catalog = Catalog.objects.create(
-            organisation=make_organisation("uganda"), name="Rain", slug="rain",
+            organisation=make_organisation("uganda"),
+            name="Rain",
+            slug="rain",
             file_format="geotiff",
         )
 
@@ -351,14 +355,18 @@ class WizardCatalogScopingTests(WizardStepBase):
         """
         url = reverse("wizard_step1_catalog", kwargs={"model_name": MODEL_NAME})
         with (
-            patch(
-                "georiva.sources.views.get_child_model_by_name", return_value=DataFeed
-            ),
+            patch("georiva.sources.views.get_child_model_by_name", return_value=DataFeed),
             # The base class declares no catalog defaults; the step-1 template
             # reads them, so supply what a real plugin would.
-            patch.object(DataFeed, "get_catalog_defaults", return_value={
-                "name": "CHIRPS", "file_format": "geotiff", "description": "",
-            }),
+            patch.object(
+                DataFeed,
+                "get_catalog_defaults",
+                return_value={
+                    "name": "CHIRPS",
+                    "file_format": "geotiff",
+                    "description": "",
+                },
+            ),
         ):
             if method == "post":
                 return self.client.post(url, data)
@@ -369,20 +377,26 @@ class WizardCatalogScopingTests(WizardStepBase):
         self.assertNotIn(self.other_orgs_catalog, response.context["unclaimed_catalogs"])
 
     def test_selecting_another_orgs_catalog_is_refused(self):
-        response = self._step1("post", {
-            "catalog_mode": "select",
-            "catalog_id": self.other_orgs_catalog.pk,
-        })
+        response = self._step1(
+            "post",
+            {
+                "catalog_mode": "select",
+                "catalog_id": self.other_orgs_catalog.pk,
+            },
+        )
 
         # Re-rendered with an error rather than advancing to step 2.
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(self.client.session.get(SESSION_KEY, {}).get("catalog_id"))
 
     def test_our_own_unclaimed_catalog_is_still_selectable(self):
-        response = self._step1("post", {
-            "catalog_mode": "select",
-            "catalog_id": self.catalog.pk,
-        })
+        response = self._step1(
+            "post",
+            {
+                "catalog_mode": "select",
+                "catalog_id": self.catalog.pk,
+            },
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.client.session[SESSION_KEY]["catalog_id"], self.catalog.pk)

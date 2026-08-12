@@ -13,6 +13,7 @@ organisation's land in the other's. Since the two fixtures differ only in their
 values, two hosts receiving *identical* tile bytes is itself the leak — which is
 what the assertions read.
 """
+
 import json
 from datetime import datetime, timezone
 
@@ -36,7 +37,9 @@ VALID_TIME = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
 def _whole_world_boundary():
     """One admin boundary covering the tile the tests request (z=0, x=0, y=0)."""
     return AdminBoundary.objects.create(
-        name_0="Testland", gid_0="TST", level=1,
+        name_0="Testland",
+        gid_0="TST",
+        level=1,
         geom=MultiPolygon(Polygon.from_bbox((-170, -80, 170, 80))),
     )
 
@@ -61,8 +64,16 @@ class BoundaryStatsTileScopingTests(TestCase):
         """
         tree = make_org_tree(make_organisation(org_slug), name=org_slug)
         BoundaryZonalStats.objects.create(
-            item=tree["item"], variable=tree["variable"], boundary=cls.boundary,
-            time=VALID_TIME, mean=mean, min=mean, max=mean, sum=mean, std=0, count=1,
+            item=tree["item"],
+            variable=tree["variable"],
+            boundary=cls.boundary,
+            time=VALID_TIME,
+            mean=mean,
+            min=mean,
+            max=mean,
+            sum=mean,
+            std=0,
+            count=1,
         )
 
     # -- helpers -----------------------------------------------------------

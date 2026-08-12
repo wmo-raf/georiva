@@ -15,6 +15,7 @@ enabled product may have a disabled (or missing) dependency* holds everywhere.
 The chain math lives in the pure ``core.derived_products.chain`` module; this layer binds
 it to the feed's ``DerivedProduct`` rows.
 """
+
 from __future__ import annotations
 
 from django.db import transaction
@@ -85,10 +86,7 @@ def build_chain(feed):
     declared_keys = {d.key for d in definitions}
     # Chips and card names use each product's display label (override -> declared
     # -> key), so a rename shows on every dependent too.
-    label_by_key = {
-        d.key: rows[d.key].display_label if d.key in rows else d.label
-        for d in definitions
-    }
+    label_by_key = {d.key: rows[d.key].display_label if d.key in rows else d.label for d in definitions}
     deps = product_dependencies(definitions)
 
     def _declared_card(definition):
@@ -97,58 +95,74 @@ def build_chain(feed):
         if product is None:
             # A new definition an upgrade added, not yet provisioned.
             return {
-                "definition": definition, "product": None, "enabled": False,
-                "is_new": True, "orphaned": False, "unbound": False,
+                "definition": definition,
+                "product": None,
+                "enabled": False,
+                "is_new": True,
+                "orphaned": False,
+                "unbound": False,
                 "display_label": definition.label,
                 "display_description": definition.description,
-                "needs": needs, "status": None, "last_activity": None,
-                "readiness": None, "readiness_hint": None,
-                "output_collections": [], "can_run": False, "run_label": None,
+                "needs": needs,
+                "status": None,
+                "last_activity": None,
+                "readiness": None,
+                "readiness_hint": None,
+                "output_collections": [],
+                "can_run": False,
+                "run_label": None,
             }
         status = product_status(product)
         readiness = product_readiness(product)
         return {
-            "definition": definition, "product": product,
-            "enabled": product.is_enabled, "is_new": False, "orphaned": False,
+            "definition": definition,
+            "product": product,
+            "enabled": product.is_enabled,
+            "is_new": False,
+            "orphaned": False,
             "unbound": _is_unbound(product, definition),
             "display_label": product.display_label,
             "display_description": product.display_description,
             "needs": needs,
-            "status": status.status, "last_activity": status.last_completed_at,
+            "status": status.status,
+            "last_activity": status.last_completed_at,
             "readiness": readiness,
             "readiness_hint": _readiness_hint(definition, readiness),
             # Output collections are read from the pinned DerivedProductOutput
             # rows (ADR-0010 §2), so an operator slug rename can't drop them.
-            "output_collections": [
-                b.collection
-                for b in product.output_bindings.select_related("collection")
-            ],
+            "output_collections": [b.collection for b in product.output_bindings.select_related("collection")],
             # Every trigger mode is hand-runnable (ADR-0020): run_product_now
             # builds a wide selector, so for an event product this is a
             # backfill over the already-staged record — the only recovery for
             # files that arrived while the product was disabled. The label
             # keeps the semantics honest per mode.
             "can_run": True,
-            "run_label": (
-                _("Backfill") if definition.trigger_mode == "event" else _("Run now")
-            ),
+            "run_label": (_("Backfill") if definition.trigger_mode == "event" else _("Run now")),
         }
 
-    stages = [
-        [_declared_card(defn) for defn in stage]
-        for stage in topological_stages(definitions)
-    ]
+    stages = [[_declared_card(defn) for defn in stage] for stage in topological_stages(definitions)]
 
     orphans = [
         {
-            "definition": None, "product": row, "enabled": row.is_enabled,
-            "is_new": False, "orphaned": True, "unbound": False,
-            "display_label": row.display_label, "display_description": "",
-            "needs": [], "status": product_status(row).status,
-            "last_activity": None, "readiness": None, "readiness_hint": None,
-            "output_collections": [], "can_run": False, "run_label": None,
+            "definition": None,
+            "product": row,
+            "enabled": row.is_enabled,
+            "is_new": False,
+            "orphaned": True,
+            "unbound": False,
+            "display_label": row.display_label,
+            "display_description": "",
+            "needs": [],
+            "status": product_status(row).status,
+            "last_activity": None,
+            "readiness": None,
+            "readiness_hint": None,
+            "output_collections": [],
+            "can_run": False,
+            "run_label": None,
         }
-        for row in rows.values() if row.definition_key not in declared_keys
+        for row in rows.values()
+        if row.definition_key not in declared_keys
     ]
     return {"stages": stages, "orphans": orphans}
 
@@ -160,13 +174,9 @@ def _readiness_hint(definition, readiness):
     feed to backfill."""
     if readiness.ready or not readiness.blocked_by:
         return None
-    blocked_ref = next(
-        (r for r in definition.inputs if r.role == readiness.blocked_by), None
-    )
+    blocked_ref = next((r for r in definition.inputs if r.role == readiness.blocked_by), None)
     if blocked_ref is not None and blocked_ref.tier == "staging":
-        return _(
-            "No staged data yet — re-run the feed to backfill this product's input."
-        )
+        return _("No staged data yet — re-run the feed to backfill this product's input.")
     return None
 
 
@@ -274,8 +284,7 @@ def delete_orphan(product):
     (a DerivedProduct owns no catalog data)."""
     if not is_orphaned(product):
         raise ProductActionError(
-            _("'%s' is still declared by the plugin and can't be deleted here.")
-            % product.display_label
+            _("'%s' is still declared by the plugin and can't be deleted here.") % product.display_label
         )
     product.delete()
 
@@ -305,9 +314,12 @@ def _resolve_inputs_or_raise(feed, definition, definitions):
     for ref in definition.inputs:
         if ref.collection not in namespace:
             raise ProductActionError(
-                _("%(product)s input '%(role)s' names collection "
-                  "'%(collection)s', which this feed neither provides nor "
-                  "produces.") % {
+                _(
+                    "%(product)s input '%(role)s' names collection "
+                    "'%(collection)s', which this feed neither provides nor "
+                    "produces."
+                )
+                % {
                     "product": _label_of(definition.key, definitions),
                     "role": ref.role,
                     "collection": ref.collection,
@@ -331,13 +343,12 @@ def enable_product(product):
         _resolve_inputs_or_raise(feed, definition, definitions)
     needed = dependencies_closure(definitions, product.definition_key)
     missing = [
-        _label_of(key, definitions)
-        for key in sorted(needed)
-        if rows.get(key) is None or not rows[key].is_enabled
+        _label_of(key, definitions) for key in sorted(needed) if rows.get(key) is None or not rows[key].is_enabled
     ]
     if missing:
         raise ProductActionError(
-            _("%(product)s needs %(deps)s to be enabled first.") % {
+            _("%(product)s needs %(deps)s to be enabled first.")
+            % {
                 "product": _label_of(product.definition_key, definitions),
                 "deps": ", ".join(missing),
             }
@@ -363,20 +374,19 @@ def rebind_product(product):
     definition = _definition_of(product.definition_key, definitions)
     if definition is None:
         raise ProductActionError(
-            _("'%s' is no longer declared by the plugin and can't be re-bound.")
-            % product.display_label
+            _("'%s' is no longer declared by the plugin and can't be re-bound.") % product.display_label
         )
     with transaction.atomic():
         materialise_and_pin(product, definition, feed)
         bound = set(product.input_bindings.values_list("role", flat=True))
-        missing = [
-            ref.role for ref in definition.inputs
-            if ref.required and ref.role not in bound
-        ]
+        missing = [ref.role for ref in definition.inputs if ref.required and ref.role not in bound]
         if missing:
             raise ProductActionError(
-                _("%(product)s can't be re-bound: required input(s) %(roles)s "
-                  "have no collection — provision or re-create it first.") % {
+                _(
+                    "%(product)s can't be re-bound: required input(s) %(roles)s "
+                    "have no collection — provision or re-create it first."
+                )
+                % {
                     "product": _label_of(definition.key, definitions),
                     "roles": ", ".join(sorted(missing)),
                 }
@@ -409,7 +419,8 @@ def pin_bindings(product, definition, feed, output_collections):
 
     for ref, collection in zip(definition.outputs, output_collections):
         DerivedProductOutput.objects.update_or_create(
-            product=product, role=ref.role,
+            product=product,
+            role=ref.role,
             defaults={"output_key": ref.collection, "collection": collection},
         )
 
@@ -418,7 +429,8 @@ def pin_bindings(product, definition, feed, output_collections):
         if collection is None:
             continue
         DerivedProductInput.objects.update_or_create(
-            product=product, role=ref.role,
+            product=product,
+            role=ref.role,
             defaults={
                 "tier": ref.tier,
                 "required": ref.required,
@@ -440,9 +452,7 @@ def backfill_bindings() -> int:
     pinned = 0
     for product in DerivedProduct.objects.filter(is_enabled=True):
         feed = product.data_feed.get_real_instance()
-        definition = _definition_of(
-            product.definition_key, feed.get_derived_products()
-        )
+        definition = _definition_of(product.definition_key, feed.get_derived_products())
         if definition is None:
             continue
         materialise_and_pin(product, definition, feed)
@@ -458,14 +468,14 @@ def _resolve_input_collection(feed, ref):
     from georiva.core.models import Collection
     from georiva.sources.models import DataFeedCollectionLink
 
-    link = DataFeedCollectionLink.objects.filter(
-        data_feed=feed, definition_key=ref.collection
-    ).select_related("collection").first()
+    link = (
+        DataFeedCollectionLink.objects.filter(data_feed=feed, definition_key=ref.collection)
+        .select_related("collection")
+        .first()
+    )
     if link is not None:
         return link.collection
-    return Collection.objects.filter(
-        catalog=feed.catalog, slug=ref.collection
-    ).first()
+    return Collection.objects.filter(catalog=feed.catalog, slug=ref.collection).first()
 
 
 def enabled_dependents(product):

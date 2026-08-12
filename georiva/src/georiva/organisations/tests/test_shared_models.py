@@ -12,6 +12,7 @@ Three verdicts are under test here (decision #269), and they differ:
 What is asserted is external behavior on the real admin URLs: which rows a
 listing shows, which edits are refused, which options a form offers.
 """
+
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -27,7 +28,6 @@ KENYA_HOST = "kenya.georiva.test"
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class TopicIsInstanceAdminOnlyTests(TestCase):
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -50,9 +50,7 @@ class TopicIsInstanceAdminOnlyTests(TestCase):
 
     def test_org_admin_cannot_create_a_topic(self):
         self._login("amina")
-        response = self.client.post(
-            reverse("topic:add"), {"name": "Smuggled", "description": "", "sort_order": 0}
-        )
+        response = self.client.post(reverse("topic:add"), {"name": "Smuggled", "description": "", "sort_order": 0})
         self.assertEqual(response.status_code, 302)
         self.assertFalse(Topic.objects.filter(name="Smuggled").exists())
 

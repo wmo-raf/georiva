@@ -14,6 +14,7 @@ manual path uses get_or_create (the operator is the source of truth and
 hand-tuned Variables are never clobbered). Those contracts live with their
 services and must stay distinct.
 """
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -58,14 +59,10 @@ def resolve_unit(symbol: str):
         return unit
     except IntegrityError:
         # Concurrent worker created the same unit; re-fetch it.
-        return (
-            Unit.objects.filter(symbol__iexact=symbol).first()
-            or Unit.objects.filter(name__iexact=symbol).first()
-        )
+        return Unit.objects.filter(symbol__iexact=symbol).first() or Unit.objects.filter(name__iexact=symbol).first()
 
 
-def build_source_block(block_type: str, source_name: str,
-                       vertical_dimension: str = "", vertical_value=None) -> dict:
+def build_source_block(block_type: str, source_name: str, vertical_dimension: str = "", vertical_value=None) -> dict:
     """One Variable ``sources`` StreamField block in its canonical dict form."""
     return {
         "type": block_type,

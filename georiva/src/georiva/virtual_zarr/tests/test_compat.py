@@ -28,8 +28,10 @@ class AssertCompatibleTests(SimpleTestCase):
 
     def test_shape_mismatch_names_asset(self):
         candidate = ArraySpec(
-            shape=(256, 1024), chunks=BASE.chunks,
-            dtype=BASE.dtype, codecs=BASE.codecs,
+            shape=(256, 1024),
+            chunks=BASE.chunks,
+            dtype=BASE.dtype,
+            codecs=BASE.codecs,
         )
         with self.assertRaises(HeterogeneousAssetError) as ctx:
             assert_compatible(BASE, candidate, source="cog-b.tif")
@@ -38,8 +40,10 @@ class AssertCompatibleTests(SimpleTestCase):
 
     def test_chunk_mismatch_fails(self):
         candidate = ArraySpec(
-            shape=BASE.shape, chunks=(512, 512),
-            dtype=BASE.dtype, codecs=BASE.codecs,
+            shape=BASE.shape,
+            chunks=(512, 512),
+            dtype=BASE.dtype,
+            codecs=BASE.codecs,
         )
         with self.assertRaises(HeterogeneousAssetError) as ctx:
             assert_compatible(BASE, candidate, source="cog-c.tif")
@@ -47,8 +51,10 @@ class AssertCompatibleTests(SimpleTestCase):
 
     def test_dtype_mismatch_fails(self):
         candidate = ArraySpec(
-            shape=BASE.shape, chunks=BASE.chunks,
-            dtype="int16", codecs=BASE.codecs,
+            shape=BASE.shape,
+            chunks=BASE.chunks,
+            dtype="int16",
+            codecs=BASE.codecs,
         )
         with self.assertRaises(HeterogeneousAssetError) as ctx:
             assert_compatible(BASE, candidate, source="cog-d.tif")
@@ -56,8 +62,10 @@ class AssertCompatibleTests(SimpleTestCase):
 
     def test_codec_pipeline_mismatch_fails(self):
         candidate = ArraySpec(
-            shape=BASE.shape, chunks=BASE.chunks,
-            dtype=BASE.dtype, codecs=('{"name":"numcodecs.deflate"}',),
+            shape=BASE.shape,
+            chunks=BASE.chunks,
+            dtype=BASE.dtype,
+            codecs=('{"name":"numcodecs.deflate"}',),
         )
         with self.assertRaises(HeterogeneousAssetError) as ctx:
             assert_compatible(BASE, candidate, source="cog-e.tif")

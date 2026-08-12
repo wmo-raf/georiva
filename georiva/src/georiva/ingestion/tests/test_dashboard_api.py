@@ -23,13 +23,14 @@ UPLOAD_SESSIONS_URL = "/admin/api/ingestion/collections/{}/upload-sessions/"
 def _setup_collection(catalog_slug="cat", collection_slug="col", organisation=None):
     catalog = Catalog.objects.create(
         organisation=organisation or make_organisation(),
-        name=catalog_slug, slug=catalog_slug, file_format="grib2",
+        name=catalog_slug,
+        slug=catalog_slug,
+        file_format="grib2",
     )
     return Collection.objects.create(name=collection_slug, slug=collection_slug, catalog=catalog)
 
 
-def _make_file_ingestion(collection, file_path=None, status=FileIngestion.Status.COMPLETED,
-                         **kwargs):
+def _make_file_ingestion(collection, file_path=None, status=FileIngestion.Status.COMPLETED, **kwargs):
     fi = FileIngestion.objects.create(
         bucket=BucketType.SOURCES,
         file_path=file_path or f"{collection.catalog.slug}/{collection.slug}/file.grib2",
@@ -45,7 +46,9 @@ class DashboardCatalogGroupedTests(TestCase):
         self.user = User.objects.create_superuser("admin_cg", "cg@test.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="grib2")
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="grib2"
+        )
         self.collection = Collection.objects.create(name="Daily", slug="daily", catalog=self.catalog)
 
     def test_dashboard_returns_catalogs_key(self):
@@ -100,7 +103,9 @@ class DashboardCatalogGroupedTests(TestCase):
         self.assertEqual(cat["summary"]["empty"], 1)
 
     def test_catalog_with_no_active_collections_excluded(self):
-        empty_catalog = Catalog.objects.create(organisation=make_organisation(), name="Empty", slug="empty-cat", file_format="grib2")
+        empty_catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Empty", slug="empty-cat", file_format="grib2"
+        )
         col = Collection.objects.create(name="col", slug="col-e", catalog=empty_catalog)
         col.is_active = False
         col.save()
@@ -145,11 +150,13 @@ class DashboardCollectionListTests(TestCase):
 
     def test_last_run_at_comes_from_most_recent_file_ingestion(self):
         older = _make_file_ingestion(
-            self.collection, file_path="cat/col/old.grib2",
+            self.collection,
+            file_path="cat/col/old.grib2",
             status=FileIngestion.Status.COMPLETED,
         )
         newer = _make_file_ingestion(
-            self.collection, file_path="cat/col/new.grib2",
+            self.collection,
+            file_path="cat/col/new.grib2",
             status=FileIngestion.Status.FAILED,
         )
         newer.created_at = older.created_at + timedelta(seconds=10)
@@ -214,7 +221,9 @@ class DashboardCollectionListTests(TestCase):
         self.assertEqual(col["sparkline"][-1]["status"], "failed")
 
     def test_multi_collection_grib_independent_sparkline_statuses(self):
-        catalog = Catalog.objects.create(organisation=make_organisation(), name="shared-cat", slug="shared-cat", file_format="grib2")
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="shared-cat", slug="shared-cat", file_format="grib2"
+        )
         col_a = Collection.objects.create(name="col-a", slug="col-a", catalog=catalog)
         col_b = Collection.objects.create(name="col-b", slug="col-b", catalog=catalog)
 
@@ -273,11 +282,13 @@ class DashboardTenancyTests(TestCase):
         # Paths are org-first in production, which is also what keeps these two
         # apart under the (bucket, file_path) uniqueness constraint.
         _make_file_ingestion(
-            self.ours, file_path="test-org/ours/daily/file.grib2",
+            self.ours,
+            file_path="test-org/ours/daily/file.grib2",
             status=FileIngestion.Status.COMPLETED,
         )
         _make_file_ingestion(
-            self.theirs, file_path="neighbour-org/ours/daily/file.grib2",
+            self.theirs,
+            file_path="neighbour-org/ours/daily/file.grib2",
             status=FileIngestion.Status.FAILED,
         )
 
@@ -316,8 +327,7 @@ class DashboardTenancyTests(TestCase):
 
         second = _setup_collection("ours-2", "monthly")
         history = [
-            sql for sql in self._dashboard_sql()
-            if "georivaingestion_fileingestion" in sql and "created_at" in sql
+            sql for sql in self._dashboard_sql() if "georivaingestion_fileingestion" in sql and "created_at" in sql
         ]
         self.assertTrue(history, "the thirty-day history query was not captured")
 
@@ -325,7 +335,8 @@ class DashboardTenancyTests(TestCase):
         narrowed = re.compile(rf'collection_id"?\s*(?:=\s*({ids})\b|IN\s*\([^)]*\b({ids})\b)')
         for sql in history:
             self.assertRegex(
-                sql, narrowed,
+                sql,
+                narrowed,
                 "the history query is not restricted to the scoped collection ids",
             )
 
@@ -333,16 +344,14 @@ class DashboardTenancyTests(TestCase):
         """Same for the link table that decides automated vs manual."""
         import re
 
-        link_queries = [
-            sql for sql in self._dashboard_sql()
-            if "georivasources_datafeedcollectionlink" in sql
-        ]
+        link_queries = [sql for sql in self._dashboard_sql() if "georivasources_datafeedcollectionlink" in sql]
         self.assertTrue(link_queries, "the feed-link query was not captured")
 
         narrowed = re.compile(rf'collection_id"?\s*(?:=\s*{self.ours.pk}\b|IN\s*\([^)]*\b{self.ours.pk}\b)')
         for sql in link_queries:
             self.assertRegex(
-                sql, narrowed,
+                sql,
+                narrowed,
                 "the feed-link query is not restricted to the scoped collection ids",
             )
 
@@ -393,11 +402,13 @@ class CollectionIngestionLogsAPITests(TestCase):
         # The completed record is created AFTER the failed one — so plain
         # most-recent-first ordering would put it first. Pinning must override this.
         fi_fail = _make_file_ingestion(
-            self.collection, file_path="cat3/col3/fail.grib2",
+            self.collection,
+            file_path="cat3/col3/fail.grib2",
             status=FileIngestion.Status.FAILED,
         )
         fi_ok = _make_file_ingestion(
-            self.collection, file_path="cat3/col3/ok.grib2",
+            self.collection,
+            file_path="cat3/col3/ok.grib2",
             status=FileIngestion.Status.COMPLETED,
         )
         fi_ok.created_at = fi_fail.created_at + timedelta(seconds=5)
@@ -412,11 +423,13 @@ class CollectionIngestionLogsAPITests(TestCase):
 
     def test_within_failed_group_most_recent_first(self):
         fi1 = _make_file_ingestion(
-            self.collection, file_path="cat3/col3/fail1.grib2",
+            self.collection,
+            file_path="cat3/col3/fail1.grib2",
             status=FileIngestion.Status.FAILED,
         )
         fi2 = _make_file_ingestion(
-            self.collection, file_path="cat3/col3/fail2.grib2",
+            self.collection,
+            file_path="cat3/col3/fail2.grib2",
             status=FileIngestion.Status.FAILED,
         )
         fi2.created_at = fi1.created_at + timedelta(seconds=10)
@@ -428,7 +441,9 @@ class CollectionIngestionLogsAPITests(TestCase):
         self.assertEqual(logs[1]["id"], fi1.pk)
 
     def test_ingestion_logs_for_grib_collection_linked_via_m2m(self):
-        catalog = Catalog.objects.create(organisation=make_organisation(), name="grib-cat", slug="grib-cat", file_format="grib2")
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="grib-cat", slug="grib-cat", file_format="grib2"
+        )
         col_x = Collection.objects.create(name="col-x", slug="col-x", catalog=catalog)
         col_y = Collection.objects.create(name="col-y", slug="col-y", catalog=catalog)
 
@@ -451,7 +466,9 @@ class CollectionFetchRunsAPITests(TestCase):
         self.user = User.objects.create_superuser("admin5", "g@h.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        catalog = Catalog.objects.create(organisation=make_organisation(), name="cat5", slug="cat5", file_format="grib2")
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="cat5", slug="cat5", file_format="grib2"
+        )
         self.collection = Collection.objects.create(name="col5", slug="col5", catalog=catalog)
         self.feed = DataFeed.objects.create(name="Test Feed")
         DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.collection)
@@ -466,6 +483,7 @@ class CollectionFetchRunsAPITests(TestCase):
 
     def test_fetch_runs_includes_runs_for_collection_feed(self):
         from georiva.sources.models import FetchRun
+
         run = FetchRun.objects.create(data_feed=self.feed)
 
         response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
@@ -483,6 +501,7 @@ class CollectionFetchRunsAPITests(TestCase):
 
     def test_fetch_runs_excludes_runs_from_unrelated_feeds(self):
         from georiva.sources.models import FetchRun
+
         other_feed = DataFeed.objects.create(name="Other Feed")
         FetchRun.objects.create(data_feed=other_feed)
 
@@ -496,6 +515,7 @@ class CollectionFetchRunsAPITests(TestCase):
     def test_fetch_runs_duration_seconds_set_when_run_finished(self):
         from django.utils import timezone
         from georiva.sources.models import FetchRun
+
         run = FetchRun.objects.create(data_feed=self.feed)
         run.finished_at = run.started_at + timedelta(seconds=42)
         run.save(update_fields=["finished_at"])
@@ -506,6 +526,7 @@ class CollectionFetchRunsAPITests(TestCase):
 
     def test_fetch_runs_duration_seconds_null_when_run_not_finished(self):
         from georiva.sources.models import FetchRun
+
         FetchRun.objects.create(data_feed=self.feed)
 
         response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
@@ -514,6 +535,7 @@ class CollectionFetchRunsAPITests(TestCase):
 
     def test_fetch_runs_does_not_include_run_time_field(self):
         from georiva.sources.models import FetchRun
+
         FetchRun.objects.create(data_feed=self.feed)
 
         response = self.client.get(FETCH_RUNS_URL.format(self.collection.pk))
@@ -587,6 +609,7 @@ class CollectionIngestionJobsAPITests(TestCase):
 def _make_upload_session(catalog, user=None, file_path=None, collection=None):
     """Create an UploadSession with one UploadedFile, optionally linked via FileIngestion."""
     from georiva.ingestion.models import UploadSession, UploadedFile
+
     session = UploadSession.objects.create(catalog=catalog, user=user)
     fp = file_path or f"{catalog.slug}/file.grib2"
     uf = UploadedFile.objects.create(session=session, original_filename="file.grib2", file_path=fp)
@@ -601,7 +624,9 @@ class CollectionUploadSessionsAPITests(TestCase):
         self.user = User.objects.create_superuser("admin_us", "us@test.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="cat-us", slug="cat-us", file_format="grib2")
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="cat-us", slug="cat-us", file_format="grib2"
+        )
         self.collection = Collection.objects.create(name="col-us", slug="col-us", catalog=self.catalog)
 
     def test_upload_sessions_returns_200_with_upload_sessions_key(self):
@@ -616,9 +641,7 @@ class CollectionUploadSessionsAPITests(TestCase):
         self.assertIn(session.pk, ids)
 
     def test_upload_sessions_excludes_unlinked_sessions(self):
-        other_collection = Collection.objects.create(
-            name="other", slug="other-col", catalog=self.catalog
-        )
+        other_collection = Collection.objects.create(name="other", slug="other-col", catalog=self.catalog)
         _make_upload_session(self.catalog, collection=other_collection)
         response = self.client.get(UPLOAD_SESSIONS_URL.format(self.collection.pk))
         self.assertEqual(len(response.json()["upload_sessions"]), 0)
@@ -629,6 +652,7 @@ class CollectionUploadSessionsAPITests(TestCase):
 
     def test_upload_sessions_duration_seconds_set_when_completed(self):
         from georiva.ingestion.models import UploadSession
+
         session = _make_upload_session(self.catalog, collection=self.collection)
         session.completed_at = session.started_at + timedelta(seconds=30)
         session.save(update_fields=["completed_at"])

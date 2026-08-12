@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Pure functions
 # ---------------------------------------------------------------------------
 
+
 def as_utc(ts: datetime) -> datetime:
     """
     Normalise to tz-aware UTC.
@@ -49,7 +50,7 @@ class TimestampDiff:
     """Catalog vs repo time axes, both sorted ascending."""
 
     missing: tuple[datetime, ...]  # in the catalog, not in the repo
-    extra: tuple[datetime, ...]    # in the repo, not in the catalog
+    extra: tuple[datetime, ...]  # in the repo, not in the catalog
 
 
 def diff_timestamps(catalog_times, repo_times) -> TimestampDiff:
@@ -62,8 +63,8 @@ def diff_timestamps(catalog_times, repo_times) -> TimestampDiff:
 
 
 def freshness_lag(
-        newest_asset_modified: datetime | None,
-        watermark: datetime | None,
+    newest_asset_modified: datetime | None,
+    watermark: datetime | None,
 ) -> timedelta | None:
     """
     How far the repo's committed watermark trails the newest ingested asset.
@@ -78,9 +79,9 @@ def freshness_lag(
 
 
 def is_lock_expired(
-        locked_at: datetime | None,
-        now: datetime,
-        timeout: timedelta,
+    locked_at: datetime | None,
+    now: datetime,
+    timeout: timedelta,
 ) -> bool:
     """
     Whether a build lock taken at ``locked_at`` has expired by ``now``.
@@ -98,26 +99,27 @@ def is_lock_expired(
 # The structured report
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class VariableCoverage:
     """Everything a monitoring surface shows about one variable's repo."""
 
     variable: "Variable"
     manifest: "VirtualZarrManifest | None"
-    status: str            # manifest status value; "" when no manifest row
-    stuck: bool            # BUILDING with an expired lock
+    status: str  # manifest status value; "" when no manifest row
+    stuck: bool  # BUILDING with an expired lock
     catalog_timestamps: tuple[datetime, ...]
     repo_timestamps: tuple[datetime, ...]
     missing: tuple[datetime, ...]
     extra: tuple[datetime, ...]
     items_without_cog: tuple[datetime, ...]
     newest_asset_modified: datetime | None
-    watermark: datetime | None   # from the tip commit's metadata, read live
+    watermark: datetime | None  # from the tip commit's metadata, read live
     lag: timedelta | None
     repo_size_bytes: int
     repo_object_count: int
-    error: str             # manifest.error (last failure message)
-    repo_read_error: str   # non-empty when the live repo read itself failed
+    error: str  # manifest.error (last failure message)
+    repo_read_error: str  # non-empty when the live repo read itself failed
 
     @property
     def display_status(self) -> str:
@@ -167,6 +169,7 @@ class VariableCoverage:
 # ---------------------------------------------------------------------------
 # The service
 # ---------------------------------------------------------------------------
+
 
 def collection_coverage(collection, *, now=None) -> list[VariableCoverage]:
     """One report per Variable in the collection, ordered by slug."""
@@ -218,9 +221,7 @@ def _catalog_state(collection, variables) -> dict[int, _CatalogState]:
     """Per-variable catalog state in two queries, however many variables."""
     from georiva.core.models import Asset, Item
 
-    item_times = dict(
-        Item.objects.filter(collection=collection).values_list("id", "time")
-    )
+    item_times = dict(Item.objects.filter(collection=collection).values_list("id", "time"))
 
     covered: dict[int, set[int]] = {v.pk: set() for v in variables}
     newest: dict[int, datetime] = {}
@@ -241,12 +242,8 @@ def _catalog_state(collection, variables) -> dict[int, _CatalogState]:
         # times, but the repo's time axis holds each timestamp once — counts
         # must agree with the set arithmetic in diff_timestamps.
         states[variable.pk] = _CatalogState(
-            timestamps=tuple(sorted(
-                {as_utc(item_times[i]) for i in item_ids}
-            )),
-            items_without_cog=tuple(sorted(
-                {as_utc(t) for i, t in item_times.items() if i not in item_ids}
-            )),
+            timestamps=tuple(sorted({as_utc(item_times[i]) for i in item_ids})),
+            items_without_cog=tuple(sorted({as_utc(t) for i, t in item_times.items() if i not in item_ids})),
             newest_asset_modified=newest.get(variable.pk),
         )
     return states
@@ -255,17 +252,13 @@ def _catalog_state(collection, variables) -> dict[int, _CatalogState]:
 def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCoverage:
     from .models import VirtualZarrManifest
 
-    repo_timestamps, watermark, repo_read_error = (
-        _read_repo_state(manifest) if manifest is not None else ((), None, "")
-    )
+    repo_timestamps, watermark, repo_read_error = _read_repo_state(manifest) if manifest is not None else ((), None, "")
     diff = diff_timestamps(catalog.timestamps, repo_timestamps)
 
     stuck = bool(
         manifest is not None
         and manifest.status == VirtualZarrManifest.Status.BUILDING
-        and is_lock_expired(
-            manifest.locked_at, now, VirtualZarrManifest.LOCK_TIMEOUT
-        )
+        and is_lock_expired(manifest.locked_at, now, VirtualZarrManifest.LOCK_TIMEOUT)
     )
 
     return VariableCoverage(
@@ -282,9 +275,7 @@ def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCo
         watermark=watermark,
         lag=freshness_lag(catalog.newest_asset_modified, watermark),
         repo_size_bytes=manifest.repo_size_bytes if manifest is not None else 0,
-        repo_object_count=(
-            manifest.repo_object_count if manifest is not None else 0
-        ),
+        repo_object_count=(manifest.repo_object_count if manifest is not None else 0),
         error=manifest.error if manifest is not None else "",
         repo_read_error=repo_read_error,
     )
@@ -293,6 +284,7 @@ def _one_variable(variable, manifest, catalog: _CatalogState, now) -> VariableCo
 # ---------------------------------------------------------------------------
 # The per-variable detail (drill-down page / future status API)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SnapshotEntry:
@@ -320,10 +312,10 @@ class VariableDetail:
 
     coverage: VariableCoverage
     build_history: tuple["VirtualZarrBuildLog", ...]  # builds only, newest first
-    last_failure_at: datetime | None   # latest failed build's finish stamp
+    last_failure_at: datetime | None  # latest failed build's finish stamp
     last_gc: "VirtualZarrBuildLog | None"
-    snapshots: tuple[SnapshotEntry, ...]     # ancestry of main, tip first
-    store_arrays: tuple[StoreArray, ...]     # structure at the tip
+    snapshots: tuple[SnapshotEntry, ...]  # ancestry of main, tip first
+    store_arrays: tuple[StoreArray, ...]  # structure at the tip
     detail_read_error: str  # non-empty when the ancestry/store read failed
 
 
@@ -353,9 +345,7 @@ def variable_detail(variable, *, now=None, history_limit=50) -> VariableDetail:
         )
 
     logs = manifest.build_logs
-    build_history = tuple(
-        logs.filter(kind=VirtualZarrBuildLog.Kind.BUILD)[:history_limit]
-    )
+    build_history = tuple(logs.filter(kind=VirtualZarrBuildLog.Kind.BUILD)[:history_limit])
     last_failure_at = (
         logs.filter(
             kind=VirtualZarrBuildLog.Kind.BUILD,
@@ -426,7 +416,8 @@ def _read_repo_detail(manifest):
     except Exception as exc:
         logger.warning(
             "virtual_zarr coverage: repo detail read failed for manifest %s: %s",
-            manifest.pk, exc,
+            manifest.pk,
+            exc,
         )
         return (), (), str(exc)
 
@@ -461,14 +452,12 @@ def _read_repo_state(manifest):
         ds = xr.open_zarr(session.store, consolidated=False, chunks=None)
         if "time" not in ds.coords:
             return (), watermark, ""
-        timestamps = tuple(
-            as_utc(pd.Timestamp(value).to_pydatetime())
-            for value in ds["time"].values
-        )
+        timestamps = tuple(as_utc(pd.Timestamp(value).to_pydatetime()) for value in ds["time"].values)
         return timestamps, watermark, ""
     except Exception as exc:
         logger.warning(
             "virtual_zarr coverage: repo read failed for manifest %s: %s",
-            manifest.pk, exc,
+            manifest.pk,
+            exc,
         )
         return (), None, str(exc)

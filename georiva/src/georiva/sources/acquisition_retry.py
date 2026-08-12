@@ -7,6 +7,7 @@ pending → fetching → stored/failed again, and the parent FetchRun's
 counters are recomputed from its children so the run reflects current
 truth. Per-file collection context comes from file_path (ADR-0003).
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,9 +26,7 @@ def _collection_for(fetched_file, feed):
 
     parts = fetched_file.file_path.split("/")
     if len(parts) < 3:
-        raise RetryNotPossible(
-            f"file path '{fetched_file.file_path}' has no collection segment"
-        )
+        raise RetryNotPossible(f"file path '{fetched_file.file_path}' has no collection segment")
     return Collection.objects.get(catalog=feed.catalog, slug=parts[1])
 
 

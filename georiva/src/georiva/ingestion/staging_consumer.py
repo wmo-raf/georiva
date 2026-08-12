@@ -32,9 +32,7 @@ from georiva.core.storage import BucketType, storage
 
 logger = logging.getLogger(__name__)
 
-STAGING_REDIS_KEY = getattr(
-    settings, "MINIO_STAGING_REDIS_KEY", "georiva:minio:staging-events"
-)
+STAGING_REDIS_KEY = getattr(settings, "MINIO_STAGING_REDIS_KEY", "georiva:minio:staging-events")
 
 # catalog.file_format → asset Format enum value
 _FORMAT_MAP = {
@@ -106,9 +104,7 @@ def register_staging_file(bucket: str, key: str):
 
     plugin = format_registry.get(catalog.file_format)
     if plugin is None:
-        logger.warning(
-            "Staging: no format plugin for '%s': %s", catalog.file_format, key
-        )
+        logger.warning("Staging: no format plugin for '%s': %s", catalog.file_format, key)
         return None
 
     origin = storage.bucket(bucket)
@@ -139,9 +135,7 @@ def register_staging_file(bucket: str, key: str):
     # if the core Collection isn't provisioned yet, registration still proceeds.
     from georiva.core.models import Collection
 
-    core_collection = Collection.objects.filter(
-        catalog=catalog, slug=collection_slug
-    ).first()
+    core_collection = Collection.objects.filter(catalog=catalog, slug=collection_slug).first()
 
     collection, _created = StagingCollection.objects.get_or_create(
         catalog=catalog,
@@ -186,7 +180,10 @@ def register_staging_file(bucket: str, key: str):
 
     logger.info(
         "Staged: %s/%s → StagingItem(%s) [%s timestep(s), no shredding]",
-        bucket, key, item.pk, len(timestamps),
+        bucket,
+        key,
+        item.pk,
+        len(timestamps),
     )
     return item
 
@@ -194,6 +191,7 @@ def register_staging_file(bucket: str, key: str):
 # =============================================================================
 # Redis event loop (mirror of consumer.py, separate list)
 # =============================================================================
+
 
 def _handle_event(ev: dict):
     bucket_name = ev.get("s3", {}).get("bucket", {}).get("name", "")
@@ -218,6 +216,7 @@ def _handle_event(ev: dict):
         return
 
     from georiva.ingestion.tasks import process_staging_file
+
     process_staging_file.delay(bucket=BucketType.STAGING, key=key)
 
 

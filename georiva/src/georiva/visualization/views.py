@@ -21,15 +21,14 @@ def item_preview(request, item_id):
     # variable's current render range (ADR 0021) — no stored visual asset.
     for asset in assets:
         asset.texture_url = (
-            titiler_encoded_preview_url(item, asset.variable)
-            if asset.format == asset.Format.COG else ""
+            titiler_encoded_preview_url(item, asset.variable) if asset.format == asset.Format.COG else ""
         )
-    
+
     context = {
         "breadcrumbs_items": breadcrumbs_items,
         "header_title": "Item Preview - {}".format(item),
-        'item': item,
-        "assets": assets
+        "item": item,
+        "assets": assets,
     }
-    
-    return render(request, 'visualization/item_preview.html', context)
+
+    return render(request, "visualization/item_preview.html", context)

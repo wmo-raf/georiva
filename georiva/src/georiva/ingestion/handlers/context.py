@@ -4,6 +4,7 @@ IngestionContext — shared state for a single file ingestion run.
 Constructed once in IngestionService.process_file() and passed to every
 handler.  Avoids threading 8+ arguments through nested call stacks.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

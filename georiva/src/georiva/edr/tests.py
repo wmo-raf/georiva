@@ -2,6 +2,7 @@
 EDR serving must expose only `public` collections — `internal` derivation
 intermediates are read by the engine but never served.
 """
+
 from django.test import TestCase
 from django.urls import reverse
 
@@ -15,15 +16,19 @@ class EDRVisibilityTests(TestCase):
         # The API roots are per organisation and resolved from the Host, so the
         # client has to dial the org that owns these fixtures.
         dial_org(self.client)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.public = Collection.objects.create(
-            catalog=self.catalog, name="Tas", slug="tas",
+            catalog=self.catalog,
+            name="Tas",
+            slug="tas",
             visibility=Collection.Visibility.PUBLIC,
         )
         self.internal = Collection.objects.create(
-            catalog=self.catalog, name="Tas anomaly", slug="tas-anomaly",
+            catalog=self.catalog,
+            name="Tas anomaly",
+            slug="tas-anomaly",
             visibility=Collection.Visibility.INTERNAL,
         )
 
@@ -36,14 +41,10 @@ class EDRVisibilityTests(TestCase):
         self.assertNotIn("tas-anomaly", ids)
 
     def test_collection_detail_404_for_internal(self):
-        ok = self.client.get(
-            reverse("edr:collection-detail", args=["tas"])
-        )
+        ok = self.client.get(reverse("edr:collection-detail", args=["tas"]))
         self.assertEqual(ok.status_code, 200)
 
-        hidden = self.client.get(
-            reverse("edr:collection-detail", args=["tas-anomaly"])
-        )
+        hidden = self.client.get(reverse("edr:collection-detail", args=["tas-anomaly"]))
         self.assertEqual(hidden.status_code, 404)
 
 
@@ -61,28 +62,24 @@ class EDRStyledParameterTests(TestCase):
         tree["collection"].save()
 
     def _x_georiva(self):
-        response = self.client.get(
-            reverse("edr:collection-detail", args=[self.variable.collection.slug])
-        )
+        response = self.client.get(reverse("edr:collection-detail", args=[self.variable.collection.slug]))
         self.assertEqual(response.status_code, 200)
         return response.json()["parameter_names"][self.variable.slug]["x-georiva"]
 
     def test_the_default_styles_snapshot_serves_as_the_palette(self):
         from georiva.core.models import ColorRamp, VariableStyle
 
-        ramp = ColorRamp.objects.create(
-            name="Categories", ramp_type=ColorRamp.RampType.QUALITATIVE
-        )
+        ramp = ColorRamp.objects.create(name="Categories", ramp_type=ColorRamp.RampType.QUALITATIVE)
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=ramp,
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ffffff"}],
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            ramp=ramp,
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}],
         )
         x_georiva = self._x_georiva()
-        self.assertEqual(
-            x_georiva["palette"], [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]]
-        )
+        self.assertEqual(x_georiva["palette"], [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]])
         self.assertEqual(x_georiva["palette_min"], 0.0)
         self.assertEqual(x_georiva["palette_max"], 50.0)
         self.assertEqual(x_georiva["palette_name"], "Official")
@@ -101,19 +98,15 @@ class EDRStyledParameterTests(TestCase):
         must change nothing — same palette, same keys, and no index of the
         styles the machine plane knows about."""
         make_style(
-            self.variable, "official",
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ffffff"}],
+            self.variable,
+            "official",
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}],
         )
         make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
-        response = self.client.get(
-            reverse("edr:collection-detail", args=[self.variable.collection.slug])
-        )
+        response = self.client.get(reverse("edr:collection-detail", args=[self.variable.collection.slug]))
         parameter = response.json()["parameter_names"][self.variable.slug]
         x_georiva = parameter["x-georiva"]
-        self.assertEqual(
-            x_georiva["palette"], [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]]
-        )
+        self.assertEqual(x_georiva["palette"], [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]])
         self.assertEqual(x_georiva["palette_name"], "Official")
         self.assertNotIn("styles", x_georiva)
         self.assertNotIn("renders", parameter)

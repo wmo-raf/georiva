@@ -34,57 +34,55 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         get_boundaries_for_collection,
         persist_stats,
     )
-    
+
     try:
-        asset = (
-            Asset.objects
-            .select_related(
-                "item",
-                "item__collection",
-                "item__collection__catalog",
-                "variable",
-            )
-            .get(pk=asset_id, format=Asset.Format.COG)
-        )
+        asset = Asset.objects.select_related(
+            "item",
+            "item__collection",
+            "item__collection__catalog",
+            "variable",
+        ).get(pk=asset_id, format=Asset.Format.COG)
     except Asset.DoesNotExist:
         logger.warning(
             "compute_boundary_zonal_stats: asset %d not found or not COG",
             asset_id,
         )
         return
-    
+
     collection = asset.item.collection
     boundaries_by_level = get_boundaries_for_collection(collection)
-    
+
     if not boundaries_by_level:
         logger.debug(
-            "compute_boundary_zonal_stats: no boundary level configured "
-            "for collection %s — skipping",
+            "compute_boundary_zonal_stats: no boundary level configured for collection %s — skipping",
             collection.slug,
         )
         return
-    
+
     try:
         cog_bytes = storage.assets.read_bytes(asset.href)
     except Exception as exc:
         logger.error(
             "compute_boundary_zonal_stats: failed to read COG %s: %s",
-            asset.href, exc,
+            asset.href,
+            exc,
         )
         raise self.retry(exc=exc)
-    
+
     for level, boundaries in boundaries_by_level.items():
         stats_rows = compute_stats_from_cog_bytes(cog_bytes, boundaries)
-        
+
         count = persist_stats(
             item=asset.item,
             variable=asset.variable,
             stats_rows=stats_rows,
         )
-        
+
         logger.info(
             "compute_boundary_zonal_stats: %d row(s) at level %d for asset %d",
-            count, level, asset_id,
+            count,
+            level,
+            asset_id,
         )
 
 
@@ -105,46 +103,37 @@ def sweep_stale_boundary_stats() -> None:
     from django.utils import timezone
     from georiva.core.models import Collection
     from .models import BoundaryZonalStats
-    
+
     now = timezone.now()
     pruned = 0
-    
+
     for collection in Collection.objects.filter(is_forecast=True, is_active=True):
-        
         # Past forecast pruning
         if not collection.retain_past_forecasts:
-            deleted, _ = (
-                BoundaryZonalStats.objects
-                .filter(
-                    item__collection=collection,
-                    time__lt=now,
-                )
-                .delete()
-            )
+            deleted, _ = BoundaryZonalStats.objects.filter(
+                item__collection=collection,
+                time__lt=now,
+            ).delete()
             pruned += deleted
-        
+
         # Latest-run-only pruning
         if collection.retain_latest_run_only:
             latest_ref = (
-                BoundaryZonalStats.objects
-                .filter(item__collection=collection)
+                BoundaryZonalStats.objects.filter(item__collection=collection)
                 .order_by("-item__reference_time")
                 .values_list("item__reference_time", flat=True)
                 .first()
             )
             if latest_ref:
                 deleted, _ = (
-                    BoundaryZonalStats.objects
-                    .filter(item__collection=collection)
+                    BoundaryZonalStats.objects.filter(item__collection=collection)
                     .exclude(item__reference_time=latest_ref)
                     .delete()
                 )
                 pruned += deleted
-    
+
     if pruned:
-        logger.info(
-            "sweep_stale_boundary_stats: pruned %d stale row(s)", pruned
-        )
+        logger.info("sweep_stale_boundary_stats: pruned %d stale row(s)", pruned)
 
 
 @app.on_after_finalize.connect
@@ -152,10 +141,8 @@ def setup_zonal_stats_periodic_tasks(sender, **kwargs) -> None:
     """Register sweep_stale_boundary_stats as a periodic task (every 5 min)."""
     try:
         from django_celery_beat.models import IntervalSchedule, PeriodicTask
-        
-        schedule, _ = IntervalSchedule.objects.get_or_create(
-            every=5, period=IntervalSchedule.MINUTES
-        )
+
+        schedule, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
         PeriodicTask.objects.update_or_create(
             name="georiva.analysis.zonal_stats.sweep_stale_boundary_stats",
             defaults={
@@ -165,6 +152,4 @@ def setup_zonal_stats_periodic_tasks(sender, **kwargs) -> None:
             },
         )
     except Exception as exc:
-        logger.warning(
-            "Could not register zonal stats periodic task: %s", exc
-        )
+        logger.warning("Could not register zonal stats periodic task: %s", exc)

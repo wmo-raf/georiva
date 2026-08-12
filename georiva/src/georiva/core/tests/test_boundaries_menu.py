@@ -7,6 +7,7 @@ superuser gate, and the suppression of the duplicate entry ``@register_setting``
 adds. A Wagtail or ``adminboundarymanager`` upgrade could undo either one
 without failing anything else.
 """
+
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -22,7 +23,6 @@ HOST = {"host": "kenya.georiva.test"}
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class BoundariesMenuPlacementTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
 
@@ -47,10 +47,7 @@ class BoundariesMenuPlacementTests(TestCase):
         self._login("root", superuser=True)
         request = self._request()
 
-        group = next(
-            item for item in settings_menu.menu_items_for_request(request)
-            if item.label == "Boundaries"
-        )
+        group = next(item for item in settings_menu.menu_items_for_request(request) if item.label == "Boundaries")
         self.assertIsInstance(group, SubmenuMenuItem)
         self.assertEqual(
             [child.url for child in group.menu.menu_items_for_request(request)],

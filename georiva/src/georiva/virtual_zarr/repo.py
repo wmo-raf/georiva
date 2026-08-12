@@ -27,6 +27,7 @@ from georiva.virtual_zarr.classify import CommittedState
 
 logger = logging.getLogger(__name__)
 
+
 # Committed virtual refs use s3:// URIs on the assets bucket (see
 # VirtualZarrBuilder — rename_paths rewrites chunk URLs to this form).
 def container_prefix() -> str:
@@ -65,33 +66,37 @@ def _storage(repo_path: str) -> icechunk.Storage:
 
 def _config(*, internal: bool) -> icechunk.RepositoryConfig:
     config = icechunk.RepositoryConfig.default()
-    config.set_virtual_chunk_container(icechunk.VirtualChunkContainer(
-        container_prefix(),
-        icechunk.s3_store(
-            region=settings.AWS_S3_REGION_NAME,
-            endpoint_url=_endpoint_url(internal),
-            allow_http=True,
-            s3_compatible=True,
-            force_path_style=True,
-        ),
-    ))
+    config.set_virtual_chunk_container(
+        icechunk.VirtualChunkContainer(
+            container_prefix(),
+            icechunk.s3_store(
+                region=settings.AWS_S3_REGION_NAME,
+                endpoint_url=_endpoint_url(internal),
+                allow_http=True,
+                s3_compatible=True,
+                force_path_style=True,
+            ),
+        )
+    )
     return config
 
 
 def _credentials() -> dict:
-    return icechunk.containers_credentials({
-        container_prefix(): icechunk.s3_credentials(
-            access_key_id=settings.AWS_ACCESS_KEY_ID,
-            secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        ),
-    })
+    return icechunk.containers_credentials(
+        {
+            container_prefix(): icechunk.s3_credentials(
+                access_key_id=settings.AWS_ACCESS_KEY_ID,
+                secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            ),
+        }
+    )
 
 
 def open_repo(
-        repo_path: str,
-        *,
-        internal: bool = True,
-        create: bool = False,
+    repo_path: str,
+    *,
+    internal: bool = True,
+    create: bool = False,
 ) -> icechunk.Repository:
     """
     Open (or, with ``create=True``, open-or-create) the Icechunk repo at an
@@ -113,11 +118,12 @@ def repo_exists(repo_path: str) -> bool:
 # Commit metadata — the watermark's source of truth (design decision 5)
 # ---------------------------------------------------------------------------
 
+
 def commit_metadata(
-        watermark: datetime,
-        item_count: int,
-        time_start: datetime,
-        time_end: datetime,
+    watermark: datetime,
+    item_count: int,
+    time_start: datetime,
+    time_end: datetime,
 ) -> dict:
     """Properties recorded on every commit; values must be JSON-friendly."""
     return {

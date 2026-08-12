@@ -6,6 +6,7 @@ product_status joins a DerivedProduct to its DerivationRuns by the opaque
 The UI knows about products; the engine still does not (it only stored the
 origin).
 """
+
 from datetime import datetime, timezone
 
 from django.contrib.auth import get_user_model
@@ -24,21 +25,28 @@ User = get_user_model()
 
 def _run(origin, status, *, completed_at=None, unit):
     from georiva.processing.recipe import unit_hash
+
     return DerivationRun.objects.create(
-        recipe_type="climatology", recipe_version="1",
-        unit_key=unit, unit_hash=unit_hash(unit),
-        status=status, origin=origin, completed_at=completed_at,
+        recipe_type="climatology",
+        recipe_version="1",
+        unit_key=unit,
+        unit_hash=unit_hash(unit),
+        status=status,
+        origin=origin,
+        completed_at=completed_at,
     )
 
 
 class ProductStatusTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
 
     def _origin(self):
@@ -103,7 +111,9 @@ class ProductStatusTests(TestCase):
 
     def test_another_products_runs_do_not_bleed_in(self):
         other = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="normals", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="normals",
+            recipe_type="climatology",
         )
         # The other product is FAILED; ours has only a COMPLETED run.
         _run(product_origin(other), DerivationRun.Status.FAILED, unit={"n": 9})
@@ -124,12 +134,14 @@ class ProductRunsTests(TestCase):
     #211): the product's DerivationRuns joined by origin, most-recent first."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
 
     def _origin(self):
@@ -147,7 +159,9 @@ class ProductRunsTests(TestCase):
 
     def test_excludes_runs_belonging_to_another_product(self):
         other = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="normals", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="normals",
+            recipe_type="climatology",
         )
         mine = _run(self._origin(), DerivationRun.Status.COMPLETED, unit={"n": 1})
         _run(product_origin(other), DerivationRun.Status.FAILED, unit={"n": 9})
@@ -173,12 +187,14 @@ class RunListViewTests(TestCase):
         self.user = User.objects.create_superuser("admin_runs", "r@test.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
 
     def _url(self):
@@ -187,7 +203,8 @@ class RunListViewTests(TestCase):
     def _failed_run(self):
         run = _run(product_origin(self.product), DerivationRun.Status.FAILED, unit={"n": 1})
         DerivationRun.objects.filter(pk=run.pk).update(
-            error="boom: the transform blew up", attempts=3,
+            error="boom: the transform blew up",
+            attempts=3,
         )
         return run
 
@@ -197,10 +214,10 @@ class RunListViewTests(TestCase):
         response = self.client.get(self._url())
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "failed")                     # status
-        self.assertContains(response, "climatology")                # unit recipe type
+        self.assertContains(response, "failed")  # status
+        self.assertContains(response, "climatology")  # unit recipe type
         self.assertContains(response, "boom: the transform blew up")  # error snippet
-        self.assertContains(response, "3")                          # attempts
+        self.assertContains(response, "3")  # attempts
 
     def test_status_filter_querystring_narrows_the_list(self):
         from georiva.processing.recipe import unit_hash
@@ -234,28 +251,27 @@ class RunListViewTests(TestCase):
     def test_feed_dashboard_card_links_to_the_run_list(self):
         # The base feed declares no products, so the card renders as an orphan —
         # which must still expose its run history.
-        response = self.client.get(
-            reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
-        )
+        response = self.client.get(reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
 
         self.assertContains(response, self._url())
 
     def test_run_list_breadcrumbs_back_to_the_feed_dashboard(self):
         response = self.client.get(self._url())
 
-        self.assertContains(
-            response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
-        )
+        self.assertContains(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
 
     def test_each_run_row_links_to_its_detail_page(self):
         run = self._failed_run()
 
         response = self.client.get(self._url())
 
-        self.assertContains(response, reverse(
-            "derived_product_run_detail",
-            kwargs={"product_pk": self.product.pk, "run_pk": run.pk},
-        ))
+        self.assertContains(
+            response,
+            reverse(
+                "derived_product_run_detail",
+                kwargs={"product_pk": self.product.pk, "run_pk": run.pk},
+            ),
+        )
 
 
 class RunDetailViewTests(TestCase):
@@ -266,12 +282,14 @@ class RunDetailViewTests(TestCase):
         self.user = User.objects.create_superuser("admin_rd", "d@test.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Rain Feed", catalog=self.catalog)
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
 
     def _run_rec(self, **overrides):
@@ -303,8 +321,8 @@ class RunDetailViewTests(TestCase):
 
         response = self.client.get(self._url(run))
 
-        self.assertContains(response, "climatology")            # recipe type
-        self.assertContains(response, unit_hash({"n": 1}))      # full unit hash
+        self.assertContains(response, "climatology")  # recipe type
+        self.assertContains(response, unit_hash({"n": 1}))  # full unit hash
 
     def test_shows_attempts_and_retry_reason(self):
         run = self._run_rec(
@@ -314,7 +332,7 @@ class RunDetailViewTests(TestCase):
 
         response = self.client.get(self._url(run))
 
-        self.assertContains(response, "4")                       # attempts
+        self.assertContains(response, "4")  # attempts
         self.assertContains(response, "Stale RUNNING reclaimed")  # reason label
 
     def test_completed_run_links_to_produced_item_and_lineage(self):
@@ -323,9 +341,7 @@ class RunDetailViewTests(TestCase):
         from georiva.core.models import Item
 
         col = Collection.objects.create(catalog=self.catalog, slug="out", name="out")
-        item = Item.objects.create(
-            collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc)
-        )
+        item = Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
         run = self._run_rec(status=DerivationRun.Status.COMPLETED, produced_item=item)
 
         response = self.client.get(self._url(run))

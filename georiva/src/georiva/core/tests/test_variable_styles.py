@@ -9,6 +9,7 @@ Two subjects, each at the model seam:
   absolute stops, in both continuous and stepped modes, and re-applying is an
   explicit act that regenerates from the ramp.
 """
+
 from importlib import import_module
 
 from django.core.exceptions import ValidationError
@@ -20,14 +21,11 @@ from georiva.core.models.visualization import generate_stops
 from georiva.organisations.testing import make_org_tree, make_organisation
 
 
-def make_ramp(hexes, *, ramp_type=ColorRamp.RampType.SEQUENTIAL, positions=None,
-              name="Test ramp"):
+def make_ramp(hexes, *, ramp_type=ColorRamp.RampType.SEQUENTIAL, positions=None, name="Test ramp"):
     ramp = ColorRamp.objects.create(name=name, ramp_type=ramp_type)
     positions = positions or [None] * len(hexes)
     for i, (hex_value, position) in enumerate(zip(hexes, positions)):
-        ColorRampStop.objects.create(
-            ramp=ramp, hex_value=hex_value, position=position, sort_order=i
-        )
+        ColorRampStop.objects.create(ramp=ramp, hex_value=hex_value, position=position, sort_order=i)
     return ramp
 
 
@@ -40,49 +38,33 @@ class VariableStyleRowTests(TestCase):
         cls.variable = make_org_tree(cls.kenya)["variable"]
 
     def test_exactly_one_default_per_variable_is_enforced_by_the_database(self):
-        VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True
-        )
+        VariableStyle.objects.create(variable=self.variable, name="Official", slug="official", is_default=True)
         with transaction.atomic():
             with self.assertRaises(IntegrityError):
-                VariableStyle.objects.create(
-                    variable=self.variable, name="Rival", slug="rival", is_default=True
-                )
+                VariableStyle.objects.create(variable=self.variable, name="Rival", slug="rival", is_default=True)
 
     def test_any_number_of_non_default_styles_may_coexist(self):
-        VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True
-        )
-        VariableStyle.objects.create(
-            variable=self.variable, name="Analyst", slug="analyst"
-        )
-        VariableStyle.objects.create(
-            variable=self.variable, name="Draft", slug="draft"
-        )
+        VariableStyle.objects.create(variable=self.variable, name="Official", slug="official", is_default=True)
+        VariableStyle.objects.create(variable=self.variable, name="Analyst", slug="analyst")
+        VariableStyle.objects.create(variable=self.variable, name="Draft", slug="draft")
         self.assertEqual(self.variable.styles.count(), 3)
 
     def test_each_variable_carries_its_own_default(self):
         other = make_org_tree(make_organisation("uganda"))["variable"]
-        VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True
-        )
-        VariableStyle.objects.create(
-            variable=other, name="Official", slug="official", is_default=True
-        )
+        VariableStyle.objects.create(variable=self.variable, name="Official", slug="official", is_default=True)
+        VariableStyle.objects.create(variable=other, name="Official", slug="official", is_default=True)
 
     def test_a_slug_is_unique_within_its_variable(self):
-        VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official"
-        )
+        VariableStyle.objects.create(variable=self.variable, name="Official", slug="official")
         with transaction.atomic():
             with self.assertRaises(IntegrityError):
-                VariableStyle.objects.create(
-                    variable=self.variable, name="Official again", slug="official"
-                )
+                VariableStyle.objects.create(variable=self.variable, name="Official again", slug="official")
 
     def test_stepped_mode_requires_a_class_count(self):
         style = VariableStyle(
-            variable=self.variable, name="Classes", slug="classes",
+            variable=self.variable,
+            name="Classes",
+            slug="classes",
             mode=VariableStyle.Mode.STEPPED,
         )
         with self.assertRaises(ValidationError):
@@ -90,16 +72,16 @@ class VariableStyleRowTests(TestCase):
 
     def test_a_malformed_stops_snapshot_is_rejected(self):
         style = VariableStyle(
-            variable=self.variable, name="Broken", slug="broken",
+            variable=self.variable,
+            name="Broken",
+            slug="broken",
             stops=[{"value": 0.0}],
         )
         with self.assertRaises(ValidationError):
             style.full_clean()
 
     def test_default_style_resolves_the_default_among_several(self):
-        VariableStyle.objects.create(
-            variable=self.variable, name="Analyst", slug="analyst"
-        )
+        VariableStyle.objects.create(variable=self.variable, name="Analyst", slug="analyst")
         official = VariableStyle.objects.create(
             variable=self.variable, name="Official", slug="official", is_default=True
         )
@@ -164,20 +146,14 @@ class SnapshotGenerationTests(TestCase):
 
     def test_stepped_samples_intermediate_class_colors_from_the_ramp(self):
         ramp = make_ramp(["#000000", "#ffffff"])
-        stops = generate_stops(
-            ramp, 0.0, 90.0, mode=VariableStyle.Mode.STEPPED, steps=3
-        )
+        stops = generate_stops(ramp, 0.0, 90.0, mode=VariableStyle.Mode.STEPPED, steps=3)
         # Middle class color sits halfway along the ramp.
         self.assertEqual(stops[2], {"value": 30.0, "color": "#808080"})
         self.assertEqual(stops[3], {"value": 60.0, "color": "#808080"})
 
     def test_stepped_cycles_a_qualitative_ramps_colors_instead_of_blending(self):
-        ramp = make_ramp(
-            ["#111111", "#222222"], ramp_type=ColorRamp.RampType.QUALITATIVE
-        )
-        stops = generate_stops(
-            ramp, 0.0, 3.0, mode=VariableStyle.Mode.STEPPED, steps=3
-        )
+        ramp = make_ramp(["#111111", "#222222"], ramp_type=ColorRamp.RampType.QUALITATIVE)
+        stops = generate_stops(ramp, 0.0, 3.0, mode=VariableStyle.Mode.STEPPED, steps=3)
         self.assertEqual(
             [s["color"] for s in stops],
             ["#111111", "#111111", "#222222", "#222222", "#111111", "#111111"],
@@ -199,8 +175,11 @@ class ApplyRampTests(TestCase):
     def test_apply_ramp_materializes_the_snapshot_from_the_variables_range(self):
         ramp = make_ramp(["#000000", "#ffffff"])
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            ramp=ramp, is_default=True,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            ramp=ramp,
+            is_default=True,
         )
         style.apply_ramp()
         # make_org_tree's variable spans 0–50.
@@ -215,7 +194,10 @@ class ApplyRampTests(TestCase):
     def test_apply_ramp_discards_fine_tuning(self):
         ramp = make_ramp(["#000000", "#ffffff"])
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", ramp=ramp,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            ramp=ramp,
             stops=[{"value": 42.0, "color": "#123456"}],
         )
         style.apply_ramp()
@@ -223,7 +205,9 @@ class ApplyRampTests(TestCase):
 
     def test_apply_ramp_without_a_ramp_is_refused(self):
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Tuned by hand", slug="tuned",
+            variable=self.variable,
+            name="Tuned by hand",
+            slug="tuned",
         )
         with self.assertRaises(ValueError):
             style.apply_ramp()
@@ -238,7 +222,10 @@ class StyleAsPaletteTests(TestCase):
 
     def test_the_snapshot_converts_to_weatherlayers_pairs(self):
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
             stops=[
                 {"value": 0.0, "color": "#000000"},
                 {"value": 50.0, "color": "#ff000080"},
@@ -251,7 +238,9 @@ class StyleAsPaletteTests(TestCase):
 
     def test_min_max_come_from_the_snapshot(self):
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             stops=[
                 {"value": 10.0, "color": "#000000"},
                 {"value": 20.0, "color": "#ffffff"},
@@ -261,9 +250,11 @@ class StyleAsPaletteTests(TestCase):
 
     def test_the_variable_serves_its_default_styles_snapshot(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official", is_default=True,
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ffffff"}],
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}],
         )
         self.assertEqual(
             self.variable.weather_layers_palette,
@@ -278,10 +269,14 @@ class StyleAsPaletteTests(TestCase):
 
     def test_the_style_renders_a_css_gradient_for_swatches(self):
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 25.0, "color": "#ff0000"},
-                   {"value": 50.0, "color": "#ffffff"}],
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            stops=[
+                {"value": 0.0, "color": "#000000"},
+                {"value": 25.0, "color": "#ff0000"},
+                {"value": 50.0, "color": "#ffffff"},
+            ],
         )
         self.assertEqual(
             style.css_gradient(),
@@ -292,9 +287,7 @@ class StyleAsPaletteTests(TestCase):
 #: The palette-retirement transforms, imported from the data migration itself
 #: so the tests and the migration can never drift apart. (importlib because
 #: the module name starts with a digit.)
-_palette_migration = import_module(
-    "georiva.core.migrations.0013_migrate_palettes_to_styles"
-)
+_palette_migration = import_module("georiva.core.migrations.0013_migrate_palettes_to_styles")
 
 
 class PaletteMigrationTests(TestCase):
@@ -312,9 +305,7 @@ class PaletteMigrationTests(TestCase):
         )
 
     def test_normalization_preserves_stop_order_not_value_order(self):
-        self.assertEqual(
-            _palette_migration.normalized_positions([10.0, 0.0]), [1.0, 0.0]
-        )
+        self.assertEqual(_palette_migration.normalized_positions([10.0, 0.0]), [1.0, 0.0])
 
     def test_a_degenerate_span_spreads_evenly(self):
         self.assertEqual(
@@ -324,9 +315,7 @@ class PaletteMigrationTests(TestCase):
 
     def test_the_snapshot_carries_the_palettes_stops_verbatim(self):
         self.assertEqual(
-            _palette_migration.style_stops_from(
-                [(0.5, "#112233"), (11.5749, "445566aa")]
-            ),
+            _palette_migration.style_stops_from([(0.5, "#112233"), (11.5749, "445566aa")]),
             [
                 {"value": 0.5, "color": "#112233"},
                 {"value": 11.5749, "color": "#445566aa"},
@@ -341,9 +330,7 @@ class PaletteMigrationTests(TestCase):
 
     def test_an_unsluggable_palette_name_still_gets_a_slug(self):
         self.assertEqual(_palette_migration.style_slug_from("温度"), "default")
-        self.assertEqual(
-            _palette_migration.style_slug_from("Kenya Rainfall"), "kenya-rainfall"
-        )
+        self.assertEqual(_palette_migration.style_slug_from("Kenya Rainfall"), "kenya-rainfall")
 
     def test_a_migrated_ramp_dodges_the_seeded_catalogs_names(self):
         # A legacy global palette named "viridis" collides with the seeded
@@ -360,9 +347,7 @@ class PaletteMigrationTests(TestCase):
         # does not collide with the instance-wide one.
         organisation = make_organisation("kenya")
         self.assertEqual(
-            _palette_migration._unique_ramp_name(
-                ColorRamp, organisation.pk, "viridis"
-            ),
+            _palette_migration._unique_ramp_name(ColorRamp, organisation.pk, "viridis"),
             "viridis",
         )
 

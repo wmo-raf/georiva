@@ -3,6 +3,7 @@ Engine tests — recipes are exercised *through* run()/run_unit(), with storage
 and the AssetWriter mocked. Mirrors sources/tests/test_loader_fetchrun.py
 (mock I/O, assert on produced records).
 """
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -37,28 +38,35 @@ def _mock_writer():
 
 class _PromotionFixture(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="geotiff"
         )
-        self.pub_col = Collection.objects.create(
-            catalog=self.catalog, slug="tas", name="tas"
-        )
+        self.pub_col = Collection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.unit = Unit.objects.create(name="Celsius", symbol="C")
         self.variable = Variable.objects.create(
-            collection=self.pub_col, slug="tas", name="tas",
-            unit=self.unit, value_min=0, value_max=50,
+            collection=self.pub_col,
+            slug="tas",
+            name="tas",
+            unit=self.unit,
+            value_min=0,
+            value_max=50,
         )
-        self.scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="tas", name="tas"
-        )
+        self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
             datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=10, height=10,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
         self.sasset = StagingAsset.objects.create(
-            item=self.sitem, href="cmip6/tas/f.tif", roles=["source"],
-            format="geotiff", checksum="abc123", variable=self.variable,
+            item=self.sitem,
+            href="cmip6/tas/f.tif",
+            roles=["source"],
+            format="geotiff",
+            checksum="abc123",
+            variable=self.variable,
         )
 
     def _unit(self):
@@ -70,7 +78,8 @@ class _PromotionFixture(TestCase):
         recipe = PromotionRecipe()
         data = np.full((10, 10), 5.0, dtype="float32")
         with patch.object(
-            PromotionRecipe, "read_raster",
+            PromotionRecipe,
+            "read_raster",
             return_value=(data, [0, 0, 1, 1], "EPSG:4326", 10, 10),
         ):
             return run_unit(recipe, self._unit(), writer=_mock_writer())
@@ -110,15 +119,20 @@ class PromotionThroughEngineTests(_PromotionFixture):
     def test_second_concurrent_acquire_is_blocked_by_lock(self):
         # First acquire takes the lock and leaves it RUNNING (not released).
         from georiva.processing.recipe import unit_hash
+
         uhash = unit_hash(self._unit())
         first = DerivationRun.acquire(
-            recipe_type="promotion", recipe_version="1",
-            unit_key=self._unit(), unit_hash=uhash,
+            recipe_type="promotion",
+            recipe_version="1",
+            unit_key=self._unit(),
+            unit_hash=uhash,
         )
         self.assertIsNotNone(first)
         second = DerivationRun.acquire(
-            recipe_type="promotion", recipe_version="1",
-            unit_key=self._unit(), unit_hash=uhash,
+            recipe_type="promotion",
+            recipe_version="1",
+            unit_key=self._unit(),
+            unit_hash=uhash,
         )
         self.assertIsNone(second)
 
@@ -146,15 +160,16 @@ class PromotionThroughEngineTests(_PromotionFixture):
         self.assertEqual(Item.objects.filter(collection=self.pub_col).count(), 1)
         self.assertEqual(DerivationLink.objects.count(), 1)
         item = Item.objects.get(pk=second.item_id)
-        self.assertEqual(
-            item.properties["derivation"]["input_hash"], second.input_hash
-        )
+        self.assertEqual(item.properties["derivation"]["input_hash"], second.input_hash)
 
     def test_dispatch_fans_out_one_task_per_unit(self):
         StagingItem.objects.create(
             collection=self.scol,
             datetime=datetime(2020, 1, 2, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=10, height=10,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
         with patch("georiva.processing.tasks.run_unit_task") as task:
             run(PromotionRecipe(), {"collection_slug": "tas"}, dispatch=True)
@@ -176,9 +191,7 @@ class PromotionThroughEngineTests(_PromotionFixture):
         item = Item.objects.get(pk=result.item_id)
         self.assertEqual(item.collection, self.pub_col)
         # No stray collection created from the old slug.
-        self.assertEqual(
-            Collection.objects.filter(catalog=self.catalog).count(), 1
-        )
+        self.assertEqual(Collection.objects.filter(catalog=self.catalog).count(), 1)
 
 
 class DerivationLinkConstraintTests(_PromotionFixture):
@@ -192,7 +205,9 @@ class DerivationLinkConstraintTests(_PromotionFixture):
         with self.assertRaises(IntegrityError), transaction.atomic():
             DerivationLink.objects.create(
                 derived_item=self._item(),
-                recipe_id="promotion", recipe_version="1", input_hash="x",
+                recipe_id="promotion",
+                recipe_version="1",
+                input_hash="x",
             )
 
     def test_rejects_two_sources(self):
@@ -202,19 +217,20 @@ class DerivationLinkConstraintTests(_PromotionFixture):
                 derived_item=item,
                 source_staging_item=self.sitem,
                 source_published_item=item,
-                recipe_id="promotion", recipe_version="1", input_hash="x",
+                recipe_id="promotion",
+                recipe_version="1",
+                input_hash="x",
             )
 
 
 class _FakeRecipe(BaseRecipe):
     """A trivial non-Promotion recipe — proves the engine is recipe-agnostic."""
+
     type = "fake"
     version = "1"
 
     def __init__(self, collection, variable, staging_item, staging_asset):
-        self._c, self._v, self._si, self._sa = (
-            collection, variable, staging_item, staging_asset
-        )
+        self._c, self._v, self._si, self._sa = (collection, variable, staging_item, staging_asset)
 
     def enumerate_units(self, selector):
         return [{"n": 1}]
@@ -226,16 +242,27 @@ class _FakeRecipe(BaseRecipe):
         return OutputItem(
             collection=self._c,
             time=datetime(2022, 6, 1, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=4, height=4,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
 
     def transform(self, unit, resolved):
         import numpy as np
-        return [OutputAsset(
-            variable=self._v, roles=["data"], format="cog",
-            array=np.zeros((4, 4), dtype="float32"),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=4, height=4,
-        )]
+
+        return [
+            OutputAsset(
+                variable=self._v,
+                roles=["data"],
+                format="cog",
+                array=np.zeros((4, 4), dtype="float32"),
+                bounds=[0, 0, 1, 1],
+                crs="EPSG:4326",
+                width=4,
+                height=4,
+            )
+        ]
 
 
 class EngineIsRecipeAgnosticTests(_PromotionFixture):
@@ -248,7 +275,8 @@ class EngineIsRecipeAgnosticTests(_PromotionFixture):
         # The shared materializer writes the COG from the one data
         # OutputAsset — visuals are derived on demand (ADR 0021).
         self.assertEqual(
-            set(item.assets.values_list("format", flat=True)), {"cog"},
+            set(item.assets.values_list("format", flat=True)),
+            {"cog"},
         )
         self.assertEqual(DerivationLink.objects.filter(derived_item=item).count(), 1)
         self.assertEqual(
@@ -266,11 +294,15 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         return Item.objects.create(
             collection=self.pub_col,
             time=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=2, height=3,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=2,
+            height=3,
         )
 
     def _materializer(self, writer):
         from georiva.ingestion.materialization import AssetMaterializer
+
         return AssetMaterializer(writer)
 
     def test_cog_output_asset_materializes_cog(self):
@@ -286,9 +318,16 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
 
         assets, grid = _register_asset(
             item,
-            OutputAsset(variable=self.variable, roles=["data"], format="cog",
-                        array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
-                        width=2, height=3),
+            OutputAsset(
+                variable=self.variable,
+                roles=["data"],
+                format="cog",
+                array=data,
+                bounds=[0, 0, 1, 1],
+                crs="EPSG:4326",
+                width=2,
+                height=3,
+            ),
             writer,
             self._materializer(writer),
         )
@@ -296,7 +335,8 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         writer.write_cog.assert_called_once()
         writer.write_metadata.assert_not_called()
         self.assertEqual(
-            {a.format for a in assets}, {Asset.Format.COG},
+            {a.format for a in assets},
+            {Asset.Format.COG},
         )
         # The grid the array was written with — run_unit stamps it on the item.
         self.assertEqual(grid, ([0, 0, 1, 1], 2, 3))
@@ -314,9 +354,16 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
 
         assets, grid = _register_asset(
             item,
-            OutputAsset(variable=self.variable, roles=["visual"], format="png",
-                        array=data, bounds=[0, 0, 1, 1], crs="EPSG:4326",
-                        width=2, height=3),
+            OutputAsset(
+                variable=self.variable,
+                roles=["visual"],
+                format="png",
+                array=data,
+                bounds=[0, 0, 1, 1],
+                crs="EPSG:4326",
+                width=2,
+                height=3,
+            ),
             writer,
             self._materializer(writer),
         )
@@ -334,7 +381,8 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
         self.pub_col.refresh_from_db()
         self.assertEqual(self.pub_col.bounds, [0, 0, 1, 1])
         self.assertEqual(
-            self.pub_col.time_start, datetime(2020, 1, 1, tzinfo=timezone.utc),
+            self.pub_col.time_start,
+            datetime(2020, 1, 1, tzinfo=timezone.utc),
         )
 
 
@@ -373,9 +421,7 @@ class AssetOutputPathTests(_PromotionFixture):
             reference_time=datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc),
         )
         path = _asset_output_path(item, self.variable, "cog")
-        self.assertEqual(
-            path, "test-org/cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif"
-        )
+        self.assertEqual(path, "test-org/cmip6/tas/tas/2026/05/01/tas_060000__ref20260501T000000.tif")
 
 
 class SoftTimeLimitReleasesLockTests(_PromotionFixture):
@@ -392,9 +438,7 @@ class SoftTimeLimitReleasesLockTests(_PromotionFixture):
 
         recipe = PromotionRecipe()
         # The soft limit fires mid-read; run_unit's `except Exception` catches it.
-        with patch.object(
-            PromotionRecipe, "read_raster", side_effect=SoftTimeLimitExceeded()
-        ):
+        with patch.object(PromotionRecipe, "read_raster", side_effect=SoftTimeLimitExceeded()):
             with self.assertRaises(SoftTimeLimitExceeded):
                 run_unit(recipe, self._unit(), writer=_mock_writer())
 

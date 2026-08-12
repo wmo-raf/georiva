@@ -6,6 +6,7 @@ against OGC's own ``wmtsGetCapabilities_response.xsd``. The schema tree is
 vendored under ``schemas/`` and every absolute ``schemaLocation`` resolves
 there, so the test never touches the network.
 """
+
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import skipUnless
@@ -51,17 +52,25 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
         self.organisation = make_organisation()
         catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Forecast", slug="forecast", file_format="geotiff",
+            name="Forecast",
+            slug="forecast",
+            file_format="geotiff",
         )
         unit = Unit.objects.create(name="Celsius", symbol="C")
         collection = Collection.objects.create(
-            catalog=catalog, name="Temperature", slug="temperature",
+            catalog=catalog,
+            name="Temperature",
+            slug="temperature",
             visibility=Collection.Visibility.PUBLIC,
             bounds=[20.0, -12.0, 52.0, 23.0],
         )
         Variable.objects.create(
-            collection=collection, slug="t2m", name="2m Temperature",
-            unit=unit, value_min=0, value_max=50,
+            collection=collection,
+            slug="t2m",
+            name="2m Temperature",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         Item.objects.create(
             collection=collection,
@@ -71,13 +80,19 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
         # A forecast collection too, so the two-dimension (Time + Reftime)
         # layer shape is held to the schema alongside the Time-only one.
         forecast = Collection.objects.create(
-            catalog=catalog, name="Model Temperature", slug="model-temperature",
+            catalog=catalog,
+            name="Model Temperature",
+            slug="model-temperature",
             visibility=Collection.Visibility.PUBLIC,
             bounds=[20.0, -12.0, 52.0, 23.0],
         )
         Variable.objects.create(
-            collection=forecast, slug="t2m", name="Forecast 2m Temperature",
-            unit=unit, value_min=0, value_max=50,
+            collection=forecast,
+            slug="t2m",
+            name="Forecast 2m Temperature",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         Item.objects.create(
             collection=forecast,
@@ -86,13 +101,12 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
         )
 
     def validate(self):
-        response = self.client.get(
-            reverse("wmts:capabilities", args=[self.organisation.slug])
-        )
+        response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
         self.assertEqual(response.status_code, 200)
         document = etree.fromstring(response.content)
         self.assertTrue(
-            self.schema.validate(document), self.schema.error_log,
+            self.schema.validate(document),
+            self.schema.error_log,
         )
 
     def test_a_populated_document_is_schema_valid(self):

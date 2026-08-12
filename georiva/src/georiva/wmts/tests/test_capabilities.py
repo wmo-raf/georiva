@@ -6,6 +6,7 @@ STAC visibility tests: the document lists exactly the collections ``visible_to``
 would serve this caller, and every URL in it is the machine-plane grammar read
 back verbatim.
 """
+
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -24,13 +25,24 @@ from georiva.core.machine_plane import (
     wmts_rest_tile_template,
 )
 from georiva.core.models import (
-    Catalog, Collection, Item, Unit, Variable, VariableStyle,
+    Catalog,
+    Collection,
+    Item,
+    Unit,
+    Variable,
+    VariableStyle,
 )
 from georiva.organisations.testing import (
-    dial_org, join_org, make_organisation, org_host,
+    dial_org,
+    join_org,
+    make_organisation,
+    org_host,
 )
 from georiva.wmts.testing import (
-    NS, PUBLIC_LAYER, CapabilitiesReader, IsolatedCapabilitiesCache,
+    NS,
+    PUBLIC_LAYER,
+    CapabilitiesReader,
+    IsolatedCapabilitiesCache,
     make_tiered_catalog,
 )
 
@@ -42,18 +54,26 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Forecast", slug="forecast", file_format="geotiff",
+            name="Forecast",
+            slug="forecast",
+            file_format="geotiff",
         )
         unit = Unit.objects.create(name="Celsius", symbol="C")
 
         self.public = Collection.objects.create(
-            catalog=self.catalog, name="Temperature", slug="temperature",
+            catalog=self.catalog,
+            name="Temperature",
+            slug="temperature",
             visibility=Collection.Visibility.PUBLIC,
             bounds=[20.0, -12.0, 52.0, 23.0],
         )
         self.variable = Variable.objects.create(
-            collection=self.public, slug="t2m", name="2m Temperature",
-            unit=unit, value_min=0, value_max=50,
+            collection=self.public,
+            slug="t2m",
+            name="2m Temperature",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         Item.objects.create(
             collection=self.public,
@@ -65,26 +85,36 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         )
 
         private = Collection.objects.create(
-            catalog=self.catalog, name="Members only", slug="members-only",
+            catalog=self.catalog,
+            name="Members only",
+            slug="members-only",
             visibility=Collection.Visibility.PRIVATE,
         )
         Variable.objects.create(
-            collection=private, slug="t2m", name="private t2m",
-            unit=unit, value_min=0, value_max=50,
+            collection=private,
+            slug="t2m",
+            name="private t2m",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         internal = Collection.objects.create(
-            catalog=self.catalog, name="Intermediate", slug="intermediate",
+            catalog=self.catalog,
+            name="Intermediate",
+            slug="intermediate",
             visibility=Collection.Visibility.INTERNAL,
         )
         Variable.objects.create(
-            collection=internal, slug="t2m", name="internal t2m",
-            unit=unit, value_min=0, value_max=50,
+            collection=internal,
+            slug="t2m",
+            name="internal t2m",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
 
     def fetch(self):
-        response = self.client.get(
-            reverse("wmts:capabilities", args=[self.organisation.slug])
-        )
+        response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
         self.assertEqual(response.status_code, 200)
         return ET.fromstring(response.content)
 
@@ -92,10 +122,7 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         return document.findall("wmts:Contents/wmts:Layer", NS)
 
     def layer_identifiers(self, document):
-        return [
-            layer.findtext("ows:Identifier", namespaces=NS)
-            for layer in self.layers(document)
-        ]
+        return [layer.findtext("ows:Identifier", namespaces=NS) for layer in self.layers(document)]
 
     def test_the_route_spells_what_the_machine_plane_builder_writes(self):
         self.assertEqual(
@@ -133,7 +160,8 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         document = self.fetch()
         (layer,) = self.layers(document)
         self.assertEqual(
-            [f.text for f in layer.findall("wmts:Format", NS)], ["image/png"],
+            [f.text for f in layer.findall("wmts:Format", NS)],
+            ["image/png"],
         )
         self.assertEqual(
             [
@@ -155,8 +183,7 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         self.assertEqual(resource.get("format"), "image/png")
         self.assertEqual(
             resource.get("template"),
-            f"http://{org_host()}"
-            + wmts_rest_tile_template(self.variable, ("Time",)),
+            f"http://{org_host()}" + wmts_rest_tile_template(self.variable, ("Time",)),
         )
 
     def test_a_filled_template_scopes_back_to_the_advertised_collection(self):
@@ -166,19 +193,21 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         document lands on a working tile route."""
         (layer,) = self.layers(self.fetch())
         template = layer.find("wmts:ResourceURL", NS).get("template")
-        split = urlsplit(template.format(
-            TileMatrix=6, TileCol=38, TileRow=32, Time="2026-03-01T12:00:00Z",
-        ))
+        split = urlsplit(
+            template.format(
+                TileMatrix=6,
+                TileCol=38,
+                TileRow=32,
+                Time="2026-03-01T12:00:00Z",
+            )
+        )
         self.assertEqual(
             scope_of(f"{split.path}?{split.query}"),
             MachineScope("test-org", "forecast", "temperature"),
         )
 
     def resource_urls(self, layer):
-        return {
-            resource.get("resourceType"): resource
-            for resource in layer.findall("wmts:ResourceURL", NS)
-        }
+        return {resource.get("resourceType"): resource for resource in layer.findall("wmts:ResourceURL", NS)}
 
     def test_the_layer_carries_an_identify_template_beside_the_tile_one(self):
         """#379: the InfoFormat above promises an identify, and until this
@@ -192,8 +221,7 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         self.assertEqual(info.get("format"), "application/json")
         self.assertEqual(
             info.get("template"),
-            f"http://{org_host()}"
-            + wmts_rest_featureinfo_template(self.variable, ("Time",)),
+            f"http://{org_host()}" + wmts_rest_featureinfo_template(self.variable, ("Time",)),
         )
 
     def test_the_identify_template_is_the_tile_template_plus_a_pixel(self):
@@ -212,10 +240,18 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         reads a tile by, so the deeper path must still name this collection —
         otherwise the document advertises an address nginx denies."""
         resources = self.resource_urls(self.layers(self.fetch())[0])
-        split = urlsplit(resources["FeatureInfo"].get("template").format(
-            TileMatrix=6, TileCol=38, TileRow=32, J=128, I=64,
-            Time="2026-03-01T12:00:00Z",
-        ))
+        split = urlsplit(
+            resources["FeatureInfo"]
+            .get("template")
+            .format(
+                TileMatrix=6,
+                TileCol=38,
+                TileRow=32,
+                J=128,
+                I=64,
+                Time="2026-03-01T12:00:00Z",
+            )
+        )
         self.assertEqual(
             scope_of(f"{split.path}?{split.query}"),
             MachineScope("test-org", "forecast", "temperature"),
@@ -233,18 +269,14 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         self.assertEqual(bbox.findtext("ows:UpperCorner", namespaces=NS), "52.0 23.0")
 
     def test_the_document_is_served_as_xml(self):
-        response = self.client.get(
-            reverse("wmts:capabilities", args=[self.organisation.slug])
-        )
+        response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
         self.assertEqual(response["Content-Type"], "application/xml")
 
     def test_anothers_org_path_on_this_host_is_absent(self):
         """The host is the authority and the path may only agree with it —
         the same rule the tile-config callback enforces (#354, story 25)."""
         make_organisation("other-org")
-        response = self.client.get(
-            reverse("wmts:capabilities", args=["other-org"])
-        )
+        response = self.client.get(reverse("wmts:capabilities", args=["other-org"]))
         self.assertEqual(response.status_code, 404)
 
     def test_an_unknown_org_segment_is_absent_too(self):
@@ -271,9 +303,7 @@ class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
 
     def test_the_kvp_operations_point_at_the_org_scoped_endpoint(self):
         operations = self.operations(self.fetch())
-        expected = (
-            f"http://{org_host()}{wmts_kvp_endpoint(self.organisation)}?"
-        )
+        expected = f"http://{org_host()}{wmts_kvp_endpoint(self.organisation)}?"
         self.assertEqual(
             operations,
             {
@@ -292,16 +322,21 @@ class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
     def test_each_operation_declares_the_kvp_encoding(self):
         document = ET.fromstring(self.fetch().content)
         gets = document.findall(
-            "ows:OperationsMetadata/ows:Operation/ows:DCP/ows:HTTP/ows:Get", NS,
+            "ows:OperationsMetadata/ows:Operation/ows:DCP/ows:HTTP/ows:Get",
+            NS,
         )
         self.assertEqual(len(gets), 3)
         for get in gets:
             constraint = get.find("ows:Constraint", NS)
             self.assertEqual(constraint.get("name"), "GetEncoding")
             self.assertEqual(
-                [v.text for v in constraint.findall(
-                    "ows:AllowedValues/ows:Value", NS,
-                )],
+                [
+                    v.text
+                    for v in constraint.findall(
+                        "ows:AllowedValues/ows:Value",
+                        NS,
+                    )
+                ],
                 ["KVP"],
             )
 
@@ -310,10 +345,7 @@ class WMTSKVPBindingTests(CapabilitiesReader, TestCase):
         gate reads as the layer's own collection (#363) — the same arm of
         ``scope_of`` GetTile travels, so identify opens no side door."""
         href = self.operations(self.fetch())["GetFeatureInfo"]
-        split = urlsplit(
-            f"{href}SERVICE=WMTS&REQUEST=GetFeatureInfo"
-            f"&LAYER={PUBLIC_LAYER}&INFOFORMAT=application/json"
-        )
+        split = urlsplit(f"{href}SERVICE=WMTS&REQUEST=GetFeatureInfo&LAYER={PUBLIC_LAYER}&INFOFORMAT=application/json")
         self.assertEqual(
             scope_of(f"{split.path}?{split.query}"),
             MachineScope("test-org", "forecast", "temperature"),
@@ -347,17 +379,25 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         self.organisation = make_organisation()
         catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Weather", slug="weather", file_format="geotiff",
+            name="Weather",
+            slug="weather",
+            file_format="geotiff",
         )
         unit = Unit.objects.create(name="Celsius", symbol="C")
 
         observations = Collection.objects.create(
-            catalog=catalog, name="Station Temperature", slug="obs-temperature",
+            catalog=catalog,
+            name="Station Temperature",
+            slug="obs-temperature",
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=observations, slug="t2m", name="2m Temperature",
-            unit=unit, value_min=0, value_max=50,
+            collection=observations,
+            slug="t2m",
+            name="2m Temperature",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         for hour in (0, 6, 12):
             Item.objects.create(
@@ -366,12 +406,18 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             )
 
         forecast = Collection.objects.create(
-            catalog=catalog, name="Model Temperature", slug="fc-temperature",
+            catalog=catalog,
+            name="Model Temperature",
+            slug="fc-temperature",
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=forecast, slug="t2m", name="Forecast 2m Temperature",
-            unit=unit, value_min=0, value_max=50,
+            collection=forecast,
+            slug="t2m",
+            name="Forecast 2m Temperature",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         for day, hours in ((1, (0, 6, 12)), (2, (0, 6))):
             run = datetime(2026, 3, day, 0, 0, tzinfo=timezone.utc)
@@ -383,9 +429,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
                 )
 
     def layer(self, identifier):
-        response = self.client.get(
-            reverse("wmts:capabilities", args=[self.organisation.slug])
-        )
+        response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
         self.assertEqual(response.status_code, 200)
         document = ET.fromstring(response.content)
         for layer in document.findall("wmts:Contents/wmts:Layer", NS):
@@ -445,7 +489,8 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             ["2026-03-02T00:00:00Z", "2026-03-02T06:00:00Z"],
         )
         self.assertEqual(
-            time.findtext("wmts:Default", namespaces=NS), "2026-03-02T00:00:00Z",
+            time.findtext("wmts:Default", namespaces=NS),
+            "2026-03-02T00:00:00Z",
         )
 
     def test_observation_time_lists_everything_and_defaults_to_the_newest(self):
@@ -460,20 +505,17 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             ],
         )
         self.assertEqual(
-            time.findtext("wmts:Default", namespaces=NS), "2026-03-01T12:00:00Z",
+            time.findtext("wmts:Default", namespaces=NS),
+            "2026-03-01T12:00:00Z",
         )
 
     def test_templates_carry_exactly_the_advertised_dimension_placeholders(self):
         forecast = self.layer("weather:fc-temperature:t2m")
         self.assertTrue(
-            forecast.find("wmts:ResourceURL", NS).get("template")
-            .endswith("?time={Time}&reftime={Reftime}")
+            forecast.find("wmts:ResourceURL", NS).get("template").endswith("?time={Time}&reftime={Reftime}")
         )
         observation = self.layer("weather:obs-temperature:t2m")
-        self.assertTrue(
-            observation.find("wmts:ResourceURL", NS).get("template")
-            .endswith("?time={Time}")
-        )
+        self.assertTrue(observation.find("wmts:ResourceURL", NS).get("template").endswith("?time={Time}"))
 
     def test_default_substitution_names_an_item_that_exists(self):
         """The dimension-ignorant client's path: filling the template with the
@@ -483,7 +525,9 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         dimensions = self.dimensions(forecast)
         template = forecast.find("wmts:ResourceURL", NS).get("template")
         url = template.format(
-            TileMatrix=0, TileCol=0, TileRow=0,
+            TileMatrix=0,
+            TileCol=0,
+            TileRow=0,
             Time=dimensions["Time"].findtext("wmts:Default", namespaces=NS),
             Reftime=dimensions["Reftime"].findtext("wmts:Default", namespaces=NS),
         )
@@ -515,31 +559,45 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
         self.organisation = make_organisation()
         catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Weather", slug="weather", file_format="geotiff",
+            name="Weather",
+            slug="weather",
+            file_format="geotiff",
         )
         unit = Unit.objects.create(name="Celsius", symbol="C")
         collection = Collection.objects.create(
-            catalog=catalog, name="Temperature", slug="temperature",
+            catalog=catalog,
+            name="Temperature",
+            slug="temperature",
             visibility=Collection.Visibility.PUBLIC,
         )
         self.styled = Variable.objects.create(
-            collection=collection, slug="t2m", name="2m Temperature",
-            unit=unit, value_min=0, value_max=50,
+            collection=collection,
+            slug="t2m",
+            name="2m Temperature",
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         VariableStyle.objects.create(
-            variable=self.styled, name="Analyst", slug="analyst",
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ffffff"}],
+            variable=self.styled,
+            name="Analyst",
+            slug="analyst",
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}],
         )
         VariableStyle.objects.create(
-            variable=self.styled, name="Official", slug="official",
+            variable=self.styled,
+            name="Official",
+            slug="official",
             is_default=True,
-            stops=[{"value": 0.0, "color": "#0000ff"},
-                   {"value": 50.0, "color": "#ff0000"}],
+            stops=[{"value": 0.0, "color": "#0000ff"}, {"value": 50.0, "color": "#ff0000"}],
         )
         self.styleless = Variable.objects.create(
-            collection=collection, slug="rh", name="Relative Humidity",
-            unit=unit, value_min=0, value_max=100,
+            collection=collection,
+            slug="rh",
+            name="Relative Humidity",
+            unit=unit,
+            value_min=0,
+            value_max=100,
         )
         Item.objects.create(
             collection=collection,
@@ -547,9 +605,7 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
         )
 
     def layer(self, identifier):
-        response = self.client.get(
-            reverse("wmts:capabilities", args=[self.organisation.slug])
-        )
+        response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
         self.assertEqual(response.status_code, 200)
         document = ET.fromstring(response.content)
         for layer in document.findall("wmts:Contents/wmts:Layer", NS):
@@ -573,10 +629,7 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
 
     def test_the_actual_default_is_the_one_marked_default(self):
         styles = self.styles(self.layer("weather:temperature:t2m"))
-        marked = {
-            s.findtext("ows:Identifier", namespaces=NS): s.get("isDefault")
-            for s in styles
-        }
+        marked = {s.findtext("ows:Identifier", namespaces=NS): s.get("isDefault") for s in styles}
         self.assertEqual(marked, {"official": "true", "analyst": None})
 
     def test_identifiers_are_style_slugs_not_the_literal_default(self):
@@ -597,10 +650,15 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
         same route the gateway authorises."""
         layer = self.layer("weather:temperature:t2m")
         template = layer.find("wmts:ResourceURL", NS).get("template")
-        split = urlsplit(template.format(
-            TileMatrix=6, TileCol=38, TileRow=32,
-            Style="analyst", Time="2026-03-01T00:00:00Z",
-        ))
+        split = urlsplit(
+            template.format(
+                TileMatrix=6,
+                TileCol=38,
+                TileRow=32,
+                Style="analyst",
+                Time="2026-03-01T00:00:00Z",
+            )
+        )
         self.assertEqual(
             scope_of(f"{split.path}?{split.query}"),
             MachineScope("test-org", "weather", "temperature"),
@@ -620,7 +678,8 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
         (placeholder,) = styles
         self.assertEqual(placeholder.get("isDefault"), "true")
         self.assertEqual(
-            placeholder.findtext("ows:Identifier", namespaces=NS), "default",
+            placeholder.findtext("ows:Identifier", namespaces=NS),
+            "default",
         )
 
     def test_a_styleless_template_carries_no_style_parameter(self):
@@ -670,7 +729,8 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
     def test_a_members_key_adds_the_orgs_private_layers_and_never_internal(self):
         response = self.fetch({"api_key": self.member_key})
         self.assertEqual(
-            self.identifiers(response), [self.PRIVATE, self.PUBLIC],
+            self.identifiers(response),
+            [self.PRIVATE, self.PUBLIC],
         )
 
     def test_another_organisations_member_sees_public_only(self):
@@ -680,7 +740,8 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
     def test_the_instance_admin_sees_private_layers(self):
         response = self.fetch({"api_key": self.admin_key})
         self.assertEqual(
-            self.identifiers(response), [self.PRIVATE, self.PUBLIC],
+            self.identifiers(response),
+            [self.PRIVATE, self.PUBLIC],
         )
 
     def test_a_broken_key_is_unauthorised_rather_than_public_only(self):
@@ -705,9 +766,7 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
         public-only view."""
         response = self.fetch({"api_key": self.member_key})
         document = ET.fromstring(response.content)
-        href = document.find("wmts:ServiceMetadataURL", NS).get(
-            f"{{{NS['xlink']}}}href"
-        )
+        href = document.find("wmts:ServiceMetadataURL", NS).get(f"{{{NS['xlink']}}}href")
         self.assertIn(f"api_key={self.member_key}", href)
 
     def test_the_kvp_endpoint_keeps_the_key_and_its_separator(self):
@@ -762,7 +821,8 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
         """A legacy client asking for XML (or anything else) gets the one
         representation this document has, never a 406."""
         response = self.fetch(
-            {"api_key": self.member_key}, HTTP_ACCEPT="application/xml",
+            {"api_key": self.member_key},
+            HTTP_ACCEPT="application/xml",
         )
         self.assertEqual(response["Content-Type"], "application/xml")
 
@@ -783,6 +843,7 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
         self.assertEqual(gate.status_code, 204)
 
         anonymous = self.client.get(
-            reverse("tile_auth"), HTTP_X_ORIGINAL_URI=split.path,
+            reverse("tile_auth"),
+            HTTP_X_ORIGINAL_URI=split.path,
         )
         self.assertEqual(anonymous.status_code, 403)

@@ -2,10 +2,7 @@ from django import forms
 from django.db import models
 from django_extensions.db.fields import AutoSlugField
 from django_extensions.db.models import TimeStampedModel
-from wagtail.admin.panels import (
-    FieldPanel,
-    MultiFieldPanel, TitleFieldPanel, TabbedInterface, ObjectList
-)
+from wagtail.admin.panels import FieldPanel, MultiFieldPanel, TitleFieldPanel, TabbedInterface, ObjectList
 from wagtail.search import index
 from wagtail.search.index import Indexed
 from georiva.organisations.lookups import SHARED_REFERENCE_DATA
@@ -21,32 +18,28 @@ class Topic(Indexed, TimeStampedModel):
 
     ORGANISATION_LOOKUP = SHARED_REFERENCE_DATA
     name = models.CharField(max_length=100, unique=True)
-    slug = AutoSlugField(populate_from='name', unique=True, editable=False)
+    slug = AutoSlugField(populate_from="name", unique=True, editable=False)
     description = models.TextField(blank=True)
-    icon = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text="Bootstrap Icons class e.g. bi-thermometer-half"
-    )
+    icon = models.CharField(max_length=50, blank=True, help_text="Bootstrap Icons class e.g. bi-thermometer-half")
     sort_order = models.PositiveIntegerField(default=0)
-    
+
     search_fields = [
-        index.SearchField('name'),
+        index.SearchField("name"),
     ]
-    
+
     class Meta:
-        ordering = ['sort_order', 'name']
+        ordering = ["sort_order", "name"]
         verbose_name = "Topic"
         verbose_name_plural = "Topics"
-    
+
     def __str__(self):
         return self.name
-    
+
     panels = [
-        FieldPanel('name'),
-        FieldPanel('description'),
-        FieldPanel('icon'),
-        FieldPanel('sort_order'),
+        FieldPanel("name"),
+        FieldPanel("description"),
+        FieldPanel("icon"),
+        FieldPanel("sort_order"),
     ]
 
 
@@ -63,14 +56,15 @@ class Catalog(Indexed, TimeStampedModel):
     manifests, zonal stats) belongs to the catalog's organisation transitively
     through the FK chain, and carries no organisation FK of its own.
     """
+
     # The tenancy root: everything beneath declares the path that reaches this
     # field. See organisations/access.py.
     ORGANISATION_LOOKUP = "organisation"
 
     organisation = models.ForeignKey(
-        'organisations.Organisation',
+        "organisations.Organisation",
         on_delete=models.CASCADE,
-        related_name='catalogs',
+        related_name="catalogs",
         help_text="The organisation that owns this catalog and everything under it.",
     )
     name = models.CharField(max_length=255)
@@ -79,49 +73,43 @@ class Catalog(Indexed, TimeStampedModel):
     # every storage key, so the pair stays unambiguous on disk too.
     slug = models.SlugField(max_length=100)
     description = models.TextField(blank=True)
-    
+
     # Provider information
     provider = models.CharField(max_length=255, blank=True)
     provider_url = models.URLField(blank=True)
     license = models.CharField(max_length=255, blank=True)
-    
+
     topics = models.ManyToManyField(
-        'georivacore.Topic',
-        blank=True,
-        related_name='catalogs',
-        help_text="Thematic topics for this catalog."
+        "georivacore.Topic", blank=True, related_name="catalogs", help_text="Thematic topics for this catalog."
     )
-    
+
     # Source file format
     class FileFormat(models.TextChoices):
-        GRIB = 'grib2', 'GRIB/GRIB2'
-        NETCDF = 'netcdf', 'NetCDF'
-        GEOTIFF = 'geotiff', 'GeoTIFF'
-        ZARR = 'zarr', 'ZARR'
-    
+        GRIB = "grib2", "GRIB/GRIB2"
+        NETCDF = "netcdf", "NetCDF"
+        GEOTIFF = "geotiff", "GeoTIFF"
+        ZARR = "zarr", "ZARR"
+
     class ClipMode(models.TextChoices):
-        NONE = 'none', 'No clipping'
-        BBOX = 'bbox', 'Bounding box only'
-        MASK = 'mask', 'Precise geometry mask'
-    
+        NONE = "none", "No clipping"
+        BBOX = "bbox", "Bounding box only"
+        MASK = "mask", "Precise geometry mask"
+
     file_format = models.CharField(max_length=20, choices=FileFormat.choices)
     archive_source_files = models.BooleanField(default=False, help_text="Should archive source files")
     is_active = models.BooleanField(default=True)
-    
+
     boundary = models.ForeignKey(
         "adminboundarymanager.AdminBoundary",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        help_text="Boundary to clip data to"
+        help_text="Boundary to clip data to",
     )
     clip_mode = models.CharField(
-        max_length=20,
-        choices=ClipMode.choices,
-        default=ClipMode.MASK,
-        help_text="How to apply boundary clipping"
+        max_length=20, choices=ClipMode.choices, default=ClipMode.MASK, help_text="How to apply boundary clipping"
     )
-    
+
     # The admin header search uses autocomplete() (partial/as-you-type
     # matching) whenever any AutocompleteField exists, and autocomplete()
     # only looks at autocomplete fields — so we must declare BOTH name and
@@ -138,47 +126,64 @@ class Catalog(Indexed, TimeStampedModel):
         # right failure, but the search box is meant to work.
         index.FilterField("organisation"),
     ]
-    
+
     panels = [
-        MultiFieldPanel([
-            TitleFieldPanel('name', placeholder=False),
-            FieldPanel('description'),
-        ], heading="Basic Information"),
-        MultiFieldPanel([
-            FieldPanel('provider'),
-            FieldPanel('provider_url'),
-            FieldPanel('license'),
-        ], heading="Provider"),
-        MultiFieldPanel([
-            FieldPanel('file_format'),
-            FieldPanel('archive_source_files'),
-        ], heading="Ingestion Configuration"),
-        MultiFieldPanel([
-            FieldPanel('boundary'),
-            FieldPanel('clip_mode'),
-        ], heading="Clipping Configuration"),
-        FieldPanel('is_active'),
-        MultiFieldPanel([
-            FieldPanel('topics', widget=forms.CheckboxSelectMultiple),
-        ], heading="Topics"),
+        MultiFieldPanel(
+            [
+                TitleFieldPanel("name", placeholder=False),
+                FieldPanel("description"),
+            ],
+            heading="Basic Information",
+        ),
+        MultiFieldPanel(
+            [
+                FieldPanel("provider"),
+                FieldPanel("provider_url"),
+                FieldPanel("license"),
+            ],
+            heading="Provider",
+        ),
+        MultiFieldPanel(
+            [
+                FieldPanel("file_format"),
+                FieldPanel("archive_source_files"),
+            ],
+            heading="Ingestion Configuration",
+        ),
+        MultiFieldPanel(
+            [
+                FieldPanel("boundary"),
+                FieldPanel("clip_mode"),
+            ],
+            heading="Clipping Configuration",
+        ),
+        FieldPanel("is_active"),
+        MultiFieldPanel(
+            [
+                FieldPanel("topics", widget=forms.CheckboxSelectMultiple),
+            ],
+            heading="Topics",
+        ),
     ]
-    
+
     slug_panels = [
-        FieldPanel('slug'),
+        FieldPanel("slug"),
     ]
-    
-    edit_handler = TabbedInterface([
-        ObjectList(panels, heading='Details'),
-        ObjectList(slug_panels, heading='Slug'),
-    ])
-    
+
+    edit_handler = TabbedInterface(
+        [
+            ObjectList(panels, heading="Details"),
+            ObjectList(slug_panels, heading="Slug"),
+        ]
+    )
+
     class Meta:
-        ordering = ['name']
-        verbose_name_plural = 'Catalogs'
+        ordering = ["name"]
+        verbose_name_plural = "Catalogs"
         constraints = [
             models.UniqueConstraint(
-                fields=['organisation', 'slug'],
-                name='unique_catalog_slug_per_organisation',
+                fields=["organisation", "slug"],
+                name="unique_catalog_slug_per_organisation",
             ),
         ]
 
@@ -191,7 +196,7 @@ class Catalog(Indexed, TimeStampedModel):
         catalog's data, on every bucket. The single place that ordering is
         spelled out, so path-building and prefix scans cannot drift apart."""
         return f"{self.organisation.slug}/{self.slug}"
-    
+
     def get_collection_names(self):
         """Space-joined collection names, indexed so the admin header search
         can find a catalog by the name of any collection it contains.

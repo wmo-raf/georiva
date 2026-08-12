@@ -19,28 +19,31 @@ def enqueue_zonal_stats_on_cog_save(asset) -> None:
       fail because of a downstream analytics hook.
     """
     from georiva.core.models import Asset
-    
+
     if asset.format != Asset.Format.COG:
         return
-    
+
     collection = asset.item.collection
     level = getattr(collection, "boundary_stats_levels", None)
     if level is None:
         return
-    
+
     try:
         from .tasks import compute_boundary_zonal_stats
-        
+
         compute_boundary_zonal_stats.apply_async(
             args=[asset.pk],
             queue="georiva-ingestion",
         )
         logger.debug(
             "Enqueued zonal stats for asset %d (%s @ %s)",
-            asset.pk, asset.variable.slug, asset.item.time,
+            asset.pk,
+            asset.variable.slug,
+            asset.item.time,
         )
     except Exception as exc:
         logger.warning(
             "Failed to enqueue zonal stats for asset %d: %s",
-            asset.pk, exc,
+            asset.pk,
+            exc,
         )

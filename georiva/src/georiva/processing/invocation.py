@@ -15,6 +15,7 @@ helpers:
 
 See issue #125 and docs/adr/0005-generic-derivation-engine.md.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,10 +52,12 @@ def _dispatch_unit(recipe_type: str, unit: dict, *, dispatch: bool = True, reaso
     why this re-dispatch fired (recorded on the DerivationRun by ``acquire``)."""
     if dispatch:
         from .tasks import run_unit_task
+
         run_unit_task.delay(recipe_type=recipe_type, unit=unit, reason=reason)
     else:
         from .engine import run_unit
         from .registry import recipe_registry
+
         recipe = recipe_registry.get(recipe_type)
         if recipe is not None:
             run_unit(recipe, unit, reason=reason)
@@ -89,7 +92,9 @@ def sweep_stale_units(*, dispatch: bool = True) -> int:
             continue
         if current != run_rec.input_hash:
             _dispatch_unit(
-                run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+                run_rec.recipe_type,
+                run_rec.unit_key,
+                dispatch=dispatch,
                 reason=DerivationRun.RetryReason.INPUT_STALE,
             )
             stale += 1
@@ -146,7 +151,10 @@ def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=Non
         if not recipe.readiness(run_rec.unit_key, resolved):
             continue
         _dispatch_unit(
-            run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch, reason=reason,
+            run_rec.recipe_type,
+            run_rec.unit_key,
+            dispatch=dispatch,
+            reason=reason,
         )
         revived += 1
     if revived:
@@ -177,22 +185,29 @@ def reclaim_stale_running(*, dispatch: bool = True) -> int:
 
     cutoff = timezone.now() - DerivationRun.LOCK_TIMEOUT
     stale_runs = DerivationRun.objects.filter(
-        status=DerivationRun.Status.RUNNING, locked_at__lt=cutoff,
+        status=DerivationRun.Status.RUNNING,
+        locked_at__lt=cutoff,
     )
     reclaimed = 0
     for run_rec in stale_runs:
         if _recipe_for(run_rec.recipe_type) is None:
             logger.warning(
                 "Sweep: stale RUNNING unit %s names unknown recipe '%s' — leaving as-is",
-                run_rec, run_rec.recipe_type,
+                run_rec,
+                run_rec.recipe_type,
             )
             continue
         logger.warning(
             "Sweep: reclaiming stale RUNNING unit %s (locked_by=%s at %s, past %s) — re-dispatching",
-            run_rec, run_rec.locked_by or "-", run_rec.locked_at, DerivationRun.LOCK_TIMEOUT,
+            run_rec,
+            run_rec.locked_by or "-",
+            run_rec.locked_at,
+            DerivationRun.LOCK_TIMEOUT,
         )
         _dispatch_unit(
-            run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+            run_rec.recipe_type,
+            run_rec.unit_key,
+            dispatch=dispatch,
             reason=DerivationRun.RetryReason.STALE_RUNNING_RECLAIM,
         )
         reclaimed += 1
@@ -238,7 +253,9 @@ def invalidate_downstream(changed_item, *, dispatch: bool = True) -> int:
             seen.add(key)
             for run_rec in DerivationRun.objects.filter(produced_item=derived):
                 _dispatch_unit(
-                    run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+                    run_rec.recipe_type,
+                    run_rec.unit_key,
+                    dispatch=dispatch,
                     reason=DerivationRun.RetryReason.INPUT_STALE,
                 )
                 count += 1

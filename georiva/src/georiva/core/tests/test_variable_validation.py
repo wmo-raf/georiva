@@ -2,6 +2,7 @@
 Variable range validation (ADR 0022): `value_min < value_max` is enforced by
 the model's clean(), the single validator every form path delegates to.
 """
+
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase
 
@@ -12,18 +13,22 @@ from georiva.organisations.testing import make_organisation
 class VariableRangeCleanTests(TestCase):
     def setUp(self):
         catalog = Catalog.objects.create(
-            organisation=make_organisation(), name="Models", slug="models",
+            organisation=make_organisation(),
+            name="Models",
+            slug="models",
             file_format="grib2",
         )
-        self.collection = Collection.objects.create(
-            catalog=catalog, name="Surface", slug="surface"
-        )
+        self.collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface")
         self.unit = Unit.objects.create(name="Celsius", symbol="C")
 
     def _variable(self, value_min, value_max):
         return Variable(
-            collection=self.collection, slug="tas", name="tas",
-            unit=self.unit, value_min=value_min, value_max=value_max,
+            collection=self.collection,
+            slug="tas",
+            name="tas",
+            unit=self.unit,
+            value_min=value_min,
+            value_max=value_max,
             sources=[("primary", {"source_name": "tas"})],
         )
 

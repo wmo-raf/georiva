@@ -9,7 +9,9 @@ User = get_user_model()
 
 
 def _catalog():
-    return Catalog.objects.create(organisation=make_organisation(), name="Upload Test", slug="upload-test", file_format="grib2")
+    return Catalog.objects.create(
+        organisation=make_organisation(), name="Upload Test", slug="upload-test", file_format="grib2"
+    )
 
 
 def _session(catalog=None, status="active"):

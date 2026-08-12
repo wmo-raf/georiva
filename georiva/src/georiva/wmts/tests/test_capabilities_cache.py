@@ -10,6 +10,7 @@ correct in terms of what the next request sees: a repeat fetch is the earlier
 document, a fetch after expiry has caught up with the archive, and neither
 happens across organisations or across credentials.
 """
+
 import importlib
 import pkgutil
 import time
@@ -23,11 +24,18 @@ from django.urls import reverse
 from georiva.accounts.models import ApiKey
 from georiva.core.models import Item, Variable
 from georiva.organisations.testing import (
-    dial_org, join_org, make_org_tree, make_organisation, org_host,
+    dial_org,
+    join_org,
+    make_org_tree,
+    make_organisation,
+    org_host,
 )
 from georiva.wmts.cache import capabilities_cache_key
 from georiva.wmts.testing import (
-    NS, CapabilitiesReader, IsolatedCapabilitiesCache, make_tiered_catalog,
+    NS,
+    CapabilitiesReader,
+    IsolatedCapabilitiesCache,
+    make_tiered_catalog,
 )
 
 
@@ -58,16 +66,16 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
 
     def times(self, response):
         """The public layer's advertised Time values."""
-        return [
-            value.text
-            for value in self.layer(response, self.PUBLIC)
-            .findall("wmts:Dimension/wmts:Value", NS)
-        ]
+        return [value.text for value in self.layer(response, self.PUBLIC).findall("wmts:Dimension/wmts:Value", NS)]
 
     def add_variable(self, slug="rh"):
         return Variable.objects.create(
-            collection=self.public, slug=slug, name="Relative Humidity",
-            unit=self.unit, value_min=0, value_max=100,
+            collection=self.public,
+            slug=slug,
+            name="Relative Humidity",
+            unit=self.unit,
+            value_min=0,
+            value_max=100,
         )
 
     def test_a_repeat_fetch_inside_the_ttl_is_the_earlier_document(self):
@@ -107,11 +115,15 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
         to keep working when there is one and it cannot be reached: a legacy
         client left unable to list any layer because Redis blinked would be a
         worse outage than the rebuild the cache spares."""
-        with override_settings(CACHES={"default": {
-            "BACKEND": "django_redis.cache.RedisCache",
-            "LOCATION": "redis://127.0.0.1:1/0",
-            "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
-        }}):
+        with override_settings(
+            CACHES={
+                "default": {
+                    "BACKEND": "django_redis.cache.RedisCache",
+                    "LOCATION": "redis://127.0.0.1:1/0",
+                    "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+                }
+            }
+        ):
             self.assertEqual(self.identifiers(self.fetch()), [self.PUBLIC])
 
     def test_a_keyed_request_is_never_answered_from_the_shared_entry(self):
@@ -183,10 +195,7 @@ class WMTSCapabilitiesCacheKeyTests(IsolatedCapabilitiesCache, TestCase):
         return document.findall("wmts:Contents/wmts:Layer", NS)
 
     def titles(self, response):
-        return [
-            layer.findtext("ows:Title", namespaces=NS)
-            for layer in self.layers(response)
-        ]
+        return [layer.findtext("ows:Title", namespaces=NS) for layer in self.layers(response)]
 
     def test_the_second_organisation_gets_its_own_document(self):
         self.assertEqual(self.titles(self.fetch(self.mine)), ["Ours — Ours"])
@@ -207,7 +216,8 @@ class WMTSCapabilitiesCacheKeyTests(IsolatedCapabilitiesCache, TestCase):
         (layer,) = self.layers(self.fetch(self.theirs))
         template = layer.find("wmts:ResourceURL", NS).get("template")
         self.assertTrue(
-            template.startswith(f"http://{org_host('other-org')}/"), template,
+            template.startswith(f"http://{org_host('other-org')}/"),
+            template,
         )
 
     def test_colliding_slugs_across_organisations_key_differently(self):
@@ -233,14 +243,10 @@ class WMTSCacheIsolationGuardTests(SimpleTestCase):
         package = importlib.import_module("georiva.wmts.tests")
         unswept = []
         for module_info in pkgutil.iter_modules(package.__path__):
-            module = importlib.import_module(
-                f"{package.__name__}.{module_info.name}"
-            )
+            module = importlib.import_module(f"{package.__name__}.{module_info.name}")
             for name, member in vars(module).items():
                 if not isinstance(member, type) or member.__module__ != module.__name__:
                     continue
-                if issubclass(member, TestCase) and not issubclass(
-                    member, IsolatedCapabilitiesCache
-                ):
+                if issubclass(member, TestCase) and not issubclass(member, IsolatedCapabilitiesCache):
                     unswept.append(f"{module.__name__}.{name}")
         self.assertEqual(unswept, [], "Missing IsolatedCapabilitiesCache")

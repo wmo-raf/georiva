@@ -36,22 +36,26 @@ def _build_collection_columns(collection_viewset, perms):
             more_buttons = []
             if perms["can_change_collection"]:
                 edit_url = reverse(collection_viewset.get_url_name("edit"), kwargs={"pk": instance.pk})
-                more_buttons.append(Button(
-                    _("Edit"),
-                    url=edit_url,
-                    icon_name="edit",
-                    attrs={"aria-label": _("Edit '%(title)s'") % {"title": str(instance)}},
-                    priority=10,
-                ))
+                more_buttons.append(
+                    Button(
+                        _("Edit"),
+                        url=edit_url,
+                        icon_name="edit",
+                        attrs={"aria-label": _("Edit '%(title)s'") % {"title": str(instance)}},
+                        priority=10,
+                    )
+                )
             if perms["can_delete_collection"]:
                 delete_url = reverse(collection_viewset.get_url_name("delete"), kwargs={"pk": instance.pk})
-                more_buttons.append(Button(
-                    _("Delete"),
-                    url=delete_url,
-                    icon_name="bin",
-                    attrs={"aria-label": _("Delete '%(title)s'") % {"title": str(instance)}},
-                    priority=20,
-                ))
+                more_buttons.append(
+                    Button(
+                        _("Delete"),
+                        url=delete_url,
+                        icon_name="bin",
+                        attrs={"aria-label": _("Delete '%(title)s'") % {"title": str(instance)}},
+                        priority=20,
+                    )
+                )
 
             if not more_buttons:
                 return []
@@ -86,11 +90,11 @@ class CatalogIndexView(IndexView):
     admin header search (AJAX results swap) and server-side pagination work
     out of the box. Search matches catalog names and collection names — see
     Catalog.search_fields."""
-    
+
     model = Catalog
     paginate_by = 20
     page_title = _("Catalogs")
-    
+
     def _build_catalog_panels(self, catalogs):
         """For the catalogs on the current page, build the render context for
         each accordion panel. Issues at most two queries (the page of catalogs
@@ -98,7 +102,7 @@ class CatalogIndexView(IndexView):
         many catalogs are on the page — no N+1."""
         # Local import to avoid a circular import (viewsets imports this view).
         from .viewsets import CatalogViewSet, CollectionViewSet
-        
+
         catalog_viewset = CatalogViewSet()
         collection_viewset = CollectionViewSet()
 
@@ -116,48 +120,44 @@ class CatalogIndexView(IndexView):
         }
 
         columns = _build_collection_columns(collection_viewset, perms)
-        add_collection_url = (
-            reverse(collection_viewset.get_url_name("add"))
-            if perms["can_add_collection"] else None
-        )
-        
+        add_collection_url = reverse(collection_viewset.get_url_name("add")) if perms["can_add_collection"] else None
+
         ids = [c.pk for c in catalogs]
         cols_by_cat = defaultdict(list)
         if ids:
             # select_related("catalog") because Collection.__str__ (used in the
             # row buttons' aria-labels) dereferences self.catalog — without it
             # rendering the tables would trigger one query per collection.
-            collections = (
-                Collection.objects
-                .filter(catalog_id__in=ids)
-                .select_related("catalog")
-                .order_by("name")
-            )
+            collections = Collection.objects.filter(catalog_id__in=ids).select_related("catalog").order_by("name")
             for col in collections:
                 cols_by_cat[col.catalog_id].append(col)
-        
+
         panels = []
         for catalog in catalogs:
             collections = cols_by_cat.get(catalog.pk, [])
             active_count = sum(1 for c in collections if c.is_active)
-            panels.append({
-                "catalog": catalog,
-                "edit_url": (
-                    reverse(catalog_viewset.get_url_name("edit"), kwargs={"pk": catalog.pk})
-                    if perms["can_change_catalog"] else None
-                ),
-                "delete_url": (
-                    reverse(catalog_viewset.get_url_name("delete"), kwargs={"pk": catalog.pk})
-                    if perms["can_delete_catalog"] else None
-                ),
-                "add_collection_url": add_collection_url,
-                "collection_count": len(collections),
-                "active_count": active_count,
-                "has_collections": bool(collections),
-                "collections_table": Table(columns, collections),
-            })
+            panels.append(
+                {
+                    "catalog": catalog,
+                    "edit_url": (
+                        reverse(catalog_viewset.get_url_name("edit"), kwargs={"pk": catalog.pk})
+                        if perms["can_change_catalog"]
+                        else None
+                    ),
+                    "delete_url": (
+                        reverse(catalog_viewset.get_url_name("delete"), kwargs={"pk": catalog.pk})
+                        if perms["can_delete_catalog"]
+                        else None
+                    ),
+                    "add_collection_url": add_collection_url,
+                    "collection_count": len(collections),
+                    "active_count": active_count,
+                    "has_collections": bool(collections),
+                    "collections_table": Table(columns, collections),
+                }
+            )
         return panels
-    
+
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(*args, **kwargs)
         context["catalog_panels"] = self._build_catalog_panels(list(context["object_list"]))
@@ -170,40 +170,36 @@ def collection_items_list(request, collection_pk):
         Collection.objects.select_related("catalog", "catalog__boundary"),
         pk=collection_pk,
     )
-    
+
     # ------------------------------------------------------------------
     # POST actions
     # ------------------------------------------------------------------
     if request.method == "POST":
         action = request.POST.get("action")
-        
+
         if action == "trigger_ingestion":
             # TODO: wire up real Celery task, e.g.:
             # from georiva.ingestion.tasks import run_loader_for_collection
             # run_loader_for_collection.delay(collection.pk)
             messages.success(request, _("Ingestion queued (placeholder)."))
             return redirect(request.path)
-    
+
     # ------------------------------------------------------------------
     # Variables
     # ------------------------------------------------------------------
-    variable_list = list(
-        collection.variables.filter(is_active=True).prefetch_related("styles")
-    )
-    
+    variable_list = list(collection.variables.filter(is_active=True).prefetch_related("styles"))
+
     # ------------------------------------------------------------------
     # Active variable tab
     # ------------------------------------------------------------------
     active_var_slug = request.GET.get("var", "")
     active_variable = None
     if active_var_slug:
-        active_variable = next(
-            (v for v in variable_list if v.slug == active_var_slug), None
-        )
+        active_variable = next((v for v in variable_list if v.slug == active_var_slug), None)
         # Unrecognised slug — fall back to "All"
         if not active_variable:
             active_var_slug = ""
-    
+
     # ------------------------------------------------------------------
     # Items queryset
     # Use a Subquery for asset_count rather than annotate(Count(...)).
@@ -211,25 +207,17 @@ def collection_items_list(request, collection_pk):
     # extra fields (created, modified) on PostgreSQL.
     # ------------------------------------------------------------------
     from georiva.core.models import Asset
-    
+
     asset_count_sq = (
-        Asset.objects.filter(item=OuterRef("pk"))
-        .order_by()
-        .values("item")
-        .annotate(c=Count("pk"))
-        .values("c")
+        Asset.objects.filter(item=OuterRef("pk")).order_by().values("item").annotate(c=Count("pk")).values("c")
     )
-    
-    items = (
-        Item.objects.filter(collection=collection)
-        .annotate(asset_count=Subquery(asset_count_sq))
-        .order_by("-time")
-    )
-    
+
+    items = Item.objects.filter(collection=collection).annotate(asset_count=Subquery(asset_count_sq)).order_by("-time")
+
     if active_variable:
         # Only items that have at least one asset for this variable
         items = items.filter(assets__variable=active_variable).distinct()
-    
+
     # ------------------------------------------------------------------
     # Pagination
     # ------------------------------------------------------------------
@@ -237,16 +225,16 @@ def collection_items_list(request, collection_pk):
         page_num = int(request.GET.get("p", 1))
     except ValueError:
         page_num = 0
-    
+
     paginator = WagtailPaginator(items, 25)
-    
+
     try:
         page_obj = paginator.page(page_num)
     except InvalidPage:
         page_obj = paginator.page(1)
-    
+
     elided_page_range = paginator.get_elided_page_range(page_obj.number)
-    
+
     # ------------------------------------------------------------------
     # Attach ingestion_log to each item on this page.
     # Bulk lookup by source_file (convention: "{bucket}:{file_path}") so
@@ -256,23 +244,22 @@ def collection_items_list(request, collection_pk):
     from django.db.models import F, Value
     from django.db.models.functions import Concat
     from georiva.ingestion.models import FileIngestion
-    
+
     source_files = {item.source_file for item in page_obj.object_list if item.source_file}
     fi_by_source_file = {}
     if source_files:
         for fi in (
-                FileIngestion.objects
-                        .annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path")))
-                        .filter(_sf__in=source_files)
-                        .order_by("-created_at")
+            FileIngestion.objects.annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path")))
+            .filter(_sf__in=source_files)
+            .order_by("-created_at")
         ):
             key = f"{fi.bucket}:{fi.file_path}"
             if key not in fi_by_source_file:
                 fi_by_source_file[key] = fi
-    
+
     for item in page_obj.object_list:
         item.ingestion_log = fi_by_source_file.get(item.source_file)
-    
+
     # ------------------------------------------------------------------
     # Context
     # ------------------------------------------------------------------
@@ -292,14 +279,14 @@ def collection_items_list(request, collection_pk):
         "paginator": paginator,
         "elided_page_range": elided_page_range,
     }
-    
+
     return render(request, "core/collection_items.html", context)
 
 
 def plugin_list(request):
     """Admin page listing all installed GeoRiva plugins and their metadata."""
     from ..plugins import get_installed_plugins
-    
+
     context = {
         "header_title": _("Installed Plugins"),
         "header_icon": "puzzle-piece",
@@ -314,14 +301,18 @@ def plugin_list(request):
 
 def add_data_select(request):
     """The Add Data front door: route to the setup wizard matching how the data arrives."""
-    return render(request, "core/add_data.html", {
-        # Rendered by the slim header via wagtailadmin/generic/base.html.
-        "breadcrumbs_items": [
-            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-            {"url": None, "label": _("Add Data")},
-        ],
-        "header_title": _("Add Data"),
-        "header_icon": "plus",
-        "automated_url": reverse("data_feed_add_select"),
-        "upload_url": reverse("upload_wizard_step1"),
-    })
+    return render(
+        request,
+        "core/add_data.html",
+        {
+            # Rendered by the slim header via wagtailadmin/generic/base.html.
+            "breadcrumbs_items": [
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("Add Data")},
+            ],
+            "header_title": _("Add Data"),
+            "header_icon": "plus",
+            "automated_url": reverse("data_feed_add_select"),
+            "upload_url": reverse("upload_wizard_step1"),
+        },
+    )

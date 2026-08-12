@@ -7,6 +7,7 @@ each Collection with its item count, the feed's own derived products, and any
 other feeds' derived products bound to the doomed collections — and only
 delete after an explicit POST. The cascade semantics themselves are unchanged.
 """
+
 from datetime import datetime, timezone
 
 from django.contrib.auth import get_user_model
@@ -36,12 +37,13 @@ def _make_item(collection, n):
 class DataFeedDeleteBase(TestCase):
     def setUp(self):
         from georiva.sources.tests.support import ensure_base_datafeed_viewset
+
         ensure_base_datafeed_viewset()
         self.user = User.objects.create_superuser("op", "op@test.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="CHIRPS Feed", catalog=self.catalog)
         self.rainfall = Collection.objects.create(
@@ -84,8 +86,8 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertContains(response, "Rainfall anomaly product")
 
     def test_confirmation_lists_other_feeds_products_bound_to_doomed_collections(self):
-        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="Other", slug="other", file_format="geotiff"
+        other_catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
         external = DerivedProduct.objects.create(
@@ -108,8 +110,8 @@ class ConfirmationPageTests(DataFeedDeleteBase):
         self.assertContains(response, "Other Feed")
 
     def test_unrelated_products_are_not_listed(self):
-        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="Other", slug="other", file_format="geotiff"
+        other_catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
         DerivedProduct.objects.create(
@@ -161,8 +163,8 @@ class DeletionTests(DataFeedDeleteBase):
         self.assertTrue(DataFeed.objects.filter(pk=lone.pk).exists())
 
     def test_external_product_survives_but_loses_its_bindings(self):
-        other_catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="Other", slug="other", file_format="geotiff"
+        other_catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Other", slug="other", file_format="geotiff"
         )
         other_feed = DataFeed.objects.create(name="Other Feed", catalog=other_catalog)
         external = DerivedProduct.objects.create(
@@ -178,9 +180,7 @@ class DeletionTests(DataFeedDeleteBase):
             source_key="rainfall-monthly",
             collection=self.rainfall,
         )
-        out_col = Collection.objects.create(
-            catalog=other_catalog, name="Drought", slug="drought"
-        )
+        out_col = Collection.objects.create(catalog=other_catalog, name="Drought", slug="drought")
         DerivedProductOutput.objects.create(
             product=external,
             role="index",
@@ -203,9 +203,7 @@ class PermissionTests(DataFeedDeleteBase):
 
         limited = User.objects.create_user("dm", "dm@test.com", "pw")
         limited.user_permissions.add(
-            Permission.objects.get(
-                content_type__app_label="wagtailadmin", codename="access_admin"
-            )
+            Permission.objects.get(content_type__app_label="wagtailadmin", codename="access_admin")
         )
         # Membership is what gets anyone through the door at all; the point of
         # this class is what happens once they are inside without permissions.
@@ -235,9 +233,7 @@ class PermissionTests(DataFeedDeleteBase):
 
         limited = self._login_without_delete_perm()
         limited.user_permissions.add(
-            Permission.objects.get(
-                content_type__app_label="georivasources", codename="delete_datafeed"
-            )
+            Permission.objects.get(content_type__app_label="georivasources", codename="delete_datafeed")
         )
 
         response = self.client.get(self._url())

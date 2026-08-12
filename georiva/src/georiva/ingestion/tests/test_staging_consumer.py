@@ -5,6 +5,7 @@ We mock storage and the format plugin to keep these fast — the point is to
 verify that one raw file becomes exactly ONE StagingItem + ONE source asset
 (no per-timestep shredding), with a temporal extent and a checksum.
 """
+
 import os
 import tempfile
 from contextlib import contextmanager
@@ -38,8 +39,8 @@ def _ts(*days):
 
 class RegisterStagingFileTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="netcdf"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="netcdf"
         )
 
     def _register(self, timestamps, key="test-org/cmip6/tas-ssp245/series.nc"):
@@ -47,18 +48,24 @@ class RegisterStagingFileTests(TestCase):
         plugin.list_variables.return_value = [{"name": "tas"}]
         plugin.get_timestamps.return_value = timestamps
         plugin.get_metadata_for_variable.return_value = {
-            "width": 10, "height": 5, "bounds": [0, 0, 1, 1], "crs": "EPSG:4326",
+            "width": 10,
+            "height": 5,
+            "bounds": [0, 0, 1, 1],
+            "crs": "EPSG:4326",
         }
         sfm = MagicMock()
         sfm.download_to_temp = lambda origin, key: _fake_temp()
 
-        with patch("georiva.formats.registry.format_registry.get", return_value=plugin), \
-                patch(
-                    "georiva.ingestion.handlers.source_file_manager.SourceFileManager",
-                    return_value=sfm,
-                ), \
-                patch("georiva.ingestion.staging_consumer.storage"):
+        with (
+            patch("georiva.formats.registry.format_registry.get", return_value=plugin),
+            patch(
+                "georiva.ingestion.handlers.source_file_manager.SourceFileManager",
+                return_value=sfm,
+            ),
+            patch("georiva.ingestion.staging_consumer.storage"),
+        ):
             from georiva.ingestion.staging_consumer import register_staging_file
+
             return register_staging_file(BucketType.STAGING, key)
 
     def test_multi_temporal_file_makes_one_item_with_extent(self):
@@ -104,9 +111,7 @@ class RegisterStagingFileTests(TestCase):
         # pinned on the StagingCollection at registration (ADR-0010 §3).
         from georiva.core.models import Collection
 
-        core = Collection.objects.create(
-            catalog=self.catalog, slug="tas-ssp245", name="Tas SSP245"
-        )
+        core = Collection.objects.create(catalog=self.catalog, slug="tas-ssp245", name="Tas SSP245")
         self._register(_ts(1))
 
         sc = StagingCollection.objects.get()
@@ -137,19 +142,13 @@ class BackfillStagingLinkTests(TestCase):
         from georiva.core.models import Catalog, Collection
         from georiva.staging.models import StagingCollection
 
-        migration = importlib.import_module(
-            "georiva.staging.migrations.0004_backfill_staging_collection_link"
-        )
+        migration = importlib.import_module("georiva.staging.migrations.0004_backfill_staging_collection_link")
         backfill_staging_links = migration.backfill_staging_links
 
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         core = Collection.objects.create(catalog=catalog, slug="rain", name="Rain")
-        matched = StagingCollection.objects.create(
-            catalog=catalog, slug="rain", name="Rain"
-        )
-        orphan = StagingCollection.objects.create(
-            catalog=catalog, slug="no-core", name="No Core"
-        )
+        matched = StagingCollection.objects.create(catalog=catalog, slug="rain", name="Rain")
+        orphan = StagingCollection.objects.create(catalog=catalog, slug="no-core", name="No Core")
 
         backfill_staging_links(global_apps, None)
 

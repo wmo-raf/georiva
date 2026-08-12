@@ -47,57 +47,88 @@ from .viewsets import (
 )
 
 
-@hooks.register('register_admin_urls')
+@hooks.register("register_admin_urls")
 def urlconf_georivasources():
     return [
-        path('data-feeds/', data_feed_list, name="data_feed_list"),
+        path("data-feeds/", data_feed_list, name="data_feed_list"),
         # Results-only fragment the search box swaps in via AJAX.
-        path('data-feeds/results/', data_feed_list_results, name="data_feed_list_results"),
-        path('data-feeds/derived-products/<int:product_pk>/runs/', derived_product_runs,
-             name="derived_product_runs"),
-        path('data-feeds/derived-products/<int:product_pk>/runs/<int:run_pk>/',
-             derived_product_run_detail, name="derived_product_run_detail"),
-        path('data-feeds/<int:feed_pk>/chain/', derived_product_chain, name="derived_product_chain"),
-        path('items/<int:item_pk>/lineage/', item_lineage, name="item_lineage"),
-        path('data-feeds/select/', data_feed_add_select, name="data_feed_add_select"),
-        path('data-feeds/<int:pk>/', data_feed_detail, name="data_feed_detail"),
-        path('data-feeds/<int:feed_pk>/fetch-runs/', data_feed_fetch_runs, name="data_feed_fetch_runs"),
-        path('data-feeds/<int:feed_pk>/fetch-runs/<int:run_pk>/', data_feed_fetch_run_detail,
-             name="data_feed_fetch_run_detail"),
-        path('data-feeds/<int:feed_pk>/fetch-runs/<int:run_pk>/recover/',
-             data_feed_fetch_run_recover, name="data_feed_fetch_run_recover"),
-        path('data-feeds/<int:feed_pk>/ingestions/', data_feed_ingestions,
-             name="data_feed_ingestions"),
-        path('data-feeds/<int:pk>/edit/', data_feed_edit, name="data_feed_edit"),
-        path('data-feeds/<int:pk>/delete/', data_feed_delete, name="data_feed_delete"),
-        path('data-feeds/<int:feed_pk>/products/<int:product_pk>/toggle/',
-             feed_product_toggle, name="feed_product_toggle"),
-        path('data-feeds/<int:feed_pk>/products/<int:product_pk>/run/',
-             feed_product_run, name="feed_product_run"),
-        path('data-feeds/<int:feed_pk>/products/<int:product_pk>/edit/',
-             feed_product_edit, name="feed_product_edit"),
-        path('data-feeds/<int:feed_pk>/products/enable/<str:definition_key>/',
-             feed_product_enable_new, name="feed_product_enable_new"),
-        path('data-feeds/<int:feed_pk>/products/<int:product_pk>/delete/',
-             feed_product_delete_orphan, name="feed_product_delete_orphan"),
-        path('data-feeds/<int:feed_pk>/products/<int:product_pk>/rebind/',
-             feed_product_rebind, name="feed_product_rebind"),
-        path('data-feeds/setup-wizard/', setup_wizard_select, name="setup_wizard_select"),
-        path('data-feeds/setup-wizard/<str:model_name>/catalog/', wizard_step1_catalog, name="wizard_step1_catalog"),
-        path('data-feeds/setup-wizard/<str:model_name>/feed/', wizard_step2_feed, name="wizard_step2_feed"),
-        path('data-feeds/setup-wizard/<str:model_name>/collections/', wizard_step3_collections,
-             name="wizard_step3_collections"),
-        path('data-feeds/setup-wizard/<str:model_name>/products/', wizard_step4_products,
-             name="wizard_step4_products"),
-        path('data-feeds/setup-wizard/<str:model_name>/provision/', wizard_provision, name="wizard_provision"),
-        path('data-feeds/<int:feed_pk>/collections/add/<str:definition_key>/', definition_collection_add,
-             name="definition_collection_add"),
-        path('data-feeds/<int:feed_pk>/collections/<int:link_pk>/edit/', definition_collection_edit,
-             name="definition_collection_edit"),
-        path('data-feeds/<int:feed_pk>/collections/<int:link_pk>/remove/', definition_collection_remove_confirm,
-             name="definition_collection_remove"),
-        path('data-feeds/<int:feed_pk>/collections/<int:link_pk>/variables/', definition_collection_vars_edit,
-             name="definition_collection_vars_edit"),
+        path("data-feeds/results/", data_feed_list_results, name="data_feed_list_results"),
+        path("data-feeds/derived-products/<int:product_pk>/runs/", derived_product_runs, name="derived_product_runs"),
+        path(
+            "data-feeds/derived-products/<int:product_pk>/runs/<int:run_pk>/",
+            derived_product_run_detail,
+            name="derived_product_run_detail",
+        ),
+        path("data-feeds/<int:feed_pk>/chain/", derived_product_chain, name="derived_product_chain"),
+        path("items/<int:item_pk>/lineage/", item_lineage, name="item_lineage"),
+        path("data-feeds/select/", data_feed_add_select, name="data_feed_add_select"),
+        path("data-feeds/<int:pk>/", data_feed_detail, name="data_feed_detail"),
+        path("data-feeds/<int:feed_pk>/fetch-runs/", data_feed_fetch_runs, name="data_feed_fetch_runs"),
+        path(
+            "data-feeds/<int:feed_pk>/fetch-runs/<int:run_pk>/",
+            data_feed_fetch_run_detail,
+            name="data_feed_fetch_run_detail",
+        ),
+        path(
+            "data-feeds/<int:feed_pk>/fetch-runs/<int:run_pk>/recover/",
+            data_feed_fetch_run_recover,
+            name="data_feed_fetch_run_recover",
+        ),
+        path("data-feeds/<int:feed_pk>/ingestions/", data_feed_ingestions, name="data_feed_ingestions"),
+        path("data-feeds/<int:pk>/edit/", data_feed_edit, name="data_feed_edit"),
+        path("data-feeds/<int:pk>/delete/", data_feed_delete, name="data_feed_delete"),
+        path(
+            "data-feeds/<int:feed_pk>/products/<int:product_pk>/toggle/",
+            feed_product_toggle,
+            name="feed_product_toggle",
+        ),
+        path("data-feeds/<int:feed_pk>/products/<int:product_pk>/run/", feed_product_run, name="feed_product_run"),
+        path("data-feeds/<int:feed_pk>/products/<int:product_pk>/edit/", feed_product_edit, name="feed_product_edit"),
+        path(
+            "data-feeds/<int:feed_pk>/products/enable/<str:definition_key>/",
+            feed_product_enable_new,
+            name="feed_product_enable_new",
+        ),
+        path(
+            "data-feeds/<int:feed_pk>/products/<int:product_pk>/delete/",
+            feed_product_delete_orphan,
+            name="feed_product_delete_orphan",
+        ),
+        path(
+            "data-feeds/<int:feed_pk>/products/<int:product_pk>/rebind/",
+            feed_product_rebind,
+            name="feed_product_rebind",
+        ),
+        path("data-feeds/setup-wizard/", setup_wizard_select, name="setup_wizard_select"),
+        path("data-feeds/setup-wizard/<str:model_name>/catalog/", wizard_step1_catalog, name="wizard_step1_catalog"),
+        path("data-feeds/setup-wizard/<str:model_name>/feed/", wizard_step2_feed, name="wizard_step2_feed"),
+        path(
+            "data-feeds/setup-wizard/<str:model_name>/collections/",
+            wizard_step3_collections,
+            name="wizard_step3_collections",
+        ),
+        path("data-feeds/setup-wizard/<str:model_name>/products/", wizard_step4_products, name="wizard_step4_products"),
+        path("data-feeds/setup-wizard/<str:model_name>/provision/", wizard_provision, name="wizard_provision"),
+        path(
+            "data-feeds/<int:feed_pk>/collections/add/<str:definition_key>/",
+            definition_collection_add,
+            name="definition_collection_add",
+        ),
+        path(
+            "data-feeds/<int:feed_pk>/collections/<int:link_pk>/edit/",
+            definition_collection_edit,
+            name="definition_collection_edit",
+        ),
+        path(
+            "data-feeds/<int:feed_pk>/collections/<int:link_pk>/remove/",
+            definition_collection_remove_confirm,
+            name="definition_collection_remove",
+        ),
+        path(
+            "data-feeds/<int:feed_pk>/collections/<int:link_pk>/variables/",
+            definition_collection_vars_edit,
+            name="definition_collection_vars_edit",
+        ),
     ]
 
 
@@ -109,12 +140,12 @@ def urlconf_georivasources():
 
 def get_data_feed_viewsets():
     data_feed_model_cls = get_all_child_models(DataFeed)
-    
+
     data_feed_viewsets = []
-    
+
     for model_cls in data_feed_model_cls:
         model_name = model_cls._meta.model_name
-        
+
         attrs = {
             "model": model_cls,
             "type": model_name,
@@ -122,21 +153,17 @@ def get_data_feed_viewsets():
             "edit_view_class": DataFeedEditView,
             "delete_view_class": DataFeedDeleteView,
         }
-        
+
         # Row scoping is injected here rather than left to each plugin: these
         # viewsets are generated from whatever DataFeed subclasses are installed,
         # so a plugin can neither opt in nor opt out of it.
-        viewset = type(
-            f"{model_cls.__name__}ViewSet",
-            (OrgScopedViewSetMixin, ModelViewSet),
-            attrs
-        )
-        
+        viewset = type(f"{model_cls.__name__}ViewSet", (OrgScopedViewSetMixin, ModelViewSet), attrs)
+
         viewset_cls = viewset()
-        
+
         data_feed_viewsets.append(viewset_cls)
         data_feed_viewset_registry.register(viewset_cls)
-    
+
     return data_feed_viewsets
 
 

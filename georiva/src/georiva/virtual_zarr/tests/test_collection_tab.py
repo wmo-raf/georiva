@@ -29,28 +29,35 @@ UTC = dt_timezone.utc
 
 def build_collection(organisation, *, slug):
     catalog = Catalog.objects.create(
-        organisation=organisation, name=slug, slug=slug,
+        organisation=organisation,
+        name=slug,
+        slug=slug,
         file_format=Catalog.FileFormat.GEOTIFF,
     )
     return Collection.objects.create(catalog=catalog, name=slug, slug=slug)
 
 
 def add_variable(collection, *, slug):
-    unit, _ = Unit.objects.get_or_create(
-        name="Millimetre", defaults={"symbol": "mm"}
-    )
+    unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
     return Variable.objects.create(
-        collection=collection, name=slug, slug=slug,
-        unit=unit, value_min=0, value_max=1,
+        collection=collection,
+        name=slug,
+        slug=slug,
+        unit=unit,
+        value_min=0,
+        value_max=1,
     )
 
 
 def add_cog(collection, variable, *, hours):
     item = Item.objects.create(
-        collection=collection, time=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(hours=hours),
+        collection=collection,
+        time=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(hours=hours),
     )
     return Asset.objects.create(
-        item=item, variable=variable, format=Asset.Format.COG,
+        item=item,
+        variable=variable,
+        format=Asset.Format.COG,
         href=f"{collection.slug}/{variable.slug}/{hours}.tif",
     )
 
@@ -73,9 +80,7 @@ class CollectionVirtualZarrTabTests(TestCase):
 
     def _get(self, collection=None):
         collection = collection or self.collection
-        return self.client.get(
-            reverse("collection_virtual_zarr", args=[collection.pk])
-        )
+        return self.client.get(reverse("collection_virtual_zarr", args=[collection.pk]))
 
     # -- tenancy: fail closed ----------------------------------------------
 
@@ -138,7 +143,8 @@ class CollectionVirtualZarrTabTests(TestCase):
     def test_stale_manifest_renders_its_status(self):
         variable = add_variable(self.collection, slug="gone-stale")
         VirtualZarrManifest.objects.create(
-            variable=variable, status=VirtualZarrManifest.Status.STALE,
+            variable=variable,
+            status=VirtualZarrManifest.Status.STALE,
         )
 
         response = self._get()

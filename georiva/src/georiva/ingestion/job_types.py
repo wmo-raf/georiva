@@ -39,7 +39,9 @@ class FileIngestionJobType(JobType):
             progress.increment(95, state="Skipped — already being processed")
             logger.info(
                 "FileIngestionJob %d: skipping %s/%s — lock not acquired",
-                job.id, job.bucket, job.file_path,
+                job.id,
+                job.bucket,
+                job.file_path,
             )
             return
 
@@ -80,14 +82,16 @@ class FileIngestionJobType(JobType):
             job.items_created = len(result.items_created)
             job.assets_created = len(result.assets_created)
             job.save(update_fields=["items_created", "assets_created"])
-            progress.increment(10, state=(
-                f"Done — {len(result.items_created)} items, "
-                f"{len(result.assets_created)} assets created"
-            ))
+            progress.increment(
+                10, state=(f"Done — {len(result.items_created)} items, {len(result.assets_created)} assets created")
+            )
             logger.info(
                 "FileIngestionJob %d: completed %s/%s — %d items, %d assets",
-                job.id, job.bucket, job.file_path,
-                len(result.items_created), len(result.assets_created),
+                job.id,
+                job.bucket,
+                job.file_path,
+                len(result.items_created),
+                len(result.assets_created),
             )
         else:
             error_msg = "; ".join(result.errors) if result else "No result returned"
@@ -101,7 +105,10 @@ class FileIngestionJobType(JobType):
     def on_error(self, job: FileIngestionJob, exc: Exception) -> None:
         logger.exception(
             "FileIngestionJob %d failed for %s/%s: %s",
-            job.id, job.bucket, job.file_path, exc,
+            job.id,
+            job.bucket,
+            job.file_path,
+            exc,
         )
         FileIngestion.objects.filter(
             bucket=job.bucket,

@@ -32,9 +32,10 @@ logger = logging.getLogger(__name__)
 # Bucket Registry
 # =============================================================================
 
+
 class BucketType:
     """Known bucket types in GeoRiva."""
-    
+
     INCOMING = "incoming"
     SOURCES = "sources"
     STAGING = "staging"
@@ -51,17 +52,22 @@ def get_bucket_config() -> dict[str, str]:
 
     Falls back to defaults if not configured.
     """
-    return getattr(settings, "GEORIVA_BUCKETS", {
-        BucketType.INCOMING: "georiva-incoming",
-        BucketType.SOURCES: "georiva-sources",
-        BucketType.ARCHIVE: "georiva-archive",
-        BucketType.ASSETS: "georiva-assets",
-    })
+    return getattr(
+        settings,
+        "GEORIVA_BUCKETS",
+        {
+            BucketType.INCOMING: "georiva-incoming",
+            BucketType.SOURCES: "georiva-sources",
+            BucketType.ARCHIVE: "georiva-archive",
+            BucketType.ASSETS: "georiva-assets",
+        },
+    )
 
 
 # =============================================================================
 # Single Bucket Handle
 # =============================================================================
+
 
 class Bucket:
     """
@@ -70,42 +76,42 @@ class Bucket:
     Wraps a Django storage backend and provides file operations
     scoped to one bucket.
     """
-    
+
     def __init__(self, bucket_type: str, storage_name: str):
         self.bucket_type = bucket_type
         self.storage_name = storage_name
         self._storage = None
-    
+
     def __repr__(self):
         return f"Bucket({self.bucket_type!r}, storage={self.storage_name!r})"
-    
+
     @property
     def storage(self):
         """Lazy-load the Django storage backend."""
         if self._storage is None:
             self._storage = storages[self.storage_name]
         return self._storage
-    
+
     @property
     def is_s3(self) -> bool:
         return hasattr(self.storage, "bucket")
-    
+
     @property
     def is_local(self) -> bool:
         return hasattr(self.storage, "location")
-    
+
     @property
     def bucket_name(self) -> str:
         """Return the S3 bucket name, or the local storage root."""
         if self.is_s3:
             return self.storage.bucket_name
         return getattr(self.storage, "location", self.storage_name)
-    
+
     # ---- Core file operations -----------------------------------------------
-    
+
     def exists(self, path: str) -> bool:
         return self.storage.exists(path)
-    
+
     def save(self, path: str, content) -> str:
         """
         Save content to a path in this bucket.
@@ -119,34 +125,34 @@ class Bucket:
         """
         if isinstance(content, bytes):
             content = ContentFile(content)
-        
+
         return self.storage.save(path, content)
-    
+
     def read_bytes(self, path: str) -> bytes:
         with self.storage.open(path, "rb") as f:
             return f.read()
-    
+
     def open(self, path: str, mode: str = "rb") -> BinaryIO:
         return self.storage.open(path, mode)
-    
+
     def delete(self, path: str) -> bool:
         """Delete a file. Returns True if it existed."""
         if self.exists(path):
             self.storage.delete(path)
             return True
         return False
-    
+
     def url(self, path: str) -> str:
         return self.storage.url(path)
-    
+
     def size(self, path: str) -> int:
         return self.storage.size(path)
-    
+
     def modified_time(self, path: str):
         return self.storage.get_modified_time(path)
-    
+
     # ---- Listing ------------------------------------------------------------
-    
+
     def list_files(self, path: str = "", recursive: bool = False) -> list[dict]:
         """
         List files under a path.
@@ -155,32 +161,34 @@ class Bucket:
             List of dicts: {'path', 'size', 'modified'}
         """
         files = []
-        
+
         try:
             dirs, filenames = self.storage.listdir(path)
-            
+
             for filename in filenames:
                 file_path = f"{path}/{filename}" if path else filename
                 try:
-                    files.append({
-                        "path": file_path,
-                        "size": self.storage.size(file_path),
-                        "modified": self.storage.get_modified_time(file_path),
-                    })
+                    files.append(
+                        {
+                            "path": file_path,
+                            "size": self.storage.size(file_path),
+                            "modified": self.storage.get_modified_time(file_path),
+                        }
+                    )
                 except Exception as e:
                     logger.warning("Could not get info for %s: %s", file_path, e)
                     files.append({"path": file_path})
-            
+
             if recursive:
                 for dir_name in dirs:
                     dir_path = f"{path}/{dir_name}" if path else dir_name
                     files.extend(self.list_files(dir_path, recursive=True))
-        
+
         except Exception as e:
             logger.error("Failed to list files in %s: %s", path, e)
-        
+
         return files
-    
+
     def list_directories(self, path: str = "") -> list[str]:
         try:
             dirs, _ = self.storage.listdir(path)
@@ -188,19 +196,19 @@ class Bucket:
         except Exception as e:
             logger.error("Failed to list directories in %s: %s", path, e)
             return []
-    
+
     # ---- Presigned URLs (S3/MinIO only) -------------------------------------
-    
+
     def get_presigned_url(
-            self,
-            path: str,
-            expiration: int = 3600,
-            method: str = "get_object",
+        self,
+        path: str,
+        expiration: int = 3600,
+        method: str = "get_object",
     ) -> Optional[str]:
         """Generate a presigned URL for download or upload."""
         if not self.is_s3:
             return None
-        
+
         try:
             client = self.storage.connection.meta.client
             return client.generate_presigned_url(
@@ -211,13 +219,13 @@ class Bucket:
         except Exception as e:
             logger.error("Failed to generate presigned URL: %s", e)
             return None
-    
+
     def get_upload_url(self, path: str, expiration: int = 3600) -> Optional[str]:
         """Convenience: presigned URL for PUT upload."""
         return self.get_presigned_url(path, expiration, method="put_object")
-    
+
     # ---- Intra-bucket operations --------------------------------------------
-    
+
     def copy(self, src_path: str, dest_path: str) -> str:
         """Copy a file within this bucket."""
         if self.is_s3:
@@ -229,10 +237,10 @@ class Bucket:
                 return dest_path
             except Exception as e:
                 logger.warning("S3 copy failed, falling back to read/write: %s", e)
-        
+
         data = self.read_bytes(src_path)
         return self.save(dest_path, data)
-    
+
     def move(self, src_path: str, dest_path: str) -> str:
         """Move a file within this bucket."""
         saved = self.copy(src_path, dest_path)
@@ -243,6 +251,7 @@ class Bucket:
 # =============================================================================
 # Multi-Bucket Storage Manager
 # =============================================================================
+
 
 class StorageManager:
     """
@@ -261,24 +270,24 @@ class StorageManager:
             path="sat-imagery/ndvi/raw.tif",
         )
     """
-    
+
     def __init__(self):
         self._buckets: dict[str, Bucket] = {}
-    
+
     def _get_bucket(self, bucket_type: str) -> Bucket:
         """Get or create a Bucket handle."""
         if bucket_type not in self._buckets:
             storage_name = f"georiva-{bucket_type}"
             self._buckets[bucket_type] = Bucket(bucket_type, storage_name)
         return self._buckets[bucket_type]
-    
+
     # ---- Named bucket accessors ---------------------------------------------
-    
+
     @property
     def incoming(self) -> Bucket:
         """User-uploaded raw data."""
         return self._get_bucket(BucketType.INCOMING)
-    
+
     @property
     def sources(self) -> Bucket:
         """Plugin-collected data."""
@@ -293,7 +302,7 @@ class StorageManager:
     def archive(self) -> Bucket:
         """Long-term raw data preservation."""
         return self._get_bucket(BucketType.ARCHIVE)
-    
+
     @property
     def assets(self) -> Bucket:
         """Final processed datasets."""
@@ -311,35 +320,34 @@ class StorageManager:
         ZarrWriter uses this to build a zarr.storage.FsspecStore that
         bypasses Django's storage layer (required for zarr v3 chunked writes).
         """
-        if settings.GEORIVA_STORAGE_BACKEND == 'local':
+        if settings.GEORIVA_STORAGE_BACKEND == "local":
             import fsspec
-            return fsspec.filesystem('file')
+
+            return fsspec.filesystem("file")
         import s3fs
+
         return s3fs.S3FileSystem(
             key=settings.AWS_ACCESS_KEY_ID,
             secret=settings.AWS_SECRET_ACCESS_KEY,
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-            use_ssl=getattr(settings, 'MINIO_PUBLIC_ENDPOINT_USE_SSL', False),
-            client_kwargs={'endpoint_url': settings.AWS_S3_ENDPOINT_URL},
+            use_ssl=getattr(settings, "MINIO_PUBLIC_ENDPOINT_USE_SSL", False),
+            client_kwargs={"endpoint_url": settings.AWS_S3_ENDPOINT_URL},
         )
 
     def bucket(self, bucket_type: str) -> Bucket:
         """Get a bucket by type string."""
         if bucket_type not in BucketType.ALL:
-            raise ValueError(
-                f"Unknown bucket type: {bucket_type!r}. "
-                f"Valid types: {BucketType.ALL}"
-            )
+            raise ValueError(f"Unknown bucket type: {bucket_type!r}. Valid types: {BucketType.ALL}")
         return self._get_bucket(bucket_type)
-    
+
     # ---- Cross-bucket operations --------------------------------------------
-    
+
     def transfer(
-            self,
-            source: Bucket,
-            dest: Bucket,
-            src_path: str,
-            dest_path: Optional[str] = None,
+        self,
+        source: Bucket,
+        dest: Bucket,
+        src_path: str,
+        dest_path: Optional[str] = None,
     ) -> str:
         """
         Copy a file between buckets.
@@ -356,7 +364,7 @@ class StorageManager:
             The path in the destination bucket.
         """
         dest_path = dest_path or src_path
-        
+
         if source.is_s3 and dest.is_s3:
             try:
                 client = source.storage.connection.meta.client
@@ -370,37 +378,41 @@ class StorageManager:
                 )
                 logger.info(
                     "S3 copy: %s/%s → %s/%s",
-                    source.bucket_name, src_path,
-                    dest.bucket_name, dest_path,
+                    source.bucket_name,
+                    src_path,
+                    dest.bucket_name,
+                    dest_path,
                 )
                 return dest_path
             except Exception as e:
                 logger.warning("S3 cross-bucket copy failed, falling back: %s", e)
-        
+
         # Fallback: read from source, write to dest
         data = source.read_bytes(src_path)
         saved = dest.save(dest_path, data)
         logger.info(
             "Copied: %s/%s → %s/%s",
-            source.bucket_name, src_path,
-            dest.bucket_name, saved,
+            source.bucket_name,
+            src_path,
+            dest.bucket_name,
+            saved,
         )
         return saved
-    
+
     def move_between(
-            self,
-            source: Bucket,
-            dest: Bucket,
-            src_path: str,
-            dest_path: Optional[str] = None,
+        self,
+        source: Bucket,
+        dest: Bucket,
+        src_path: str,
+        dest_path: Optional[str] = None,
     ) -> str:
         """Copy between buckets, then delete from source."""
         saved = self.transfer(source, dest, src_path, dest_path)
         source.delete(src_path)
         return saved
-    
+
     # ---- Pipeline helpers ---------------------------------------------------
-    
+
     def archive_raw(self, source: Bucket, path: str) -> str:
         """
         Archive a raw file before processing.
@@ -412,20 +424,17 @@ class StorageManager:
         """
         org, _, remainder = path.partition("/")
         if not remainder:
-            raise ValueError(
-                f"Cannot archive '{path}': expected an org-prefixed path "
-                f"({{org}}/{{catalog}}/…)."
-            )
+            raise ValueError(f"Cannot archive '{path}': expected an org-prefixed path ({{org}}/{{catalog}}/…).")
         archive_path = f"{org}/{source.bucket_type}/{remainder}"
         return self.transfer(source, self.archive, path, archive_path)
-    
+
     def ingest(
-            self,
-            source: Bucket,
-            path: str,
-            asset_path: str,
-            processed_data: bytes,
-            delete_source: bool = False,
+        self,
+        source: Bucket,
+        path: str,
+        asset_path: str,
+        processed_data: bytes,
+        delete_source: bool = False,
     ) -> dict:
         """
         Full ingest pipeline: archive raw → save processed asset.
@@ -444,32 +453,32 @@ class StorageManager:
         # 1. Archive the raw file
         archived = self.archive_raw(source, path)
         logger.info("Archived: %s/%s → archive/%s", source.bucket_type, path, archived)
-        
+
         # 2. Save processed data to assets
         saved_asset = self.assets.save(asset_path, processed_data)
         logger.info("Asset saved: %s", saved_asset)
-        
+
         # 3. Optionally clean up source
         if delete_source:
             source.delete(path)
             logger.info("Deleted source: %s/%s", source.bucket_type, path)
-        
+
         return {
             "archive_path": archived,
             "asset_path": saved_asset,
             "source": f"{source.bucket_type}/{path}",
         }
-    
+
     # ---- Asset path builder -------------------------------------------------
-    
+
     @staticmethod
     def build_asset_path(
-            org: str,
-            catalog: str,
-            collection: str,
-            variable: str,
-            timestamp: datetime,
-            filename: str,
+        org: str,
+        catalog: str,
+        collection: str,
+        variable: str,
+        timestamp: datetime,
+        filename: str,
     ) -> str:
         """
         Build a time-partitioned asset path:
@@ -483,21 +492,16 @@ class StorageManager:
         from UTC values to ensure consistent paths across timezones.
         """
         import pytz
+
         if not org:
             raise ValueError("org is required to build an asset path")
         if timestamp.tzinfo is None:
-            raise ValueError(
-                f"timestamp must be UTC-aware, got naive datetime: {timestamp}"
-            )
+            raise ValueError(f"timestamp must be UTC-aware, got naive datetime: {timestamp}")
         ts = timestamp.astimezone(pytz.utc)
-        return (
-            f"{org}/{catalog}/{collection}/{variable}/"
-            f"{ts.year}/{ts.month:02d}/{ts.day:02d}/"
-            f"{filename}"
-        )
-    
+        return f"{org}/{catalog}/{collection}/{variable}/{ts.year}/{ts.month:02d}/{ts.day:02d}/{filename}"
+
     # ---- Bucket initialization (for Docker/startup) -------------------------
-    
+
     def ensure_buckets(self) -> list[str]:
         """
         Ensure all required buckets exist.
@@ -509,10 +513,10 @@ class StorageManager:
             List of bucket names that were created.
         """
         created = []
-        
+
         for bucket_type in BucketType.ALL:
             bucket = self._get_bucket(bucket_type)
-            
+
             if bucket.is_s3:
                 try:
                     client = bucket.storage.connection.meta.client
@@ -529,15 +533,16 @@ class StorageManager:
                         created.append(bucket.storage.bucket_name)
                     except Exception:
                         logger.debug("Bucket %s likely exists: %s", bucket.bucket_name, e)
-            
+
             elif bucket.is_local:
                 import os
+
                 location = bucket.storage.location
                 if not os.path.exists(location):
                     os.makedirs(location, exist_ok=True)
                     created.append(location)
                     logger.info("Created local directory: %s", location)
-        
+
         return created
 
 

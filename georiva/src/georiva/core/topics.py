@@ -18,9 +18,4 @@ def topics_of(catalogs):
     """
     from georiva.core.models import Topic
 
-    return (
-        Topic.objects
-        .filter(catalogs__in=catalogs)
-        .distinct()
-        .order_by('sort_order', 'name')
-    )
+    return Topic.objects.filter(catalogs__in=catalogs).distinct().order_by("sort_order", "name")

@@ -6,6 +6,7 @@ Owns:
   - Archiving the raw file to georiva-archive
   - The archive-then-delete decision once processing is complete
 """
+
 import logging
 import tempfile
 from contextlib import contextmanager
@@ -25,11 +26,11 @@ class SourceFileManager:
     """
     Handles the lifecycle of the raw source file during ingestion.
     """
-    
+
     # =========================================================================
     # Download
     # =========================================================================
-    
+
     @contextmanager
     def download_to_temp(self, origin: "Bucket", file_path: str):
         """
@@ -40,20 +41,20 @@ class SourceFileManager:
         size — important for large files.
         """
         original_name = Path(file_path).name
-        
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / original_name
-            
+
             with origin.open(file_path, "rb") as src, open(tmp_path, "wb") as dst:
                 while chunk := src.read(8 * 1024 * 1024):  # 8 MB chunks
                     dst.write(chunk)
-            
+
             yield tmp_path
-    
+
     # =========================================================================
     # Archive
     # =========================================================================
-    
+
     def archive(self, origin: "Bucket", file_path: str) -> Optional[str]:
         """
         Copy the raw source file to georiva-archive.
@@ -65,26 +66,30 @@ class SourceFileManager:
             archived = storage.archive_raw(origin, file_path)
             logger.info(
                 "Archived: %s/%s → archive/%s",
-                origin.bucket_name, file_path, archived,
+                origin.bucket_name,
+                file_path,
+                archived,
             )
             return archived
         except Exception as e:
             logger.warning(
                 "Archive failed: %s/%s — %s",
-                origin.bucket_name, file_path, e,
+                origin.bucket_name,
+                file_path,
+                e,
             )
             return None
-    
+
     # =========================================================================
     # Cleanup
     # =========================================================================
-    
+
     def cleanup(
-            self,
-            origin: "Bucket",
-            file_path: str,
-            catalog,
-            result: "IngestionResult",
+        self,
+        origin: "Bucket",
+        file_path: str,
+        catalog,
+        result: "IngestionResult",
     ) -> None:
         """
         Archive and/or delete the source file based on the ingestion outcome.
@@ -100,19 +105,16 @@ class SourceFileManager:
           No items created (complete failure)
             → keep in origin (FileIngestion already marks it failed)
         """
-        has_partial_failures = any(
-            "Partial failure" in e for e in result.errors
-        )
-        
+        has_partial_failures = any("Partial failure" in e for e in result.errors)
+
         if result.success and not has_partial_failures:
             if catalog.archive_source_files:
                 archived = self.archive(origin, file_path)
                 result.archive_path = archived or ""
             origin.delete(file_path)
-        
+
         elif result.success and has_partial_failures:
             logger.warning(
-                "Partial variable failures — keeping source file "
-                "for re-processing: %s",
+                "Partial variable failures — keeping source file for re-processing: %s",
                 file_path,
             )

@@ -6,6 +6,7 @@ geometries (GeoJSON, in EPSG:4326), and returns per-geometry stats. No Django
 models — callers build the geometries (e.g. from AdminBoundary) and own that
 adapter layer.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,12 @@ logger = logging.getLogger(__name__)
 _CRS_4326 = RasterioCRS.from_epsg(4326)
 
 EMPTY_STATS = {
-    "mean": None, "min": None, "max": None,
-    "sum": None, "std": None, "count": None,
+    "mean": None,
+    "min": None,
+    "max": None,
+    "sum": None,
+    "std": None,
+    "count": None,
 }
 
 
@@ -50,7 +55,11 @@ def mask_and_aggregate(dataset, geom: dict | None, *, label=None) -> dict:
 
     try:
         masked, _ = rasterio.mask.mask(
-            dataset, [geom], crop=False, nodata=np.nan, all_touched=False,
+            dataset,
+            [geom],
+            crop=False,
+            nodata=np.nan,
+            all_touched=False,
         )
         arr = masked[0].astype(np.float32)
         arr[~np.isfinite(arr)] = np.nan
@@ -119,9 +128,14 @@ def zonal_stats_from_array(data, transform, crs, geometries) -> list[dict]:
     results = []
     with MemoryFile() as memfile:
         with memfile.open(
-                driver="GTiff", height=height, width=width, count=1,
-                dtype=np.float32, crs=raster_crs, transform=transform,
-                nodata=np.nan,
+            driver="GTiff",
+            height=height,
+            width=width,
+            count=1,
+            dtype=np.float32,
+            crs=raster_crs,
+            transform=transform,
+            nodata=np.nan,
         ) as dst:
             dst.write(np.asarray(data, dtype=np.float32), 1)
 

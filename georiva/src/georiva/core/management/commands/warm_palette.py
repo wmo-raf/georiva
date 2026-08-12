@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = "Warm the palette cache"
-    
+
     def handle(self, *args, **kwargs):
         self.stdout.write("Warming palette cache...")
         warm_all()

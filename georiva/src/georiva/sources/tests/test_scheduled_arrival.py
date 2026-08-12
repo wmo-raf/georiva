@@ -3,6 +3,7 @@ Tests for Loader-driven FetchRun creation after a scheduled data-feed run.
 
 Replaces the old DataArrival-based tests that verified DataFeed.record_run().
 """
+
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
@@ -44,12 +45,12 @@ class ScheduledRunCreatesFetchRunTests(TestCase):
         loader.data_source.post_process_fetched_file.side_effect = lambda r, p: (p, None)
         fetch_iter = iter(fetch_results)
         with (
-            patch.object(loader, '_already_exists', return_value=False),
-            patch.object(loader, '_find_existing_catalog_path', return_value=None),
-            patch.object(loader, '_fetch_and_store', side_effect=lambda r: next(fetch_iter)),
-            patch.object(loader, '_cleanup_temp'),
-            patch.object(loader.fetch_strategy, 'connect'),
-            patch.object(loader.fetch_strategy, 'disconnect'),
+            patch.object(loader, "_already_exists", return_value=False),
+            patch.object(loader, "_find_existing_catalog_path", return_value=None),
+            patch.object(loader, "_fetch_and_store", side_effect=lambda r: next(fetch_iter)),
+            patch.object(loader, "_cleanup_temp"),
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
         ):
             return loader.run()
 
@@ -57,8 +58,7 @@ class ScheduledRunCreatesFetchRunTests(TestCase):
         req = _mock_request("rain.grib")
         result = self._run(
             [req],
-            [FetchResult(request=req, success=True, status="success",
-                         bytes_transferred=4096)],
+            [FetchResult(request=req, success=True, status="success", bytes_transferred=4096)],
         )
 
         run = FetchRun.objects.get(data_feed=self.feed)
@@ -71,8 +71,7 @@ class ScheduledRunCreatesFetchRunTests(TestCase):
         req = _mock_request("temp.grib")
         self._run(
             [req],
-            [FetchResult(request=req, success=True, status="success",
-                         bytes_transferred=512)],
+            [FetchResult(request=req, success=True, status="success", bytes_transferred=512)],
         )
 
         self.feed.refresh_from_db()
@@ -82,14 +81,12 @@ class ScheduledRunCreatesFetchRunTests(TestCase):
 
     def test_collection_link_last_run_at_updated(self):
         from georiva.sources.models import DataFeedCollectionLink
-        DataFeedCollectionLink.objects.create(
-            data_feed=self.feed, collection=self.collection
-        )
+
+        DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.collection)
         req = _mock_request("wind.grib")
         self._run(
             [req],
-            [FetchResult(request=req, success=True, status="success",
-                         bytes_transferred=256)],
+            [FetchResult(request=req, success=True, status="success", bytes_transferred=256)],
         )
         link = self.feed.collection_links.get(collection=self.collection)
         self.assertIsNotNone(link.last_run_at)

@@ -286,7 +286,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         with connection.cursor() as cursor:
-
             self.stdout.write("Dropping existing function (if any)…")
             cursor.execute(_DROP_FUNCTION_SQL)
 
@@ -300,12 +299,14 @@ class Command(BaseCommand):
             self.stdout.write("Adding function comment…")
             cursor.execute(_COMMENT_SQL)
 
-        self.stdout.write(self.style.SUCCESS(
-            "\nFunction created. Martin tile URL:\n"
-            "  /martin/boundary_stats/{z}/{x}/{y}"
-            "?org=<slug>&catalog=<slug>&collection=<slug>"
-            "&variable=<slug>&admin_level=<int>&time=<iso>&reference_time=<iso>\n\n"
-            "Reload Martin to pick up the new function source:\n"
-            "  docker compose restart martin\n"
-            "  # or POST http://martin:3000/reload"
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(
+                "\nFunction created. Martin tile URL:\n"
+                "  /martin/boundary_stats/{z}/{x}/{y}"
+                "?org=<slug>&catalog=<slug>&collection=<slug>"
+                "&variable=<slug>&admin_level=<int>&time=<iso>&reference_time=<iso>\n\n"
+                "Reload Martin to pick up the new function source:\n"
+                "  docker compose restart martin\n"
+                "  # or POST http://martin:3000/reload"
+            )
+        )

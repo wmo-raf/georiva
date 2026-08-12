@@ -22,6 +22,4 @@ class Command(BaseCommand):
 
         self.stdout.write("Running sweep_staging...")
         count = sweep_staging(sync=not options["async_mode"])
-        self.stdout.write(self.style.SUCCESS(
-            f"Sweep complete: {count} new staging file(s) registered."
-        ))
+        self.stdout.write(self.style.SUCCESS(f"Sweep complete: {count} new staging file(s) registered."))

@@ -38,9 +38,7 @@ class RasterCombineTests(unittest.TestCase):
     def test_nan_is_skipped_when_other_present(self):
         a = np.array([[np.nan, 2.0]])
         b = np.array([[5.0, 6.0]])
-        np.testing.assert_array_equal(
-            raster_combine(a, b, op="sum"), np.array([[5.0, 8.0]])
-        )
+        np.testing.assert_array_equal(raster_combine(a, b, op="sum"), np.array([[5.0, 8.0]]))
 
     def test_requires_two_arrays(self):
         with self.assertRaises(ValueError):

@@ -3,10 +3,10 @@ from .ftp import FTPFetchStrategy
 from .http import HTTPFetchStrategy
 
 __all__ = [
-    'FileRequest',
-    'FetchMode',
-    'FetchResult',
-    'BaseFetchStrategy',
-    'HTTPFetchStrategy',
-    'FTPFetchStrategy',
+    "FileRequest",
+    "FetchMode",
+    "FetchResult",
+    "BaseFetchStrategy",
+    "HTTPFetchStrategy",
+    "FTPFetchStrategy",
 ]

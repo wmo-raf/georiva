@@ -9,7 +9,7 @@ class DataFeedViewSetRegistry:
 
     def register(self, viewset_class):
         """Register a viewset class. Uses the class's 'model' as key."""
-        if not getattr(viewset_class, 'model', None):
+        if not getattr(viewset_class, "model", None):
             raise ValueError(f"{viewset_class.type} must define 'model'")
 
         self._viewsets[viewset_class.type] = viewset_class

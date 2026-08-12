@@ -13,10 +13,10 @@ try:
 except ImportError:
     pass
 
-SECRET_KEY = env.str('SECRET_KEY')
+SECRET_KEY = env.str("SECRET_KEY")
 
 MANIFEST_LOADER = {
-    'cache': True,
+    "cache": True,
     # recommended True for production, requires a server restart to pick up new values from the manifest.
 }
 
@@ -29,12 +29,12 @@ ALLOWED_HOSTS = [
     "georiva",
     GEORIVA_BASE_DOMAIN,
     f".{GEORIVA_BASE_DOMAIN}",
-] + env.list('ALLOWED_HOSTS', default=[])
+] + env.list("ALLOWED_HOSTS", default=[])
 
 CSRF_TRUSTED_ORIGINS = [
     f"https://{GEORIVA_BASE_DOMAIN}",
     f"https://*.{GEORIVA_BASE_DOMAIN}",
-] + env.list('CSRF_TRUSTED_ORIGINS', cast=None, default=[])
+] + env.list("CSRF_TRUSTED_ORIGINS", cast=None, default=[])
 
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', cast=None, default=[])
+CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", cast=None, default=[])

@@ -5,6 +5,7 @@ We mock fetch_strategy and storage to keep these fast and deterministic —
 the point is to verify FetchRun/FetchedFile records are written correctly,
 not to test network or storage I/O.
 """
+
 from unittest.mock import MagicMock, patch, call
 
 from django.test import TestCase
@@ -32,8 +33,7 @@ def _mock_request(filename="file.grib", reference_time=None):
 
 
 def _success_fetch_result(req, bytes_transferred=1024):
-    return FetchResult(request=req, success=True, status="success",
-                       bytes_transferred=bytes_transferred)
+    return FetchResult(request=req, success=True, status="success", bytes_transferred=bytes_transferred)
 
 
 def _failed_fetch_result(req, error="timeout"):
@@ -53,20 +53,17 @@ class LoaderFetchRunCreationTests(TestCase):
         )
         loader.data_source.name = "test"
         loader.data_source.generate_requests_for_collection.return_value = requests
-        loader.data_source.post_process_fetched_file.side_effect = (
-            lambda req, path: (path, None)
-        )
+        loader.data_source.post_process_fetched_file.side_effect = lambda req, path: (path, None)
 
         fetch_iter = iter(fetch_results)
 
         with (
-            patch.object(loader, '_already_exists', return_value=False),
-            patch.object(loader, '_find_existing_catalog_path', return_value=None),
-            patch.object(loader, '_fetch_and_store',
-                         side_effect=lambda req: next(fetch_iter)),
-            patch.object(loader, '_cleanup_temp'),
-            patch.object(loader.fetch_strategy, 'connect'),
-            patch.object(loader.fetch_strategy, 'disconnect'),
+            patch.object(loader, "_already_exists", return_value=False),
+            patch.object(loader, "_find_existing_catalog_path", return_value=None),
+            patch.object(loader, "_fetch_and_store", side_effect=lambda req: next(fetch_iter)),
+            patch.object(loader, "_cleanup_temp"),
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
         ):
             result = loader.run(skip_existing=skip_existing)
         return result
@@ -103,9 +100,9 @@ class LoaderFetchRunCreationTests(TestCase):
         loader.data_source.generate_requests_for_collection.return_value = []
         loader.data_source.post_process_fetched_file.side_effect = lambda r, p: (p, None)
         with (
-            patch.object(loader, '_cleanup_temp'),
-            patch.object(loader.fetch_strategy, 'connect'),
-            patch.object(loader.fetch_strategy, 'disconnect'),
+            patch.object(loader, "_cleanup_temp"),
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
         ):
             loader.run()
         self.assertEqual(FetchRun.objects.count(), 0)
@@ -127,13 +124,12 @@ class LoaderFetchedFileTrackingTests(TestCase):
         loader.data_source.post_process_fetched_file.side_effect = lambda r, p: (p, None)
 
         with (
-            patch.object(loader, '_already_exists', return_value=False),
-            patch.object(loader, '_find_existing_catalog_path', return_value=None),
-            patch.object(loader, '_fetch_and_store',
-                         return_value=_success_fetch_result(req, bytes_transferred=2048)),
-            patch.object(loader, '_cleanup_temp'),
-            patch.object(loader.fetch_strategy, 'connect'),
-            patch.object(loader.fetch_strategy, 'disconnect'),
+            patch.object(loader, "_already_exists", return_value=False),
+            patch.object(loader, "_find_existing_catalog_path", return_value=None),
+            patch.object(loader, "_fetch_and_store", return_value=_success_fetch_result(req, bytes_transferred=2048)),
+            patch.object(loader, "_cleanup_temp"),
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
         ):
             loader.run()
 
@@ -154,11 +150,11 @@ class LoaderFetchedFileTrackingTests(TestCase):
         loader.data_source.post_process_fetched_file.side_effect = lambda r, p: (p, None)
 
         with (
-            patch.object(loader, '_already_exists', return_value=True),
-            patch.object(loader, '_find_existing_catalog_path', return_value=None),
-            patch.object(loader, '_cleanup_temp'),
-            patch.object(loader.fetch_strategy, 'connect'),
-            patch.object(loader.fetch_strategy, 'disconnect'),
+            patch.object(loader, "_already_exists", return_value=True),
+            patch.object(loader, "_find_existing_catalog_path", return_value=None),
+            patch.object(loader, "_cleanup_temp"),
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
         ):
             loader.run()
 
@@ -178,13 +174,12 @@ class LoaderFetchedFileTrackingTests(TestCase):
         loader.data_source.post_process_fetched_file.side_effect = lambda r, p: (p, None)
 
         with (
-            patch.object(loader, '_already_exists', return_value=False),
-            patch.object(loader, '_find_existing_catalog_path', return_value=None),
-            patch.object(loader, '_fetch_and_store',
-                         return_value=_failed_fetch_result(req, error="FTP timeout")),
-            patch.object(loader, '_cleanup_temp'),
-            patch.object(loader.fetch_strategy, 'connect'),
-            patch.object(loader.fetch_strategy, 'disconnect'),
+            patch.object(loader, "_already_exists", return_value=False),
+            patch.object(loader, "_find_existing_catalog_path", return_value=None),
+            patch.object(loader, "_fetch_and_store", return_value=_failed_fetch_result(req, error="FTP timeout")),
+            patch.object(loader, "_cleanup_temp"),
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
         ):
             loader.run()
 

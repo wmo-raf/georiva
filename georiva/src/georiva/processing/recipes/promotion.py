@@ -10,6 +10,7 @@ The output Published Collection mirrors the staging collection (same catalog,
 same slug). The asset's Variable is the staging asset's variable if set, else
 the target collection's first Variable.
 """
+
 from __future__ import annotations
 
 from typing import Iterable
@@ -94,12 +95,7 @@ class PromotionRecipe(BaseRecipe):
     def resolve_inputs(self, unit: ProductionUnit) -> "dict[str, ResolvedInput]":
         from georiva.staging.models import StagingItem
 
-        si = (
-            StagingItem.objects
-            .filter(pk=unit["staging_item_id"])
-            .select_related("collection__catalog")
-            .first()
-        )
+        si = StagingItem.objects.filter(pk=unit["staging_item_id"]).select_related("collection__catalog").first()
         items = [si] if si else []
         assets = list(si.assets.all()) if si else []
         return {"source": ResolvedInput("source", required=True, items=items, assets=assets)}
@@ -107,11 +103,7 @@ class PromotionRecipe(BaseRecipe):
     def outputs(self, unit: ProductionUnit) -> OutputItem:
         from georiva.staging.models import StagingItem
 
-        si = (
-            StagingItem.objects
-            .select_related("collection__catalog")
-            .get(pk=unit["staging_item_id"])
-        )
+        si = StagingItem.objects.select_related("collection__catalog").get(pk=unit["staging_item_id"])
         collection = self._published_collection(si)
         time = si.datetime or si.start_datetime or si.end_datetime
         return OutputItem(
@@ -139,17 +131,24 @@ class PromotionRecipe(BaseRecipe):
                     f"Promotion: no Variable for staging asset {asset.pk}; "
                     f"set one on the asset or on collection '{collection.slug}'"
                 )
-            data, bounds, crs, width, height = self.read_raster(
-                BucketType.STAGING, asset.href
-            )
+            data, bounds, crs, width, height = self.read_raster(BucketType.STAGING, asset.href)
             stats = _array_stats(data)
             # One data OutputAsset per staging asset; the engine's shared
             # materializer writes the served COG from it, same as ingestion.
-            out.append(OutputAsset(
-                variable=variable, roles=["data"], format="cog", array=data,
-                bounds=bounds, crs=crs, width=width, height=height,
-                stats=stats, checksum=asset.checksum,
-            ))
+            out.append(
+                OutputAsset(
+                    variable=variable,
+                    roles=["data"],
+                    format="cog",
+                    array=data,
+                    bounds=bounds,
+                    crs=crs,
+                    width=width,
+                    height=height,
+                    stats=stats,
+                    checksum=asset.checksum,
+                )
+            )
         return out
 
     # ---- I/O seam (mocked in tests) -----------------------------------------
@@ -187,4 +186,5 @@ class PromotionRecipe(BaseRecipe):
     @staticmethod
     def _fallback_variable(collection):
         from georiva.core.models import Variable
+
         return Variable.objects.filter(collection=collection).first()

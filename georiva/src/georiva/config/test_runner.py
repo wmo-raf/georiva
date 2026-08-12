@@ -13,6 +13,7 @@ their own organisations on top.
 The runner also builds the test-only ``DataFeed`` subclass table (see
 ``setup_databases``).
 """
+
 from django.db import connection
 from django.test.runner import DiscoverRunner
 
@@ -20,7 +21,6 @@ TEST_BASE_DOMAIN = "testserver"
 
 
 class GeoRivaTestRunner(DiscoverRunner):
-
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
         from django.conf import settings

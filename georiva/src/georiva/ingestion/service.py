@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # Ingestion Service
 # =============================================================================
 
+
 class IngestionService:
     """
     Orchestrates the full ingestion pipeline for geospatial data files.
@@ -71,21 +72,21 @@ class IngestionService:
     re-processed. This is intentional — a partial ingest is better than
     losing data silently.
     """
-    
+
     def __init__(self):
         self.logger = logging.getLogger("georiva.ingestion")
         self._source_file_manager = SourceFileManager()
-    
+
     # =========================================================================
     # Main Entry Point
     # =========================================================================
-    
+
     def process_file(
-            self,
-            file_path: str,
-            origin_bucket: str = BucketType.INCOMING,
-            reference_time: datetime = None,
-            progress=None,
+        self,
+        file_path: str,
+        origin_bucket: str = BucketType.INCOMING,
+        reference_time: datetime = None,
+        progress=None,
     ) -> IngestionResult:
         """
         Process a single incoming geospatial file end-to-end.
@@ -108,21 +109,22 @@ class IngestionService:
             IngestionResult summarising what was created and any errors.
         """
         from task_ferry.progress import Progress
+
         if progress is None:
             progress = Progress(total=100)
 
         origin = storage.bucket(origin_bucket)
         self.logger.info("Processing: %s/%s", origin.bucket_name, file_path)
-        
+
         # ── Path parsing ──────────────────────────────────────────────────────
         path_meta = parse_path(file_path)
         org_slug = path_meta.get("org")
         catalog_slug = path_meta.get("catalog")
         collection_slug = path_meta.get("collection")
-        
+
         if reference_time is None:
             reference_time = path_meta.get("reference_time")
-        
+
         result = IngestionResult(
             origin_file=file_path,
             origin_bucket=origin_bucket,
@@ -131,7 +133,7 @@ class IngestionService:
             success=False,
             timestamp=datetime.now(pytz.utc),
         )
-        
+
         try:
             # ── Organisation + catalog resolution ─────────────────────────────
             catalog, error = resolve_org_catalog(org_slug, catalog_slug)
@@ -141,32 +143,26 @@ class IngestionService:
 
             # ── Collection resolution ─────────────────────────────────────────
             collections = self._resolve_collections(catalog, collection_slug)
-            
+
             if not collections:
                 if collection_slug:
-                    result.add_error(
-                        f"Collection not found or inactive: "
-                        f"{org_slug}/{catalog_slug}/{collection_slug}"
-                    )
+                    result.add_error(f"Collection not found or inactive: {org_slug}/{catalog_slug}/{collection_slug}")
                 else:
-                    result.add_error(
-                        f"No active collections found for catalog: "
-                        f"{org_slug}/{catalog_slug}"
-                    )
+                    result.add_error(f"No active collections found for catalog: {org_slug}/{catalog_slug}")
                 return result
-            
+
             self.logger.info(
                 "Processing against %d collection(s): %s",
                 len(collections),
                 ", ".join(c.slug for c in collections),
             )
-            
+
             # ── Format plugin ─────────────────────────────────────────────────
             plugin = format_registry.get(catalog.file_format)
             if not plugin:
                 result.add_error(f"No format plugin for: {catalog.file_format}")
                 return result
-            
+
             # ── Boundary clipper ──────────────────────────────────────────────
             clipper = BoundaryClipper(
                 boundary=catalog.boundary if catalog.clip_mode != "none" else None,
@@ -176,11 +172,9 @@ class IngestionService:
                 result.clipped = True
                 result.clip_boundary = str(catalog.boundary)
                 self.logger.info("Clipping enabled: %s", catalog.boundary)
-            
+
             # ── FileIngestion reference ────────────────────────────────────────
-            ingestion_log = FileIngestion.objects.filter(
-                bucket=origin_bucket, file_path=file_path
-            ).first()
+            ingestion_log = FileIngestion.objects.filter(bucket=origin_bucket, file_path=file_path).first()
 
             # Write resolved collections immediately — even a run that fails
             # before creating any Items remains collection-trackable.
@@ -208,23 +202,18 @@ class IngestionService:
                     for collection in collections:
                         first_variable_name = self._get_first_variable_name(collection)
                         if not first_variable_name:
-                            result.add_error(
-                                f"No active variables for: {collection.slug}"
-                            )
+                            result.add_error(f"No active variables for: {collection.slug}")
                             continue
 
-                        timestamps = plugin.get_timestamps(
-                            local_path, first_variable_name
-                        )
+                        timestamps = plugin.get_timestamps(local_path, first_variable_name)
                         if not timestamps:
-                            result.add_error(
-                                f"No timestamps found in: {file_path}"
-                            )
+                            result.add_error(f"No timestamps found in: {file_path}")
                             continue
 
                         self.logger.info(
                             "Found %d timestamp(s) for %s",
-                            len(timestamps), collection.slug,
+                            len(timestamps),
+                            collection.slug,
                         )
                         result.collection_slug = collection.slug
 
@@ -232,52 +221,40 @@ class IngestionService:
                             by=5,
                             state=f"{collection.slug}: {len(timestamps)} timestamps found",
                         )
-                        n_vars = len(
-                            [v for v in collection.variables.all() if v.is_active]
-                        )
-                        loop = progress.create_child(
-                            represents=70, total=max(1, len(timestamps))
-                        )
+                        n_vars = len([v for v in collection.variables.all() if v.is_active])
+                        loop = progress.create_child(represents=70, total=max(1, len(timestamps)))
 
                         for ts in timestamps:
-                            ts_slot = loop.create_child(
-                                represents=1, total=max(1, n_vars)
-                            )
+                            ts_slot = loop.create_child(represents=1, total=max(1, n_vars))
                             try:
-                                item, assets, clip_info, failed_vars = (
-                                    handler.process_timestamp(
-                                        collection=collection,
-                                        local_path=local_path,
-                                        timestamp=ts,
-                                        source_file=f"{origin_bucket}:{file_path}",
-                                        progress=ts_slot,
-                                    )
+                                item, assets, clip_info, failed_vars = handler.process_timestamp(
+                                    collection=collection,
+                                    local_path=local_path,
+                                    timestamp=ts,
+                                    source_file=f"{origin_bucket}:{file_path}",
+                                    progress=ts_slot,
                                 )
-                                
+
                                 if failed_vars:
                                     result.add_error(
                                         f"Partial failure for {collection.slug} "
                                         f"@ {ts}: variables failed: "
                                         f"{', '.join(failed_vars)}"
                                     )
-                                
+
                                 if item is None:
                                     continue
-                                
+
                                 result.items_created.append(str(item.pk))
-                                result.assets_created.extend(
-                                    [str(a.pk) for a in assets]
-                                )
-                                
+                                result.assets_created.extend([str(a.pk) for a in assets])
+
                                 if clip_info and result.original_size is None:
                                     result.original_size = clip_info.get("original_size")
                                     result.clipped_size = clip_info.get("clipped_size")
-                            
+
                             except Exception as e:
-                                result.add_error(
-                                    f"Failed {collection.slug} @ {ts}: {e}"
-                                )
-                
+                                result.add_error(f"Failed {collection.slug} @ {ts}: {e}")
+
                 result.success = len(result.items_created) > 0
 
                 # Populate summary fields from the last collection processed
@@ -287,11 +264,11 @@ class IngestionService:
                     sorted_ts = sorted(timestamps)
                     result.valid_time_start = sorted_ts[0]
                     result.valid_time_end = sorted_ts[-1]
-            
+
             finally:
                 if hasattr(plugin, "clear_cache"):
                     plugin.clear_cache()
-            
+
             # ── Archive + cleanup ─────────────────────────────────────────────
             progress.increment(by=10, state="archiving")
             self._source_file_manager.cleanup(origin, file_path, catalog, result)
@@ -303,21 +280,21 @@ class IngestionService:
                     "Clipping reduced data size by %.1f%%",
                     result.size_reduction_percent,
                 )
-        
+
         except Exception as e:
             self.logger.exception("Ingestion failed: %s", file_path)
             result.add_error(str(e))
-        
+
         return result
-    
+
     # =========================================================================
     # Collection Resolution
     # =========================================================================
-    
+
     def _resolve_collections(
-            self,
-            catalog: Catalog,
-            collection_slug: str = None,
+        self,
+        catalog: Catalog,
+        collection_slug: str = None,
     ) -> list[Collection]:
         """
         Resolve which collections to process for a given catalog.
@@ -330,18 +307,18 @@ class IngestionService:
         """
         # ``catalog__organisation`` is fetched here, not lazily: every asset
         # write reads ``catalog.organisation.slug`` to build its path.
-        base_qs = Collection.objects.select_related(
-            "catalog__organisation"
-        ).prefetch_related(
+        base_qs = Collection.objects.select_related("catalog__organisation").prefetch_related(
             Prefetch(
                 "variables",
                 queryset=Variable.objects.select_related(
                     "source_unit",
                     "unit",
-                ).prefetch_related("styles").order_by("sort_order"),
+                )
+                .prefetch_related("styles")
+                .order_by("sort_order"),
             )
         )
-        
+
         if collection_slug:
             try:
                 return [
@@ -353,13 +330,13 @@ class IngestionService:
                 ]
             except Collection.DoesNotExist:
                 return []
-        
+
         return list(base_qs.filter(catalog=catalog, is_active=True))
-    
+
     def _get_first_variable_name(self, collection: Collection) -> Optional[str]:
         for variable in collection.variables.all():
             if not variable.is_active:
                 continue
             if variable.sources:
-                return variable.sources[0].value['source_name']
+                return variable.sources[0].value["source_name"]
         return None

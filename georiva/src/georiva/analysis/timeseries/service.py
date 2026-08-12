@@ -37,21 +37,21 @@ class TimeseriesService:
                  container).
         False → fetch chunks via the public endpoint (external callers).
     """
-    
+
     def __init__(self, *, internal: bool = True) -> None:
         self._internal = internal
-    
+
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
-    
+
     def point(
-            self,
-            variable: "Variable",
-            lat: float,
-            lon: float,
-            time_start: datetime | None = None,
-            time_end: datetime | None = None,
+        self,
+        variable: "Variable",
+        lat: float,
+        lon: float,
+        time_start: datetime | None = None,
+        time_end: datetime | None = None,
     ) -> pd.Series:
         """
         Extract a point time series for a single lat/lon coordinate.
@@ -81,29 +81,23 @@ class TimeseriesService:
             If the variable has no READY manifest.
         """
         ds = self._open_dataset(variable)
-        
+
         da = ds[variable.slug]
         da = self._filter_time(da, time_start, time_end)
-        
-        logger.debug(
-            "Point query: %s @ (%.4f, %.4f)", variable.slug, lat, lon
-        )
-        
-        result = (
-            da
-            .sel(lat=lat, lon=lon, method="nearest")
-            .load()
-        )
-        
+
+        logger.debug("Point query: %s @ (%.4f, %.4f)", variable.slug, lat, lon)
+
+        result = da.sel(lat=lat, lon=lon, method="nearest").load()
+
         return self._to_series(result, variable.slug)
-    
+
     def area(
-            self,
-            variable: "Variable",
-            geometry: dict,
-            aggregation: str = "mean",
-            time_start: datetime | None = None,
-            time_end: datetime | None = None,
+        self,
+        variable: "Variable",
+        geometry: dict,
+        aggregation: str = "mean",
+        time_start: datetime | None = None,
+        time_end: datetime | None = None,
     ) -> pd.Series:
         """
         Zonal statistics over an arbitrary GeoJSON polygon.
@@ -141,28 +135,25 @@ class TimeseriesService:
         """
         supported = {"mean", "sum", "min", "max", "std"}
         if aggregation not in supported:
-            raise ValueError(
-                f"Unsupported aggregation {aggregation!r}. "
-                f"Choose from: {sorted(supported)}"
-            )
-        
+            raise ValueError(f"Unsupported aggregation {aggregation!r}. Choose from: {sorted(supported)}")
+
         ds = self._open_dataset(variable)
-        
+
         da = ds[variable.slug]
         da = self._filter_time(da, time_start, time_end)
-        
+
         # --- Bbox subset ----------------------------------------------------
         # Reduce the spatial extent to the polygon's bounding box before
         # loading any data.  Only the intersecting COG tiles are fetched.
         da = self._bbox_subset(da, geometry)
-        
+
         # --- Load into memory ------------------------------------------------
         # Load after bbox subset so we only pull the tiles we need.
         da = da.load()
-        
+
         # --- Polygon mask ----------------------------------------------------
         da = self._apply_polygon_mask(da, geometry)
-        
+
         # --- Spatial aggregation ---------------------------------------------
         agg_fn = {
             "mean": da.mean,
@@ -171,16 +162,16 @@ class TimeseriesService:
             "max": da.max,
             "std": da.std,
         }[aggregation]
-        
+
         result = agg_fn(dim=["lat", "lon"], skipna=True)
-        
+
         series_name = f"{variable.slug}_{aggregation}"
         return self._to_series(result, series_name)
-    
+
     # -------------------------------------------------------------------------
     # Private helpers
     # -------------------------------------------------------------------------
-    
+
     def _open_dataset(self, variable: "Variable"):
         """
         Open the variable's virtual Zarr (Icechunk) repo as a lazy xarray Dataset.
@@ -189,7 +180,7 @@ class TimeseriesService:
         Opens a read-only session at the tip of the repo's main branch.
         """
         from georiva.virtual_zarr.models import VirtualZarrManifest
-        
+
         try:
             manifest = VirtualZarrManifest.objects.get(variable=variable)
         except VirtualZarrManifest.DoesNotExist:
@@ -200,26 +191,27 @@ class TimeseriesService:
                 f"/{variable.collection.slug} "
                 f"--variable {variable.slug}"
             )
-        
+
         return manifest.open_dataset(internal=self._internal, chunks={})
-    
+
     def _filter_time(self, da, time_start, time_end):
         """Apply an optional time range slice to a DataArray."""
         if time_start is None and time_end is None:
             return da
-        
+
         # Normalise to tz-naive UTC strings for xarray slice
         def _fmt(dt: datetime) -> str:
             if hasattr(dt, "tzinfo") and dt.tzinfo is not None:
                 import pytz
+
                 dt = dt.astimezone(pytz.utc).replace(tzinfo=None)
             return str(dt)
-        
+
         start = _fmt(time_start) if time_start else None
         end = _fmt(time_end) if time_end else None
-        
+
         return da.sel(time=slice(start, end))
-    
+
     def _bbox_subset(self, da, geometry: dict):
         """
         Subset a DataArray to the bounding box of a GeoJSON geometry.
@@ -228,15 +220,15 @@ class TimeseriesService:
         The subset is inclusive so border pixels are included.
         """
         from shapely.geometry import shape
-        
+
         geom = shape(geometry)
         minx, miny, maxx, maxy = geom.bounds
-        
+
         return da.sel(
             lat=slice(maxy, miny),  # lat is descending (north → south)
             lon=slice(minx, maxx),
         )
-    
+
     def _apply_polygon_mask(self, da, geometry: dict):
         """
         Mask pixels outside the GeoJSON geometry to NaN using regionmask.
@@ -247,12 +239,12 @@ class TimeseriesService:
         try:
             import regionmask
             from shapely.geometry import shape
-            
+
             geom = shape(geometry)
             regions = regionmask.Regions([geom])
             mask = regions.mask(da)
             return da.where(mask == 0)
-        
+
         except ImportError:
             # regionmask not installed — fall back to bbox only with a warning.
             logger.warning(
@@ -261,7 +253,7 @@ class TimeseriesService:
                 "pip install regionmask"
             )
             return da
-    
+
     @staticmethod
     def _to_series(result, name: str) -> pd.Series:
         """
@@ -272,12 +264,12 @@ class TimeseriesService:
         (consistent with how TimescaleDB returns timestamps).
         """
         series = result.to_series().rename(name)
-        
+
         # Drop NaN — nodata values from masked pixels or missing timesteps
         series = series.dropna()
-        
+
         # Ensure the index is tz-naive UTC
         if hasattr(series.index, "tz") and series.index.tz is not None:
             series.index = series.index.tz_convert("UTC").tz_localize(None)
-        
+
         return series

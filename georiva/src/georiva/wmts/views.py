@@ -13,6 +13,7 @@ A DRF view rather than a plain one so a presented API key becomes
 member's key widens ``visible_to`` here exactly as it does the tile gate, and
 a broken key answers the same 401 (ADR 0014).
 """
+
 from django.http import Http404, HttpResponse
 from django.utils.cache import patch_cache_control
 from rest_framework.negotiation import BaseContentNegotiation
@@ -38,7 +39,6 @@ class OneRepresentation(BaseContentNegotiation):
 
 
 class WMTSCapabilitiesView(APIView):
-
     permission_classes = []
     content_negotiation_class = OneRepresentation
 

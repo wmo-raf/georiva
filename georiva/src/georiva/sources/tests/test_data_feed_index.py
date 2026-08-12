@@ -8,6 +8,7 @@ DataFeedSuccessUrlMixin, DataFeed.delete_url, the admin menu and breadcrumbs
 across several templates all reverse "data_feed_list", so the swap must be
 invisible to them.
 """
+
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -33,7 +34,8 @@ def _ago(**kwargs):
 def _make_feed_named(name, **kwargs):
     """Create a feed whose name may collide with others (catalog slugs stay unique)."""
     _make_feed_named.counter += 1
-    catalog = Catalog.objects.create(organisation=make_organisation(), 
+    catalog = Catalog.objects.create(
+        organisation=make_organisation(),
         name=f"{name} {_make_feed_named.counter}",
         slug=f"cat-{_make_feed_named.counter}",
         file_format="geotiff",
@@ -49,7 +51,9 @@ def _make_feed(name, *, organisation=None, **kwargs):
     slug = name.lower().replace(" ", "-")
     catalog = Catalog.objects.create(
         organisation=organisation or make_organisation(),
-        name=name, slug=slug, file_format="geotiff",
+        name=name,
+        slug=slug,
+        file_format="geotiff",
     )
     return DataFeed.objects.create(name=name, catalog=catalog, **kwargs)
 
@@ -194,21 +198,22 @@ class HealthChipScopingTests(DataFeedIndexBase):
     def test_a_chip_does_not_count_another_organisations_feeds(self):
         _make_feed("Ours Failed", last_run_status="failed", last_run_at=_ago(minutes=5))
         _make_feed(
-            "Theirs Failed", organisation=self.neighbour,
-            last_run_status="failed", last_run_at=_ago(minutes=5),
+            "Theirs Failed",
+            organisation=self.neighbour,
+            last_run_status="failed",
+            last_run_at=_ago(minutes=5),
         )
 
-        chips = {
-            chip["state"]: chip["count"]
-            for chip in self.client.get(self.url).context["health_chips"]
-        }
+        chips = {chip["state"]: chip["count"] for chip in self.client.get(self.url).context["health_chips"]}
         self.assertEqual(chips[Health.FAILED], 1)
 
     def test_the_all_total_does_not_count_another_organisations_feeds(self):
         _make_feed("Ours Healthy", last_run_status="success", last_run_at=_ago(minutes=5))
         _make_feed(
-            "Theirs Healthy", organisation=self.neighbour,
-            last_run_status="success", last_run_at=_ago(minutes=5),
+            "Theirs Healthy",
+            organisation=self.neighbour,
+            last_run_status="success",
+            last_run_at=_ago(minutes=5),
         )
 
         response = self.client.get(self.url)
@@ -219,8 +224,10 @@ class HealthChipScopingTests(DataFeedIndexBase):
         not appear on this bar as something to filter by."""
         _make_feed("Ours Healthy", last_run_status="success", last_run_at=_ago(minutes=5))
         _make_feed(
-            "Theirs Failed", organisation=self.neighbour,
-            last_run_status="failed", last_run_at=_ago(minutes=5),
+            "Theirs Failed",
+            organisation=self.neighbour,
+            last_run_status="failed",
+            last_run_at=_ago(minutes=5),
         )
 
         states = [chip["state"] for chip in self.client.get(self.url).context["health_chips"]]
@@ -232,8 +239,10 @@ class HealthChipScopingTests(DataFeedIndexBase):
         _make_feed("Ours Failed", last_run_status="failed", last_run_at=_ago(minutes=5))
         _make_feed("Ours Healthy", last_run_status="success", last_run_at=_ago(minutes=5))
         _make_feed(
-            "Theirs Failed", organisation=self.neighbour,
-            last_run_status="failed", last_run_at=_ago(minutes=5),
+            "Theirs Failed",
+            organisation=self.neighbour,
+            last_run_status="failed",
+            last_run_at=_ago(minutes=5),
         )
 
         response = self.client.get(self.url, {"health": Health.FAILED.rank})
@@ -246,9 +255,7 @@ class UrlIntegrityTests(DataFeedIndexBase):
 
     def test_delete_url_still_points_at_the_cascade_page(self):
         feed = _make_feed("CHIRPS Daily")
-        self.assertEqual(
-            feed.delete_url, reverse("data_feed_delete", kwargs={"pk": feed.pk})
-        )
+        self.assertEqual(feed.delete_url, reverse("data_feed_delete", kwargs={"pk": feed.pk}))
 
     def test_success_url_mixin_still_targets_the_listing(self):
         from georiva.sources.viewsets import DataFeedSuccessUrlMixin

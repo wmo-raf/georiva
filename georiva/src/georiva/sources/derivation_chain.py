@@ -9,6 +9,7 @@ configured-but-unrun (blocked) edges appear alongside the ones that have run.
 
 The read-side topology view; the engine stays unaware (ADR-0005).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from georiva.sources.derivation_invocation import definition_for
 @dataclass
 class ChainNode:
     """A collection in the pipeline."""
+
     collection: str
 
 
@@ -31,6 +33,7 @@ class ChainEdge:
     (a declared definition with no row yet), or ``orphaned`` (a row the plugin no
     longer declares). ``product_id`` is None for a ``new`` edge.
     """
+
     product_id: int | None
     label: str
     recipe_type: str
@@ -78,34 +81,50 @@ def build_chain_graph(data_feed) -> ChainGraph:
         row = rows.get(definition.key)
         if row is None:
             # A declared definition an upgrade added, not yet provisioned.
-            edges.append(ChainEdge(
-                product_id=None, label=definition.label,
-                recipe_type=definition.recipe_type,
-                trigger_mode=definition.trigger_mode,
-                inputs=inputs, outputs=outputs, state="new",
-            ))
+            edges.append(
+                ChainEdge(
+                    product_id=None,
+                    label=definition.label,
+                    recipe_type=definition.recipe_type,
+                    trigger_mode=definition.trigger_mode,
+                    inputs=inputs,
+                    outputs=outputs,
+                    state="new",
+                )
+            )
             continue
         readiness = product_readiness(row)
-        edges.append(ChainEdge(
-            product_id=row.pk, label=row.display_label,
-            recipe_type=definition.recipe_type,
-            trigger_mode=definition.trigger_mode,
-            inputs=inputs, outputs=outputs,
-            status=product_status(row).status,
-            ready=readiness.ready, reason=readiness.reason,
-            state="enabled" if row.is_enabled else "disabled",
-        ))
+        edges.append(
+            ChainEdge(
+                product_id=row.pk,
+                label=row.display_label,
+                recipe_type=definition.recipe_type,
+                trigger_mode=definition.trigger_mode,
+                inputs=inputs,
+                outputs=outputs,
+                status=product_status(row).status,
+                ready=readiness.ready,
+                reason=readiness.reason,
+                state="enabled" if row.is_enabled else "disabled",
+            )
+        )
 
     # Orphaned rows: no declaration, so no inputs/outputs to draw — a flagged,
     # collection-less edge listed after the topology.
     for row in rows.values():
         if row.definition_key not in declared_keys:
-            edges.append(ChainEdge(
-                product_id=row.pk, label=row.display_label,
-                recipe_type=row.recipe_type, trigger_mode="",
-                inputs=[], outputs=[],
-                status=product_status(row).status, state="orphaned",
-            ))
+            edges.append(
+                ChainEdge(
+                    product_id=row.pk,
+                    label=row.display_label,
+                    recipe_type=row.recipe_type,
+                    trigger_mode="",
+                    inputs=[],
+                    outputs=[],
+                    status=product_status(row).status,
+                    state="orphaned",
+                )
+            )
 
     return ChainGraph(nodes=[ChainNode(slug) for slug in node_slugs], edges=edges)
 
@@ -116,10 +135,8 @@ def item_lineage(item) -> list:
     source StagingItems/Items recorded for ``item``."""
     from georiva.staging.models import DerivationLink
 
-    links = (
-        DerivationLink.objects
-        .filter(derived_item=item)
-        .select_related("source_staging_item", "source_published_item")
+    links = DerivationLink.objects.filter(derived_item=item).select_related(
+        "source_staging_item", "source_published_item"
     )
     sources = []
     for link in links:

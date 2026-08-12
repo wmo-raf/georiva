@@ -39,7 +39,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
     display_name = "GeoTIFF"
     extensions = [".tif", ".tiff", ".geotiff"]
     time_from_filename = True
-    
+
     def can_handle(self, file_path: PathLike) -> bool:
         file_path = Path(file_path)
         if file_path.suffix.lower() in self.extensions:
@@ -50,11 +50,11 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                 return magic[:2] in (b"II", b"MM")
         except Exception:
             return False
-    
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    
+
     def list_variables(self, file_path: PathLike) -> list[dict]:
         """
         List all bands in the GeoTIFF file.
@@ -70,16 +70,16 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         """
         file_path = Path(file_path)
         results: list[dict] = []
-        
+
         try:
             with rasterio.open(file_path) as src:
                 descriptions = list(getattr(src, "descriptions", []) or [])
                 units = list(getattr(src, "units", []) or [])
-                
+
                 for i in range(1, src.count + 1):
                     desc = descriptions[i - 1] if i - 1 < len(descriptions) else None
                     unit = units[i - 1] if i - 1 < len(units) else ""
-                    
+
                     results.append(
                         {
                             "name": f"band_{i}",
@@ -93,24 +93,24 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                     )
         except Exception as e:
             self.logger.error(f"Failed to list variables in {file_path}: {e}")
-        
+
         return results
-    
+
     def get_timestamps(self, file_path: PathLike, variable_name: str = "") -> list[datetime]:
         """Extract timestamps from the filename. Same for all bands."""
         file_path = Path(file_path)
         dt = self._parse_timestamp_from_filename(file_path.name)
         return [dt] if dt else []
-    
+
     @contextmanager
     def open_variable(
-            self,
-            file_path: PathLike,
-            variable_name: str,
-            *,
-            timestamp: Optional[datetime] = None,
-            window: Optional[tuple[int, int, int, int]] = None,
-            **kwargs,
+        self,
+        file_path: PathLike,
+        variable_name: str,
+        *,
+        timestamp: Optional[datetime] = None,
+        window: Optional[tuple[int, int, int, int]] = None,
+        **kwargs,
     ) -> Generator[VariableInfo, None, None]:
         """
         Open a GeoTIFF band lazily via rioxarray.
@@ -120,7 +120,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         """
         file_path = Path(file_path)
         band = self._parse_band_index(variable_name)
-        
+
         # Open lazily with rioxarray
         ds = xr.open_dataset(file_path, engine="rasterio", chunks={})
         try:
@@ -128,17 +128,15 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             var_names = list(ds.data_vars)
             if not var_names:
                 raise ValueError(f"No data variables found in {file_path}")
-            
+
             var = ds[var_names[0]]
-            
+
             # Select band
             if "band" in var.dims:
                 if band < 1 or band > var.sizes["band"]:
-                    raise ValueError(
-                        f"Band {band} not found (file has {var.sizes['band']} bands)"
-                    )
+                    raise ValueError(f"Band {band} not found (file has {var.sizes['band']} bands)")
                 var = var.sel(band=band)
-            
+
             # Window slicing (lazy)
             y_dim, x_dim = self._spatial_dims(var)
             if window and y_dim and x_dim:
@@ -147,15 +145,11 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                 full_h = var.sizes.get(y_dim, var.shape[-2])
                 w = min(w, full_w - x_off)
                 h = min(h, full_h - y_off)
-                var = var.isel(
-                    {x_dim: slice(x_off, x_off + w), y_dim: slice(y_off, y_off + h)}
-                )
-            
+                var = var.isel({x_dim: slice(x_off, x_off + w), y_dim: slice(y_off, y_off + h)})
+
             # Spatial info from rasterio (more reliable than xarray coords for GeoTIFF)
             with rasterio.open(file_path) as src:
-                bounds, resolution, crs, needs_flip = self._spatial_from_rasterio(
-                    src, window
-                )
+                bounds, resolution, crs, needs_flip = self._spatial_from_rasterio(src, window)
                 full_width = src.width
                 full_height = src.height
                 unit = ""
@@ -166,12 +160,12 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                     unit = src_units[band - 1] or ""
                 if band - 1 < len(src_descs):
                     long_name = src_descs[band - 1] or ""
-            
+
             valid_time = timestamp
             if valid_time is None:
                 ts = self.get_timestamps(file_path)
                 valid_time = ts[0] if ts else datetime.now(timezone.utc)
-            
+
             yield VariableInfo(
                 data=var,
                 bounds=bounds,
@@ -193,14 +187,14 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             )
         finally:
             ds.close()
-    
+
     def extract_variable(
-            self,
-            file_path: PathLike,
-            variable_name: str,
-            timestamp: Optional[datetime] = None,
-            window: Optional[tuple[int, int, int, int]] = None,
-            **kwargs,
+        self,
+        file_path: PathLike,
+        variable_name: str,
+        timestamp: Optional[datetime] = None,
+        window: Optional[tuple[int, int, int, int]] = None,
+        **kwargs,
     ) -> ExtractedVariable:
         """
         Override: use rasterio windowed reading for efficient materialization.
@@ -210,37 +204,35 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         """
         file_path = Path(file_path)
         band = self._parse_band_index(variable_name)
-        
+
         with rasterio.open(file_path) as src:
             if band < 1 or band > src.count:
                 raise ValueError(f"Band {band} not found (file has {src.count} bands)")
-            
+
             rio_window = None
             if window:
                 x_off, y_off, w, h = window
                 rio_window = Window(col_off=x_off, row_off=y_off, width=w, height=h)
-            
+
             data = src.read(band, window=rio_window)
-            
+
             # Replace nodata with NaN
             if src.nodata is not None:
                 data = data.astype(float, copy=False)
                 data = np.where(data == src.nodata, np.nan, data)
-            
-            bounds, resolution, crs, needs_flip = self._spatial_from_rasterio(
-                src, window
-            )
+
+            bounds, resolution, crs, needs_flip = self._spatial_from_rasterio(src, window)
             if needs_flip:
                 data = np.flipud(data)
-            
+
             valid_time = timestamp
             if valid_time is None:
                 ts = self.get_timestamps(file_path)
                 valid_time = ts[0] if ts else datetime.now(timezone.utc)
-            
+
             descriptions = list(getattr(src, "descriptions", []) or [])
             units = list(getattr(src, "units", []) or [])
-            
+
             return ExtractedVariable(
                 data=data,
                 bounds=bounds,
@@ -253,9 +245,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                 units=units[band - 1] if band - 1 < len(units) else "",
                 metadata={
                     "source_file": str(file_path),
-                    "long_name": descriptions[band - 1]
-                    if band - 1 < len(descriptions)
-                    else "",
+                    "long_name": descriptions[band - 1] if band - 1 < len(descriptions) else "",
                     "band_index": band,
                     "driver": src.driver,
                     "dtype": str(src.dtypes[band - 1]),
@@ -263,23 +253,23 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                     "full_height": int(src.height),
                 },
             )
-    
+
     def get_metadata_for_variable(
-            self,
-            file_path: PathLike,
-            variable_name: str,
-            *,
-            timestamp: Optional[datetime] = None,
-            **kwargs,
+        self,
+        file_path: PathLike,
+        variable_name: str,
+        *,
+        timestamp: Optional[datetime] = None,
+        **kwargs,
     ) -> dict:
         """Override: use rasterio directly — faster than opening xarray."""
         file_path = Path(file_path)
         band = self._parse_band_index(variable_name)
-        
+
         with rasterio.open(file_path) as src:
             if band < 1 or band > src.count:
                 raise ValueError(f"Band {band} not found (file has {src.count} bands)")
-            
+
             b = src.bounds
             return {
                 "width": int(src.width),
@@ -287,11 +277,11 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
                 "bounds": (float(b.left), float(b.bottom), float(b.right), float(b.top)),
                 "crs": str(src.crs) if src.crs else "EPSG:4326",
             }
-    
+
     # ------------------------------------------------------------------
     # Internal: band resolution
     # ------------------------------------------------------------------
-    
+
     @staticmethod
     def _parse_band_index(variable_name: str) -> int:
         """Extract band index from variable name like 'band_3'. Defaults to 1."""
@@ -301,14 +291,14 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             except (ValueError, IndexError):
                 pass
         return 1
-    
+
     # ------------------------------------------------------------------
     # Internal: spatial helpers
     # ------------------------------------------------------------------
-    
+
     _Y_NAMES = {"latitude", "lat", "y"}
     _X_NAMES = {"longitude", "lon", "x"}
-    
+
     def _spatial_dims(self, var) -> tuple[Optional[str], Optional[str]]:
         y_dim = x_dim = None
         for d in var.dims:
@@ -318,10 +308,10 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
             elif dl in self._X_NAMES:
                 x_dim = d
         return y_dim, x_dim
-    
+
     @staticmethod
     def _spatial_from_rasterio(
-            src, window: Optional[tuple[int, int, int, int]]
+        src, window: Optional[tuple[int, int, int, int]]
     ) -> tuple[tuple[float, ...], tuple[float, float], str, bool]:
         """
         Extract bounds, resolution, CRS, and flip flag from a rasterio source.
@@ -336,18 +326,18 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         else:
             b = src.bounds
             bounds = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
-        
+
         transform = src.transform
         resolution = (float(abs(transform.a)), float(abs(transform.e)))
         crs = str(src.crs) if src.crs else "EPSG:4326"
         needs_flip = transform.e > 0
-        
+
         return bounds, resolution, crs, needs_flip
-    
+
     # ------------------------------------------------------------------
     # Internal: time handling
     # ------------------------------------------------------------------
-    
+
     _TIMESTAMP_PATTERNS = [
         (r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", "%Y-%m-%dT%H:%M:%S"),
         (r"(\d{4}-\d{2}-\d{2})", "%Y-%m-%d"),
@@ -355,7 +345,7 @@ class GeoTIFFFormatPlugin(BaseFormatPlugin):
         (r"(\d{14})", "%Y%m%d%H%M%S"),
         (r"(\d{8})", "%Y%m%d"),
     ]
-    
+
     @classmethod
     def _parse_timestamp_from_filename(cls, filename: str) -> Optional[datetime]:
         for pattern, fmt in cls._TIMESTAMP_PATTERNS:

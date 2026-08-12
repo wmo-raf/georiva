@@ -21,11 +21,12 @@ logger = logging.getLogger(__name__)
 # Core computation — Django adapter over geoprocessing.zonal
 # ---------------------------------------------------------------------------
 
+
 def compute_stats_from_array(
-        data: np.ndarray,
-        transform,
-        crs: str,
-        boundaries: "list[AdminBoundary]",
+    data: np.ndarray,
+    transform,
+    crs: str,
+    boundaries: "list[AdminBoundary]",
 ) -> "list[dict]":
     """
     Compute zonal statistics for all boundaries against one 2-D numpy array.
@@ -47,7 +48,9 @@ def compute_stats_from_array(
             geometries.append((boundary.pk, json.loads(boundary.geom.geojson)))
         except Exception as exc:
             logger.warning(
-                "Failed to parse geometry for boundary %s: %s", boundary.pk, exc,
+                "Failed to parse geometry for boundary %s: %s",
+                boundary.pk,
+                exc,
             )
             geometries.append((boundary.pk, None))
 
@@ -58,8 +61,8 @@ def compute_stats_from_array(
 
 
 def compute_stats_from_cog_bytes(
-        cog_bytes: bytes,
-        boundaries: "list[AdminBoundary]",
+    cog_bytes: bytes,
+    boundaries: "list[AdminBoundary]",
 ) -> "list[dict]":
     """
     Compute zonal statistics from raw COG bytes (used by backfill task).
@@ -84,11 +87,12 @@ def compute_stats_from_cog_bytes(
 # Persistence
 # ---------------------------------------------------------------------------
 
+
 def persist_stats(
-        item: "Item",
-        variable: "Variable",
-        stats_rows: "list[dict]",
-        overwrite: bool = False,
+    item: "Item",
+    variable: "Variable",
+    stats_rows: "list[dict]",
+    overwrite: bool = False,
 ) -> int:
     """
     Bulk upsert BoundaryZonalStats rows for one (item, variable) pair.
@@ -104,10 +108,10 @@ def persist_stats(
     Returns the number of rows written.
     """
     from .models import BoundaryZonalStats
-    
+
     if not stats_rows:
         return 0
-    
+
     objects = [
         BoundaryZonalStats(
             time=item.time,  # hypertable partition key
@@ -124,10 +128,10 @@ def persist_stats(
         for row in stats_rows
         if row.get("boundary_id") is not None
     ]
-    
+
     if not objects:
         return 0
-    
+
     if overwrite:
         written = 0
         for obj in objects:
@@ -137,13 +141,17 @@ def persist_stats(
                 variable_id=obj.variable_id,
                 boundary_id=obj.boundary_id,
                 defaults={
-                    "mean": obj.mean, "min": obj.min, "max": obj.max,
-                    "sum": obj.sum, "std": obj.std, "count": obj.count,
+                    "mean": obj.mean,
+                    "min": obj.min,
+                    "max": obj.max,
+                    "sum": obj.sum,
+                    "std": obj.std,
+                    "count": obj.count,
                 },
             )
             written += 1
         return written
-    
+
     BoundaryZonalStats.objects.bulk_create(
         objects,
         update_conflicts=True,
@@ -157,6 +165,7 @@ def persist_stats(
 # Boundary resolution
 # ---------------------------------------------------------------------------
 
+
 def get_boundaries_for_collection(collection) -> "dict[int, list[AdminBoundary]]":
     """
     Return AdminBoundary objects grouped by level for a collection.
@@ -166,10 +175,7 @@ def get_boundaries_for_collection(collection) -> "dict[int, list[AdminBoundary]]
     levels = getattr(collection, "boundary_stats_levels", None)
     if not levels:
         return {}
-    
+
     from adminboundarymanager.models import AdminBoundary
-    
-    return {
-        level: list(AdminBoundary.objects.filter(level=level))
-        for level in levels
-    }
+
+    return {level: list(AdminBoundary.objects.filter(level=level)) for level in levels}

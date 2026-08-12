@@ -11,6 +11,7 @@ Group membership is deliberately not removed when an organisation membership is:
 users may belong to several organisations, and the choke point already denies a
 non-member every row on the host they no longer belong to.
 """
+
 import logging
 
 from django.contrib.auth.models import Group
@@ -34,7 +35,9 @@ def grant_data_manager_capabilities(sender, instance, created, **kwargs):
         # migrated database, not a membership worth refusing.
         logger.warning(
             "Group %r does not exist; %s joined %s without data capabilities.",
-            DATA_MANAGERS_GROUP, instance.user, instance.organisation.slug,
+            DATA_MANAGERS_GROUP,
+            instance.user,
+            instance.organisation.slug,
         )
         return
     instance.user.groups.add(group)

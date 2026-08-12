@@ -10,6 +10,7 @@ computed from the declaration, not from running a recipe.
 Mirrors the fixture style of test_multi_input.py (real catalog/staging rows,
 asserting the resolved result).
 """
+
 from datetime import datetime, timezone
 
 from django.test import TestCase
@@ -25,55 +26,67 @@ _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 class ResolveDeclaredInputsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
-        self.unit_dim, _ = Unit.objects.get_or_create(
-            symbol="mm", defaults={"name": "millimetre"}
-        )
+        self.unit_dim, _ = Unit.objects.get_or_create(symbol="mm", defaults={"name": "millimetre"})
 
         # Staging tier: a raw rainfall series.
-        self.staging_col = StagingCollection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall"
-        )
+        self.staging_col = StagingCollection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
         # Published tier: a normals product.
-        self.pub_col = Collection.objects.create(
-            catalog=self.catalog, slug="rainfall-normals", name="Normals"
-        )
+        self.pub_col = Collection.objects.create(catalog=self.catalog, slug="rainfall-normals", name="Normals")
         self.pub_var = Variable.objects.create(
-            collection=self.pub_col, slug="normals", name="Normals",
-            unit=self.unit_dim, value_min=0, value_max=2000,
+            collection=self.pub_col,
+            slug="normals",
+            name="Normals",
+            unit=self.unit_dim,
+            value_min=0,
+            value_max=2000,
         )
 
     def _add_staging(self):
         si = StagingItem.objects.create(
-            collection=self.staging_col, datetime=_TIME,
-            bounds=[0, 0, 8, 8], crs="EPSG:4326", width=4, height=4,
+            collection=self.staging_col,
+            datetime=_TIME,
+            bounds=[0, 0, 8, 8],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
         StagingAsset.objects.create(
-            item=si, href="chirps/rainfall/r.tif", roles=["source"],
-            format="geotiff", checksum="rain-1",
+            item=si,
+            href="chirps/rainfall/r.tif",
+            roles=["source"],
+            format="geotiff",
+            checksum="rain-1",
         )
         return si
 
     def _add_published(self):
         item = Item.objects.create(
-            collection=self.pub_col, time=_TIME,
-            bounds=[0, 0, 8, 8], crs="EPSG:4326", width=4, height=4,
+            collection=self.pub_col,
+            time=_TIME,
+            bounds=[0, 0, 8, 8],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
         Asset.objects.create(
-            item=item, variable=self.pub_var, format="cog",
-            href="chirps/normals/n.tif", roles=["data"], checksum="norm-1",
-            width=4, height=4,
+            item=item,
+            variable=self.pub_var,
+            format="cog",
+            href="chirps/normals/n.tif",
+            roles=["data"],
+            checksum="norm-1",
+            width=4,
+            height=4,
         )
         return item
 
     def test_staging_input_resolves_to_staging_items(self):
         si = self._add_staging()
 
-        resolved = resolve_declared_inputs(
-            [InputRef(role="value", collection="rainfall", tier="staging")]
-        )
+        resolved = resolve_declared_inputs([InputRef(role="value", collection="rainfall", tier="staging")])
 
         ri = resolved["value"]
         self.assertTrue(ri.present)
@@ -83,20 +96,19 @@ class ResolveDeclaredInputsTests(TestCase):
     def test_published_input_resolves_to_published_items(self):
         item = self._add_published()
 
-        resolved = resolve_declared_inputs(
-            [InputRef(role="normals", collection="rainfall-normals", tier="published")]
-        )
+        resolved = resolve_declared_inputs([InputRef(role="normals", collection="rainfall-normals", tier="published")])
 
         ri = resolved["normals"]
         self.assertTrue(ri.present)
         self.assertEqual([it.pk for it in ri.items], [item.pk])
 
     def test_required_flag_is_carried_through(self):
-        resolved = resolve_declared_inputs([
-            InputRef(role="value", collection="rainfall", tier="staging"),
-            InputRef(role="normals", collection="rainfall-normals",
-                     tier="published", required=False),
-        ])
+        resolved = resolve_declared_inputs(
+            [
+                InputRef(role="value", collection="rainfall", tier="staging"),
+                InputRef(role="normals", collection="rainfall-normals", tier="published", required=False),
+            ]
+        )
 
         self.assertTrue(resolved["value"].required)
         self.assertFalse(resolved["normals"].required)
@@ -104,9 +116,7 @@ class ResolveDeclaredInputsTests(TestCase):
     def test_empty_collection_resolves_to_absent_input(self):
         # No rows added: the declared input is keyed but not present, which is
         # how product readiness detects a blocked (empty-input) product.
-        resolved = resolve_declared_inputs(
-            [InputRef(role="value", collection="rainfall", tier="staging")]
-        )
+        resolved = resolve_declared_inputs([InputRef(role="value", collection="rainfall", tier="staging")])
 
         self.assertIn("value", resolved)
         self.assertFalse(resolved["value"].present)
@@ -125,24 +135,27 @@ class ResolveDeclaredInputsTests(TestCase):
         mine = self._add_staging()
 
         # A different catalog, same 'rainfall' slug, with its own staged item.
-        other_cat = Catalog.objects.create(organisation=make_organisation(), 
-            name="Other", slug="other", file_format="geotiff"
+        other_cat = Catalog.objects.create(
+            organisation=make_organisation(), name="Other", slug="other", file_format="geotiff"
         )
-        other_core = Collection.objects.create(
-            catalog=other_cat, slug="rainfall", name="Rainfall"
-        )
+        other_core = Collection.objects.create(catalog=other_cat, slug="rainfall", name="Rainfall")
         other_staging = StagingCollection.objects.create(
             catalog=other_cat, slug="rainfall", name="Rainfall", collection=other_core
         )
         StagingItem.objects.create(
-            collection=other_staging, datetime=_TIME,
-            bounds=[0, 0, 8, 8], crs="EPSG:4326", width=4, height=4,
+            collection=other_staging,
+            datetime=_TIME,
+            bounds=[0, 0, 8, 8],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
 
-        resolved = resolve_declared_inputs([
-            Spec(role="value", collection="rainfall", tier="staging",
-                 required=True, collection_id=self.pub_col.pk),
-        ])
+        resolved = resolve_declared_inputs(
+            [
+                Spec(role="value", collection="rainfall", tier="staging", required=True, collection_id=self.pub_col.pk),
+            ]
+        )
 
         self.assertEqual([it.pk for it in resolved["value"].items], [mine.pk])
 
@@ -153,18 +166,23 @@ class ResolveDeclaredInputsTests(TestCase):
         item = self._add_published()
 
         # Another catalog's collection with the same slug and its own item.
-        other_cat = Catalog.objects.create(organisation=make_organisation(), 
-            name="Other", slug="other", file_format="geotiff"
+        other_cat = Catalog.objects.create(
+            organisation=make_organisation(), name="Other", slug="other", file_format="geotiff"
         )
-        other = Collection.objects.create(
-            catalog=other_cat, slug="rainfall-normals", name="Normals"
-        )
+        other = Collection.objects.create(catalog=other_cat, slug="rainfall-normals", name="Normals")
         Item.objects.create(collection=other, time=_TIME)
 
-        resolved = resolve_declared_inputs([
-            Spec(role="normals", collection="rainfall-normals", tier="published",
-                 required=True, collection_id=self.pub_col.pk),
-        ])
+        resolved = resolve_declared_inputs(
+            [
+                Spec(
+                    role="normals",
+                    collection="rainfall-normals",
+                    tier="published",
+                    required=True,
+                    collection_id=self.pub_col.pk,
+                ),
+            ]
+        )
 
         self.assertEqual([it.pk for it in resolved["normals"].items], [item.pk])
 

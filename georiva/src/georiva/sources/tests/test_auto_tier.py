@@ -6,6 +6,7 @@ products, not a stored field: it routes to staging iff some enabled
 DerivedProduct consumes it at the staging tier; otherwise it publishes directly
 ("no derivation -> no staging"). This removes the target_tier-vs-products drift.
 """
+
 from django.test import TestCase
 
 from georiva.core.derived_products import (
@@ -43,8 +44,8 @@ class CollectionRoutesToStagingTests(TestCase):
     not by re-matching declarations (ADR-0010 §4)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
@@ -60,12 +61,17 @@ class CollectionRoutesToStagingTests(TestCase):
         )
         for ref in definition.inputs:
             col, _ = Collection.objects.get_or_create(
-                catalog=self.catalog, slug=ref.collection,
+                catalog=self.catalog,
+                slug=ref.collection,
                 defaults={"name": ref.collection},
             )
             DerivedProductInput.objects.create(
-                product=product, role=ref.role, tier=ref.tier,
-                required=ref.required, source_key=ref.collection, collection=col,
+                product=product,
+                role=ref.role,
+                tier=ref.tier,
+                required=ref.required,
+                source_key=ref.collection,
+                collection=col,
             )
         return product
 
@@ -83,7 +89,5 @@ class CollectionRoutesToStagingTests(TestCase):
         self.assertFalse(collection_routes_to_staging(self.feed, "rainfall"))
 
     def test_a_published_tier_input_does_not_route_to_staging(self):
-        self._product(_definition(inputs=(
-            InputRef(role="value", collection="rainfall", tier="published"),
-        )))
+        self._product(_definition(inputs=(InputRef(role="value", collection="rainfall", tier="published"),)))
         self.assertFalse(collection_routes_to_staging(self.feed, "rainfall"))

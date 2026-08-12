@@ -5,6 +5,7 @@ out a subdomain and a storage prefix. Rather than gate the views one by one, the
 viewset carries this policy — Wagtail then hides the menu item, the listing
 buttons and the views themselves from everyone but a superuser.
 """
+
 from django.contrib.auth import get_user_model
 from wagtail.permission_policies.base import BasePermissionPolicy
 

@@ -9,6 +9,7 @@ writing, Asset DB records, collection extent — is the shared
 AssetMaterializer (``ingestion/materialization.py``), which the derivation
 engine uses too.
 """
+
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -39,9 +40,9 @@ class AssetHandler:
     """
 
     def __init__(
-            self,
-            writer: AssetWriter,
-            extractor: VariableExtractor,
+        self,
+        writer: AssetWriter,
+        extractor: VariableExtractor,
     ):
         self.writer = writer
         self.extractor = extractor
@@ -52,18 +53,18 @@ class AssetHandler:
     # =========================================================================
 
     def process_variable(
-            self,
-            *,
-            item: Item,
-            variable: "Variable",
-            local_path: Path,
-            timestamp: datetime,
-            bounds: tuple,
-            crs: str,
-            width: int,
-            height: int,
-            clipper: Optional[BoundaryClipper] = None,
-            clip_window: Optional[dict] = None,
+        self,
+        *,
+        item: Item,
+        variable: "Variable",
+        local_path: Path,
+        timestamp: datetime,
+        bounds: tuple,
+        crs: str,
+        width: int,
+        height: int,
+        clipper: Optional[BoundaryClipper] = None,
+        clip_window: Optional[dict] = None,
     ) -> list[Asset]:
         """
         Run the full pipeline for *variable* at *timestamp*.
@@ -106,13 +107,13 @@ class AssetHandler:
     # =========================================================================
 
     def _extract(
-            self,
-            variable: "Variable",
-            local_path: Path,
-            timestamp: datetime,
-            width: int,
-            height: int,
-            clip_window: Optional[dict] = None,
+        self,
+        variable: "Variable",
+        local_path: Path,
+        timestamp: datetime,
+        width: int,
+        height: int,
+        clip_window: Optional[dict] = None,
     ) -> np.ndarray:
         """
         Extract raw data from the source file.
@@ -129,15 +130,10 @@ class AssetHandler:
 
         Boundary geometry masking happens downstream in the materializer.
         """
-        use_chunked = (
-                width * height > settings.GEORIVA_CHUNK_THRESHOLD_PIXELS
-                and clip_window is None
-        )
+        use_chunked = width * height > settings.GEORIVA_CHUNK_THRESHOLD_PIXELS and clip_window is None
 
         if use_chunked:
-            logger.debug(
-                "Using chunked extraction for %s (%dx%d)", variable.slug, width, height
-            )
+            logger.debug("Using chunked extraction for %s (%dx%d)", variable.slug, width, height)
             return self._extract_chunked(
                 variable=variable,
                 local_path=local_path,
@@ -154,11 +150,11 @@ class AssetHandler:
         )
 
     def _extract_direct(
-            self,
-            variable: "Variable",
-            local_path: Path,
-            timestamp: datetime,
-            clip_window: Optional[dict] = None,
+        self,
+        variable: "Variable",
+        local_path: Path,
+        timestamp: datetime,
+        clip_window: Optional[dict] = None,
     ) -> np.ndarray:
         """Read the full (or windowed) array at once."""
         window = None
@@ -173,12 +169,12 @@ class AssetHandler:
         return self.extractor.extract(variable, local_path, timestamp, window)
 
     def _extract_chunked(
-            self,
-            variable: "Variable",
-            local_path: Path,
-            timestamp: datetime,
-            width: int,
-            height: int,
+        self,
+        variable: "Variable",
+        local_path: Path,
+        timestamp: datetime,
+        width: int,
+        height: int,
     ) -> np.ndarray:
         """
         Process large variable in 2048×2048 pixel blocks.
@@ -190,7 +186,7 @@ class AssetHandler:
 
         for x, y, w, h in iter_windows(width, height, block_size=2048):
             chunk = self.extractor.extract(variable, local_path, timestamp, (x, y, w, h))
-            final_data[y:y + h, x:x + w] = chunk
+            final_data[y : y + h, x : x + w] = chunk
             del chunk
 
         return final_data

@@ -13,6 +13,7 @@ and the texture to draw it from, and :func:`variable_style_stops`, which
 generates a ramp's stops without saving them so the map can show a ramp before
 the operator commits to it.
 """
+
 from django import forms
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
@@ -61,9 +62,7 @@ def styling_summary(variable):
     return {
         "default_style": default,
         "swatch": _swatch_html(gradient),
-        "styling_url": reverse(
-            "variable_styling", args=[variable.collection_id, variable.pk]
-        ),
+        "styling_url": reverse("variable_styling", args=[variable.collection_id, variable.pk]),
     }
 
 
@@ -76,9 +75,7 @@ class VariableRangeForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        Variable.validate_value_range(
-            cleaned.get("value_min"), cleaned.get("value_max")
-        )
+        Variable.validate_value_range(cleaned.get("value_min"), cleaned.get("value_max"))
         return cleaned
 
 
@@ -122,9 +119,7 @@ def _parse_stops(post):
         try:
             value = float(row["value"])
         except ValueError:
-            raise ValidationError(
-                {"stops": _("Not a number: %(value)s") % {"value": row["value"]}}
-            )
+            raise ValidationError({"stops": _("Not a number: %(value)s") % {"value": row["value"]}})
         entries.append({"value": value, "color": row["color"]})
     return entries
 
@@ -178,13 +173,15 @@ def _ramp_groups(ramp_queryset, selected_ramp_id):
     labels = dict(ColorRamp.RampType.choices)
     by_type = {}
     for ramp in ramp_queryset:
-        by_type.setdefault(ramp.ramp_type, []).append({
-            "pk": ramp.pk,
-            "name": ramp.name,
-            "gradient": ramp.css_gradient(),
-            "owner_label": ramp.owner_label(),
-            "selected": ramp.pk == selected_ramp_id,
-        })
+        by_type.setdefault(ramp.ramp_type, []).append(
+            {
+                "pk": ramp.pk,
+                "name": ramp.name,
+                "gradient": ramp.css_gradient(),
+                "owner_label": ramp.owner_label(),
+                "selected": ramp.pk == selected_ramp_id,
+            }
+        )
     return [
         {"label": labels.get(ramp_type, ramp_type), "ramps": by_type[ramp_type]}
         for ramp_type in RAMP_TYPE_ORDER
@@ -231,21 +228,19 @@ def collection_styling(request, collection_pk):
         Collection.objects.select_related("catalog"),
         pk=collection_pk,
     )
-    variables = list(
-        collection.variables.select_related("unit").prefetch_related("styles")
-    )
+    variables = list(collection.variables.select_related("unit").prefetch_related("styles"))
     rows = []
     for variable in variables:
         default = variable.default_style
-        rows.append({
-            "variable": variable,
-            "default_style": default,
-            "gradient": default.css_gradient() if default else GRAYSCALE_GRADIENT,
-            "style_count": len(variable.styles.all()),
-            "url": reverse(
-                "variable_styling", args=[collection.pk, variable.pk]
-            ),
-        })
+        rows.append(
+            {
+                "variable": variable,
+                "default_style": default,
+                "gradient": default.css_gradient() if default else GRAYSCALE_GRADIENT,
+                "style_count": len(variable.styles.all()),
+                "url": reverse("variable_styling", args=[collection.pk, variable.pk]),
+            }
+        )
 
     context = {
         "breadcrumbs_items": [
@@ -268,9 +263,7 @@ def collection_styling(request, collection_pk):
 def _get_style_or_none(variable, slug):
     if not slug:
         return None
-    return next(
-        (style for style in variable.styles.all() if style.slug == slug), None
-    )
+    return next((style for style in variable.styles.all() if style.slug == slug), None)
 
 
 def variable_styling(request, collection_pk, variable_pk):
@@ -287,9 +280,7 @@ def variable_styling(request, collection_pk, variable_pk):
         collection=collection,
     )
     styles = list(variable.styles.all())
-    ramp_queryset = scoped_queryset(
-        request, ColorRamp.objects.prefetch_related("stops")
-    ).order_by("name")
+    ramp_queryset = scoped_queryset(request, ColorRamp.objects.prefetch_related("stops")).order_by("name")
 
     form_url = reverse("variable_styling", args=[collection.pk, variable.pk])
 
@@ -301,8 +292,7 @@ def variable_styling(request, collection_pk, variable_pk):
     # Which style the editor pane shows: the one asked for, else the default,
     # else the first, else a blank "new style" pane.
     requested_slug = request.POST.get("style_slug", request.GET.get("style", ""))
-    creating = requested_slug in ("", NEW_STYLE) if request.method == "POST" \
-        else requested_slug == NEW_STYLE
+    creating = requested_slug in ("", NEW_STYLE) if request.method == "POST" else requested_slug == NEW_STYLE
     selected = None if creating else _get_style_or_none(variable, requested_slug)
     if selected is None and not creating:
         if requested_slug:
@@ -311,11 +301,13 @@ def variable_styling(request, collection_pk, variable_pk):
         selected = variable.default_style or (styles[0] if styles else None)
         creating = selected is None
 
-    range_form = VariableRangeForm(initial={
-        "value_min": variable.value_min,
-        "value_max": variable.value_max,
-        "scale_type": variable.scale_type,
-    })
+    range_form = VariableRangeForm(
+        initial={
+            "value_min": variable.value_min,
+            "value_max": variable.value_max,
+            "scale_type": variable.scale_type,
+        }
+    )
     style_form = VariableStyleForm(
         ramp_queryset=ramp_queryset,
         initial={
@@ -339,9 +331,7 @@ def variable_styling(request, collection_pk, variable_pk):
                 # A range edit alone never rewrites any style's stops — the
                 # snapshot is the operator's (ADR 0022); regeneration is only
                 # ever the explicit re-apply gesture below.
-                variable.save(
-                    update_fields=["value_min", "value_max", "scale_type", "modified"]
-                )
+                variable.save(update_fields=["value_min", "value_max", "scale_type", "modified"])
                 messages.success(request, _("Range saved."))
                 return redirect(style_url(selected))
 
@@ -411,12 +401,7 @@ def variable_styling(request, collection_pk, variable_pk):
         selected_ramp_id = None
     ramp_groups = _ramp_groups(ramp_queryset, selected_ramp_id)
     selected_ramp = next(
-        (
-            ramp
-            for group in ramp_groups
-            for ramp in group["ramps"]
-            if ramp["selected"]
-        ),
+        (ramp for group in ramp_groups for ramp in group["ramps"] if ramp["selected"]),
         None,
     )
 
@@ -448,9 +433,7 @@ def variable_styling(request, collection_pk, variable_pk):
         "selected_ramp": selected_ramp,
         "ramp_catalog_url": reverse("colorramp:index"),
         "form_url": form_url,
-        "stops_url": reverse(
-            "variable_style_stops", args=[collection.pk, variable.pk]
-        ),
+        "stops_url": reverse("variable_style_stops", args=[collection.pk, variable.pk]),
         "new_style_url": style_url(),
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
@@ -473,17 +456,17 @@ def variable_style_stops(request, collection_pk, variable_pk):
     re-apply would have produced. Read-only and side-effect-free, hence GET.
     """
     collection = get_org_object_or_404(request, Collection, pk=collection_pk)
-    variable = get_org_object_or_404(
-        request, Variable, pk=variable_pk, collection=collection
-    )
+    variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
 
     try:
         ramp_pk = int(request.GET.get("ramp", ""))
     except ValueError:
         ramp_pk = None
-    ramp = scoped_queryset(
-        request, ColorRamp.objects.prefetch_related("stops")
-    ).filter(pk=ramp_pk).first() if ramp_pk else None
+    ramp = (
+        scoped_queryset(request, ColorRamp.objects.prefetch_related("stops")).filter(pk=ramp_pk).first()
+        if ramp_pk
+        else None
+    )
     if ramp is None:
         return JsonResponse({"error": _("Pick a ramp to apply.")}, status=400)
 
@@ -498,12 +481,10 @@ def variable_style_stops(request, collection_pk, variable_pk):
         except ValueError:
             steps = 0
         if steps < 2:
-            return JsonResponse(
-                {"error": _("Stepped mode needs at least two classes.")}, status=400
-            )
+            return JsonResponse({"error": _("Stepped mode needs at least two classes.")}, status=400)
 
-    return JsonResponse({
-        "stops": generate_stops(
-            ramp, variable.value_min, variable.value_max, mode=mode, steps=steps
-        ),
-    })
+    return JsonResponse(
+        {
+            "stops": generate_stops(ramp, variable.value_min, variable.value_max, mode=mode, steps=steps),
+        }
+    )

@@ -47,7 +47,8 @@ def mark_manifest_stale_on_cog_save(sender, instance: Asset, created: bool, **kw
     except Exception as exc:
         logger.warning(
             "Failed to update manifest for asset %s: %s",
-            instance.pk, exc,
+            instance.pk,
+            exc,
         )
 
 
@@ -77,5 +78,6 @@ def mark_manifest_stale_on_cog_delete(sender, instance: Asset, **kwargs):
     except Exception as exc:
         logger.warning(
             "Failed to mark manifest stale on delete of asset %s: %s",
-            instance.pk, exc,
+            instance.pk,
+            exc,
         )

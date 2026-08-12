@@ -21,17 +21,21 @@ def manual_upload_config_list(request):
         .order_by("catalog__name", "name")
     )
 
-    return render(request, "georivaingestion/manual_upload_config_list.html", {
-        # Rendered by the slim header via wagtailadmin/generic/base.html.
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": None, "label": _("Manual Uploads")},
-        ],
-        "header_title": _("Manual Uploads"),
-        "header_icon": "upload",
-        "add_url": reverse("upload_wizard_step1"),
-        "configs": configs,
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_config_list.html",
+        {
+            # Rendered by the slim header via wagtailadmin/generic/base.html.
+            "breadcrumbs_items": [
+                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("Manual Uploads")},
+            ],
+            "header_title": _("Manual Uploads"),
+            "header_icon": "upload",
+            "add_url": reverse("upload_wizard_step1"),
+            "configs": configs,
+        },
+    )
 
 
 def manual_upload_config_edit(request, pk):
@@ -54,22 +58,24 @@ def manual_upload_config_edit(request, pk):
     else:
         form = EditForm(instance=config)
 
-    variables = config.variables.select_related("collection").order_by(
-        "collection__name", "variable_name"
-    )
+    variables = config.variables.select_related("collection").order_by("collection__name", "variable_name")
 
-    return render(request, "georivaingestion/manual_upload_config_edit.html", {
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": None, "label": config.name},
-        ],
-        "header_title": _("Edit configuration — %s") % config.name,
-        "header_icon": "edit",
-        "config": config,
-        "form": form,
-        "variables": variables,
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_config_edit.html",
+        {
+            "breadcrumbs_items": [
+                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
+                {"url": None, "label": config.name},
+            ],
+            "header_title": _("Edit configuration — %s") % config.name,
+            "header_icon": "edit",
+            "config": config,
+            "form": form,
+            "variables": variables,
+        },
+    )
 
 
 def manual_upload_config_delete(request, pk):
@@ -83,16 +89,20 @@ def manual_upload_config_delete(request, pk):
         messages.success(request, _("Configuration '%s' deleted.") % name)
         return redirect("manual_upload_config_list")
 
-    return render(request, "georivaingestion/manual_upload_config_confirm_delete.html", {
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": None, "label": _("Delete")},
-        ],
-        "header_title": _("Delete configuration — %s") % config.name,
-        "header_icon": "bin",
-        "config": config,
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_config_confirm_delete.html",
+        {
+            "breadcrumbs_items": [
+                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
+                {"url": None, "label": _("Delete")},
+            ],
+            "header_title": _("Delete configuration — %s") % config.name,
+            "header_icon": "bin",
+            "config": config,
+        },
+    )
 
 
 # =============================================================================
@@ -112,9 +122,7 @@ def _core_variable_for(mcv):
 
     from georiva.core.models import Variable
 
-    return Variable.objects.filter(
-        collection=mcv.collection, slug=slugify(mcv.variable_name)
-    ).first()
+    return Variable.objects.filter(collection=mcv.collection, slug=slugify(mcv.variable_name)).first()
 
 
 def _variable_breadcrumbs(config, leaf):
@@ -160,16 +168,20 @@ def manual_upload_variable_edit(request, pk, var_pk):
     else:
         form = scope_form_fields(request, VariableEditForm(instance=variable))
 
-    return render(request, "georivaingestion/manual_upload_variable_edit.html", {
-        "breadcrumbs_items": _variable_breadcrumbs(config, mcv.variable_name),
-        "header_title": _("Edit variable — %s") % mcv.variable_name,
-        "header_icon": "edit",
-        "config": config,
-        "mcv": mcv,
-        "variable": variable,
-        "form": form,
-        **styling_summary(variable),
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_variable_edit.html",
+        {
+            "breadcrumbs_items": _variable_breadcrumbs(config, mcv.variable_name),
+            "header_title": _("Edit variable — %s") % mcv.variable_name,
+            "header_icon": "edit",
+            "config": config,
+            "mcv": mcv,
+            "variable": variable,
+            "form": form,
+            **styling_summary(variable),
+        },
+    )
 
 
 def manual_upload_variable_add(request, pk):
@@ -191,10 +203,13 @@ def manual_upload_variable_add(request, pk):
         long_name = forms.CharField(label=_("Display name"), required=False)
         collection = forms.ModelChoiceField(label=_("Collection"), queryset=collections)
         unit = forms.ModelChoiceField(
-            label=_("Unit"), queryset=Unit.objects.order_by("name"), required=False,
+            label=_("Unit"),
+            queryset=Unit.objects.order_by("name"),
+            required=False,
         )
         new_unit_symbol = forms.CharField(
-            label=_("Or create a unit"), required=False,
+            label=_("Or create a unit"),
+            required=False,
             help_text=_("A unit symbol such as hPa or mm — used when the unit is not in the list."),
         )
 
@@ -240,8 +255,7 @@ def manual_upload_variable_add(request, pk):
             )
             wagtail_messages.success(
                 request,
-                _("Variable '%s' added — set its value range and style on the Styling page.")
-                % variable_name,
+                _("Variable '%s' added — set its value range and style on the Styling page.") % variable_name,
                 buttons=[
                     wagtail_messages.button(
                         reverse(
@@ -256,13 +270,17 @@ def manual_upload_variable_add(request, pk):
     else:
         form = VariableAddForm()
 
-    return render(request, "georivaingestion/manual_upload_variable_add.html", {
-        "breadcrumbs_items": _variable_breadcrumbs(config, _("Add variable")),
-        "header_title": _("Add variable — %s") % config.name,
-        "header_icon": "plus",
-        "config": config,
-        "form": form,
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_variable_add.html",
+        {
+            "breadcrumbs_items": _variable_breadcrumbs(config, _("Add variable")),
+            "header_title": _("Add variable — %s") % config.name,
+            "header_icon": "plus",
+            "config": config,
+            "form": form,
+        },
+    )
 
 
 def manual_upload_variable_remove(request, pk, var_pk):
@@ -280,10 +298,14 @@ def manual_upload_variable_remove(request, pk, var_pk):
         messages.success(request, _("Variable '%s' removed.") % name)
         return redirect("manual_upload_config_edit", pk=config.pk)
 
-    return render(request, "georivaingestion/manual_upload_variable_confirm_remove.html", {
-        "breadcrumbs_items": _variable_breadcrumbs(config, _("Remove variable")),
-        "header_title": _("Remove variable — %s") % mcv.variable_name,
-        "header_icon": "bin",
-        "config": config,
-        "mcv": mcv,
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_variable_confirm_remove.html",
+        {
+            "breadcrumbs_items": _variable_breadcrumbs(config, _("Remove variable")),
+            "header_title": _("Remove variable — %s") % mcv.variable_name,
+            "header_icon": "bin",
+            "config": config,
+            "mcv": mcv,
+        },
+    )

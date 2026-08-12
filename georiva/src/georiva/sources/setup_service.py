@@ -5,6 +5,7 @@ CollectionDefinition objects declared by a DataFeed plugin.
 Idempotent: re-running updates existing records (keyed by slug) rather than
 creating duplicates, so adding new collections to a plugin is safe to re-run.
 """
+
 import logging
 import math
 from typing import Optional
@@ -76,16 +77,16 @@ class SourceSetupService:
             ],
         )
     """
-    
+
     def provision(
-            self,
-            data_feed_model_cls,
-            *,
-            catalog,
-            feed_name: str,
-            feed_interval: int = 360,
-            global_config: Optional[dict] = None,
-            selected_definitions: list[tuple[CollectionDefinition, dict]],
+        self,
+        data_feed_model_cls,
+        *,
+        catalog,
+        feed_name: str,
+        feed_interval: int = 360,
+        global_config: Optional[dict] = None,
+        selected_definitions: list[tuple[CollectionDefinition, dict]],
     ) -> tuple:
         """
         Create DataFeed + Collections + Variables + Links atomically.
@@ -102,7 +103,7 @@ class SourceSetupService:
         Returns (data_feed, collections).
         """
         global_config = global_config or {}
-        
+
         with transaction.atomic():
             data_feed = self._create_data_feed(
                 model_cls=data_feed_model_cls,
@@ -111,7 +112,7 @@ class SourceSetupService:
                 catalog=catalog,
                 extra_data=global_config,
             )
-            
+
             created_collections = []
             for definition, config_values in selected_definitions:
                 collection = self._provision_collection(
@@ -121,16 +122,16 @@ class SourceSetupService:
                     config_values=config_values,
                 )
                 created_collections.append(collection)
-            
+
             return data_feed, created_collections
-    
+
     def provision_collection(
-            self,
-            *,
-            catalog,
-            definition: CollectionDefinition,
-            data_feed,
-            config_values: dict,
+        self,
+        *,
+        catalog,
+        definition: CollectionDefinition,
+        data_feed,
+        config_values: dict,
     ):
         """
         Provision a single collection for an existing DataFeed (used for the
@@ -143,7 +144,7 @@ class SourceSetupService:
                 data_feed=data_feed,
                 config_values=config_values,
             )
-    
+
     def provision_derived_products(self, data_feed, selected_products: list) -> list:
         """
         Provision DerivedProduct rows for a feed from its declared definitions
@@ -189,14 +190,16 @@ class SourceSetupService:
                 logger.info(
                     "DerivedProduct %s: feed=%s product=%s enabled=%s",
                     "created" if _created else "updated",
-                    data_feed.pk, definition.key, product.is_enabled,
+                    data_feed.pk,
+                    definition.key,
+                    product.is_enabled,
                 )
             return products
 
     # -------------------------------------------------------------------------
     # Internal helpers
     # -------------------------------------------------------------------------
-    
+
     @staticmethod
     def _create_data_feed(*, model_cls, name: str, interval_minutes: int, catalog, extra_data: Optional[dict] = None):
         defaults = {**model_cls.get_wizard_defaults(), **(extra_data or {})}
@@ -209,7 +212,7 @@ class SourceSetupService:
         data_feed.save()
         logger.info("Created DataFeed: %s (%s)", name, model_cls.__name__)
         return data_feed
-    
+
     def _provision_collection(self, *, catalog, definition: CollectionDefinition, data_feed, config_values: dict):
         """Create/update Collection + Variables + Link for one CollectionDefinition."""
         # Slug is the definition key alone — no catalog prefix (ADR-0010 §5) — so
@@ -217,11 +220,11 @@ class SourceSetupService:
         # reference and the output collections materialise under. The bucket path
         # already carries the catalog segment, so the prefix was redundant.
         slug = slugify(definition.key)
-        
+
         # selected_variable_keys is a wizard-only field, not stored on the link
         config_for_link = dict(config_values)
-        selected_var_keys = config_for_link.pop('selected_variable_keys', None)
-        
+        selected_var_keys = config_for_link.pop("selected_variable_keys", None)
+
         collection = self._upsert_collection(
             catalog=catalog,
             slug=slug,
@@ -229,27 +232,26 @@ class SourceSetupService:
             time_resolution=definition.time_resolution,
             is_forecast=definition.is_forecast,
         )
-        
+
         variables_to_create = [
-            v for v in definition.variables
-            if selected_var_keys is None or v.key in selected_var_keys
+            v for v in definition.variables if selected_var_keys is None or v.key in selected_var_keys
         ]
         for var_def in variables_to_create:
             self._upsert_variable(collection, var_def)
-        
+
         self._upsert_link(
             data_feed=data_feed,
             collection=collection,
             definition=definition,
             config_values=config_for_link,
         )
-        
+
         return collection
-    
+
     @staticmethod
     def _upsert_collection(*, catalog, slug: str, name: str, time_resolution: str, is_forecast: bool):
         from georiva.core.models import Collection
-        
+
         collection, created = Collection.objects.update_or_create(
             catalog=catalog,
             slug=slug,
@@ -262,17 +264,13 @@ class SourceSetupService:
         action = "created" if created else "updated"
         logger.info("Collection %s: %s/%s", action, catalog.slug, slug)
         return collection
-    
+
     def _upsert_variable(self, collection, var_def: CollectionVariable):
         from georiva.core.models import Variable
-        
+
         slug = slugify(var_def.key)
         source_unit = resolve_unit(var_def.source_units)
-        output_unit = (
-            resolve_unit(var_def.output_units)
-            if var_def.output_units
-            else source_unit
-        )
+        output_unit = resolve_unit(var_def.output_units) if var_def.output_units else source_unit
 
         base_defaults = {
             "name": var_def.name,
@@ -289,8 +287,11 @@ class SourceSetupService:
         if stops_error:
             seed_warnings.append(
                 "Variable %s/%s: ignoring palette_stops (%s) — falling back "
-                "to %s" % (
-                    collection.slug, slug, stops_error,
+                "to %s"
+                % (
+                    collection.slug,
+                    slug,
+                    stops_error,
                     f"ramp {var_def.palette!r}" if var_def.palette else "grayscale",
                 )
             )
@@ -298,14 +299,17 @@ class SourceSetupService:
             seed_min = seed_stops[0]["value"]
             seed_max = seed_stops[-1]["value"]
             if var_def.value_range and not (
-                math.isclose(seed_min, var_def.value_range[0])
-                and math.isclose(seed_max, var_def.value_range[1])
+                math.isclose(seed_min, var_def.value_range[0]) and math.isclose(seed_max, var_def.value_range[1])
             ):
                 seed_warnings.append(
                     "Variable %s/%s: declared value_range %s disagrees with "
-                    "palette_stops span (%s, %s) — the stops win" % (
-                        collection.slug, slug, var_def.value_range,
-                        seed_min, seed_max,
+                    "palette_stops span (%s, %s) — the stops win"
+                    % (
+                        collection.slug,
+                        slug,
+                        var_def.value_range,
+                        seed_min,
+                        seed_max,
                     )
                 )
         elif var_def.value_range:
@@ -313,11 +317,11 @@ class SourceSetupService:
         else:
             seed_min, seed_max = 0.0, 1.0
         seed_defaults = {"value_min": seed_min, "value_max": seed_max}
-        
-        if var_def.transform == 'passthrough':
+
+        if var_def.transform == "passthrough":
             transform = Variable.TransformType.PASSTHROUGH
             sources_data = [self._source_key_to_block("primary", var_def.source_variable)]
-        elif var_def.transform == 'vector_magnitude':
+        elif var_def.transform == "vector_magnitude":
             transform = Variable.TransformType.VECTOR_MAGNITUDE
             sources_data = [
                 self._source_key_to_block("u_component", var_def.components["u"]),
@@ -329,7 +333,7 @@ class SourceSetupService:
                 self._source_key_to_block("u_component", var_def.components["u"]),
                 self._source_key_to_block("v_component", var_def.components["v"]),
             ]
-        
+
         defaults = {**base_defaults, "transform_type": transform, "sources": sources_data}
 
         variable, created = Variable.objects.update_or_create(
@@ -377,17 +381,15 @@ class SourceSetupService:
         # catalog — the org's own ramp wins a name collision.
         organisation = variable.collection.catalog.organisation
         ramp = (
-            ColorRamp.objects.filter(
-                organisation=organisation, name__iexact=var_def.palette
-            ).first()
-            or ColorRamp.objects.filter(
-                organisation__isnull=True, name__iexact=var_def.palette
-            ).first()
+            ColorRamp.objects.filter(organisation=organisation, name__iexact=var_def.palette).first()
+            or ColorRamp.objects.filter(organisation__isnull=True, name__iexact=var_def.palette).first()
         )
         if ramp is None:
             logger.warning(
                 "Variable %s/%s: unknown color ramp %r — grayscale fallback",
-                variable.collection.slug, variable.slug, var_def.palette,
+                variable.collection.slug,
+                variable.slug,
+                var_def.palette,
             )
             return
         VariableStyle.objects.create(
@@ -398,17 +400,17 @@ class SourceSetupService:
             ramp=ramp,
             stops=generate_stops(ramp, variable.value_min, variable.value_max),
         )
-    
+
     @staticmethod
     def _upsert_link(*, data_feed, collection, definition: CollectionDefinition, config_values: dict):
         """Create or update a DataFeedCollectionLink with definition_key and config_values."""
         link_model = type(data_feed).get_collection_link_model()
-        
+
         # Baked-in config from the plugin (e.g. CHIRPS period derived from definition key)
         baked_config = type(data_feed).get_link_config_for_definition(definition)
-        
+
         interval = definition.default_interval_minutes
-        
+
         link, _created = link_model.objects.update_or_create(
             data_feed=data_feed,
             collection=collection,
@@ -422,7 +424,7 @@ class SourceSetupService:
         action = "created" if _created else "updated"
         logger.info("DataFeedCollectionLink %s: feed=%s collection=%s", action, data_feed.pk, collection.slug)
         return link
-    
+
     @staticmethod
     def _source_key_to_block(block_type: str, source_key) -> dict:
         """Adapt a definition SourceKey to a canonical sources block."""

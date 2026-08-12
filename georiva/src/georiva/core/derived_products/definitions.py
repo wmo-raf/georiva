@@ -17,6 +17,7 @@ The DB-backed resolution of a declared ``InputRef`` into the catalog items it
 points at lives in ``processing`` (``resolve_declared_inputs``), not here, so
 ``core`` stays free of ``staging``/``processing`` imports.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -37,21 +38,18 @@ def _coerce(field, value):
     """Coerce one operator-supplied value to a ConfigField's declared type."""
     if field.type == "choice":
         if value not in field.choices:
-            raise ValueError(
-                f"ConfigField '{field.key}': '{value}' is not among choices {field.choices}"
-            )
+            raise ValueError(f"ConfigField '{field.key}': '{value}' is not among choices {field.choices}")
         return value
     try:
         return _SCALAR_COERCERS[field.type](value)
     except (TypeError, ValueError):
-        raise ValueError(
-            f"ConfigField '{field.key}': '{value}' is not a valid {field.type}"
-        )
+        raise ValueError(f"ConfigField '{field.key}': '{value}' is not a valid {field.type}")
 
 
 @dataclass(frozen=True)
 class InputRef:
     """One declared input a product consumes: a collection at a tier."""
+
     role: str
     collection: str
     tier: str
@@ -63,9 +61,7 @@ class InputRef:
         if not self.collection:
             raise ValueError("InputRef: 'collection' is required and must be non-empty")
         if self.tier not in TIERS:
-            raise ValueError(
-                f"InputRef '{self.role}': tier must be one of {TIERS}, got '{self.tier}'"
-            )
+            raise ValueError(f"InputRef '{self.role}': tier must be one of {TIERS}, got '{self.tier}'")
 
 
 @dataclass(frozen=True)
@@ -77,6 +73,7 @@ class OutputRef:
     the product is enabled — it is *not* injected into recipe selectors, which
     stay keyed on ``role``/``collection`` only.
     """
+
     role: str
     collection: str
     title: str = ""
@@ -90,14 +87,14 @@ class OutputRef:
             raise ValueError("OutputRef: 'collection' is required and must be non-empty")
         if self.visibility not in VISIBILITIES:
             raise ValueError(
-                f"OutputRef '{self.role}': visibility must be one of "
-                f"{VISIBILITIES}, got '{self.visibility}'"
+                f"OutputRef '{self.role}': visibility must be one of {VISIBILITIES}, got '{self.visibility}'"
             )
 
 
 @dataclass(frozen=True)
 class ConfigField:
     """One operator-configurable option, driving the wizard form + validation."""
+
     key: str
     type: str
     default: object = None
@@ -105,17 +102,13 @@ class ConfigField:
 
     def __post_init__(self):
         if self.type not in CONFIG_FIELD_TYPES:
-            raise ValueError(
-                f"ConfigField '{self.key}': type must be one of "
-                f"{CONFIG_FIELD_TYPES}, got '{self.type}'"
-            )
+            raise ValueError(f"ConfigField '{self.key}': type must be one of {CONFIG_FIELD_TYPES}, got '{self.type}'")
         if self.type == "choice":
             if not self.choices:
                 raise ValueError(f"ConfigField '{self.key}': choice type requires 'choices'")
             if self.default is not None and self.default not in self.choices:
                 raise ValueError(
-                    f"ConfigField '{self.key}': default '{self.default}' is not "
-                    f"among choices {self.choices}"
+                    f"ConfigField '{self.key}': default '{self.default}' is not among choices {self.choices}"
                 )
 
 
@@ -123,6 +116,7 @@ class ConfigField:
 class DerivedProductDefinition:
     """Blueprint for one derived product a feed can produce (mirrors
     CollectionDefinition)."""
+
     key: str
     recipe_type: str
     label: str
@@ -141,9 +135,7 @@ class DerivedProductDefinition:
     def __post_init__(self):
         for field in ("key", "recipe_type", "label"):
             if not getattr(self, field):
-                raise ValueError(
-                    f"DerivedProductDefinition: '{field}' is required and must be non-empty"
-                )
+                raise ValueError(f"DerivedProductDefinition: '{field}' is required and must be non-empty")
         if self.trigger_mode not in TRIGGER_MODES:
             raise ValueError(
                 f"DerivedProductDefinition '{self.key}': trigger_mode must be "
@@ -151,14 +143,9 @@ class DerivedProductDefinition:
             )
         for dep in self.depends_on:
             if not dep:
-                raise ValueError(
-                    f"DerivedProductDefinition '{self.key}': depends_on entries "
-                    f"must be non-empty"
-                )
+                raise ValueError(f"DerivedProductDefinition '{self.key}': depends_on entries must be non-empty")
             if dep == self.key:
-                raise ValueError(
-                    f"DerivedProductDefinition '{self.key}': cannot depend on itself"
-                )
+                raise ValueError(f"DerivedProductDefinition '{self.key}': cannot depend on itself")
 
     def validate_config(self, config: dict) -> dict:
         """

@@ -81,9 +81,7 @@ class Health(Enum):
     NEW = _State(80, _("Never run"), "grey", "time", Q(last_run_at__isnull=True))
     # RUNNING precedes STALE: a feed that is already overdue when a run starts
     # should report that recovery is under way, not that it is still waiting.
-    RUNNING = _State(
-        50, _("Running"), "info", "spinner", Q(last_run_status__in=("queued", "running"))
-    )
+    RUNNING = _State(50, _("Running"), "info", "spinner", Q(last_run_status__in=("queued", "running")))
     STALE = _State(
         30,
         _("Overdue"),
@@ -121,9 +119,7 @@ class Health(Enum):
     def as_case(cls):
         """Build the health_rank Case/When by iterating the ladder."""
         whens = [
-            When(state.value.condition, then=Value(state.rank))
-            for state in cls
-            if state.value.condition is not None
+            When(state.value.condition, then=Value(state.rank)) for state in cls if state.value.condition is not None
         ]
         default = next(state for state in cls if state.value.condition is None)
         return Case(*whens, default=Value(default.rank), output_field=IntegerField())

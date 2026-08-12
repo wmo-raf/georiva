@@ -143,7 +143,7 @@ class CollectionViewSet(OrgScopedViewSetMixin, ModelViewSet):
 class ItemIndexView(IndexView):
     def get_list_more_buttons(self, instance):
         buttons = super().get_list_more_buttons(instance)
-        
+
         label = _("View")
         url = reverse("item_preview", args=[instance.id])
         icon_name = "view"
@@ -157,7 +157,7 @@ class ItemIndexView(IndexView):
                     attrs=attrs,
                 )
             )
-        
+
         return buttons
 
 
@@ -202,9 +202,7 @@ class GlobalTierCreateView(generic.CreateView):
         panel = super().get_panel()
         if not self._may_choose_tier() or panel is None:
             return panel
-        return ObjectList(
-            list(panel.children) + [FieldPanel("organisation")]
-        ).bind_to_model(self.model)
+        return ObjectList(list(panel.children) + [FieldPanel("organisation")]).bind_to_model(self.model)
 
     def save_instance(self):
         if not self._may_choose_tier():

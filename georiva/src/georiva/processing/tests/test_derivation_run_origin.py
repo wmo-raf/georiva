@@ -7,6 +7,7 @@ UI joins product -> runs by it. These tests assert the field is nullable
 (unstamped runs are fine, no backfill) and that adding it did not pull the feed
 layer into the engine (ADR-0005 layering).
 """
+
 import ast
 
 from django.test import TestCase

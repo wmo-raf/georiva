@@ -11,6 +11,7 @@ The member forms are the org admin's, not the instance admin's: they only ever
 act on the organisation serving the request, which is why neither carries an
 organisation field.
 """
+
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import UserCreationForm
@@ -71,10 +72,7 @@ class MemberCreateForm(UserCreationForm):
         choices=OrganisationMembership.Role.choices,
         initial=OrganisationMembership.Role.MEMBER,
         label=_("Role"),
-        help_text=_(
-            "Members do all the data work. Org admins additionally manage members "
-            "and organisation settings."
-        ),
+        help_text=_("Members do all the data work. Org admins additionally manage members and organisation settings."),
     )
 
     class Meta(UserCreationForm.Meta):

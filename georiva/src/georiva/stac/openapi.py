@@ -16,7 +16,7 @@ def get_openapi_schema(request: Request) -> dict:
     """Generate OpenAPI 3.0 schema for STAC API."""
 
     base_url = get_base_stac_api_url(request)
-    
+
     return {
         "openapi": "3.0.3",
         "info": {
@@ -30,9 +30,7 @@ def get_openapi_schema(request: Request) -> dict:
                 "name": "MIT",
             },
         },
-        "servers": [
-            {"url": base_url, "description": "GeoRiva STAC API"}
-        ],
+        "servers": [{"url": base_url, "description": "GeoRiva STAC API"}],
         "tags": [
             {"name": "Core", "description": "STAC API core endpoints"},
             {"name": "Collections", "description": "Collection management"},
@@ -49,13 +47,9 @@ def get_openapi_schema(request: Request) -> dict:
                     "responses": {
                         "200": {
                             "description": "STAC Catalog",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Catalog"}
-                                }
-                            }
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Catalog"}}},
                         }
-                    }
+                    },
                 }
             },
             "/conformance": {
@@ -66,13 +60,9 @@ def get_openapi_schema(request: Request) -> dict:
                     "responses": {
                         "200": {
                             "description": "Conformance declaration",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Conformance"}
-                                }
-                            }
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Conformance"}}},
                         }
-                    }
+                    },
                 }
             },
             "/collections": {
@@ -83,13 +73,9 @@ def get_openapi_schema(request: Request) -> dict:
                     "responses": {
                         "200": {
                             "description": "List of STAC Collections",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Collections"}
-                                }
-                            }
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Collections"}}},
                         }
-                    }
+                    },
                 }
             },
             "/collections/{catalogId}/{collectionId}/{variableId}": {
@@ -105,14 +91,10 @@ def get_openapi_schema(request: Request) -> dict:
                     "responses": {
                         "200": {
                             "description": "STAC Collection",
-                            "content": {
-                                "application/json": {
-                                    "schema": {"$ref": "#/components/schemas/Collection"}
-                                }
-                            }
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Collection"}}},
                         },
-                        "404": {"description": "Collection not found"}
-                    }
+                        "404": {"description": "Collection not found"},
+                    },
                 }
             },
             "/collections/{catalogId}/{collectionId}/{variableId}/items": {
@@ -133,12 +115,10 @@ def get_openapi_schema(request: Request) -> dict:
                         "200": {
                             "description": "STAC ItemCollection (GeoJSON FeatureCollection)",
                             "content": {
-                                "application/geo+json": {
-                                    "schema": {"$ref": "#/components/schemas/ItemCollection"}
-                                }
-                            }
+                                "application/geo+json": {"schema": {"$ref": "#/components/schemas/ItemCollection"}}
+                            },
                         }
-                    }
+                    },
                 }
             },
             "/collections/{catalogId}/{collectionId}/{variableId}/items/{itemId}": {
@@ -155,14 +135,10 @@ def get_openapi_schema(request: Request) -> dict:
                     "responses": {
                         "200": {
                             "description": "STAC Item (GeoJSON Feature)",
-                            "content": {
-                                "application/geo+json": {
-                                    "schema": {"$ref": "#/components/schemas/Item"}
-                                }
-                            }
+                            "content": {"application/geo+json": {"schema": {"$ref": "#/components/schemas/Item"}}},
                         },
-                        "404": {"description": "Item not found"}
-                    }
+                        "404": {"description": "Item not found"},
+                    },
                 }
             },
             "/search": {
@@ -181,12 +157,10 @@ def get_openapi_schema(request: Request) -> dict:
                         "200": {
                             "description": "Search results",
                             "content": {
-                                "application/geo+json": {
-                                    "schema": {"$ref": "#/components/schemas/ItemCollection"}
-                                }
-                            }
+                                "application/geo+json": {"schema": {"$ref": "#/components/schemas/ItemCollection"}}
+                            },
                         }
-                    }
+                    },
                 },
                 "post": {
                     "tags": ["Search"],
@@ -194,23 +168,17 @@ def get_openapi_schema(request: Request) -> dict:
                     "operationId": "searchItemsPost",
                     "requestBody": {
                         "description": "Search parameters",
-                        "content": {
-                            "application/json": {
-                                "schema": {"$ref": "#/components/schemas/SearchBody"}
-                            }
-                        }
+                        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SearchBody"}}},
                     },
                     "responses": {
                         "200": {
                             "description": "Search results",
                             "content": {
-                                "application/geo+json": {
-                                    "schema": {"$ref": "#/components/schemas/ItemCollection"}
-                                }
-                            }
+                                "application/geo+json": {"schema": {"$ref": "#/components/schemas/ItemCollection"}}
+                            },
                         }
-                    }
-                }
+                    },
+                },
             },
         },
         "components": {
@@ -338,8 +306,10 @@ def get_openapi_schema(request: Request) -> dict:
                         "temporal": {
                             "type": "object",
                             "properties": {
-                                "interval": {"type": "array",
-                                             "items": {"type": "array", "items": {"type": "string", "nullable": True}}},
+                                "interval": {
+                                    "type": "array",
+                                    "items": {"type": "array", "items": {"type": "string", "nullable": True}},
+                                },
                             },
                         },
                     },
@@ -426,8 +396,8 @@ def get_openapi_schema(request: Request) -> dict:
     }
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 def openapi_view(request: Request) -> Response:
     """Serve OpenAPI schema."""
     schema = get_openapi_schema(request)
-    return Response(schema, content_type='application/vnd.oai.openapi+json;version=3.0')
+    return Response(schema, content_type="application/vnd.oai.openapi+json;version=3.0")

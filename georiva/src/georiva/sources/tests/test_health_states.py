@@ -14,7 +14,9 @@ from georiva.organisations.testing import make_organisation
 
 
 def _make_feed(name="Test Feed", **kwargs):
-    catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=name.lower().replace(" ", "-"), file_format="grib2")
+    catalog = Catalog.objects.create(
+        organisation=make_organisation(), name=name, slug=name.lower().replace(" ", "-"), file_format="grib2"
+    )
     return DataFeed.objects.create(name=name, catalog=catalog, **kwargs)
 
 
@@ -144,11 +146,7 @@ class HealthOrderingTests(TestCase):
         _make_feed(name="Alpha Failed", last_run_status="failed", last_run_at=_ago(minutes=1))
         _make_feed(name="Mike Inactive", is_active=False)
 
-        names = list(
-            DataFeed.objects.with_health()
-            .order_by("health_rank", "name")
-            .values_list("name", flat=True)
-        )
+        names = list(DataFeed.objects.with_health().order_by("health_rank", "name").values_list("name", flat=True))
         self.assertEqual(names, ["Alpha Failed", "Zulu Healthy", "Mike Inactive"])
 
     def test_ordering_beats_alphabetical_default(self):
@@ -241,9 +239,5 @@ class PolymorphicHealthTests(TestCase):
             name="Sub Failed", catalog=catalog, last_run_status="failed", last_run_at=_ago(minutes=1)
         )
 
-        names = list(
-            DataFeed.objects.with_health()
-            .order_by("health_rank", "name")
-            .values_list("name", flat=True)
-        )
+        names = list(DataFeed.objects.with_health().order_by("health_rank", "name").values_list("name", flat=True))
         self.assertEqual(names, ["Sub Failed", "Base Healthy"])

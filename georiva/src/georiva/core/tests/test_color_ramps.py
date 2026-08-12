@@ -9,6 +9,7 @@ Three subjects, each at its agreed seam:
   listing, global tier read-only to operators, instance admin curates), plus
   the gradient preview in the listing.
 """
+
 from importlib import import_module
 
 from django.core.exceptions import ValidationError
@@ -31,20 +32,15 @@ KENYA_HOST = "kenya.georiva.test"
 #: The seed catalog, imported from the data migration itself so the test and
 #: the seed can never drift apart. (importlib because the module name starts
 #: with a digit.)
-SEED_RAMPS = import_module(
-    "georiva.core.migrations.0011_seed_color_ramp_catalog"
-).SEED_RAMPS
+SEED_RAMPS = import_module("georiva.core.migrations.0011_seed_color_ramp_catalog").SEED_RAMPS
 
 
 class ColorRampModelTests(TestCase):
-
     def _ramp(self, hexes, *, ramp_type=ColorRamp.RampType.SEQUENTIAL, positions=None):
         ramp = ColorRamp.objects.create(name="Test ramp", ramp_type=ramp_type)
         positions = positions or [None] * len(hexes)
         for i, (hex_value, position) in enumerate(zip(hexes, positions)):
-            ColorRampStop.objects.create(
-                ramp=ramp, hex_value=hex_value, position=position, sort_order=i
-            )
+            ColorRampStop.objects.create(ramp=ramp, hex_value=hex_value, position=position, sort_order=i)
         return ramp
 
     def test_colors_without_positions_spread_evenly(self):
@@ -73,9 +69,7 @@ class ColorRampModelTests(TestCase):
         )
 
     def test_a_qualitative_ramp_renders_hard_edged_blocks(self):
-        ramp = self._ramp(
-            ["#111111", "#222222"], ramp_type=ColorRamp.RampType.QUALITATIVE
-        )
+        ramp = self._ramp(["#111111", "#222222"], ramp_type=ColorRamp.RampType.QUALITATIVE)
         self.assertEqual(
             ramp.css_gradient(),
             "linear-gradient(to right, #111111 0% 50%, #222222 50% 100%)",
@@ -111,9 +105,7 @@ class SeededCatalogTests(TestCase):
             with self.subTest(name=name):
                 ramp = ColorRamp.objects.get(organisation__isnull=True, name=name)
                 self.assertEqual(ramp.ramp_type, ramp_type)
-                self.assertEqual(
-                    [stop.hex_value for stop in ramp.stops.all()], hexes
-                )
+                self.assertEqual([stop.hex_value for stop in ramp.stops.all()], hexes)
 
     def test_the_catalog_is_a_curated_set_not_the_full_matplotlib_registry(self):
         count = ColorRamp.objects.filter(organisation__isnull=True).count()
@@ -121,21 +113,13 @@ class SeededCatalogTests(TestCase):
         self.assertLessEqual(count, 20)
 
     def test_the_headline_ramps_are_present_under_matplotlib_names(self):
-        names = set(
-            ColorRamp.objects.filter(organisation__isnull=True).values_list(
-                "name", flat=True
-            )
-        )
+        names = set(ColorRamp.objects.filter(organisation__isnull=True).values_list("name", flat=True))
         self.assertLessEqual({"viridis", "cividis", "RdBu", "Blues", "Greys"}, names)
 
     def test_seeded_ramps_carry_no_values_only_colors(self):
         # The catalog is value-free by construction: positions are empty, so
         # the ramp implies even spacing and nothing else.
-        self.assertFalse(
-            ColorRampStop.objects.filter(
-                ramp__organisation__isnull=True, position__isnull=False
-            ).exists()
-        )
+        self.assertFalse(ColorRampStop.objects.filter(ramp__organisation__isnull=True, position__isnull=False).exists())
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
@@ -147,18 +131,10 @@ class ColorRampAdminTierTests(TestCase):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         cls.uganda = provision_organisation(name="Uganda Met", slug="uganda")
         cls.shipped = ColorRamp.objects.get(organisation__isnull=True, name="viridis")
-        cls.kenya_ramp = ColorRamp.objects.create(
-            name="Kenya Rainfall", organisation=cls.kenya
-        )
-        ColorRampStop.objects.create(
-            ramp=cls.kenya_ramp, hex_value="#ffffff", sort_order=0
-        )
-        ColorRampStop.objects.create(
-            ramp=cls.kenya_ramp, hex_value="#0000ff", sort_order=1
-        )
-        cls.uganda_ramp = ColorRamp.objects.create(
-            name="Uganda Rainfall", organisation=cls.uganda
-        )
+        cls.kenya_ramp = ColorRamp.objects.create(name="Kenya Rainfall", organisation=cls.kenya)
+        ColorRampStop.objects.create(ramp=cls.kenya_ramp, hex_value="#ffffff", sort_order=0)
+        ColorRampStop.objects.create(ramp=cls.kenya_ramp, hex_value="#0000ff", sort_order=1)
+        cls.uganda_ramp = ColorRamp.objects.create(name="Uganda Rainfall", organisation=cls.uganda)
 
     def setUp(self):
         self.user = grant_everything(make_user("amina"))
@@ -181,18 +157,12 @@ class ColorRampAdminTierTests(TestCase):
     def test_the_listing_shows_a_gradient_preview_per_ramp(self):
         response = self.client.get(reverse("colorramp:index"))
         self.assertContains(response, "linear-gradient(to right, #440154 0%")
-        self.assertContains(
-            response, "linear-gradient(to right, #ffffff 0%, #0000ff 100%)"
-        )
+        self.assertContains(response, "linear-gradient(to right, #ffffff 0%, #0000ff 100%)")
 
     def test_the_listing_offers_no_edit_link_for_an_instance_wide_ramp(self):
         response = self.client.get(reverse("colorramp:index"))
-        self.assertNotContains(
-            response, reverse("colorramp:edit", args=[self.shipped.pk])
-        )
-        self.assertContains(
-            response, reverse("colorramp:edit", args=[self.kenya_ramp.pk])
-        )
+        self.assertNotContains(response, reverse("colorramp:edit", args=[self.shipped.pk]))
+        self.assertContains(response, reverse("colorramp:edit", args=[self.kenya_ramp.pk]))
 
     # -- writes ------------------------------------------------------------
 

@@ -6,6 +6,7 @@ import-package names are exposed as ``settings.GEORIVA_PLUGIN_NAMES``.
 
 Metadata is read from the installed distribution via ``importlib.metadata``.
 """
+
 import importlib.metadata
 
 from django.conf import settings
@@ -61,7 +62,7 @@ def get_plugin_metadata(module_name):
         dist = importlib.metadata.distribution(_distribution_name(module_name))
     except importlib.metadata.PackageNotFoundError:
         return {"name": module_name, "module": module_name, "available": False}
-    
+
     meta = dist.metadata
     return {
         "module": module_name,

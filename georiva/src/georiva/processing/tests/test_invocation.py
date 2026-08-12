@@ -6,6 +6,7 @@ per-unit compute (``run_unit_task``) mocked.
 
 See issue #125 and docs/adr/0005-generic-derivation-engine.md.
 """
+
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -159,20 +160,24 @@ class _StagingFixture(TestCase):
             StagingItem,
         )
 
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="geotiff"
         )
-        self.scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="tas", name="tas"
-        )
+        self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
             datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=10, height=10,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
         StagingAsset.objects.create(
-            item=self.sitem, href="cmip6/tas/f.tif", roles=["source"],
-            format="geotiff", checksum="abc123",
+            item=self.sitem,
+            href="cmip6/tas/f.tif",
+            roles=["source"],
+            format="geotiff",
+            checksum="abc123",
         )
 
 
@@ -190,20 +195,19 @@ class PromotionCandidateUnitsTests(_StagingFixture):
         StagingItem.objects.create(
             collection=self.scol,
             datetime=datetime(2020, 1, 2, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=10, height=10,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
 
-        units = list(
-            PromotionRecipe().candidate_units({"staging_item_id": self.sitem.pk})
-        )
+        units = list(PromotionRecipe().candidate_units({"staging_item_id": self.sitem.pk}))
         self.assertEqual(units, [{"staging_item_id": self.sitem.pk}])
 
     def test_selector_without_trigger_still_enumerates(self):
         from georiva.processing.recipes.promotion import PromotionRecipe
 
-        units = list(
-            PromotionRecipe().candidate_units({"collection_slug": "tas"})
-        )
+        units = list(PromotionRecipe().candidate_units({"collection_slug": "tas"}))
         self.assertIn({"staging_item_id": self.sitem.pk}, units)
 
     def test_ignores_published_item_trigger(self):
@@ -212,9 +216,7 @@ class PromotionCandidateUnitsTests(_StagingFixture):
         # fire for same-named staging items.
         from georiva.processing.recipes.promotion import PromotionRecipe
 
-        units = list(PromotionRecipe().candidate_units(
-            {"published_item_id": 99, "collection_slug": "tas"}
-        ))
+        units = list(PromotionRecipe().candidate_units({"published_item_id": 99, "collection_slug": "tas"}))
         self.assertEqual(units, [])
 
 
@@ -230,13 +232,9 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
 
         from georiva.core.models import Catalog, Collection, Item
 
-        catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="C", slug="c", file_format="geotiff"
-        )
+        catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
-        return Item.objects.create(
-            collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc)
-        )
+        return Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
 
     def test_completed_unit_chains_downstream_trigger(self):
         from georiva.processing.engine import UnitResult
@@ -249,13 +247,9 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
                 "georiva.processing.engine.run_unit",
                 return_value=UnitResult(status="completed", item_id=item.pk),
             ),
-            patch(
-                "georiva.processing.invocation.dispatch_for_trigger"
-            ) as dispatch,
+            patch("georiva.processing.invocation.dispatch_for_trigger") as dispatch,
         ):
-            run_unit_task.apply(
-                kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}}
-            )
+            run_unit_task.apply(kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}})
 
         dispatch.assert_called_once()
         trigger = dispatch.call_args.args[0]
@@ -271,13 +265,9 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
                 "georiva.processing.engine.run_unit",
                 return_value=UnitResult(status="not_ready"),
             ),
-            patch(
-                "georiva.processing.invocation.dispatch_for_trigger"
-            ) as dispatch,
+            patch("georiva.processing.invocation.dispatch_for_trigger") as dispatch,
         ):
-            run_unit_task.apply(
-                kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}}
-            )
+            run_unit_task.apply(kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}})
 
         dispatch.assert_not_called()
 
@@ -306,11 +296,7 @@ class _SweepRecipe(BaseRecipe):
     def resolve_inputs(self, unit):
         from georiva.processing.recipe import ResolvedInput
 
-        return {
-            "src": ResolvedInput(
-                "src", required=True, items=[], assets=[_Asset(self.checksum)]
-            )
-        }
+        return {"src": ResolvedInput("src", required=True, items=[], assets=[_Asset(self.checksum)])}
 
     def outputs(self, unit):
         return OutputItem(collection=None, time=None)
@@ -328,9 +314,12 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
 
         unit = {"n": 1}
         return DerivationRun.objects.create(
-            recipe_type="sweep_fake", recipe_version="1",
-            unit_key=unit, unit_hash=unit_hash(unit),
-            input_hash=recorded_hash, status=DerivationRun.Status.COMPLETED,
+            recipe_type="sweep_fake",
+            recipe_version="1",
+            unit_key=unit,
+            unit_hash=unit_hash(unit),
+            input_hash=recorded_hash,
+            status=DerivationRun.Status.COMPLETED,
         )
 
     def _current_hash(self):
@@ -382,9 +371,12 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
         b = Item.objects.create(collection=bcol, time=t)
         b_unit = {"n": 1}
         DerivationRun.objects.create(
-            recipe_type="sweep_fake", recipe_version="1",
-            unit_key=b_unit, unit_hash=unit_hash(b_unit),
-            input_hash="STALE", status=DerivationRun.Status.COMPLETED,
+            recipe_type="sweep_fake",
+            recipe_version="1",
+            unit_key=b_unit,
+            unit_hash=unit_hash(b_unit),
+            input_hash="STALE",
+            status=DerivationRun.Status.COMPLETED,
             produced_item=b,
         )
 
@@ -394,14 +386,20 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
         c = Item.objects.create(collection=ccol, time=t)
         c_unit = {"id": "C"}
         DerivationRun.objects.create(
-            recipe_type="recipe_c", recipe_version="1",
-            unit_key=c_unit, unit_hash=unit_hash(c_unit),
-            input_hash="hc", status=DerivationRun.Status.COMPLETED,
+            recipe_type="recipe_c",
+            recipe_version="1",
+            unit_key=c_unit,
+            unit_hash=unit_hash(c_unit),
+            input_hash="hc",
+            status=DerivationRun.Status.COMPLETED,
             produced_item=c,
         )
         DerivationLink.objects.create(
-            derived_item=c, source_published_item=b,
-            recipe_id="recipe_c", recipe_version="1", input_hash="hc",
+            derived_item=c,
+            source_published_item=b,
+            recipe_id="recipe_c",
+            recipe_version="1",
+            input_hash="hc",
         )
 
         with patch("georiva.processing.tasks.run_unit_task") as task:
@@ -411,7 +409,7 @@ class SweepStalenessTests(_RegistryIsolationMixin, TestCase):
             (call.kwargs["recipe_type"], tuple(sorted(call.kwargs["unit"].items())))
             for call in task.delay.call_args_list
         }
-        self.assertIn(("sweep_fake", (("n", 1),)), dispatched)   # the stale unit
+        self.assertIn(("sweep_fake", (("n", 1),)), dispatched)  # the stale unit
         self.assertIn(("recipe_c", (("id", "C"),)), dispatched)  # propagated downstream
 
 
@@ -429,10 +427,13 @@ class ReclaimStaleRunningTests(_RegistryIsolationMixin, TestCase):
         from georiva.processing.recipe import unit_hash
 
         return DerivationRun.objects.create(
-            recipe_type="sweep_fake", recipe_version="1",
-            unit_key=unit, unit_hash=unit_hash(unit),
+            recipe_type="sweep_fake",
+            recipe_version="1",
+            unit_key=unit,
+            unit_hash=unit_hash(unit),
             status=DerivationRun.Status.RUNNING,
-            locked_by="dead-worker", locked_at=timezone.now() - age,
+            locked_by="dead-worker",
+            locked_at=timezone.now() - age,
         )
 
     def test_stale_running_unit_is_reclaimed(self):
@@ -442,7 +443,8 @@ class ReclaimStaleRunningTests(_RegistryIsolationMixin, TestCase):
         from georiva.processing.tasks import sweep_derivations
 
         self._running_run(
-            unit={"n": 1}, age=DerivationRun.LOCK_TIMEOUT + timedelta(minutes=1),
+            unit={"n": 1},
+            age=DerivationRun.LOCK_TIMEOUT + timedelta(minutes=1),
         )
 
         with patch("georiva.processing.tasks.run_unit_task") as task:
@@ -493,31 +495,45 @@ class ForwardInvalidationTests(TestCase):
 
         # B: internal intermediate derived from A.
         bcol = Collection.objects.create(
-            catalog=catalog, slug="b", name="b",
+            catalog=catalog,
+            slug="b",
+            name="b",
             visibility=Collection.Visibility.INTERNAL,
         )
         self.B = Item.objects.create(collection=bcol, time=t)
         DerivationRun.objects.create(
-            recipe_type="recipe_b", recipe_version="1",
-            unit_key={"id": "B"}, unit_hash=unit_hash({"id": "B"}),
-            status=DerivationRun.Status.COMPLETED, produced_item=self.B,
+            recipe_type="recipe_b",
+            recipe_version="1",
+            unit_key={"id": "B"},
+            unit_hash=unit_hash({"id": "B"}),
+            status=DerivationRun.Status.COMPLETED,
+            produced_item=self.B,
         )
         DerivationLink.objects.create(
-            derived_item=self.B, source_staging_item=self.A,
-            recipe_id="recipe_b", recipe_version="1", input_hash="hb",
+            derived_item=self.B,
+            source_staging_item=self.A,
+            recipe_id="recipe_b",
+            recipe_version="1",
+            input_hash="hb",
         )
 
         # C: product derived from B.
         ccol = Collection.objects.create(catalog=catalog, slug="cc", name="cc")
         self.C = Item.objects.create(collection=ccol, time=t)
         DerivationRun.objects.create(
-            recipe_type="recipe_c", recipe_version="1",
-            unit_key={"id": "C"}, unit_hash=unit_hash({"id": "C"}),
-            status=DerivationRun.Status.COMPLETED, produced_item=self.C,
+            recipe_type="recipe_c",
+            recipe_version="1",
+            unit_key={"id": "C"},
+            unit_hash=unit_hash({"id": "C"}),
+            status=DerivationRun.Status.COMPLETED,
+            produced_item=self.C,
         )
         DerivationLink.objects.create(
-            derived_item=self.C, source_published_item=self.B,
-            recipe_id="recipe_c", recipe_version="1", input_hash="hc",
+            derived_item=self.C,
+            source_published_item=self.B,
+            recipe_id="recipe_c",
+            recipe_version="1",
+            input_hash="hc",
         )
 
     def test_changed_input_recomputes_downstream_transitively(self):
@@ -526,10 +542,7 @@ class ForwardInvalidationTests(TestCase):
         with patch("georiva.processing.tasks.run_unit_task") as task:
             invalidate_downstream(self.A)
 
-        dispatched = {
-            (c.kwargs["recipe_type"], c.kwargs["unit"]["id"])
-            for c in task.delay.call_args_list
-        }
+        dispatched = {(c.kwargs["recipe_type"], c.kwargs["unit"]["id"]) for c in task.delay.call_args_list}
         self.assertEqual(dispatched, {("recipe_b", "B"), ("recipe_c", "C")})
 
     def test_invalidating_intermediate_recomputes_only_below_it(self):
@@ -539,10 +552,7 @@ class ForwardInvalidationTests(TestCase):
         with patch("georiva.processing.tasks.run_unit_task") as task:
             invalidate_downstream(self.B)
 
-        dispatched = {
-            (c.kwargs["recipe_type"], c.kwargs["unit"]["id"])
-            for c in task.delay.call_args_list
-        }
+        dispatched = {(c.kwargs["recipe_type"], c.kwargs["unit"]["id"]) for c in task.delay.call_args_list}
         self.assertEqual(dispatched, {("recipe_c", "C")})
 
 
@@ -554,17 +564,17 @@ class ClimatologyCandidateUnitsTests(TestCase):
     def test_ignores_event_trigger(self):
         from georiva.processing.recipes.climatology import ClimatologyRecipe
 
-        units = list(
-            ClimatologyRecipe().candidate_units({"staging_item_id": 5})
-        )
+        units = list(ClimatologyRecipe().candidate_units({"staging_item_id": 5}))
         self.assertEqual(units, [])
 
     def test_full_selector_still_enumerates(self):
         from georiva.processing.recipes.climatology import ClimatologyRecipe
 
         selector = {
-            "source_collection": "tas", "variable": "tas",
-            "periods": [[2011, 2040]], "seasons": ["annual"],
+            "source_collection": "tas",
+            "variable": "tas",
+            "periods": [[2011, 2040]],
+            "seasons": ["annual"],
             "quantities": ["value"],
         }
         units = list(ClimatologyRecipe().candidate_units(selector))
@@ -584,9 +594,7 @@ class TriggerBuilderTests(TestCase):
 
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         col = Collection.objects.create(catalog=catalog, slug="anom", name="anom")
-        item = Item.objects.create(
-            collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc)
-        )
+        item = Item.objects.create(collection=col, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
 
         trigger = published_item_trigger(item)
 
@@ -601,9 +609,7 @@ class TriggerBuilderTests(TestCase):
 
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
         core = Collection.objects.create(catalog=catalog, slug="rain", name="Rain")
-        sc = StagingCollection.objects.create(
-            catalog=catalog, slug="rain", name="Rain", collection=core
-        )
+        sc = StagingCollection.objects.create(catalog=catalog, slug="rain", name="Rain", collection=core)
         item = StagingItem.objects.create(collection=sc)
 
         trigger = staging_item_trigger(item)
@@ -621,9 +627,7 @@ class TriggerBuilderTests(TestCase):
         from georiva.staging.models import StagingCollection, StagingItem
 
         catalog = Catalog.objects.create(organisation=make_organisation(), name="C", slug="c", file_format="geotiff")
-        sc = StagingCollection.objects.create(
-            catalog=catalog, slug="rain", name="Rain"
-        )
+        sc = StagingCollection.objects.create(catalog=catalog, slug="rain", name="Rain")
         item = StagingItem.objects.create(collection=sc)
 
         trigger = staging_item_trigger(item)

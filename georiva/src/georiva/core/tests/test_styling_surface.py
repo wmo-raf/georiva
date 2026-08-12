@@ -13,6 +13,7 @@ Three seams:
   hand, as ``item_preview.html``'s already is; what is tested here is the
   contract the page hands it.
 """
+
 from datetime import datetime, timezone
 
 from django.core.exceptions import ValidationError
@@ -53,34 +54,42 @@ class VariableStyleOrderingTests(TestCase):
 
     def _style(self, stops):
         return VariableStyle(
-            variable=self.tree["variable"], name="Default", slug="default",
+            variable=self.tree["variable"],
+            name="Default",
+            slug="default",
             stops=stops,
         )
 
     def test_descending_stop_values_are_rejected(self):
-        style = self._style([
-            {"value": 10.0, "color": "#000000"},
-            {"value": 5.0, "color": "#ffffff"},
-        ])
+        style = self._style(
+            [
+                {"value": 10.0, "color": "#000000"},
+                {"value": 5.0, "color": "#ffffff"},
+            ]
+        )
         with self.assertRaises(ValidationError) as caught:
             style.full_clean()
         self.assertIn("stops", caught.exception.error_dict)
 
     def test_equal_neighbouring_values_are_allowed(self):
         # Stepped snapshots share class-boundary values by construction.
-        style = self._style([
-            {"value": 0.0, "color": "#000000"},
-            {"value": 5.0, "color": "#000000"},
-            {"value": 5.0, "color": "#ffffff"},
-            {"value": 10.0, "color": "#ffffff"},
-        ])
+        style = self._style(
+            [
+                {"value": 0.0, "color": "#000000"},
+                {"value": 5.0, "color": "#000000"},
+                {"value": 5.0, "color": "#ffffff"},
+                {"value": 10.0, "color": "#ffffff"},
+            ]
+        )
         style.full_clean()
 
     def test_ascending_stop_values_are_allowed(self):
-        style = self._style([
-            {"value": 0.0, "color": "#000000"},
-            {"value": 50.0, "color": "#ffffff"},
-        ])
+        style = self._style(
+            [
+                {"value": 0.0, "color": "#000000"},
+                {"value": 50.0, "color": "#ffffff"},
+            ]
+        )
         style.full_clean()
 
 
@@ -91,11 +100,15 @@ class PromoteToDefaultTests(TestCase):
     def setUpTestData(cls):
         cls.tree = make_org_tree(make_organisation())
         cls.official = VariableStyle.objects.create(
-            variable=cls.tree["variable"], name="Official", slug="official",
+            variable=cls.tree["variable"],
+            name="Official",
+            slug="official",
             is_default=True,
         )
         cls.analyst = VariableStyle.objects.create(
-            variable=cls.tree["variable"], name="Analyst", slug="analyst",
+            variable=cls.tree["variable"],
+            name="Analyst",
+            slug="analyst",
         )
 
     def test_promoting_flips_the_default_in_one_gesture(self):
@@ -110,9 +123,7 @@ class PromoteToDefaultTests(TestCase):
         self.official.refresh_from_db()
         self.assertTrue(self.official.is_default)
         self.assertEqual(
-            VariableStyle.objects.filter(
-                variable=self.tree["variable"], is_default=True
-            ).count(),
+            VariableStyle.objects.filter(variable=self.tree["variable"], is_default=True).count(),
             1,
         )
 
@@ -127,16 +138,15 @@ class StylingSurfaceTestCase(TestCase):
         cls.tree = make_org_tree(cls.org)
         cls.collection = cls.tree["collection"]
         cls.variable = cls.tree["variable"]
-        cls.global_ramp = ColorRamp.objects.get(
-            organisation__isnull=True, name="viridis"
-        )
+        cls.global_ramp = ColorRamp.objects.get(organisation__isnull=True, name="viridis")
         cls.org_ramp = make_ramp("House Rainfall", organisation=cls.org)
         cls.foreign_ramp = make_ramp("Foreign Rainfall", organisation=cls.other_org)
 
     def setUp(self):
         self.user = grant_everything(make_user("amina"))
         OrganisationMembership.objects.create(
-            user=self.user, organisation=self.org,
+            user=self.user,
+            organisation=self.org,
             role=OrganisationMembership.Role.ADMIN,
         )
         dial_org(self.client)
@@ -148,15 +158,11 @@ class StylingSurfaceTestCase(TestCase):
 
     @property
     def form_url(self):
-        return reverse(
-            "variable_styling", args=[self.collection.pk, self.variable.pk]
-        )
+        return reverse("variable_styling", args=[self.collection.pk, self.variable.pk])
 
     @property
     def stops_url(self):
-        return reverse(
-            "variable_style_stops", args=[self.collection.pk, self.variable.pk]
-        )
+        return reverse("variable_style_stops", args=[self.collection.pk, self.variable.pk])
 
 
 class StylingPageTests(StylingSurfaceTestCase):
@@ -176,7 +182,9 @@ class StylingPageTests(StylingSurfaceTestCase):
 
     def test_a_styled_variable_shows_its_default_swatch(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
             stops=[
                 {"value": 0.0, "color": "#123456"},
@@ -188,15 +196,11 @@ class StylingPageTests(StylingSurfaceTestCase):
 
     def test_another_organisations_collection_is_not_found(self):
         foreign = make_org_tree(self.other_org)["collection"]
-        response = self.client.get(
-            reverse("collection_styling", args=[foreign.pk])
-        )
+        response = self.client.get(reverse("collection_styling", args=[foreign.pk]))
         self.assertEqual(response.status_code, 404)
 
     def test_the_collection_items_page_links_here(self):
-        response = self.client.get(
-            reverse("collection_items_list", args=[self.collection.pk])
-        )
+        response = self.client.get(reverse("collection_items_list", args=[self.collection.pk]))
         self.assertContains(response, self.page_url)
 
 
@@ -226,13 +230,8 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         response = self.client.get(self.form_url)
         groups = response.context["ramp_groups"]
 
-        self.assertEqual(
-            [group["label"] for group in groups], ["Sequential", "Diverging"]
-        )
-        names = {
-            group["label"]: [ramp["name"] for ramp in group["ramps"]]
-            for group in groups
-        }
+        self.assertEqual([group["label"] for group in groups], ["Sequential", "Diverging"])
+        names = {group["label"]: [ramp["name"] for ramp in group["ramps"]] for group in groups}
         self.assertIn("viridis", names["Sequential"])
         self.assertIn("RdBu", names["Diverging"])
         # Each ramp appears under its own type and nowhere else.
@@ -243,28 +242,23 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         # The markup needs no lookup table beside it, and the browser repaints
         # the toggle from the row it was handed.
         response = self.client.get(self.form_url)
-        ramps = [
-            ramp
-            for group in response.context["ramp_groups"]
-            for ramp in group["ramps"]
-        ]
+        ramps = [ramp for group in response.context["ramp_groups"] for ramp in group["ramps"]]
         self.assertTrue(ramps)
         self.assertTrue(all(ramp["gradient"].startswith("linear-gradient") for ramp in ramps))
 
     def test_another_organisations_ramp_is_in_no_group(self):
         response = self.client.get(self.form_url)
-        names = [
-            ramp["name"]
-            for group in response.context["ramp_groups"]
-            for ramp in group["ramps"]
-        ]
+        names = [ramp["name"] for group in response.context["ramp_groups"] for ramp in group["ramps"]]
         self.assertIn("House Rainfall", names)
         self.assertNotIn("Foreign Rainfall", names)
 
     def test_the_saved_ramp_comes_back_marked_selected(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=self.org_ramp,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            ramp=self.org_ramp,
         )
         response = self.client.get(self.form_url)
         self.assertEqual(response.context["selected_ramp"]["name"], "House Rainfall")
@@ -276,43 +270,48 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
     def test_the_ramp_still_saves_through_the_hidden_input(self):
         """The picker is presentation: the field is still a scoped
         ModelChoiceField named `ramp`, so nothing about saving moved."""
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(
-            VariableStyle.objects.get(variable=self.variable).ramp, self.org_ramp
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Official",
+                "ramp": str(self.org_ramp.pk),
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+            },
         )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(VariableStyle.objects.get(variable=self.variable).ramp, self.org_ramp)
 
     # -- range -------------------------------------------------------------
 
     def test_saving_the_range_updates_the_variable(self):
-        response = self.client.post(self.form_url, {
-            "action": "save-range",
-            "value_min": "-10",
-            "value_max": "45",
-            "scale_type": Variable.ScaleType.LINEAR,
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-range",
+                "value_min": "-10",
+                "value_max": "45",
+                "scale_type": Variable.ScaleType.LINEAR,
+            },
+        )
         self.assertEqual(response.status_code, 302)
         self.variable.refresh_from_db()
         self.assertEqual(self.variable.value_range, (-10.0, 45.0))
 
     def test_an_inverted_range_is_rejected_with_the_models_message(self):
-        response = self.client.post(self.form_url, {
-            "action": "save-range",
-            "value_min": "45",
-            "value_max": "10",
-            "scale_type": Variable.ScaleType.LINEAR,
-        })
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response, "Maximum value must be greater than minimum value."
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-range",
+                "value_min": "45",
+                "value_max": "10",
+                "scale_type": Variable.ScaleType.LINEAR,
+            },
         )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maximum value must be greater than minimum value.")
         self.variable.refresh_from_db()
         self.assertEqual(self.variable.value_range, (0.0, 50.0))
 
@@ -322,15 +321,22 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
             {"value": 50.0, "color": "#222222"},
         ]
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=self.org_ramp, stops=tuned,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            ramp=self.org_ramp,
+            stops=tuned,
         )
-        response = self.client.post(self.form_url, {
-            "action": "save-range",
-            "value_min": "-20",
-            "value_max": "60",
-            "scale_type": Variable.ScaleType.LINEAR,
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-range",
+                "value_min": "-20",
+                "value_max": "60",
+                "scale_type": Variable.ScaleType.LINEAR,
+            },
+        )
         self.assertEqual(response.status_code, 302)
         style.refresh_from_db()
         self.assertEqual(style.stops, tuned)
@@ -338,14 +344,17 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
     # -- style creation ----------------------------------------------------
 
     def test_creating_a_style_with_a_ramp_generates_stops_over_the_range(self):
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Official",
+                "ramp": str(self.org_ramp.pk),
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+            },
+        )
         self.assertEqual(response.status_code, 302)
         style = VariableStyle.objects.get(variable=self.variable)
         self.assertEqual(style.name, "Official")
@@ -359,43 +368,52 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         )
 
     def test_the_first_style_becomes_the_default(self):
-        self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
-        self.assertTrue(
-            VariableStyle.objects.get(variable=self.variable).is_default
+        self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Official",
+                "ramp": str(self.org_ramp.pk),
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+            },
         )
+        self.assertTrue(VariableStyle.objects.get(variable=self.variable).is_default)
 
     def test_a_second_style_does_not_steal_the_default(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
         )
-        self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "",
-            "name": "Analyst",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
+        self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Analyst",
+                "ramp": str(self.org_ramp.pk),
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+            },
+        )
         analyst = VariableStyle.objects.get(variable=self.variable, slug="analyst")
         self.assertFalse(analyst.is_default)
 
     def test_stepped_mode_produces_n_discrete_classes(self):
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "",
-            "name": "Classed",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.STEPPED,
-            "steps": "7",
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Classed",
+                "ramp": str(self.org_ramp.pk),
+                "mode": VariableStyle.Mode.STEPPED,
+                "steps": "7",
+            },
+        )
         self.assertEqual(response.status_code, 302)
         style = VariableStyle.objects.get(variable=self.variable)
         # Two stops per class keep the edges hard through interpolation.
@@ -403,40 +421,47 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertEqual(style.steps, 7)
 
     def test_a_foreign_ramp_is_not_accepted(self):
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "",
-            "name": "Official",
-            "ramp": str(self.foreign_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(
-            VariableStyle.objects.filter(variable=self.variable).exists()
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "",
+                "name": "Official",
+                "ramp": str(self.foreign_ramp.pk),
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+            },
         )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(VariableStyle.objects.filter(variable=self.variable).exists())
 
     # -- fine-tuning -------------------------------------------------------
 
     def test_submitted_stops_are_saved_verbatim(self):
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=self.org_ramp,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            ramp=self.org_ramp,
             stops=[
                 {"value": 0.0, "color": "#000000"},
                 {"value": 50.0, "color": "#ffffff"},
             ],
         )
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-            "stop_value": ["0", "0", "50"],
-            "stop_color": ["#0000ff", "#ffffff", "#ff0000"],
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "official",
+                "name": "Official",
+                "ramp": str(self.org_ramp.pk),
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+                "stop_value": ["0", "0", "50"],
+                "stop_color": ["#0000ff", "#ffffff", "#ff0000"],
+            },
+        )
         self.assertEqual(response.status_code, 302)
         style.refresh_from_db()
         self.assertEqual(
@@ -450,55 +475,70 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
 
     def test_out_of_order_stops_are_rejected(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
         )
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": "",
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-            "stop_value": ["50", "0"],
-            "stop_color": ["#000000", "#ffffff"],
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "official",
+                "name": "Official",
+                "ramp": "",
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+                "stop_value": ["50", "0"],
+                "stop_color": ["#000000", "#ffffff"],
+            },
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "ascending")
 
     def test_a_non_numeric_stop_value_is_rejected(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
         )
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": "",
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-            "stop_value": ["zero"],
-            "stop_color": ["#000000"],
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "official",
+                "name": "Official",
+                "ramp": "",
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+                "stop_value": ["zero"],
+                "stop_color": ["#000000"],
+            },
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Not a number")
 
     def test_a_non_hex_color_is_rejected(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
         )
-        response = self.client.post(self.form_url, {
-            "action": "save-style",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": "",
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-            "stop_value": ["0"],
-            "stop_color": ["red;}"],
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "save-style",
+                "style_slug": "official",
+                "name": "Official",
+                "ramp": "",
+                "mode": VariableStyle.Mode.CONTINUOUS,
+                "steps": "",
+                "stop_value": ["0"],
+                "stop_color": ["red;}"],
+            },
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "hex color")
 
@@ -517,20 +557,20 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
             {"value": 50.0, "color": "#222222"},
         ]
         style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=self.org_ramp, stops=tuned,
+            variable=self.variable,
+            name="Official",
+            slug="official",
+            is_default=True,
+            ramp=self.org_ramp,
+            stops=tuned,
         )
-        response = self.client.get(
-            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"}
-        )
+        response = self.client.get(self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"})
         self.assertEqual(response.status_code, 200)
         style.refresh_from_db()
         self.assertEqual(style.stops, tuned)
 
     def test_the_generated_stops_are_the_ramp_over_the_saved_range(self):
-        response = self.client.get(
-            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"}
-        )
+        response = self.client.get(self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"})
         self.assertEqual(
             response.json()["stops"],
             [
@@ -548,16 +588,12 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertEqual(len(response.json()["stops"]), 14)
 
     def test_stepped_generation_without_classes_is_refused(self):
-        response = self.client.get(
-            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "stepped"}
-        )
+        response = self.client.get(self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "stepped"})
         self.assertEqual(response.status_code, 400)
         self.assertIn("classes", response.json()["error"])
 
     def test_an_unknown_rendering_mode_is_refused(self):
-        response = self.client.get(
-            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "swirly"}
-        )
+        response = self.client.get(self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "swirly"})
         self.assertEqual(response.status_code, 400)
 
     def test_generating_without_a_ramp_is_refused(self):
@@ -566,9 +602,7 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertIn("ramp", response.json()["error"])
 
     def test_a_non_numeric_ramp_is_refused_rather_than_erroring(self):
-        response = self.client.get(
-            self.stops_url, {"ramp": "viridis", "mode": "continuous"}
-        )
+        response = self.client.get(self.stops_url, {"ramp": "viridis", "mode": "continuous"})
         self.assertEqual(response.status_code, 400)
 
     def test_another_organisations_ramp_cannot_be_generated_from(self):
@@ -596,18 +630,25 @@ class StyleSetManagementTests(StylingSurfaceTestCase):
     def setUp(self):
         super().setUp()
         self.official = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
         )
         self.analyst = VariableStyle.objects.create(
-            variable=self.variable, name="Analyst", slug="analyst",
+            variable=self.variable,
+            name="Analyst",
+            slug="analyst",
         )
 
     def test_promoting_a_style_flips_the_default(self):
-        response = self.client.post(self.form_url, {
-            "action": "promote",
-            "style_slug": "analyst",
-        })
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "promote",
+                "style_slug": "analyst",
+            },
+        )
         self.assertEqual(response.status_code, 302)
         self.official.refresh_from_db()
         self.analyst.refresh_from_db()
@@ -615,35 +656,38 @@ class StyleSetManagementTests(StylingSurfaceTestCase):
         self.assertTrue(self.analyst.is_default)
 
     def test_a_non_default_style_can_be_deleted(self):
-        response = self.client.post(self.form_url, {
-            "action": "delete-style",
-            "style_slug": "analyst",
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertFalse(
-            VariableStyle.objects.filter(pk=self.analyst.pk).exists()
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "delete-style",
+                "style_slug": "analyst",
+            },
         )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(VariableStyle.objects.filter(pk=self.analyst.pk).exists())
 
     def test_the_default_cannot_be_deleted_while_siblings_remain(self):
-        response = self.client.post(self.form_url, {
-            "action": "delete-style",
-            "style_slug": "official",
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertTrue(
-            VariableStyle.objects.filter(pk=self.official.pk).exists()
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "delete-style",
+                "style_slug": "official",
+            },
         )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(VariableStyle.objects.filter(pk=self.official.pk).exists())
 
     def test_the_last_style_can_be_deleted_back_to_grayscale(self):
         self.analyst.delete()
-        response = self.client.post(self.form_url, {
-            "action": "delete-style",
-            "style_slug": "official",
-        })
-        self.assertEqual(response.status_code, 302)
-        self.assertFalse(
-            VariableStyle.objects.filter(variable=self.variable).exists()
+        response = self.client.post(
+            self.form_url,
+            {
+                "action": "delete-style",
+                "style_slug": "official",
+            },
         )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(VariableStyle.objects.filter(variable=self.variable).exists())
 
 
 class DemotedCollectionFormTests(StylingSurfaceTestCase):
@@ -667,7 +711,9 @@ class DemotedCollectionFormTests(StylingSurfaceTestCase):
 
     def test_the_inline_variables_panel_shows_the_range_and_default_swatch(self):
         VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
             stops=[
                 {"value": 0.0, "color": "#123456"},
@@ -683,7 +729,9 @@ class DemotedCollectionFormTests(StylingSurfaceTestCase):
         provisioned with no declared range comes up 0–1 grayscale, to be tuned
         on the Styling page."""
         variable = Variable.objects.create(
-            collection=self.collection, name="Fresh", slug="fresh",
+            collection=self.collection,
+            name="Fresh",
+            slug="fresh",
             unit=self.variable.unit,
         )
         self.assertEqual((variable.value_min, variable.value_max), (0.0, 1.0))
@@ -706,15 +754,18 @@ class PreviewItemChoiceTests(TestCase):
         # never stands in for one.
         cls.tree["item"].delete()
 
-    def _item(self, time, reference_time=None, fmt=Asset.Format.COG,
-              variable=None, bounds=(0, 0, 10, 10)):
+    def _item(self, time, reference_time=None, fmt=Asset.Format.COG, variable=None, bounds=(0, 0, 10, 10)):
         item = Item.objects.create(
-            collection=self.collection, time=time,
-            reference_time=reference_time, bounds=list(bounds),
+            collection=self.collection,
+            time=time,
+            reference_time=reference_time,
+            bounds=list(bounds),
         )
         Asset.objects.create(
-            item=item, variable=variable or self.variable,
-            href="x.tif", format=fmt,
+            item=item,
+            variable=variable or self.variable,
+            href="x.tif",
+            format=fmt,
         )
         return item
 
@@ -739,8 +790,12 @@ class PreviewItemChoiceTests(TestCase):
 
     def test_another_variables_item_is_not_a_candidate(self):
         other = Variable.objects.create(
-            collection=self.collection, name="Other", slug="other",
-            unit=self.variable.unit, value_min=0, value_max=1,
+            collection=self.collection,
+            name="Other",
+            slug="other",
+            unit=self.variable.unit,
+            value_min=0,
+            value_max=1,
         )
         self._item(datetime(2026, 3, 3, tzinfo=timezone.utc), variable=other)
         self.assertIsNone(Item.objects.latest_for_variable(self.variable))
@@ -759,7 +814,9 @@ class PreviewPanelTests(StylingSurfaceTestCase):
             bounds=list(bounds) if bounds else None,
         )
         Asset.objects.create(
-            item=item, variable=self.variable, href="x.tif",
+            item=item,
+            variable=self.variable,
+            href="x.tif",
             format=Asset.Format.COG,
         )
         return item

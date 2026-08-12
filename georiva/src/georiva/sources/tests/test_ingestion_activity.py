@@ -5,6 +5,7 @@ Scoping is by the feed's catalog path prefix — FileIngestion joins the
 acquisition side via file_path, not FKs (ADR-0003) — so failed Ingestions
 never associated with any Collection still appear on the feed's page.
 """
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -24,8 +25,7 @@ def _feed(name="CHIRPS", slug="chirps"):
     return feed
 
 
-def _ingestion(feed, filename, *, status=FileIngestion.Status.COMPLETED,
-               collections=(), **fields):
+def _ingestion(feed, filename, *, status=FileIngestion.Status.COMPLETED, collections=(), **fields):
     record = FileIngestion.objects.create(
         bucket="sources",
         file_path=f"{feed.catalog.storage_prefix}/rainfall/{filename}",
@@ -44,7 +44,9 @@ class FeedFileIngestionsTests(TestCase):
 
     def test_scopes_by_catalog_prefix_and_includes_collectionless_failures(self):
         orphaned_failure = _ingestion(
-            self.feed, "orphan.tif", status=FileIngestion.Status.FAILED,
+            self.feed,
+            "orphan.tif",
+            status=FileIngestion.Status.FAILED,
         )
         linked = _ingestion(self.feed, "linked.tif")
 
@@ -59,25 +61,21 @@ class FeedFileIngestionsTests(TestCase):
         failed = _ingestion(self.feed, "bad.tif", status=FileIngestion.Status.FAILED)
         _ingestion(self.feed, "good.tif")
 
-        records = list(
-            feed_file_ingestions(self.feed, status=FileIngestion.Status.FAILED)
-        )
+        records = list(feed_file_ingestions(self.feed, status=FileIngestion.Status.FAILED))
 
         self.assertEqual(records, [failed])
 
     def test_collection_filter_narrows_via_the_m2m_and_none_finds_orphans(self):
         from georiva.ingestion.ingestion_tracking import NO_COLLECTION
 
-        rainfall = Collection.objects.create(
-            name="Rainfall", slug="rainfall", catalog=self.feed.catalog
-        )
-        wind = Collection.objects.create(
-            name="Wind", slug="wind", catalog=self.feed.catalog
-        )
+        rainfall = Collection.objects.create(name="Rainfall", slug="rainfall", catalog=self.feed.catalog)
+        wind = Collection.objects.create(name="Wind", slug="wind", catalog=self.feed.catalog)
         rain_record = _ingestion(self.feed, "rain.tif", collections=[rainfall])
         _ingestion(self.feed, "wind.tif", collections=[wind])
         orphan = _ingestion(
-            self.feed, "orphan.tif", status=FileIngestion.Status.FAILED,
+            self.feed,
+            "orphan.tif",
+            status=FileIngestion.Status.FAILED,
         )
 
         self.assertEqual(
@@ -98,16 +96,15 @@ class IngestionActivityViewTests(TestCase):
         dial_org(self.client)
         self.client.force_login(self.user)
         self.feed = _feed()
-        self.rainfall = Collection.objects.create(
-            name="Rainfall", slug="rainfall", catalog=self.feed.catalog
-        )
+        self.rainfall = Collection.objects.create(name="Rainfall", slug="rainfall", catalog=self.feed.catalog)
 
     def _url(self):
         return reverse("data_feed_ingestions", kwargs={"feed_pk": self.feed.pk})
 
     def test_lists_records_with_status_collections_retries_error_and_counts(self):
         _ingestion(
-            self.feed, "bad.grib",
+            self.feed,
+            "bad.grib",
             status=FileIngestion.Status.FAILED,
             collections=[self.rainfall],
             retry_count=2,
@@ -130,16 +127,16 @@ class IngestionActivityViewTests(TestCase):
 
         _ingestion(self.feed, "linked-ok.grib", collections=[self.rainfall])
         _ingestion(
-            self.feed, "orphan-bad.grib", status=FileIngestion.Status.FAILED,
+            self.feed,
+            "orphan-bad.grib",
+            status=FileIngestion.Status.FAILED,
         )
 
         by_status = self.client.get(self._url(), {"status": "failed"})
         self.assertContains(by_status, "orphan-bad.grib")
         self.assertNotContains(by_status, "linked-ok.grib")
 
-        by_collection = self.client.get(
-            self._url(), {"collection": self.rainfall.pk}
-        )
+        by_collection = self.client.get(self._url(), {"collection": self.rainfall.pk})
         self.assertContains(by_collection, "linked-ok.grib")
         self.assertNotContains(by_collection, "orphan-bad.grib")
 
@@ -180,10 +177,8 @@ class CheckUnprocessedViewTests(TestCase):
 
     def _found(self, *paths, reason="untracked"):
         from georiva.ingestion.unprocessed import UnprocessedFile
-        return [
-            UnprocessedFile(bucket="sources", file_path=p, reason=reason)
-            for p in paths
-        ]
+
+        return [UnprocessedFile(bucket="sources", file_path=p, reason=reason) for p in paths]
 
     def test_check_renders_the_scoped_scan_results(self):
         from unittest.mock import patch
@@ -202,9 +197,7 @@ class CheckUnprocessedViewTests(TestCase):
     def test_check_with_a_clean_bucket_shows_a_clear_empty_state(self):
         from unittest.mock import patch
 
-        with patch(
-            "georiva.ingestion.unprocessed.find_unprocessed", return_value=[]
-        ):
+        with patch("georiva.ingestion.unprocessed.find_unprocessed", return_value=[]):
             response = self.client.post(self._url(), {"action": "check_unprocessed"})
 
         self.assertContains(response, "No unprocessed files")
@@ -213,12 +206,15 @@ class CheckUnprocessedViewTests(TestCase):
         from unittest.mock import patch
 
         FileIngestion.objects.create(
-            bucket="sources", file_path="test-org/chirps/rainfall/pending.grib",
+            bucket="sources",
+            file_path="test-org/chirps/rainfall/pending.grib",
             status=FileIngestion.Status.PENDING,
         )
         FileIngestion.objects.create(
-            bucket="sources", file_path="test-org/chirps/rainfall/dead.grib",
-            status=FileIngestion.Status.COMPLETED, force_reingest=True,
+            bucket="sources",
+            file_path="test-org/chirps/rainfall/dead.grib",
+            status=FileIngestion.Status.COMPLETED,
+            force_reingest=True,
         )
         found = (
             self._found("test-org/chirps/rainfall/new.grib", reason="untracked")
@@ -227,23 +223,22 @@ class CheckUnprocessedViewTests(TestCase):
         )
 
         with (
-            patch("georiva.ingestion.unprocessed.find_unprocessed",
-                  return_value=found),
+            patch("georiva.ingestion.unprocessed.find_unprocessed", return_value=found),
             patch("georiva.ingestion.tasks.process_incoming_file") as task,
         ):
-            response = self.client.post(
-                self._url(), {"action": "ingest_now"}, follow=True
-            )
+            response = self.client.post(self._url(), {"action": "ingest_now"}, follow=True)
 
         dispatched = {c.kwargs["file_path"] for c in task.delay.call_args_list}
-        self.assertEqual(dispatched, {
-            "test-org/chirps/rainfall/new.grib",
-            "test-org/chirps/rainfall/pending.grib",
-            "test-org/chirps/rainfall/dead.grib",
-        })
+        self.assertEqual(
+            dispatched,
+            {
+                "test-org/chirps/rainfall/new.grib",
+                "test-org/chirps/rainfall/pending.grib",
+                "test-org/chirps/rainfall/dead.grib",
+            },
+        )
         # The untracked file now has a FileIngestion; the dead one was reset.
-        self.assertTrue(FileIngestion.objects.filter(
-            file_path="test-org/chirps/rainfall/new.grib").exists())
+        self.assertTrue(FileIngestion.objects.filter(file_path="test-org/chirps/rainfall/new.grib").exists())
         self.assertEqual(
             FileIngestion.objects.get(file_path="test-org/chirps/rainfall/dead.grib").status,
             FileIngestion.Status.PENDING,
@@ -255,13 +250,10 @@ class CheckUnprocessedViewTests(TestCase):
         from unittest.mock import patch
 
         with (
-            patch("georiva.ingestion.unprocessed.find_unprocessed",
-                  return_value=[]),
+            patch("georiva.ingestion.unprocessed.find_unprocessed", return_value=[]),
             patch("georiva.ingestion.tasks.process_incoming_file") as task,
         ):
-            response = self.client.post(
-                self._url(), {"action": "ingest_now"}, follow=True
-            )
+            response = self.client.post(self._url(), {"action": "ingest_now"}, follow=True)
 
         task.delay.assert_not_called()
         self.assertContains(response, "No unprocessed files")
@@ -282,7 +274,9 @@ class ReingestUITests(TestCase):
 
     def test_only_failed_rows_offer_reingest(self):
         failed = _ingestion(
-            self.feed, "bad.grib", status=FileIngestion.Status.FAILED,
+            self.feed,
+            "bad.grib",
+            status=FileIngestion.Status.FAILED,
         )
         _ingestion(self.feed, "good.grib")  # completed
         _ingestion(self.feed, "busy.grib", status=FileIngestion.Status.PROCESSING)
@@ -297,23 +291,21 @@ class ReingestUITests(TestCase):
         from unittest.mock import patch
 
         failed = _ingestion(
-            self.feed, "bad.grib",
+            self.feed,
+            "bad.grib",
             status=FileIngestion.Status.FAILED,
-            error="boom", retry_count=3,
+            error="boom",
+            retry_count=3,
         )
 
         with patch("georiva.ingestion.tasks.process_incoming_file") as task:
-            response = self.client.post(
-                self._url(), {"reingest_id": failed.pk}, follow=True
-            )
+            response = self.client.post(self._url(), {"reingest_id": failed.pk}, follow=True)
 
         failed.refresh_from_db()
         self.assertEqual(failed.status, FileIngestion.Status.PENDING)
         self.assertEqual(failed.error, "")
         task.delay.assert_called_once()
-        self.assertEqual(
-            task.delay.call_args.kwargs["file_path"], failed.file_path
-        )
+        self.assertEqual(task.delay.call_args.kwargs["file_path"], failed.file_path)
         self.assertRedirects(response, self._url())
         self.assertContains(response, "Reingestion queued for 1 file(s)")
 
@@ -321,25 +313,26 @@ class ReingestUITests(TestCase):
         from unittest.mock import patch
 
         first = _ingestion(
-            self.feed, "one.grib", status=FileIngestion.Status.FAILED,
+            self.feed,
+            "one.grib",
+            status=FileIngestion.Status.FAILED,
         )
         second = _ingestion(
-            self.feed, "two.grib", status=FileIngestion.Status.FAILED,
+            self.feed,
+            "two.grib",
+            status=FileIngestion.Status.FAILED,
         )
         completed = _ingestion(self.feed, "fine.grib")
 
         with patch("georiva.ingestion.tasks.process_incoming_file") as task:
             response = self.client.post(
                 self._url(),
-                {"action": "reingest_selected",
-                 "record_ids": [first.pk, second.pk, completed.pk, "junk"]},
+                {"action": "reingest_selected", "record_ids": [first.pk, second.pk, completed.pk, "junk"]},
                 follow=True,
             )
 
         dispatched = {c.kwargs["file_path"] for c in task.delay.call_args_list}
-        self.assertEqual(
-            dispatched, {first.file_path, second.file_path}
-        )
+        self.assertEqual(dispatched, {first.file_path, second.file_path})
         completed.refresh_from_db()
         self.assertEqual(completed.status, FileIngestion.Status.COMPLETED)
         self.assertContains(response, "Reingestion queued for 2 file(s)")
@@ -349,16 +342,14 @@ class ReingestUITests(TestCase):
 
         other_feed = _feed(name="Other", slug="other")
         foreign = _ingestion(
-            other_feed, "foreign.grib", status=FileIngestion.Status.FAILED,
+            other_feed,
+            "foreign.grib",
+            status=FileIngestion.Status.FAILED,
         )
 
         with patch("georiva.ingestion.tasks.process_incoming_file") as task:
-            crafted = self.client.post(
-                self._url(), {"reingest_id": foreign.pk}, follow=True
-            )
-            empty = self.client.post(
-                self._url(), {"action": "reingest_selected"}, follow=True
-            )
+            crafted = self.client.post(self._url(), {"reingest_id": foreign.pk}, follow=True)
+            empty = self.client.post(self._url(), {"action": "reingest_selected"}, follow=True)
 
         task.delay.assert_not_called()
         foreign.refresh_from_db()
@@ -385,6 +376,7 @@ class DataFeedDetailIngestionCardTests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         from georiva.sources.tests.support import ensure_base_datafeed_viewset
+
         ensure_base_datafeed_viewset()
 
     def setUp(self):
@@ -407,12 +399,16 @@ class DataFeedDetailIngestionCardTests(TestCase):
 
         response = self.client.get(self._detail_url())
 
-        self.assertEqual(response.context["ingestion_counts"], {
-            "pending": 1, "processing": 0, "completed": 3, "failed": 1,
-        })
-        list_url = reverse(
-            "data_feed_ingestions", kwargs={"feed_pk": self.feed.pk}
+        self.assertEqual(
+            response.context["ingestion_counts"],
+            {
+                "pending": 1,
+                "processing": 0,
+                "completed": 3,
+                "failed": 1,
+            },
         )
+        list_url = reverse("data_feed_ingestions", kwargs={"feed_pk": self.feed.pk})
         for status in ("completed", "pending", "processing", "failed"):
             self.assertContains(response, f"{list_url}?status={status}")
         self.assertContains(response, list_url)  # View all
@@ -420,7 +416,5 @@ class DataFeedDetailIngestionCardTests(TestCase):
     def test_card_renders_zero_counts_for_a_quiet_feed(self):
         response = self.client.get(self._detail_url())
 
-        self.assertEqual(
-            set(response.context["ingestion_counts"].values()), {0}
-        )
+        self.assertEqual(set(response.context["ingestion_counts"].values()), {0})
         self.assertEqual(response.status_code, 200)

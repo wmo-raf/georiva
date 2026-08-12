@@ -10,6 +10,7 @@ The write-side analogue of FileIngestion. Serves three roles:
 Lives in the processing (engine) app — engine bookkeeping, not catalog data.
 See docs/adr/0005-generic-derivation-engine.md.
 """
+
 from datetime import timedelta
 
 from django.db import models
@@ -35,25 +36,25 @@ class DerivationRun(TimeStampedModel):
     LOCK_TIMEOUT = timedelta(seconds=DERIVATION_LOCK_TIMEOUT_SECONDS)
 
     class Status(models.TextChoices):
-        PENDING = 'pending', 'Pending'
-        RUNNING = 'running', 'Running'
-        COMPLETED = 'completed', 'Completed'
-        FAILED = 'failed', 'Failed'
-        SKIPPED = 'skipped', 'Skipped (idempotent no-op)'
-        NOT_READY = 'not_ready', 'Not ready'
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped (idempotent no-op)"
+        NOT_READY = "not_ready", "Not ready"
 
     class RetryReason(models.TextChoices):
         # Why the most recent RUNNING transition fired. Recorded so an operator
         # can tell a code failure (celery_retry) from an infrastructure reclaim
         # (stale_running_reclaim) from a legitimate freshness recompute
         # (input_stale) from a hand-triggered rerun (manual_rerun).
-        INITIAL = 'initial', 'Initial run'
-        CELERY_RETRY = 'celery_retry', 'Celery auto-retry'
-        STALE_RUNNING_RECLAIM = 'stale_running_reclaim', 'Stale RUNNING reclaimed'
-        INPUT_STALE = 'input_stale', 'Input changed (recompute)'
-        MANUAL_RERUN = 'manual_rerun', 'Manual re-run'
-        NOT_READY_SWEEP = 'not_ready_sweep', 'Inputs ready (sweep revival)'
-        INPUT_ARRIVED = 'input_arrived', 'Required input arrived'
+        INITIAL = "initial", "Initial run"
+        CELERY_RETRY = "celery_retry", "Celery auto-retry"
+        STALE_RUNNING_RECLAIM = "stale_running_reclaim", "Stale RUNNING reclaimed"
+        INPUT_STALE = "input_stale", "Input changed (recompute)"
+        MANUAL_RERUN = "manual_rerun", "Manual re-run"
+        NOT_READY_SWEEP = "not_ready_sweep", "Inputs ready (sweep revival)"
+        INPUT_ARRIVED = "input_arrived", "Required input arrived"
 
     recipe_type = models.CharField(max_length=100, db_index=True)
     recipe_version = models.CharField(max_length=50)
@@ -73,7 +74,10 @@ class DerivationRun(TimeStampedModel):
     origin = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
     status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True,
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
     )
 
     locked_at = models.DateTimeField(null=True, blank=True)
@@ -89,29 +93,31 @@ class DerivationRun(TimeStampedModel):
     # the count and the most recent trigger.
     attempts = models.PositiveIntegerField(default=0)
     last_retry_reason = models.CharField(
-        max_length=32, choices=RetryReason.choices, default=RetryReason.INITIAL,
+        max_length=32,
+        choices=RetryReason.choices,
+        default=RetryReason.INITIAL,
     )
     last_retry_at = models.DateTimeField(null=True, blank=True)
 
     produced_item = models.ForeignKey(
-        'georivacore.Item',
+        "georivacore.Item",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='derivation_runs',
+        related_name="derivation_runs",
         db_constraint=False,  # Item is a hypertable (see Asset.item)
     )
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['recipe_type', 'unit_hash'],
-                name='unique_run_per_recipe_unit',
+                fields=["recipe_type", "unit_hash"],
+                name="unique_run_per_recipe_unit",
             ),
         ]
         indexes = [
-            models.Index(fields=['recipe_type', 'status']),
-            models.Index(fields=['status', 'locked_at']),
+            models.Index(fields=["recipe_type", "status"]),
+            models.Index(fields=["status", "locked_at"]),
         ]
 
     def __str__(self):
@@ -124,7 +130,9 @@ class DerivationRun(TimeStampedModel):
         return dj_timezone.now() - self.locked_at > self.LOCK_TIMEOUT
 
     @classmethod
-    def acquire(cls, *, recipe_type, recipe_version, unit_key, unit_hash, worker_id="", origin=None, reason=RetryReason.INITIAL) -> "DerivationRun | None":
+    def acquire(
+        cls, *, recipe_type, recipe_version, unit_key, unit_hash, worker_id="", origin=None, reason=RetryReason.INITIAL
+    ) -> "DerivationRun | None":
         """
         Atomically take the lock for (recipe_type, unit_hash).
 
@@ -170,15 +178,24 @@ class DerivationRun(TimeStampedModel):
         if origin is not None:
             claim_values["origin"] = origin
 
-        claimed = cls.objects.filter(
-            pk=run.pk,
-        ).filter(
-            models.Q(status__in=[
-                cls.Status.PENDING, cls.Status.FAILED,
-                cls.Status.SKIPPED, cls.Status.NOT_READY, cls.Status.COMPLETED,
-            ])
-            | models.Q(status=cls.Status.RUNNING, locked_at__lt=stale_cutoff)
-        ).update(**claim_values)
+        claimed = (
+            cls.objects.filter(
+                pk=run.pk,
+            )
+            .filter(
+                models.Q(
+                    status__in=[
+                        cls.Status.PENDING,
+                        cls.Status.FAILED,
+                        cls.Status.SKIPPED,
+                        cls.Status.NOT_READY,
+                        cls.Status.COMPLETED,
+                    ]
+                )
+                | models.Q(status=cls.Status.RUNNING, locked_at__lt=stale_cutoff)
+            )
+            .update(**claim_values)
+        )
 
         if not claimed:
             return None
@@ -193,10 +210,17 @@ class DerivationRun(TimeStampedModel):
         self.completed_at = dj_timezone.now()
         self.locked_at = None
         self.locked_by = ""
-        self.save(update_fields=[
-            "status", "produced_item", "input_hash", "completed_at",
-            "locked_at", "locked_by", "modified",
-        ])
+        self.save(
+            update_fields=[
+                "status",
+                "produced_item",
+                "input_hash",
+                "completed_at",
+                "locked_at",
+                "locked_by",
+                "modified",
+            ]
+        )
 
     def mark_skipped(self, *, input_hash=""):
         self.status = self.Status.SKIPPED
@@ -204,9 +228,16 @@ class DerivationRun(TimeStampedModel):
         self.completed_at = dj_timezone.now()
         self.locked_at = None
         self.locked_by = ""
-        self.save(update_fields=[
-            "status", "input_hash", "completed_at", "locked_at", "locked_by", "modified",
-        ])
+        self.save(
+            update_fields=[
+                "status",
+                "input_hash",
+                "completed_at",
+                "locked_at",
+                "locked_by",
+                "modified",
+            ]
+        )
 
     def mark_not_ready(self):
         self.status = self.Status.NOT_READY
@@ -220,6 +251,13 @@ class DerivationRun(TimeStampedModel):
         self.completed_at = dj_timezone.now()
         self.locked_at = None
         self.locked_by = ""
-        self.save(update_fields=[
-            "status", "error", "completed_at", "locked_at", "locked_by", "modified",
-        ])
+        self.save(
+            update_fields=[
+                "status",
+                "error",
+                "completed_at",
+                "locked_at",
+                "locked_by",
+                "modified",
+            ]
+        )

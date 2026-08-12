@@ -4,6 +4,7 @@ Every refusal on the KVP endpoint must be parseable by a legacy OGC client:
 an OWS 1.1 ExceptionReport with an exceptionCode the spec names and a locator
 pointing at the offending parameter — never framework-default JSON.
 """
+
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -17,7 +18,8 @@ def get(client, **overrides):
 
 class TestMissingParameters:
     @pytest.mark.parametrize(
-        "name", ["REQUEST", "LAYER", "TILEMATRIXSET", "TILEMATRIX", "TILEROW", "TILECOL", "TIME"],
+        "name",
+        ["REQUEST", "LAYER", "TILEMATRIXSET", "TILEMATRIX", "TILEROW", "TILECOL", "TIME"],
     )
     def test_a_missing_required_parameter_names_itself_in_the_locator(self, client, name):
         response = get(client, **{name: None})
@@ -117,7 +119,5 @@ class TestOperations:
         root = ET.fromstring(response.content)
         assert root.tag == "{http://www.opengis.net/ows/1.1}ExceptionReport"
         assert root.get("version") == "1.1.0"
-        text = root.find(
-            "{http://www.opengis.net/ows/1.1}Exception/{http://www.opengis.net/ows/1.1}ExceptionText"
-        )
+        text = root.find("{http://www.opengis.net/ows/1.1}Exception/{http://www.opengis.net/ows/1.1}ExceptionText")
         assert text is not None and text.text

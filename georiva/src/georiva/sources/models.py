@@ -43,31 +43,31 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     Each subclass pairs with one BaseDataSource implementation and holds the
     operator-supplied configuration (schedule, credentials, variable selection).
     """
-    
+
     # A feed's organisation is its catalog's. The FK is nullable, so a feed
     # created without one belongs to nobody and is visible on no host —
     # fail-closed by construction rather than a fallback to some default org.
     ORGANISATION_LOOKUP = "catalog__organisation"
 
     catalog = models.OneToOneField(
-        'georivacore.Catalog',
+        "georivacore.Catalog",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='data_feed',
+        related_name="data_feed",
         verbose_name=_("Catalog"),
     )
-    
+
     name = models.CharField(
         max_length=255,
         verbose_name=_("Name"),
     )
-    
+
     is_active = models.BooleanField(
         default=True,
         verbose_name=_("Active"),
     )
-    
+
     interval_minutes = models.PositiveIntegerField(
         default=360,  # 6 hours
         validators=[MinValueValidator(5)],
@@ -81,32 +81,32 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         max_length=20,
         blank=True,
         choices=[
-            ('success', _('Success')),
-            ('partial', _('Partial')),
-            ('failed', _('Failed')),
-            ('queued', _('Queued')),
-            ('running', _('Running')),
-            ('empty', _('No Data')),
+            ("success", _("Success")),
+            ("partial", _("Partial")),
+            ("failed", _("Failed")),
+            ("queued", _("Queued")),
+            ("running", _("Running")),
+            ("empty", _("No Data")),
         ],
     )
     last_run_message = models.TextField(blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
-    
+
     # Statistics
     total_runs = models.PositiveIntegerField(default=0)
     total_files_fetched = models.PositiveIntegerField(default=0)
     total_bytes_transferred = models.BigIntegerField(default=0)
-    
+
     objects = DataFeedManager()
 
     base_panels = [
-        FieldPanel('name'),
+        FieldPanel("name"),
         # On the form because a feed with no catalog has no organisation, and so
         # is served on no host and reachable from no admin. The chooser only ever
         # offers this organisation's catalogs (organisations/scoping.py).
-        FieldPanel('catalog'),
-        FieldPanel('is_active'),
-        FieldPanel('interval_minutes'),
+        FieldPanel("catalog"),
+        FieldPanel("is_active"),
+        FieldPanel("interval_minutes"),
     ]
 
     panels = base_panels
@@ -116,19 +116,19 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     class Meta:
         verbose_name = _("Data Feed")
         verbose_name_plural = _("Data Feeds")
-        ordering = ['name']
-    
+        ordering = ["name"]
+
     def __str__(self):
         return f"{self.name} - {self.get_real_instance_class().__name__}"
-    
+
     def get_loader_config(self) -> dict:
         """Get loader configuration dictionary."""
         return {}
-    
+
     @property
     def data_source_cls(self):
         return None
-    
+
     @classmethod
     def get_wizard_defaults(cls) -> dict:
         """
@@ -138,7 +138,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         values. Only needs to cover fields that have no model-level default.
         """
         return {}
-    
+
     @classmethod
     def get_catalog_defaults(cls) -> dict:
         """
@@ -149,9 +149,9 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         provides a meaningful description without the operator having to know it.
         """
         return {}
-    
+
     @classmethod
-    def get_collection_definitions(cls) -> list['CollectionDefinition']:
+    def get_collection_definitions(cls) -> list["CollectionDefinition"]:
         """
         Return the finite list of collections this plugin can create.
 
@@ -172,14 +172,10 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         per-resolution products at the wizard step and at provisioning (ADR-0008).
         """
         if self.pk:
-            return [
-                link.definition_key
-                for link in self.collection_links.all()
-                if link.definition_key
-            ]
-        return list(getattr(self, '_wizard_selected_keys', []))
+            return [link.definition_key for link in self.collection_links.all() if link.definition_key]
+        return list(getattr(self, "_wizard_selected_keys", []))
 
-    def get_derived_products(self) -> list['DerivedProductDefinition']:
+    def get_derived_products(self) -> list["DerivedProductDefinition"]:
         """
         Return the derived products this feed offers (ADR-0008).
 
@@ -195,12 +191,12 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     # =========================================================================
     # Collection link helpers
     # =========================================================================
-    
+
     @classmethod
     def get_collection_link_model(cls):
         """Return the DataFeedCollectionLink subclass for this feed type. Default: base class."""
         return DataFeedCollectionLink
-    
+
     @classmethod
     def get_link_config_for_definition(cls, definition) -> dict:
         """
@@ -212,20 +208,20 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         see it as an editable field.
         """
         return {}
-    
+
     # =========================================================================
     # Factory Methods
     # =========================================================================
-    
+
     def get_data_source(self, collection=None):
         """Instantiate configured data source, merging per-collection link config."""
         source_class = self.data_source_cls
         if not source_class:
             raise ValueError("No data source class defined for this data feed.")
-        
+
         if not issubclass(source_class, BaseDataSource):
             raise ValueError(f"Data source class {source_class} must inherit from BaseDataSource.")
-        
+
         config = {**self.get_loader_config()}
         if collection is not None:
             try:
@@ -234,21 +230,21 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             except DataFeedCollectionLink.DoesNotExist:
                 pass
         return source_class(config)
-    
+
     def get_loader(self, collection=None):
         """Create fully configured Loader instance."""
         from .loader import Loader
-        
+
         return Loader(
             data_source=self.get_data_source(collection=collection),
             collection=collection,
             data_feed=self,
         )
-    
+
     # =========================================================================
     # Run Management
     # =========================================================================
-    
+
     def _update_run_stats(self, result, collection):
         """Update feed-level and collection-link scheduling stats after a run."""
         from django.utils import timezone
@@ -258,7 +254,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
 
         self.last_run_at = now
         self.last_run_status = result.status
-        self.last_run_message = '; '.join(result.errors[:3]) if result.errors else ''
+        self.last_run_message = "; ".join(result.errors[:3]) if result.errors else ""
         self.total_runs += 1
         self.total_files_fetched += result.files_fetched
         self.total_bytes_transferred += result.bytes_transferred
@@ -266,26 +262,32 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         if result.success:
             self.last_success_at = self.last_run_at
 
-        self.save(update_fields=[
-            'last_run_at', 'last_run_status', 'last_run_message',
-            'last_success_at', 'total_runs', 'total_files_fetched',
-            'total_bytes_transferred',
-        ])
-    
+        self.save(
+            update_fields=[
+                "last_run_at",
+                "last_run_status",
+                "last_run_message",
+                "last_success_at",
+                "total_runs",
+                "total_files_fetched",
+                "total_bytes_transferred",
+            ]
+        )
+
     def is_due(self) -> bool:
         """Check if data feed is due to run."""
         if not self.is_active:
             return False
-        
+
         if not self.last_run_at:
             return True
-        
+
         from django.utils import timezone
         from datetime import timedelta
-        
+
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run
-    
+
     def check_new_files(self):
         """
         Synchronous "check for new files" dry run (PRD #217): ask the source
@@ -297,7 +299,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         {"collection", "candidates" (list of CandidateFile), "error"}.
         """
         results = []
-        for link in self.collection_links.select_related('collection'):
+        for link in self.collection_links.select_related("collection"):
             entry = {"collection": link.collection, "candidates": [], "error": None}
             try:
                 loader = self.get_loader(link.collection)
@@ -322,60 +324,61 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         """
         if async_run:
             from task_ferry.handler import JobHandler
-            
+
             return JobHandler.create_and_start(
                 user=user,
                 job_type_name="data_source_load",
                 data_feed_id=self.pk,
                 collection_id=collection.pk if collection else None,
             )
-        
-        collections = [collection] if collection else [
-            link.collection
-            for link in self.collection_links.select_related('collection')
-        ]
+
+        collections = (
+            [collection]
+            if collection
+            else [link.collection for link in self.collection_links.select_related("collection")]
+        )
         results = []
         for coll in collections:
             loader = self.get_loader(coll)
             result = loader.run()
             results.append(result)
         return results
-    
+
     @cached_property
     def viewset(self):
         from .registry import data_feed_viewset_registry
+
         model_name = self.get_real_instance_class().__name__.lower()
         return data_feed_viewset_registry.get(model_name)
-    
+
     @property
     def edit_url(self):
         if self.viewset:
             return reverse(self.viewset.get_url_name("edit"), kwargs={"pk": self.pk})
         return None
-    
+
     @property
     def delete_url(self):
         # The cascade-aware confirmation page (issue #243), not the per-subclass
         # viewset DeleteView — its GET redirects here too.
         return reverse("data_feed_delete", kwargs={"pk": self.pk})
-    
+
     def delete(self, *args, **kwargs):
         """Delete this feed and its linked Catalog (which cascades to Collections/Variables/Items)."""
         catalog_id = self.catalog_id
         result = super().delete(*args, **kwargs)
         if catalog_id:
             from georiva.core.models import Catalog
+
             Catalog.objects.filter(pk=catalog_id).delete()
         return result
-    
+
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        
+
         from georiva.sources.tasks import update_collection_data_feed_periodic_task
-        
-        update_collection_data_feed_periodic_task(
-            sender=self.__class__, instance=self, created=False
-        )
+
+        update_collection_data_feed_periodic_task(sender=self.__class__, instance=self, created=False)
 
 
 class DataFeedCollectionLink(PolymorphicModel):
@@ -390,17 +393,18 @@ class DataFeedCollectionLink(PolymorphicModel):
       - interval_minutes: per-collection override; null means use DataFeed.interval_minutes
       - last_run_at: updated after each successful collection run for is_due() checks
     """
+
     ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
 
-    data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name='collection_links')
-    collection = models.ForeignKey('georivacore.Collection', on_delete=models.CASCADE, related_name='feed_links')
-    
+    data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name="collection_links")
+    collection = models.ForeignKey("georivacore.Collection", on_delete=models.CASCADE, related_name="feed_links")
+
     definition_key = models.CharField(
         max_length=100,
         blank=True,
         help_text="The CollectionDefinition.key used to provision this link.",
     )
-    
+
     # Per-collection scheduling (overrides DataFeed.interval_minutes when set)
     interval_minutes = models.PositiveIntegerField(
         null=True,
@@ -410,16 +414,16 @@ class DataFeedCollectionLink(PolymorphicModel):
         help_text=_("Minutes between runs for this collection. Leave blank to use the feed's global interval."),
     )
     last_run_at = models.DateTimeField(null=True, blank=True)
-    
+
     class Meta:
-        unique_together = ['data_feed', 'collection']
-        ordering = ['id']
-    
+        unique_together = ["data_feed", "collection"]
+        ordering = ["id"]
+
     @property
     def effective_interval(self) -> int:
         """Per-collection interval if set, else the feed's global interval."""
         return self.interval_minutes or self.data_feed.interval_minutes
-    
+
     def is_due(self) -> bool:
         """Return True if this collection is due to run."""
         if not self.data_feed.is_active:
@@ -427,21 +431,22 @@ class DataFeedCollectionLink(PolymorphicModel):
         if not self.last_run_at:
             return True
         from django.utils import timezone
+
         next_run = self.last_run_at + timedelta(minutes=self.effective_interval)
         return timezone.now() >= next_run
-    
+
     @property
     def config(self) -> dict:
         """Per-collection config dict merged into the DataSource config at runtime."""
         return {}
-    
+
     def __str__(self):
         return f"{self.data_feed_id} → {self.collection_id}"
-    
+
     # -------------------------------------------------------------------------
     # UI / form discovery
     # -------------------------------------------------------------------------
-    
+
     @classmethod
     def get_panels(cls) -> list:
         """
@@ -449,11 +454,11 @@ class DataFeedCollectionLink(PolymorphicModel):
         Override in subclasses to expose typed fields in the admin form.
         """
         return []
-    
+
     def has_configurable_fields(self) -> bool:
         """Return True if there are any operator-editable config fields on this link."""
         return bool(self.get_panels())
-    
+
     @classmethod
     def get_form_class(cls):
         """
@@ -465,18 +470,15 @@ class DataFeedCollectionLink(PolymorphicModel):
         """
         from django.forms import modelform_factory
         from wagtail.admin.panels import FieldPanel
-        
-        panel_fields = [
-            p.field_name for p in cls.get_panels()
-            if isinstance(p, FieldPanel)
-        ]
-        
+
+        panel_fields = [p.field_name for p in cls.get_panels() if isinstance(p, FieldPanel)]
+
         if not panel_fields:
             return None
-        
-        base_form_class = getattr(cls, 'base_form_class', WagtailAdminModelForm)
-        
-        all_fields = panel_fields + ['interval_minutes']
+
+        base_form_class = getattr(cls, "base_form_class", WagtailAdminModelForm)
+
+        all_fields = panel_fields + ["interval_minutes"]
         return modelform_factory(cls, form=base_form_class, fields=all_fields)
 
 
@@ -492,9 +494,10 @@ class DerivedProduct(models.Model):
     several output Collections; in the chain DAG products are edges, collections
     are nodes.
     """
+
     ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
 
-    data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name='derived_products')
+    data_feed = ParentalKey(DataFeed, on_delete=models.CASCADE, related_name="derived_products")
 
     definition_key = models.CharField(
         max_length=100,
@@ -536,14 +539,15 @@ class DerivedProduct(models.Model):
     last_run_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        unique_together = ['data_feed', 'definition_key']
-        ordering = ['id']
+        unique_together = ["data_feed", "definition_key"]
+        ordering = ["id"]
 
     @property
     def definition(self):
         """The plugin-declared DerivedProductDefinition this row was provisioned
         from, or None if the declaration is gone (an orphaned row)."""
         from georiva.sources.derivation_invocation import definition_for
+
         return definition_for(self)
 
     @property
@@ -578,6 +582,7 @@ class DerivedProduct(models.Model):
         if not self.last_run_at:
             return True
         from django.utils import timezone
+
         return timezone.now() >= self.last_run_at + timedelta(minutes=self.effective_interval)
 
     def __str__(self):
@@ -596,11 +601,10 @@ class DerivedProductInput(models.Model):
     re-resolution across upgrades and for diagnostics. Deleting the bound
     `Collection` cascades this row away (surfaced as an *unbound* product in a
     later slice)."""
+
     ORGANISATION_LOOKUP = "product__data_feed__catalog__organisation"
 
-    product = models.ForeignKey(
-        DerivedProduct, on_delete=models.CASCADE, related_name='input_bindings'
-    )
+    product = models.ForeignKey(DerivedProduct, on_delete=models.CASCADE, related_name="input_bindings")
     role = models.CharField(max_length=100)
     tier = models.CharField(max_length=20)
     required = models.BooleanField(default=True)
@@ -609,14 +613,14 @@ class DerivedProductInput(models.Model):
         help_text=_("The declared collection key this binding resolved from."),
     )
     collection = models.ForeignKey(
-        'georivacore.Collection',
+        "georivacore.Collection",
         on_delete=models.CASCADE,
-        related_name='derived_product_inputs',
+        related_name="derived_product_inputs",
     )
 
     class Meta:
-        unique_together = ['product', 'role']
-        ordering = ['id']
+        unique_together = ["product", "role"]
+        ordering = ["id"]
 
     def __str__(self):
         return f"{self.product_id}:{self.role} ← {self.collection_id} ({self.tier})"
@@ -630,25 +634,24 @@ class DerivedProductOutput(models.Model):
     when the product is enabled, so the chain panel and downstream resolution read
     a product's served/internal collections by FK instead of a catalog+slug query.
     `output_key` keeps the declared key for re-resolution and diagnostics."""
+
     ORGANISATION_LOOKUP = "product__data_feed__catalog__organisation"
 
-    product = models.ForeignKey(
-        DerivedProduct, on_delete=models.CASCADE, related_name='output_bindings'
-    )
+    product = models.ForeignKey(DerivedProduct, on_delete=models.CASCADE, related_name="output_bindings")
     role = models.CharField(max_length=100)
     output_key = models.CharField(
         max_length=100,
         help_text=_("The declared output collection key this binding resolved from."),
     )
     collection = models.ForeignKey(
-        'georivacore.Collection',
+        "georivacore.Collection",
         on_delete=models.CASCADE,
-        related_name='derived_product_outputs',
+        related_name="derived_product_outputs",
     )
 
     class Meta:
-        unique_together = ['product', 'role']
-        ordering = ['id']
+        unique_together = ["product", "role"]
+        ordering = ["id"]
 
     def __str__(self):
         return f"{self.product_id}:{self.role} → {self.collection_id}"
@@ -658,34 +661,34 @@ class DerivedProductOutput(models.Model):
 # Acquisition tracking models
 # ---------------------------------------------------------------------------
 
+
 class FetchRun(models.Model):
     """Tracks one fetch run of a DataFeed — the acquisition phase before ingestion."""
 
     class Status(models.TextChoices):
-        RUNNING = 'running', 'Running'
-        COMPLETED = 'completed', 'Completed'
-        FAILED = 'failed', 'Failed'
-        CANCELLED = 'cancelled', 'Cancelled'
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
         # A worker died mid-run (power loss, OOM, forced restart) and the
         # stale-run sweep declared it dead. Distinct from FAILED because the
         # source never rejected us — interrupted runs are safe to auto-resume.
-        INTERRUPTED = 'interrupted', 'Interrupted'
+        INTERRUPTED = "interrupted", "Interrupted"
 
     ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
 
     data_feed = models.ForeignKey(
         DataFeed,
         on_delete=models.CASCADE,
-        related_name='fetch_runs',
+        related_name="fetch_runs",
     )
     resumed_from = models.ForeignKey(
-        'self',
+        "self",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='resumes',
-        help_text="The interrupted run this run was auto-enqueued to resume. "
-                  "Chain depth bounds the auto-resume cap.",
+        related_name="resumes",
+        help_text="The interrupted run this run was auto-enqueued to resume. Chain depth bounds the auto-resume cap.",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -699,15 +702,16 @@ class FetchRun(models.Model):
     error_message = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['-started_at']
+        ordering = ["-started_at"]
 
     def _finish(self, status, **update_fields):
         from django.utils import timezone
+
         self.status = status
         self.finished_at = timezone.now()
         for k, v in update_fields.items():
             setattr(self, k, v)
-        fields = ['status', 'finished_at'] + list(update_fields.keys())
+        fields = ["status", "finished_at"] + list(update_fields.keys())
         self.save(update_fields=fields)
 
     def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0):
@@ -719,13 +723,13 @@ class FetchRun(models.Model):
             bytes_transferred=bytes_transferred,
         )
 
-    def mark_failed(self, error=''):
+    def mark_failed(self, error=""):
         self._finish(self.Status.FAILED, error_message=error)
 
     def mark_cancelled(self):
         self._finish(self.Status.CANCELLED)
 
-    def mark_interrupted(self, error=''):
+    def mark_interrupted(self, error=""):
         self._finish(self.Status.INTERRUPTED, error_message=error)
 
     def resume_generation(self):
@@ -744,16 +748,16 @@ class FetchRun(models.Model):
         from django.db.models import Count, Q, Sum
 
         agg = self.fetched_files.aggregate(
-            fetched=Count('id', filter=Q(status=FetchedFile.Status.STORED)),
-            skipped=Count('id', filter=Q(status=FetchedFile.Status.SKIPPED)),
-            failed=Count('id', filter=Q(status=FetchedFile.Status.FAILED)),
-            bytes=Sum('bytes_transferred'),
+            fetched=Count("id", filter=Q(status=FetchedFile.Status.STORED)),
+            skipped=Count("id", filter=Q(status=FetchedFile.Status.SKIPPED)),
+            failed=Count("id", filter=Q(status=FetchedFile.Status.FAILED)),
+            bytes=Sum("bytes_transferred"),
         )
         return {
-            'files_fetched': agg['fetched'],
-            'files_skipped': agg['skipped'],
-            'files_failed': agg['failed'],
-            'bytes_transferred': agg['bytes'] or 0,
+            "files_fetched": agg["fetched"],
+            "files_skipped": agg["skipped"],
+            "files_failed": agg["failed"],
+            "bytes_transferred": agg["bytes"] or 0,
         }
 
     def recompute_counters(self):
@@ -761,27 +765,32 @@ class FetchRun(models.Model):
         called after a per-file retry so the run reflects current truth."""
         for field, value in self.derive_counters().items():
             setattr(self, field, value)
-        self.save(update_fields=[
-            'files_fetched', 'files_skipped', 'files_failed', 'bytes_transferred',
-        ])
+        self.save(
+            update_fields=[
+                "files_fetched",
+                "files_skipped",
+                "files_failed",
+                "bytes_transferred",
+            ]
+        )
 
 
 class FetchedFile(models.Model):
     """Per-file record within a FetchRun."""
 
     class Status(models.TextChoices):
-        PENDING = 'pending', 'Pending'
-        FETCHING = 'fetching', 'Fetching'
-        STORED = 'stored', 'Stored'
-        SKIPPED = 'skipped', 'Skipped'
-        FAILED = 'failed', 'Failed'
+        PENDING = "pending", "Pending"
+        FETCHING = "fetching", "Fetching"
+        STORED = "stored", "Stored"
+        SKIPPED = "skipped", "Skipped"
+        FAILED = "failed", "Failed"
 
     ORGANISATION_LOOKUP = "fetch_run__data_feed__catalog__organisation"
 
     fetch_run = models.ForeignKey(
         FetchRun,
         on_delete=models.CASCADE,
-        related_name='fetched_files',
+        related_name="fetched_files",
     )
     file_path = models.CharField(max_length=500)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
@@ -789,7 +798,7 @@ class FetchedFile(models.Model):
         null=True,
         blank=True,
         help_text="Serialized FileRequest that produced this file, enabling "
-                  "per-file re-fetch. Null on records that predate the feature.",
+        "per-file re-fetch. Null on records that predate the feature.",
     )
     skip_reason = models.CharField(max_length=255, blank=True)
     error = models.TextField(blank=True)
@@ -798,35 +807,37 @@ class FetchedFile(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ['id']
+        ordering = ["id"]
 
     def mark_fetching(self):
         from django.utils import timezone
+
         self.status = self.Status.FETCHING
         self.started_at = timezone.now()
-        self.save(update_fields=['status', 'started_at'])
+        self.save(update_fields=["status", "started_at"])
 
     def mark_stored(self, bytes_transferred=0):
         from django.utils import timezone
+
         self.status = self.Status.STORED
         self.bytes_transferred = bytes_transferred
         self.completed_at = timezone.now()
-        self.save(update_fields=['status', 'bytes_transferred', 'completed_at'])
+        self.save(update_fields=["status", "bytes_transferred", "completed_at"])
 
-    def mark_skipped(self, reason=''):
+    def mark_skipped(self, reason=""):
         self.status = self.Status.SKIPPED
         self.skip_reason = reason
-        self.save(update_fields=['status', 'skip_reason'])
+        self.save(update_fields=["status", "skip_reason"])
 
-    def mark_failed(self, error=''):
+    def mark_failed(self, error=""):
         from django.utils import timezone
+
         self.status = self.Status.FAILED
         self.error = error
         self.completed_at = timezone.now()
-        self.save(update_fields=['status', 'error', 'completed_at'])
+        self.save(update_fields=["status", "error", "completed_at"])
 
 
 # ---------------------------------------------------------------------------
 # Task-ferry Job model
 # ---------------------------------------------------------------------------
-

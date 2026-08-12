@@ -1,6 +1,7 @@
 """
 CollectionExtentHandler — expand a Collection's temporal and spatial extent.
 """
+
 import logging
 from datetime import datetime
 
@@ -17,12 +18,12 @@ class CollectionExtentHandler:
     Uses field-level saves (update_fields) to avoid overwriting concurrent
     updates from other ingestion workers processing the same collection.
     """
-    
+
     def expand(
-            self,
-            collection: Collection,
-            timestamp: datetime,
-            bounds: tuple | list,
+        self,
+        collection: Collection,
+        timestamp: datetime,
+        bounds: tuple | list,
     ) -> None:
         """
         Expand *collection* extent to include *timestamp* and *bounds*.
@@ -31,16 +32,16 @@ class CollectionExtentHandler:
         Only the fields that actually changed are written to the database.
         """
         update_fields = []
-        
+
         # ── Temporal extent ───────────────────────────────────────────────────
         if collection.time_start is None or timestamp < collection.time_start:
             collection.time_start = timestamp
             update_fields.append("time_start")
-        
+
         if collection.time_end is None or timestamp > collection.time_end:
             collection.time_end = timestamp
             update_fields.append("time_end")
-        
+
         # ── Spatial extent ────────────────────────────────────────────────────
         current = collection.bounds
         if not current or len(current) < 4:
@@ -56,9 +57,7 @@ class CollectionExtentHandler:
             if expanded != list(current):
                 collection.bounds = normalize_bounds(expanded)
                 update_fields.append("bounds")
-        
+
         if update_fields:
             collection.save(update_fields=update_fields)
-            logger.debug(
-                "Updated extent for %s: fields=%s", collection.slug, update_fields
-            )
+            logger.debug("Updated extent for %s: fields=%s", collection.slug, update_fields)

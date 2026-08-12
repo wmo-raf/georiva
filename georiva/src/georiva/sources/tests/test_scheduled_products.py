@@ -6,6 +6,7 @@ scheduled and dispatches each due one via the product-driven invocation path
 (run_product_now). Event-driven and manual products are never fired here, and a
 product that ran recently is skipped until its interval elapses.
 """
+
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -40,11 +41,13 @@ def _definition(trigger_mode="scheduled", **overrides):
 
 class DispatchDueScheduledProductsTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(
-            name="Feed", catalog=self.catalog, interval_minutes=60,
+            name="Feed",
+            catalog=self.catalog,
+            interval_minutes=60,
         )
 
     def _product(self, **overrides):
@@ -60,9 +63,7 @@ class DispatchDueScheduledProductsTests(TestCase):
     def test_beat_task_invokes_the_dispatch_seam(self):
         from georiva.sources.tasks import sweep_scheduled_products
 
-        with patch(
-            "georiva.sources.derivation_invocation.dispatch_due_scheduled_products"
-        ) as seam:
+        with patch("georiva.sources.derivation_invocation.dispatch_due_scheduled_products") as seam:
             sweep_scheduled_products.apply()
 
         seam.assert_called_once()
@@ -83,8 +84,7 @@ class DispatchDueScheduledProductsTests(TestCase):
         self._product()
 
         with (
-            patch.object(DataFeed, "get_derived_products",
-                         return_value=[_definition(trigger_mode="event")]),
+            patch.object(DataFeed, "get_derived_products", return_value=[_definition(trigger_mode="event")]),
             patch("georiva.sources.derivation_invocation.run_product_now") as run_now,
         ):
             dispatch_due_scheduled_products()
@@ -95,8 +95,7 @@ class DispatchDueScheduledProductsTests(TestCase):
         self._product()
 
         with (
-            patch.object(DataFeed, "get_derived_products",
-                         return_value=[_definition(trigger_mode="manual")]),
+            patch.object(DataFeed, "get_derived_products", return_value=[_definition(trigger_mode="manual")]),
             patch("georiva.sources.derivation_invocation.run_product_now") as run_now,
         ):
             dispatch_due_scheduled_products()

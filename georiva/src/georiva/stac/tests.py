@@ -2,6 +2,7 @@
 STAC serving must expose only `public` collections — `internal` derivation
 intermediates are read by the engine but never served.
 """
+
 from datetime import datetime, timezone
 
 from django.test import TestCase
@@ -17,33 +18,43 @@ class STACVisibilityTests(TestCase):
         # The API roots are per organisation and resolved from the Host, so the
         # client has to dial the org that owns these fixtures.
         dial_org(self.client)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.unit = Unit.objects.create(name="Celsius", symbol="C")
 
         self.public = Collection.objects.create(
-            catalog=self.catalog, name="Tas", slug="tas",
+            catalog=self.catalog,
+            name="Tas",
+            slug="tas",
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=self.public, slug="tas", name="tas",
-            unit=self.unit, value_min=0, value_max=50,
+            collection=self.public,
+            slug="tas",
+            name="tas",
+            unit=self.unit,
+            value_min=0,
+            value_max=50,
         )
 
         self.internal = Collection.objects.create(
-            catalog=self.catalog, name="Tas anomaly", slug="tas-anomaly",
+            catalog=self.catalog,
+            name="Tas anomaly",
+            slug="tas-anomaly",
             visibility=Collection.Visibility.INTERNAL,
         )
         Variable.objects.create(
-            collection=self.internal, slug="tas", name="tas anomaly",
-            unit=self.unit, value_min=-25, value_max=25,
+            collection=self.internal,
+            slug="tas",
+            name="tas anomaly",
+            unit=self.unit,
+            value_min=-25,
+            value_max=25,
         )
 
     def test_collection_list_excludes_internal(self):
-        response = self.client.get(
-            reverse("stac:collection-list", args=["cmip6"])
-        )
+        response = self.client.get(reverse("stac:collection-list", args=["cmip6"]))
         self.assertEqual(response.status_code, 200)
 
         ids = {c["id"] for c in response.json()["collections"]}
@@ -51,9 +62,7 @@ class STACVisibilityTests(TestCase):
         self.assertNotIn("tas-anomaly/tas", ids)
 
     def test_collection_detail_404_for_internal(self):
-        ok = self.client.get(
-            reverse("stac:collection-detail", args=["cmip6", "tas", "tas"])
-        )
+        ok = self.client.get(reverse("stac:collection-detail", args=["cmip6", "tas", "tas"]))
         self.assertEqual(ok.status_code, 200)
 
         hidden = self.client.get(
@@ -79,16 +88,24 @@ class STACRenderExtensionTests(TestCase):
         dial_org(self.client)
         self.catalog = Catalog.objects.create(
             organisation=make_organisation(),
-            name="CMIP6", slug="cmip6", file_format="geotiff",
+            name="CMIP6",
+            slug="cmip6",
+            file_format="geotiff",
         )
         self.unit = Unit.objects.create(name="Celsius", symbol="C")
         collection = Collection.objects.create(
-            catalog=self.catalog, name="Tas", slug="tas",
+            catalog=self.catalog,
+            name="Tas",
+            slug="tas",
             visibility=Collection.Visibility.PUBLIC,
         )
         self.variable = Variable.objects.create(
-            collection=collection, slug="tas", name="tas",
-            unit=self.unit, value_min=0, value_max=50,
+            collection=collection,
+            slug="tas",
+            name="tas",
+            unit=self.unit,
+            value_min=0,
+            value_max=50,
         )
         self.item = Item.objects.create(
             collection=collection,
@@ -98,23 +115,19 @@ class STACRenderExtensionTests(TestCase):
         make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
 
     def _collection(self, variable_slug="tas"):
-        response = self.client.get(
-            reverse("stac:collection-detail", args=["cmip6", "tas", variable_slug])
-        )
+        response = self.client.get(reverse("stac:collection-detail", args=["cmip6", "tas", variable_slug]))
         self.assertEqual(response.status_code, 200)
         return response.json()
 
     def _item(self):
-        response = self.client.get(
-            reverse("stac:item-detail",
-                    args=["cmip6", "tas", "tas", "20260301T120000Z"])
-        )
+        response = self.client.get(reverse("stac:item-detail", args=["cmip6", "tas", "tas", "20260301T120000Z"]))
         self.assertEqual(response.status_code, 200)
         return response.json()
 
     def test_the_collection_enumerates_each_style_by_slug(self):
         self.assertEqual(
-            list(self._collection()["renders"]), ["official", "analyst"],
+            list(self._collection()["renders"]),
+            ["official", "analyst"],
         )
 
     def test_a_render_entry_carries_asset_rescale_and_colormap(self):
@@ -136,16 +149,20 @@ class STACRenderExtensionTests(TestCase):
         """`renders` is required wherever the extension is declared, so a
         still-grayscale variable carries neither the field nor the URI."""
         other = Collection.objects.create(
-            catalog=self.catalog, name="Pr", slug="pr",
+            catalog=self.catalog,
+            name="Pr",
+            slug="pr",
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=other, slug="pr", name="pr", unit=self.unit,
-            value_min=0, value_max=10,
+            collection=other,
+            slug="pr",
+            name="pr",
+            unit=self.unit,
+            value_min=0,
+            value_max=10,
         )
-        response = self.client.get(
-            reverse("stac:collection-detail", args=["cmip6", "pr", "pr"])
-        ).json()
+        response = self.client.get(reverse("stac:collection-detail", args=["cmip6", "pr", "pr"])).json()
         self.assertNotIn("renders", response)
         self.assertNotIn(self.RENDER_SCHEMA, response["stac_extensions"])
 
@@ -169,27 +186,28 @@ class STACRenderExtensionTests(TestCase):
         Collection.objects.filter(slug="tas").update(
             visibility=Collection.Visibility.PRIVATE,
         )
-        response = self.client.get(
-            reverse("stac:collection-detail", args=["cmip6", "tas", "tas"])
-        )
+        response = self.client.get(reverse("stac:collection-detail", args=["cmip6", "tas", "tas"]))
         self.assertEqual(response.status_code, 404)
 
     def test_a_styleless_variables_item_declares_nothing(self):
         other = Collection.objects.create(
-            catalog=self.catalog, name="Pr", slug="pr",
+            catalog=self.catalog,
+            name="Pr",
+            slug="pr",
             visibility=Collection.Visibility.PUBLIC,
         )
         Variable.objects.create(
-            collection=other, slug="pr", name="pr", unit=self.unit,
-            value_min=0, value_max=10,
+            collection=other,
+            slug="pr",
+            name="pr",
+            unit=self.unit,
+            value_min=0,
+            value_max=10,
         )
         Item.objects.create(
             collection=other,
             time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
         )
-        response = self.client.get(
-            reverse("stac:item-detail",
-                    args=["cmip6", "pr", "pr", "20260301T120000Z"])
-        ).json()
+        response = self.client.get(reverse("stac:item-detail", args=["cmip6", "pr", "pr", "20260301T120000Z"])).json()
         self.assertNotIn("renders", response["properties"])
         self.assertNotIn(self.RENDER_SCHEMA, response["stac_extensions"])

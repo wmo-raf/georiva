@@ -11,6 +11,7 @@ This is the ONLY place that joins the feed layer (DerivedProduct) to the engine,
 so the engine itself never imports DerivedProduct (ADR-0005). The feed layer
 depending on the engine is the allowed direction.
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,13 +62,11 @@ def _binding(product) -> dict:
     """
     return {
         "inputs": [
-            {"role": b.role, "collection": b.source_key, "tier": b.tier,
-             "collection_id": b.collection_id}
+            {"role": b.role, "collection": b.source_key, "tier": b.tier, "collection_id": b.collection_id}
             for b in product.input_bindings.all()
         ],
         "outputs": [
-            {"role": b.role, "collection": b.output_key,
-             "collection_id": b.collection_id}
+            {"role": b.role, "collection": b.output_key, "collection_id": b.collection_id}
             for b in product.output_bindings.all()
         ],
     }
@@ -87,9 +86,7 @@ def collection_routes_to_staging(data_feed, collection_slug: str) -> bool:
 
     if data_feed.catalog_id is None:
         return False
-    collection = Collection.objects.filter(
-        catalog_id=data_feed.catalog_id, slug=collection_slug
-    ).first()
+    collection = Collection.objects.filter(catalog_id=data_feed.catalog_id, slug=collection_slug).first()
     if collection is None:
         return False
     return DerivedProductInput.objects.filter(
@@ -124,9 +121,7 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
         return []
 
     product_ids = (
-        DerivedProductInput.objects.filter(
-            collection_id=collection_id, tier=tier, product__is_enabled=True
-        )
+        DerivedProductInput.objects.filter(collection_id=collection_id, tier=tier, product__is_enabled=True)
         .values_list("product_id", flat=True)
         .distinct()
     )
@@ -135,14 +130,10 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
     for product in DerivedProduct.objects.filter(pk__in=list(product_ids)):
         recipe = recipe_registry.get(product.recipe_type)
         if recipe is None:
-            logger.error(
-                "Product %s names unknown recipe '%s'", product.pk, product.recipe_type
-            )
+            logger.error("Product %s names unknown recipe '%s'", product.pk, product.recipe_type)
             continue
         selector = {**(product.config or {}), **_binding(product), **trigger}
-        results.extend(
-            run(recipe, selector, origin=product_origin(product), dispatch=dispatch)
-        )
+        results.extend(run(recipe, selector, origin=product_origin(product), dispatch=dispatch))
     return results
 
 
@@ -174,20 +165,24 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
 
     recipe = recipe_registry.get(product.recipe_type)
     if recipe is None:
-        logger.error(
-            "Product %s names unknown recipe '%s'", product.pk, product.recipe_type
-        )
+        logger.error("Product %s names unknown recipe '%s'", product.pk, product.recipe_type)
         return []
     origin = product_origin(product)
     logger.info(
         "[run-now] manual run for product %s (key=%s recipe=%s) → origin=%s",
-        product.pk, product.definition_key, product.recipe_type, origin,
+        product.pk,
+        product.definition_key,
+        product.recipe_type,
+        origin,
     )
     selector = {**(product.config or {}), **_binding(product)}
     from georiva.processing.models import DerivationRun
 
     return run(
-        recipe, selector, origin=origin, dispatch=dispatch,
+        recipe,
+        selector,
+        origin=origin,
+        dispatch=dispatch,
         reason=DerivationRun.RetryReason.MANUAL_RERUN,
     )
 
@@ -211,20 +206,19 @@ def resurrect_dependents(item, *, dispatch: bool = True) -> int:
 
     product_ids = (
         DerivedProductInput.objects.filter(
-            collection_id=item.collection_id, tier="published",
+            collection_id=item.collection_id,
+            tier="published",
             product__is_enabled=True,
         )
         .values_list("product_id", flat=True)
         .distinct()
     )
-    origins = [
-        product_origin(p)
-        for p in DerivedProduct.objects.filter(pk__in=list(product_ids))
-    ]
+    origins = [product_origin(p) for p in DerivedProduct.objects.filter(pk__in=list(product_ids))]
     if not origins:
         return 0
     return resurrect_not_ready_units(
-        dispatch=dispatch, origins=origins,
+        dispatch=dispatch,
+        origins=origins,
         reason=DerivationRun.RetryReason.INPUT_ARRIVED,
     )
 

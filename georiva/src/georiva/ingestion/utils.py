@@ -15,11 +15,7 @@ def apply_unit_conversion(data: np.ndarray, source_unit=None, output_unit=None) 
     return np.asarray(quantity.to(output_unit.pint_unit).magnitude, dtype=np.float32)
 
 
-def iter_windows(
-        width: int,
-        height: int,
-        block_size: int = 2048
-) -> Generator[tuple[int, int, int, int], None, None]:
+def iter_windows(width: int, height: int, block_size: int = 2048) -> Generator[tuple[int, int, int, int], None, None]:
     """
     Yield (x_offset, y_offset, width, height) windows for chunked processing.
     """
@@ -40,17 +36,17 @@ def normalize_bounds(bounds: list | tuple) -> list:
       - Longitude clamping to -180/180
     """
     west, south, east, north = bounds
-    
+
     if west > 180:
         west -= 360
     if east > 180:
         east -= 360
-    
+
     south = max(-90.0, min(90.0, south))
     north = max(-90.0, min(90.0, north))
     west = max(-180.0, min(180.0, west))
     east = max(-180.0, min(180.0, east))
-    
+
     return [west, south, east, north]
 
 
@@ -63,19 +59,19 @@ def ensure_utc(dt) -> Optional[datetime]:
     """
     if dt is None:
         return None
-    
+
     if isinstance(dt, str):
         dt = pd.Timestamp(dt).to_pydatetime()
-    
+
     if isinstance(dt, pd.Timestamp):
         dt = dt.to_pydatetime()
-    
+
     if isinstance(dt, np.datetime64):
         dt = pd.Timestamp(dt).to_pydatetime()
-    
+
     if dt.tzinfo is None:
         return pytz.utc.localize(dt)
-    
+
     return dt.astimezone(pytz.utc)
 
 

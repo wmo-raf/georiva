@@ -29,13 +29,14 @@ from typing import Optional
 import pytz
 
 # Pattern: GR--YYYYMMDDTHHMM--rest_of_filename
-GEORIVA_REFTIME_PATTERN = re.compile(r'^GR--(\d{8}T\d{4})--(.+)$')
-GEORIVA_REFTIME_FORMAT = '%Y%m%dT%H%M'
+GEORIVA_REFTIME_PATTERN = re.compile(r"^GR--(\d{8}T\d{4})--(.+)$")
+GEORIVA_REFTIME_FORMAT = "%Y%m%dT%H%M"
 
 
 # =============================================================================
 # Filename operations
 # =============================================================================
+
 
 def has_reference_time(filename: str) -> bool:
     """Check if a filename carries a GR-- reference time prefix."""
@@ -63,33 +64,33 @@ def parse_filename(filename: str) -> dict:
         {'reference_time': None, 'original_name': 'sentinel2_ndvi.tif'}
     """
     match = GEORIVA_REFTIME_PATTERN.match(filename)
-    
+
     if not match:
         return {
-            'reference_time': None,
-            'original_name': filename,
+            "reference_time": None,
+            "original_name": filename,
         }
-    
+
     ref_str, original_name = match.groups()
-    
+
     try:
         reference_time = datetime.strptime(ref_str, GEORIVA_REFTIME_FORMAT)
         reference_time = pytz.utc.localize(reference_time)
     except ValueError:
         return {
-            'reference_time': None,
-            'original_name': filename,
+            "reference_time": None,
+            "original_name": filename,
         }
-    
+
     return {
-        'reference_time': reference_time,
-        'original_name': original_name,
+        "reference_time": reference_time,
+        "original_name": original_name,
     }
 
 
 def build_filename(
-        original_filename: str,
-        reference_time: Optional[datetime] = None,
+    original_filename: str,
+    reference_time: Optional[datetime] = None,
 ) -> str:
     """
     Build a filename, adding GR-- prefix only if reference_time is provided.
@@ -113,13 +114,12 @@ def build_filename(
     """
     if reference_time is None:
         return original_filename
-    
+
     if reference_time.tzinfo is None:
         raise ValueError(
-            "reference_time must be timezone-aware (UTC). "
-            "Got naive datetime. Use datetime(..., tzinfo=timezone.utc)"
+            "reference_time must be timezone-aware (UTC). Got naive datetime. Use datetime(..., tzinfo=timezone.utc)"
         )
-    
+
     utc_time = reference_time.astimezone(pytz.utc)
     ref_str = utc_time.strftime(GEORIVA_REFTIME_FORMAT)
     return f"GR--{ref_str}--{original_filename}"
@@ -128,6 +128,7 @@ def build_filename(
 # =============================================================================
 # Full path operations
 # =============================================================================
+
 
 def parse_path(file_path: str) -> dict:
     """
@@ -172,11 +173,11 @@ def parse_path(file_path: str) -> dict:
         collection = None
 
     return {
-        'org': org,
-        'catalog': catalog,
-        'collection': collection,
-        'reference_time': parsed['reference_time'],
-        'original_name': parsed['original_name'],
+        "org": org,
+        "catalog": catalog,
+        "collection": collection,
+        "reference_time": parsed["reference_time"],
+        "original_name": parsed["original_name"],
     }
 
 
@@ -198,9 +199,6 @@ def validate_path(file_path: str) -> dict:
     parts = Path(file_path).parts
 
     if len(parts) < 3:
-        raise ValueError(
-            f"Invalid path: '{file_path}'. "
-            f"Expected at minimum: {{org}}/{{catalog}}/filename.ext"
-        )
+        raise ValueError(f"Invalid path: '{file_path}'. Expected at minimum: {{org}}/{{catalog}}/filename.ext")
 
     return parse_path(file_path)

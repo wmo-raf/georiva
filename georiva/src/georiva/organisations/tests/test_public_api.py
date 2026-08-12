@@ -20,6 +20,7 @@ Every fixture is named after the organisation that owns it, so the other's name
 appearing anywhere in a response *is* the leak — which is what lets the sweep at
 the bottom check routes nobody thought to write a test for.
 """
+
 import json
 import re
 
@@ -47,12 +48,18 @@ def build_uganda_only_tree(organisation):
         file_format=Catalog.FileFormat.GEOTIFF,
     )
     collection = Collection.objects.create(
-        catalog=catalog, name="Uganda Only", slug=UGANDA_ONLY_SLUG,
+        catalog=catalog,
+        name="Uganda Only",
+        slug=UGANDA_ONLY_SLUG,
     )
     unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
     variable = Variable.objects.create(
-        collection=collection, name="Uganda Only", slug=UGANDA_ONLY_SLUG,
-        unit=unit, value_min=0, value_max=1,
+        collection=collection,
+        name="Uganda Only",
+        slug=UGANDA_ONLY_SLUG,
+        unit=unit,
+        value_min=0,
+        value_max=1,
     )
     item = Item.objects.create(collection=collection, time="2026-01-01T00:00:00Z")
     Asset.objects.create(item=item, variable=variable, href="uganda.tif")
@@ -129,7 +136,8 @@ class CrossOrgPublicApiTests(TestCase):
 
     def test_the_colliding_collection_address_serves_this_organisations_variable(self):
         url = reverse(
-            "stac:collection-detail", args=[SHARED_SLUG, SHARED_SLUG, SHARED_SLUG],
+            "stac:collection-detail",
+            args=[SHARED_SLUG, SHARED_SLUG, SHARED_SLUG],
         )
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
@@ -170,7 +178,8 @@ class CrossOrgPublicApiTests(TestCase):
 
     def test_edr_catalog_filter_cannot_name_another_organisations_catalog(self):
         response = self.client.get(
-            reverse("edr:collection-list"), {"catalog": UGANDA_ONLY_SLUG},
+            reverse("edr:collection-list"),
+            {"catalog": UGANDA_ONLY_SLUG},
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["collections"], [])
@@ -209,7 +218,8 @@ class CrossOrgPublicApiTests(TestCase):
 
     def test_dataset_dates_still_serve_this_organisations_collection(self):
         url = reverse(
-            "datasets:collection-available-dates", args=[SHARED_SLUG, SHARED_SLUG],
+            "datasets:collection-available-dates",
+            args=[SHARED_SLUG, SHARED_SLUG],
         )
         self.assertEqual(self.client.get(url).status_code, 200)
 
@@ -257,7 +267,8 @@ class CrossOrgPublicApiTests(TestCase):
         add_member(user, self.kenya)
         self.client.login(username="amina", password=PASSWORD)
         job = Job.objects.create(
-            user=user, content_type=ContentType.objects.get_for_model(Job),
+            user=user,
+            content_type=ContentType.objects.get_for_model(Job),
         )
 
         payloads = {}
@@ -340,7 +351,8 @@ class PublicApiUrlSweepTests(TestCase):
             checked += 1
             with self.subTest(url=url):
                 self.assertEqual(
-                    response.status_code, 404,
+                    response.status_code,
+                    404,
                     f"{url} answered {response.status_code} for another organisation's row",
                 )
         self.assertGreater(checked, 4, "the sweep found too few API URLs to be meaningful")
@@ -360,7 +372,8 @@ class PublicApiUrlSweepTests(TestCase):
             checked += 1
             with self.subTest(url=route):
                 self.assertNotIn(
-                    b"Uganda", response.content,
+                    b"Uganda",
+                    response.content,
                     f"/{route} names another organisation's data",
                 )
         self.assertGreater(checked, 4, "the sweep found too few API listings to be meaningful")

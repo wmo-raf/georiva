@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MinioStoreConfig:
     """
@@ -58,18 +59,18 @@ class MinioStoreConfig:
     path_style : bool
         Use path-style URLs (required for MinIO). Default True.
     """
-    
+
     bucket: str
     access_key: str
     secret_key: str
     internal_endpoint: str
     public_endpoint: str = ""
     path_style: bool = True
-    
+
     def __post_init__(self) -> None:
         if not self.public_endpoint:
             self.public_endpoint = self.internal_endpoint
-    
+
     @classmethod
     def from_django_settings(cls) -> "MinioStoreConfig":
         """
@@ -84,7 +85,7 @@ class MinioStoreConfig:
             MINIO_PUBLIC_ENDPOINT  # optional public CDN/proxy URL
         """
         from django.conf import settings
-        
+
         return cls(
             bucket=settings.GEORIVA_ASSETS_BUCKET,
             access_key=settings.AWS_ACCESS_KEY_ID,
@@ -92,11 +93,11 @@ class MinioStoreConfig:
             internal_endpoint=settings.AWS_S3_ENDPOINT_URL,
             public_endpoint=getattr(settings, "MINIO_PUBLIC_ENDPOINT", ""),
         )
-    
+
     # ------------------------------------------------------------------
     # Store factories
     # ------------------------------------------------------------------
-    
+
     def _build_obstore(self) -> S3Store:
         """
         obstore S3Store for the assets bucket, pointed at the internal endpoint.
@@ -114,7 +115,7 @@ class MinioStoreConfig:
             aws_virtual_hosted_style_request=str(not self.path_style).lower(),
             aws_allow_http="true",
         )
-    
+
     def _build_async_store(self, bucket: str | None = None) -> AsyncS3Store:
         """
         async-tiff S3Store pointed at the internal endpoint.
@@ -131,7 +132,7 @@ class MinioStoreConfig:
             aws_virtual_hosted_style_request=str(not self.path_style).lower(),
             aws_allow_http="true",
         )
-    
+
     def build_registry(self) -> ObjectStoreRegistry:
         """
         Registry that maps ``<internal_endpoint>/<bucket>/`` → obstore.
@@ -143,11 +144,11 @@ class MinioStoreConfig:
         store = self._build_obstore()
         prefix = f"{self.internal_endpoint}/{self.bucket}/"
         return ObjectStoreRegistry({prefix: store})
-    
+
     # ------------------------------------------------------------------
     # URL helpers
     # ------------------------------------------------------------------
-    
+
     def url_for(self, path: str) -> str:
         """
         Full internal URL for a bucket-relative asset path.
@@ -155,7 +156,7 @@ class MinioStoreConfig:
         ``path`` must NOT start with the bucket name.
         """
         return f"{self.internal_endpoint}/{self.bucket}/{path}"
-    
+
     def s3_uri_for(self, internal_url: str) -> str:
         """
         Convert an internal ``http(s)://host/bucket/key`` URL to an
@@ -166,17 +167,18 @@ class MinioStoreConfig:
         injected then rather than baked into every chunk reference.
         """
         for prefix in (
-                f"{self.internal_endpoint}/{self.bucket}/",
-                f"{self.public_endpoint}/{self.bucket}/",
+            f"{self.internal_endpoint}/{self.bucket}/",
+            f"{self.public_endpoint}/{self.bucket}/",
         ):
             if internal_url.startswith(prefix):
-                return f"s3://{self.bucket}/{internal_url[len(prefix):]}"
+                return f"s3://{self.bucket}/{internal_url[len(prefix) :]}"
         return internal_url  # already s3:// or unrecognised
-    
+
 
 # ---------------------------------------------------------------------------
 # VirtualTIFF parser
 # ---------------------------------------------------------------------------
+
 
 class MinioVirtualTIFF(VirtualTIFF):
     """
@@ -190,17 +192,17 @@ class MinioVirtualTIFF(VirtualTIFF):
     This subclass bypasses that conversion and builds AsyncS3Store directly
     from the MinioStoreConfig, which always uses the correct ``aws_`` prefix.
     """
-    
+
     def __init__(
-            self,
-            config: MinioStoreConfig,
-            *,
-            ifd: int | None = 0,
-            ifd_layout: str = "flat",
+        self,
+        config: MinioStoreConfig,
+        *,
+        ifd: int | None = 0,
+        ifd_layout: str = "flat",
     ) -> None:
         super().__init__(ifd=ifd, ifd_layout=ifd_layout)
         self._config = config
-    
+
     def __call__(self, url: str, registry: ObjectStoreRegistry) -> ManifestStore:
         obstore_store, path_in_store = registry.resolve(url)
         bucket = getattr(obstore_store, "bucket", self._config.bucket)
@@ -218,6 +220,7 @@ class MinioVirtualTIFF(VirtualTIFF):
 # ---------------------------------------------------------------------------
 # Builder
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class VirtualZarrBuilder:
@@ -238,10 +241,10 @@ class VirtualZarrBuilder:
         self._parser = MinioVirtualTIFF(self.config)
 
     def build(
-            self,
-            url_df: pd.DataFrame,
-            variable_name: str = "data",
-            per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
+        self,
+        url_df: pd.DataFrame,
+        variable_name: str = "data",
+        per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
     ) -> xr.Dataset:
         """
         Build a virtual dataset of chunk references over the given COGs.
@@ -281,9 +284,9 @@ class VirtualZarrBuilder:
     # ------------------------------------------------------------------
 
     def _build_virtual_dataset(
-            self,
-            url_df: pd.DataFrame,
-            per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
+        self,
+        url_df: pd.DataFrame,
+        per_cog_check: Callable[[xr.Dataset, str], None] | None = None,
     ) -> xr.Dataset:
         virtual_datasets = []
         for _, row in url_df.iterrows():
@@ -291,9 +294,7 @@ class VirtualZarrBuilder:
                 # virtual-tiff's predictor codecs are outside the zarr v3
                 # spec and warn on every COG — expected noise, keep worker
                 # logs readable.
-                warnings.filterwarnings(
-                    "ignore", category=UserWarning, module="virtual_tiff"
-                )
+                warnings.filterwarnings("ignore", category=UserWarning, module="virtual_tiff")
                 vds = open_virtual_dataset(
                     url=row["url"],
                     registry=self._registry,
@@ -310,7 +311,7 @@ class VirtualZarrBuilder:
             vds = vds.assign_coords(time=ts).expand_dims("time")
             virtual_datasets.append(vds)
         return xr.concat(virtual_datasets, dim="time")
-    
+
     def _assign_geo_coords(self, ds: xr.Dataset, sample_url: str) -> xr.Dataset:
         """
         Read the affine geotransform from one COG and attach lat/lon coords.
@@ -321,28 +322,25 @@ class VirtualZarrBuilder:
         with rasterio.open(sample_url) as src:
             transform = src.transform
             height, width = src.height, src.width
-        
+
         lons = transform.c + transform.a * (np.arange(width) + 0.5)
         lats = transform.f + transform.e * (np.arange(height) + 0.5)
-        
-        return (
-            ds
-            .assign_coords(lat=("y", lats), lon=("x", lons))
-            .swap_dims({"y": "lat", "x": "lon"})
-        )
+
+        return ds.assign_coords(lat=("y", lats), lon=("x", lons)).swap_dims({"y": "lat", "x": "lon"})
 
 
 # ---------------------------------------------------------------------------
 # Icechunk writers
 # ---------------------------------------------------------------------------
 
+
 def write_rebuild(
-        repo,
-        vds: xr.Dataset,
-        *,
-        last_updated_at: datetime,
-        metadata: dict,
-        message: str,
+    repo,
+    vds: xr.Dataset,
+    *,
+    last_updated_at: datetime,
+    metadata: dict,
+    message: str,
 ) -> str:
     """
     Commit a full rebuild as a new commit in place — never delete the prefix.
@@ -363,20 +361,18 @@ def write_rebuild(
 
 
 def write_append(
-        repo,
-        vds: xr.Dataset,
-        *,
-        last_updated_at: datetime,
-        metadata: dict,
-        message: str,
+    repo,
+    vds: xr.Dataset,
+    *,
+    last_updated_at: datetime,
+    metadata: dict,
+    message: str,
 ) -> str:
     """
     Append new timesteps along ``time`` and commit.  Returns the snapshot id.
     """
     session = repo.writable_session("main")
-    vds.vz.to_icechunk(
-        session.store, append_dim="time", last_updated_at=last_updated_at
-    )
+    vds.vz.to_icechunk(session.store, append_dim="time", last_updated_at=last_updated_at)
     return session.commit(message, metadata=metadata)
 
 

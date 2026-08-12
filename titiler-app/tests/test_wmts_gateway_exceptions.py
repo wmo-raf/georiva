@@ -35,6 +35,7 @@ and no import binds them; this suite is the binding.
 
 Skipped, not failed, where Docker is unavailable.
 """
+
 import os
 import re
 import socket
@@ -136,7 +137,8 @@ def _proxy_image():
     server's ``error_page`` and ``return`` semantics.
     """
     match = re.search(
-        r"georiva-web-proxy:\s*\n\s*image:\s*(\S+)", COMPOSE_FILE.read_text(),
+        r"georiva-web-proxy:\s*\n\s*image:\s*(\S+)",
+        COMPOSE_FILE.read_text(),
     )
     assert match, "could not find the web proxy's image in docker-compose.yml"
     return match.group(1)
@@ -172,15 +174,33 @@ def gateway(tmp_path_factory):
             (containers[1], root / "titiler.conf", TITILER_HOST),
         ):
             started = _run(
-                "docker", "run", "--rm", "-d", "--name", name,
-                "--network", network, "--network-alias", alias,
-                *mount(conf), image,
+                "docker",
+                "run",
+                "--rm",
+                "-d",
+                "--name",
+                name,
+                "--network",
+                network,
+                "--network-alias",
+                alias,
+                *mount(conf),
+                image,
             )
             assert started.returncode == 0, started.stderr
         started = _run(
-            "docker", "run", "--rm", "-d", "--name", containers[2],
-            "--network", network, "-p", f"127.0.0.1:{port}:80",
-            *mount(NGINX_CONF), image,
+            "docker",
+            "run",
+            "--rm",
+            "-d",
+            "--name",
+            containers[2],
+            "--network",
+            network,
+            "-p",
+            f"127.0.0.1:{port}:80",
+            *mount(NGINX_CONF),
+            image,
         )
         assert started.returncode == 0, started.stderr
 
@@ -215,7 +235,10 @@ REFUSED = _translate_capabilities_error(401)
 #: its text is broader than any single branch there. Rendered through the shim's
 #: own renderer all the same, which is what keeps the report's *shape* shared.
 DENIED = WMTSException(
-    404, "InvalidParameterValue", None, "No WMTS service or layer at this address",
+    404,
+    "InvalidParameterValue",
+    None,
+    "No WMTS service or layer at this address",
 )
 
 
@@ -239,16 +262,23 @@ def _as_the_shim_would(exc):
 
 def get(gateway, path, api_key=DENIED_KEY, **params):
     return httpx.get(
-        f"{gateway}{path}", params={API_KEY_PARAM: api_key, **params}, timeout=10,
+        f"{gateway}{path}",
+        params={API_KEY_PARAM: api_key, **params},
+        timeout=10,
     )
 
 
 def kvp(gateway, api_key=DENIED_KEY, request="GetTile", **params):
     """A KVP request on the org-scoped endpoint, as it looks behind the proxy."""
     return get(
-        gateway, f"/titiler/{ORG}/wmts", api_key=api_key,
-        SERVICE="WMTS", VERSION="1.0.0", REQUEST=request,
-        LAYER="forecasts:gfs:temperature", **params,
+        gateway,
+        f"/titiler/{ORG}/wmts",
+        api_key=api_key,
+        SERVICE="WMTS",
+        VERSION="1.0.0",
+        REQUEST=request,
+        LAYER="forecasts:gfs:temperature",
+        **params,
     )
 
 

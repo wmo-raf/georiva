@@ -55,8 +55,8 @@ class BuildPlan:
 
 
 def classify(
-        committed: CommittedState | None,
-        rows: list[SourceRow],
+    committed: CommittedState | None,
+    rows: list[SourceRow],
 ) -> BuildPlan:
     """
     Decide how this build cycle updates the repo.

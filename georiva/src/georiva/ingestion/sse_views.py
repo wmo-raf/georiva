@@ -9,13 +9,16 @@ logger = logging.getLogger(__name__)
 
 _KEEPALIVE_SECS = 25
 
-_INGESTION_EVENT_TYPES = frozenset([
-    "file_ingestion.created",
-    "file_ingestion.status_changed",
-    "job.state_changed",
-    "job.progress_updated",
-    "snapshot",
-])
+_INGESTION_EVENT_TYPES = frozenset(
+    [
+        "file_ingestion.created",
+        "file_ingestion.status_changed",
+        "job.state_changed",
+        "job.progress_updated",
+        "snapshot",
+    ]
+)
+
 
 def ingestion_events_sse(request):
     """Async SSE endpoint streaming ingestion (FileIngestion/Job) events."""
@@ -34,6 +37,7 @@ def ingestion_events_sse(request):
 
 async def _build_ingestion_snapshot(org_slug):
     from .snapshot import build_ingestion_snapshot
+
     return await build_ingestion_snapshot(org_slug)
 
 

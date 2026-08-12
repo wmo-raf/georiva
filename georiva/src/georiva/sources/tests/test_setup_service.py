@@ -3,6 +3,7 @@ Tests for SourceSetupService variable provisioning: the source_units -> units
 split that drives ingestion-time unit conversion, and the seed-vs-tune policy
 (ADR 0022) for value ranges and styling seeds.
 """
+
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, ColorRamp, ColorRampStop, VariableStyle
@@ -31,22 +32,28 @@ class ProvisionCollectionSlugTests(TestCase):
 
     def test_slug_is_the_definition_key_without_a_catalog_prefix(self):
         service = SourceSetupService()
-        catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         feed = DataFeed.objects.create(name="Rain Feed", catalog=catalog)
         definition = CollectionDefinition(
             key="chirps-monthly",
             name="CHIRPS Monthly",
             time_resolution="monthly",
-            variables=(CollectionVariable(
-                key="precip", name="Precipitation", source_units="mm",
-                source_variable=SourceKey(name="band_1"),
-            ),),
+            variables=(
+                CollectionVariable(
+                    key="precip",
+                    name="Precipitation",
+                    source_units="mm",
+                    source_variable=SourceKey(name="band_1"),
+                ),
+            ),
         )
 
         collection = service.provision_collection(
-            catalog=catalog, definition=definition, data_feed=feed,
+            catalog=catalog,
+            definition=definition,
+            data_feed=feed,
             config_values={},
         )
 
@@ -176,23 +183,28 @@ class UpsertVariableSeedVsTuneTests(TestCase):
             palette="viridis",
         )
         definition = CollectionDefinition(
-            key="rain", name="Rain", time_resolution="daily",
+            key="rain",
+            name="Rain",
+            time_resolution="daily",
             variables=(var_def,),
         )
         collection = self.service.provision_collection(
-            catalog=self.collection.catalog, definition=definition,
-            data_feed=feed, config_values={},
+            catalog=self.collection.catalog,
+            definition=definition,
+            data_feed=feed,
+            config_values={},
         )
         variable = collection.variables.get(slug="precip")
         style = variable.styles.get()
-        tuned_stops = [{"value": -5.0, "color": "#123456"},
-                       {"value": 1200.0, "color": "#654321"}]
+        tuned_stops = [{"value": -5.0, "color": "#123456"}, {"value": 1200.0, "color": "#654321"}]
         style.stops = tuned_stops
         style.save()
 
         self.service.provision_collection(
-            catalog=self.collection.catalog, definition=definition,
-            data_feed=feed, config_values={},
+            catalog=self.collection.catalog,
+            definition=definition,
+            data_feed=feed,
+            config_values={},
         )
 
         style.refresh_from_db()
@@ -211,8 +223,10 @@ class UpsertVariableSeedVsTuneTests(TestCase):
             variables=(self.var_def,),
         )
         collection = self.service.provision_collection(
-            catalog=self.collection.catalog, definition=definition,
-            data_feed=feed, config_values={},
+            catalog=self.collection.catalog,
+            definition=definition,
+            data_feed=feed,
+            config_values={},
         )
         variable = collection.variables.get(slug="precip")
         self.assertEqual(variable.value_max, 500.0)
@@ -222,8 +236,10 @@ class UpsertVariableSeedVsTuneTests(TestCase):
         variable.save()
 
         self.service.provision_collection(
-            catalog=self.collection.catalog, definition=definition,
-            data_feed=feed, config_values={},
+            catalog=self.collection.catalog,
+            definition=definition,
+            data_feed=feed,
+            config_values={},
         )
 
         variable.refresh_from_db()
@@ -254,20 +270,14 @@ class UpsertVariableStyleSeedTests(TestCase):
     # -------- palette: ramp name stretched over the declared range --------
 
     def test_palette_seeds_default_style_from_the_catalog_ramp(self):
-        variable = self.service._upsert_variable(
-            self.collection, self._var_def(palette="viridis")
-        )
+        variable = self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
 
         style = variable.styles.get()
         self.assertTrue(style.is_default)
         self.assertEqual(style.ramp.name, "viridis")
-        self.assertEqual(
-            style.stops, generate_stops(style.ramp, 0.0, 500.0)
-        )
+        self.assertEqual(style.stops, generate_stops(style.ramp, 0.0, 500.0))
         # tile-config serves the default style's snapshot
-        self.assertEqual(
-            variable.weather_layers_palette, style.as_weatherlayers_palette()
-        )
+        self.assertEqual(variable.weather_layers_palette, style.as_weatherlayers_palette())
         # ... all the way down to the payload Titiler reads.
         from georiva.core.machine_plane.palette_cache import build_variable_payload
 
@@ -282,17 +292,13 @@ class UpsertVariableStyleSeedTests(TestCase):
         ColorRampStop.objects.create(ramp=org_ramp, hex_value="#111111", sort_order=0)
         ColorRampStop.objects.create(ramp=org_ramp, hex_value="#eeeeee", sort_order=1)
 
-        variable = self.service._upsert_variable(
-            self.collection, self._var_def(palette="viridis")
-        )
+        variable = self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
 
         self.assertEqual(variable.styles.get().ramp, org_ramp)
 
     def test_unknown_ramp_degrades_to_grayscale_with_a_warning(self):
         with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
-            variable = self.service._upsert_variable(
-                self.collection, self._var_def(palette="no-such-ramp")
-            )
+            variable = self.service._upsert_variable(self.collection, self._var_def(palette="no-such-ramp"))
 
         # No style row: serving falls back to grayscale.
         self.assertEqual(variable.styles.count(), 0)
@@ -310,11 +316,14 @@ class UpsertVariableStyleSeedTests(TestCase):
         style = variable.styles.get()
         self.assertTrue(style.is_default)
         self.assertIsNone(style.ramp)
-        self.assertEqual(style.stops, [
-            {"value": 0.0, "color": "#000000"},
-            {"value": 250.0, "color": "#ff0000"},
-            {"value": 500.0, "color": "#ffffff"},
-        ])
+        self.assertEqual(
+            style.stops,
+            [
+                {"value": 0.0, "color": "#000000"},
+                {"value": 250.0, "color": "#ff0000"},
+                {"value": 500.0, "color": "#ffffff"},
+            ],
+        )
         # Range is derived from the stops.
         self.assertEqual(variable.value_min, 0.0)
         self.assertEqual(variable.value_max, 500.0)
@@ -323,8 +332,7 @@ class UpsertVariableStyleSeedTests(TestCase):
         stops = ((0.0, "#000000"), (10.0, "#ffffff"))
         variable = self.service._upsert_variable(
             self.collection,
-            self._var_def(palette="viridis", palette_stops=stops,
-                          value_range=None),
+            self._var_def(palette="viridis", palette_stops=stops, value_range=None),
         )
 
         style = variable.styles.get()
@@ -356,8 +364,7 @@ class UpsertVariableStyleSeedTests(TestCase):
         with self.assertLogs("georiva.sources.setup_service", level="WARNING"):
             variable = self.service._upsert_variable(
                 self.collection,
-                self._var_def(palette="viridis",
-                              palette_stops=(("low", "#000000"),)),
+                self._var_def(palette="viridis", palette_stops=(("low", "#000000"),)),
             )
 
         style = variable.styles.get()
@@ -387,29 +394,20 @@ class UpsertVariableStyleSeedTests(TestCase):
 
     def test_unsorted_stops_are_normalized_to_ascending_order(self):
         stops = ((500.0, "#ffffff"), (0.0, "#000000"))
-        variable = self.service._upsert_variable(
-            self.collection, self._var_def(value_range=None, palette_stops=stops)
-        )
+        variable = self.service._upsert_variable(self.collection, self._var_def(value_range=None, palette_stops=stops))
 
-        self.assertEqual(
-            [s["value"] for s in variable.styles.get().stops], [0.0, 500.0]
-        )
+        self.assertEqual([s["value"] for s in variable.styles.get().stops], [0.0, 500.0])
 
     # -------- create-only: re-provision never touches styles --------
 
     def test_reprovision_never_modifies_an_existing_style(self):
-        variable = self.service._upsert_variable(
-            self.collection, self._var_def(palette="viridis")
-        )
+        variable = self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
         style = variable.styles.get()
-        tuned = [{"value": 0.0, "color": "#123456"},
-                 {"value": 42.0, "color": "#654321"}]
+        tuned = [{"value": 0.0, "color": "#123456"}, {"value": 42.0, "color": "#654321"}]
         style.stops = tuned
         style.save()
 
-        self.service._upsert_variable(
-            self.collection, self._var_def(palette="plasma")
-        )
+        self.service._upsert_variable(self.collection, self._var_def(palette="plasma"))
 
         style.refresh_from_db()
         self.assertEqual(style.stops, tuned)
@@ -427,14 +425,10 @@ class UpsertVariableStyleSeedTests(TestCase):
             self.service._upsert_variable(self.collection, bad)
 
     def test_reprovision_does_not_resurrect_a_style_the_operator_deleted(self):
-        variable = self.service._upsert_variable(
-            self.collection, self._var_def(palette="viridis")
-        )
+        variable = self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
         variable.styles.all().delete()
 
-        self.service._upsert_variable(
-            self.collection, self._var_def(palette="viridis")
-        )
+        self.service._upsert_variable(self.collection, self._var_def(palette="viridis"))
 
         self.assertEqual(variable.styles.count(), 0)
 
@@ -443,19 +437,23 @@ class ParseCollectionDefsPaletteTests(TestCase):
     """The dict shorthand carries the styling seed fields through."""
 
     def test_palette_and_palette_stops_survive_parsing(self):
-        defs = parse_collection_defs({
-            "rain": {
-                "name": "Rain",
-                "time_resolution": "daily",
-                "variables": [{
-                    "name": "Precipitation",
-                    "source_units": "mm",
-                    "source_variable": "band_1",
-                    "palette": "viridis",
-                    "palette_stops": [(0.0, "#000000"), (500.0, "#ffffff")],
-                }],
-            },
-        })
+        defs = parse_collection_defs(
+            {
+                "rain": {
+                    "name": "Rain",
+                    "time_resolution": "daily",
+                    "variables": [
+                        {
+                            "name": "Precipitation",
+                            "source_units": "mm",
+                            "source_variable": "band_1",
+                            "palette": "viridis",
+                            "palette_stops": [(0.0, "#000000"), (500.0, "#ffffff")],
+                        }
+                    ],
+                },
+            }
+        )
 
         var = defs[0].variables[0]
         self.assertEqual(var.palette, "viridis")
