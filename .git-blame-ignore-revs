@@ -1,9 +1,0 @@
-# Revisions that changed formatting only, and that `git blame` should skip so
-# it keeps pointing at whoever last changed a line for a reason.
-#
-# GitHub honours this file automatically. For local git:
-#
-#     git config blame.ignoreRevsFile .git-blame-ignore-revs
-
-# style: apply ruff format — 339 files, formatter output only.
-0df468baf7dbb7f88e5d53ef0771460db0e462a5
