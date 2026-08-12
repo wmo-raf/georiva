@@ -68,10 +68,22 @@ dials it from nowhere.
 understands only 2xx, 401 and 403 and fails the outer request with a 500 on
 anything else, so the view speaks that protocol and one `error_page` line turns
 403 into the 404 every other plane already answers. A *presented-but-broken* key
-stays 401, passed through untouched: that answer is the same whether the
-collection exists or not, so it gives nothing away, and it is what tells a QGIS
-user their credential expired rather than leaving them hunting a dataset that
-appears to have vanished (ADR 0014).
+stays 401: that answer is the same whether the collection exists or not, so it
+gives nothing away, and it is what tells a QGIS user their credential expired
+rather than leaving them hunting a dataset that appears to have vanished
+(ADR 0014).
+
+Both statuses reach the client with nginx's own HTML error page behind them,
+which suits every client on this gateway but one. The org-wide WMTS KVP endpoint
+(`/titiler/{org}/wmts`, ADR 0013's grammar) exists for legacy desktop GIS that
+parses OGC XML and nothing else, and an unparseable error body there reads as a
+broken layer rather than as an expired key — so on that path, and only that
+path, each status carries an OWS ExceptionReport body (#372). The bodies are
+constants rendered by the gateway itself rather than fetched from Django: the
+gate's refusal has nothing per-request to add, and an upstream hop would put a
+request on Django for every tile of a canvas whose key has just expired. The
+decision stays entirely this view's; the gateway only spells it in a dialect
+those clients can read, and the tile servers still learn nothing.
 
 **The gate is cached for ~60s, keyed on everything the decision reads.** A
 raster plane answers per tile; a membership check per tile is a database round
