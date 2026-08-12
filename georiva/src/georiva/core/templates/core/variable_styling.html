@@ -231,6 +231,27 @@
             display: flex;
             gap: 0.75rem;
             margin-top: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        /*
+         * The `hidden` attribute alone loses to any author rule that sets
+         * `display`, and .button sets one — so both toggled controls need this
+         * spelled out.
+         */
+        .vs-apply-ramp[hidden],
+        .vs-unsaved[hidden] {
+            display: none;
+        }
+
+        .vs-unsaved {
+            margin: 0;
+            padding: 0.3rem 0.6rem;
+            border-radius: 3px;
+            background: var(--w-color-warning-100);
+            color: var(--w-color-text-label);
+            font-size: 0.85em;
         }
 
         .vs-stop-tools {
@@ -556,6 +577,9 @@
                                 data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
                             {% trans "Apply ramp" %}
                         </button>
+                        <p class="vs-unsaved" id="vs-unsaved" hidden>
+                            {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
+                        </p>
                     </div>
                     <ul class="vs-errors" id="vs-apply-error" hidden
                         data-pick-ramp="{% trans 'Pick a ramp to apply.' %}"
@@ -704,6 +728,54 @@
             const mapStatus = document.getElementById('vs-map-status');
             const applyButtons = [...document.querySelectorAll('.vs-apply-ramp')];
             const applyError = document.getElementById('vs-apply-error');
+            const unsavedNote = document.getElementById('vs-unsaved');
+
+            /**
+             Two pieces of state the page keeps about itself.
+
+             `appliedSignature` is the ramp, mode and class count the stops in
+             the table were last generated from — the saved style's own on load,
+             the chosen ones after an apply. Apply shows only when pressing it
+             would actually change something: when those inputs have moved on,
+             when the stops have been edited away from what they produced, or
+             when there are no stops at all. Editing counts because otherwise
+             applying would hide itself the moment an operator hand-tuned a
+             stop, leaving no way back to the clean ramp.
+
+             `styleDirty` is the simpler one: anything on this form that the
+             database has not been told about. Applying a ramp writes nothing,
+             and the swatch in the Styles list keeps showing the saved style —
+             so without saying so, the page would show two different palettes
+             and claim both.
+             **/
+
+            let appliedSignature = null;
+            let stopsEdited = false;
+            let styleDirty = false;
+
+            function currentSignature() {
+                return JSON.stringify([
+                    rampInput.value,
+                    modeSelect.value,
+                    modeSelect.value === 'stepped' ? stepsInput.value : ''
+                ]);
+            }
+
+            function refreshState() {
+                const changed = currentSignature() !== appliedSignature
+                    || stopsEdited
+                    || !body.querySelector('.vs-stop-row');
+                applyButtons.forEach(function (button) {
+                    button.hidden = !changed;
+                });
+                unsavedNote.hidden = !styleDirty;
+            }
+
+            function markStopsEdited() {
+                stopsEdited = true;
+                styleDirty = true;
+                refreshState();
+            }
             const stopsUrl = '{{ stops_url }}';
             let mapPreview = null;
 
@@ -729,6 +801,8 @@
                 if (option.dataset.rampPk) {
                     option.setAttribute('aria-current', 'true');
                 }
+                styleDirty = true;
+                refreshState();
             }
 
             /**
@@ -891,6 +965,7 @@
                     input.addEventListener('input', function () {
                         syncPicker(row);
                         renderPreview();
+                        markStopsEdited();
                     });
                 });
                 const picker = row.querySelector('.vs-stop-picker');
@@ -898,6 +973,7 @@
                     picker.addEventListener('input', function () {
                         row.querySelector('[name="stop_color"]').value = picker.value;
                         renderPreview();
+                        markStopsEdited();
                     });
                 }
                 const remove = row.querySelector('.vs-remove-stop');
@@ -905,6 +981,7 @@
                     remove.addEventListener('click', function () {
                         row.remove();
                         renderPreview();
+                        markStopsEdited();
                     });
                 }
                 syncPicker(row);
@@ -922,6 +999,7 @@
 
             document.getElementById('vs-add-stop').addEventListener('click', function () {
                 addRow('', '');
+                markStopsEdited();
             });
 
             /**
@@ -942,6 +1020,7 @@
                     syncPicker(row);
                 });
                 renderPreview();
+                markStopsEdited();
             });
 
             /**
@@ -985,6 +1064,13 @@
                         addRow(stop.value, stop.color);
                     });
                     renderPreview();
+                    // The table is now exactly what these inputs produce, so
+                    // Apply has nothing left to do — but the database still
+                    // holds the old snapshot.
+                    appliedSignature = currentSignature();
+                    stopsEdited = false;
+                    styleDirty = true;
+                    refreshState();
                 } catch (error) {
                     console.error('Applying the ramp failed', error);
                     showApplyError(applyError.dataset.unreachable);
@@ -1058,10 +1144,27 @@
             }
 
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
-            modeSelect.addEventListener('change', toggleSteps);
+            modeSelect.addEventListener('change', function () {
+                toggleSteps();
+                styleDirty = true;
+                refreshState();
+            });
+            stepsInput.addEventListener('input', function () {
+                styleDirty = true;
+                refreshState();
+            });
+            form.querySelector('[name="name"]').addEventListener('input', function () {
+                styleDirty = true;
+                refreshState();
+            });
+
             toggleSteps();
             initMap();
             renderPreview();
+            // The stops on the page came from the saved style, so this is what
+            // they were generated from until something says otherwise.
+            appliedSignature = currentSignature();
+            refreshState();
         });
     </script>
 {% endblock %}
