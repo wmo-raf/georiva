@@ -27,7 +27,9 @@ Two bindings are advertised, and a client reads whichever it speaks: modern
 clients follow the per-layer REST ``ResourceURL`` templates, while a KVP-only
 client reads ``OperationsMetadata`` for the org-scoped endpoint under the
 Titiler prefix — the same address it fetched this document from, since that
-endpoint proxies GetCapabilities straight back here (#362).
+endpoint proxies GetCapabilities straight back here (#362). Each layer carries
+both a ``tile`` and a ``FeatureInfo`` template (#379), so neither binding is
+shown an operation it has no address for.
 """
 from xml.etree import ElementTree as ET
 
@@ -38,6 +40,7 @@ from georiva.core.machine_plane import (
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,
+    wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
 from georiva.core.models import Collection, Item, Variable
@@ -275,6 +278,23 @@ def _append_layer(contents, request, variable, dimensions, api_key=None):
         "template": get_full_url_by_request(
             request,
             wmts_rest_tile_template(
+                variable, dimensions, styled=bool(styles), api_key=api_key,
+            ),
+        ),
+    })
+
+    # The identify address, for the client that reads these templates and never
+    # speaks KVP (#379). Without it the InfoFormat above is an offer with no
+    # address behind it on this binding: a REST client would show its identify
+    # tool and have nowhere to send the click. The same dimensions and style as
+    # the tile template, because the pixel being explained belongs to the tile
+    # drawn from the line above.
+    ET.SubElement(layer, _wmts("ResourceURL"), {
+        "format": INFO_FORMAT,
+        "resourceType": "FeatureInfo",
+        "template": get_full_url_by_request(
+            request,
+            wmts_rest_featureinfo_template(
                 variable, dimensions, styled=bool(styles), api_key=api_key,
             ),
         ),

@@ -36,6 +36,7 @@ from georiva.core.machine_plane import (
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,
+    wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
 from georiva.core.models import Item, Variable
@@ -290,6 +291,53 @@ class WmtsRestTileTemplateTests(TestCase):
         self.assertNotEqual(
             wmts_rest_tile_template(self.kenya_tree["variable"], ("Time",)),
             wmts_rest_tile_template(self.uganda_tree["variable"], ("Time",)),
+        )
+
+    def test_the_identify_template_is_the_tile_template_plus_the_pixel(self):
+        """#379: the two templates a Layer advertises are one address written
+        twice, so they are asserted against each other rather than against a
+        second literal — a builder that drifted would still satisfy a literal
+        copied from it, and a client would then identify a pixel of a tile it
+        is not looking at."""
+        variable = self.kenya_tree["variable"]
+        for dimensions, styled, key in (
+                (("Time",), False, None),
+                (("Time", "Reftime"), True, None),
+                ((), False, None),
+                (("Time",), True, "grv_secret"),
+        ):
+            with self.subTest(dimensions=dimensions, styled=styled, keyed=bool(key)):
+                tile = wmts_rest_tile_template(variable, dimensions, styled, key)
+                info = wmts_rest_featureinfo_template(variable, dimensions, styled, key)
+                path, _, query = tile.partition("?")
+                info_path, _, info_query = info.partition("?")
+                self.assertEqual(info_query, query)
+                self.assertEqual(
+                    info_path, path.removesuffix(".png") + "/{J}/{I}.json",
+                )
+
+    def test_the_identify_template_is_the_identify_route_org_first(self):
+        self.assertEqual(
+            wmts_rest_featureinfo_template(self.kenya_tree["variable"], ("Time",)),
+            f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}"
+            "/tiles/WebMercatorQuad/{TileMatrix}/{TileCol}/{TileRow}/{J}/{I}.json"
+            "?time={Time}",
+        )
+
+    def test_a_filled_identify_template_scopes_back_to_its_own_collection(self):
+        """Two segments deeper than a tile, and the gate must still read the
+        same collection out of it — otherwise the document advertises an
+        identify address nginx denies (ADR 0015)."""
+        from georiva.core.machine_plane import MachineScope, scope_of
+
+        filled = wmts_rest_featureinfo_template(
+            self.kenya_tree["variable"], ("Time",),
+        ).format(
+            TileMatrix=6, TileCol=38, TileRow=32, J=128, I=64,
+            Time="2026-03-01T12:00:00Z",
+        )
+        self.assertEqual(
+            scope_of(filled), MachineScope("kenya", SHARED_SLUG, SHARED_SLUG),
         )
 
     def test_a_layer_identifier_is_the_triple_a_kvp_layer_param_carries(self):

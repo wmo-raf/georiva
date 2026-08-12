@@ -20,6 +20,7 @@ from georiva.core.machine_plane import (
     scope_of,
     wmts_capabilities_url,
     wmts_kvp_endpoint,
+    wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
 from georiva.core.models import (
@@ -167,6 +168,53 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
         template = layer.find("wmts:ResourceURL", NS).get("template")
         split = urlsplit(template.format(
             TileMatrix=6, TileCol=38, TileRow=32, Time="2026-03-01T12:00:00Z",
+        ))
+        self.assertEqual(
+            scope_of(f"{split.path}?{split.query}"),
+            MachineScope("test-org", "forecast", "temperature"),
+        )
+
+    def resource_urls(self, layer):
+        return {
+            resource.get("resourceType"): resource
+            for resource in layer.findall("wmts:ResourceURL", NS)
+        }
+
+    def test_the_layer_carries_an_identify_template_beside_the_tile_one(self):
+        """#379: the InfoFormat above promises an identify, and until this
+        template existed a client reading only ``ResourceURL`` had nowhere to
+        send the click — identify was reachable through ``OperationsMetadata``
+        and therefore by KVP speakers alone."""
+        (layer,) = self.layers(self.fetch())
+        resources = self.resource_urls(layer)
+        self.assertEqual(sorted(resources), ["FeatureInfo", "tile"])
+        info = resources["FeatureInfo"]
+        self.assertEqual(info.get("format"), "application/json")
+        self.assertEqual(
+            info.get("template"),
+            f"http://{org_host()}"
+            + wmts_rest_featureinfo_template(self.variable, ("Time",)),
+        )
+
+    def test_the_identify_template_is_the_tile_template_plus_a_pixel(self):
+        """The two must address one layer at one instant in one style, or a
+        client identifies a pixel of a tile it is not looking at. Asserted as a
+        relationship between the two strings rather than against a literal,
+        because what matters is that they cannot drift apart."""
+        resources = self.resource_urls(self.layers(self.fetch())[0])
+        tile, query = resources["tile"].get("template").split("?")
+        info, info_query = resources["FeatureInfo"].get("template").split("?")
+        self.assertEqual(info_query, query)
+        self.assertEqual(info, tile.removesuffix(".png") + "/{J}/{I}.json")
+
+    def test_a_filled_identify_template_scopes_back_to_the_collection(self):
+        """The gate reads an identify request by the same four segments it
+        reads a tile by, so the deeper path must still name this collection —
+        otherwise the document advertises an address nginx denies."""
+        resources = self.resource_urls(self.layers(self.fetch())[0])
+        split = urlsplit(resources["FeatureInfo"].get("template").format(
+            TileMatrix=6, TileCol=38, TileRow=32, J=128, I=64,
+            Time="2026-03-01T12:00:00Z",
         ))
         self.assertEqual(
             scope_of(f"{split.path}?{split.query}"),
