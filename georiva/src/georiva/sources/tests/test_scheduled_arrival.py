@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import make_organisation
+from georiva.sources.fetch.base import FetchResult
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchRun
-from georiva.sources.fetch.base import FetchResult
-from georiva.organisations.testing import make_organisation
 
 
 def _make_feed_and_collection():

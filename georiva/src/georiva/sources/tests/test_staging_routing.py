@@ -20,9 +20,9 @@ from georiva.core.derived_products import (
 )
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
+from georiva.organisations.testing import make_organisation
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductInput
-from georiva.organisations.testing import make_organisation
 
 
 def _staging_definition(collection_slug="tas"):

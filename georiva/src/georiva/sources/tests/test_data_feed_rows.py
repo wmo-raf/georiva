@@ -11,15 +11,15 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
-from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 

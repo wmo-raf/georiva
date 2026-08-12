@@ -3,15 +3,15 @@ import json
 from django.contrib import messages
 from django.db.models import Count
 from django.shortcuts import redirect, render
-from django.urls import reverse_lazy, reverse
+from django.urls import reverse, reverse_lazy
 from django.utils.functional import cached_property
 from django.utils.timesince import timesince
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy, ngettext
 from wagtail.admin.forms import WagtailAdminModelForm
+from wagtail.admin.ui.tables import BooleanColumn, ButtonsColumnMixin, TitleColumn
 from wagtail.admin.views.generic import IndexView
-from wagtail.admin.ui.tables import TitleColumn, ButtonsColumnMixin, BooleanColumn
-from wagtail.admin.widgets import HeaderButton, ButtonWithDropdown, Button
+from wagtail.admin.widgets import Button, ButtonWithDropdown, HeaderButton
 
 from georiva.organisations.access import get_org_object_or_404, get_via_scoped_parent_or_404
 from georiva.organisations.scoping import OrgScopedViewMixin
@@ -719,6 +719,7 @@ def data_feed_delete(request, pk):
     from django.db.models import Count, Q
     from wagtail.admin.auth import permission_denied
     from wagtail.permissions import ModelPermissionPolicy
+
     from georiva.sources.models import DerivedProduct
 
     feed = get_org_object_or_404(request, DataFeed, pk=pk)
@@ -939,6 +940,7 @@ def definition_collection_remove_confirm(request, feed_pk, link_pk):
 def definition_collection_vars_edit(request, feed_pk, link_pk):
     """Manage which variables from the definition are active in the collection."""
     from django.utils.text import slugify
+
     from georiva.sources.models import DataFeedCollectionLink
     from georiva.sources.setup_service import SourceSetupService
 
@@ -1075,8 +1077,8 @@ def _global_config_form_class(model_cls, include_base=False):
       - base fields (name, is_active, interval_minutes) if include_base=True
       - any extra fields declared in model_cls.panels beyond base_panels
     """
-    from wagtail.admin.panels import FieldPanel, MultiFieldPanel
     from django.forms import modelform_factory
+    from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 
     base_field_names = {p.field_name for p in DataFeed.base_panels if isinstance(p, FieldPanel)}
 
@@ -1233,6 +1235,7 @@ def setup_wizard_select(request):
 def wizard_step1_catalog(request, model_name):
     """Step 1: create a new Catalog or select an existing unclaimed one."""
     from django.utils.text import slugify
+
     from georiva.core.models import Catalog
     from georiva.core.provisioning import catalog_slug_taken
     from georiva.organisations.access import require_active_org

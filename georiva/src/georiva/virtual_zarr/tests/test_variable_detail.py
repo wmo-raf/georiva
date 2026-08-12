@@ -14,7 +14,8 @@ store structure at the tip.  Two layers, mirroring test_coverage:
 
 import unittest
 import uuid
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.conf import settings
 from django.test import TestCase

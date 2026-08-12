@@ -47,7 +47,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from app.wmts import (
     API_KEY_PARAM,
     OWS_NS,
@@ -55,6 +54,7 @@ from app.wmts import (
     _translate_capabilities_error,
     exception_report,
 )
+
 from tests.conftest import ORG, exception_of
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

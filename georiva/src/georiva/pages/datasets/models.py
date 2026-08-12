@@ -13,7 +13,7 @@ from georiva.core.machine_plane import (
     org_slug_of,
     titiler_encoded_preview_url,
 )
-from georiva.core.models import Catalog, Collection, Item, Asset, visible_visibilities
+from georiva.core.models import Asset, Catalog, Collection, Item, visible_visibilities
 from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
 from georiva.organisations.access import (

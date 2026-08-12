@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 
-from georiva.core.models import Catalog, Collection, Item, Asset
+from georiva.core.models import Asset, Catalog, Collection, Item
 from georiva.organisations.access import get_org_object_or_404
 
 

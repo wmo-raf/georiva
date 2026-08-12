@@ -1,16 +1,15 @@
 from datetime import timedelta
 
-from django.test import TestCase
-from django.utils import timezone
-
 from django.contrib.contenttypes.models import ContentType
 from django.db import connection, models
 from django.db.models import Count
+from django.test import TestCase
+from django.utils import timezone
 
 from georiva.core.models import Catalog
+from georiva.organisations.testing import make_organisation
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
-from georiva.organisations.testing import make_organisation
 
 
 def _make_feed(name="Test Feed", **kwargs):

@@ -14,11 +14,10 @@ See docs/adr/0005-generic-derivation-engine.md.
 from datetime import timedelta
 
 from django.db import models
-
-from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 from django.utils import timezone as dj_timezone
 from django_extensions.db.models import TimeStampedModel
 
+from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 from georiva.processing.constants import DERIVATION_LOCK_TIMEOUT_SECONDS
 
 

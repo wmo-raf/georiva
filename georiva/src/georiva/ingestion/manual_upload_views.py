@@ -40,6 +40,7 @@ def manual_upload_config_list(request):
 
 def manual_upload_config_edit(request, pk):
     from django.forms import ModelForm
+
     from georiva.ingestion.models import ManualUploadConfig
 
     config = get_org_object_or_404(request, ManualUploadConfig, pk=pk)

@@ -60,8 +60,8 @@ def should_forward(payload, allowed_types, org_slug):
 
 
 async def _event_stream(allowed_types, snapshot_fn, org_slug):
-    from django.conf import settings
     import redis.asyncio as aioredis
+    from django.conf import settings
 
     from .events import CHANNEL
 

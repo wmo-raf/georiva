@@ -7,9 +7,10 @@ from django.db import models
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.models import ClusterableModel
 from wagtail.admin.forms import WagtailAdminModelForm
-from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel, TitleFieldPanel, TabbedInterface, ObjectList
+from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel, ObjectList, TabbedInterface, TitleFieldPanel
 
 from georiva.core.widget import ConditionalCheckbox
+
 from .base import AbstractCollection
 
 ADM_LEVEL_CHOICES = [

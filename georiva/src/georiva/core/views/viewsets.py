@@ -7,14 +7,15 @@ from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
-from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
+from wagtail.snippets.views.snippets import IndexView, SnippetViewSet
 
-from georiva.core.models import Item, Catalog, Collection, ColorRamp, Asset
+from georiva.core.models import Asset, Catalog, Collection, ColorRamp, Item
 from georiva.core.models.catalog import Topic
-from .admin import CatalogIndexView
 from georiva.organisations.access import may_change_org_object, require_active_org
 from georiva.organisations.permissions import SuperuserOnlyPermissionPolicy
 from georiva.organisations.scoping import OrgScopedChooserViewSetMixin, OrgScopedViewSetMixin
+
+from .admin import CatalogIndexView
 
 
 class BoundaryChooserViewSet(ChooserViewSet):

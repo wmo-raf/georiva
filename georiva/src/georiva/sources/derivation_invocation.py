@@ -112,7 +112,6 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
     """
     from georiva.processing.engine import run
     from georiva.processing.registry import recipe_registry
-
     from georiva.sources.models import DerivedProduct, DerivedProductInput
 
     collection_id = trigger.get("collection_id")
@@ -201,7 +200,6 @@ def resurrect_dependents(item, *, dispatch: bool = True) -> int:
     """
     from georiva.processing.invocation import resurrect_not_ready_units
     from georiva.processing.models import DerivationRun
-
     from georiva.sources.models import DerivedProduct, DerivedProductInput
 
     product_ids = (

@@ -119,7 +119,7 @@ def validate_unit(unit):
     """Check if a unit is valid."""
     try:
         ureg(unit)
-    except pint.errors.UndefinedUnitError as e:
+    except pint.errors.UndefinedUnitError:
         raise ValidationError(
             _("'%(unit)s' is not defined in the unit registry"),
             params={"unit": unit},

@@ -29,6 +29,7 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
     """
     from georiva.core.models import Asset
     from georiva.core.storage import storage
+
     from .service import (
         compute_stats_from_cog_bytes,
         get_boundaries_for_collection,
@@ -101,7 +102,9 @@ def sweep_stale_boundary_stats() -> None:
     Runs every 5 minutes via django-celery-beat.
     """
     from django.utils import timezone
+
     from georiva.core.models import Collection
+
     from .models import BoundaryZonalStats
 
     now = timezone.now()

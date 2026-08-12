@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from georiva.core.models import Collection
 from georiva.virtual_zarr.models import VirtualZarrManifest
-from georiva.virtual_zarr.tasks import build_virtual_zarr_manifest, _run_build
+from georiva.virtual_zarr.tasks import _run_build, build_virtual_zarr_manifest
 
 
 class Command(BaseCommand):
@@ -44,7 +44,7 @@ class Command(BaseCommand):
                 manifest.mark_building("management-command")
                 try:
                     _run_build(manifest)
-                    self.stdout.write(self.style.SUCCESS(f"    ✓ READY"))
+                    self.stdout.write(self.style.SUCCESS("    ✓ READY"))
                 except Exception as exc:
                     manifest.mark_failed(str(exc))
                     self.stdout.write(self.style.ERROR(f"    ✗ FAILED: {exc}"))

@@ -11,10 +11,10 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run
 from georiva.processing.recipe import BaseRecipe, OutputItem
 from georiva.processing.registry import RecipeRegistry
-from georiva.organisations.testing import make_organisation
 
 
 class _TriggerRecipe(BaseRecipe):

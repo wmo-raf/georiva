@@ -1,10 +1,11 @@
 from django.db import models
 from modelcluster.fields import ParentalKey
-from wagtail.admin.panels import FieldPanel, MultiFieldPanel, InlinePanel
+from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
 from wagtail.contrib.settings.models import BaseSiteSetting, register_setting
-from wagtail.models import Page, Orderable
+from wagtail.models import Orderable, Page
 from wagtail_color_panel.edit_handlers import NativeColorPanel
 from wagtail_color_panel.fields import ColorField
+
 from georiva.organisations.lookups import PAGE_TREE, via_related
 
 

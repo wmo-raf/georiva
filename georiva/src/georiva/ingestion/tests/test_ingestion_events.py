@@ -109,6 +109,7 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
 class FileIngestionJobStateEventTests(IngestionEventsTestCase):
     def _make_job(self):
         from django.contrib.contenttypes.models import ContentType
+
         from georiva.ingestion.models import FileIngestionJob
 
         ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)

@@ -6,15 +6,15 @@ the point is to verify FetchRun/FetchedFile records are written correctly,
 not to test network or storage I/O.
 """
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
-from georiva.sources.loader import Loader
-from georiva.sources.models import DataFeed, FetchRun, FetchedFile
-from georiva.sources.fetch.base import FetchResult
 from georiva.organisations.testing import make_organisation
+from georiva.sources.fetch.base import FetchResult
+from georiva.sources.loader import Loader
+from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
 
 def _make_feed_and_collection():

@@ -3,9 +3,9 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, Optional, Protocol, runtime_checkable, Tuple
+from typing import Iterator, Optional, Protocol, Tuple, runtime_checkable
 
-from georiva.sources.fetch.base import FileRequest, BaseFetchStrategy
+from georiva.sources.fetch.base import BaseFetchStrategy, FileRequest
 
 
 class DataSourceType(str, Enum):

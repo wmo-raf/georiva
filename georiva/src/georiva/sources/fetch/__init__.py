@@ -1,4 +1,4 @@
-from .base import FileRequest, FetchMode, FetchResult, BaseFetchStrategy
+from .base import BaseFetchStrategy, FetchMode, FetchResult, FileRequest
 from .ftp import FTPFetchStrategy
 from .http import HTTPFetchStrategy
 

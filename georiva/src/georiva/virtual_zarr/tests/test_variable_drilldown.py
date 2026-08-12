@@ -7,7 +7,8 @@ assertions stay at the level a client sees — timestamp lists, build-history
 rows, GC status, graceful degradation when no repo exists yet.
 """
 
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.test import TestCase, override_settings
 from django.urls import reverse

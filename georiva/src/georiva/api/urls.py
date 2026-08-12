@@ -1,4 +1,4 @@
-from django.urls import path, include
+from django.urls import include, path
 
 from georiva.core.machine_plane.config_view import TileConfigView
 from georiva.edr import urls as edr_urls

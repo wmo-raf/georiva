@@ -18,13 +18,14 @@ import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Generator
+from typing import Generator, Optional
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
 from georiva.utils.path import PathLike
+
 from .base import BaseFormatPlugin, VariableInfo
 
 logger = logging.getLogger(__name__)

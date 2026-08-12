@@ -19,9 +19,9 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog
+from georiva.organisations.testing import make_organisation
 from georiva.sources.derivation_invocation import dispatch_due_scheduled_products
 from georiva.sources.models import DataFeed, DerivedProduct
-from georiva.organisations.testing import make_organisation
 
 
 def _definition(trigger_mode="scheduled", **overrides):

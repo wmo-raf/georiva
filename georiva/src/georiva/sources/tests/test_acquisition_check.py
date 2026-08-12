@@ -14,6 +14,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.loader import Loader
 from georiva.sources.models import (
     DataFeed,
@@ -21,8 +22,6 @@ from georiva.sources.models import (
     FetchedFile,
     FetchRun,
 )
-from georiva.organisations.testing import dial_org, make_organisation
-
 
 User = get_user_model()
 

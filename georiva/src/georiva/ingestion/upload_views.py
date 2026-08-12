@@ -170,8 +170,8 @@ def manual_upload_submit(request, pk):
         FileIngestion,
         FileIngestionJob,
         ManualUploadConfig,
-        UploadSession,
         UploadedFile,
+        UploadSession,
     )
     from georiva.ingestion.tasks import process_incoming_file
 

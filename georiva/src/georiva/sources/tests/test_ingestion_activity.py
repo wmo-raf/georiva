@@ -13,8 +13,8 @@ from django.urls import reverse
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.ingestion_tracking import feed_file_ingestions
 from georiva.ingestion.models import FileIngestion
-from georiva.sources.models import DataFeed
 from georiva.organisations.testing import dial_org, make_organisation
+from georiva.sources.models import DataFeed
 
 User = get_user_model()
 

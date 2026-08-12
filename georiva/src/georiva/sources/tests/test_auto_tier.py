@@ -15,13 +15,13 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import make_organisation
 from georiva.sources.derivation_invocation import collection_routes_to_staging
 from georiva.sources.models import (
     DataFeed,
     DerivedProduct,
     DerivedProductInput,
 )
-from georiva.organisations.testing import make_organisation
 
 
 def _definition(**overrides):

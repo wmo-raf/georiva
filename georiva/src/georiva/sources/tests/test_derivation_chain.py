@@ -17,9 +17,9 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.derivation_chain import build_chain_graph, item_lineage
 from georiva.sources.models import DataFeed, DerivedProduct
-from georiva.organisations.testing import dial_org, make_organisation
 
 
 def _definition(key="anomaly", inputs=None, outputs=None, **overrides):

@@ -1,6 +1,7 @@
-from georiva.organisations.testing import dial_org
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from georiva.organisations.testing import dial_org
 
 User = get_user_model()
 
@@ -88,6 +89,7 @@ class DashboardPanelViewAllTests(TestCase):
         # not just in the sidebar menu.
         from django.template.loader import render_to_string
         from django.test import RequestFactory
+
         from georiva.ingestion.panels import IngestionActivityPanel
 
         request = RequestFactory().get("/admin/")

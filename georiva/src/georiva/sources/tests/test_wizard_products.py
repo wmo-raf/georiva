@@ -14,10 +14,11 @@ products.
 """
 
 import re
+from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
-from unittest.mock import patch
 
 from georiva.core.derived_products import (
     ConfigField,
@@ -25,11 +26,9 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from django.contrib.auth import get_user_model
-
 from georiva.core.models import Catalog
-from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.organisations.testing import dial_org, make_organisation, org_host
+from georiva.sources.models import DataFeed, DerivedProduct
 
 User = get_user_model()
 

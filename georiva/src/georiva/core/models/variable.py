@@ -1,12 +1,12 @@
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils.translation import gettext_lazy as _
 from django.utils.functional import cached_property
+from django.utils.translation import gettext_lazy as _
 from django_extensions.db.models import TimeStampedModel
 from modelcluster.fields import ParentalKey
 from modelcluster.models import ClusterableModel
 from wagtail.admin.panels import FieldPanel, TitleFieldPanel
-from wagtail.blocks import StructBlock, CharBlock, FloatBlock, StreamBlock
+from wagtail.blocks import CharBlock, FloatBlock, StreamBlock, StructBlock
 from wagtail.fields import StreamField
 from wagtail.models import Orderable
 

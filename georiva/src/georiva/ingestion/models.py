@@ -20,10 +20,10 @@ import os
 from datetime import timedelta
 
 from django.db import models
-
-from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
+
+from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
 
 @register_snippet

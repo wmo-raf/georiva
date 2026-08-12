@@ -18,6 +18,7 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.organisations.testing import make_organisation
 from georiva.sources.derivation_tracking import product_readiness
 from georiva.sources.models import (
     DataFeed,
@@ -25,7 +26,6 @@ from georiva.sources.models import (
     DerivedProductInput,
 )
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
-from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 

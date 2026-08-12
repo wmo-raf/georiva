@@ -24,9 +24,9 @@ prefix; pass ``--org`` to narrow to one.
 
 from django.core.management.base import BaseCommand, CommandError
 
-from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
 from georiva.core.models import Asset, Collection
 from georiva.core.storage import storage
+from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
 
 
 class Command(BaseCommand):

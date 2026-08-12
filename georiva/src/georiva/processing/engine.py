@@ -130,8 +130,8 @@ def _register_asset(item, oa, writer, materializer, clipper=None):
     ``AssetMaterializer``, exactly what ingestion writes. Visual textures
     are derived on demand by Titiler (ADR 0021), so a ``format="png"``
     OutputAsset addresses nothing and is skipped."""
-    from georiva.core.storage import storage
     from georiva.core.models import Asset
+    from georiva.core.storage import storage
 
     if oa.array is not None:
         if oa.format == "png":

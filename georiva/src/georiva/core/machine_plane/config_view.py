@@ -56,12 +56,12 @@ index-free, being Titiler's rendering config and nothing more:
   Without one:  {"vmin", "vmax", "scale_type", "styles": []}
 """
 
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import status
 
-from georiva.core.models import Collection, Variable
 from georiva.core.machine_plane.palette_cache import build_variable_payload
+from georiva.core.models import Collection, Variable
 
 
 class TileConfigView(APIView):

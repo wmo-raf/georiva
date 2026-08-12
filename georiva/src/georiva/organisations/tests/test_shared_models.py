@@ -17,8 +17,8 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from georiva.core.models.catalog import Topic
-from georiva.organisations.ownership import is_shared_reference
 from georiva.organisations.models import OrganisationMembership
+from georiva.organisations.ownership import is_shared_reference
 from georiva.organisations.provisioning import provision_organisation
 
 from .factories import PASSWORD, add_member, grant_everything, make_user

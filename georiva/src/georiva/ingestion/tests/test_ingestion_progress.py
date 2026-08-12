@@ -12,7 +12,6 @@ from georiva.ingestion.progress import PublishingProgress
 from georiva.ingestion.service import IngestionService
 from georiva.organisations.testing import make_organisation
 
-
 # =============================================================================
 # PublishingProgress unit tests
 # =============================================================================

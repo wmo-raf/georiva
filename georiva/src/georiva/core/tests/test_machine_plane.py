@@ -41,8 +41,6 @@ from georiva.core.machine_plane import (
     wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
-from georiva.core.models import Item, Variable
-from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.core.machine_plane.palette_cache import (
     build_colormap_256,
     build_variable_payload,
@@ -50,8 +48,12 @@ from georiva.core.machine_plane.palette_cache import (
     variable_cache_key,
     warm_all,
 )
+from georiva.core.models import Item, Variable
+from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.testing import (
     SHARED_TREE_SLUG as SHARED_SLUG,
+)
+from georiva.organisations.testing import (
     make_org_tree,
     make_organisation,
 )

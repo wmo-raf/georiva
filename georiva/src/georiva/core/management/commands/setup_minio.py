@@ -158,7 +158,7 @@ class Command(BaseCommand):
         }
 
         if dry_run:
-            self.stdout.write(f"  → Would set public read policy")
+            self.stdout.write("  → Would set public read policy")
             return
 
         try:
@@ -166,24 +166,24 @@ class Command(BaseCommand):
                 Bucket=bucket_name,
                 Policy=json.dumps(policy),
             )
-            self.stdout.write(self.style.SUCCESS(f"  ✓ Public read policy set"))
+            self.stdout.write(self.style.SUCCESS("  ✓ Public read policy set"))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"  ✗ Failed to set policy: {e}"))
 
     def _set_private_policy(self, s3, bucket_name: str, dry_run: bool):
         """Remove any public policy (private bucket)."""
         if dry_run:
-            self.stdout.write(f"  → Would ensure private policy")
+            self.stdout.write("  → Would ensure private policy")
             return
 
         try:
             s3.delete_bucket_policy(Bucket=bucket_name)
-            self.stdout.write(f"  ✓ Private policy set (no public access)")
+            self.stdout.write("  ✓ Private policy set (no public access)")
         except ClientError as e:
             # No policy to delete is fine
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code in ("NoSuchBucketPolicy", "404"):
-                self.stdout.write(f"  ✓ Already private")
+                self.stdout.write("  ✓ Already private")
             else:
                 self.stdout.write(self.style.ERROR(f"  ✗ Failed to set private policy: {e}"))
 

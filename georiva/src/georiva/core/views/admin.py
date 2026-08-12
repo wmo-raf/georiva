@@ -7,13 +7,13 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 from wagtail.admin.paginator import WagtailPaginator
-from wagtail.admin.ui.tables import ButtonsColumnMixin, TitleColumn, Table, BooleanColumn
+from wagtail.admin.ui.tables import BooleanColumn, ButtonsColumnMixin, Table, TitleColumn
 from wagtail.admin.views.generic import IndexView
 from wagtail.admin.widgets import Button, ButtonWithDropdown
 
-from georiva.core.models import Catalog
-from georiva.core.models import Collection, Item
+from georiva.core.models import Catalog, Collection, Item
 from georiva.organisations.access import get_org_object_or_404
+
 from .tables import LinkColumnWithIcon
 
 
@@ -243,6 +243,7 @@ def collection_items_list(request, collection_pk):
     # ------------------------------------------------------------------
     from django.db.models import F, Value
     from django.db.models.functions import Concat
+
     from georiva.ingestion.models import FileIngestion
 
     source_files = {item.source_file for item in page_obj.object_list if item.source_file}

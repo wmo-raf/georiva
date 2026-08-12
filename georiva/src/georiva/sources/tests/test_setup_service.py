@@ -9,6 +9,7 @@ from django.test import TestCase
 from georiva.core.models import Catalog, Collection, ColorRamp, ColorRampStop, VariableStyle
 from georiva.core.models.visualization import generate_stops
 from georiva.core.unit_utils import ureg
+from georiva.organisations.testing import make_organisation
 from georiva.sources.collection_definitions import (
     CollectionDefinition,
     CollectionVariable,
@@ -17,7 +18,6 @@ from georiva.sources.collection_definitions import (
 from georiva.sources.models import DataFeed
 from georiva.sources.parameters import SourceKey
 from georiva.sources.setup_service import SourceSetupService
-from georiva.organisations.testing import make_organisation
 
 
 def _collection():

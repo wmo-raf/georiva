@@ -13,8 +13,8 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType
-from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 from georiva.organisations.testing import make_organisation
+from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
 
 class SweepStagingTests(TestCase):

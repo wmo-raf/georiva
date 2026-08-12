@@ -11,9 +11,9 @@ inside.
 
 import httpx
 import pytest
-
 from app import dependencies
 from app.config import DJANGO_BASE_URL
+
 from tests.conftest import ORG, exception_of, overriding
 
 #: What Django answers with. Opaque on purpose: Titiler interprets none of it,

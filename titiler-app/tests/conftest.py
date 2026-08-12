@@ -33,11 +33,10 @@ os.environ["DJANGO_BASE_URL"] = "http://never-connected:8000"
 import numpy
 import pytest
 import rasterio
-from fastapi.testclient import TestClient
-from rasterio.transform import from_bounds
-
 from app import dependencies
 from app.main import app
+from fastapi.testclient import TestClient
+from rasterio.transform import from_bounds
 
 #: The address every test speaks unless it says otherwise.
 ORG, CATALOG, COLLECTION, VARIABLE = "kenya", "forecasts", "gfs", "temperature"

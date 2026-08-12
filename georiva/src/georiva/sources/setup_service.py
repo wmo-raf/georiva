@@ -28,8 +28,9 @@ def _validated_palette_stops(raw):
     ``error`` says why — the caller degrades one tier with a warning
     (ADR 0022: provisioning never fails on styling).
     """
-    from georiva.core.models.visualization import HEX_COLOR_VALIDATOR
     from django.core.exceptions import ValidationError
+
+    from georiva.core.models.visualization import HEX_COLOR_VALIDATOR
 
     if raw is None:
         return None, None

@@ -11,6 +11,7 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.models import DerivationRun
 from georiva.processing.recipe import (
@@ -26,7 +27,6 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
-from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
@@ -87,7 +87,6 @@ class _PromotionFixture(TestCase):
 
 class PromotionThroughEngineTests(_PromotionFixture):
     def test_promotion_produces_cog_asset_and_link(self):
-        from georiva.core.models import Asset
 
         result = self._run_promotion()
 
@@ -308,7 +307,6 @@ class RegisterAssetMaterializationTests(_PromotionFixture):
     def test_cog_output_asset_materializes_cog(self):
         import numpy as np
 
-        from georiva.core.models import Asset
         from georiva.processing.engine import _register_asset
         from georiva.processing.recipe import OutputAsset
 

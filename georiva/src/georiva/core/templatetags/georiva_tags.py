@@ -5,7 +5,7 @@ from django import template
 from django.conf import settings
 
 from georiva import __version__
-from georiva.core.models import Catalog, Item, Collection
+from georiva.core.models import Catalog, Collection, Item
 from georiva.core.topics import topics_of
 from georiva.organisations.access import scoped_queryset
 
@@ -209,7 +209,6 @@ def query_params(filters, **kwargs):
     Drops empty values and always resets page to 1 when
     a filter changes (unless page is explicitly passed).
     """
-    from urllib.parse import urlencode
 
     params = {k: v for k, v in filters.items() if v}
     params.update({k: v for k, v in kwargs.items() if v != ""})

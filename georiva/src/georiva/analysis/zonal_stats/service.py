@@ -12,6 +12,7 @@ from georiva.geoprocessing.zonal import zonal_stats_from_array
 
 if TYPE_CHECKING:
     from adminboundarymanager.models import AdminBoundary
+
     from georiva.core.models import Item, Variable
 
 logger = logging.getLogger(__name__)

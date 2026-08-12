@@ -10,8 +10,8 @@ from georiva.ingestion.models import (
     FileIngestionJob,
     ManualUploadConfig,
     ManualUploadConfigVariable,
-    UploadSession,
     UploadedFile,
+    UploadSession,
 )
 from georiva.organisations.testing import dial_org, make_organisation
 

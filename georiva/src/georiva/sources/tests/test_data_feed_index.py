@@ -17,10 +17,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Catalog
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
 from georiva.sources.views import DataFeedIndexView
-from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 

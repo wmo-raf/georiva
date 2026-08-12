@@ -10,13 +10,13 @@ thread a reason down to it, so no Celery broker is needed.
 
 from datetime import datetime, timedelta, timezone
 
+from django.test import TestCase
+from django.utils import timezone as dj_timezone
+
+from georiva.organisations.testing import make_organisation
 from georiva.processing.models import DerivationRun
 from georiva.processing.recipe import BaseRecipe, OutputItem, ResolvedInput, unit_hash
 from georiva.processing.registry import RecipeRegistry
-
-from django.test import TestCase
-from django.utils import timezone as dj_timezone
-from georiva.organisations.testing import make_organisation
 
 
 class _Asset:

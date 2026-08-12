@@ -17,9 +17,9 @@ from django.test import TestCase
 
 from georiva.core.derived_products import InputRef
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.organisations.testing import make_organisation
 from georiva.processing.recipe import BaseRecipe, resolve_declared_inputs
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
-from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 

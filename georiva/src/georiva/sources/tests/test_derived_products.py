@@ -17,6 +17,7 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import make_organisation
 from georiva.sources.models import DataFeed, DataFeedCollectionLink, DerivedProduct
 from georiva.sources.setup_service import SourceSetupService
 from georiva.sources.views import (
@@ -24,7 +25,6 @@ from georiva.sources.views import (
     build_product_config_form,
     selected_products_from_session,
 )
-from georiva.organisations.testing import make_organisation
 
 
 def _definition(**overrides):

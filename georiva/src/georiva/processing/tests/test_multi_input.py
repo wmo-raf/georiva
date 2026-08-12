@@ -22,6 +22,7 @@ from rasterio.transform import from_bounds
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.geoprocessing import regrid_array
+from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.recipe import (
     BaseRecipe,
@@ -35,7 +36,6 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
-from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 

@@ -19,7 +19,6 @@ from django.urls import NoReverseMatch, reverse
 from georiva.core.models import ColorRamp, ColorRampStop
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
-
 from georiva.organisations.tests.factories import (
     PASSWORD,
     add_member,

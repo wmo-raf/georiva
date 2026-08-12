@@ -17,16 +17,17 @@ what the assertions read.
 import json
 from datetime import datetime, timezone
 
+from adminboundarymanager.models import AdminBoundary
 from django.contrib.gis.geos import MultiPolygon, Polygon
 from django.core.management import call_command
 from django.db import InternalError, connection, transaction
 from django.test import TestCase
 
-from adminboundarymanager.models import AdminBoundary
-
 from georiva.analysis.zonal_stats.models import BoundaryZonalStats
 from georiva.organisations.testing import (
     SHARED_TREE_SLUG as SHARED_SLUG,
+)
+from georiva.organisations.testing import (
     make_org_tree,
     make_organisation,
 )

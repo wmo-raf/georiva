@@ -31,6 +31,7 @@ class DashboardSummaryTests(TestCase):
 
     def test_summary_item_counts(self):
         from django.conf import settings
+
         from georiva.core.views.summary_items import (
             CatalogSummaryItem,
             CollectionSummaryItem,
@@ -80,6 +81,7 @@ class DashboardSummaryTests(TestCase):
         and ``plugin_list`` lists all of them — so the count already matches the
         page it links to and must not be narrowed."""
         from django.conf import settings
+
         from georiva.core.views.summary_items import PluginSummaryItem
         from georiva.organisations.testing import make_org_tree
 

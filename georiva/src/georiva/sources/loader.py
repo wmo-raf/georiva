@@ -13,12 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
+from django.conf import settings
 from django.utils import timezone
 
 from georiva.core.storage import storage
 from georiva.sources.fetch.base import FetchResult
-
-from django.conf import settings
 
 
 @dataclass
@@ -240,7 +239,7 @@ class Loader:
         Returns:
             LoaderRunResult with statistics and details
         """
-        from georiva.sources.models import FetchRun, FetchedFile
+        from georiva.sources.models import FetchedFile, FetchRun
 
         result = LoaderRunResult()
         fetch_run = None
@@ -424,8 +423,8 @@ class Loader:
            where the file exists in MinIO but has no FileIngestion entry
            (dropped event, manual upload, consumer restart, etc.).
         """
-        from georiva.core.storage.filename import build_filename
         from georiva.core.storage import BucketType
+        from georiva.core.storage.filename import build_filename
         from georiva.ingestion.models import FileIngestion
 
         filename = build_filename(

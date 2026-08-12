@@ -43,6 +43,7 @@ class LoaderJobType(JobType):
           - rest for file fetches (one tick per file)
         """
         from georiva.core.models import Collection
+
         from .loader import Loader
         from .models import DataFeed
 

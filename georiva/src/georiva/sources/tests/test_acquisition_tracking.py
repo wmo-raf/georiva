@@ -14,9 +14,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Catalog
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.acquisition_tracking import feed_fetch_runs
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 

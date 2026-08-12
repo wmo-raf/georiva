@@ -25,6 +25,7 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.models import (
     DataFeed,
     DataFeedCollectionLink,
@@ -44,7 +45,6 @@ from georiva.sources.product_service import (
     materialise_output_collections,
     product_label,
 )
-from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 

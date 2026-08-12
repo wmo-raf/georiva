@@ -7,7 +7,8 @@ the SAME record in place, and recomputes the parent FetchRun's counters.
 Records without a stored request refuse retry gracefully.
 """
 
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -15,10 +16,10 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.fetch.base import FetchResult, FileRequest
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import dial_org, make_organisation
 
 
 class FileRequestRoundTripTests(TestCase):

@@ -10,9 +10,8 @@ class FormatsConfig(AppConfig):
     def ready(self):
         # Import format plugins to register them
         from .geotiff import GeoTIFFFormatPlugin
-        from .netcdf import NetCDFFormatPlugin
         from .grib import GRIBFormatPlugin
-
+        from .netcdf import NetCDFFormatPlugin
         from .registry import format_registry
 
         format_registry.register(GeoTIFFFormatPlugin)

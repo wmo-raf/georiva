@@ -7,7 +7,8 @@ the other's collection pk. Rendering assertions stay at the level a client
 sees — status labels, coverage counts, the stuck-vs-building distinction.
 """
 
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.test import TestCase, override_settings
 from django.urls import reverse

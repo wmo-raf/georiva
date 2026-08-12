@@ -10,11 +10,11 @@ under a unique scratch prefix and purges it afterwards.
 import time
 import unittest
 import uuid
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
+from datetime import timezone as dt_timezone
 
 import numpy as np
 import pandas as pd
-
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone

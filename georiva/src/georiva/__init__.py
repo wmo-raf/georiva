@@ -1,6 +1,6 @@
 from georiva.config.celery import app as celery_app
 
-from .utils.version import get_version, get_semver_version
+from .utils.version import get_semver_version, get_version
 from .version import VERSION
 
 __version__ = get_version(VERSION)

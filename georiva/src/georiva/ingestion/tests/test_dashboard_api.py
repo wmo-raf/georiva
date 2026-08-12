@@ -8,8 +8,8 @@ from django.utils import timezone
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.ingestion.models import FileIngestion, FileIngestionJob
-from georiva.sources.models import DataFeed, DataFeedCollectionLink
 from georiva.organisations.testing import dial_org, make_organisation
+from georiva.sources.models import DataFeed, DataFeedCollectionLink
 
 User = get_user_model()
 
@@ -513,7 +513,6 @@ class CollectionFetchRunsAPITests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_fetch_runs_duration_seconds_set_when_run_finished(self):
-        from django.utils import timezone
         from georiva.sources.models import FetchRun
 
         run = FetchRun.objects.create(data_feed=self.feed)
@@ -608,7 +607,7 @@ class CollectionIngestionJobsAPITests(TestCase):
 
 def _make_upload_session(catalog, user=None, file_path=None, collection=None):
     """Create an UploadSession with one UploadedFile, optionally linked via FileIngestion."""
-    from georiva.ingestion.models import UploadSession, UploadedFile
+    from georiva.ingestion.models import UploadedFile, UploadSession
 
     session = UploadSession.objects.create(catalog=catalog, user=user)
     fp = file_path or f"{catalog.slug}/file.grib2"

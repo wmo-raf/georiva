@@ -1,9 +1,10 @@
-from georiva.ingestion.sse_views import _INGESTION_EVENT_TYPES, should_forward
-from georiva.organisations.models import Organisation
-from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG, dial_org
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from georiva.ingestion.sse_views import _INGESTION_EVENT_TYPES, should_forward
+from georiva.organisations.models import Organisation
+from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG, dial_org
 
 User = get_user_model()
 
@@ -194,8 +195,10 @@ class SSELiveEventForwardingTests(TestCase):
     async def test_only_this_organisations_event_appears_in_the_stream(self):
         import asyncio
         import json
+
         import redis.asyncio as aioredis
         from django.conf import settings
+
         from georiva.ingestion.events import CHANNEL
 
         await self.async_client.aforce_login(self.user)

@@ -9,6 +9,7 @@ class IngestionConfig(AppConfig):
 
     def ready(self):
         from task_ferry.registry import job_type_registry
+
         from .job_types import FileIngestionJobType
 
         job_type_registry.register(FileIngestionJobType())

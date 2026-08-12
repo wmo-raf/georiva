@@ -15,6 +15,7 @@ import xarray as xr
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.recipes.climatology import ClimatologyRecipe
 from georiva.staging.models import (
@@ -23,7 +24,6 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
-from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():

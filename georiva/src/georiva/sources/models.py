@@ -282,8 +282,9 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         if not self.last_run_at:
             return True
 
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
 
         next_run = self.last_run_at + timedelta(minutes=self.interval_minutes)
         return timezone.now() >= next_run

@@ -3,7 +3,6 @@ from wagtail import hooks
 
 from .panels import IngestionActivityPanel
 
-
 # No menu item: the Ingestion Activity page is reached through the homepage
 # activity panel, and acquisition monitoring lives on each feed's dashboard
 # (ADR 0019).
@@ -13,11 +12,11 @@ from .panels import IngestionActivityPanel
 def register_ingestion_dashboard_urls():
     from .activity_views import ingestion_activity_feed
     from .dashboard_views import (
-        ingestion_dashboard_api,
-        collection_ingestion_logs_api,
-        collection_ingestion_jobs_api,
         collection_fetch_runs_api,
+        collection_ingestion_jobs_api,
+        collection_ingestion_logs_api,
         collection_upload_sessions_api,
+        ingestion_dashboard_api,
     )
     from .sse_views import ingestion_events_sse
 
@@ -55,16 +54,16 @@ def register_ingestion_dashboard_urls():
 @hooks.register("register_admin_urls")
 def register_manual_upload_config_urls():
     from .manual_upload_views import (
-        manual_upload_config_list,
-        manual_upload_config_edit,
         manual_upload_config_delete,
-        manual_upload_variable_edit,
+        manual_upload_config_edit,
+        manual_upload_config_list,
         manual_upload_variable_add,
+        manual_upload_variable_edit,
         manual_upload_variable_remove,
     )
     from .upload_views import (
-        manual_upload_page,
         manual_upload_extract_times,
+        manual_upload_page,
         manual_upload_submit,
     )
 
@@ -96,12 +95,12 @@ def register_manual_upload_config_urls():
 @hooks.register("register_admin_urls")
 def register_upload_wizard_urls():
     from .upload_wizard_views import (
+        upload_wizard_provision,
         upload_wizard_step1,
         upload_wizard_step2,
         upload_wizard_step3,
         upload_wizard_step4,
         upload_wizard_step5,
-        upload_wizard_provision,
         upload_wizard_upload_sample,
     )
 

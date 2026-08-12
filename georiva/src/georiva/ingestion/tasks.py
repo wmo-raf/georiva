@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.utils import timezone as dj_timezone
-from django_celery_beat.models import PeriodicTask, IntervalSchedule
+from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
+from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
-from georiva.core.storage import storage, BucketType
 from georiva.ingestion.models import FileIngestion
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,6 @@ def process_incoming_file(
       - Marking the FileIngestion completed or failed
     """
     from django.contrib.contenttypes.models import ContentType
-
     from task_ferry.handler import JobHandler
 
     from georiva.ingestion.models import FileIngestionJob
@@ -257,7 +256,7 @@ def sweep_staging(sync: bool = False):
 
 @app.task(name="georiva.ingestion.tasks.cleanup_archives", queue="georiva-default")
 def cleanup_archives(max_age_days: int = 5):
-    from georiva.core.storage import storage, BucketType
+    from georiva.core.storage import BucketType, storage
     from georiva.ingestion.models import FileIngestion
 
     cutoff = dj_timezone.now() - timedelta(days=max_age_days)

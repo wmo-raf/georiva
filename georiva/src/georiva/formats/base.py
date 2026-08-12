@@ -29,7 +29,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Generator
+from typing import Generator, Optional
 
 import numpy as np
 import xarray as xr

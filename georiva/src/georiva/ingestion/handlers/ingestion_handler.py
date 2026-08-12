@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from georiva.core.models import Collection, Item, Asset
+from georiva.core.models import Asset, Collection, Item
 from georiva.ingestion.handlers.asset_handler import AssetHandler
 from georiva.ingestion.handlers.context import IngestionContext
 from georiva.ingestion.handlers.item_handler import ItemHandler

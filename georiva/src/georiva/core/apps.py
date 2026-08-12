@@ -1,7 +1,7 @@
 import logging
 
 from django.apps import AppConfig
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_delete, post_save
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ def on_style_change(sender, instance, **kwargs):
     warm.
     """
     from georiva.core.machine_plane.palette_cache import warm_variable
+
     from .models import Variable
 
     variable = (
@@ -75,7 +76,7 @@ def _sync_keep_for_collection(collection):
     """Create or remove the incoming/.keep for a collection based on whether
     it has any linked DataFeeds. Automated collections (with a feed) don't
     use the manual dropzone, so no .keep is needed there."""
-    from georiva.core.storage import storage, BucketType
+    from georiva.core.storage import BucketType, storage
 
     bucket = storage.bucket(BucketType.INCOMING)
     keep_path = f"{collection.catalog.storage_prefix}/{collection.slug}/.keep"
@@ -120,10 +121,11 @@ class CoreConfig(AppConfig):
     verbose_name = "GeoRIVA Core"
 
     def ready(self):
-        from .models import Collection, Variable
-        from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
-        from .models.visualization import VariableStyle
         from georiva.sources.models import DataFeed
+        from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
+
+        from .models import Collection, Variable
+        from .models.visualization import VariableStyle
 
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
         post_save.connect(collection_post_save, sender=Collection)

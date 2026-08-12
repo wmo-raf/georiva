@@ -9,7 +9,8 @@ FileIngestionJob is the operator-visible layer on top.
 import logging
 
 from task_ferry.registry import JobType
-from .models import FileIngestionJob, FileIngestion
+
+from .models import FileIngestion, FileIngestionJob
 
 logger = logging.getLogger(__name__)
 

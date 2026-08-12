@@ -15,13 +15,13 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Item
+from georiva.organisations.testing import dial_org, join_org, make_organisation
 from georiva.sources.models import (
     DataFeed,
     DerivedProduct,
     DerivedProductInput,
     DerivedProductOutput,
 )
-from georiva.organisations.testing import dial_org, join_org, make_organisation
 
 User = get_user_model()
 

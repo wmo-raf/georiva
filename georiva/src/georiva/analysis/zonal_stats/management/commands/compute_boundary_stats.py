@@ -69,14 +69,14 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from georiva.core.models import Asset
-        from georiva.core.storage import storage
         from georiva.analysis.zonal_stats.service import (
             compute_stats_from_cog_bytes,
             get_boundaries_for_collection,
             persist_stats,
         )
         from georiva.analysis.zonal_stats.tasks import compute_boundary_zonal_stats
+        from georiva.core.models import Asset
+        from georiva.core.storage import storage
 
         collections = self._resolve_collections(options)
 

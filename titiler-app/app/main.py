@@ -3,7 +3,6 @@ from app.logging_config import configure_logging
 configure_logging()
 
 import logging
-
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Query, Request, Response

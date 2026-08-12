@@ -2,9 +2,10 @@ from django import forms
 from django.db import models
 from django_extensions.db.fields import AutoSlugField
 from django_extensions.db.models import TimeStampedModel
-from wagtail.admin.panels import FieldPanel, MultiFieldPanel, TitleFieldPanel, TabbedInterface, ObjectList
+from wagtail.admin.panels import FieldPanel, MultiFieldPanel, ObjectList, TabbedInterface, TitleFieldPanel
 from wagtail.search import index
 from wagtail.search.index import Indexed
+
 from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 

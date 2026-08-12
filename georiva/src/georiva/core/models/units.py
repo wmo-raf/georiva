@@ -2,7 +2,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin.panels import FieldPanel
 
-from georiva.core.unit_utils import validate_unit, ureg
+from georiva.core.unit_utils import ureg, validate_unit
 from georiva.organisations.lookups import SHARED_REFERENCE_DATA
 
 

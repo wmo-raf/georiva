@@ -9,11 +9,11 @@ back verbatim.
 
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
+from xml.etree import ElementTree as ET
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
-from xml.etree import ElementTree as ET
 
 from georiva.accounts.models import ApiKey
 from georiva.core.machine_plane import (
