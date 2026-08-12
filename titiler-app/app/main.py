@@ -22,6 +22,7 @@ from app.dependencies import (
     SemanticTileConfig,
 )
 from app.middleware import RequestLoggingMiddleware
+from app.wmts import rest_router as wmts_rest_router
 from app.wmts import router as wmts_router
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,13 @@ app.include_router(
 #: read as the four-segment tile grammar above. Like every other route here
 #: the org is carried, never resolved (ADR 0013).
 app.include_router(wmts_router)
+
+#: RESTful GetFeatureInfo (#379), on the same prefix the tiles are on: the
+#: identify address is the tile address with the clicked pixel appended, which
+#: is why it mounts here rather than under the KVP endpoint. Two segments
+#: deeper than the deepest route the factory registers, so it shadows none of
+#: them, and the auth gate scopes it by the four segments it already reads.
+app.include_router(wmts_rest_router, prefix=TILE_ROUTE_PREFIX)
 
 
 # ---------------------------------------------------------------------------

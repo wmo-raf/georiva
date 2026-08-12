@@ -380,6 +380,35 @@ def _keyed(url, api_key):
     return f"{url}?{_api_key_pair(api_key)}" if api_key else url
 
 
+def _wmts_rest_template(variable, leaf, dimensions, styled, api_key) -> str:
+    """A REST ``ResourceURL`` template addressing ``variable``'s tile grid.
+
+    The shared trunk of the two templates a Layer advertises (#354, #379): the
+    per-variable route down to ``{TileMatrix}/{TileCol}/{TileRow}``, then
+    ``leaf`` — ``.png`` for the tile itself, the clicked pixel for an identify
+    — and then the query both spell identically. Written once because the two
+    templates must name the same layer at the same instant in the same style,
+    or a client would identify a pixel of a tile it is not looking at.
+    """
+    collection = variable.collection
+    root = titiler_variable_root(
+        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
+    )
+    template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}{leaf}"
+    params = [
+        (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
+    ] if styled else []
+    params += [
+        (WMTS_DIMENSION_PARAMS[identifier], identifier)
+        for identifier in dimensions
+    ]
+    parts = [f"{param}={{{placeholder}}}" for param, placeholder in params]
+    if api_key:
+        parts.append(_api_key_pair(api_key))
+    query = "&".join(parts)
+    return f"{template}?{query}" if query else template
+
+
 def wmts_rest_tile_template(variable, dimensions=(), styled=False, api_key=None) -> str:
     """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
 
@@ -408,23 +437,27 @@ def wmts_rest_tile_template(variable, dimensions=(), styled=False, api_key=None)
     cannot append parameters. Only a document already personal to that caller
     may pass it, and such documents never enter a shared cache.
     """
-    collection = variable.collection
-    root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
-    )
-    template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}.png"
-    params = [
-        (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
-    ] if styled else []
-    params += [
-        (WMTS_DIMENSION_PARAMS[identifier], identifier)
-        for identifier in dimensions
-    ]
-    parts = [f"{param}={{{placeholder}}}" for param, placeholder in params]
-    if api_key:
-        parts.append(_api_key_pair(api_key))
-    query = "&".join(parts)
-    return f"{template}?{query}" if query else template
+    return _wmts_rest_template(variable, ".png", dimensions, styled, api_key)
+
+
+def wmts_rest_featureinfo_template(variable, dimensions=(), styled=False, api_key=None) -> str:
+    """The REST identify template a capabilities Layer advertises (#379).
+
+    The tile template with the clicked pixel spliced in: ``{J}`` and ``{I}``
+    are WMTS 1.0's names for the row and column of a pixel *within* the tile,
+    and a client fills them from the same click that named the tile. The
+    answer comes back as the one ``InfoFormat`` the document offers, so the
+    leaf is ``.json`` rather than a format placeholder — there is no second
+    rendering to choose between.
+
+    Without this a Layer declares an ``InfoFormat`` no REST client can reach:
+    identify was KVP-only, discoverable through ``OperationsMetadata`` alone
+    (#363). ``dimensions``, ``styled`` and ``api_key`` mean exactly what they
+    mean on the tile template, and are passed through unchanged, because an
+    identify that named a different time or style than the tile beside it
+    would explain a pixel nobody is looking at.
+    """
+    return _wmts_rest_template(variable, "/{J}/{I}.json", dimensions, styled, api_key)
 
 
 def wmts_capabilities_url(organisation, api_key=None) -> str:

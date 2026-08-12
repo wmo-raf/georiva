@@ -19,8 +19,16 @@ one pasted URL discovers layers and then serves their tiles.
 coordinate and the ``I``/``J`` pixel within it become a lon/lat, and the COG
 behind the same semantic address is point-read for the raw physical value.
 
-Errors answer OGC ExceptionReport XML (OWS 1.1), never framework JSON: the
-clients on this endpoint are legacy KVP speakers that can parse nothing else.
+The same identify is reachable on the RESTful binding (#379), through
+``rest_router`` rather than this endpoint: a client that reads the per-layer
+``ResourceURL`` templates and never speaks KVP was shown an ``InfoFormat`` it
+had no address to ask on. Both bindings resolve their pixel and read their
+point through :func:`_identify`, so the two cannot answer one click two ways.
+
+Errors answer OGC ExceptionReport XML (OWS 1.1), never framework JSON, on both
+routers. The KVP endpoint's clients are legacy speakers that can parse nothing
+else; the REST identify route exists only to serve a ``ResourceURL``, so its
+caller is a WMTS client too, whatever the encoding it fetched with.
 """
 import logging
 import math
@@ -40,6 +48,12 @@ from app import dependencies
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+#: The RESTful identify route (#379), mounted by ``app.main`` under the same
+#: four-segment prefix the tile factory sits on — so the address a client
+#: clicks on is the tile address with the pixel appended, and the auth gate
+#: scopes it by the very segments it already scopes tiles by (ADR 0015).
+rest_router = APIRouter()
 
 OWS_NS = "http://www.opengis.net/ows/1.1"
 
@@ -146,18 +160,22 @@ def _require(params: dict[str, str], name: str) -> str:
     return value
 
 
-def _check_org_slug(org_slug: str) -> None:
-    """Refuse an organisation segment that could re-shape a URL it is spliced into.
+def _check_slugs(*segments: str) -> None:
+    """Refuse a path segment that could re-shape a URL it is spliced into.
 
-    The segment arrives in this endpoint's own path and leaves in two more —
-    the tile route GetTile dispatches to, and the Django address
-    GetCapabilities is fetched from — so its shape is the same question
-    :func:`_parse_layer` asks of the ``LAYER`` triple, asked once at the door
-    because both branches splice it. Reported as absent rather than invalid:
-    no organisation is spelt this way, and which institutions exist here is
-    not this caller's business.
+    On the KVP endpoint that is the organisation alone: it arrives in that
+    endpoint's own path and leaves in two more — the tile route GetTile
+    dispatches to, and the Django address GetCapabilities is fetched from — so
+    its shape is the same question :func:`_parse_layer` asks of the ``LAYER``
+    triple, asked once at the door because both branches splice it. On the REST
+    identify route (#379) the whole address arrives as path segments and all
+    four are asked, because there the triple never passes through
+    ``_parse_layer`` at all.
+
+    Reported as absent rather than invalid: nothing here is spelt this way, and
+    which institutions and catalogs exist is not this caller's business.
     """
-    if not SLUG_RE.fullmatch(org_slug):
+    if not all(SLUG_RE.fullmatch(segment) for segment in segments):
         raise WMTSException(
             404, "InvalidParameterValue", None, "No WMTS service at this address",
         )
@@ -503,10 +521,12 @@ async def _read_point(
     return value
 
 
-async def _dispatch_get_feature_info(
-        request: Request, org_slug: str, params: dict[str, str],
-) -> Response:
-    """Answer GetFeatureInfo with the value under the clicked pixel (#363).
+async def _identify(
+        request: Request, address: tuple[str, str, str, str],
+        zoom: int, row: int, col: int, i: int, j: int,
+        style: Optional[str], query: dict[str, str],
+) -> dict:
+    """The identify answer for one pixel, whichever binding asked (#363, #379).
 
     The answer echoes what was asked — layer, time, reftime and the lon/lat
     the tile coordinate and pixel resolved to — beside the value, so a
@@ -518,24 +538,18 @@ async def _dispatch_get_feature_info(
     value. The client asked a well-formed question about a real place and the
     honest answer is "nothing here" — an exception would tell it the layer is
     broken.
+
+    The ``layer`` echoed is the identifier the capabilities document
+    advertises, rebuilt from the address rather than from whatever the client
+    sent, so the REST caller — which spelt the triple as path segments and
+    never sent a ``LAYER`` at all — gets the same receipt as the KVP one.
     """
-    _validate_service_and_version(params)
-    _validate_tile_choices(params)
-    _validate_info_format(params)
-    catalog, collection, variable = _parse_layer(params)
-    zoom, row, col = _parse_tile_coords(params)
-    i, j = _parse_pixel(params, zoom)
-
-    style = _resolve_style(params)
-    query = _time_query(params)
-    address = (org_slug, catalog, collection, variable)
-
     lon, lat = _pixel_lonlat(zoom, row, col, i, j)
     config = await _tile_config_for(address, style)
     value = await _read_point(request, address, lon, lat, query, style)
 
     payload = {
-        "layer": params["layer"],
+        "layer": ":".join(address[1:]),
         "time": query["time"],
         "reftime": query.get("reftime"),
         "longitude": lon,
@@ -547,6 +561,24 @@ async def _dispatch_get_feature_info(
     for name in ("units", "label"):
         if config.get(name):
             payload[name] = config[name]
+    return payload
+
+
+async def _dispatch_get_feature_info(
+        request: Request, org_slug: str, params: dict[str, str],
+) -> Response:
+    """Answer KVP GetFeatureInfo with the value under the clicked pixel (#363)."""
+    _validate_service_and_version(params)
+    _validate_tile_choices(params)
+    _validate_info_format(params)
+    catalog, collection, variable = _parse_layer(params)
+    zoom, row, col = _parse_tile_coords(params)
+    i, j = _parse_pixel(params, zoom)
+
+    payload = await _identify(
+        request, (org_slug, catalog, collection, variable), zoom, row, col, i, j,
+        _resolve_style(params), _time_query(params),
+    )
     return JSONResponse(payload, media_type=INFO_FORMAT)
 
 
@@ -677,7 +709,7 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
     collection before it got here (ADR 0015).
     """
     try:
-        _check_org_slug(org_slug)
+        _check_slugs(org_slug)
         params = _collect_params(request)
         operation = _require(params, "request").lower()
         if operation == "gettile":
@@ -694,4 +726,57 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
     except WMTSException as exc:
         if exc.status_code >= 500:
             logger.warning("WMTS KVP %s: %s", exc.code, exc.text)
+        return exception_report(exc)
+
+
+@rest_router.get("/tiles/{tile_matrix_set}/{tile_matrix}/{tile_col}/{tile_row}/{j}/{i}.json")
+async def wmts_rest_feature_info(
+        request: Request,
+        org_slug: str, catalog_slug: str, collection_slug: str, variable_slug: str,
+        tile_matrix_set: str, tile_matrix: str, tile_col: str, tile_row: str,
+        j: str, i: str,
+) -> Response:
+    """RESTful GetFeatureInfo — the identify a ``ResourceURL`` client can reach (#379).
+
+    The tile address with the pixel appended, because that is what the client
+    is holding: it drew the tile from
+    ``…/tiles/WebMercatorQuad/{TileMatrix}/{TileCol}/{TileRow}.png`` and the
+    click it wants explained happened inside that very tile. Column before row,
+    matching the tile route's own ``z/x/y`` — the capabilities template names
+    its placeholders, so a client substitutes by name and never by position.
+
+    Every value is taken as a string and validated by the same helpers the KVP
+    binding uses, rather than declared as ``int`` for the framework to check.
+    FastAPI would answer a malformed segment with its own 422 JSON, which is
+    the one shape this route promised not to emit — and the two bindings would
+    then disagree about what a bad TILEROW is.
+
+    Dimensions and style arrive in the query, exactly as they do on the tile
+    route this sits beside (``?time=…&reftime=…&style=…``), so the capabilities
+    template is the tile template with a pixel spliced in and the same query
+    behind it.
+    """
+    try:
+        _check_slugs(org_slug, catalog_slug, collection_slug, variable_slug)
+        # Query first, path second: the path is where the gate read this
+        # request's address, so a query parameter of the same name may not
+        # quietly stand in for one of its segments.
+        params = _collect_params(request)
+        params.update({
+            "tilematrixset": tile_matrix_set, "tilematrix": tile_matrix,
+            "tilecol": tile_col, "tilerow": tile_row, "i": i, "j": j,
+        })
+        _validate_tile_choices(params)
+        zoom, row, col = _parse_tile_coords(params)
+        pixel_i, pixel_j = _parse_pixel(params, zoom)
+
+        payload = await _identify(
+            request, (org_slug, catalog_slug, collection_slug, variable_slug),
+            zoom, row, col, pixel_i, pixel_j,
+            _resolve_style(params), _time_query(params),
+        )
+        return JSONResponse(payload, media_type=INFO_FORMAT)
+    except WMTSException as exc:
+        if exc.status_code >= 500:
+            logger.warning("WMTS REST %s: %s", exc.code, exc.text)
         return exception_report(exc)
