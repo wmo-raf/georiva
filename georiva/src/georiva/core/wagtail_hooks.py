@@ -12,6 +12,7 @@ from .views import (
     collection_items_list,
     collection_styling,
     plugin_list,
+    variable_style_stops,
     variable_styling,
 )
 from .views.viewsets import BoundaryChooserViewSet, admin_viewsets
@@ -28,6 +29,11 @@ def urlconf_georivacore():
             'collection/<int:collection_pk>/styling/<int:variable_pk>/',
             variable_styling,
             name="variable_styling",
+        ),
+        path(
+            'collection/<int:collection_pk>/styling/<int:variable_pk>/stops/',
+            variable_style_stops,
+            name="variable_style_stops",
         ),
         path('plugins/', plugin_list, name="plugin_list"),
     ]

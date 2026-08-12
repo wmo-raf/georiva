@@ -285,6 +285,36 @@ class ItemManager(models.Manager):
             qs = qs.filter(collection=collection)
         return qs.order_by('-time').first()
     
+    def latest_for_variable(self, variable):
+        """The item a preview of ``variable`` should show: newest run, earliest
+        horizon.
+
+        Plain ``-time`` ordering answers the wrong question on a forecast feed.
+        Its newest valid time is the *furthest* horizon — a ten-day-out field —
+        so an operator judging a style against it is judging a guess, not the
+        weather. The newest ``reference_time`` therefore decides first and the
+        earliest valid time within that run decides second; a collection whose
+        items carry no reference time degenerates to the newest valid time,
+        which for observations is the same question correctly answered.
+
+        Only items carrying a COG for this variable are candidates: the encoded
+        texture is derived from the COG and nothing else can stand in for it.
+        """
+        candidates = self.filter(
+            collection_id=variable.collection_id,
+            assets__variable=variable,
+            assets__format=Asset.Format.COG,
+        )
+        latest_ref = (
+            candidates.filter(reference_time__isnull=False)
+            .order_by('-reference_time')
+            .values_list('reference_time', flat=True)
+            .first()
+        )
+        if latest_ref is not None:
+            return candidates.filter(reference_time=latest_ref).order_by('time').first()
+        return candidates.order_by('-time').first()
+
     def latest_forecast_run(self, collection):
         """Get items from the latest forecast run."""
         latest_ref = (
