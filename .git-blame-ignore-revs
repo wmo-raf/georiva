@@ -6,4 +6,4 @@
 #     git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 # style: apply ruff format — 339 files, formatter output only.
-ad058a845cebdc82ba618ea9b7c90bcb7df9df98
+0df468baf7dbb7f88e5d53ef0771460db0e462a5

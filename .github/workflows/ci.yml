@@ -156,3 +156,26 @@ jobs:
 
       - name: Run Titiler test suite
         run: make titiler-test
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Ruff is a single binary and reads ./ruff.toml, so this needs neither the
+    # image nor the services. It is the fastest signal in the workflow and the
+    # one most likely to be the only thing red, which is why it reports on its
+    # own rather than behind a test failure.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # `make lint` and not a bare ruff invocation, so that what CI checks and
+      # what `make format` fixes can never drift apart: both read the pinned
+      # version from one place in the Makefile.
+      - name: Check lint and formatting
+        run: make lint
