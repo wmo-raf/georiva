@@ -1,19 +1,33 @@
 """The Styling surface (ADR 0022, issue #321): one place where styling is tuned.
 
-Two seams:
+Three seams:
 
 * the model — stop ordering on ``VariableStyle.clean()`` and the atomic
   default-promotion helper, neither of which the earlier slices needed;
 * the admin surface — the collection Styling page and the canonical
   per-variable form, driven through the admin test client: listing with
-  swatches, ramp application, stop fine-tuning, the re-apply warning path,
-  default promotion, deletion guards, and org scoping of ramp choices.
+  swatches, ramp application, stop fine-tuning, default promotion, deletion
+  guards, and org scoping of ramp choices;
+* the map preview (#382) — which item it draws and what the panel says when
+  there is nothing to draw. The map itself is JavaScript and is verified by
+  hand, as ``item_preview.html``'s already is; what is tested here is the
+  contract the page hands it.
 """
+from datetime import datetime, timezone
+
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from georiva.core.models import ColorRamp, ColorRampStop, Variable, VariableStyle
+from georiva.core.machine_plane import titiler_encoded_preview_url
+from georiva.core.models import (
+    Asset,
+    ColorRamp,
+    ColorRampStop,
+    Item,
+    Variable,
+    VariableStyle,
+)
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
 from georiva.organisations.tests.factories import (
@@ -136,6 +150,12 @@ class StylingSurfaceTestCase(TestCase):
     def form_url(self):
         return reverse(
             "variable_styling", args=[self.collection.pk, self.variable.pk]
+        )
+
+    @property
+    def stops_url(self):
+        return reverse(
+            "variable_style_stops", args=[self.collection.pk, self.variable.pk]
         )
 
 
@@ -406,9 +426,15 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "hex color")
 
-    # -- re-apply ramp -----------------------------------------------------
+    # -- applying a ramp ---------------------------------------------------
 
-    def test_reapplying_over_tuned_stops_asks_before_discarding(self):
+    def test_applying_a_ramp_writes_nothing(self):
+        """Applying is a form gesture now (#382), not a database write.
+
+        The endpoint hands back stops the browser fills the form with; only
+        Save persists them. A saved snapshot the operator has not saved over
+        must therefore come back untouched.
+        """
         tuned = [
             {"value": 0.0, "color": "#111111"},
             {"value": 25.0, "color": "#123123"},
@@ -418,64 +444,74 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
             variable=self.variable, name="Official", slug="official",
             is_default=True, ramp=self.org_ramp, stops=tuned,
         )
-        response = self.client.post(self.form_url, {
-            "action": "apply-ramp",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
+        response = self.client.get(
+            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"}
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "discard")
         style.refresh_from_db()
         self.assertEqual(style.stops, tuned)
 
-    def test_a_confirmed_reapply_regenerates_the_snapshot(self):
-        style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=self.org_ramp,
-            stops=[
-                {"value": 0.0, "color": "#111111"},
-                {"value": 25.0, "color": "#123123"},
-                {"value": 50.0, "color": "#222222"},
-            ],
+    def test_the_generated_stops_are_the_ramp_over_the_saved_range(self):
+        response = self.client.get(
+            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "continuous"}
         )
-        response = self.client.post(self.form_url, {
-            "action": "apply-ramp",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-            "confirm_discard": "1",
-        })
-        self.assertEqual(response.status_code, 302)
-        style.refresh_from_db()
         self.assertEqual(
-            style.stops,
+            response.json()["stops"],
             [
                 {"value": 0.0, "color": "#000000"},
                 {"value": 50.0, "color": "#ffffff"},
             ],
         )
 
-    def test_applying_onto_an_empty_snapshot_needs_no_confirmation(self):
-        style = VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
-            is_default=True, ramp=self.org_ramp,
+    def test_stepped_generation_doubles_each_class_boundary(self):
+        response = self.client.get(
+            self.stops_url,
+            {"ramp": str(self.org_ramp.pk), "mode": "stepped", "steps": "7"},
         )
-        response = self.client.post(self.form_url, {
-            "action": "apply-ramp",
-            "style_slug": "official",
-            "name": "Official",
-            "ramp": str(self.org_ramp.pk),
-            "mode": VariableStyle.Mode.CONTINUOUS,
-            "steps": "",
-        })
-        self.assertEqual(response.status_code, 302)
-        style.refresh_from_db()
-        self.assertEqual(len(style.stops), 2)
+        # Two stops per class keep the edges hard through interpolation.
+        self.assertEqual(len(response.json()["stops"]), 14)
+
+    def test_stepped_generation_without_classes_is_refused(self):
+        response = self.client.get(
+            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "stepped"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("classes", response.json()["error"])
+
+    def test_an_unknown_rendering_mode_is_refused(self):
+        response = self.client.get(
+            self.stops_url, {"ramp": str(self.org_ramp.pk), "mode": "swirly"}
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_generating_without_a_ramp_is_refused(self):
+        response = self.client.get(self.stops_url, {"mode": "continuous"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ramp", response.json()["error"])
+
+    def test_a_non_numeric_ramp_is_refused_rather_than_erroring(self):
+        response = self.client.get(
+            self.stops_url, {"ramp": "viridis", "mode": "continuous"}
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_another_organisations_ramp_cannot_be_generated_from(self):
+        response = self.client.get(
+            self.stops_url,
+            {"ramp": str(self.foreign_ramp.pk), "mode": "continuous"},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_another_organisations_variable_is_not_found(self):
+        foreign = make_org_tree(self.other_org)
+        response = self.client.get(
+            reverse(
+                "variable_style_stops",
+                args=[foreign["collection"].pk, foreign["variable"].pk],
+            ),
+            {"ramp": str(self.org_ramp.pk), "mode": "continuous"},
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 class StyleSetManagementTests(StylingSurfaceTestCase):
@@ -575,3 +611,110 @@ class DemotedCollectionFormTests(StylingSurfaceTestCase):
             unit=self.variable.unit,
         )
         self.assertEqual((variable.value_min, variable.value_max), (0.0, 1.0))
+
+
+class PreviewItemChoiceTests(TestCase):
+    """Which item the map preview draws (#382).
+
+    The rule is newest run, earliest horizon — because a forecast feed's newest
+    *valid* time is its furthest horizon, and styling against a ten-day-out
+    field judges a guess rather than the weather.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = make_org_tree(make_organisation())
+        cls.variable = cls.tree["variable"]
+        cls.collection = cls.tree["collection"]
+        # The fixture's own asset carries no format, so it is not a COG and
+        # never stands in for one.
+        cls.tree["item"].delete()
+
+    def _item(self, time, reference_time=None, fmt=Asset.Format.COG,
+              variable=None, bounds=(0, 0, 10, 10)):
+        item = Item.objects.create(
+            collection=self.collection, time=time,
+            reference_time=reference_time, bounds=list(bounds),
+        )
+        Asset.objects.create(
+            item=item, variable=variable or self.variable,
+            href="x.tif", format=fmt,
+        )
+        return item
+
+    def test_a_forecast_feed_previews_the_newest_runs_earliest_horizon(self):
+        old_run = datetime(2026, 3, 1, tzinfo=timezone.utc)
+        new_run = datetime(2026, 3, 2, tzinfo=timezone.utc)
+        self._item(datetime(2026, 3, 10, tzinfo=timezone.utc), old_run)
+        analysis = self._item(new_run, new_run)
+        # The furthest horizon of the newest run: newest valid time overall,
+        # and the wrong answer.
+        self._item(datetime(2026, 3, 12, tzinfo=timezone.utc), new_run)
+        self.assertEqual(Item.objects.latest_for_variable(self.variable), analysis)
+
+    def test_a_feed_without_reference_times_previews_the_newest_valid_time(self):
+        self._item(datetime(2026, 3, 1, tzinfo=timezone.utc))
+        newest = self._item(datetime(2026, 3, 3, tzinfo=timezone.utc))
+        self.assertEqual(Item.objects.latest_for_variable(self.variable), newest)
+
+    def test_an_item_carrying_no_cog_is_not_a_candidate(self):
+        self._item(datetime(2026, 3, 3, tzinfo=timezone.utc), fmt=Asset.Format.PNG)
+        self.assertIsNone(Item.objects.latest_for_variable(self.variable))
+
+    def test_another_variables_item_is_not_a_candidate(self):
+        other = Variable.objects.create(
+            collection=self.collection, name="Other", slug="other",
+            unit=self.variable.unit, value_min=0, value_max=1,
+        )
+        self._item(datetime(2026, 3, 3, tzinfo=timezone.utc), variable=other)
+        self.assertIsNone(Item.objects.latest_for_variable(self.variable))
+
+    def test_a_variable_with_no_items_previews_nothing(self):
+        self.assertIsNone(Item.objects.latest_for_variable(self.variable))
+
+
+class PreviewPanelTests(StylingSurfaceTestCase):
+    """What the styling form hands the map, and what it says when it cannot."""
+
+    def _cog_item(self, bounds=(0.0, 0.0, 10.0, 10.0)):
+        item = Item.objects.create(
+            collection=self.collection,
+            time=datetime(2026, 4, 1, tzinfo=timezone.utc),
+            bounds=list(bounds) if bounds else None,
+        )
+        Asset.objects.create(
+            item=item, variable=self.variable, href="x.tif",
+            format=Asset.Format.COG,
+        )
+        return item
+
+    def test_the_texture_url_and_extent_reach_the_page(self):
+        item = self._cog_item()
+        response = self.client.get(self.form_url)
+        config = response.context["preview"]["config"]
+        # From the database, because the texture's ``v`` token hashes the
+        # range's repr — the fixture's ints and the stored floats spell it
+        # differently.
+        self.variable.refresh_from_db()
+        self.assertEqual(config["textureUrl"], titiler_encoded_preview_url(item, self.variable))
+        self.assertEqual(config["bounds"], [0.0, 0.0, 10.0, 10.0])
+        # The unscale is the variable's saved range — what the texture was
+        # encoded against, and what the clipping warning measures against.
+        self.assertEqual(config["imageUnscale"], [0.0, 50.0])
+
+    def test_the_panel_links_to_the_full_item_preview(self):
+        item = self._cog_item()
+        response = self.client.get(self.form_url)
+        self.assertContains(response, reverse("item_preview", args=[item.pk]))
+
+    def test_a_variable_with_no_ingested_data_says_so(self):
+        response = self.client.get(self.form_url)
+        self.assertIsNone(response.context["preview"]["config"])
+        self.assertEqual(response.context["preview"]["unavailable"], "no-data")
+        self.assertContains(response, "no data has been ingested")
+
+    def test_an_item_without_an_extent_says_so_differently(self):
+        self._cog_item(bounds=None)
+        response = self.client.get(self.form_url)
+        self.assertEqual(response.context["preview"]["unavailable"], "no-bounds")
+        self.assertContains(response, "no spatial extent")

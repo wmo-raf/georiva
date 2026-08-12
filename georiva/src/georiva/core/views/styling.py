@@ -4,17 +4,27 @@ Two pages: a collection-level listing — every variable with its range and its
 default style's swatch, grayscale defaults plainly visible — and the canonical
 per-variable form, where ranges are edited, ramps applied, stops fine-tuned and
 the style set managed. Every other admin surface only seeds or links here.
+
+The per-variable form carries a live map preview of the latest item (#382), so
+the question the operator actually has — does this style read correctly on real
+data? — is answered on the page where it is asked rather than somewhere else
+after a save. Two seams serve it: :func:`_preview_context`, which finds the item
+and the texture to draw it from, and :func:`variable_style_stops`, which
+generates a ramp's stops without saving them so the map can show a ramp before
+the operator commits to it.
 """
 from django import forms
 from django.core.exceptions import ValidationError
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 
-from georiva.core.models import Collection, ColorRamp, Variable, VariableStyle
-from georiva.core.models.visualization import _swatch_html
+from georiva.core.machine_plane import titiler_encoded_preview_url
+from georiva.core.models import Collection, ColorRamp, Item, Variable, VariableStyle
+from georiva.core.models.visualization import _swatch_html, generate_stops
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
 
 #: The stepped-mode class count preselected for a fresh style (ADR 0022).
@@ -27,6 +37,15 @@ GRAYSCALE_GRADIENT = "linear-gradient(to right, #000000 0%, #ffffff 100%)"
 #: style — impossible as a real slug, since slugify never yields underscores
 #: around a word.
 NEW_STYLE = "__new__"
+
+#: Why the map preview has nothing to draw. A fresh feed that has ingested
+#: nothing, a variable served as something other than a COG, and an item whose
+#: ingest recorded no extent are three different problems with three different
+#: fixes, and an operator can only tell which one they have if the panel says
+#: which one it is. A single "preview unavailable" would read as a bug in the
+#: styling page at exactly the moment it is not one.
+PREVIEW_NO_DATA = "no-data"
+PREVIEW_NO_BOUNDS = "no-bounds"
 
 
 def styling_summary(variable):
@@ -133,6 +152,38 @@ def _add_model_errors(form, error):
             form.add_error(target, message)
 
 
+def _preview_context(variable):
+    """What the map preview draws, or why it draws nothing (#382).
+
+    The texture is Titiler's on-demand ``encoded-preview.png`` — the item's whole
+    extent with pixel = rescale(value, vmin→vmax, 0→255), which the browser
+    unscales back to physical values and colors client-side. Nothing about the
+    style enters this URL, which is the point: recoloring is a palette swap in
+    the browser, so a stop edit repaints without a request and without a save.
+
+    That also fixes what the preview can honestly show. The texture is encoded
+    against the variable's *saved* range, so a stop beyond it renders as flat
+    clipped color; the panel says so rather than letting the operator read the
+    clipping as a broken ramp.
+    """
+    item = Item.objects.latest_for_variable(variable)
+    if item is None:
+        return {"unavailable": PREVIEW_NO_DATA, "config": None}
+    if not item.bounds:
+        return {"unavailable": PREVIEW_NO_BOUNDS, "config": None, "item": item}
+    return {
+        "unavailable": None,
+        "item": item,
+        "item_url": reverse("item_preview", args=[item.pk]),
+        "config": {
+            "textureUrl": titiler_encoded_preview_url(item, variable),
+            "bounds": list(item.bounds),
+            "imageUnscale": [variable.value_min, variable.value_max],
+            "unit": variable.units or "",
+        },
+    }
+
+
 def collection_styling(request, collection_pk):
     """The collection's Styling page: every variable, range and default swatch."""
     collection = get_org_object_or_404(
@@ -235,7 +286,6 @@ def variable_styling(request, collection_pk, variable_pk):
         },
     )
     stop_rows = list(selected.stops) if selected else []
-    reapply_warning = False
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -287,39 +337,6 @@ def variable_styling(request, collection_pk, variable_pk):
                     messages.success(request, _("Style saved."))
                     return redirect(style_url(style))
             stop_rows = _stop_rows(request.POST)
-
-        elif action == "apply-ramp":
-            if selected is None:
-                messages.error(request, _("Save the style before applying a ramp."))
-                return redirect(style_url())
-            style_form = VariableStyleForm(request.POST, ramp_queryset=ramp_queryset)
-            if style_form.is_valid():
-                data = style_form.cleaned_data
-                if data["ramp"] is None:
-                    style_form.add_error("ramp", _("Pick a ramp to apply."))
-                elif selected.stops and not request.POST.get("confirm_discard"):
-                    # The explicit warning path: regenerating replaces whatever
-                    # fine-tuning the snapshot holds, so it never happens on
-                    # the first click.
-                    reapply_warning = True
-                    stop_rows = list(selected.stops)
-                else:
-                    selected.name = data["name"]
-                    selected.ramp = data["ramp"]
-                    selected.mode = data["mode"]
-                    selected.steps = data["steps"]
-                    selected.apply_ramp()
-                    try:
-                        selected.full_clean()
-                    except ValidationError as error:
-                        _add_model_errors(style_form, error)
-                    else:
-                        selected.save()
-                        messages.success(
-                            request,
-                            _("Ramp applied — the stops were regenerated."),
-                        )
-                        return redirect(style_url(selected))
 
         elif action == "promote":
             if selected is None:
@@ -374,11 +391,64 @@ def variable_styling(request, collection_pk, variable_pk):
         "range_form": range_form,
         "style_form": style_form,
         "stop_rows": stop_rows,
-        "reapply_warning": reapply_warning,
         "ramp_gradients": ramp_gradients,
         "form_url": form_url,
+        "stops_url": reverse(
+            "variable_style_stops", args=[collection.pk, variable.pk]
+        ),
         "new_style_url": style_url(),
         "grayscale_gradient": GRAYSCALE_GRADIENT,
         "default_stepped_classes": DEFAULT_STEPPED_CLASSES,
+        "preview": _preview_context(variable),
     }
     return render(request, "core/variable_styling.html", context)
+
+
+def variable_style_stops(request, collection_pk, variable_pk):
+    """A ramp's stops over the variable's range, generated and *not* saved.
+
+    What the styling form's "Apply ramp" reads. Applying used to be a POST that
+    regenerated the snapshot in the database behind a confirm round-trip, so the
+    only way to see a ramp on real data was to destroy the tuning it replaced.
+    Here the stops come back as JSON, fill the form unsaved, and the map
+    repaints — nothing is lost until Save, and a reload undoes it.
+
+    It runs the same :func:`generate_stops` the model's ``apply_ramp()`` does
+    over the same saved range, so what the form fills in is exactly what a saved
+    re-apply would have produced. Read-only and side-effect-free, hence GET.
+    """
+    collection = get_org_object_or_404(request, Collection, pk=collection_pk)
+    variable = get_org_object_or_404(
+        request, Variable, pk=variable_pk, collection=collection
+    )
+
+    try:
+        ramp_pk = int(request.GET.get("ramp", ""))
+    except ValueError:
+        ramp_pk = None
+    ramp = scoped_queryset(
+        request, ColorRamp.objects.prefetch_related("stops")
+    ).filter(pk=ramp_pk).first() if ramp_pk else None
+    if ramp is None:
+        return JsonResponse({"error": _("Pick a ramp to apply.")}, status=400)
+
+    mode = request.GET.get("mode", VariableStyle.Mode.CONTINUOUS)
+    if mode not in VariableStyle.Mode.values:
+        return JsonResponse({"error": _("Unknown rendering mode.")}, status=400)
+
+    steps = None
+    if mode == VariableStyle.Mode.STEPPED:
+        try:
+            steps = int(request.GET.get("steps", ""))
+        except ValueError:
+            steps = 0
+        if steps < 2:
+            return JsonResponse(
+                {"error": _("Stepped mode needs at least two classes.")}, status=400
+            )
+
+    return JsonResponse({
+        "stops": generate_stops(
+            ramp, variable.value_min, variable.value_max, mode=mode, steps=steps
+        ),
+    })

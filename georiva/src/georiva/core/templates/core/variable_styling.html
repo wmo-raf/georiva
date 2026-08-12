@@ -1,14 +1,15 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n wagtailadmin_tags %}
+{% load i18n static wagtailadmin_tags %}
 
 {% block titletag %}{% blocktrans with name=variable.name %}Styling — {{ name }}{% endblocktrans %}{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
+    <link rel="stylesheet" href="{% static 'css/vendor/maplibre-gl.css' %}">
     <style>
         .vs-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 280px;
+            grid-template-columns: minmax(0, 1fr) 420px;
             gap: 2rem;
             align-items: start;
         }
@@ -112,19 +113,6 @@
             background: none;
         }
 
-        .vs-warning {
-            border: 1px solid var(--w-color-warning-100);
-            background: var(--w-color-warning-100);
-            border-radius: 5px;
-            padding: 1rem 1.25rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .vs-warning form {
-            display: inline-block;
-            margin-inline-end: 0.5rem;
-        }
-
         .vs-style-list {
             list-style: none;
             margin: 0;
@@ -173,31 +161,106 @@
             gap: 0.75rem;
             margin-top: 1rem;
         }
+
+        /*
+         * The map rides in the aside, pinned, because the stops table it
+         * answers for is taller than a screen: a preview that scrolls away
+         * while the operator drags a stop is not a live preview.
+         *
+         * The aside has to span the whole row for that to hold. The grid's
+         * `align-items: start` otherwise sizes it to its own content, and a
+         * sticky element cannot travel past the bottom of its container — so
+         * the map would scroll away exactly like a static one.
+         */
+        .vs-layout > aside {
+            align-self: stretch;
+        }
+
+        .vs-map-panel {
+            position: sticky;
+            /*
+             * Clear Wagtail's slim header, which is sticky at the top of the
+             * same scrolling element (71px), plus the page's own breathing
+             * space. There is no Wagtail variable for that height.
+             */
+            top: 5.5rem;
+            /*
+             * Wagtail's `.button` is `position: relative` at `z-index: auto`
+             * and the "New style" button comes later in the DOM, so without a
+             * layer of our own it paints over the pinned map.
+             */
+            z-index: 1;
+        }
+
+        .vs-map {
+            height: 320px;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--w-color-border-furniture);
+        }
+
+        .vs-map-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 0.75rem;
+            font-size: 0.85em;
+        }
+
+        .vs-map-toolbar label {
+            color: var(--w-color-grey-400);
+            font-weight: 600;
+        }
+
+        .vs-map-toolbar input[type="range"] {
+            inline-size: 6rem;
+            vertical-align: middle;
+        }
+
+        .vs-map-meta {
+            color: var(--w-color-grey-400);
+            font-size: 0.85em;
+            margin: 0.75rem 0 0;
+        }
+
+        .vs-map-meta dl {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 0.15rem 0.5rem;
+            margin: 0 0 0.5rem;
+        }
+
+        .vs-map-meta dt {
+            font-weight: 600;
+        }
+
+        .vs-map-meta dd {
+            margin: 0;
+        }
+
+        .vs-map-note {
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 4px;
+            padding: 0.75rem 1rem;
+            color: var(--w-color-grey-400);
+            font-size: 0.9em;
+        }
+
+        .vs-map-note.vs-map-note--warning {
+            border-color: var(--w-color-warning-100);
+            background: var(--w-color-warning-100);
+            color: var(--w-color-text-label);
+            margin-top: 0.75rem;
+        }
+
+        .vs-map-note[hidden] {
+            display: none;
+        }
     </style>
 {% endblock %}
 
 {% block main_content %}
-
-    {% if reapply_warning %}
-        <div class="vs-warning">
-            <p>
-                <strong>{% trans "Re-applying the ramp discards your fine-tuning." %}</strong>
-                {% trans "The current stops — including any hand-edited values or pinned thresholds — will be replaced by stops regenerated from the ramp over the variable's current range." %}
-            </p>
-            <form method="post" action="{{ form_url }}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="apply-ramp">
-                <input type="hidden" name="style_slug" value="{{ selected.slug }}">
-                <input type="hidden" name="name" value="{{ style_form.name.value|default_if_none:'' }}">
-                <input type="hidden" name="ramp" value="{{ style_form.ramp.value|default_if_none:'' }}">
-                <input type="hidden" name="mode" value="{{ style_form.mode.value|default_if_none:'' }}">
-                <input type="hidden" name="steps" value="{{ style_form.steps.value|default_if_none:'' }}">
-                <input type="hidden" name="confirm_discard" value="1">
-                <button type="submit" class="button">{% trans "Discard tuning and re-apply" %}</button>
-            </form>
-            <a href="{{ form_url }}?style={{ selected.slug }}" class="button button-secondary">{% trans "Keep my stops" %}</a>
-        </div>
-    {% endif %}
 
     <div class="vs-layout">
         <div>
@@ -238,7 +301,7 @@
                         <button type="submit" class="button">{% trans "Save range" %}</button>
                     </div>
                     <p class="help-text">
-                        {% trans "Changing the range never rewrites existing stops — use “Re-apply ramp” in the style editor to regenerate them over a new range." %}
+                        {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
                     </p>
                 </form>
             </section>
@@ -320,27 +383,79 @@
                         <button type="submit" name="action" value="save-style" class="button">
                             {% trans "Save style" %}
                         </button>
-                        {% if not creating %}
-                            <button type="submit" name="action" value="apply-ramp"
-                                    class="button button-secondary">
-                                {% if stop_rows %}
-                                    {% trans "Re-apply ramp" %}
-                                {% else %}
-                                    {% trans "Apply ramp" %}
-                                {% endif %}
-                            </button>
-                        {% endif %}
+                        {% comment %}
+                            Applying a ramp fills the table above from the
+                            server's own generator and repaints the map — it
+                            writes nothing. Whatever it replaces is unsaved
+                            work, recoverable by reloading, so the confirm is
+                            about the form and not about the database.
+                        {% endcomment %}
+                        <button type="button" class="button button-secondary" id="vs-apply-ramp"
+                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
+                            {% trans "Apply ramp" %}
+                        </button>
                     </div>
-                    {% if not creating %}
-                        <p class="help-text">
-                            {% trans "“Re-apply ramp” regenerates the stops from the selected ramp over the current range, discarding fine-tuning (you will be asked to confirm)." %}
-                        </p>
-                    {% endif %}
+                    <ul class="vs-errors" id="vs-apply-error" hidden
+                        data-pick-ramp="{% trans 'Pick a ramp to apply.' %}"
+                        data-unreachable="{% trans 'Could not reach the server.' %}"></ul>
+                    <p class="help-text">
+                        {% trans "“Apply ramp” regenerates the stops from the selected ramp over the variable's saved range and shows them on the map. Nothing is written until you save." %}
+                    </p>
                 </form>
             </section>
         </div>
 
         <aside>
+            {% comment %}
+                The live preview (#382): the latest item drawn from Titiler's
+                value-encoded texture and colored in the browser from the stop
+                rows above — including unsaved ones. Nothing here is a saved
+                artifact and no edit on this page reaches the server to repaint
+                it.
+            {% endcomment %}
+            <section class="vs-panel vs-map-panel">
+                <h2 class="w-label-1">{% trans "Preview" %}</h2>
+                {% if preview.unavailable == "no-data" %}
+                    <p class="vs-map-note">
+                        {% trans "Nothing to preview yet — no data has been ingested for this variable as a COG. The style can still be tuned; the map appears once the first file lands." %}
+                    </p>
+                    {% elif preview.unavailable == "no-bounds" %}
+                    <p class="vs-map-note">
+                        {% trans "The latest item recorded no spatial extent, so there is nothing to place on a map. This is an ingestion problem, not a styling one." %}
+                    </p>
+                {% else %}
+                    <div class="vs-map" id="vs-map"></div>
+                    <p class="vs-map-note" id="vs-map-status"
+                       data-no-webgl="{% trans 'This browser has no WebGL, so the map cannot be drawn. Everything else on this page still works.' %}"
+                       data-texture-failed="{% trans 'The preview texture could not be loaded. The data may not have finished processing, or you may be signed in to a different organisation than this collection belongs to.' %}">{% trans "Loading the preview…" %}</p>
+                    <div class="vs-map-toolbar">
+                        <label for="vs-basemap">{% trans "Basemap" %}</label>
+                        <select id="vs-basemap">
+                            <option value="osm">{% trans "OSM" %}</option>
+                            <option value="light">{% trans "Light" %}</option>
+                            <option value="dark">{% trans "Dark" %}</option>
+                            <option value="satellite">{% trans "Satellite" %}</option>
+                        </select>
+                        <label for="vs-opacity">{% trans "Opacity" %}</label>
+                        <input type="range" id="vs-opacity" min="0" max="100" value="100">
+                    </div>
+                    <p class="vs-map-note vs-map-note--warning" id="vs-clip-warning" hidden>
+                        {% trans "Some stops fall outside the saved value range, so the map renders them as flat clipped color. Save a wider range to see them." %}
+                    </p>
+                    <div class="vs-map-meta">
+                        <dl>
+                            <dt>{% trans "Valid" %}</dt>
+                            <dd>{{ preview.item.time }}</dd>
+                            {% if preview.item.reference_time %}
+                                <dt>{% trans "Run" %}</dt>
+                                <dd>{{ preview.item.reference_time }}</dd>
+                            {% endif %}
+                        </dl>
+                        <a href="{{ preview.item_url }}">{% trans "Open the full item preview" %}</a>
+                    </div>
+                {% endif %}
+            </section>
+
             <section class="vs-panel">
                 <h2 class="w-label-1">{% trans "Styles" %}</h2>
                 {% if styles %}
@@ -352,7 +467,8 @@
                                     <span class="w-status w-status--primary">{% trans "Default" %}</span>
                                 {% endif %}
                                 <span class="vs-style-swatch"
-                                      style="background: {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
+                                      style="background:
+                                              {% if style.stops %}{{ style.css_gradient }}{% else %}{{ grayscale_gradient }}{% endif %};"></span>
                                 <div class="vs-style-actions">
                                     {% if not style.is_default %}
                                         <form method="post" action="{{ form_url }}">
@@ -384,7 +500,11 @@
                 {% endif %}
                 <p>
                     <a href="{{ new_style_url }}" class="button button-small bicolor button--icon">
-                        <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+                        <span class="icon-wrapper">
+                            <svg class="icon icon-plus" aria-hidden="true">
+                                <use href="#icon-plus"></use>
+                            </svg>
+                        </span>
                         {% trans "New style" %}
                     </a>
                 </p>
@@ -393,10 +513,15 @@
     </div>
 
     {{ ramp_gradients|json_script:"vs-ramp-gradients" }}
+    {{ preview.config|json_script:"vs-preview-config" }}
 {% endblock %}
 
 {% block extra_js %}
     {{ block.super }}
+    <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
+    <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
+    <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
+    <script src="{% static 'js/raster_preview.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             const rampGradients = JSON.parse(
@@ -412,6 +537,16 @@
             const preview = document.getElementById('vs-preview');
             const previewMin = document.getElementById('vs-preview-min');
             const previewMax = document.getElementById('vs-preview-max');
+            const previewConfigEl = document.getElementById('vs-preview-config');
+            const previewConfig = previewConfigEl
+                ? JSON.parse(previewConfigEl.textContent)
+                : null;
+            const clipWarning = document.getElementById('vs-clip-warning');
+            const mapStatus = document.getElementById('vs-map-status');
+            const applyButton = document.getElementById('vs-apply-ramp');
+            const applyError = document.getElementById('vs-apply-error');
+            const stopsUrl = '{{ stops_url }}';
+            let mapPreview = null;
 
             function renderRampSwatch() {
                 const gradient = rampGradients[rampSelect.value] || '';
@@ -445,11 +580,12 @@
                 return stops;
             }
 
-            {% comment %}
-                The live preview: the current stop rows as a gradient, values
-                normalized over their own span — the same reading
-                VariableStyle.css_gradient() gives the saved snapshot.
-            {% endcomment %}
+            /**
+             The live preview: the current stop rows as a gradient, values
+             normalized over their own span — the same reading
+             VariableStyle.css_gradient() gives the saved snapshot.
+             **/
+
             function renderPreview() {
                 const stops = readStops();
                 if (!stops.length) {
@@ -473,6 +609,77 @@
                 preview.style.background = gradient;
                 previewMin.textContent = String(low);
                 previewMax.textContent = String(high);
+
+                paintMap(stops);
+            }
+
+            /**
+             The map's palette, built from the same rows the gradient bar
+             reads. WeatherLayers wants [[value, [r, g, b, a]], …] — the very
+             shape VariableStyle.as_weatherlayers_palette() hands the tile
+             config, so what the operator sees here is what Titiler will
+             serve once this is saved.
+             **/
+
+            function hexToRgba(hex) {
+                const clean = hex.replace('#', '');
+                const rgba = [
+                    parseInt(clean.slice(0, 2), 16),
+                    parseInt(clean.slice(2, 4), 16),
+                    parseInt(clean.slice(4, 6), 16),
+                    clean.length >= 8 ? parseInt(clean.slice(6, 8), 16) : 255
+                ];
+                return rgba.map(function (channel) {
+                    return Number.isNaN(channel) ? 0 : channel;
+                });
+            }
+
+            function paletteFromStops(stops) {
+                if (!stops.length) {
+                    // What a styleless variable actually renders as, shown
+                    // honestly rather than as an empty map.
+                    return [
+                        [previewConfig.imageUnscale[0], [0, 0, 0, 255]],
+                        [previewConfig.imageUnscale[1], [255, 255, 255, 255]]
+                    ];
+                }
+                if (stops.length === 1) {
+                    // A single stop spans nothing, and a zero-width palette
+                    // divides by zero on the GPU.
+                    const only = hexToRgba(stops[0].color);
+                    return [[stops[0].value, only], [stops[0].value + 1e-6, only]];
+                }
+                return stops.map(function (stop) {
+                    return [stop.value, hexToRgba(stop.color)];
+                });
+            }
+
+            /**
+             The texture is encoded against the variable's saved range, so a
+             stop beyond it has nowhere to land and renders as flat clipped
+             color. Saying so is the difference between the operator reading
+             that as a bad ramp and reading it as a stale range.
+             **/
+
+            function updateClipWarning(stops) {
+                if (!clipWarning) {
+                    return;
+                }
+                const low = previewConfig.imageUnscale[0];
+                const high = previewConfig.imageUnscale[1];
+                clipWarning.hidden = !stops.some(function (stop) {
+                    return stop.value < low || stop.value > high;
+                });
+            }
+
+            function paintMap(stops) {
+                if (!previewConfig) {
+                    return;
+                }
+                updateClipWarning(stops);
+                if (mapPreview) {
+                    mapPreview.setPalette(paletteFromStops(stops));
+                }
             }
 
             function syncPicker(row) {
@@ -512,11 +719,77 @@
             }
 
             const rowTemplate = document.getElementById('vs-stop-row-template');
-            document.getElementById('vs-add-stop').addEventListener('click', function () {
+
+            function addRow(value, color) {
                 const row = rowTemplate.content.firstElementChild.cloneNode(true);
+                row.querySelector('[name="stop_value"]').value = value;
+                row.querySelector('[name="stop_color"]').value = color;
                 body.appendChild(row);
                 wireRow(row);
+            }
+
+            document.getElementById('vs-add-stop').addEventListener('click', function () {
+                addRow('', '');
             });
+
+            /**
+             Applying a ramp asks the server for the stops it would generate
+             and fills the form with them — the same generate_stops() the
+             model's apply_ramp() runs, so there is one implementation of the
+             sampling and it lives in Python. Nothing is written; the map
+             repaints and Save is still the only thing that persists.
+             **/
+
+            async function applyRamp() {
+                if (!rampSelect.value) {
+                    showApplyError(applyError.dataset.pickRamp);
+                    return;
+                }
+                if (readStops().length && !window.confirm(applyButton.dataset.confirm)) {
+                    return;
+                }
+                const params = new URLSearchParams({
+                    ramp: rampSelect.value,
+                    mode: modeSelect.value
+                });
+                if (modeSelect.value === 'stepped') {
+                    params.set('steps', stepsInput.value);
+                }
+                applyButton.disabled = true;
+                try {
+                    const response = await fetch(stopsUrl + '?' + params.toString(), {
+                        headers: {'Accept': 'application/json'}
+                    });
+                    const payload = await response.json();
+                    if (!response.ok) {
+                        showApplyError(payload.error || response.statusText);
+                        return;
+                    }
+                    showApplyError('');
+                    body.replaceChildren();
+                    payload.stops.forEach(function (stop) {
+                        addRow(stop.value, stop.color);
+                    });
+                    renderPreview();
+                } catch (error) {
+                    console.error('Applying the ramp failed', error);
+                    showApplyError(applyError.dataset.unreachable);
+                } finally {
+                    applyButton.disabled = false;
+                }
+            }
+
+            function showApplyError(message) {
+                applyError.replaceChildren();
+                applyError.hidden = !message;
+                if (message) {
+                    const item = document.createElement('li');
+                    item.textContent = message;
+                    applyError.appendChild(item);
+                }
+            }
+
+            applyButton.addEventListener('click', applyRamp);
 
             document.querySelectorAll('form[data-confirm]').forEach(function (confirmForm) {
                 confirmForm.addEventListener('submit', function (event) {
@@ -526,11 +799,46 @@
                 });
             });
 
+            function initMap() {
+                if (!previewConfig) {
+                    return;
+                }
+                mapPreview = GeoRivaRasterPreview.create({
+                    container: 'vs-map',
+                    textureUrl: previewConfig.textureUrl,
+                    bounds: previewConfig.bounds,
+                    imageUnscale: previewConfig.imageUnscale,
+                    unit: previewConfig.unit,
+                    palette: paletteFromStops(readStops()),
+                    onStatus: function (state, code) {
+                        if (state === 'ready') {
+                            mapStatus.hidden = true;
+                            return;
+                        }
+                        mapStatus.hidden = false;
+                        mapStatus.textContent = code === 'no-webgl'
+                            ? mapStatus.dataset.noWebgl
+                            : mapStatus.dataset.textureFailed;
+                    }
+                });
+                document.getElementById('vs-basemap').addEventListener('change', function (event) {
+                    if (mapPreview) {
+                        mapPreview.setBasemap(event.target.value);
+                    }
+                });
+                document.getElementById('vs-opacity').addEventListener('input', function (event) {
+                    if (mapPreview) {
+                        mapPreview.setOpacity(parseInt(event.target.value, 10) / 100);
+                    }
+                });
+            }
+
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
             rampSelect.addEventListener('change', renderRampSwatch);
             modeSelect.addEventListener('change', toggleSteps);
             renderRampSwatch();
             toggleSteps();
+            initMap();
             renderPreview();
         });
     </script>
