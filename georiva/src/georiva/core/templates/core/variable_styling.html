@@ -482,6 +482,19 @@
                             <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
                             {{ style_form.steps }}
                         </div>
+                        {% comment %}
+                            The same gesture as the one below the stops table.
+                            It is duplicated rather than moved because the two
+                            ends of the form are two different moments: here it
+                            sits beside the ramp and mode that feed it, which is
+                            where an operator who has just changed either one
+                            reaches for it, and the stops table is taller than a
+                            screen.
+                        {% endcomment %}
+                        <button type="button" class="button button-small button-secondary vs-apply-ramp"
+                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
+                            {% trans "Apply ramp" %}
+                        </button>
                     </div>
 
                     <h3 class="w-label-2">{% trans "Preview" %}</h3>
@@ -539,7 +552,7 @@
                             work, recoverable by reloading, so the confirm is
                             about the form and not about the database.
                         {% endcomment %}
-                        <button type="button" class="button button-secondary" id="vs-apply-ramp"
+                        <button type="button" class="button button-secondary vs-apply-ramp"
                                 data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
                             {% trans "Apply ramp" %}
                         </button>
@@ -689,7 +702,7 @@
                 : null;
             const clipWarning = document.getElementById('vs-clip-warning');
             const mapStatus = document.getElementById('vs-map-status');
-            const applyButton = document.getElementById('vs-apply-ramp');
+            const applyButtons = [...document.querySelectorAll('.vs-apply-ramp')];
             const applyError = document.getElementById('vs-apply-error');
             const stopsUrl = '{{ stops_url }}';
             let mapPreview = null;
@@ -939,12 +952,12 @@
              repaints and Save is still the only thing that persists.
              **/
 
-            async function applyRamp() {
+            async function applyRamp(trigger) {
                 if (!rampInput.value) {
                     showApplyError(applyError.dataset.pickRamp);
                     return;
                 }
-                if (readStops().length && !window.confirm(applyButton.dataset.confirm)) {
+                if (readStops().length && !window.confirm(trigger.dataset.confirm)) {
                     return;
                 }
                 const params = new URLSearchParams({
@@ -954,7 +967,9 @@
                 if (modeSelect.value === 'stepped') {
                     params.set('steps', stepsInput.value);
                 }
-                applyButton.disabled = true;
+                applyButtons.forEach(function (button) {
+                    button.disabled = true;
+                });
                 try {
                     const response = await fetch(stopsUrl + '?' + params.toString(), {
                         headers: {'Accept': 'application/json'}
@@ -974,7 +989,9 @@
                     console.error('Applying the ramp failed', error);
                     showApplyError(applyError.dataset.unreachable);
                 } finally {
-                    applyButton.disabled = false;
+                    applyButtons.forEach(function (button) {
+                        button.disabled = false;
+                    });
                 }
             }
 
@@ -985,10 +1002,18 @@
                     const item = document.createElement('li');
                     item.textContent = message;
                     applyError.appendChild(item);
+                    // There is one error list but two buttons, at opposite
+                    // ends of a form taller than the screen — so bring it to
+                    // whoever pressed one.
+                    applyError.scrollIntoView({block: 'nearest'});
                 }
             }
 
-            applyButton.addEventListener('click', applyRamp);
+            applyButtons.forEach(function (button) {
+                button.addEventListener('click', function () {
+                    applyRamp(button);
+                });
+            });
 
             document.querySelectorAll('form[data-confirm]').forEach(function (confirmForm) {
                 confirmForm.addEventListener('submit', function (event) {
