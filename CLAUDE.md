@@ -189,6 +189,11 @@ Check these when working on related areas:
 **IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that
 branch for the reminder of the session
 
+**IMPORTANT**: Run `make format` before committing Python changes — it sorts imports, applies ruff's safe fixes and
+formats. CI runs `make lint` (the same checks, reporting only) and fails the PR on any difference. Rules live in
+`ruff.toml` at the repo root and cover core and `titiler-app/` together; migrations and
+`source-plugin-boilerplate/` are excluded.
+
 ## Agent skills
 
 ### Issue tracker
