@@ -39,10 +39,17 @@ reading order. If you're new, start at the top and work down.
    [ADR-0009](adr/0009-derived-product-chain-and-lifecycle.md), and
    [ADR-0010](adr/0010-pinned-collection-bindings-for-derived-products.md).
 
+## Operating & validation
+
+9. **[WMTS legacy-client validation runbook](wmts-legacy-client-validation.md)** — the step-by-step session for
+   checking the org-wide WMTS service against QGIS and a real legacy KVP client: the two paste-able URLs, API-key
+   setup for private layers, dimension defaults, exception rendering, and the two known risks (JSON-only InfoFormat,
+   capabilities-document size). Run when the WMTS surface changes or before an NMHS rollout.
+
 ## Contributing
 
-9. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
-   conventions.
+10. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
+    conventions.
 
 ## Cross-cutting patterns (for maintainers)
 
