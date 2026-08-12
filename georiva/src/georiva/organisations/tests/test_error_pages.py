@@ -10,6 +10,7 @@ Everything here runs with ``DEBUG=False``. The handlers under test are the ones
 Django only consults in production; with debug on it answers with its own
 traceback and technical 404 page instead, and none of this would be exercised.
 """
+
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -175,9 +176,7 @@ class AdminOpenPathTests(TestCase):
         The body is asserted for the same reason the sprite's is: the header
         alone would let through anything Django happened to label as script.
         """
-        response = self.client.get(
-            reverse("wagtailadmin_javascript_catalog"), headers=UGANDA
-        )
+        response = self.client.get(reverse("wagtailadmin_javascript_catalog"), headers=UGANDA)
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("javascript", response["Content-Type"])
@@ -231,9 +230,7 @@ class MemberWithoutAdminRightsTests(TestCase):
     def test_a_restricted_surface_redirects_rather_than_refusing(self):
         response = self.client.get(reverse("organisation_settings"), headers=KENYA)
 
-        self.assertRedirects(
-            response, reverse("wagtailadmin_home"), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, reverse("wagtailadmin_home"), fetch_redirect_response=False)
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"], DEBUG=False)

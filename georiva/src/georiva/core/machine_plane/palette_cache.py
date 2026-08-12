@@ -33,7 +33,10 @@ PALETTE_KEY_PREFIX = "georiva:palette"
 
 
 def get_palette_cache_key(
-    org_slug: str, catalog_slug: str, collection_slug: str, variable_slug: str,
+    org_slug: str,
+    catalog_slug: str,
+    collection_slug: str,
+    variable_slug: str,
     style_slug: str | None = None,
 ) -> str:
     key = f"{PALETTE_KEY_PREFIX}:{org_slug}:{catalog_slug}:{collection_slug}:{variable_slug}"
@@ -80,10 +83,7 @@ def build_colormap_256(palette_stops: list, vmin: float, vmax: float) -> dict:
                 if positions[j] <= i <= positions[j + 1]:
                     span = positions[j + 1] - positions[j]
                     t = (i - positions[j]) / span if span > 0 else 0
-                    result[i] = [
-                        round(colors[j][k] + t * (colors[j + 1][k] - colors[j][k]))
-                        for k in range(4)
-                    ]
+                    result[i] = [round(colors[j][k] + t * (colors[j + 1][k] - colors[j][k])) for k in range(4)]
                     break
 
     return result
@@ -118,8 +118,10 @@ def variable_cache_key(variable, style=None) -> str:
 
     collection = variable.collection
     return get_palette_cache_key(
-        org_slug_of(collection), collection.catalog.slug,
-        collection.slug, variable.slug,
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable.slug,
         style.slug if style is not None else None,
     )
 
@@ -137,15 +139,13 @@ def warm_variable(variable):
     try:
         entries = {variable_cache_key(variable): build_variable_payload(variable)}
         for style in variable.styles.all():
-            entries[variable_cache_key(variable, style)] = (
-                build_variable_payload(variable, style)
-            )
+            entries[variable_cache_key(variable, style)] = build_variable_payload(variable, style)
         redis_conn = get_redis_connection("default")
         for key, payload in entries.items():
             redis_conn.set(key, json.dumps(payload))
         return list(entries)
     except Exception as e:
-        logger.warning("Failed to warm palette cache for variable %s: %s", getattr(variable, 'slug', '?'), e)
+        logger.warning("Failed to warm palette cache for variable %s: %s", getattr(variable, "slug", "?"), e)
         return None
 
 
@@ -170,7 +170,8 @@ def prune_variable(variable) -> None:
     except Exception as e:
         logger.warning(
             "Failed to prune palette cache for variable %s: %s",
-            getattr(variable, 'slug', '?'), e,
+            getattr(variable, "slug", "?"),
+            e,
         )
 
 
@@ -189,7 +190,8 @@ def prune_style(style) -> None:
     except Exception as e:
         logger.warning(
             "Failed to prune palette cache for style %s: %s",
-            getattr(style, 'slug', '?'), e,
+            getattr(style, "slug", "?"),
+            e,
         )
 
 
@@ -211,10 +213,7 @@ def prune_stale_keys(live_keys) -> int:
 
     try:
         redis_conn = get_redis_connection("default")
-        stale = [
-            key for key in redis_conn.scan_iter(match=f"{PALETTE_KEY_PREFIX}:*")
-            if _as_text(key) not in live_keys
-        ]
+        stale = [key for key in redis_conn.scan_iter(match=f"{PALETTE_KEY_PREFIX}:*") if _as_text(key) not in live_keys]
         if stale:
             redis_conn.delete(*stale)
         return len(stale)
@@ -232,10 +231,9 @@ def warm_all() -> None:
     from georiva.core.models import Variable
 
     qs = (
-        Variable.objects
-        .filter(is_active=True)
-        .select_related('collection__catalog__organisation')
-        .prefetch_related('styles')
+        Variable.objects.filter(is_active=True)
+        .select_related("collection__catalog__organisation")
+        .prefetch_related("styles")
     )
 
     warmed = 0
@@ -249,5 +247,7 @@ def warm_all() -> None:
     pruned = prune_stale_keys(live_keys)
     logger.info(
         "Warmed palette cache for %d variables (%d keys), pruned %d stale key(s)",
-        warmed, len(live_keys), pruned,
+        warmed,
+        len(live_keys),
+        pruned,
     )

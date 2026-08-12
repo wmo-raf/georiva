@@ -24,6 +24,4 @@ class Command(BaseCommand):
         if not updated:
             self.stdout.write(f"Every organisation Site is already on port {target}.")
             return
-        self.stdout.write(
-            self.style.SUCCESS(f"Moved {updated} organisation Site(s) to port {target}.")
-        )
+        self.stdout.write(self.style.SUCCESS(f"Moved {updated} organisation Site(s) to port {target}."))

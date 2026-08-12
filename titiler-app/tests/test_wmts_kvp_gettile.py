@@ -4,10 +4,17 @@ Everything here is behavior at the HTTP boundary: the KVP spelling of a tile
 request must answer exactly what the REST spelling answers — same bytes on
 success, same status on refusal — with only the error vocabulary changing.
 """
+
 import json
 
 from tests.conftest import (
-    CATALOG, COLLECTION, ORG, TILE_CONFIG, VARIABLE, exception_of, kvp,
+    CATALOG,
+    COLLECTION,
+    ORG,
+    TILE_CONFIG,
+    VARIABLE,
+    exception_of,
+    kvp,
 )
 
 TIME = "2026-03-23T12:00:00Z"
@@ -118,9 +125,7 @@ class TestStyle:
         assert response.status_code == 404
         exc = exception_of(response)
         assert exc.get("exceptionCode") == "InvalidParameterValue"
-        assert "style" in exc.findtext(
-            "{http://www.opengis.net/ows/1.1}ExceptionText"
-        ).lower()
+        assert "style" in exc.findtext("{http://www.opengis.net/ows/1.1}ExceptionText").lower()
 
     def test_an_unknown_layer_is_a_404_exception_report(self, client, fake_redis, seed_cog):
         response = client.get(f"/{ORG}/wmts", params=kvp(LAYER="no:such:layer"))

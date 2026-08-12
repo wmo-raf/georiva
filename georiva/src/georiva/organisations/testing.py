@@ -9,6 +9,7 @@ with the same slug.
 Not a test module itself: it lives beside the app so any app's tests can import
 it without reaching into another app's ``tests`` package.
 """
+
 from datetime import datetime, timezone
 
 from wagtail.models import Page, Site
@@ -74,9 +75,7 @@ def make_organisation(slug=DEFAULT_TEST_ORG_SLUG, name=None, **fields):
         port=80,
         defaults={"site_name": name or slug, "root_page": _root_page()},
     )
-    return Organisation.objects.create(
-        name=name or slug, slug=slug, site=site, **fields
-    )
+    return Organisation.objects.create(name=name or slug, slug=slug, site=site, **fields)
 
 
 #: The catalog/collection/variable slug :func:`make_org_tree` defaults to. It is
@@ -103,20 +102,31 @@ def make_org_tree(organisation, *, name=None, slug=SHARED_TREE_SLUG):
 
     name = name or f"{organisation.slug} {slug}"
     catalog = Catalog.objects.create(
-        organisation=organisation, name=name, slug=slug,
+        organisation=organisation,
+        name=name,
+        slug=slug,
         file_format=Catalog.FileFormat.GEOTIFF,
     )
     collection = Collection.objects.create(catalog=catalog, name=name, slug=slug)
     unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
     variable = Variable.objects.create(
-        collection=collection, name=name, slug=slug,
-        unit=unit, value_min=0, value_max=50,
+        collection=collection,
+        name=name,
+        slug=slug,
+        unit=unit,
+        value_min=0,
+        value_max=50,
     )
     item = Item.objects.create(
-        collection=collection, time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+        collection=collection,
+        time=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
     )
     asset = Asset.objects.create(item=item, variable=variable, href="x.tif")
     return {
-        "organisation": organisation, "catalog": catalog, "collection": collection,
-        "variable": variable, "item": item, "asset": asset,
+        "organisation": organisation,
+        "catalog": catalog,
+        "collection": collection,
+        "variable": variable,
+        "item": item,
+        "asset": asset,
     }

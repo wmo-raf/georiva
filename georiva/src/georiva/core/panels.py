@@ -10,6 +10,7 @@ Runtime imports throughout: this module is imported by ``core.models.variable``
 at model-definition time, so importing models or views at module level would be
 circular.
 """
+
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin.panels import Panel
 
@@ -30,7 +31,6 @@ class StylingSummaryPanel(Panel):
                 context.update(styling_summary(variable))
             else:
                 context["styling_note"] = _(
-                    "Save the collection first, then set the range and style "
-                    "on the Styling page."
+                    "Save the collection first, then set the range and style on the Styling page."
                 )
             return context

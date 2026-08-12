@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-
 # ---------------------------------------------------------------------------
 # Shared fields
 # ---------------------------------------------------------------------------
+
 
 class VariablePathField(serializers.CharField):
     """
@@ -48,8 +48,7 @@ class VariablePathField(serializers.CharField):
         request = self.context.get("request")
         if request is None:
             raise serializers.ValidationError(
-                "This field cannot resolve a variable without a request to take "
-                "the organisation from."
+                "This field cannot resolve a variable without a request to take the organisation from."
             )
 
         variables = scoped_queryset(
@@ -70,93 +69,77 @@ class VariablePathField(serializers.CharField):
                 collection__catalog__slug=catalog_slug,
             )
         except Variable.DoesNotExist:
-            raise serializers.ValidationError(
-                f"Variable not found or inactive: {value!r}"
-            )
+            raise serializers.ValidationError(f"Variable not found or inactive: {value!r}")
 
 
 # ---------------------------------------------------------------------------
 # Request serializers
 # ---------------------------------------------------------------------------
 
+
 class PointRequestSerializer(serializers.Serializer):
-    variable = VariablePathField(
-        help_text="catalog_slug/collection_slug/variable_slug"
-    )
+    variable = VariablePathField(help_text="catalog_slug/collection_slug/variable_slug")
     lat = serializers.FloatField(min_value=-90.0, max_value=90.0)
     lon = serializers.FloatField(min_value=-180.0, max_value=180.0)
     time_start = serializers.DateTimeField(required=False, default=None)
     time_end = serializers.DateTimeField(required=False, default=None)
-    
+
     def validate(self, attrs):
         start = attrs.get("time_start")
         end = attrs.get("time_end")
         if start and end and start >= end:
-            raise serializers.ValidationError(
-                "time_start must be before time_end."
-            )
+            raise serializers.ValidationError("time_start must be before time_end.")
         return attrs
 
 
 class AreaRequestSerializer(serializers.Serializer):
     AGGREGATIONS = ["mean", "sum", "min", "max", "std"]
-    
-    variable = VariablePathField(
-        help_text="catalog_slug/collection_slug/variable_slug"
-    )
-    geometry = serializers.JSONField(
-        help_text="GeoJSON geometry (Polygon or MultiPolygon)"
-    )
+
+    variable = VariablePathField(help_text="catalog_slug/collection_slug/variable_slug")
+    geometry = serializers.JSONField(help_text="GeoJSON geometry (Polygon or MultiPolygon)")
     aggregation = serializers.ChoiceField(
         choices=AGGREGATIONS,
         default="mean",
     )
     time_start = serializers.DateTimeField(required=False, default=None)
     time_end = serializers.DateTimeField(required=False, default=None)
-    
+
     def validate_geometry(self, value):
         """Check geometry is a valid GeoJSON Polygon or MultiPolygon."""
         if not isinstance(value, dict):
             raise serializers.ValidationError("Must be a GeoJSON geometry object.")
-        
+
         geom_type = value.get("type")
         if geom_type not in ("Polygon", "MultiPolygon"):
-            raise serializers.ValidationError(
-                f"geometry.type must be Polygon or MultiPolygon, got {geom_type!r}."
-            )
+            raise serializers.ValidationError(f"geometry.type must be Polygon or MultiPolygon, got {geom_type!r}.")
         if "coordinates" not in value:
-            raise serializers.ValidationError(
-                "geometry must have a 'coordinates' key."
-            )
-        
+            raise serializers.ValidationError("geometry must have a 'coordinates' key.")
+
         # Validate with shapely so we catch self-intersections etc.
         try:
             from shapely.geometry import shape
             from shapely.validation import explain_validity
-            
+
             geom = shape(value)
             if not geom.is_valid:
-                raise serializers.ValidationError(
-                    f"Invalid geometry: {explain_validity(geom)}"
-                )
+                raise serializers.ValidationError(f"Invalid geometry: {explain_validity(geom)}")
         except ImportError:
             pass  # shapely not installed — skip deep validation
-        
+
         return value
-    
+
     def validate(self, attrs):
         start = attrs.get("time_start")
         end = attrs.get("time_end")
         if start and end and start >= end:
-            raise serializers.ValidationError(
-                "time_start must be before time_end."
-            )
+            raise serializers.ValidationError("time_start must be before time_end.")
         return attrs
 
 
 # ---------------------------------------------------------------------------
 # Response serializers
 # ---------------------------------------------------------------------------
+
 
 class TimeseriesValueSerializer(serializers.Serializer):
     time = serializers.DateTimeField()

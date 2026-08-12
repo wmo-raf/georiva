@@ -24,9 +24,7 @@ class NoDjangoDependencyTests(unittest.TestCase):
         env = dict(os.environ)
         env.pop("DJANGO_SETTINGS_MODULE", None)
         env["PYTHONPATH"] = str(_SRC)
-        r = subprocess.run(
-            [sys.executable, "-c", code], capture_output=True, text=True, env=env
-        )
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("OK", r.stdout)
 

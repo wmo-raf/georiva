@@ -29,7 +29,7 @@ from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, Generator
+from typing import Generator, Optional
 
 import numpy as np
 import xarray as xr
@@ -45,7 +45,7 @@ class VariableInfo:
     Carries spatial/temporal info alongside the lazy DataArray,
     so callers can inspect bounds, CRS, etc. without computing.
     """
-    
+
     data: xr.DataArray  # lazy (dask-backed)
     bounds: tuple[float, float, float, float]  # west, south, east, north
     crs: str
@@ -57,7 +57,7 @@ class VariableInfo:
     units: str = ""
     needs_flip: bool = False  # True if data is south-to-north and needs flipud on materialize
     metadata: dict = field(default_factory=dict)
-    
+
     def compute(self) -> np.ndarray:
         """Materialize to numpy with correct image orientation."""
         data = self.data.values.squeeze()
@@ -69,7 +69,7 @@ class VariableInfo:
 @dataclass
 class ExtractedVariable:
     """Materialized variable — numpy array with spatial metadata."""
-    
+
     data: np.ndarray
     bounds: tuple[float, float, float, float]  # west, south, east, north
     crs: str
@@ -89,21 +89,21 @@ class BaseFormatPlugin(ABC):
     Subclasses must implement: can_handle, list_variables, get_timestamps, open_variable.
     extract_variable and get_metadata_for_variable have default implementations.
     """
-    
+
     name: str = "base"
     display_name: str = "Base Format"
     extensions: list[str] = []
     time_from_filename: bool = False  # True only for formats that have no native time dimension (e.g. GeoTIFF)
-    
+
     def __init__(self):
         self.logger = logging.getLogger(f"georiva.formats.{self.name}")
         self._dataset_cache: dict[str, list] = {}
-    
+
     @abstractmethod
     def can_handle(self, file_path: PathLike) -> bool:
         """Check if this plugin can handle the given file."""
         ...
-    
+
     @abstractmethod
     def list_variables(self, file_path: PathLike) -> list[dict]:
         """
@@ -114,7 +114,7 @@ class BaseFormatPlugin(ABC):
             Format-specific fields (e.g. band_index, key) may also be present.
         """
         ...
-    
+
     @abstractmethod
     def get_timestamps(self, file_path: PathLike, variable_name: str, **kwargs) -> list[datetime]:
         """
@@ -129,17 +129,17 @@ class BaseFormatPlugin(ABC):
             Sorted list of datetime objects.
         """
         ...
-    
+
     @abstractmethod
     @contextmanager
     def open_variable(
-            self,
-            file_path: PathLike,
-            variable_name: str,
-            *,
-            timestamp: Optional[datetime] = None,
-            window: Optional[tuple[int, int, int, int]] = None,
-            **kwargs,
+        self,
+        file_path: PathLike,
+        variable_name: str,
+        *,
+        timestamp: Optional[datetime] = None,
+        window: Optional[tuple[int, int, int, int]] = None,
+        **kwargs,
     ) -> Generator[VariableInfo, None, None]:
         """
         Primary interface. Opens a variable lazily as a context manager.
@@ -164,14 +164,14 @@ class BaseFormatPlugin(ABC):
             **kwargs: Format-specific options (e.g. key for GRIB).
         """
         ...
-    
+
     def extract_variable(
-            self,
-            file_path: PathLike,
-            variable_name: str,
-            timestamp: Optional[datetime] = None,
-            window: Optional[tuple[int, int, int, int]] = None,
-            **kwargs,
+        self,
+        file_path: PathLike,
+        variable_name: str,
+        timestamp: Optional[datetime] = None,
+        window: Optional[tuple[int, int, int, int]] = None,
+        **kwargs,
     ) -> ExtractedVariable:
         """
         Convenience method: opens variable and materializes to numpy.
@@ -179,17 +179,17 @@ class BaseFormatPlugin(ABC):
         For lazy access, use open_variable() instead.
         """
         with self.open_variable(
-                file_path,
-                variable_name,
-                timestamp=timestamp,
-                window=window,
-                **kwargs,
+            file_path,
+            variable_name,
+            timestamp=timestamp,
+            window=window,
+            **kwargs,
         ) as var_info:
             data = var_info.compute()
-            
+
             height = int(data.shape[0]) if data.ndim > 1 else 1
             width = int(data.shape[1]) if data.ndim > 1 else int(data.shape[0])
-            
+
             return ExtractedVariable(
                 data=data,
                 bounds=var_info.bounds,
@@ -202,14 +202,14 @@ class BaseFormatPlugin(ABC):
                 units=var_info.units,
                 metadata=var_info.metadata,
             )
-    
+
     def get_metadata_for_variable(
-            self,
-            file_path: PathLike,
-            variable_name: str,
-            *,
-            timestamp: Optional[datetime] = None,
-            **kwargs,
+        self,
+        file_path: PathLike,
+        variable_name: str,
+        *,
+        timestamp: Optional[datetime] = None,
+        **kwargs,
     ) -> dict:
         """
         Lightweight scan for dimensions and bounds without reading pixel data.
@@ -221,10 +221,10 @@ class BaseFormatPlugin(ABC):
             Dict with: width, height, bounds, crs.
         """
         with self.open_variable(
-                file_path,
-                variable_name,
-                timestamp=timestamp,
-                **kwargs,
+            file_path,
+            variable_name,
+            timestamp=timestamp,
+            **kwargs,
         ) as var_info:
             return {
                 "width": var_info.width,
@@ -232,11 +232,11 @@ class BaseFormatPlugin(ABC):
                 "bounds": var_info.bounds,
                 "crs": var_info.crs,
             }
-    
+
     def clear_cache(self):
         """
         Release all cached datasets and close their file handles.
-    
+
         Call this after finishing all variable reads for a file.
         """
         for datasets in self._dataset_cache.values():

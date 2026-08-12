@@ -26,6 +26,7 @@ testable with that one seam mocked. The quantity math is covered by the
 
 See docs/adr/0005-generic-derivation-engine.md and issue #123.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -78,20 +79,19 @@ class ClimatologyRecipe(BaseRecipe):
                 for quantity in quantities:
                     if quantity in _ANOMALY_QUANTITIES:
                         for baseline in baselines:
-                            yield self._make_unit(
-                                source, variable, period, season, quantity, baseline
-                            )
+                            yield self._make_unit(source, variable, period, season, quantity, baseline)
                     else:
-                        yield self._make_unit(
-                            source, variable, period, season, quantity, None
-                        )
+                        yield self._make_unit(source, variable, period, season, quantity, None)
 
     @staticmethod
     def _make_unit(source, variable, period, season, quantity, baseline) -> ProductionUnit:
         return {
-            "source_collection": source, "variable": variable,
-            "period": period, "season": season,
-            "quantity": quantity, "baseline": baseline,
+            "source_collection": source,
+            "variable": variable,
+            "period": period,
+            "season": season,
+            "quantity": quantity,
+            "baseline": baseline,
         }
 
     # ---- input resolution ---------------------------------------------------
@@ -105,9 +105,7 @@ class ClimatologyRecipe(BaseRecipe):
         if unit.get("baseline"):
             # The baseline window is read from the same source series; it is a
             # distinct, required selector for the anomaly quantities.
-            resolved["baseline"] = ResolvedInput(
-                "baseline", required=True, items=items, assets=assets
-            )
+            resolved["baseline"] = ResolvedInput("baseline", required=True, items=items, assets=assets)
         return resolved
 
     # ---- outputs mapping ----------------------------------------------------
@@ -119,11 +117,18 @@ class ClimatologyRecipe(BaseRecipe):
         return OutputItem(
             collection=collection,
             time=datetime(start, 1, 1, tzinfo=timezone.utc),
-            bounds=si.bounds, crs=si.crs, width=si.width, height=si.height,
-            properties={"climatology": {
-                "season": unit["season"], "quantity": unit["quantity"],
-                "period": unit["period"], "baseline": unit.get("baseline"),
-            }},
+            bounds=si.bounds,
+            crs=si.crs,
+            width=si.width,
+            height=si.height,
+            properties={
+                "climatology": {
+                    "season": unit["season"],
+                    "quantity": unit["quantity"],
+                    "period": unit["period"],
+                    "baseline": unit.get("baseline"),
+                }
+            },
         )
 
     # ---- transform ----------------------------------------------------------
@@ -153,13 +158,21 @@ class ClimatologyRecipe(BaseRecipe):
         # The AssetWriter writes a 2D numpy array; the quantity ops return a
         # (y, x) DataArray once time is reduced out.
         import numpy as np
+
         array = np.asarray(result, dtype="float32")
-        return [OutputAsset(
-            variable=out_var, roles=["data"], format="cog",
-            array=array, bounds=si.bounds, crs=si.crs,
-            width=si.width, height=si.height,
-            stats=self._array_stats(array),
-        )]
+        return [
+            OutputAsset(
+                variable=out_var,
+                roles=["data"],
+                format="cog",
+                array=array,
+                bounds=si.bounds,
+                crs=si.crs,
+                width=si.width,
+                height=si.height,
+                stats=self._array_stats(array),
+            )
+        ]
 
     @staticmethod
     def _array_stats(array) -> dict:
@@ -218,10 +231,7 @@ class ClimatologyRecipe(BaseRecipe):
             return ds[asset.variable.slug]
         data_vars = list(ds.data_vars)
         if len(data_vars) != 1:
-            raise ValueError(
-                f"ClimatologyRecipe: cannot pick a variable from {data_vars} "
-                f"for asset {asset.pk}"
-            )
+            raise ValueError(f"ClimatologyRecipe: cannot pick a variable from {data_vars} for asset {asset.pk}")
         return ds[data_vars[0]]
 
     # ---- helpers ------------------------------------------------------------
@@ -248,7 +258,9 @@ class ClimatologyRecipe(BaseRecipe):
 
         slug = self._collection_slug(unit)
         collection, _ = Collection.objects.get_or_create(
-            catalog=catalog, slug=slug, defaults={"name": slug},
+            catalog=catalog,
+            slug=slug,
+            defaults={"name": slug},
         )
         return collection
 
@@ -257,8 +269,7 @@ class ClimatologyRecipe(BaseRecipe):
         from georiva.staging.models import StagingItem
 
         return list(
-            StagingItem.objects
-            .filter(collection__slug=unit["source_collection"])
+            StagingItem.objects.filter(collection__slug=unit["source_collection"])
             .select_related("collection__catalog")
             .prefetch_related("assets")
         )
@@ -273,18 +284,16 @@ class ClimatologyRecipe(BaseRecipe):
         """
         from georiva.core.models import Variable
 
-        src = next(
-            (a.variable for a in resolved["value"].assets if a.variable), None
-        )
+        src = next((a.variable for a in resolved["value"].assets if a.variable), None)
         if src is None:
-            raise ValueError(
-                "ClimatologyRecipe: source staging asset has no Variable to mirror"
-            )
+            raise ValueError("ClimatologyRecipe: source staging asset has no Variable to mirror")
         si = resolved["value"].items[0]
         collection = self._published_collection(unit, si.collection.catalog)
         spec = self._variable_spec(src, unit["quantity"])
         out_var, _ = Variable.objects.get_or_create(
-            collection=collection, slug=src.slug, defaults=spec,
+            collection=collection,
+            slug=src.slug,
+            defaults=spec,
         )
         return out_var
 
@@ -292,18 +301,18 @@ class ClimatologyRecipe(BaseRecipe):
         """Quantity-specific (name, unit, value_min, value_max) for the output."""
         span = (src.value_max - src.value_min) / 2.0
         if quantity == "value":
-            return {"name": src.name, "unit": src.unit,
-                    "value_min": src.value_min, "value_max": src.value_max}
+            return {"name": src.name, "unit": src.unit, "value_min": src.value_min, "value_max": src.value_max}
         if quantity == "anomaly":
-            return {"name": f"{src.name} anomaly", "unit": src.unit,
-                    "value_min": -span, "value_max": span}
+            return {"name": f"{src.name} anomaly", "unit": src.unit, "value_min": -span, "value_max": span}
         if quantity == "relative_anomaly":
-            return {"name": f"{src.name} relative anomaly",
-                    "unit": self._dimensionless_unit(),
-                    "value_min": -1.0, "value_max": 1.0}
+            return {
+                "name": f"{src.name} relative anomaly",
+                "unit": self._dimensionless_unit(),
+                "value_min": -1.0,
+                "value_max": 1.0,
+            }
         if quantity == "trend":
-            return {"name": f"{src.name} trend (per year)", "unit": src.unit,
-                    "value_min": -span, "value_max": span}
+            return {"name": f"{src.name} trend (per year)", "unit": src.unit, "value_min": -span, "value_max": span}
         raise ValueError(f"unknown quantity: {quantity!r}")
 
     @staticmethod
@@ -311,6 +320,7 @@ class ClimatologyRecipe(BaseRecipe):
         from georiva.core.models import Unit
 
         unit, _ = Unit.objects.get_or_create(
-            symbol="dimensionless", defaults={"name": "Dimensionless"},
+            symbol="dimensionless",
+            defaults={"name": "Dimensionless"},
         )
         return unit

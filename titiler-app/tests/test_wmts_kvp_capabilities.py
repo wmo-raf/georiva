@@ -8,11 +8,12 @@ Django for — because a proxy that fetched the wrong document, or fetched the
 right one without the caller's credential, would look identical from the
 inside.
 """
+
 import httpx
 import pytest
-
 from app import dependencies
 from app.config import DJANGO_BASE_URL
+
 from tests.conftest import ORG, exception_of, overriding
 
 #: What Django answers with. Opaque on purpose: Titiler interprets none of it,
@@ -42,9 +43,13 @@ class FakeDjango:
 
     def __init__(self):
         self.requests = []
-        self.answers(httpx.Response(
-            200, content=DOCUMENT, headers={"content-type": "application/xml"},
-        ))
+        self.answers(
+            httpx.Response(
+                200,
+                content=DOCUMENT,
+                headers={"content-type": "application/xml"},
+            )
+        )
 
     def answers(self, answer):
         """Answer every fetch with ``answer`` — a Response, or a callable."""
@@ -65,9 +70,11 @@ class FakeDjango:
 def django(monkeypatch):
     fake = FakeDjango()
     monkeypatch.setattr(
-        dependencies, "django_client",
+        dependencies,
+        "django_client",
         lambda: httpx.AsyncClient(
-            base_url=DJANGO_BASE_URL, transport=httpx.MockTransport(fake.handle),
+            base_url=DJANGO_BASE_URL,
+            transport=httpx.MockTransport(fake.handle),
         ),
     )
     return fake
@@ -148,10 +155,13 @@ class TestCredentialForwarding:
         # A keyed document lists private layers and carries the caller's own
         # key in its URLs; Django marks it private, and dropping that here
         # would leave it cacheable by everything between the two services.
-        django.answers(httpx.Response(
-            200, content=DOCUMENT,
-            headers={"content-type": "application/xml", "cache-control": "private"},
-        ))
+        django.answers(
+            httpx.Response(
+                200,
+                content=DOCUMENT,
+                headers={"content-type": "application/xml", "cache-control": "private"},
+            )
+        )
 
         response = get(client, api_key="grv_secret")
 
@@ -164,10 +174,13 @@ class TestCredentialForwarding:
 
 
 class TestFailurePaths:
-    @pytest.mark.parametrize("failure", [
-        httpx.ConnectError("connection refused"),
-        httpx.ReadTimeout("timed out"),
-    ])
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            httpx.ConnectError("connection refused"),
+            httpx.ReadTimeout("timed out"),
+        ],
+    )
     def test_an_unreachable_django_answers_an_exception_report(self, client, django, failure):
         def raise_it(request):
             raise failure

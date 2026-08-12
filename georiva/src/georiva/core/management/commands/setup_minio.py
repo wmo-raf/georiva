@@ -51,31 +51,31 @@ BUCKET_CONFIGS = {
         "public_read": False,
         "notify_on_create": False,
         "description": "Zarr stores for ingestion output (private)",
-    }
+    },
 }
 
 
 class Command(BaseCommand):
     help = "Configure GeoRiva MinIO buckets, policies, and notifications"
-    
+
     def add_arguments(self, parser):
         parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Show what would be done without making changes",
         )
-    
+
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
-        
+
         if settings.GEORIVA_STORAGE_BACKEND != "s3":
-            self.stdout.write(self.style.WARNING(
-                f"Skipping: GEORIVA_STORAGE_BACKEND is '{settings.GEORIVA_STORAGE_BACKEND}'"
-            ))
+            self.stdout.write(
+                self.style.WARNING(f"Skipping: GEORIVA_STORAGE_BACKEND is '{settings.GEORIVA_STORAGE_BACKEND}'")
+            )
             return
-        
+
         self.stdout.write("Connecting to MinIO/S3...")
-        
+
         s3 = boto3.client(
             "s3",
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
@@ -83,33 +83,32 @@ class Command(BaseCommand):
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
             region_name=settings.AWS_S3_REGION_NAME,
         )
-        
+
         buckets = getattr(settings, "GEORIVA_BUCKETS", {})
-        
+
         # ARN format MinIO prints on startup when Redis target is configured:
         # arn:minio:sqs::<IDENTIFIER>:redis
         # IDENTIFIER must match MINIO_NOTIFY_REDIS_ENABLE_<IDENTIFIER> in docker-compose.
         redis_arn = getattr(settings, "MINIO_REDIS_ARN", "arn:minio:sqs::primary:redis")
-        
+
         for bucket_type, bucket_config in buckets.items():
             config = BUCKET_CONFIGS.get(bucket_type, {})
-            
+
             bucket_name = bucket_config.get("name")
-            
+
             self.stdout.write(
-                f"\n{'[DRY RUN] ' if dry_run else ''}"
-                f"Setting up: {bucket_name} ({config.get('description', '')})"
+                f"\n{'[DRY RUN] ' if dry_run else ''}Setting up: {bucket_name} ({config.get('description', '')})"
             )
-            
+
             # 1. Ensure bucket exists
             self._ensure_bucket(s3, bucket_name, dry_run)
-            
+
             # 2. Set bucket policy
             if config.get("public_read"):
                 self._set_public_read_policy(s3, bucket_name, dry_run)
             else:
                 self._set_private_policy(s3, bucket_name, dry_run)
-            
+
             # 3. Configure notifications. A bucket may opt into a different
             #    Redis target (e.g. staging → its own list) via notify_arn_setting.
             if config.get("notify_on_create"):
@@ -118,13 +117,13 @@ class Command(BaseCommand):
                 if arn_setting:
                     arn = getattr(settings, arn_setting, redis_arn)
                 self._set_redis_notification(s3, bucket_name, arn, dry_run)
-        
+
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
-    
+
     # =========================================================================
     # Bucket creation
     # =========================================================================
-    
+
     def _ensure_bucket(self, s3, bucket_name: str, dry_run: bool):
         try:
             s3.head_bucket(Bucket=bucket_name)
@@ -135,18 +134,14 @@ class Command(BaseCommand):
             else:
                 try:
                     s3.create_bucket(Bucket=bucket_name)
-                    self.stdout.write(self.style.SUCCESS(
-                        f"  + Created bucket: {bucket_name}"
-                    ))
+                    self.stdout.write(self.style.SUCCESS(f"  + Created bucket: {bucket_name}"))
                 except Exception as e:
-                    self.stdout.write(self.style.ERROR(
-                        f"  ✗ Failed to create {bucket_name}: {e}"
-                    ))
-    
+                    self.stdout.write(self.style.ERROR(f"  ✗ Failed to create {bucket_name}: {e}"))
+
     # =========================================================================
     # Bucket policies
     # =========================================================================
-    
+
     def _set_public_read_policy(self, s3, bucket_name: str, dry_run: bool):
         """Allow public read access (for assets bucket)."""
         policy = {
@@ -161,50 +156,42 @@ class Command(BaseCommand):
                 }
             ],
         }
-        
+
         if dry_run:
-            self.stdout.write(f"  → Would set public read policy")
+            self.stdout.write("  → Would set public read policy")
             return
-        
+
         try:
             s3.put_bucket_policy(
                 Bucket=bucket_name,
                 Policy=json.dumps(policy),
             )
-            self.stdout.write(self.style.SUCCESS(
-                f"  ✓ Public read policy set"
-            ))
+            self.stdout.write(self.style.SUCCESS("  ✓ Public read policy set"))
         except Exception as e:
-            self.stdout.write(self.style.ERROR(
-                f"  ✗ Failed to set policy: {e}"
-            ))
-    
+            self.stdout.write(self.style.ERROR(f"  ✗ Failed to set policy: {e}"))
+
     def _set_private_policy(self, s3, bucket_name: str, dry_run: bool):
         """Remove any public policy (private bucket)."""
         if dry_run:
-            self.stdout.write(f"  → Would ensure private policy")
+            self.stdout.write("  → Would ensure private policy")
             return
-        
+
         try:
             s3.delete_bucket_policy(Bucket=bucket_name)
-            self.stdout.write(f"  ✓ Private policy set (no public access)")
+            self.stdout.write("  ✓ Private policy set (no public access)")
         except ClientError as e:
             # No policy to delete is fine
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code in ("NoSuchBucketPolicy", "404"):
-                self.stdout.write(f"  ✓ Already private")
+                self.stdout.write("  ✓ Already private")
             else:
-                self.stdout.write(self.style.ERROR(
-                    f"  ✗ Failed to set private policy: {e}"
-                ))
-    
+                self.stdout.write(self.style.ERROR(f"  ✗ Failed to set private policy: {e}"))
+
     # =========================================================================
     # Redis notifications
     # =========================================================================
-    
-    def _set_redis_notification(
-            self, s3, bucket_name: str, redis_arn: str, dry_run: bool
-    ):
+
+    def _set_redis_notification(self, s3, bucket_name: str, redis_arn: str, dry_run: bool):
         """
         Configure S3 event notifications to publish to a MinIO Redis target.
 
@@ -234,22 +221,16 @@ class Command(BaseCommand):
                 }
             ],
         }
-        
+
         if dry_run:
-            self.stdout.write(
-                f"  → Would set Redis notification → {redis_arn}"
-            )
+            self.stdout.write(f"  → Would set Redis notification → {redis_arn}")
             return
-        
+
         try:
             s3.put_bucket_notification_configuration(
                 Bucket=bucket_name,
                 NotificationConfiguration=notification_config,
             )
-            self.stdout.write(self.style.SUCCESS(
-                f"  ✓ Redis notification set → {redis_arn}"
-            ))
+            self.stdout.write(self.style.SUCCESS(f"  ✓ Redis notification set → {redis_arn}"))
         except Exception as e:
-            self.stdout.write(self.style.ERROR(
-                f"  ✗ Failed to set notification: {e}"
-            ))
+            self.stdout.write(self.style.ERROR(f"  ✗ Failed to set notification: {e}"))

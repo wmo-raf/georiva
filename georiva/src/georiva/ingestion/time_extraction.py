@@ -6,12 +6,12 @@ from georiva.core.storage.filename import parse_filename
 from georiva.formats.registry import format_registry
 
 _FORMAT_PATTERNS = {
-    "YYYYMMDD":   "%Y%m%d",
-    "DDMMYYYY":   "%d%m%Y",
+    "YYYYMMDD": "%Y%m%d",
+    "DDMMYYYY": "%d%m%Y",
     "YYYYMMDDHH": "%Y%m%d%H",
     "YYYYMMDDHHMM": "%Y%m%d%H%M",
-    "DDMMYY":     "%d%m%y",
-    "YYMMDD":     "%y%m%d",
+    "DDMMYY": "%d%m%y",
+    "YYMMDD": "%y%m%d",
 }
 
 
@@ -49,6 +49,7 @@ def _parse_stem(stem: str, format_choice: str):
     if not pattern:
         return None
     from datetime import datetime
+
     try:
         dt = datetime.strptime(stem, pattern)
         return pytz.utc.localize(dt)
@@ -93,6 +94,7 @@ def _fill_from_content(filename: str, file_obj, result: dict):
         if tmp_path:
             try:
                 import os
+
                 os.unlink(tmp_path)
             except Exception:
                 pass

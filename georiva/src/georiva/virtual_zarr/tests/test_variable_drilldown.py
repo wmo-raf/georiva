@@ -7,7 +7,8 @@ assertions stay at the level a client sees — timestamp lists, build-history
 rows, GC status, graceful degradation when no repo exists yet.
 """
 
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -29,19 +30,23 @@ UTC = dt_timezone.utc
 
 def build_collection(organisation, *, slug):
     catalog = Catalog.objects.create(
-        organisation=organisation, name=slug, slug=slug,
+        organisation=organisation,
+        name=slug,
+        slug=slug,
         file_format=Catalog.FileFormat.GEOTIFF,
     )
     return Collection.objects.create(catalog=catalog, name=slug, slug=slug)
 
 
 def add_variable(collection, *, slug):
-    unit, _ = Unit.objects.get_or_create(
-        name="Millimetre", defaults={"symbol": "mm"}
-    )
+    unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
     return Variable.objects.create(
-        collection=collection, name=slug, slug=slug,
-        unit=unit, value_min=0, value_max=1,
+        collection=collection,
+        name=slug,
+        slug=slug,
+        unit=unit,
+        value_min=0,
+        value_max=1,
     )
 
 
@@ -51,7 +56,9 @@ def add_cog(collection, variable, *, hours):
         time=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(hours=hours),
     )
     return Asset.objects.create(
-        item=item, variable=variable, format=Asset.Format.COG,
+        item=item,
+        variable=variable,
+        format=Asset.Format.COG,
         href=f"{collection.slug}/{variable.slug}/{hours}.tif",
     )
 
@@ -81,15 +88,11 @@ class VariableDrilldownTests(TestCase):
         return variable
 
     def _get(self, variable):
-        return self.client.get(
-            reverse("variable_virtual_zarr", args=[variable.pk])
-        )
+        return self.client.get(reverse("variable_virtual_zarr", args=[variable.pk]))
 
     def _manifest(self, variable, **kwargs):
         manifest, _ = VirtualZarrManifest.objects.get_or_create(variable=variable)
-        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
-            repo_path="", **kwargs
-        )
+        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(repo_path="", **kwargs)
         manifest.refresh_from_db()
         return manifest
 
@@ -205,7 +208,7 @@ class VariableDrilldownTests(TestCase):
 
         response = self._get(variable)
 
-        self.assertContains(response, "2.0")   # 2.0 KB
+        self.assertContains(response, "2.0")  # 2.0 KB
         self.assertContains(response, "9")
 
     # -- navigation ---------------------------------------------------------
@@ -214,9 +217,7 @@ class VariableDrilldownTests(TestCase):
         variable = self._variable()
         drilldown_url = reverse("variable_virtual_zarr", args=[variable.pk])
 
-        response = self.client.get(
-            reverse("collection_virtual_zarr", args=[self.collection.pk])
-        )
+        response = self.client.get(reverse("collection_virtual_zarr", args=[self.collection.pk]))
 
         self.assertContains(response, drilldown_url)
 

@@ -6,6 +6,7 @@ execution: a product is ready iff every *required* declared input collection
 exists and is non-empty. Gates the "Run now" button and names the blocker when
 not ready. The engine's per-unit readiness + min-count guard are unchanged.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -16,7 +17,8 @@ from georiva.core.derived_products import (
     InputRef,
     OutputRef,
 )
-from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import make_organisation
 from georiva.sources.derivation_tracking import product_readiness
 from georiva.sources.models import (
     DataFeed,
@@ -24,7 +26,6 @@ from georiva.sources.models import (
     DerivedProductInput,
 )
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
-from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
@@ -46,32 +47,37 @@ def _definition(**overrides):
 
 class ProductReadinessTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
 
     def _core(self, slug):
-        col, _ = Collection.objects.get_or_create(
-            catalog=self.catalog, slug=slug, defaults={"name": slug}
-        )
+        col, _ = Collection.objects.get_or_create(catalog=self.catalog, slug=slug, defaults={"name": slug})
         return col
 
     def _add_staging(self, slug="rainfall"):
         """A staged item in a staging collection linked to its core Collection."""
-        scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug=slug, name=slug, collection=self._core(slug)
-        )
+        scol = StagingCollection.objects.create(catalog=self.catalog, slug=slug, name=slug, collection=self._core(slug))
         si = StagingItem.objects.create(
-            collection=scol, datetime=_TIME,
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=4, height=4,
+            collection=scol,
+            datetime=_TIME,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
         StagingAsset.objects.create(
-            item=si, href=f"chirps/{slug}/f.tif", roles=["source"],
-            format="geotiff", checksum=f"{slug}-1",
+            item=si,
+            href=f"chirps/{slug}/f.tif",
+            roles=["source"],
+            format="geotiff",
+            checksum=f"{slug}-1",
         )
         return si
 
@@ -80,10 +86,13 @@ class ProductReadinessTests(TestCase):
         path would — readiness now resolves through these rows."""
         for ref in definition.inputs:
             DerivedProductInput.objects.update_or_create(
-                product=self.product, role=ref.role,
+                product=self.product,
+                role=ref.role,
                 defaults={
-                    "tier": ref.tier, "required": ref.required,
-                    "source_key": ref.collection, "collection": self._core(ref.collection),
+                    "tier": ref.tier,
+                    "required": ref.required,
+                    "source_key": ref.collection,
+                    "collection": self._core(ref.collection),
                 },
             )
 
@@ -102,10 +111,12 @@ class ProductReadinessTests(TestCase):
     def test_blocked_when_a_required_input_is_empty(self):
         # The anomaly needs both raw rainfall (present) and normals (absent).
         self._add_staging("rainfall")
-        definition = _definition(inputs=(
-            InputRef(role="value", collection="rainfall", tier="staging"),
-            InputRef(role="normals", collection="rainfall-normals", tier="published"),
-        ))
+        definition = _definition(
+            inputs=(
+                InputRef(role="value", collection="rainfall", tier="staging"),
+                InputRef(role="normals", collection="rainfall-normals", tier="published"),
+            )
+        )
 
         verdict = self._readiness(definition)
 
@@ -115,10 +126,12 @@ class ProductReadinessTests(TestCase):
 
     def test_an_empty_optional_input_does_not_block(self):
         self._add_staging("rainfall")
-        definition = _definition(inputs=(
-            InputRef(role="value", collection="rainfall", tier="staging"),
-            InputRef(role="pet", collection="pet", tier="published", required=False),
-        ))
+        definition = _definition(
+            inputs=(
+                InputRef(role="value", collection="rainfall", tier="staging"),
+                InputRef(role="pet", collection="pet", tier="published", required=False),
+            )
+        )
 
         verdict = self._readiness(definition)
 
@@ -128,18 +141,20 @@ class ProductReadinessTests(TestCase):
         # Another catalog has the same 'rainfall' slug WITH data; this product's
         # own catalog has none. Readiness must resolve through the pinned
         # collection_id, so it stays blocked (ADR-0010 §5) — no cross-catalog leak.
-        other_cat = Catalog.objects.create(organisation=make_organisation(), 
-            name="Other", slug="other", file_format="geotiff"
+        other_cat = Catalog.objects.create(
+            organisation=make_organisation(), name="Other", slug="other", file_format="geotiff"
         )
-        other_core = Collection.objects.create(
-            catalog=other_cat, slug="rainfall", name="Rainfall"
-        )
+        other_core = Collection.objects.create(catalog=other_cat, slug="rainfall", name="Rainfall")
         other_staging = StagingCollection.objects.create(
             catalog=other_cat, slug="rainfall", name="Rainfall", collection=other_core
         )
         StagingItem.objects.create(
-            collection=other_staging, datetime=_TIME,
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=4, height=4,
+            collection=other_staging,
+            datetime=_TIME,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
         # This product's own 'rainfall' core Collection exists but has no items.
         self._core("rainfall")
@@ -154,7 +169,7 @@ class ProductReadinessTests(TestCase):
         # row) is blocked — there is no collection to resolve.
         self._add_staging("rainfall")
         with patch.object(DataFeed, "get_derived_products", return_value=[_definition()]):
-            verdict = product_readiness(self.product)   # note: no _pin()
+            verdict = product_readiness(self.product)  # note: no _pin()
 
         self.assertFalse(verdict.ready)
         self.assertEqual(verdict.blocked_by, "value")

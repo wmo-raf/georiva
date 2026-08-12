@@ -5,7 +5,7 @@ from django import template
 from django.conf import settings
 
 from georiva import __version__
-from georiva.core.models import Catalog, Item, Collection
+from georiva.core.models import Catalog, Collection, Item
 from georiva.core.topics import topics_of
 from georiva.organisations.access import scoped_queryset
 
@@ -60,14 +60,14 @@ def datasets_index_url(context):
     if site is not None:
         pages = pages.descendant_of(site.root_page, inclusive=True)
     page = pages.first()
-    return page.url if page else '/datasets/'
+    return page.url if page else "/datasets/"
 
 
 @register.filter(is_safe=True)
 def to_json(value):
     """Convert a Python object to JSON string."""
     if value is None:
-        return ''
+        return ""
     return json.dumps(value)
 
 
@@ -91,9 +91,9 @@ def get_latest_collections(context, limit=6):
     """Latest active collections ordered by most recently updated item."""
     return (
         org_collections(context)
-        .select_related('catalog')
-        .prefetch_related('catalog__topics')
-        .order_by('-time_end', '-modified')[:limit]
+        .select_related("catalog")
+        .prefetch_related("catalog__topics")
+        .order_by("-time_end", "-modified")[:limit]
     )
 
 
@@ -101,11 +101,12 @@ def get_latest_collections(context, limit=6):
 def get_latest_catalogs(context, limit=6):
     """Active catalogs ordered by most recently updated item across their collections."""
     from django.db.models import Max
+
     return (
         org_catalogs(context)
-        .prefetch_related('topics')
-        .annotate(latest_updated=Max('collections__time_end'))
-        .order_by('-latest_updated', 'name')[:limit]
+        .prefetch_related("topics")
+        .annotate(latest_updated=Max("collections__time_end"))
+        .order_by("-latest_updated", "name")[:limit]
     )
 
 
@@ -130,16 +131,13 @@ def get_landing_stats(context):
     totals is quoting its neighbours' numbers.
     """
     latest_item = (
-        scoped_queryset(require_request(context), Item.objects.all())
-        .order_by('-created')
-        .values('created')
-        .first()
+        scoped_queryset(require_request(context), Item.objects.all()).order_by("-created").values("created").first()
     )
-    
+
     return {
-        'catalog_count': org_catalogs(context).count(),
-        'collection_count': org_collections(context).count(),
-        'last_updated': latest_item['created'] if latest_item else None,
+        "catalog_count": org_catalogs(context).count(),
+        "collection_count": org_collections(context).count(),
+        "last_updated": latest_item["created"] if latest_item else None,
     }
 
 
@@ -147,13 +145,14 @@ def get_landing_stats(context):
 # All collections
 # -----------------------------------------------------------------------------
 
+
 @register.simple_tag(takes_context=True)
 def get_all_collections(context):
     return (
         org_collections(context)
-        .select_related('catalog')
-        .prefetch_related('variables', 'catalog__topics')
-        .order_by('catalog__name', 'sort_order', 'name')
+        .select_related("catalog")
+        .prefetch_related("variables", "catalog__topics")
+        .order_by("catalog__name", "sort_order", "name")
     )
 
 
@@ -162,10 +161,10 @@ def get_all_collections(context):
 # -----------------------------------------------------------------------------
 
 FORMAT_ICONS = {
-    'grib2': 'bi-wind',
-    'netcdf': 'bi-grid-3x3',
-    'geotiff': 'bi-image',
-    'zarr': 'bi-database',
+    "grib2": "bi-wind",
+    "netcdf": "bi-grid-3x3",
+    "geotiff": "bi-image",
+    "zarr": "bi-database",
 }
 
 
@@ -175,12 +174,13 @@ def get_catalog_icon(file_format):
     Returns a Bootstrap Icon class string for the given file format.
     Falls back to a generic layers icon.
     """
-    return FORMAT_ICONS.get(file_format, 'bi-layers')
+    return FORMAT_ICONS.get(file_format, "bi-layers")
 
 
 # -----------------------------------------------------------------------------
 # Active collection count for a catalog — used in featured_catalogs.html
 # -----------------------------------------------------------------------------
+
 
 @register.simple_tag
 def active_collection_count(catalog):
@@ -192,19 +192,13 @@ def active_collection_count(catalog):
 def get_active_time_resolutions(context):
     """Only resolutions used by at least one of this organisation's collections."""
     from georiva.core.models import Collection
+
     active_values = (
-        org_collections(context)
-        .exclude(time_resolution='')
-        .values_list('time_resolution', flat=True)
-        .distinct()
+        org_collections(context).exclude(time_resolution="").values_list("time_resolution", flat=True).distinct()
     )
     # Return as (value, label) tuples preserving TimeResolution order
     choices = dict(Collection.TimeResolution.choices)
-    return [
-        (value, choices[value])
-        for value in Collection.TimeResolution.values
-        if value in active_values
-    ]
+    return [(value, choices[value]) for value in Collection.TimeResolution.values if value in active_values]
 
 
 @register.simple_tag(takes_context=False)
@@ -215,12 +209,12 @@ def query_params(filters, **kwargs):
     Drops empty values and always resets page to 1 when
     a filter changes (unless page is explicitly passed).
     """
-    from urllib.parse import urlencode
+
     params = {k: v for k, v in filters.items() if v}
-    params.update({k: v for k, v in kwargs.items() if v != ''})
+    params.update({k: v for k, v in kwargs.items() if v != ""})
     # reset to page 1 when any filter other than page changes
-    if 'page' not in kwargs:
-        params.pop('page', None)
+    if "page" not in kwargs:
+        params.pop("page", None)
     return urlencode(params)
 
 
@@ -229,11 +223,11 @@ def query_string_replace(context, key, value):
     """
     Return the current query string with `key` set to `value`.
     All other parameters are preserved.
- 
+
     Usage:
         <a href="?{% query_string_replace 'page' 3 %}">Page 3</a>
     """
-    request = context.get('request')
+    request = context.get("request")
     params = request.GET.copy() if request else {}
     params[key] = value
     return params.urlencode()
@@ -244,11 +238,11 @@ def query_string_drop(context, *keys):
     """
     Return the current query string with the given keys removed.
     All other parameters are preserved.
- 
+
     Usage:
         <a href="?{% query_string_drop 'date' 'page' %}">Clear date</a>
     """
-    request = context.get('request')
+    request = context.get("request")
     params = request.GET.copy() if request else {}
     for key in keys:
         params.pop(key, None)

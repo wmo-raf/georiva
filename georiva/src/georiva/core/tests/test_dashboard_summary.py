@@ -23,6 +23,7 @@ class DashboardSummaryTests(TestCase):
         have resolved to.
         """
         from django.test import RequestFactory
+
         request = RequestFactory().get("/admin/")
         request.user = self.user
         request.active_org = organisation or make_organisation()
@@ -30,8 +31,11 @@ class DashboardSummaryTests(TestCase):
 
     def test_summary_item_counts(self):
         from django.conf import settings
+
         from georiva.core.views.summary_items import (
-            CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem,
+            CatalogSummaryItem,
+            CollectionSummaryItem,
+            PluginSummaryItem,
         )
 
         cat = Catalog.objects.create(organisation=make_organisation(), name="A", slug="a", file_format="grib2")
@@ -41,9 +45,7 @@ class DashboardSummaryTests(TestCase):
         request = self._request()
         self.assertEqual(CatalogSummaryItem(request).get_count(), 2)
         self.assertEqual(CollectionSummaryItem(request).get_count(), 1)
-        self.assertEqual(
-            PluginSummaryItem(request).get_count(), len(settings.GEORIVA_PLUGIN_NAMES)
-        )
+        self.assertEqual(PluginSummaryItem(request).get_count(), len(settings.GEORIVA_PLUGIN_NAMES))
 
     def test_the_tiles_do_not_count_another_organisations_holdings(self):
         """A dashboard that boasts the instance's totals is quoting its
@@ -79,6 +81,7 @@ class DashboardSummaryTests(TestCase):
         and ``plugin_list`` lists all of them — so the count already matches the
         page it links to and must not be narrowed."""
         from django.conf import settings
+
         from georiva.core.views.summary_items import PluginSummaryItem
         from georiva.organisations.testing import make_org_tree
 

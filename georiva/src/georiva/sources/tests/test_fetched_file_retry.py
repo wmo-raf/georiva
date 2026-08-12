@@ -6,7 +6,9 @@ task rebuilds the request, re-fetches with skip-existing disabled, updates
 the SAME record in place, and recomputes the parent FetchRun's counters.
 Records without a stored request refuse retry gracefully.
 """
-from datetime import datetime, timezone as dt_timezone
+
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -14,10 +16,10 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.fetch.base import FetchResult, FileRequest
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import dial_org, make_organisation
 
 
 class FileRequestRoundTripTests(TestCase):
@@ -56,9 +58,7 @@ User = get_user_model()
 
 def _feed_and_collection(name="CHIRPS", slug="chirps"):
     catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
-    collection = Collection.objects.create(
-        name="Rainfall", slug="rainfall", catalog=catalog
-    )
+    collection = Collection.objects.create(name="Rainfall", slug="rainfall", catalog=catalog)
     feed = DataFeed.objects.create(name=f"{name} Feed", catalog=catalog)
     return feed, collection
 
@@ -82,22 +82,19 @@ class LoaderPersistsRequestPayloadTests(TestCase):
         )
         loader.data_source.name = "test"
         loader.data_source.generate_requests_for_collection.return_value = [
-            stored_req, skipped_req, failed_req,
+            stored_req,
+            skipped_req,
+            failed_req,
         ]
-        loader.data_source.post_process_fetched_file.side_effect = (
-            lambda req, path: (path, None)
-        )
+        loader.data_source.post_process_fetched_file.side_effect = lambda req, path: (path, None)
 
         def fetch(req):
             if req is stored_req:
-                return FetchResult(request=req, success=True, status="success",
-                                   bytes_transferred=10)
-            return FetchResult(request=req, success=False, status="failed",
-                               error="boom")
+                return FetchResult(request=req, success=True, status="success", bytes_transferred=10)
+            return FetchResult(request=req, success=False, status="failed", error="boom")
 
         with (
-            patch.object(loader, "_already_exists",
-                         side_effect=lambda req: req is skipped_req),
+            patch.object(loader, "_already_exists", side_effect=lambda req: req is skipped_req),
             patch.object(loader, "_find_existing_catalog_path", return_value=None),
             patch.object(loader, "_fetch_and_store", side_effect=fetch),
             patch.object(loader, "_cleanup_temp"),
@@ -106,10 +103,7 @@ class LoaderPersistsRequestPayloadTests(TestCase):
         ):
             loader.run(skip_existing=True)
 
-        payloads = {
-            ff.file_path.rsplit("/", 1)[-1]: ff.request_payload
-            for ff in FetchedFile.objects.all()
-        }
+        payloads = {ff.file_path.rsplit("/", 1)[-1]: ff.request_payload for ff in FetchedFile.objects.all()}
         self.assertEqual(len(payloads), 3)
         for filename in ("stored.tif", "skipped.tif", "failed.tif"):
             self.assertIsNotNone(payloads[filename], filename)
@@ -133,9 +127,7 @@ class RetryFetchTests(TestCase):
             file_path="chirps/rainfall/failed.tif",
             status=FetchedFile.Status.FAILED,
             error="timeout",
-            request_payload=FileRequest(
-                identifier="x", filename="failed.tif"
-            ).to_dict(),
+            request_payload=FileRequest(identifier="x", filename="failed.tif").to_dict(),
         )
 
     def _retry(self, fetch_result):
@@ -150,8 +142,7 @@ class RetryFetchTests(TestCase):
     def test_successful_retry_updates_the_same_record_and_run_counters(self):
         request = FileRequest(identifier="x", filename="failed.tif")
         loader, get_loader = self._retry(
-            FetchResult(request=request, success=True, status="success",
-                        bytes_transferred=55)
+            FetchResult(request=request, success=True, status="success", bytes_transferred=55)
         )
 
         get_loader.assert_called_once_with(self.collection)
@@ -169,10 +160,7 @@ class RetryFetchTests(TestCase):
 
     def test_failed_retry_records_the_new_error_and_keeps_counters_truthful(self):
         request = FileRequest(identifier="x", filename="failed.tif")
-        self._retry(
-            FetchResult(request=request, success=False, status="failed",
-                        error="still unreachable")
-        )
+        self._retry(FetchResult(request=request, success=False, status="failed", error="still unreachable"))
 
         self.ff.refresh_from_db()
         self.assertEqual(self.ff.status, FetchedFile.Status.FAILED)
@@ -207,15 +195,15 @@ class RetryFetchedFileTaskTests(TestCase):
     def setUp(self):
         self.feed, self.collection = _feed_and_collection()
         self.run = FetchRun.objects.create(
-            data_feed=self.feed, status=FetchRun.Status.COMPLETED, files_failed=1,
+            data_feed=self.feed,
+            status=FetchRun.Status.COMPLETED,
+            files_failed=1,
         )
         self.ff = FetchedFile.objects.create(
             fetch_run=self.run,
             file_path="chirps/rainfall/failed.tif",
             status=FetchedFile.Status.FAILED,
-            request_payload=FileRequest(
-                identifier="x", filename="failed.tif"
-            ).to_dict(),
+            request_payload=FileRequest(identifier="x", filename="failed.tif").to_dict(),
         )
 
     def test_task_retries_the_file_by_id(self):
@@ -224,7 +212,10 @@ class RetryFetchedFileTaskTests(TestCase):
         request = FileRequest(identifier="x", filename="failed.tif")
         loader = MagicMock()
         loader.fetch_one.return_value = FetchResult(
-            request=request, success=True, status="success", bytes_transferred=9,
+            request=request,
+            success=True,
+            status="success",
+            bytes_transferred=9,
         )
 
         with patch.object(DataFeed, "get_loader", return_value=loader):
@@ -258,14 +249,12 @@ class RunDetailRetryUITests(TestCase):
         self.client.force_login(self.user)
         self.feed, self.collection = _feed_and_collection()
         self.run = FetchRun.objects.create(
-            data_feed=self.feed, status=FetchRun.Status.COMPLETED,
+            data_feed=self.feed,
+            status=FetchRun.Status.COMPLETED,
         )
 
     def _file(self, filename, status=FetchedFile.Status.FAILED, with_payload=True):
-        payload = (
-            FileRequest(identifier=filename, filename=filename).to_dict()
-            if with_payload else None
-        )
+        payload = FileRequest(identifier=filename, filename=filename).to_dict() if with_payload else None
         return FetchedFile.objects.create(
             fetch_run=self.run,
             file_path=f"chirps/rainfall/{filename}",
@@ -296,9 +285,7 @@ class RunDetailRetryUITests(TestCase):
         retryable = self._file("retryable.tif")
 
         with patch("georiva.sources.tasks.retry_fetched_file.delay") as delay:
-            response = self.client.post(
-                self._url(), {"retry_file_id": retryable.pk}, follow=True
-            )
+            response = self.client.post(self._url(), {"retry_file_id": retryable.pk}, follow=True)
 
         delay.assert_called_once_with(retryable.pk)
         self.assertRedirects(response, self._url())
@@ -322,8 +309,7 @@ class RunDetailRetryUITests(TestCase):
         with patch("georiva.sources.tasks.retry_fetched_file.delay") as delay:
             response = self.client.post(
                 self._url(),
-                {"action": "retry_selected",
-                 "file_ids": [first.pk, second.pk, stored.pk]},
+                {"action": "retry_selected", "file_ids": [first.pk, second.pk, stored.pk]},
                 follow=True,
             )
 
@@ -335,9 +321,7 @@ class RunDetailRetryUITests(TestCase):
         self._file("one.tif")
 
         with patch("georiva.sources.tasks.retry_fetched_file.delay") as delay:
-            response = self.client.post(
-                self._url(), {"action": "retry_selected"}, follow=True
-            )
+            response = self.client.post(self._url(), {"action": "retry_selected"}, follow=True)
 
         delay.assert_not_called()
         self.assertContains(response, "No files selected")

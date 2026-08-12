@@ -9,8 +9,7 @@ cannot drift between the suites guarding those surfaces.
 
 #: An alternate palette whose 256-entry colormap opens on a color no other
 #: fixture here uses — tests tell styles apart by that first entry.
-ANALYST_STOPS = [{"value": 0.0, "color": "#0000ff"},
-                 {"value": 50.0, "color": "#00ff00"}]
+ANALYST_STOPS = [{"value": 0.0, "color": "#0000ff"}, {"value": 50.0, "color": "#00ff00"}]
 
 
 def make_style(variable, slug="official", *, is_default=True, stops=None):
@@ -18,7 +17,9 @@ def make_style(variable, slug="official", *, is_default=True, stops=None):
     from georiva.core.models import VariableStyle
 
     return VariableStyle.objects.create(
-        variable=variable, name=slug.title(), slug=slug, is_default=is_default,
-        stops=stops or [{"value": 0.0, "color": "#000000"},
-                        {"value": 50.0, "color": "#ff0000"}],
+        variable=variable,
+        name=slug.title(),
+        slug=slug,
+        is_default=is_default,
+        stops=stops or [{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ff0000"}],
     )

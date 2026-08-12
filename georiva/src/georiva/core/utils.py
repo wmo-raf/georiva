@@ -36,8 +36,8 @@ def iso_utc_z(dt) -> str:
 
 def get_base_stac_api_url(request=None):
     path = "/api/stac/"
-    
+
     if request:
         return get_full_url_by_request(request, path)
-    
+
     return path

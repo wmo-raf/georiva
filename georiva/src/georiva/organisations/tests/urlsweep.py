@@ -5,6 +5,7 @@ targets from the URLs the project actually registers rather than from a list
 somebody maintains. That is the whole point of them: a view added next month is
 covered on the day it is registered. This is the one piece they share.
 """
+
 from django.urls import URLPattern, URLResolver
 
 

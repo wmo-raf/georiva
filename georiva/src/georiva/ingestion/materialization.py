@@ -18,6 +18,7 @@ Extraction stays per-flow: ingestion reads windowed chunks from source files,
 recipes compute arrays. This service only owns what happens after an array,
 its bounds, and its Variable exist.
 """
+
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
@@ -59,10 +60,10 @@ class AssetMaterializer:
     # =========================================================================
 
     def clip_array(
-            self,
-            data: np.ndarray,
-            bounds: list | tuple,
-            clipper: "BoundaryClipper",
+        self,
+        data: np.ndarray,
+        bounds: list | tuple,
+        clipper: "BoundaryClipper",
     ) -> tuple[np.ndarray, list | tuple]:
         """
         Crop a full-grid array to the clipper's pixel-snapped window.
@@ -82,21 +83,21 @@ class AssetMaterializer:
         if not window:
             return data, bounds
         y0, x0 = window["y_off"], window["x_off"]
-        cropped = data[y0:y0 + window["height"], x0:x0 + window["width"]]
+        cropped = data[y0 : y0 + window["height"], x0 : x0 + window["width"]]
         return cropped, window["bounds"]
 
     def materialize_variable(
-            self,
-            *,
-            item: Item,
-            variable: "Variable",
-            data: np.ndarray,
-            bounds: list | tuple,
-            crs: str,
-            timestamp: datetime,
-            clipper: Optional["BoundaryClipper"] = None,
-            stats: Optional[dict] = None,
-            checksum: str = "",
+        self,
+        *,
+        item: Item,
+        variable: "Variable",
+        data: np.ndarray,
+        bounds: list | tuple,
+        crs: str,
+        timestamp: datetime,
+        clipper: Optional["BoundaryClipper"] = None,
+        stats: Optional[dict] = None,
+        checksum: str = "",
     ) -> list[Asset]:
         """
         Run the shared materialization sequence for one variable's array.
@@ -113,8 +114,13 @@ class AssetMaterializer:
             stats = compute_stats(data)
 
         assets = self._save_assets(
-            item=item, variable=variable, data=data,
-            stats=stats, bounds=bounds, crs=crs, timestamp=timestamp,
+            item=item,
+            variable=variable,
+            data=data,
+            stats=stats,
+            bounds=bounds,
+            crs=crs,
+            timestamp=timestamp,
             checksum=checksum,
         )
 
@@ -126,16 +132,16 @@ class AssetMaterializer:
     # =========================================================================
 
     def _save_assets(
-            self,
-            *,
-            item: Item,
-            variable: "Variable",
-            data: np.ndarray,
-            stats: dict,
-            bounds: list,
-            crs: str,
-            timestamp: datetime,
-            checksum: str = "",
+        self,
+        *,
+        item: Item,
+        variable: "Variable",
+        data: np.ndarray,
+        stats: dict,
+        bounds: list,
+        crs: str,
+        timestamp: datetime,
+        checksum: str = "",
     ) -> list[Asset]:
         """
         Write the COG to storage and upsert its Asset row.
@@ -166,9 +172,7 @@ class AssetMaterializer:
             stored_cog = self.writer.write_cog(data, cog_path, tuple(bounds), crs)
             cog_defaults = {
                 "href": stored_cog,
-                "media_type": (
-                    "image/tiff; application=geotiff; profile=cloud-optimized"
-                ),
+                "media_type": ("image/tiff; application=geotiff; profile=cloud-optimized"),
                 "roles": ["data"],
                 "file_size": self._get_file_size(stored_cog),
                 "width": width,

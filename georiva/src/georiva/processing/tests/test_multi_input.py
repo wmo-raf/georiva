@@ -12,6 +12,7 @@ AssetWriter, assert produced records).
 
 See issue #124 and docs/adr/0005-generic-derivation-engine.md.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +22,7 @@ from rasterio.transform import from_bounds
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.geoprocessing import regrid_array
+from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.recipe import (
     BaseRecipe,
@@ -34,7 +36,6 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
-from georiva.organisations.testing import make_organisation
 
 _TIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
@@ -61,7 +62,7 @@ class _MultiInputFixtureRecipe(BaseRecipe):
     version = "1"
 
     # The recipe's declared target grid of production.
-    TARGET_SHAPE = (8, 8)             # (height, width)
+    TARGET_SHAPE = (8, 8)  # (height, width)
     TARGET_BOUNDS = [0.0, 0.0, 8.0, 8.0]
     TARGET_CRS = "EPSG:4326"
 
@@ -107,12 +108,18 @@ class _MultiInputFixtureRecipe(BaseRecipe):
             layers.append(pet_layer)
 
         combined = np.nansum(np.stack(layers), axis=0).astype("float32")
-        return [OutputAsset(
-            variable=self._out_var, roles=["data"], format="cog",
-            array=combined,
-            bounds=self.TARGET_BOUNDS, crs=self.TARGET_CRS,
-            width=self.TARGET_SHAPE[1], height=self.TARGET_SHAPE[0],
-        )]
+        return [
+            OutputAsset(
+                variable=self._out_var,
+                roles=["data"],
+                format="cog",
+                array=combined,
+                bounds=self.TARGET_BOUNDS,
+                crs=self.TARGET_CRS,
+                width=self.TARGET_SHAPE[1],
+                height=self.TARGET_SHAPE[0],
+            )
+        ]
 
     # ---- harmonization (recipe-side, via geoprocessing) ---------------------
 
@@ -122,8 +129,12 @@ class _MultiInputFixtureRecipe(BaseRecipe):
         arr, src_transform, src_crs = self.read_array(item)
         dst_transform = from_bounds(*self.TARGET_BOUNDS, *self.TARGET_SHAPE[::-1])
         return regrid_array(
-            arr, src_transform, src_crs,
-            dst_transform, self.TARGET_CRS, self.TARGET_SHAPE,
+            arr,
+            src_transform,
+            src_crs,
+            dst_transform,
+            self.TARGET_CRS,
+            self.TARGET_SHAPE,
             resampling="nearest",
         )
 
@@ -145,11 +156,7 @@ class _MultiInputFixtureRecipe(BaseRecipe):
 
     @staticmethod
     def _select(model, collection_slug, *, required):
-        items = list(
-            model.objects
-            .filter(collection__slug=collection_slug)
-            .prefetch_related("assets")
-        )
+        items = list(model.objects.filter(collection__slug=collection_slug).prefetch_related("assets"))
         assets = [a for it in items for a in it.assets.all()]
         name = collection_slug.split("-")[0]
         return ResolvedInput(name, required=required, items=items, assets=assets)
@@ -157,38 +164,48 @@ class _MultiInputFixtureRecipe(BaseRecipe):
 
 class _MultiInputFixture(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="Climate", slug="climate", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Climate", slug="climate", file_format="geotiff"
         )
         self.unit = Unit.objects.create(name="dimensionless", symbol="x")
 
         # Output (public) collection + its variable.
         self.out_col = Collection.objects.create(
-            catalog=self.catalog, slug="cdi", name="CDI",
+            catalog=self.catalog,
+            slug="cdi",
+            name="CDI",
             visibility=Collection.Visibility.PUBLIC,
         )
         self.out_var = Variable.objects.create(
-            collection=self.out_col, slug="cdi", name="CDI",
-            unit=self.unit, value_min=-3, value_max=3,
+            collection=self.out_col,
+            slug="cdi",
+            name="CDI",
+            unit=self.unit,
+            value_min=-3,
+            value_max=3,
         )
 
         # precip — Staging tier.
-        self.precip_scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="precip-staging", name="Precip"
-        )
+        self.precip_scol = StagingCollection.objects.create(catalog=self.catalog, slug="precip-staging", name="Precip")
         # soil — Published, INTERNAL (harmonized intermediate, read as input).
         self.soil_col = Collection.objects.create(
-            catalog=self.catalog, slug="soil-internal", name="Soil",
+            catalog=self.catalog,
+            slug="soil-internal",
+            name="Soil",
             visibility=Collection.Visibility.INTERNAL,
         )
         # veg — Published, public.
         self.veg_col = Collection.objects.create(
-            catalog=self.catalog, slug="veg", name="Veg",
+            catalog=self.catalog,
+            slug="veg",
+            name="Veg",
             visibility=Collection.Visibility.PUBLIC,
         )
         # pet — Published, public (optional input; created empty by default).
         self.pet_col = Collection.objects.create(
-            catalog=self.catalog, slug="pet", name="PET",
+            catalog=self.catalog,
+            slug="pet",
+            name="PET",
             visibility=Collection.Visibility.PUBLIC,
         )
 
@@ -196,23 +213,40 @@ class _MultiInputFixture(TestCase):
 
     def _add_precip(self, checksum="precip-1"):
         si = StagingItem.objects.create(
-            collection=self.precip_scol, datetime=_TIME,
-            bounds=[0, 0, 8, 8], crs="EPSG:4326", width=4, height=4,
+            collection=self.precip_scol,
+            datetime=_TIME,
+            bounds=[0, 0, 8, 8],
+            crs="EPSG:4326",
+            width=4,
+            height=4,
         )
         StagingAsset.objects.create(
-            item=si, href="climate/precip/p.tif", roles=["source"],
-            format="geotiff", checksum=checksum,
+            item=si,
+            href="climate/precip/p.tif",
+            roles=["source"],
+            format="geotiff",
+            checksum=checksum,
         )
         return si
 
     def _add_published(self, collection, href, checksum, *, w, h):
         item = Item.objects.create(
-            collection=collection, time=_TIME,
-            bounds=[0, 0, 8, 8], crs="EPSG:4326", width=w, height=h,
+            collection=collection,
+            time=_TIME,
+            bounds=[0, 0, 8, 8],
+            crs="EPSG:4326",
+            width=w,
+            height=h,
         )
         Asset.objects.create(
-            item=item, variable=self.out_var, format="cog",
-            href=href, roles=["data"], checksum=checksum, width=w, height=h,
+            item=item,
+            variable=self.out_var,
+            format="cog",
+            href=href,
+            roles=["data"],
+            checksum=checksum,
+            width=w,
+            height=h,
         )
         return item
 
@@ -226,9 +260,7 @@ class _MultiInputFixture(TestCase):
         return self._add_published(self.pet_col, "climate/pet/e.tif", checksum, w=7, h=7)
 
     def _recipe(self):
-        return _MultiInputFixtureRecipe(
-            output_collection=self.out_col, output_variable=self.out_var
-        )
+        return _MultiInputFixtureRecipe(output_collection=self.out_col, output_variable=self.out_var)
 
     def _run(self):
         recipe = self._recipe()
@@ -269,9 +301,7 @@ class OptionalInputTests(_MultiInputFixture):
 
         self.assertEqual(result.status, "completed")
         # Only the three required inputs contributed lineage edges.
-        self.assertEqual(
-            DerivationLink.objects.filter(derived_item_id=result.item_id).count(), 3
-        )
+        self.assertEqual(DerivationLink.objects.filter(derived_item_id=result.item_id).count(), 3)
 
     def test_present_optional_input_participates(self):
         self._add_precip()
@@ -282,16 +312,14 @@ class OptionalInputTests(_MultiInputFixture):
         result = self._run()
 
         self.assertEqual(result.status, "completed")
-        self.assertEqual(
-            DerivationLink.objects.filter(derived_item_id=result.item_id).count(), 4
-        )
+        self.assertEqual(DerivationLink.objects.filter(derived_item_id=result.item_id).count(), 4)
 
 
 class CrossTierLineageTests(_MultiInputFixture):
     def test_links_span_collections_and_tiers(self):
-        precip = self._add_precip()   # Staging tier
-        soil = self._add_soil()       # Published, internal
-        veg = self._add_veg()         # Published, public
+        precip = self._add_precip()  # Staging tier
+        soil = self._add_soil()  # Published, internal
+        veg = self._add_veg()  # Published, public
 
         result = self._run()
         self.assertEqual(result.status, "completed")
@@ -306,9 +334,7 @@ class CrossTierLineageTests(_MultiInputFixture):
 
         # …two from the Published tier, spanning different collections.
         published = links.filter(source_published_item__isnull=False)
-        self.assertEqual(
-            {l.source_published_item_id for l in published}, {soil.pk, veg.pk}
-        )
+        self.assertEqual({link.source_published_item_id for link in published}, {soil.pk, veg.pk})
 
     def test_internal_collection_is_read_as_an_input(self):
         self._add_precip()
@@ -321,9 +347,7 @@ class CrossTierLineageTests(_MultiInputFixture):
         # The internal intermediate is consumed as an input and recorded in
         # lineage, even though it is never served.
         self.assertTrue(
-            DerivationLink.objects.filter(
-                derived_item_id=result.item_id, source_published_item=soil
-            ).exists()
+            DerivationLink.objects.filter(derived_item_id=result.item_id, source_published_item=soil).exists()
         )
 
 
@@ -336,17 +360,13 @@ class RunPrimitiveTests(_MultiInputFixture):
         self._add_soil()
         self._add_veg()
 
-        with patch(
-            "georiva.ingestion.asset_writer.AssetWriter", return_value=_mock_writer()
-        ):
+        with patch("georiva.ingestion.asset_writer.AssetWriter", return_value=_mock_writer()):
             results = run(self._recipe(), {}, dispatch=False)
 
         self.assertEqual([r.status for r in results], ["completed"])
         self.assertEqual(Item.objects.filter(collection=self.out_col).count(), 1)
         item = Item.objects.get(collection=self.out_col)
-        self.assertEqual(
-            DerivationLink.objects.filter(derived_item_id=item.pk).count(), 3
-        )
+        self.assertEqual(DerivationLink.objects.filter(derived_item_id=item.pk).count(), 3)
 
 
 class HarmonizationTests(_MultiInputFixture):

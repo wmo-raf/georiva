@@ -6,6 +6,7 @@ fetch, classifies each candidate against storage, and persists nothing —
 no FetchRun/FetchedFile, no feed counter changes. "Fetch now" is the
 existing asynchronous run_now, unchanged.
 """
+
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -13,6 +14,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.loader import Loader
 from georiva.sources.models import (
     DataFeed,
@@ -20,17 +22,13 @@ from georiva.sources.models import (
     FetchedFile,
     FetchRun,
 )
-from georiva.organisations.testing import dial_org, make_organisation
-
 
 User = get_user_model()
 
 
 def _feed_and_collection(name="CHIRPS", slug="chirps"):
     catalog = Catalog.objects.create(organisation=make_organisation(), name=name, slug=slug, file_format="geotiff")
-    collection = Collection.objects.create(
-        name="Rainfall", slug="rainfall", catalog=catalog
-    )
+    collection = Collection.objects.create(name="Rainfall", slug="rainfall", catalog=catalog)
     feed = DataFeed.objects.create(name=f"{name} Feed", catalog=catalog)
     return feed, collection
 
@@ -57,7 +55,8 @@ class LoaderCheckNewFilesTests(TestCase):
         loader.data_source.generate_requests_for_collection.return_value = requests
 
         with patch.object(
-            loader, "_already_exists",
+            loader,
+            "_already_exists",
             side_effect=lambda req: exists_by_filename[req.filename],
         ):
             return loader.check_new_files()
@@ -72,9 +71,7 @@ class LoaderCheckNewFilesTests(TestCase):
         self.assertEqual(len(candidates), 2)
         self.assertFalse(by_name["new.tif"].exists)
         self.assertTrue(by_name["old.tif"].exists)
-        self.assertEqual(
-            by_name["new.tif"].storage_path, "test-org/chirps/rainfall/new.tif"
-        )
+        self.assertEqual(by_name["new.tif"].storage_path, "test-org/chirps/rainfall/new.tif")
 
     def test_persists_no_acquisition_records(self):
         self._check([_request("new.tif")], {"new.tif": False})
@@ -89,15 +86,9 @@ class DataFeedCheckNewFilesTests(TestCase):
 
     def setUp(self):
         self.feed, self.rainfall = _feed_and_collection()
-        self.wind = Collection.objects.create(
-            name="Wind", slug="wind", catalog=self.feed.catalog
-        )
-        DataFeedCollectionLink.objects.create(
-            data_feed=self.feed, collection=self.rainfall
-        )
-        DataFeedCollectionLink.objects.create(
-            data_feed=self.feed, collection=self.wind
-        )
+        self.wind = Collection.objects.create(name="Wind", slug="wind", catalog=self.feed.catalog)
+        DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.rainfall)
+        DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.wind)
 
     def test_groups_candidates_per_linked_collection(self):
         from georiva.sources.loader import CandidateFile
@@ -132,9 +123,7 @@ class DataFeedCheckNewFilesTests(TestCase):
 
         def loader_for(collection=None):
             loader = MagicMock()
-            loader.check_new_files.return_value = [
-                CandidateFile("a.tif", "chirps/x/a.tif", exists=False)
-            ]
+            loader.check_new_files.return_value = [CandidateFile("a.tif", "chirps/x/a.tif", exists=False)]
             return loader
 
         with patch.object(DataFeed, "get_loader", side_effect=loader_for):
@@ -170,9 +159,7 @@ class CheckNewFilesViewTests(TestCase):
         dial_org(self.client)
         self.client.force_login(self.user)
         self.feed, self.rainfall = _feed_and_collection()
-        DataFeedCollectionLink.objects.create(
-            data_feed=self.feed, collection=self.rainfall
-        )
+        DataFeedCollectionLink.objects.create(data_feed=self.feed, collection=self.rainfall)
 
     def _url(self):
         return reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk})
@@ -180,14 +167,16 @@ class CheckNewFilesViewTests(TestCase):
     def test_check_renders_results_grouped_per_collection(self):
         from georiva.sources.loader import CandidateFile
 
-        canned = [{
-            "collection": self.rainfall,
-            "candidates": [
-                CandidateFile("fresh.tif", "chirps/rainfall/fresh.tif", exists=False),
-                CandidateFile("stale.tif", "chirps/rainfall/stale.tif", exists=True),
-            ],
-            "error": None,
-        }]
+        canned = [
+            {
+                "collection": self.rainfall,
+                "candidates": [
+                    CandidateFile("fresh.tif", "chirps/rainfall/fresh.tif", exists=False),
+                    CandidateFile("stale.tif", "chirps/rainfall/stale.tif", exists=True),
+                ],
+                "error": None,
+            }
+        ]
 
         with patch.object(DataFeed, "check_new_files", return_value=canned):
             response = self.client.post(self._url(), {"action": "check_new_files"})
@@ -206,9 +195,13 @@ class CheckNewFilesViewTests(TestCase):
         self.assertContains(response, "Source offered no files")
 
     def test_check_shows_a_source_error_instead_of_crashing(self):
-        canned = [{
-            "collection": self.rainfall, "candidates": [], "error": "host down",
-        }]
+        canned = [
+            {
+                "collection": self.rainfall,
+                "candidates": [],
+                "error": "host down",
+            }
+        ]
 
         with patch.object(DataFeed, "check_new_files", return_value=canned):
             response = self.client.post(self._url(), {"action": "check_new_files"})
@@ -218,9 +211,7 @@ class CheckNewFilesViewTests(TestCase):
 
     def test_fetch_now_dispatches_the_feeds_async_run_and_confirms(self):
         with patch.object(DataFeed, "run_now") as run_now:
-            response = self.client.post(
-                self._url(), {"action": "fetch_now"}, follow=True
-            )
+            response = self.client.post(self._url(), {"action": "fetch_now"}, follow=True)
 
         run_now.assert_called_once()
         self.assertEqual(run_now.call_args.kwargs.get("user"), self.user)

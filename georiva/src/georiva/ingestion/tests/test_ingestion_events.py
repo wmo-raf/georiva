@@ -5,11 +5,9 @@ from django.conf import settings
 from django.test import TestCase
 
 from georiva.ingestion.events import CHANNEL
-from georiva.organisations.testing import make_organisation
 
 
 class IngestionEventsTestCase(TestCase):
-
     def setUp(self):
         self.r = redis.from_url(settings.REDIS_URL)
         self.pubsub = self.r.pubsub()
@@ -38,8 +36,8 @@ class IngestionEventsTestCase(TestCase):
 # Cycle 1: publish_event() delivers to the channel
 # =============================================================================
 
-class PublishEventTests(IngestionEventsTestCase):
 
+class PublishEventTests(IngestionEventsTestCase):
     def test_published_event_is_received_on_channel(self):
         from georiva.ingestion.events import publish_event
 
@@ -55,10 +53,11 @@ class PublishEventTests(IngestionEventsTestCase):
 # Cycle 2: FileIngestion creation publishes file_ingestion.created
 # =============================================================================
 
-class FileIngestionCreatedEventTests(IngestionEventsTestCase):
 
+class FileIngestionCreatedEventTests(IngestionEventsTestCase):
     def test_creation_publishes_created_event(self):
         from georiva.ingestion.models import FileIngestion
+
         fi, _ = FileIngestion.register(bucket="incoming", file_path="cat/file.grib2")
 
         event = self._next_event()
@@ -71,6 +70,7 @@ class FileIngestionCreatedEventTests(IngestionEventsTestCase):
 
     def test_creation_event_is_not_status_changed(self):
         from georiva.ingestion.models import FileIngestion
+
         FileIngestion.register(bucket="incoming", file_path="cat/file2.grib2")
 
         event = self._next_event()
@@ -82,10 +82,11 @@ class FileIngestionCreatedEventTests(IngestionEventsTestCase):
 # Cycle 3: FileIngestion status changes publish file_ingestion.status_changed
 # =============================================================================
 
-class FileIngestionStatusEventTests(IngestionEventsTestCase):
 
+class FileIngestionStatusEventTests(IngestionEventsTestCase):
     def test_status_change_publishes_event(self):
         from georiva.ingestion.models import FileIngestion
+
         fi, _ = FileIngestion.register(bucket="incoming", file_path="cat/file3.grib2")
         self._drain()
 
@@ -103,11 +104,13 @@ class FileIngestionStatusEventTests(IngestionEventsTestCase):
 # Cycle 4: FileIngestionJob state changes publish an event
 # =============================================================================
 
-class FileIngestionJobStateEventTests(IngestionEventsTestCase):
 
+class FileIngestionJobStateEventTests(IngestionEventsTestCase):
     def _make_job(self):
         from django.contrib.contenttypes.models import ContentType
+
         from georiva.ingestion.models import FileIngestionJob
+
         ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
         return FileIngestionJob.objects.create(
             user=None,
@@ -139,8 +142,8 @@ class FileIngestionJobStateEventTests(IngestionEventsTestCase):
 # Cycle 5: PublishingProgress._publish() emits a job.progress_updated event
 # =============================================================================
 
-class PublishingProgressEventTests(IngestionEventsTestCase):
 
+class PublishingProgressEventTests(IngestionEventsTestCase):
     def test_increment_publishes_progress_event(self):
         from georiva.ingestion.progress import PublishingProgress
 

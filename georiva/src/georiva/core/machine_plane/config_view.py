@@ -56,12 +56,12 @@ index-free, being Titiler's rendering config and nothing more:
   Without one:  {"vmin", "vmax", "scale_type", "styles": []}
 """
 
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import status
 
-from georiva.core.models import Collection, Variable
 from georiva.core.machine_plane.palette_cache import build_variable_payload
+from georiva.core.models import Collection, Variable
 
 
 class TileConfigView(APIView):
@@ -80,9 +80,8 @@ class TileConfigView(APIView):
 
         try:
             variable = (
-                Variable.objects
-                .select_related('collection__catalog__organisation')
-                .prefetch_related('styles')
+                Variable.objects.select_related("collection__catalog__organisation")
+                .prefetch_related("styles")
                 .get(
                     collection__catalog__organisation__slug=org_slug,
                     collection__catalog__slug=catalog_slug,
@@ -101,14 +100,14 @@ class TileConfigView(APIView):
             # Scanned in Python, not `.filter()`: the styles are prefetched
             # above, and cardinality is styles-per-variable (ADR 0023).
             style = next(
-                (s for s in variable.styles.all() if s.slug == style_slug), None,
+                (s for s in variable.styles.all() if s.slug == style_slug),
+                None,
             )
             if style is None:
                 return Response(status=status.HTTP_404_NOT_FOUND)
 
         payload = build_variable_payload(variable, style)
         payload["styles"] = [
-            {"slug": s.slug, "title": s.name, "is_default": s.is_default}
-            for s in variable.styles.all()
+            {"slug": s.slug, "title": s.name, "is_default": s.is_default} for s in variable.styles.all()
         ]
         return Response(payload)

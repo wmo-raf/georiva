@@ -38,6 +38,4 @@ class Command(BaseCommand):
 
         for old_hostname, new_hostname in moves:
             self.stdout.write(f"  {old_hostname} -> {new_hostname}")
-        self.stdout.write(
-            self.style.SUCCESS(f"Moved {len(moves)} organisation Site(s) onto {target}.")
-        )
+        self.stdout.write(self.style.SUCCESS(f"Moved {len(moves)} organisation Site(s) onto {target}."))

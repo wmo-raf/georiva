@@ -14,7 +14,8 @@ store structure at the tip.  Two layers, mirroring test_coverage:
 
 import unittest
 import uuid
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.conf import settings
 from django.test import TestCase
@@ -29,8 +30,7 @@ UTC = dt_timezone.utc
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 S3_READY = bool(
-    getattr(settings, "AWS_S3_ENDPOINT_URL", None)
-    and getattr(settings, "GEORIVA_STORAGE_BACKEND", "") == "s3"
+    getattr(settings, "AWS_S3_ENDPOINT_URL", None) and getattr(settings, "GEORIVA_STORAGE_BACKEND", "") == "s3"
 )
 
 BOUNDS = (30.0, -10.0, 40.0, 0.0)
@@ -44,22 +44,29 @@ def _t(hours: int) -> datetime:
 # Service over DB fixtures (no repo behind the manifests)
 # ---------------------------------------------------------------------------
 
+
 class VariableDetailTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.catalog = Catalog.objects.create(
             organisation=make_organisation(),
-            name="Models", slug="models", file_format="geotiff",
+            name="Models",
+            slug="models",
+            file_format="geotiff",
         )
         cls.collection = Collection.objects.create(
-            catalog=cls.catalog, name="Surface", slug="surface",
+            catalog=cls.catalog,
+            name="Surface",
+            slug="surface",
         )
-        unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         cls.variable = Variable.objects.create(
-            collection=cls.collection, name="precip", slug="precip",
-            unit=unit, value_min=0, value_max=1,
+            collection=cls.collection,
+            name="precip",
+            slug="precip",
+            unit=unit,
+            value_min=0,
+            value_max=1,
         )
 
     def setUp(self):
@@ -68,9 +75,7 @@ class VariableDetailTests(TestCase):
         )
         # Blank repo path: the repo cannot exist yet, so the service never
         # touches object storage in these tests.
-        VirtualZarrManifest.objects.filter(pk=self.manifest.pk).update(
-            repo_path=""
-        )
+        VirtualZarrManifest.objects.filter(pk=self.manifest.pk).update(repo_path="")
 
     def _log(self, *, age=timedelta(), duration=timedelta(), **kwargs):
         started = timezone.now() - age
@@ -87,12 +92,12 @@ class VariableDetailTests(TestCase):
     def test_detail_wraps_the_coverage_report(self):
         item = Item.objects.create(collection=self.collection, time=_t(0))
         Asset.objects.create(
-            item=item, variable=self.variable, format=Asset.Format.COG,
+            item=item,
+            variable=self.variable,
+            format=Asset.Format.COG,
             href="models/surface/precip/x.tif",
         )
-        VirtualZarrManifest.objects.filter(pk=self.manifest.pk).update(
-            repo_path=""
-        )
+        VirtualZarrManifest.objects.filter(pk=self.manifest.pk).update(repo_path="")
 
         detail = variable_detail(self.variable)
 
@@ -112,18 +117,14 @@ class VariableDetailTests(TestCase):
 
         detail = variable_detail(self.variable)
 
-        self.assertEqual(
-            list(detail.build_history), [newest, failed, older]
-        )
+        self.assertEqual(list(detail.build_history), [newest, failed, older])
 
     def test_build_log_row_knows_its_duration(self):
         self._log(duration=timedelta(seconds=90))
 
         detail = variable_detail(self.variable)
 
-        self.assertEqual(
-            detail.build_history[0].duration, timedelta(seconds=90)
-        )
+        self.assertEqual(detail.build_history[0].duration, timedelta(seconds=90))
 
     def test_last_failure_is_the_latest_failed_build(self):
         self._log(
@@ -198,6 +199,7 @@ class VariableDetailTests(TestCase):
 # Service over a real Icechunk repo (existing integration-test pattern)
 # ---------------------------------------------------------------------------
 
+
 def _purge_prefix(bucket, prefix: str) -> None:
     for entry in bucket.list_files(prefix, recursive=True):
         try:
@@ -218,26 +220,27 @@ class VariableDetailIcechunkTests(TestCase):
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Itest", slug=f"itest-{uuid.uuid4().hex[:8]}",
+            name="Itest",
+            slug=f"itest-{uuid.uuid4().hex[:8]}",
             file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Daily", slug="daily",
+            catalog=self.catalog,
+            name="Daily",
+            slug="daily",
         )
-        unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precip", name="Precip",
-            unit=unit, value_min=0, value_max=500,
+            collection=self.collection,
+            slug="precip",
+            name="Precip",
+            unit=unit,
+            value_min=0,
+            value_max=500,
         )
         self.rng = np.random.default_rng(4)
-        self.addCleanup(
-            _purge_prefix, storage.assets, self.catalog.storage_prefix
-        )
-        self.addCleanup(
-            _purge_prefix, storage.zarr, self.catalog.storage_prefix
-        )
+        self.addCleanup(_purge_prefix, storage.assets, self.catalog.storage_prefix)
+        self.addCleanup(_purge_prefix, storage.zarr, self.catalog.storage_prefix)
 
     def _add_item(self, day: int):
         from georiva.core.storage import storage
@@ -245,19 +248,20 @@ class VariableDetailIcechunkTests(TestCase):
 
         ts = datetime(2026, 3, day, tzinfo=UTC)
         item = Item.objects.create(
-            collection=self.collection, time=ts,
-            bounds=list(BOUNDS), crs="EPSG:4326", width=64, height=64,
+            collection=self.collection,
+            time=ts,
+            bounds=list(BOUNDS),
+            crs="EPSG:4326",
+            width=64,
+            height=64,
         )
-        key = (
-            f"{self.catalog.storage_prefix}/daily/precip/"
-            f"2026/03/{day:02d}/precip.tif"
-        )
-        AssetWriter(storage.assets).write_cog(
-            self.rng.random((64, 64), dtype="float32"), key, BOUNDS
-        )
+        key = f"{self.catalog.storage_prefix}/daily/precip/2026/03/{day:02d}/precip.tif"
+        AssetWriter(storage.assets).write_cog(self.rng.random((64, 64), dtype="float32"), key, BOUNDS)
         Asset.objects.create(
-            item=item, variable=self.variable,
-            format=Asset.Format.COG, href=key,
+            item=item,
+            variable=self.variable,
+            format=Asset.Format.COG,
+            href=key,
         )
         return item
 

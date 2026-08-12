@@ -6,6 +6,7 @@ key. Both uses are unforgiving — hence lowercase-only, no leading/trailing or
 doubled hyphens, and a blocklist of names that would collide with an existing
 host or URL prefix on the instance.
 """
+
 import re
 
 from django.core.exceptions import ValidationError
@@ -18,26 +19,28 @@ ORG_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # Hostnames and URL prefixes the instance already owns. An organisation taking
 # one of these would shadow a real service on the base domain.
-RESERVED_ORG_SLUGS = frozenset({
-    "admin",
-    "api",
-    "assets",
-    "auth",
-    "docs",
-    "edr",
-    "ftp",
-    "internal",
-    "localhost",
-    "mail",
-    "martin",
-    "media",
-    "minio",
-    "root",
-    "stac",
-    "static",
-    "titiler",
-    "www",
-})
+RESERVED_ORG_SLUGS = frozenset(
+    {
+        "admin",
+        "api",
+        "assets",
+        "auth",
+        "docs",
+        "edr",
+        "ftp",
+        "internal",
+        "localhost",
+        "mail",
+        "martin",
+        "media",
+        "minio",
+        "root",
+        "stac",
+        "static",
+        "titiler",
+        "www",
+    }
+)
 
 
 def validate_org_slug(value):
@@ -54,8 +57,7 @@ def validate_org_slug(value):
 
     if not ORG_SLUG_RE.match(value):
         raise ValidationError(
-            "Organisation slug must be lowercase letters and digits, "
-            "separated by single hyphens (e.g. “kenya-met”).",
+            "Organisation slug must be lowercase letters and digits, separated by single hyphens (e.g. “kenya-met”).",
             code="invalid_org_slug",
         )
 

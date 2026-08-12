@@ -33,7 +33,8 @@ LOG_ARGS ?= --tail 100
 	dev-app-logs dev-worker-default-logs dev-worker-ingestion-logs dev-beat-logs dev-titiler-logs \
 	dev-shell dev-worker-default-shell dev-worker-ingestion-shell dev-beat-shell dev-titiler-shell \
 	dev-migrate dev-makemigrations dev-test titiler-test \
-	uv-add uv-add-dev uv-remove uv-lock uv-sync
+	uv-add uv-add-dev uv-remove uv-lock uv-sync \
+	lint format
 
 # ======================
 # PROD (default)
@@ -214,3 +215,23 @@ uv-lock:
 # Refresh the integrated dev venv (core + all checked-out plugins).
 uv-sync:
 	uv sync --all-packages
+
+
+# ======================
+# Lint & format (ruff, on the host — not in Docker)
+# ======================
+# Rules live in ./ruff.toml and cover core and the Titiler app together.
+# The version is pinned: unpinned, a ruff release changes CI's mind about code
+# nobody touched. Keep it in step with .github/workflows/ci.yml.
+
+RUFF ?= ruff@0.15.20
+
+# What CI runs. Reports, changes nothing.
+lint:
+	uvx $(RUFF) check .
+	uvx $(RUFF) format --check .
+
+# What to run before committing: sorts imports, applies safe fixes, formats.
+format:
+	uvx $(RUFF) check --fix .
+	uvx $(RUFF) format .

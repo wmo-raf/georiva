@@ -16,6 +16,7 @@ modelled as an ``Asset`` row.
 Kept dependency-free so it is unit-testable without a live bucket; the command
 supplies the object listing and the live-href set.
 """
+
 from __future__ import annotations
 
 import os

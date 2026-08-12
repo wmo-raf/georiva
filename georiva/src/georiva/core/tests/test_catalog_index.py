@@ -166,11 +166,13 @@ class CatalogIndexAffordanceTests(TestCase):
     """The catalog accordion only shows affordances the user can actually use."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="Models", slug="models-idx", file_format="grib2")
-        self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Surface", slug="surface-idx"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Models", slug="models-idx", file_format="grib2"
         )
-        self.empty_catalog = Catalog.objects.create(organisation=make_organisation(), name="Empty", slug="empty-idx", file_format="grib2")
+        self.collection = Collection.objects.create(catalog=self.catalog, name="Surface", slug="surface-idx")
+        self.empty_catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Empty", slug="empty-idx", file_format="grib2"
+        )
 
     def _get_index_as(self, user):
         dial_org(self.client)
@@ -179,6 +181,7 @@ class CatalogIndexAffordanceTests(TestCase):
 
     def test_data_manager_sees_a_read_only_accordion(self):
         from django.contrib.auth.models import Group
+
         user = User.objects.create_user("dm-idx", "dmi@x.com", "pw")
         join_org(user)
         user.groups.add(Group.objects.get(name="Data Managers"))

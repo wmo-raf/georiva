@@ -11,6 +11,7 @@ adopting Wagtail's existing default Site and root page instead of creating new
 ones. It is otherwise an entirely ordinary organisation: no code anywhere treats
 it as a fallback.
 """
+
 import logging
 
 from django.conf import settings
@@ -181,7 +182,7 @@ def sync_site_domains(old_domain, base_domain=None):
         if hostname == old:
             new_hostname = target
         elif hostname.endswith(suffix):
-            new_hostname = f"{hostname[:-len(suffix)]}.{target}"
+            new_hostname = f"{hostname[: -len(suffix)]}.{target}"
         else:
             continue
         moves.append((site, hostname, new_hostname))
@@ -189,14 +190,10 @@ def sync_site_domains(old_domain, base_domain=None):
     # Wagtail holds (hostname, port) unique, and a half-applied rename is an
     # instance where some organisations are reachable and others are not.
     # Nothing moves unless every move can.
-    taken = set(
-        Site.objects.exclude(pk__in=[site.pk for site, _, _ in moves]).values_list("hostname", "port")
-    )
+    taken = set(Site.objects.exclude(pk__in=[site.pk for site, _, _ in moves]).values_list("hostname", "port"))
     collisions = [f"{old_hostname} -> {new}" for site, old_hostname, new in moves if (new, site.port) in taken]
     if collisions:
-        raise ValueError(
-            "Another Site already answers on: " + ", ".join(collisions) + ". Nothing was moved."
-        )
+        raise ValueError("Another Site already answers on: " + ", ".join(collisions) + ". Nothing was moved.")
 
     with transaction.atomic():
         for site, _, new_hostname in moves:
@@ -206,7 +203,10 @@ def sync_site_domains(old_domain, base_domain=None):
     if moves:
         logger.info(
             "Moved %d organisation Site(s) from %s to %s: %s",
-            len(moves), old, target, ", ".join(new for _, _, new in moves),
+            len(moves),
+            old,
+            target,
+            ", ".join(new for _, _, new in moves),
         )
     return [(old_hostname, new) for _, old_hostname, new in moves]
 

@@ -9,8 +9,10 @@ class IngestionActivityPanel(Component):
 
     def get_context_data(self, parent_context):
         context = super().get_context_data(parent_context)
-        context.update({
-            "api_url": reverse("ingestion_dashboard_api"),
-            "activity_feed_url": reverse("ingestion_activity_feed"),
-        })
+        context.update(
+            {
+                "api_url": reverse("ingestion_dashboard_api"),
+                "activity_feed_url": reverse("ingestion_activity_feed"),
+            }
+        )
         return context

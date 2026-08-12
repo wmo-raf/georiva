@@ -2,6 +2,7 @@
 Public dataset pages must not surface `internal` collections — they are
 derivation intermediates, read by the engine but never served.
 """
+
 import json
 
 from django.test import TestCase, override_settings
@@ -17,29 +18,27 @@ class DatasetVisibilityTests(TestCase):
     def setUp(self):
         # Dataset pages are per organisation and resolved from the Host.
         dial_org(self.client)
-        self.catalog = Catalog.objects.create(organisation=make_organisation(),
-            name="CMIP6", slug="cmip6", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         Collection.objects.create(
-            catalog=self.catalog, name="Tas", slug="tas",
+            catalog=self.catalog,
+            name="Tas",
+            slug="tas",
             visibility=Collection.Visibility.PUBLIC,
         )
         Collection.objects.create(
-            catalog=self.catalog, name="Tas anomaly", slug="tas-anomaly",
+            catalog=self.catalog,
+            name="Tas anomaly",
+            slug="tas-anomaly",
             visibility=Collection.Visibility.INTERNAL,
         )
 
     def test_available_dates_404_for_internal(self):
-        ok = self.client.get(
-            reverse("datasets:collection-available-dates",
-                    args=["cmip6", "tas"])
-        )
+        ok = self.client.get(reverse("datasets:collection-available-dates", args=["cmip6", "tas"]))
         self.assertEqual(ok.status_code, 200)
 
-        hidden = self.client.get(
-            reverse("datasets:collection-available-dates",
-                    args=["cmip6", "tas-anomaly"])
-        )
+        hidden = self.client.get(reverse("datasets:collection-available-dates", args=["cmip6", "tas-anomaly"]))
         self.assertEqual(hidden.status_code, 404)
 
 
@@ -60,9 +59,7 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
         from georiva.pages.datasets.models import DatasetsIndexPage
 
-        cls.index = DatasetsIndexPage.objects.descendant_of(
-            cls.organisation.site.root_page
-        ).get()
+        cls.index = DatasetsIndexPage.objects.descendant_of(cls.organisation.site.root_page).get()
 
         tree = make_org_tree(cls.organisation)
         cls.catalog = tree["catalog"]
@@ -89,7 +86,7 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         body = response.content.decode()
         start = body.index('id="grItemConfig"')
         start = body.index(">", start) + 1
-        raw = body[start:body.index("</script>", start)]
+        raw = body[start : body.index("</script>", start)]
         return json.loads(raw)
 
     def test_the_config_block_is_parseable_json(self):
@@ -110,8 +107,8 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         self.assertIn(self.variable.slug, config["textureUrls"])
         url = config["textureUrls"][self.variable.slug]
         self.assertIn(
-            f"/titiler/kenya/{self.catalog.slug}/{self.collection.slug}/"
-            f"{self.variable.slug}/encoded-preview.png?", url,
+            f"/titiler/kenya/{self.catalog.slug}/{self.collection.slug}/{self.variable.slug}/encoded-preview.png?",
+            url,
         )
         self.assertIn("v=", url)
 
@@ -124,17 +121,15 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         """Dataset pages stay on the default style (ADR 0023): an alternate
         named style must not change the palette the map layer carries."""
         make_style(
-            self.variable, "official",
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ffffff"}],
+            self.variable,
+            "official",
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ffffff"}],
         )
         make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
         url = f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/items/{self.item.pk}/"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-        layers = {
-            layer["slug"]: layer for layer in response.context["map_layers"]
-        }
+        layers = {layer["slug"]: layer for layer in response.context["map_layers"]}
         self.assertEqual(
             layers[self.variable.slug]["palette"],
             [[0.0, [0, 0, 0]], [50.0, [255, 255, 255]]],

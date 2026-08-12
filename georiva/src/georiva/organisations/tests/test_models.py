@@ -10,7 +10,6 @@ from .factories import make_user
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
 class OrganisationSlugValidationTests(TestCase):
-
     def test_accepts_lowercase_and_internal_hyphens(self):
         for slug in ["kenya", "kenya-met", "icpac2", "a", "a1-b2-c3"]:
             with self.subTest(slug=slug):
@@ -54,7 +53,6 @@ class OrganisationSlugValidationTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
 class OrganisationSlugImmutabilityTests(TestCase):
-
     def setUp(self):
         self.organisation = provision_organisation(name="Kenya Met", slug="kenya")
 
@@ -85,7 +83,6 @@ class OrganisationSlugImmutabilityTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
 class OrganisationMembershipTests(TestCase):
-
     def setUp(self):
         self.organisation = provision_organisation(name="Kenya Met", slug="kenya")
         self.other = provision_organisation(name="ICPAC", slug="icpac")
@@ -116,4 +113,3 @@ class OrganisationMembershipTests(TestCase):
         self.assertEqual(self.organisation.membership_for(self.user), membership)
         membership.delete()
         self.assertIsNone(self.organisation.membership_for(self.user))
-

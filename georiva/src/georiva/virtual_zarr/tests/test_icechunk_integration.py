@@ -10,18 +10,17 @@ under a unique scratch prefix and purges it afterwards.
 import time
 import unittest
 import uuid
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
+from datetime import timezone as dt_timezone
 
 import numpy as np
 import pandas as pd
-
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 S3_READY = bool(
-    getattr(settings, "AWS_S3_ENDPOINT_URL", None)
-    and getattr(settings, "GEORIVA_STORAGE_BACKEND", "") == "s3"
+    getattr(settings, "AWS_S3_ENDPOINT_URL", None) and getattr(settings, "GEORIVA_STORAGE_BACKEND", "") == "s3"
 )
 
 BOUNDS = (30.0, -10.0, 40.0, 0.0)  # west, south, east, north
@@ -73,13 +72,10 @@ class IcechunkStorageChecks(SimpleTestCase):
     def _build_vds(self, dated_keys, variable="precip", per_cog_check=None):
         from georiva.virtual_zarr.virtual_zarr import VirtualZarrBuilder
 
-        url_df = pd.DataFrame([
-            {"date": pd.Timestamp(date), "url": self.config.url_for(key)}
-            for date, key in dated_keys
-        ])
-        return VirtualZarrBuilder(self.config).build(
-            url_df, variable_name=variable, per_cog_check=per_cog_check
+        url_df = pd.DataFrame(
+            [{"date": pd.Timestamp(date), "url": self.config.url_for(key)} for date, key in dated_keys]
         )
+        return VirtualZarrBuilder(self.config).build(url_df, variable_name=variable, per_cog_check=per_cog_check)
 
     def _commit_rebuild(self, repo, vds, item_count):
         from georiva.virtual_zarr.repo import commit_metadata
@@ -87,7 +83,8 @@ class IcechunkStorageChecks(SimpleTestCase):
 
         now = timezone.now()
         return write_rebuild(
-            repo, vds,
+            repo,
+            vds,
             last_updated_at=now,
             metadata=commit_metadata(now, item_count, now, now),
             message=f"rebuild: {item_count}",
@@ -122,9 +119,7 @@ class IcechunkStorageChecks(SimpleTestCase):
 
         # Tip stays consistent: the first writer's values won.
         reopened = open_repo(self.repo_path)
-        group = zarr.open_group(
-            reopened.readonly_session(branch="main").store, mode="r"
-        )
+        group = zarr.open_group(reopened.readonly_session(branch="main").store, mode="r")
         np.testing.assert_array_equal(group["x"][:], np.full(4, 1, dtype="int32"))
 
     # -- check 2: overwrite safety -------------------------------------------
@@ -142,9 +137,7 @@ class IcechunkStorageChecks(SimpleTestCase):
         self._commit_rebuild(repo, vds, 1)
 
         ds = self._open_tip(repo)
-        np.testing.assert_array_equal(
-            ds["precip"].isel(time=0).values, source
-        )
+        np.testing.assert_array_equal(ds["precip"].isel(time=0).values, source)
 
         # Rewrite different data at the same key.  Last-Modified has
         # 1-second granularity, so step past the recorded checksum second.
@@ -159,7 +152,6 @@ class IcechunkStorageChecks(SimpleTestCase):
     # -- check 3: predictor round-trip ---------------------------------------
 
     def test_predictor_roundtrip_bit_equal_to_rasterio(self):
-        from georiva.virtual_zarr.repo import open_repo
 
         rng = np.random.default_rng(1)
         cases = {
@@ -175,6 +167,7 @@ class IcechunkStorageChecks(SimpleTestCase):
 
                 repo_path = f"{self.scratch}/repo-{dtype}/"
                 from georiva.virtual_zarr.repo import open_repo as _open
+
                 repo = _open(repo_path, create=True)
                 vds = self._build_vds([("2026-01-01", key)], variable="v")
                 self._commit_rebuild(repo, vds, 1)
@@ -182,9 +175,7 @@ class IcechunkStorageChecks(SimpleTestCase):
                 # mask_and_scale=False: xarray otherwise promotes ints with a
                 # _FillValue to NaN-masked floats (same as the kerchunk path)
                 ds = self._open_tip(repo, mask_and_scale=False)
-                np.testing.assert_array_equal(
-                    ds["v"].isel(time=0).values, source
-                )
+                np.testing.assert_array_equal(ds["v"].isel(time=0).values, source)
 
     # -- check 4: virtual append + pinned snapshot ----------------------------
 
@@ -209,7 +200,8 @@ class IcechunkStorageChecks(SimpleTestCase):
         now = timezone.now()
         vds_new = self._build_vds(list(zip(dates[2:], keys[2:])))
         c2 = write_append(
-            repo, vds_new,
+            repo,
+            vds_new,
             last_updated_at=now,
             metadata=commit_metadata(now, 4, now, now),
             message="append: 2",
@@ -217,9 +209,7 @@ class IcechunkStorageChecks(SimpleTestCase):
         self.assertNotEqual(c1, c2)
 
         ds = self._open_tip(repo)
-        np.testing.assert_array_equal(
-            ds["time"].values, dates.values
-        )
+        np.testing.assert_array_equal(ds["time"].values, dates.values)
         for i, key in enumerate(keys):
             np.testing.assert_array_equal(
                 ds["precip"].isel(time=i).values,
@@ -246,43 +236,47 @@ class BuildTaskEndToEndTests(TestCase):
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Itest", slug=f"itest-{uuid.uuid4().hex[:8]}",
+            name="Itest",
+            slug=f"itest-{uuid.uuid4().hex[:8]}",
             file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Daily", slug="daily",
+            catalog=self.catalog,
+            name="Daily",
+            slug="daily",
         )
-        self.unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        self.unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precip", name="Precip",
-            unit=self.unit, value_min=0, value_max=500,
+            collection=self.collection,
+            slug="precip",
+            name="Precip",
+            unit=self.unit,
+            value_min=0,
+            value_max=500,
         )
         self.rng = np.random.default_rng(3)
-        self.addCleanup(
-            _purge_prefix, storage.assets, self.catalog.storage_prefix
-        )
-        self.addCleanup(
-            _purge_prefix, storage.zarr, self.catalog.storage_prefix
-        )
+        self.addCleanup(_purge_prefix, storage.assets, self.catalog.storage_prefix)
+        self.addCleanup(_purge_prefix, storage.zarr, self.catalog.storage_prefix)
 
     def _add_item(self, day: int):
         from georiva.core.models import Asset, Item
 
         ts = datetime(2026, 3, day, tzinfo=dt_timezone.utc)
         item = Item.objects.create(
-            collection=self.collection, time=ts,
-            bounds=list(BOUNDS), crs="EPSG:4326", width=64, height=64,
+            collection=self.collection,
+            time=ts,
+            bounds=list(BOUNDS),
+            crs="EPSG:4326",
+            width=64,
+            height=64,
         )
-        key = (
-            f"{self.catalog.storage_prefix}/daily/precip/"
-            f"2026/03/{day:02d}/precip.tif"
-        )
+        key = f"{self.catalog.storage_prefix}/daily/precip/2026/03/{day:02d}/precip.tif"
         _write_cog(key, self.rng.random((64, 64), dtype="float32"))
         asset = Asset.objects.create(
-            item=item, variable=self.variable,
-            format=Asset.Format.COG, href=key,
+            item=item,
+            variable=self.variable,
+            format=Asset.Format.COG,
+            href=key,
         )
         return item, asset
 
@@ -291,9 +285,7 @@ class BuildTaskEndToEndTests(TestCase):
 
         manifest, _ = VirtualZarrManifest.objects.get_or_create(
             variable=self.variable,
-            defaults={
-                "repo_path": VirtualZarrManifest.make_repo_path(self.variable)
-            },
+            defaults={"repo_path": VirtualZarrManifest.make_repo_path(self.variable)},
         )
         return manifest
 
@@ -369,7 +361,10 @@ class BuildTaskEndToEndTests(TestCase):
         Item.objects.create(
             collection=self.collection,
             time=datetime(2026, 3, 5, tzinfo=dt_timezone.utc),
-            bounds=list(BOUNDS), crs="EPSG:4326", width=64, height=64,
+            bounds=list(BOUNDS),
+            crs="EPSG:4326",
+            width=64,
+            height=64,
         )
         manifest = self._manifest()
 
@@ -408,9 +403,7 @@ class BuildTaskEndToEndTests(TestCase):
         self.assertEqual(uptodate_log.items_written, 0)
 
         # --- GC leaves a per-repo record and refreshes the caches ----------
-        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
-            repo_size_bytes=0, repo_object_count=0
-        )
+        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(repo_size_bytes=0, repo_object_count=0)
         gc_virtual_zarr_repos.apply()
 
         gc_log = manifest.build_logs.get(kind=VirtualZarrBuildLog.Kind.GC)

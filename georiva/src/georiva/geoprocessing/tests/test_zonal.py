@@ -21,9 +21,7 @@ class ZonalStatsFromArrayTests(unittest.TestCase):
         self.crs = "EPSG:4326"
 
     def test_full_extent_aggregates_all_pixels(self):
-        rows = zonal_stats_from_array(
-            self.data, self.transform, self.crs, [("all", _square(0, 0, 4, 4))]
-        )
+        rows = zonal_stats_from_array(self.data, self.transform, self.crs, [("all", _square(0, 0, 4, 4))])
         self.assertEqual(len(rows), 1)
         r = rows[0]
         self.assertEqual(r["key"], "all")
@@ -34,37 +32,27 @@ class ZonalStatsFromArrayTests(unittest.TestCase):
 
     def test_partial_geometry_counts_fewer_pixels(self):
         # Bottom-left quadrant only.
-        rows = zonal_stats_from_array(
-            self.data, self.transform, self.crs, [("q", _square(0, 0, 2, 2))]
-        )
+        rows = zonal_stats_from_array(self.data, self.transform, self.crs, [("q", _square(0, 0, 2, 2))])
         self.assertLess(rows[0]["count"], 16)
         self.assertGreater(rows[0]["count"], 0)
 
     def test_none_geometry_returns_empty_stats(self):
-        rows = zonal_stats_from_array(
-            self.data, self.transform, self.crs, [("none", None)]
-        )
+        rows = zonal_stats_from_array(self.data, self.transform, self.crs, [("none", None)])
         self.assertIsNone(rows[0]["mean"])
         self.assertIsNone(rows[0]["count"])
         self.assertEqual(rows[0]["key"], "none")
 
     def test_non_intersecting_geometry_returns_empty_stats(self):
-        rows = zonal_stats_from_array(
-            self.data, self.transform, self.crs, [("far", _square(100, 100, 101, 101))]
-        )
+        rows = zonal_stats_from_array(self.data, self.transform, self.crs, [("far", _square(100, 100, 101, 101))])
         self.assertIsNone(rows[0]["mean"])
 
     def test_empty_geometries_returns_empty_list(self):
-        self.assertEqual(
-            zonal_stats_from_array(self.data, self.transform, self.crs, []), []
-        )
+        self.assertEqual(zonal_stats_from_array(self.data, self.transform, self.crs, []), [])
 
     def test_nan_pixels_excluded(self):
         data = self.data.copy()
         data[0, 0] = np.nan
-        rows = zonal_stats_from_array(
-            data, self.transform, self.crs, [("all", _square(0, 0, 4, 4))]
-        )
+        rows = zonal_stats_from_array(data, self.transform, self.crs, [("all", _square(0, 0, 4, 4))])
         self.assertEqual(rows[0]["count"], 15)
 
 

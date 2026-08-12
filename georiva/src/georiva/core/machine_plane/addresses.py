@@ -27,6 +27,7 @@ for one reason — it is the exact inverse of the builders above, and an inverse
 that drifts from its function is a gate that authorises one collection while the
 tile server reads another.
 """
+
 import hashlib
 import json
 from collections import namedtuple
@@ -208,10 +209,14 @@ def titiler_preview_url(item, variable, style=None) -> str:
         params["style"] = style.slug
     if variable is not None:
         params["v"] = style_version_token(
-            variable, style if style is not None else variable.default_style,
+            variable,
+            style if style is not None else variable.default_style,
         )
     root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable_slug,
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable_slug,
     )
 
     return f"{root}/preview.webp?{urlencode(params)}"
@@ -270,7 +275,10 @@ def titiler_encoded_preview_url(item, variable) -> str:
         params["reftime"] = item.reference_time_iso
     params["v"] = render_config_token(variable)
     root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable.slug,
     )
 
     return f"{root}/encoded-preview.png?{urlencode(params)}"
@@ -290,11 +298,13 @@ def martin_boundary_stats_url(collection, base) -> str:
     an absolute URL from the request, and a default would only ever be a wrong
     answer that looked like a working one.
     """
-    params = urlencode({
-        "org": org_slug_of(collection),
-        "catalog": collection.catalog.slug,
-        "collection": collection.slug,
-    })
+    params = urlencode(
+        {
+            "org": org_slug_of(collection),
+            "catalog": collection.catalog.slug,
+            "collection": collection.slug,
+        }
+    )
     return f"{base.rstrip('/')}/{MARTIN_BOUNDARY_STATS_SOURCE}/{{z}}/{{x}}/{{y}}?{params}"
 
 
@@ -392,16 +402,20 @@ def _wmts_rest_template(variable, leaf, dimensions, styled, api_key) -> str:
     """
     collection = variable.collection
     root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable.slug,
     )
     template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}{leaf}"
-    params = [
-        (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
-    ] if styled else []
-    params += [
-        (WMTS_DIMENSION_PARAMS[identifier], identifier)
-        for identifier in dimensions
-    ]
+    params = (
+        [
+            (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
+        ]
+        if styled
+        else []
+    )
+    params += [(WMTS_DIMENSION_PARAMS[identifier], identifier) for identifier in dimensions]
     parts = [f"{param}={{{placeholder}}}" for param, placeholder in params]
     if api_key:
         parts.append(_api_key_pair(api_key))
@@ -474,5 +488,6 @@ def wmts_capabilities_url(organisation, api_key=None) -> str:
     would silently drop the caller back to the public-only view.
     """
     return _keyed(
-        f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml", api_key,
+        f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml",
+        api_key,
     )

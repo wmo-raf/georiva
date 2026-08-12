@@ -5,6 +5,7 @@ A feed declares the derived products it offers via get_derived_products(); the
 base default is none. Plugins override to return DerivedProductDefinitions bound
 to their configured collections.
 """
+
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -16,6 +17,7 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import make_organisation
 from georiva.sources.models import DataFeed, DataFeedCollectionLink, DerivedProduct
 from georiva.sources.setup_service import SourceSetupService
 from georiva.sources.views import (
@@ -23,7 +25,6 @@ from georiva.sources.views import (
     build_product_config_form,
     selected_products_from_session,
 )
-from georiva.organisations.testing import make_organisation
 
 
 def _definition(**overrides):
@@ -33,8 +34,7 @@ def _definition(**overrides):
         label="Rainfall anomaly",
         description="Anomaly vs a baseline.",
         config_schema=(
-            ConfigField(key="quantity", type="choice",
-                        choices=("anomaly", "value"), default="anomaly"),
+            ConfigField(key="quantity", type="choice", choices=("anomaly", "value"), default="anomaly"),
             ConfigField(key="min_years", type="int", default=30),
         ),
         inputs=(InputRef(role="value", collection="rainfall", tier="staging"),),
@@ -47,7 +47,9 @@ def _definition(**overrides):
 
 class GetDerivedProductsTests(TestCase):
     def test_defaults_to_empty_list(self):
-        catalog = Catalog.objects.create(organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff")
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
         feed = DataFeed.objects.create(name="Feed", catalog=catalog)
 
         self.assertEqual(feed.get_derived_products(), [])
@@ -55,8 +57,8 @@ class GetDerivedProductsTests(TestCase):
 
 class DerivedProductModelTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
@@ -77,13 +79,17 @@ class DerivedProductModelTests(TestCase):
 
     def test_is_enabled_defaults_to_true(self):
         product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
         self.assertTrue(product.is_enabled)
 
     def test_display_label_falls_back_to_the_declared_label(self):
         product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
         )
         with patch.object(DataFeed, "get_derived_products", return_value=[_definition()]):
             # No override -> the plugin's declared label (so upgrades refresh it).
@@ -92,8 +98,11 @@ class DerivedProductModelTests(TestCase):
 
     def test_display_label_prefers_the_operator_override(self):
         product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly", recipe_type="climatology",
-            title="Rainfall Normals (1991–2020)", description="My note.",
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
+            title="Rainfall Normals (1991–2020)",
+            description="My note.",
         )
         with patch.object(DataFeed, "get_derived_products", return_value=[_definition()]):
             self.assertEqual(product.display_label, "Rainfall Normals (1991–2020)")
@@ -102,7 +111,9 @@ class DerivedProductModelTests(TestCase):
     def test_display_label_falls_back_to_key_for_an_orphaned_product(self):
         # No matching declaration (orphan) and no override -> the definition key.
         product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="ghost", recipe_type="climatology",
+            data_feed=self.feed,
+            definition_key="ghost",
+            recipe_type="climatology",
         )
         with patch.object(DataFeed, "get_derived_products", return_value=[]):
             self.assertEqual(product.display_label, "ghost")
@@ -111,8 +122,8 @@ class DerivedProductModelTests(TestCase):
 class ProvisionDerivedProductsTests(TestCase):
     def setUp(self):
         self.service = SourceSetupService()
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
@@ -132,9 +143,7 @@ class ProvisionDerivedProductsTests(TestCase):
         # Every declared product gets a row; an operator's opt-out is recorded as
         # is_enabled=False, not as a missing row — so it stays visible and
         # re-enablable later.
-        self.service.provision_derived_products(
-            self.feed, [(_definition(), {}, False)]
-        )
+        self.service.provision_derived_products(self.feed, [(_definition(), {}, False)])
 
         product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
         self.assertFalse(product.is_enabled)
@@ -156,12 +165,8 @@ class ProvisionDerivedProductsTests(TestCase):
         self.assertEqual(DerivedProduct.objects.filter(data_feed=self.feed).count(), 0)
 
     def test_reprovisioning_updates_in_place_rather_than_duplicating(self):
-        self.service.provision_derived_products(
-            self.feed, [(_definition(), {"min_years": "30"}, True)]
-        )
-        self.service.provision_derived_products(
-            self.feed, [(_definition(), {"min_years": "50"}, True)]
-        )
+        self.service.provision_derived_products(self.feed, [(_definition(), {"min_years": "30"}, True)])
+        self.service.provision_derived_products(self.feed, [(_definition(), {"min_years": "50"}, True)])
 
         products = DerivedProduct.objects.filter(data_feed=self.feed, definition_key="anomaly")
         self.assertEqual(products.count(), 1)
@@ -188,29 +193,23 @@ class ProvisionDerivedProductsTests(TestCase):
         # is_enabled is a create-time default: once a row exists, re-running the
         # wizard edits config but must not clobber a toggle the operator changed
         # after setup.
-        self.service.provision_derived_products(
-            self.feed, [(_definition(), {"min_years": "30"}, True)]
-        )
+        self.service.provision_derived_products(self.feed, [(_definition(), {"min_years": "30"}, True)])
         # Operator later disables it out-of-band.
         product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
         product.is_enabled = False
         product.save(update_fields=["is_enabled"])
 
         # Wizard re-run arrives with enabled=True again.
-        self.service.provision_derived_products(
-            self.feed, [(_definition(), {"min_years": "50"}, True)]
-        )
+        self.service.provision_derived_products(self.feed, [(_definition(), {"min_years": "50"}, True)])
 
         product.refresh_from_db()
-        self.assertFalse(product.is_enabled)      # toggle preserved
-        self.assertEqual(product.config["min_years"], 50)   # config still updated
+        self.assertFalse(product.is_enabled)  # toggle preserved
+        self.assertEqual(product.config["min_years"], 50)  # config still updated
 
     def test_unticked_product_provisions_with_schema_defaults(self):
         # An unticked product is validated with an empty config, so it lands with
         # its declared schema defaults filled in — ready to run if enabled later.
-        self.service.provision_derived_products(
-            self.feed, [(_definition(), {}, False)]
-        )
+        self.service.provision_derived_products(self.feed, [(_definition(), {}, False)])
 
         product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
         self.assertEqual(product.config, {"quantity": "anomaly", "min_years": 30})
@@ -218,39 +217,35 @@ class ProvisionDerivedProductsTests(TestCase):
     def test_provisioning_enabled_product_materialises_its_output_collections(self):
         # A product enabled in the wizard has its outputs materialised at
         # provision time, with the declared metadata.
-        defn = _definition(outputs=(
-            OutputRef(role="anomaly", collection="rainfall-anomaly",
-                      title="Rainfall Anomaly", visibility="internal"),
-        ))
+        defn = _definition(
+            outputs=(
+                OutputRef(
+                    role="anomaly", collection="rainfall-anomaly", title="Rainfall Anomaly", visibility="internal"
+                ),
+            )
+        )
 
         self.service.provision_derived_products(self.feed, [(defn, {}, True)])
 
-        collection = Collection.objects.get(
-            catalog=self.catalog, slug="rainfall-anomaly"
-        )
+        collection = Collection.objects.get(catalog=self.catalog, slug="rainfall-anomaly")
         self.assertEqual(collection.name, "Rainfall Anomaly")
         self.assertEqual(collection.visibility, Collection.Visibility.INTERNAL)
 
     def test_provisioning_disabled_product_does_not_materialise_outputs(self):
         # An unticked product's outputs stay latent — they materialise only when
         # it is enabled later.
-        defn = _definition(outputs=(
-            OutputRef(role="anomaly", collection="rainfall-anomaly"),
-        ))
+        defn = _definition(outputs=(OutputRef(role="anomaly", collection="rainfall-anomaly"),))
 
         self.service.provision_derived_products(self.feed, [(defn, {}, False)])
 
-        self.assertFalse(
-            Collection.objects.filter(slug="rainfall-anomaly").exists()
-        )
+        self.assertFalse(Collection.objects.filter(slug="rainfall-anomaly").exists())
 
     def test_reprovisioning_preserves_overrides_and_collection_renames(self):
         # A wizard re-run edits config but must never clobber an operator's title
         # override or a renamed output collection.
-        defn = _definition(outputs=(
-            OutputRef(role="anomaly", collection="rainfall-anomaly",
-                      title="Declared Anomaly"),
-        ))
+        defn = _definition(
+            outputs=(OutputRef(role="anomaly", collection="rainfall-anomaly", title="Declared Anomaly"),)
+        )
         self.service.provision_derived_products(self.feed, [(defn, {"min_years": "30"}, True)])
 
         product = DerivedProduct.objects.get(data_feed=self.feed, definition_key="anomaly")
@@ -265,9 +260,9 @@ class ProvisionDerivedProductsTests(TestCase):
 
         product.refresh_from_db()
         collection.refresh_from_db()
-        self.assertEqual(product.title, "My Anomaly")           # override kept
-        self.assertEqual(product.config["min_years"], 50)       # config updated
-        self.assertEqual(collection.name, "My Renamed Anomaly") # rename kept
+        self.assertEqual(product.title, "My Anomaly")  # override kept
+        self.assertEqual(product.config["min_years"], 50)  # config updated
+        self.assertEqual(collection.name, "My Renamed Anomaly")  # rename kept
 
 
 class BuildProductConfigFormTests(TestCase):
@@ -310,9 +305,7 @@ class TransientFeedForProductsTests(TestCase):
         feed = _transient_feed_for_products(DataFeed, session)
 
         self.assertIsNone(feed.pk)
-        self.assertEqual(
-            feed._wizard_selected_keys, ["chirps-monthly", "chirps-dekadal"]
-        )
+        self.assertEqual(feed._wizard_selected_keys, ["chirps-monthly", "chirps-dekadal"])
 
     def test_no_selection_stashes_an_empty_list(self):
         feed = _transient_feed_for_products(DataFeed, {"catalog_mode": "create"})
@@ -326,18 +319,14 @@ class SelectedDefinitionKeysTests(TestCase):
     wizard's stash while still transient, and must agree across the two."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
 
     def test_saved_feed_reads_keys_from_collection_links(self):
         feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
-        collection = Collection.objects.create(
-            catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly"
-        )
-        DataFeedCollectionLink.objects.create(
-            data_feed=feed, collection=collection, definition_key="chirps-monthly"
-        )
+        collection = Collection.objects.create(catalog=self.catalog, slug="chirps-monthly", name="CHIRPS Monthly")
+        DataFeedCollectionLink.objects.create(data_feed=feed, collection=collection, definition_key="chirps-monthly")
 
         self.assertEqual(feed.selected_definition_keys(), ["chirps-monthly"])
 
@@ -357,8 +346,8 @@ class SelectedProductsFromSessionTests(TestCase):
     so provisioning always writes a full row set with the opt-out in is_enabled."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
@@ -370,8 +359,7 @@ class SelectedProductsFromSessionTests(TestCase):
             "selected_product_keys": ["anomaly"],
         }
 
-        with patch.object(DataFeed, "get_derived_products",
-                          return_value=[anomaly, promotion]):
+        with patch.object(DataFeed, "get_derived_products", return_value=[anomaly, promotion]):
             triples = selected_products_from_session(self.feed, session)
 
         # A triple per declared definition; enabled reflects the tick selection,

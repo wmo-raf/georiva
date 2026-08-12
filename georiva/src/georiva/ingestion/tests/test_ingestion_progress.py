@@ -12,13 +12,12 @@ from georiva.ingestion.progress import PublishingProgress
 from georiva.ingestion.service import IngestionService
 from georiva.organisations.testing import make_organisation
 
-
 # =============================================================================
 # PublishingProgress unit tests
 # =============================================================================
 
-class PublishingProgressTests(TestCase):
 
+class PublishingProgressTests(TestCase):
     def test_is_progress_subclass(self):
         pub = PublishingProgress(total=10)
         self.assertIsInstance(pub, Progress)
@@ -33,15 +32,22 @@ class PublishingProgressTests(TestCase):
 # IngestionService.process_file() progress checkpoints
 # =============================================================================
 
-class ProcessFileProgressTests(TestCase):
 
+class ProcessFileProgressTests(TestCase):
     def setUp(self):
-        catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff",
-            is_active=True, clip_mode="none",
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(),
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
+            is_active=True,
+            clip_mode="none",
         )
         Collection.objects.create(
-            catalog=catalog, name="Rainfall", slug="rainfall", is_active=True,
+            catalog=catalog,
+            name="Rainfall",
+            slug="rainfall",
+            is_active=True,
         )
 
     def _run(self):
@@ -88,8 +94,7 @@ class ProcessFileProgressTests(TestCase):
 
     def _states(self, mock_progress):
         return [
-            c.kwargs.get("state", c.args[1] if len(c.args) > 1 else "")
-            for c in mock_progress.increment.call_args_list
+            c.kwargs.get("state", c.args[1] if len(c.args) > 1 else "") for c in mock_progress.increment.call_args_list
         ]
 
     def test_emits_file_opened_checkpoint(self):
@@ -126,15 +131,16 @@ class ProcessFileProgressTests(TestCase):
 # IngestionHandler.process_timestamp() progress checkpoints
 # =============================================================================
 
-class ProcessTimestampProgressTests(TestCase):
 
+class ProcessTimestampProgressTests(TestCase):
     def _make_handler(self):
         ctx = MagicMock()
         ctx.clipper.is_active = False
         ctx.reference_time = None
         ctx.ingestion_log = None
         ctx.extractor.get_metadata.return_value = {
-            "width": 720, "height": 360,
+            "width": 720,
+            "height": 360,
             "bounds": (-180.0, -90.0, 180.0, 90.0),
             "crs": "EPSG:4326",
         }

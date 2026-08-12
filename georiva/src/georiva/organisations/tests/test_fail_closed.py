@@ -10,13 +10,13 @@ deliberate: per-org slug uniqueness (#267) makes it legal, and it is the case
 where an unscoped lookup does not merely leak but answers with the wrong
 institution's data.
 """
+
 import re
 
 from django.contrib.auth.models import Group, Permission
 from django.db import models
 from django.test import TestCase, override_settings
 from django.urls import get_resolver, reverse
-from wagtail import hooks
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import (
@@ -69,10 +69,12 @@ NOT_ORM_SCOPABLE_MODELS = {
 #: - failwhale is Wagtail's deliberate-500 page, where raising is the point;
 #: - the SSE feed never closes, so a test client GET would hang forever. Its
 #:   org filtering is covered directly in ingestion's SSE tests instead.
-_SWEEP_EXEMPT_LISTINGS = frozenset({
-    "admin/failwhale/",
-    "admin/api/ingestion/events/",
-})
+_SWEEP_EXEMPT_LISTINGS = frozenset(
+    {
+        "admin/failwhale/",
+        "admin/api/ingestion/events/",
+    }
+)
 
 
 class Undeclared(models.Model):
@@ -113,19 +115,19 @@ def build_org_tree(organisation, *, name):
     collection = Collection.objects.create(catalog=catalog, name=name, slug=SHARED_SLUG)
     unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
     variable = Variable.objects.create(
-        collection=collection, name=name, slug=SHARED_SLUG,
-        unit=unit, value_min=0, value_max=1,
+        collection=collection,
+        name=name,
+        slug=SHARED_SLUG,
+        unit=unit,
+        value_min=0,
+        value_max=1,
     )
     item = Item.objects.create(collection=collection, time="2026-01-01T00:00:00Z")
     asset = Asset.objects.create(item=item, variable=variable, href="x.tif")
     manifest = VirtualZarrManifest.objects.create(variable=variable)
     feed = DataFeed.objects.create(name=name, catalog=catalog)
-    link = DataFeedCollectionLink.objects.create(
-        data_feed=feed, collection=collection, definition_key=SHARED_SLUG
-    )
-    product = DerivedProduct.objects.create(
-        data_feed=feed, definition_key=SHARED_SLUG, recipe_type="promotion"
-    )
+    link = DataFeedCollectionLink.objects.create(data_feed=feed, collection=collection, definition_key=SHARED_SLUG)
+    product = DerivedProduct.objects.create(data_feed=feed, definition_key=SHARED_SLUG, recipe_type="promotion")
     run = FetchRun.objects.create(data_feed=feed)
     config = ManualUploadConfig.objects.create(
         catalog=catalog, name=name, valid_time_format=ManualUploadConfig.ValidTimeFormat.YYYYMMDD
@@ -278,9 +280,7 @@ class CrossOrgAdminTests(TestCase):
 
     def test_a_revoked_membership_fails_closed_on_the_next_request(self):
         self.assertEqual(self.client.get(reverse("catalog:index")).status_code, 200)
-        OrganisationMembership.objects.filter(
-            user=self.user, organisation=self.kenya
-        ).delete()
+        OrganisationMembership.objects.filter(user=self.user, organisation=self.kenya).delete()
         self.assertEqual(self.client.get(reverse("catalog:index")).status_code, 403)
 
     def test_a_member_of_another_organisation_cannot_enter_this_admin(self):
@@ -408,7 +408,8 @@ class AdminUrlSweepTests(TestCase):
             checked += 1
             with self.subTest(url=url):
                 self.assertIn(
-                    response.status_code, (403, 404),
+                    response.status_code,
+                    (403, 404),
                     f"{url} answered {response.status_code} for another organisation's row",
                 )
         self.assertGreater(checked, 10, "the sweep found too few admin URLs to be meaningful")
@@ -434,7 +435,8 @@ class AdminUrlSweepTests(TestCase):
             checked += 1
             with self.subTest(url=prefix + route):
                 self.assertNotIn(
-                    b"Uganda Forecast", response.content,
+                    b"Uganda Forecast",
+                    response.content,
                     f"/{prefix}{route} names another organisation's data",
                 )
         self.assertGreater(checked, 5, "the sweep found too few admin listings to be meaningful")
@@ -452,19 +454,18 @@ class OrgOwnedLookupDeclarationTests(TestCase):
         from django.apps import apps
 
         return [
-            model for model in apps.get_models()
+            model
+            for model in apps.get_models()
             if model.__module__.startswith(access.OWN_MODULE_PREFIX)
             # The undeclared stand-in below is undeclared on purpose.
             and model is not Undeclared
         ]
 
     def test_every_model_declares_its_tenancy(self):
-        undeclared = [
-            model._meta.label for model in self._own_models()
-            if not getattr(model, LOOKUP_ATTR, None)
-        ]
+        undeclared = [model._meta.label for model in self._own_models() if not getattr(model, LOOKUP_ATTR, None)]
         self.assertEqual(
-            undeclared, [],
+            undeclared,
+            [],
             f"declare {LOOKUP_ATTR} on these: the ORM path to Organisation, or one of "
             f"SHARED_REFERENCE_DATA / ORGANISATION_SELF / NOT_ORM_SCOPABLE",
         )
@@ -490,12 +491,10 @@ class OrgOwnedLookupDeclarationTests(TestCase):
         here are excused by name, so a new one is a decision somebody made rather
         than a default somebody fell into.
         """
-        unreachable = sorted(
-            model._meta.label for model in self._own_models()
-            if not ownership.is_scopable(model)
-        )
+        unreachable = sorted(model._meta.label for model in self._own_models() if not ownership.is_scopable(model))
         self.assertEqual(
-            unreachable, sorted(NOT_ORM_SCOPABLE_MODELS),
+            unreachable,
+            sorted(NOT_ORM_SCOPABLE_MODELS),
             "a model here reaches no organisation. Give it an ORM path, PAGE_TREE, "
             "via_related(...) or via_content_object(...) — or, if it genuinely has no "
             "owner the dispatcher can find, declare NOT_ORM_SCOPABLE and add it to "
@@ -552,13 +551,8 @@ class OrgOwnedLookupDeclarationTests(TestCase):
         """
         from django.apps import apps
 
-        pairs = [
-            (model, getattr(model, LOOKUP_ATTR, None)) for model in self._own_models()
-        ]
-        pairs += [
-            (apps.get_model(label), declared)
-            for label, declared in ownership.EXTERNAL_DECLARATIONS.items()
-        ]
+        pairs = [(model, getattr(model, LOOKUP_ATTR, None)) for model in self._own_models()]
+        pairs += [(apps.get_model(label), declared) for label, declared in ownership.EXTERNAL_DECLARATIONS.items()]
         return [(model, declared) for model, declared in pairs if declared]
 
     def test_scoping_refuses_a_model_that_declares_nothing(self):
@@ -588,11 +582,18 @@ class NoUnscopedObjectLookupTests(TestCase):
     """
 
     APPS = [
-        "core", "sources", "ingestion", "visualization", "virtual_zarr", "analysis",
+        "core",
+        "sources",
+        "ingestion",
+        "visualization",
+        "virtual_zarr",
+        "analysis",
         # The public plane resolves the same rows from the same slugs, and its
         # callers are anonymous — it earns the rule rather than being exempt
         # from it (#271).
-        "stac", "edr", "pages",
+        "stac",
+        "edr",
+        "pages",
     ]
 
     def test_org_owned_apps_do_not_call_get_object_or_404(self):
@@ -611,7 +612,7 @@ class NoUnscopedObjectLookupTests(TestCase):
                 if re.search(r"\bget_object_or_404\b", text):
                     offenders.append(str(path.relative_to(root)))
         self.assertEqual(
-            offenders, [],
-            "these resolve rows without an organisation; use "
-            "organisations.access.get_org_object_or_404 instead",
+            offenders,
+            [],
+            "these resolve rows without an organisation; use organisations.access.get_org_object_or_404 instead",
         )

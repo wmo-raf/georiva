@@ -5,6 +5,7 @@ demand by Titiler (ADR 0021), so no PNG is written or recorded here.
 
 Mirrors processing/tests/test_engine.py: mock the writer, assert on records.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -38,22 +39,35 @@ class MaterializerFixture(TestCase):
     def setUp(self):
         self.catalog = Catalog.objects.create(
             organisation=make_organisation(),
-            name="Cat", slug="cat", file_format="geotiff",
+            name="Cat",
+            slug="cat",
+            file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, slug="col", name="col",
+            catalog=self.catalog,
+            slug="col",
+            name="col",
         )
         self.unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"},
+            name="Millimetre",
+            defaults={"symbol": "mm"},
         )
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precip", name="Precipitation",
-            unit=self.unit, value_min=0, value_max=300,
+            collection=self.collection,
+            slug="precip",
+            name="Precipitation",
+            unit=self.unit,
+            value_min=0,
+            value_max=300,
         )
         self.ts = datetime(2024, 5, 1, tzinfo=timezone.utc)
         self.item = Item.objects.create(
-            collection=self.collection, time=self.ts,
-            bounds=[10, -5, 20, 5], crs="EPSG:4326", width=10, height=10,
+            collection=self.collection,
+            time=self.ts,
+            bounds=[10, -5, 20, 5],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
         self.writer = _mock_writer()
         self.materializer = AssetMaterializer(self.writer)
@@ -61,8 +75,12 @@ class MaterializerFixture(TestCase):
 
     def _materialize(self, **kwargs):
         defaults = dict(
-            item=self.item, variable=self.variable, data=self.data,
-            bounds=[10, -5, 20, 5], crs="EPSG:4326", timestamp=self.ts,
+            item=self.item,
+            variable=self.variable,
+            data=self.data,
+            bounds=[10, -5, 20, 5],
+            crs="EPSG:4326",
+            timestamp=self.ts,
         )
         defaults.update(kwargs)
         return self.materializer.materialize_variable(**defaults)
@@ -79,9 +97,7 @@ class MaterializeVariableTests(MaterializerFixture):
         self.assertEqual(cog.stats_min, 42.0)
 
         # No stored visual: textures are derived on demand (ADR 0021).
-        self.assertFalse(
-            self.item.assets.filter(format=Asset.Format.PNG).exists()
-        )
+        self.assertFalse(self.item.assets.filter(format=Asset.Format.PNG).exists())
 
         # The COG is the only object written — no JSON sidecar (ADR 0024).
         # The spec'd writer mock raises if any other method is touched.
@@ -114,16 +130,23 @@ class MaterializeVariableTests(MaterializerFixture):
         self.assertTrue(np.isnan(written[:, :5]).all())
         self.assertTrue((written[:, 5:] == 42.0).all())
 
+
 class ClipArrayTests(MaterializerFixture):
     def test_clip_array_crops_to_window(self):
         clipper = MagicMock()
         clipper.is_active = True
         clipper.compute_window.return_value = {
-            "x_off": 2, "y_off": 2, "width": 4, "height": 4,
-            "bounds": (12, -3, 16, 1), "resolution": (1, 1),
+            "x_off": 2,
+            "y_off": 2,
+            "width": 4,
+            "height": 4,
+            "bounds": (12, -3, 16, 1),
+            "resolution": (1, 1),
         }
         data, bounds = self.materializer.clip_array(
-            self.data, [10, -5, 20, 5], clipper,
+            self.data,
+            [10, -5, 20, 5],
+            clipper,
         )
         self.assertEqual(data.shape, (4, 4))
         self.assertEqual(list(bounds), [12, -3, 16, 1])
@@ -133,7 +156,9 @@ class ClipArrayTests(MaterializerFixture):
         clipper.is_active = True
         clipper.compute_window.side_effect = ValueError("no intersection")
         data, bounds = self.materializer.clip_array(
-            self.data, [10, -5, 20, 5], clipper,
+            self.data,
+            [10, -5, 20, 5],
+            clipper,
         )
         self.assertEqual(data.shape, (10, 10))
         self.assertEqual(list(bounds), [10, -5, 20, 5])

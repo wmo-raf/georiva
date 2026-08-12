@@ -1,6 +1,7 @@
 """
 ItemHandler — get-or-create an Item record and keep its spatial fields current.
 """
+
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
@@ -24,19 +25,19 @@ class ItemHandler:
     On re-ingest the Item is updated rather than duplicated so that Asset
     records always point to the most recent spatial metadata.
     """
-    
+
     def get_or_create(
-            self,
-            *,
-            collection: Collection,
-            timestamp: datetime,
-            reference_time: Optional[datetime],
-            source_file: str,
-            ingestion_log: Optional["FileIngestion"],
-            bounds: tuple | list,
-            width: int,
-            height: int,
-            crs: str,
+        self,
+        *,
+        collection: Collection,
+        timestamp: datetime,
+        reference_time: Optional[datetime],
+        source_file: str,
+        ingestion_log: Optional["FileIngestion"],
+        bounds: tuple | list,
+        width: int,
+        height: int,
+        crs: str,
     ) -> tuple[Item, bool]:
         """
         Return (item, created).
@@ -48,7 +49,7 @@ class ItemHandler:
         ts_utc = ensure_utc(timestamp)
         ref_utc = ensure_utc(reference_time) if reference_time else None
         bounds = normalize_bounds(bounds)
-        
+
         item, created = Item.objects.get_or_create(
             collection=collection,
             time=ts_utc,
@@ -58,20 +59,14 @@ class ItemHandler:
                 "bounds": list(bounds),
                 "width": width,
                 "height": height,
-                "resolution_x": (
-                    abs((bounds[2] - bounds[0]) / width) if width else 0
-                ),
-                "resolution_y": (
-                    abs((bounds[3] - bounds[1]) / height) if height else 0
-                ),
+                "resolution_x": (abs((bounds[2] - bounds[0]) / width) if width else 0),
+                "resolution_y": (abs((bounds[3] - bounds[1]) / height) if height else 0),
                 "crs": crs,
             },
         )
 
         if not created:
-            logger.info(
-                "Item already exists for %s @ %s — updating assets", collection, ts_utc
-            )
+            logger.info("Item already exists for %s @ %s — updating assets", collection, ts_utc)
             update_fields = []
 
             if item.source_file != source_file:
@@ -88,13 +83,11 @@ class ItemHandler:
                 item.save(update_fields=update_fields)
 
         return item, created
-    
+
     def increment_collection_item_count(self, collection: Collection) -> None:
         """Atomically increment Collection.item_count after a new Item is created."""
-        Collection.objects.filter(pk=collection.pk).update(
-            item_count=F("item_count") + 1
-        )
-    
+        Collection.objects.filter(pk=collection.pk).update(item_count=F("item_count") + 1)
+
     def delete_orphan(self, item: Item) -> None:
         """
         Delete an Item that ended up with no assets.
@@ -102,7 +95,5 @@ class ItemHandler:
         Called by IngestionHandler when every variable in a timestamp fails
         to produce any output — keeps the catalog free of empty shells.
         """
-        logger.warning(
-            "No assets created for Item %s — deleting orphan item", item.pk
-        )
+        logger.warning("No assets created for Item %s — deleting orphan item", item.pk)
         item.delete()

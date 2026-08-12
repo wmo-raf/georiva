@@ -1,6 +1,7 @@
-from georiva.organisations.testing import dial_org
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from georiva.organisations.testing import dial_org
 
 User = get_user_model()
 
@@ -11,8 +12,8 @@ ACTIVITY_URL = "/admin/ingestion/activity/"
 # Cycle 1: Activity page renders for authenticated users
 # =============================================================================
 
-class ActivityPageRenderTests(TestCase):
 
+class ActivityPageRenderTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_af", "af@test.com", "pw")
         dial_org(self.client)
@@ -44,8 +45,8 @@ class ActivityPageRenderTests(TestCase):
 # Cycle 1 (issue #55): Cancel wiring present in activity feed template
 # =============================================================================
 
-class ActivityFeedLiveArrivalTests(TestCase):
 
+class ActivityFeedLiveArrivalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin_la", "la@test.com", "pw")
         dial_org(self.client)
@@ -61,7 +62,6 @@ class ActivityFeedLiveArrivalTests(TestCase):
 
 
 class ActivityFeedCancelWiringTests(TestCase):
-
     def setUp(self):
         self.user = User.objects.create_superuser("admin_cw", "cw@test.com", "pw")
         dial_org(self.client)
@@ -79,7 +79,6 @@ class ActivityFeedCancelWiringTests(TestCase):
 
 
 class DashboardPanelViewAllTests(TestCase):
-
     def setUp(self):
         self.user = User.objects.create_superuser("admin_dp", "dp@test.com", "pw")
         dial_org(self.client)
@@ -90,6 +89,7 @@ class DashboardPanelViewAllTests(TestCase):
         # not just in the sidebar menu.
         from django.template.loader import render_to_string
         from django.test import RequestFactory
+
         from georiva.ingestion.panels import IngestionActivityPanel
 
         request = RequestFactory().get("/admin/")

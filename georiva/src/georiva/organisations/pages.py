@@ -31,6 +31,7 @@ no rights in. This is the tenancy layer over that: a user who belongs to two
 institutions, and a superuser who belongs to all of them, still see exactly one
 organisation's pages on one organisation's host.
 """
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import Http404
@@ -43,12 +44,14 @@ from .access import require_active_org
 #: URL kwargs by which Wagtail's admin names a page. Every page view takes one of
 #: these (``wagtail.admin.urls.pages`` plus the explore and choose-page routes),
 #: which is what makes one check at the request boundary enough.
-PAGE_ID_URL_KWARGS = frozenset({
-    "page_id",
-    "parent_page_id",
-    "page_to_move_id",
-    "destination_id",
-})
+PAGE_ID_URL_KWARGS = frozenset(
+    {
+        "page_id",
+        "parent_page_id",
+        "page_to_move_id",
+        "destination_id",
+    }
+)
 
 #: The bulk-action route, the one page surface that names its pages in the query
 #: string instead of the path (``/admin/bulk/wagtailcore/page/delete/?id=…``).
@@ -59,12 +62,14 @@ BULK_ACTION_ID_PARAM = "id"
 #: explorer starts and how the chooser browses in — and what it *contains* is
 #: filtered by the hooks below. Everything else (editing it, adding a child under
 #: it) would author outside every organisation's tree, so it is refused.
-ROOT_NODE_URL_NAMES = frozenset({
-    "wagtailadmin_explore",
-    "wagtailadmin_explore_results",
-    "wagtailadmin_choose_page_child",
-    "wagtailadmin_choose_page_search",
-})
+ROOT_NODE_URL_NAMES = frozenset(
+    {
+        "wagtailadmin_explore",
+        "wagtailadmin_explore_results",
+        "wagtailadmin_choose_page_child",
+        "wagtailadmin_choose_page_search",
+    }
+)
 
 
 def org_root_page(request):
@@ -141,10 +146,7 @@ def _org_page_owners(request):
     if filter_organisation(request) is None:
         return users.none()
     return users.filter(
-        pk__in=scope_pages(request, Page.objects.all())
-        .order_by()
-        .values_list("owner_id", flat=True)
-        .distinct()
+        pk__in=scope_pages(request, Page.objects.all()).order_by().values_list("owner_id", flat=True).distinct()
     )
 
 
@@ -153,9 +155,7 @@ def _org_page_editors(request):
     if filter_organisation(request) is None:
         return users.none()
     return users.filter(
-        pk__in=scope_page_log_entries(
-            request, PageLogEntry.objects.filter(action=PAGE_EDIT_ACTION)
-        )
+        pk__in=scope_page_log_entries(request, PageLogEntry.objects.filter(action=PAGE_EDIT_ACTION))
         .order_by()
         .values_list("user_id", flat=True)
         .distinct()
@@ -240,10 +240,7 @@ class OrgPageTreeMiddleware:
             match = resolve(request.path_info)
         except Resolver404:
             return
-        ids = {
-            value for name, value in match.kwargs.items()
-            if name in PAGE_ID_URL_KWARGS and value is not None
-        }
+        ids = {value for name, value in match.kwargs.items() if name in PAGE_ID_URL_KWARGS and value is not None}
         ids |= _bulk_action_page_ids(request, match)
         if not ids:
             return
@@ -270,6 +267,4 @@ def _bulk_action_page_ids(request, match):
         return set()
     if match.kwargs.get("model_name", "").lower() != "page":
         return set()
-    return {
-        value for value in request.GET.getlist(BULK_ACTION_ID_PARAM) if value.isdigit()
-    }
+    return {value for value in request.GET.getlist(BULK_ACTION_ID_PARAM) if value.isdigit()}

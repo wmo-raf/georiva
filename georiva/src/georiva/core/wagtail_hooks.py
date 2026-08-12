@@ -6,7 +6,6 @@ from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 from wagtail.snippets.models import register_snippet
 
-from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
 from .views import (
     add_data_select,
     collection_items_list,
@@ -15,27 +14,27 @@ from .views import (
     variable_style_stops,
     variable_styling,
 )
-from .views.viewsets import BoundaryChooserViewSet, admin_viewsets
-from .views.viewsets import ItemViewSet, AssetViewSet
+from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
+from .views.viewsets import AssetViewSet, BoundaryChooserViewSet, ItemViewSet, admin_viewsets
 
 
-@hooks.register('register_admin_urls')
+@hooks.register("register_admin_urls")
 def urlconf_georivacore():
     return [
-        path('data/add/', add_data_select, name="add_data"),
-        path('collection/<int:collection_pk>/items/', collection_items_list, name="collection_items_list"),
-        path('collection/<int:collection_pk>/styling/', collection_styling, name="collection_styling"),
+        path("data/add/", add_data_select, name="add_data"),
+        path("collection/<int:collection_pk>/items/", collection_items_list, name="collection_items_list"),
+        path("collection/<int:collection_pk>/styling/", collection_styling, name="collection_styling"),
         path(
-            'collection/<int:collection_pk>/styling/<int:variable_pk>/',
+            "collection/<int:collection_pk>/styling/<int:variable_pk>/",
             variable_styling,
             name="variable_styling",
         ),
         path(
-            'collection/<int:collection_pk>/styling/<int:variable_pk>/stops/',
+            "collection/<int:collection_pk>/styling/<int:variable_pk>/stops/",
             variable_style_stops,
             name="variable_style_stops",
         ),
-        path('plugins/', plugin_list, name="plugin_list"),
+        path("plugins/", plugin_list, name="plugin_list"),
     ]
 
 
@@ -47,11 +46,13 @@ def urlconf_georivacore():
 def register_data_menu():
     return SubmenuMenuItem(
         _("Data"),
-        Menu(items=[
-            MenuItem(_("Add Data"), reverse_lazy("add_data"), icon_name="plus", order=10),
-            MenuItem(_("Automated Sources"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
-            MenuItem(_("Manual Uploads"), reverse_lazy("manual_upload_config_list"), icon_name="upload", order=40),
-        ]),
+        Menu(
+            items=[
+                MenuItem(_("Add Data"), reverse_lazy("add_data"), icon_name="plus", order=10),
+                MenuItem(_("Automated Sources"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
+                MenuItem(_("Manual Uploads"), reverse_lazy("manual_upload_config_list"), icon_name="upload", order=40),
+            ]
+        ),
         icon_name="folder-open-inverse",
         order=400,
     )
@@ -98,14 +99,22 @@ class SuperuserMenuItem(MenuItem):
 def register_boundaries_menu_item():
     return SubmenuMenuItem(
         _("Boundaries"),
-        Menu(items=[
-            SuperuserMenuItem(_("Load Data"), reverse_lazy("adminboundarymanager_preview_boundary"),
-                              icon_name="upload", order=10),
-            SuperuserMenuItem(_("Settings"), reverse_lazy(
-                "wagtailsettings:edit",
-                args=[AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name],
-            ), icon_name="cogs", order=20),
-        ]),
+        Menu(
+            items=[
+                SuperuserMenuItem(
+                    _("Load Data"), reverse_lazy("adminboundarymanager_preview_boundary"), icon_name="upload", order=10
+                ),
+                SuperuserMenuItem(
+                    _("Settings"),
+                    reverse_lazy(
+                        "wagtailsettings:edit",
+                        args=[AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name],
+                    ),
+                    icon_name="cogs",
+                    order=20,
+                ),
+            ]
+        ),
         icon_name="map",
         order=120,
     )
@@ -125,19 +134,19 @@ register_snippet(ItemViewSet)
 register_snippet(AssetViewSet)
 
 
-@hooks.register('construct_main_menu')
+@hooks.register("construct_main_menu")
 def hide_some_menus(request, menu_items):
     hidden_menus = ["documents", "help", "snippets", "reports"]
-    
+
     menu_items[:] = [item for item in menu_items if item.name not in hidden_menus]
 
 
-@hooks.register('construct_homepage_summary_items')
+@hooks.register("construct_homepage_summary_items")
 def construct_homepage_summary_items(request, summary_items):
     hidden_summary_items = ["PagesSummaryItem", "DocumentsSummaryItem", "ImagesSummaryItem"]
-    
+
     summary_items[:] = [item for item in summary_items if item.__class__.__name__ not in hidden_summary_items]
-    
+
     summary_items[:] = [
         CatalogSummaryItem(request),
         CollectionSummaryItem(request),
@@ -151,29 +160,27 @@ def construct_homepage_summary_items(request, summary_items):
 # so give the slim-header + bare-nice-padding pairing the same breathing room.
 @hooks.register("insert_global_admin_css")
 def main_content_breathing_space():
-    return mark_safe(
-        "<style>.w-sticky.w-z-header + .nice-padding { margin-top: 2rem; }</style>"
-    )
+    return mark_safe("<style>.w-sticky.w-z-header + .nice-padding { margin-top: 2rem; }</style>")
 
 
 @hooks.register("register_icons")
 def register_icons(icons):
     return icons + [
-        'wagtailfontawesomesvg/solid/circle-nodes.svg',
-        'wagtailfontawesomesvg/solid/map-pin.svg',
-        'wagtailfontawesomesvg/solid/location-pin.svg',
-        'wagtailfontawesomesvg/solid/location-dot.svg',
-        'wagtailfontawesomesvg/solid/plug.svg',
-        'wagtailfontawesomesvg/solid/hourglass-start.svg',
-        'wagtailfontawesomesvg/solid/hourglass-end.svg',
-        'wagtailfontawesomesvg/solid/hourglass-half.svg',
-        'wagtailfontawesomesvg/solid/paper-plane.svg',
-        'wagtailfontawesomesvg/solid/puzzle-piece.svg',
-        'wagtailfontawesomesvg/solid/up-down.svg',
-        'wagtailfontawesomesvg/solid/plus-minus.svg',
-        'wagtailfontawesomesvg/solid/palette.svg',
-        'wagtailfontawesomesvg/solid/map.svg',
-        'wagtailfontawesomesvg/solid/file-import.svg',
-        'wagtailfontawesomesvg/solid/hashtag.svg',
-        'wagtailfontawesomesvg/solid/save.svg',
+        "wagtailfontawesomesvg/solid/circle-nodes.svg",
+        "wagtailfontawesomesvg/solid/map-pin.svg",
+        "wagtailfontawesomesvg/solid/location-pin.svg",
+        "wagtailfontawesomesvg/solid/location-dot.svg",
+        "wagtailfontawesomesvg/solid/plug.svg",
+        "wagtailfontawesomesvg/solid/hourglass-start.svg",
+        "wagtailfontawesomesvg/solid/hourglass-end.svg",
+        "wagtailfontawesomesvg/solid/hourglass-half.svg",
+        "wagtailfontawesomesvg/solid/paper-plane.svg",
+        "wagtailfontawesomesvg/solid/puzzle-piece.svg",
+        "wagtailfontawesomesvg/solid/up-down.svg",
+        "wagtailfontawesomesvg/solid/plus-minus.svg",
+        "wagtailfontawesomesvg/solid/palette.svg",
+        "wagtailfontawesomesvg/solid/map.svg",
+        "wagtailfontawesomesvg/solid/file-import.svg",
+        "wagtailfontawesomesvg/solid/hashtag.svg",
+        "wagtailfontawesomesvg/solid/save.svg",
     ]

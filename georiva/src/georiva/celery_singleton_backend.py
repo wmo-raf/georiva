@@ -7,5 +7,5 @@ class RedisBackendForSingleton(RedisBackend):
         """
         Use the existing redis connection instead of creating a new one.
         """
-        
+
         self.redis = get_redis_connection("default")

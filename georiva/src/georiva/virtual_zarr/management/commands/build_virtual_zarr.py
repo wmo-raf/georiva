@@ -2,12 +2,12 @@ from django.core.management.base import BaseCommand, CommandError
 
 from georiva.core.models import Collection
 from georiva.virtual_zarr.models import VirtualZarrManifest
-from georiva.virtual_zarr.tasks import build_virtual_zarr_manifest, _run_build
+from georiva.virtual_zarr.tasks import _run_build, build_virtual_zarr_manifest
 
 
 class Command(BaseCommand):
     help = "Build or rebuild virtual Zarr manifests"
-    
+
     def add_arguments(self, parser):
         parser.add_argument(
             "--collection",
@@ -15,10 +15,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--variable",
-            help=(
-                "Variable slug, e.g. precipitation. "
-                "If omitted, all active variables in the collection are built."
-            ),
+            help=("Variable slug, e.g. precipitation. If omitted, all active variables in the collection are built."),
         )
         parser.add_argument(
             "--all",
@@ -30,19 +27,16 @@ class Command(BaseCommand):
             action="store_true",
             help="Run synchronously (blocking) instead of dispatching to Celery.",
         )
-    
+
     def handle(self, *args, **options):
         manifests = self._resolve_manifests(options)
-        
+
         if not manifests:
             self.stdout.write("No manifests found.")
             return
-        
-        self.stdout.write(
-            f"{'Sync' if options['sync'] else 'Async'} build for "
-            f"{len(manifests)} manifest(s):\n"
-        )
-        
+
+        self.stdout.write(f"{'Sync' if options['sync'] else 'Async'} build for {len(manifests)} manifest(s):\n")
+
         for manifest in manifests:
             label = str(manifest)
             if options["sync"]:
@@ -50,7 +44,7 @@ class Command(BaseCommand):
                 manifest.mark_building("management-command")
                 try:
                     _run_build(manifest)
-                    self.stdout.write(self.style.SUCCESS(f"    ✓ READY"))
+                    self.stdout.write(self.style.SUCCESS("    ✓ READY"))
                 except Exception as exc:
                     manifest.mark_failed(str(exc))
                     self.stdout.write(self.style.ERROR(f"    ✗ FAILED: {exc}"))
@@ -60,11 +54,11 @@ class Command(BaseCommand):
                     queue="georiva-ingestion",
                 )
                 self.stdout.write(f"  [async] {label} → dispatched to Celery")
-    
+
     # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
-    
+
     def _resolve_manifests(self, options) -> list:
         """
         Resolve the list of VirtualZarrManifest records to build.
@@ -75,30 +69,28 @@ class Command(BaseCommand):
         """
         if options["all"] and options["collection"]:
             raise CommandError("Pass either --all or --collection, not both.")
-        
+
         if options["all"]:
             return list(
-                VirtualZarrManifest.objects
-                .select_related(
+                VirtualZarrManifest.objects.select_related(
                     "variable",
                     "variable__collection",
                     "variable__collection__catalog",
-                )
-                .all()
+                ).all()
             )
-        
+
         if options["collection"]:
             return self._resolve_for_collection(
                 options["collection"],
                 variable_slug=options.get("variable"),
             )
-        
+
         raise CommandError("Pass --collection <org/catalog/collection> or --all.")
-    
+
     def _resolve_for_collection(
-            self,
-            collection_arg: str,
-            variable_slug: str | None = None,
+        self,
+        collection_arg: str,
+        variable_slug: str | None = None,
     ) -> list:
         """
         Return manifests for a collection, creating missing records as needed.
@@ -125,17 +117,14 @@ class Command(BaseCommand):
             )
         except Collection.DoesNotExist:
             raise CommandError(f"Collection not found: {collection_arg}")
-        
+
         # Active variables to consider — optionally filtered by slug
         variables_qs = collection.variables.filter(is_active=True)
         if variable_slug:
             variables_qs = variables_qs.filter(slug=variable_slug)
             if not variables_qs.exists():
-                raise CommandError(
-                    f"Variable {variable_slug!r} not found or inactive "
-                    f"in {collection_arg}."
-                )
-        
+                raise CommandError(f"Variable {variable_slug!r} not found or inactive in {collection_arg}.")
+
         manifests = []
         for variable in variables_qs:
             obj, created = VirtualZarrManifest.objects.get_or_create(
@@ -145,9 +134,7 @@ class Command(BaseCommand):
                 },
             )
             if created:
-                self.stdout.write(
-                    self.style.WARNING(f"  Created manifest record: {obj}")
-                )
+                self.stdout.write(self.style.WARNING(f"  Created manifest record: {obj}"))
             manifests.append(obj)
-        
+
         return manifests

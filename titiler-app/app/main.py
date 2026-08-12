@@ -3,7 +3,6 @@ from app.logging_config import configure_logging
 configure_logging()
 
 import logging
-
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Query, Request, Response
@@ -102,12 +101,18 @@ app.include_router(wmts_rest_router, prefix=TILE_ROUTE_PREFIX)
 # Encoded texture (ADR 0021)
 # ---------------------------------------------------------------------------
 
+
 @app.get(TILE_ROUTE_PREFIX + "/encoded-preview.png")
 def encoded_preview(
     src_path: str = Depends(SemanticPathParams),
     tile_config: dict = Depends(SemanticTileConfig),
     max_size: int = Query(4096, ge=1, description="Cap on the longest image side (native grid if smaller)"),
-    v: Optional[str] = Query(None, description="Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"),
+    v: Optional[str] = Query(
+        None,
+        description=(
+            "Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"
+        ),
+    ),
 ) -> Response:
     """The whole extent as one value-encoded texture: pixel = rescale(value, vmin→vmax, 0→255).
 
@@ -128,7 +133,7 @@ def encoded_preview(
         media_type="image/png",
         headers={
             "Cache-Control": "public, max-age=31536000, immutable",
-            "X-Image-Unscale": f'{tile_config["vmin"]},{tile_config["vmax"]}',
+            "X-Image-Unscale": f"{tile_config['vmin']},{tile_config['vmax']}",
             "X-Image-Bounds": ",".join(str(b) for b in img.bounds) if img.bounds else "",
         },
     )

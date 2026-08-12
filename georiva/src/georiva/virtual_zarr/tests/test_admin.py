@@ -29,14 +29,20 @@ def build_manifest(organisation, *, slug):
     label is built from slugs, so a distinct slug is what makes a row
     recognisable (or leak-proof) in a rendered listing."""
     catalog = Catalog.objects.create(
-        organisation=organisation, name=slug, slug=slug,
+        organisation=organisation,
+        name=slug,
+        slug=slug,
         file_format=Catalog.FileFormat.GEOTIFF,
     )
     collection = Collection.objects.create(catalog=catalog, name=slug, slug=slug)
     unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
     variable = Variable.objects.create(
-        collection=collection, name=slug, slug=slug,
-        unit=unit, value_min=0, value_max=1,
+        collection=collection,
+        name=slug,
+        slug=slug,
+        unit=unit,
+        value_min=0,
+        value_max=1,
     )
     return VirtualZarrManifest.objects.create(variable=variable)
 
@@ -68,23 +74,17 @@ class ManifestAdminTests(TestCase):
         self.assertNotContains(response, "uganda-forecast")
 
     def test_editing_another_organisations_manifest_is_not_found(self):
-        response = self.client.get(
-            reverse(f"{URL_NS}:edit", args=[self.uganda_manifest.pk])
-        )
+        response = self.client.get(reverse(f"{URL_NS}:edit", args=[self.uganda_manifest.pk]))
         self.assertEqual(response.status_code, 404)
 
     def test_deleting_another_organisations_manifest_is_not_found(self):
-        response = self.client.get(
-            reverse(f"{URL_NS}:delete", args=[self.uganda_manifest.pk])
-        )
+        response = self.client.get(reverse(f"{URL_NS}:delete", args=[self.uganda_manifest.pk]))
         self.assertEqual(response.status_code, 404)
 
     def test_the_same_views_serve_this_organisations_manifest(self):
         for url_name in ("edit", "delete"):
             with self.subTest(view=url_name):
-                response = self.client.get(
-                    reverse(f"{URL_NS}:{url_name}", args=[self.kenya_manifest.pk])
-                )
+                response = self.client.get(reverse(f"{URL_NS}:{url_name}", args=[self.kenya_manifest.pk]))
                 self.assertEqual(response.status_code, 200)
 
     # -- listing: columns and filters --------------------------------------
@@ -117,17 +117,13 @@ class ManifestAdminTests(TestCase):
     # -- form: derived caches stay derived ---------------------------------
 
     def test_coverage_summary_fields_are_not_editable(self):
-        response = self.client.get(
-            reverse(f"{URL_NS}:edit", args=[self.kenya_manifest.pk])
-        )
+        response = self.client.get(reverse(f"{URL_NS}:edit", args=[self.kenya_manifest.pk]))
         form = response.context["form"]
         for field in ("time_start", "time_end", "item_count", "watermark", "snapshot_id"):
             self.assertNotIn(field, form.fields)
 
     def test_lock_bookkeeping_is_not_editable(self):
-        response = self.client.get(
-            reverse(f"{URL_NS}:edit", args=[self.kenya_manifest.pk])
-        )
+        response = self.client.get(reverse(f"{URL_NS}:edit", args=[self.kenya_manifest.pk]))
         form = response.context["form"]
         for field in ("locked_at", "locked_by"):
             self.assertNotIn(field, form.fields)

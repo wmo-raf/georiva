@@ -11,6 +11,7 @@ Catalog slugs are unique per organisation, so ``(org, catalog)`` is the only
 lookup that identifies a catalog unambiguously; a bare ``slug=`` lookup would
 now match an arbitrary org's catalog.
 """
+
 from georiva.core.models import Catalog
 from georiva.organisations.models import Organisation
 
@@ -48,9 +49,7 @@ def resolve_org_catalog(org_slug, catalog_slug, *, require_active=True):
     catalogs = Catalog.objects.select_related("boundary", "organisation")
     catalog = catalogs.filter(organisation=organisation, slug=catalog_slug).first()
     if catalog is None:
-        return None, (
-            f"Catalog '{catalog_slug}' does not belong to organisation '{org_slug}'."
-        )
+        return None, (f"Catalog '{catalog_slug}' does not belong to organisation '{org_slug}'.")
     if require_active and not catalog.is_active:
         return None, f"Catalog '{org_slug}/{catalog_slug}' is inactive."
 

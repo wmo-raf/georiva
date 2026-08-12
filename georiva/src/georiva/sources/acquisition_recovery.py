@@ -17,6 +17,7 @@ The broker visibility_timeout is raised above the staleness threshold (see
 settings.base) so acks-late redelivery never races this sweep; the resume
 guard below makes the sweep idempotent against any concurrent recovery anyway.
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,9 +37,7 @@ RESUME_CAP_REACHED = "cap_reached"
 RESUME_ALREADY_UNDER_WAY = "already_under_way"
 RESUME_ENQUEUE_FAILED = "enqueue_failed"
 
-OPERATOR_SWEEP_REASON = (
-    "Interrupted — declared dead by an operator (targeted sweep)."
-)
+OPERATOR_SWEEP_REASON = "Interrupted — declared dead by an operator (targeted sweep)."
 
 
 def stale_after_hours() -> int:
@@ -78,20 +77,14 @@ def sweep_stale_fetch_runs(
     jobs_reaped = _reap_stale_loader_jobs(cutoff)
 
     stale_runs = (
-        FetchRun.objects
-        .filter(status=FetchRun.Status.RUNNING)
-        .select_related("data_feed")
-        .order_by("started_at")
+        FetchRun.objects.filter(status=FetchRun.Status.RUNNING).select_related("data_feed").order_by("started_at")
     )
     if run_ids is not None:
         stale_runs = stale_runs.filter(pk__in=run_ids)
         reason = OPERATOR_SWEEP_REASON
     else:
         stale_runs = stale_runs.filter(started_at__lt=cutoff)
-        reason = (
-            f"Interrupted — worker stopped mid-run; still unfinished after "
-            f"{hours}h."
-        )
+        reason = f"Interrupted — worker stopped mid-run; still unfinished after {hours}h."
 
     swept = resumed = 0
     for run in stale_runs:
@@ -102,9 +95,10 @@ def sweep_stale_fetch_runs(
 
     if swept or jobs_reaped:
         logger.info(
-            "Stale-run sweep: %d run(s) interrupted, %d resume(s) enqueued, "
-            "%d zombie job(s) reaped",
-            swept, resumed, jobs_reaped,
+            "Stale-run sweep: %d run(s) interrupted, %d resume(s) enqueued, %d zombie job(s) reaped",
+            swept,
+            resumed,
+            jobs_reaped,
         )
     return {"swept": swept, "resumed": resumed, "jobs_reaped": jobs_reaped}
 
@@ -123,7 +117,9 @@ def _sweep_run(run, reason) -> None:
     _backfill_feed_stats(run)
     logger.warning(
         "FetchRun %d (%s): marked interrupted — %s",
-        run.pk, run.data_feed.name, reason,
+        run.pk,
+        run.data_feed.name,
+        reason,
     )
 
 
@@ -135,9 +131,9 @@ def _backfill_feed_stats(run) -> None:
     if feed.last_run_at and feed.last_run_at >= run.started_at:
         return
     feed.last_run_at = run.started_at
-    feed.last_run_status = 'failed'
-    feed.last_run_message = 'Interrupted — worker stopped mid-run'
-    feed.save(update_fields=['last_run_at', 'last_run_status', 'last_run_message'])
+    feed.last_run_status = "failed"
+    feed.last_run_message = "Interrupted — worker stopped mid-run"
+    feed.save(update_fields=["last_run_at", "last_run_status", "last_run_message"])
 
 
 def recover_run(run) -> str:
@@ -166,26 +162,30 @@ def _maybe_resume(run) -> str:
     if generation >= MAX_AUTO_RESUMES:
         logger.warning(
             "FetchRun %d: auto-resume cap (%d) reached — leaving for a human",
-            run.pk, MAX_AUTO_RESUMES,
+            run.pk,
+            MAX_AUTO_RESUMES,
         )
         return RESUME_CAP_REACHED
 
     feed = run.data_feed
     if FetchRun.objects.filter(
-        data_feed=feed, started_at__gt=run.started_at,
+        data_feed=feed,
+        started_at__gt=run.started_at,
     ).exists():
         logger.info(
             "FetchRun %d: newer run exists for feed %s — not resuming",
-            run.pk, feed.pk,
+            run.pk,
+            feed.pk,
         )
         return RESUME_ALREADY_UNDER_WAY
     if LoaderJob.objects.filter(
-        data_feed=feed, state__in=JOB_STATES_PENDING_OR_RUNNING,
+        data_feed=feed,
+        state__in=JOB_STATES_PENDING_OR_RUNNING,
     ).exists():
         logger.info(
-            "FetchRun %d: a loader job is already pending/running for feed %s "
-            "— not resuming",
-            run.pk, feed.pk,
+            "FetchRun %d: a loader job is already pending/running for feed %s — not resuming",
+            run.pk,
+            feed.pk,
         )
         return RESUME_ALREADY_UNDER_WAY
 
@@ -202,7 +202,9 @@ def _maybe_resume(run) -> str:
 
     logger.info(
         "FetchRun %d: auto-resume enqueued (attempt %d of %d)",
-        run.pk, generation + 1, MAX_AUTO_RESUMES,
+        run.pk,
+        generation + 1,
+        MAX_AUTO_RESUMES,
     )
     return RESUME_QUEUED
 

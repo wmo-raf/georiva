@@ -81,10 +81,7 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
     if config.catalog.file_format == "geotiff":
         var_slug = slugify(variable.variable_name)
         coll_slug = variable.collection.slug
-        return (
-            f"{catalog_prefix}/{coll_slug}/{var_slug}/"
-            f"{valid_time:%Y}/{valid_time:%m}/{valid_time:%d}/{final_name}"
-        )
+        return f"{catalog_prefix}/{coll_slug}/{var_slug}/{valid_time:%Y}/{valid_time:%m}/{valid_time:%d}/{final_name}"
     return f"{catalog_prefix}/{final_name}"
 
 
@@ -95,13 +92,8 @@ def manual_upload_page(request, pk):
         _CATALOG_FORMAT_LABEL,
     )
 
-    config = get_org_object_or_404(
-        request,
-        ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
-    )
-    variables = config.variables.select_related("collection").order_by(
-        "long_name", "variable_name"
-    )
+    config = get_org_object_or_404(request, ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk)
+    variables = config.variables.select_related("collection").order_by("long_name", "variable_name")
     file_format = config.catalog.file_format
     is_geotiff = file_format == "geotiff"
 
@@ -115,27 +107,31 @@ def manual_upload_page(request, pk):
                 seen.add(v.collection_id)
                 affected_collections.append(v.collection)
 
-    return render(request, "georivaingestion/manual_upload_page.html", {
-        # Rendered by the slim header via wagtailadmin/generic/base.html.
-        "breadcrumbs_items": [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": None, "label": config.name},
-        ],
-        "header_title": _("Upload files — %s") % config.name,
-        "header_icon": "upload",
-        # 'upload_config', not 'config': wagtailadmin/admin_base.html assigns
-        # {% wagtail_config as config %}, which shadows a 'config' context var
-        # by the time extra_js renders.
-        "upload_config": config,
-        "variables": variables,
-        "is_geotiff": is_geotiff,
-        "affected_collections": affected_collections,
-        "accept_extensions": _CATALOG_FORMAT_ACCEPT.get(file_format, ""),
-        "format_label": _CATALOG_FORMAT_LABEL.get(file_format, file_format),
-        "time_label": _("Model run time") if config.is_forecast else _("Observation date"),
-        "time_required": config.is_forecast or is_geotiff,
-    })
+    return render(
+        request,
+        "georivaingestion/manual_upload_page.html",
+        {
+            # Rendered by the slim header via wagtailadmin/generic/base.html.
+            "breadcrumbs_items": [
+                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
+                {"url": None, "label": config.name},
+            ],
+            "header_title": _("Upload files — %s") % config.name,
+            "header_icon": "upload",
+            # 'upload_config', not 'config': wagtailadmin/admin_base.html assigns
+            # {% wagtail_config as config %}, which shadows a 'config' context var
+            # by the time extra_js renders.
+            "upload_config": config,
+            "variables": variables,
+            "is_geotiff": is_geotiff,
+            "affected_collections": affected_collections,
+            "accept_extensions": _CATALOG_FORMAT_ACCEPT.get(file_format, ""),
+            "format_label": _CATALOG_FORMAT_LABEL.get(file_format, file_format),
+            "time_label": _("Model run time") if config.is_forecast else _("Observation date"),
+            "time_required": config.is_forecast or is_geotiff,
+        },
+    )
 
 
 def manual_upload_extract_times(request, pk):
@@ -156,12 +152,14 @@ def manual_upload_extract_times(request, pk):
     def _iso(dt):
         return dt.isoformat() if dt else None
 
-    return JsonResponse({
-        "reference_time": _iso(reference_time),
-        "valid_time": _iso(valid_time),
-        # naive local value for the datetime-local input
-        "prefill": prefill.strftime("%Y-%m-%dT%H:%M") if prefill else None,
-    })
+    return JsonResponse(
+        {
+            "reference_time": _iso(reference_time),
+            "valid_time": _iso(valid_time),
+            # naive local value for the datetime-local input
+            "prefill": prefill.strftime("%Y-%m-%dT%H:%M") if prefill else None,
+        }
+    )
 
 
 def manual_upload_submit(request, pk):
@@ -169,18 +167,18 @@ def manual_upload_submit(request, pk):
 
     from georiva.core.storage import BucketType, storage
     from georiva.ingestion.models import (
-        FileIngestion, FileIngestionJob, ManualUploadConfig,
-        UploadSession, UploadedFile,
+        FileIngestion,
+        FileIngestionJob,
+        ManualUploadConfig,
+        UploadedFile,
+        UploadSession,
     )
     from georiva.ingestion.tasks import process_incoming_file
 
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    config = get_org_object_or_404(
-        request,
-        ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk
-    )
+    config = get_org_object_or_404(request, ManualUploadConfig.objects.select_related("catalog__organisation"), pk=pk)
 
     uploaded_files = request.FILES.getlist("files")
     is_geotiff = config.catalog.file_format == "geotiff"
@@ -195,9 +193,7 @@ def manual_upload_submit(request, pk):
         for i, uploaded in enumerate(uploaded_files):
             vid = variable_ids[i] if i < len(variable_ids) else None
             if not vid or not config.variables.filter(pk=vid).exists():
-                return JsonResponse(
-                    {"error": str(_("Please choose a variable for each file."))}, status=400
-                )
+                return JsonResponse({"error": str(_("Please choose a variable for each file."))}, status=400)
 
     # Pre-validate time requirements before creating the session.
     for i, uploaded in enumerate(uploaded_files):
@@ -210,10 +206,15 @@ def manual_upload_submit(request, pk):
             )
         if is_geotiff and valid_time is None:
             return JsonResponse(
-                {"error": str(_(
-                    "Could not determine the observation date. Use a filename matching "
-                    "the '%s' format, or fill in the date field."
-                ) % config.valid_time_format)},
+                {
+                    "error": str(
+                        _(
+                            "Could not determine the observation date. Use a filename matching "
+                            "the '%s' format, or fill in the date field."
+                        )
+                        % config.valid_time_format
+                    )
+                },
                 status=400,
             )
 
@@ -227,16 +228,11 @@ def manual_upload_submit(request, pk):
 
     for i, uploaded in enumerate(uploaded_files):
         vid = variable_ids[i] if i < len(variable_ids) else None
-        variable = (
-            config.variables.select_related("collection").filter(pk=vid).first()
-            if vid else None
-        )
+        variable = config.variables.select_related("collection").filter(pk=vid).first() if vid else None
         operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
         reference_time, valid_time = _resolve_times(config, uploaded.name, operator_time)
 
-        file_path = _build_incoming_path(
-            config, variable, uploaded.name, reference_time, valid_time
-        )
+        file_path = _build_incoming_path(config, variable, uploaded.name, reference_time, valid_time)
 
         uf = UploadedFile.objects.create(session=session, original_filename=uploaded.name)
         uf.mark_uploading()

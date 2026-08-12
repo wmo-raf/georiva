@@ -1,9 +1,10 @@
-from georiva.ingestion.sse_views import _INGESTION_EVENT_TYPES, should_forward
-from georiva.organisations.models import Organisation
-from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG, dial_org
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+
+from georiva.ingestion.sse_views import _INGESTION_EVENT_TYPES, should_forward
+from georiva.organisations.models import Organisation
+from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG
 
 User = get_user_model()
 
@@ -12,8 +13,8 @@ User = get_user_model()
 # Cycle 1: Unauthenticated requests are rejected
 # =============================================================================
 
-class SSEAuthTests(TestCase):
 
+class SSEAuthTests(TestCase):
     def test_unauthenticated_is_rejected(self):
         response = self.client.get(
             "/admin/api/ingestion/events/",
@@ -26,8 +27,8 @@ class SSEAuthTests(TestCase):
 # Cycle 2: Ingestion snapshot shape (FileIngestion-keyed)
 # =============================================================================
 
-class IngestionSnapshotShapeTests(TestCase):
 
+class IngestionSnapshotShapeTests(TestCase):
     def setUp(self):
         from georiva.ingestion.models import FileIngestion
 
@@ -85,21 +86,22 @@ class IngestionSnapshotShapeTests(TestCase):
 # Cycle 3: Authenticated connect delivers snapshot as first SSE message
 # =============================================================================
 
-class SSESnapshotOnConnectTests(TestCase):
 
+class SSESnapshotOnConnectTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin", "admin@test.com", "pw")
 
     @staticmethod
     def _parse_sse_events(raw: bytes) -> list[dict]:
         import json
+
         events = []
         current = {}
         for line in raw.decode().splitlines():
             if line.startswith("event:"):
-                current["event"] = line[len("event:"):].strip()
+                current["event"] = line[len("event:") :].strip()
             elif line.startswith("data:"):
-                current["data"] = json.loads(line[len("data:"):].strip())
+                current["data"] = json.loads(line[len("data:") :].strip())
             elif line == "" and current:
                 events.append(current)
                 current = {}
@@ -134,6 +136,7 @@ class SSESnapshotOnConnectTests(TestCase):
 # Cycle 4: Live Redis events are forwarded as typed SSE messages
 # =============================================================================
 
+
 class EventForwardingRuleTests(TestCase):
     """The rule itself: one channel, one organisation's events per listener.
 
@@ -143,27 +146,40 @@ class EventForwardingRuleTests(TestCase):
     """
 
     def test_an_event_for_this_organisation_is_forwarded(self):
-        self.assertTrue(should_forward(
-            {"type": "file_ingestion.created", "org": "kenya"},
-            _INGESTION_EVENT_TYPES, "kenya",
-        ))
+        self.assertTrue(
+            should_forward(
+                {"type": "file_ingestion.created", "org": "kenya"},
+                _INGESTION_EVENT_TYPES,
+                "kenya",
+            )
+        )
 
     def test_another_organisations_event_is_dropped(self):
-        self.assertFalse(should_forward(
-            {"type": "file_ingestion.created", "org": "uganda"},
-            _INGESTION_EVENT_TYPES, "kenya",
-        ))
+        self.assertFalse(
+            should_forward(
+                {"type": "file_ingestion.created", "org": "uganda"},
+                _INGESTION_EVENT_TYPES,
+                "kenya",
+            )
+        )
 
     def test_an_unattributed_event_reaches_nobody(self):
-        self.assertFalse(should_forward(
-            {"type": "file_ingestion.created"}, _INGESTION_EVENT_TYPES, "kenya",
-        ))
+        self.assertFalse(
+            should_forward(
+                {"type": "file_ingestion.created"},
+                _INGESTION_EVENT_TYPES,
+                "kenya",
+            )
+        )
 
     def test_an_event_of_an_uncarried_type_is_dropped(self):
-        self.assertFalse(should_forward(
-            {"type": "some.other_event", "org": "kenya"},
-            _INGESTION_EVENT_TYPES, "kenya",
-        ))
+        self.assertFalse(
+            should_forward(
+                {"type": "some.other_event", "org": "kenya"},
+                _INGESTION_EVENT_TYPES,
+                "kenya",
+            )
+        )
 
     def test_an_unreadable_payload_is_dropped(self):
         self.assertFalse(should_forward("not json at all", _INGESTION_EVENT_TYPES, "kenya"))
@@ -179,8 +195,10 @@ class SSELiveEventForwardingTests(TestCase):
     async def test_only_this_organisations_event_appears_in_the_stream(self):
         import asyncio
         import json
+
         import redis.asyncio as aioredis
         from django.conf import settings
+
         from georiva.ingestion.events import CHANNEL
 
         await self.async_client.aforce_login(self.user)
@@ -205,22 +223,34 @@ class SSELiveEventForwardingTests(TestCase):
             # A foreign event first, then one for each organisation that exists —
             # whichever of those this host serves is the one that must arrive, so
             # the test never has to guess which organisation the stream resolved.
-            await r.publish(CHANNEL, json.dumps({
-                "type": "file_ingestion.status_changed",
-                "org": "somebody-else", "id": 1, "status": "failed",
-            }))
+            await r.publish(
+                CHANNEL,
+                json.dumps(
+                    {
+                        "type": "file_ingestion.status_changed",
+                        "org": "somebody-else",
+                        "id": 1,
+                        "status": "failed",
+                    }
+                ),
+            )
             for slug in self.org_slugs:
-                await r.publish(CHANNEL, json.dumps({
-                    "type": "file_ingestion.status_changed",
-                    "org": slug, "id": 2, "status": "completed",
-                }))
+                await r.publish(
+                    CHANNEL,
+                    json.dumps(
+                        {
+                            "type": "file_ingestion.status_changed",
+                            "org": slug,
+                            "id": 2,
+                            "status": "completed",
+                        }
+                    ),
+                )
             await r.aclose()
 
         # Bounded: a dropped event that should have arrived would otherwise leave
         # the stream emitting keepalives forever and hang the suite.
-        _, chunk = await asyncio.wait_for(
-            asyncio.gather(_publish(), _collect()), timeout=20
-        )
+        _, chunk = await asyncio.wait_for(asyncio.gather(_publish(), _collect()), timeout=20)
 
         self.assertIn('"id": 2', chunk)
         self.assertNotIn('"id": 1', chunk)

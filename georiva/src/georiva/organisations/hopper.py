@@ -24,6 +24,7 @@ The block itself is rendered server-side and delivered by :func:`org_hopper_scri
 because Wagtail's global admin-chrome hooks are handed no request and so cannot
 render per-user markup themselves. See ADR 0017.
 """
+
 import json
 from dataclasses import dataclass
 

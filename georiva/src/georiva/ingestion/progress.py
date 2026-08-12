@@ -21,9 +21,12 @@ class PublishingProgress(Progress):
         if self._job_id is None:
             return
         from georiva.ingestion.events import publish_event
-        publish_event({
-            "type": "job.progress_updated",
-            "job_id": self._job_id,
-            "state": state,
-            "percentage": self.percentage,
-        })
+
+        publish_event(
+            {
+                "type": "job.progress_updated",
+                "job_id": self._job_id,
+                "state": state,
+                "percentage": self.percentage,
+            }
+        )

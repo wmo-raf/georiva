@@ -30,6 +30,7 @@ the document is absolute against. Renaming a host therefore keeps handing out
 the old one for a few minutes, which is the smaller half of a change that
 already breaks in-flight clients outright.
 """
+
 import logging
 
 from django.conf import settings

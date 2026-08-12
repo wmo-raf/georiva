@@ -5,6 +5,7 @@ The quantity math itself is covered by geoprocessing unit tests; here we assert
 the declarative pieces (enumeration, outputs mapping, input resolution) and that
 running a unit produces the right Published records.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +15,7 @@ import xarray as xr
 from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run, run_unit
 from georiva.processing.recipes.climatology import ClimatologyRecipe
 from georiva.staging.models import (
@@ -22,7 +24,6 @@ from georiva.staging.models import (
     StagingCollection,
     StagingItem,
 )
-from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
@@ -44,37 +45,47 @@ def _cube(monthly_by_year, ny=3, nx=2, start="2011-01-01"):
 
 class _ClimatologyFixture(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="netcdf"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="netcdf"
         )
-        self.scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="tas", name="tas"
-        )
+        self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="tas", name="tas")
         self.sitem = StagingItem.objects.create(
             collection=self.scol,
             start_datetime=datetime(2011, 1, 1, tzinfo=timezone.utc),
             end_datetime=datetime(2012, 12, 31, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=2, height=3,
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=2,
+            height=3,
         )
         # The source variable the recipe mirrors onto its output products.
         self.unit_c = Unit.objects.create(name="Celsius", symbol="C")
-        self.src_col = Collection.objects.create(
-            catalog=self.catalog, slug="tas-src", name="tas src"
-        )
+        self.src_col = Collection.objects.create(catalog=self.catalog, slug="tas-src", name="tas src")
         self.src_var = Variable.objects.create(
-            collection=self.src_col, slug="tas", name="tas",
-            unit=self.unit_c, value_min=0, value_max=50,
+            collection=self.src_col,
+            slug="tas",
+            name="tas",
+            unit=self.unit_c,
+            value_min=0,
+            value_max=50,
         )
         self.sasset = StagingAsset.objects.create(
-            item=self.sitem, href="cmip6/tas/series.nc", roles=["source"],
-            format="netcdf", checksum="abc123", variable=self.src_var,
+            item=self.sitem,
+            href="cmip6/tas/series.nc",
+            roles=["source"],
+            format="netcdf",
+            checksum="abc123",
+            variable=self.src_var,
         )
 
     def _unit(self, **over):
         unit = {
-            "source_collection": "tas", "variable": "tas",
-            "period": [2011, 2012], "season": "JJA",
-            "quantity": "value", "baseline": None,
+            "source_collection": "tas",
+            "variable": "tas",
+            "period": [2011, 2012],
+            "season": "JJA",
+            "quantity": "value",
+            "baseline": None,
         }
         unit.update(over)
         return unit
@@ -93,10 +104,7 @@ class _ClimatologyFixture(TestCase):
         """Contiguous monthly cube over the spanned years; JJA months carry the
         given per-year value, all other months carry junk (ignored by season)."""
         years = range(min(jja_by_year), max(jja_by_year) + 1)
-        months = [
-            jja_by_year.get(y, 0.0) if m in (6, 7, 8) else junk
-            for y in years for m in range(1, 13)
-        ]
+        months = [jja_by_year.get(y, 0.0) if m in (6, 7, 8) else junk for y in years for m in range(1, 13)]
         return _cube(months, start=f"{min(jja_by_year)}-01-01")
 
 
@@ -146,8 +154,10 @@ class OutputVariableMetadataTests(_ClimatologyFixture):
     def test_anomaly_variable_has_symmetric_range_and_mirrors_unit(self):
         cube = self._yearly_jja_cube({1981: 10.0, 2011: 13.0})
         unit = self._unit(
-            season="JJA", quantity="anomaly",
-            period=[2011, 2011], baseline=[1981, 1981],
+            season="JJA",
+            quantity="anomaly",
+            period=[2011, 2011],
+            baseline=[1981, 1981],
         )
         var = self._out_variable(unit, cube)
         self.assertEqual(var.unit, self.unit_c)  # an anomaly keeps source units
@@ -158,8 +168,10 @@ class OutputVariableMetadataTests(_ClimatologyFixture):
     def test_relative_anomaly_variable_is_dimensionless(self):
         cube = self._yearly_jja_cube({1981: 10.0, 2011: 13.0})
         unit = self._unit(
-            season="JJA", quantity="relative_anomaly",
-            period=[2011, 2011], baseline=[1981, 1981],
+            season="JJA",
+            quantity="relative_anomaly",
+            period=[2011, 2011],
+            baseline=[1981, 1981],
         )
         var = self._out_variable(unit, cube)
         self.assertNotEqual(var.unit, self.unit_c)
@@ -180,32 +192,32 @@ class AnomalyQuantityTests(_ClimatologyFixture):
         # JJA value (2011) = 13; JJA baseline (1981) = 10; anomaly = 3.0.
         cube = self._yearly_jja_cube({1981: 10.0, 2011: 13.0})
         unit = self._unit(
-            season="JJA", quantity="anomaly",
-            period=[2011, 2011], baseline=[1981, 1981],
+            season="JJA",
+            quantity="anomaly",
+            period=[2011, 2011],
+            baseline=[1981, 1981],
         )
         result = self._run(unit, cube)
 
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
         self.assertEqual(item.collection.slug, "tas_jja_anomaly_1981-1981")
-        np.testing.assert_array_almost_equal(
-            self._written_array(), np.full((3, 2), 3.0)
-        )
+        np.testing.assert_array_almost_equal(self._written_array(), np.full((3, 2), 3.0))
 
     def test_relative_anomaly_divides_by_baseline(self):
         cube = self._yearly_jja_cube({1981: 10.0, 2011: 13.0})
         unit = self._unit(
-            season="JJA", quantity="relative_anomaly",
-            period=[2011, 2011], baseline=[1981, 1981],
+            season="JJA",
+            quantity="relative_anomaly",
+            period=[2011, 2011],
+            baseline=[1981, 1981],
         )
         result = self._run(unit, cube)
 
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
         self.assertEqual(item.collection.slug, "tas_jja_relative_anomaly_1981-1981")
-        np.testing.assert_array_almost_equal(
-            self._written_array(), np.full((3, 2), 0.3)
-        )
+        np.testing.assert_array_almost_equal(self._written_array(), np.full((3, 2), 0.3))
 
 
 class TrendQuantityTests(_ClimatologyFixture):
@@ -218,15 +230,14 @@ class TrendQuantityTests(_ClimatologyFixture):
         self.assertEqual(result.status, "completed")
         item = Item.objects.get(pk=result.item_id)
         self.assertEqual(item.collection.slug, "tas_jja_trend")
-        np.testing.assert_array_almost_equal(
-            self._written_array(), np.full((3, 2), 2.0)
-        )
+        np.testing.assert_array_almost_equal(self._written_array(), np.full((3, 2), 2.0))
 
 
 class EnumerateUnitsTests(_ClimatologyFixture):
     def test_cartesian_product_with_baseline_only_on_anomalies(self):
         selector = {
-            "source_collection": "tas", "variable": "tas",
+            "source_collection": "tas",
+            "variable": "tas",
             "periods": [[2011, 2040], [2041, 2070]],
             "seasons": ["DJF", "JJA"],
             "quantities": ["value", "anomaly", "trend"],
@@ -245,9 +256,14 @@ class EnumerateUnitsTests(_ClimatologyFixture):
         self.assertTrue(all(u["baseline"] is None for u in non_anom))
 
         self.assertIn(
-            {"source_collection": "tas", "variable": "tas",
-             "period": [2011, 2040], "season": "JJA",
-             "quantity": "value", "baseline": None},
+            {
+                "source_collection": "tas",
+                "variable": "tas",
+                "period": [2011, 2040],
+                "season": "JJA",
+                "quantity": "value",
+                "baseline": None,
+            },
             units,
         )
 
@@ -261,56 +277,55 @@ class CalendarFromFileContentTests(_ClimatologyFixture):
         self.sitem.save()
 
         time = xr.date_range(
-            "2011-01-01", periods=36, freq="MS",
-            calendar="360_day", use_cftime=True,
+            "2011-01-01",
+            periods=36,
+            freq="MS",
+            calendar="360_day",
+            use_cftime=True,
         )
-        months = [
-            {2011: 10.0, 2012: 12.0, 2013: 14.0}[int(t.year)]
-            if t.month in (6, 7, 8) else 999.0
-            for t in time
-        ]
-        data = np.broadcast_to(
-            np.asarray(months, dtype="float32")[:, None, None], (36, 3, 2)
-        )
+        months = [{2011: 10.0, 2012: 12.0, 2013: 14.0}[int(t.year)] if t.month in (6, 7, 8) else 999.0 for t in time]
+        data = np.broadcast_to(np.asarray(months, dtype="float32")[:, None, None], (36, 3, 2))
         cube = xr.DataArray(data, coords={"time": time}, dims=["time", "y", "x"])
 
         unit = self._unit(season="JJA", quantity="trend", period=[2011, 2013])
         result = self._run(unit, cube)
 
         self.assertEqual(result.status, "completed")
-        np.testing.assert_array_almost_equal(
-            self._written_array(), np.full((3, 2), 2.0)
-        )
+        np.testing.assert_array_almost_equal(self._written_array(), np.full((3, 2), 2.0))
 
 
 class RunThroughEngineTests(_ClimatologyFixture):
     def test_selector_produces_multiple_products_with_lineage(self):
         cube = self._yearly_jja_cube({2011: 10.0, 2012: 13.0})
         selector = {
-            "source_collection": "tas", "variable": "tas",
-            "periods": [[2012, 2012]], "seasons": ["JJA", "DJF"],
-            "quantities": ["value", "anomaly"], "baselines": [[2011, 2011]],
+            "source_collection": "tas",
+            "variable": "tas",
+            "periods": [[2012, 2012]],
+            "seasons": ["JJA", "DJF"],
+            "quantities": ["value", "anomaly"],
+            "baselines": [[2011, 2011]],
         }
-        with patch.object(ClimatologyRecipe, "read_series", return_value=cube), \
-                patch("georiva.ingestion.asset_writer.AssetWriter") as AW:
+        with (
+            patch.object(ClimatologyRecipe, "read_series", return_value=cube),
+            patch("georiva.ingestion.asset_writer.AssetWriter") as AW,
+        ):
             AW.return_value = _mock_writer()
             results = run(ClimatologyRecipe(), selector, dispatch=False)
 
         self.assertEqual(len(results), 4)
         self.assertTrue(all(r.status == "completed" for r in results))
 
-        slugs = set(
-            Collection.objects.filter(catalog=self.catalog)
-            .values_list("slug", flat=True)
+        slugs = set(Collection.objects.filter(catalog=self.catalog).values_list("slug", flat=True))
+        self.assertTrue(
+            {
+                "tas_jja_value",
+                "tas_jja_anomaly_2011-2011",
+                "tas_djf_value",
+                "tas_djf_anomaly_2011-2011",
+            }
+            <= slugs
         )
-        self.assertTrue({
-            "tas_jja_value", "tas_jja_anomaly_2011-2011",
-            "tas_djf_value", "tas_djf_anomaly_2011-2011",
-        } <= slugs)
 
         self.assertEqual(Item.objects.filter(collection__slug__startswith="tas_").count(), 4)
         self.assertEqual(DerivationLink.objects.count(), 4)
-        self.assertTrue(
-            all(l.source_staging_item_id == self.sitem.pk
-                for l in DerivationLink.objects.all())
-        )
+        self.assertTrue(all(link.source_staging_item_id == self.sitem.pk for link in DerivationLink.objects.all()))

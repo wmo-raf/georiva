@@ -11,14 +11,18 @@ ALLOWED_HOSTS = ["*"]
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-GDAL_LIBRARY_PATH = env.str('GDAL_LIBRARY_PATH', None)
-GEOS_LIBRARY_PATH = env.str('GEOS_LIBRARY_PATH', None)
+GDAL_LIBRARY_PATH = env.str("GDAL_LIBRARY_PATH", None)
+GEOS_LIBRARY_PATH = env.str("GEOS_LIBRARY_PATH", None)
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-INSTALLED_APPS = ["daphne"] + INSTALLED_APPS + [
-    "wagtail.contrib.styleguide",
-]
+INSTALLED_APPS = (
+    ["daphne"]
+    + INSTALLED_APPS
+    + [
+        "wagtail.contrib.styleguide",
+    ]
+)
 
 try:
     from .local import *

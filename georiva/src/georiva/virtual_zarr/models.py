@@ -1,8 +1,12 @@
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from django.db import models
 from django.utils import timezone
 from django_extensions.db.models import TimeStampedModel
+
+if TYPE_CHECKING:
+    from georiva.core.models import Variable
 
 
 class VirtualZarrManifest(TimeStampedModel):
@@ -21,9 +25,9 @@ class VirtualZarrManifest(TimeStampedModel):
     derived caches — the source of truth for what the repo contains is the
     latest Icechunk commit's metadata (design decision 5).
     """
-    
+
     LOCK_TIMEOUT = timedelta(minutes=30)
-    
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending build"
         BUILDING = "building", "Building"
@@ -34,11 +38,11 @@ class VirtualZarrManifest(TimeStampedModel):
         # there is nothing to build.  The sweep skips NO_DATA; the COG
         # save/delete signals flip it back to STALE when reality changes.
         NO_DATA = "no_data", "No data"
-    
+
     # -------------------------------------------------------------------------
     # Identity — one manifest per variable
     # -------------------------------------------------------------------------
-    
+
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
     variable = models.OneToOneField(
@@ -46,11 +50,11 @@ class VirtualZarrManifest(TimeStampedModel):
         on_delete=models.CASCADE,
         related_name="virtual_zarr_manifest",
     )
-    
+
     # -------------------------------------------------------------------------
     # Storage
     # -------------------------------------------------------------------------
-    
+
     repo_path = models.CharField(
         max_length=500,
         blank=True,
@@ -68,11 +72,16 @@ class VirtualZarrManifest(TimeStampedModel):
     time_end = models.DateTimeField(null=True, blank=True, editable=False)
     item_count = models.PositiveIntegerField(default=0, editable=False)
     watermark = models.DateTimeField(
-        null=True, blank=True, editable=False,
+        null=True,
+        blank=True,
+        editable=False,
         help_text="Max Asset.modified at the last successful commit.",
     )
     snapshot_id = models.CharField(
-        max_length=100, blank=True, default="", editable=False,
+        max_length=100,
+        blank=True,
+        default="",
+        editable=False,
         help_text="Icechunk snapshot id of the last successful commit.",
     )
 
@@ -82,18 +91,20 @@ class VirtualZarrManifest(TimeStampedModel):
     # -------------------------------------------------------------------------
 
     repo_size_bytes = models.BigIntegerField(
-        default=0, editable=False,
+        default=0,
+        editable=False,
         help_text="Total bytes under the repo prefix at the last refresh.",
     )
     repo_object_count = models.PositiveIntegerField(
-        default=0, editable=False,
+        default=0,
+        editable=False,
         help_text="Object count under the repo prefix at the last refresh.",
     )
 
     # -------------------------------------------------------------------------
     # State machine
     # -------------------------------------------------------------------------
-    
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -104,7 +115,7 @@ class VirtualZarrManifest(TimeStampedModel):
     locked_at = models.DateTimeField(null=True, blank=True)
     locked_by = models.CharField(max_length=100, blank=True, default="")
     error = models.TextField(blank=True)
-    
+
     class Meta:
         # ordering by collection then variable slug for readable admin lists
         ordering = ["variable__collection", "variable__slug"]
@@ -114,27 +125,24 @@ class VirtualZarrManifest(TimeStampedModel):
                 name="idx_vzm_status",
             ),
         ]
-    
+
     def __str__(self):
         col = self.variable.collection
-        return (
-            f"{col.catalog.slug}/{col.slug}"
-            f"/{self.variable.slug} [{self.status}]"
-        )
-    
+        return f"{col.catalog.slug}/{col.slug}/{self.variable.slug} [{self.status}]"
+
     # -------------------------------------------------------------------------
     # Collection convenience property
     # -------------------------------------------------------------------------
-    
+
     @property
     def collection(self):
         """Convenience accessor — always self.variable.collection."""
         return self.variable.collection
-    
+
     # -------------------------------------------------------------------------
     # Derived path
     # -------------------------------------------------------------------------
-    
+
     @classmethod
     def make_repo_path(cls, variable: "Variable") -> str:
         """
@@ -143,21 +151,18 @@ class VirtualZarrManifest(TimeStampedModel):
         bucket key.  Trailing slash: this names a prefix, not an object.
         """
         collection = variable.collection
-        return (
-            f"{collection.catalog.storage_prefix}/"
-            f"{collection.slug}/{variable.slug}/"
-        )
+        return f"{collection.catalog.storage_prefix}/{collection.slug}/{variable.slug}/"
 
     def get_repo_path(self) -> str:
         """Return (or derive) the repo prefix for this record."""
         if self.repo_path:
             return self.repo_path
         return self.make_repo_path(self.variable)
-    
+
     # -------------------------------------------------------------------------
     # State transitions
     # -------------------------------------------------------------------------
-    
+
     def mark_building(self, worker_id: str = "") -> None:
         self.__class__.objects.filter(pk=self.pk).update(
             status=self.Status.BUILDING,
@@ -165,15 +170,15 @@ class VirtualZarrManifest(TimeStampedModel):
             locked_by=worker_id,
             error="",
         )
-    
+
     def mark_ready(
-            self,
-            repo_path: str,
-            item_count: int,
-            time_start,
-            time_end,
-            snapshot_id: str = "",
-            watermark=None,
+        self,
+        repo_path: str,
+        item_count: int,
+        time_start,
+        time_end,
+        snapshot_id: str = "",
+        watermark=None,
     ) -> None:
         self.__class__.objects.filter(pk=self.pk).update(
             status=self.Status.READY,
@@ -188,7 +193,7 @@ class VirtualZarrManifest(TimeStampedModel):
             locked_by="",
             error="",
         )
-    
+
     def mark_failed(self, error: str) -> None:
         self.__class__.objects.filter(pk=self.pk).update(
             status=self.Status.FAILED,
@@ -196,7 +201,7 @@ class VirtualZarrManifest(TimeStampedModel):
             locked_by="",
             error=error[:2000],
         )
-    
+
     def mark_no_data(self) -> None:
         """
         Park the manifest when its variable has no COG assets at all.
@@ -224,7 +229,7 @@ class VirtualZarrManifest(TimeStampedModel):
             pk=self.pk,
             status__in=[self.Status.READY, self.Status.NO_DATA],
         ).update(status=self.Status.STALE)
-    
+
     def queue_rebuild(self) -> bool:
         """
         Flip to PENDING so the next sweep rebuilds — the operator's manual
@@ -239,20 +244,24 @@ class VirtualZarrManifest(TimeStampedModel):
         cannot race a concurrent ``mark_building``.
         """
         stale_cutoff = timezone.now() - self.LOCK_TIMEOUT
-        updated = self.__class__.objects.filter(pk=self.pk).exclude(
-            status=self.Status.BUILDING,
-            locked_at__gte=stale_cutoff,
-        ).update(
-            status=self.Status.PENDING,
-            locked_at=None,
-            locked_by="",
+        updated = (
+            self.__class__.objects.filter(pk=self.pk)
+            .exclude(
+                status=self.Status.BUILDING,
+                locked_at__gte=stale_cutoff,
+            )
+            .update(
+                status=self.Status.PENDING,
+                locked_at=None,
+                locked_by="",
+            )
         )
         return bool(updated)
 
     # -------------------------------------------------------------------------
     # Bulk helpers
     # -------------------------------------------------------------------------
-    
+
     @classmethod
     def get_buildable(cls):
         """
@@ -262,21 +271,25 @@ class VirtualZarrManifest(TimeStampedModel):
         duplicate dispatches when the sweep runs concurrently with a build task.
         """
         stale_cutoff = timezone.now() - cls.LOCK_TIMEOUT
-        return cls.objects.filter(
-            status__in=[
-                cls.Status.PENDING,
-                cls.Status.STALE,
-                cls.Status.FAILED,
-            ]
-        ).exclude(
-            status=cls.Status.BUILDING,
-            locked_at__gte=stale_cutoff,
-        ).select_related(
-            "variable",
-            "variable__collection",
-            "variable__collection__catalog",
+        return (
+            cls.objects.filter(
+                status__in=[
+                    cls.Status.PENDING,
+                    cls.Status.STALE,
+                    cls.Status.FAILED,
+                ]
+            )
+            .exclude(
+                status=cls.Status.BUILDING,
+                locked_at__gte=stale_cutoff,
+            )
+            .select_related(
+                "variable",
+                "variable__collection",
+                "variable__collection__catalog",
+            )
         )
-    
+
     @classmethod
     def reset_stale_locks(cls) -> int:
         """
@@ -292,7 +305,7 @@ class VirtualZarrManifest(TimeStampedModel):
             locked_at=None,
             locked_by="",
         )
-    
+
     # -------------------------------------------------------------------------
     # Repo stats refresh
     # -------------------------------------------------------------------------
@@ -305,9 +318,7 @@ class VirtualZarrManifest(TimeStampedModel):
         """
         from georiva.core.storage import storage
 
-        entries = storage.zarr.list_files(
-            self.get_repo_path().rstrip("/"), recursive=True
-        )
+        entries = storage.zarr.list_files(self.get_repo_path().rstrip("/"), recursive=True)
         if not entries:
             # list_files swallows storage errors into an empty list; a repo
             # that has ever committed is never empty, so keep the previous
@@ -321,7 +332,7 @@ class VirtualZarrManifest(TimeStampedModel):
     # -------------------------------------------------------------------------
     # Dataset access
     # -------------------------------------------------------------------------
-    
+
     def open_dataset(self, *, internal: bool = True, chunks: dict | None = {}):
         """
         Open this variable's Icechunk repo as a lazy xarray Dataset.
@@ -344,10 +355,7 @@ class VirtualZarrManifest(TimeStampedModel):
             If the manifest is not in READY state.
         """
         if self.status != self.Status.READY:
-            raise ValueError(
-                f"Manifest {self} is not ready (status={self.status}). "
-                "Trigger a build first."
-            )
+            raise ValueError(f"Manifest {self} is not ready (status={self.status}). Trigger a build first.")
 
         import xarray as xr
 
@@ -397,7 +405,10 @@ class VirtualZarrBuildLog(models.Model):
     kind = models.CharField(max_length=10, choices=Kind.choices)
     outcome = models.CharField(max_length=10, choices=Outcome.choices)
     mode = models.CharField(
-        max_length=20, choices=Mode.choices, blank=True, default="",
+        max_length=20,
+        choices=Mode.choices,
+        blank=True,
+        default="",
     )
 
     started_at = models.DateTimeField()
@@ -410,7 +421,9 @@ class VirtualZarrBuildLog(models.Model):
     )
     error = models.TextField(blank=True)
     snapshot_id = models.CharField(
-        max_length=100, blank=True, default="",
+        max_length=100,
+        blank=True,
+        default="",
         help_text="Icechunk snapshot id the build resulted in, if any.",
     )
 
@@ -421,10 +434,7 @@ class VirtualZarrBuildLog(models.Model):
         ]
 
     def __str__(self):
-        return (
-            f"{self.manifest_id} {self.kind}/{self.outcome} "
-            f"@ {self.started_at:%Y-%m-%d %H:%M}"
-        )
+        return f"{self.manifest_id} {self.kind}/{self.outcome} @ {self.started_at:%Y-%m-%d %H:%M}"
 
     @property
     def duration(self) -> timedelta:
@@ -432,7 +442,12 @@ class VirtualZarrBuildLog(models.Model):
 
     @classmethod
     def record(
-            cls, manifest, kind, outcome, started_at, **fields,
+        cls,
+        manifest,
+        kind,
+        outcome,
+        started_at,
+        **fields,
     ) -> "VirtualZarrBuildLog":
         """One attempt/run row, stamped finished now."""
         return cls.objects.create(

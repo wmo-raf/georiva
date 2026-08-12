@@ -13,7 +13,12 @@ class RegridArrayTests(unittest.TestCase):
         dst_t = from_bounds(0, 0, 2, 2, 4, 4)
 
         out = regrid_array(
-            data, src_t, "EPSG:4326", dst_t, "EPSG:4326", (4, 4),
+            data,
+            src_t,
+            "EPSG:4326",
+            dst_t,
+            "EPSG:4326",
+            (4, 4),
             resampling="nearest",
         )
         self.assertEqual(out.shape, (4, 4))
@@ -23,16 +28,14 @@ class RegridArrayTests(unittest.TestCase):
     def test_identity_grid_returns_same_values(self):
         data = np.array([[1.0, 2.0], [3.0, 4.0]], dtype="float32")
         t = from_bounds(0, 0, 2, 2, 2, 2)
-        out = regrid_array(data, t, "EPSG:4326", t, "EPSG:4326", (2, 2),
-                           resampling="nearest")
+        out = regrid_array(data, t, "EPSG:4326", t, "EPSG:4326", (2, 2), resampling="nearest")
         np.testing.assert_array_almost_equal(out, data)
 
     def test_unknown_resampling_raises(self):
         data = np.zeros((2, 2), dtype="float32")
         t = from_bounds(0, 0, 2, 2, 2, 2)
         with self.assertRaises(ValueError):
-            regrid_array(data, t, "EPSG:4326", t, "EPSG:4326", (2, 2),
-                         resampling="bogus")
+            regrid_array(data, t, "EPSG:4326", t, "EPSG:4326", (2, 2), resampling="bogus")
 
 
 if __name__ == "__main__":

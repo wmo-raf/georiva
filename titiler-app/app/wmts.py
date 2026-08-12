@@ -30,6 +30,7 @@ routers. The KVP endpoint's clients are legacy speakers that can parse nothing
 else; the REST identify route exists only to serve a ``ResourceURL``, so its
 caller is a WMTS client too, whatever the encoding it fetched with.
 """
+
 import logging
 import math
 import re
@@ -122,7 +123,7 @@ def exception_report(exc: WMTSException) -> Response:
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<ExceptionReport xmlns="{OWS_NS}" version="1.1.0">'
-        f'<Exception exceptionCode={quoteattr(exc.code)}{locator}>'
+        f"<Exception exceptionCode={quoteattr(exc.code)}{locator}>"
         f"<ExceptionText>{escape(exc.text)}</ExceptionText>"
         "</Exception></ExceptionReport>"
     )
@@ -144,7 +145,9 @@ def _collect_params(request: Request) -> dict[str, str]:
     repeated = sorted(name for name, values in params.items() if len(values) > 1)
     if repeated:
         raise WMTSException(
-            400, "InvalidParameterValue", repeated[0].upper(),
+            400,
+            "InvalidParameterValue",
+            repeated[0].upper(),
             f"Parameter given more than once: {', '.join(n.upper() for n in repeated)}",
         )
     return {name: values[0] for name, values in params.items()}
@@ -154,7 +157,9 @@ def _require(params: dict[str, str], name: str) -> str:
     value = params.get(name)
     if value is None or value == "":
         raise WMTSException(
-            400, "MissingParameterValue", name.upper(),
+            400,
+            "MissingParameterValue",
+            name.upper(),
             f"Missing required parameter {name.upper()}",
         )
     return value
@@ -177,7 +182,10 @@ def _check_slugs(*segments: str) -> None:
     """
     if not all(SLUG_RE.fullmatch(segment) for segment in segments):
         raise WMTSException(
-            404, "InvalidParameterValue", None, "No WMTS service at this address",
+            404,
+            "InvalidParameterValue",
+            None,
+            "No WMTS service at this address",
         )
 
 
@@ -195,7 +203,9 @@ def _parse_layer(params: dict[str, str]) -> tuple[str, str, str]:
     # could re-shape the path would let the two read different addresses.
     if len(parts) != 3 or not all(SLUG_RE.fullmatch(part) for part in parts):
         raise WMTSException(
-            400, "InvalidParameterValue", "LAYER",
+            400,
+            "InvalidParameterValue",
+            "LAYER",
             f"Layer identifier must be catalog:collection:variable, got {layer!r}",
         )
     return parts[0], parts[1], parts[2]
@@ -208,10 +218,12 @@ def _parse_tile_coords(params: dict[str, str]) -> tuple[int, int, int]:
     # "WebMercatorQuad:5" — the qualified spelling names the same matrix.
     prefix = f"{TILE_MATRIX_SET}:"
     if matrix.startswith(prefix):
-        matrix = matrix[len(prefix):]
+        matrix = matrix[len(prefix) :]
     if not matrix.isdigit() or not 0 <= int(matrix) <= MAX_ZOOM:
         raise WMTSException(
-            400, "InvalidParameterValue", "TILEMATRIX",
+            400,
+            "InvalidParameterValue",
+            "TILEMATRIX",
             f"TILEMATRIX must be a {TILE_MATRIX_SET} level between 0 and {MAX_ZOOM}",
         )
     zoom = int(matrix)
@@ -221,15 +233,19 @@ def _parse_tile_coords(params: dict[str, str]) -> tuple[int, int, int]:
         value = _require(params, name)
         if not value.isdigit():
             raise WMTSException(
-                400, "InvalidParameterValue", name.upper(),
+                400,
+                "InvalidParameterValue",
+                name.upper(),
                 f"{name.upper()} must be a non-negative integer",
             )
         coords[name] = int(value)
-    limit = 2 ** zoom
+    limit = 2**zoom
     for name, value in coords.items():
         if value >= limit:
             raise WMTSException(
-                400, "TileOutOfRange", name.upper(),
+                400,
+                "TileOutOfRange",
+                name.upper(),
                 f"{name.upper()} {value} outside the grid at TILEMATRIX {zoom} (0..{limit - 1})",
             )
     return zoom, coords["tilerow"], coords["tilecol"]
@@ -245,12 +261,18 @@ def _validate_service_and_version(params: dict[str, str]) -> None:
     service = params.get("service")
     if service is not None and service.lower() != "wmts":
         raise WMTSException(
-            400, "InvalidParameterValue", "SERVICE", f"Service {service!r} not served here — this is WMTS",
+            400,
+            "InvalidParameterValue",
+            "SERVICE",
+            f"Service {service!r} not served here — this is WMTS",
         )
     version = params.get("version")
     if version is not None and version != "1.0.0":
         raise WMTSException(
-            400, "InvalidParameterValue", "VERSION", f"Version {version!r} not supported — only 1.0.0",
+            400,
+            "InvalidParameterValue",
+            "VERSION",
+            f"Version {version!r} not supported — only 1.0.0",
         )
 
 
@@ -266,13 +288,18 @@ def _validate_tile_choices(params: dict[str, str]) -> None:
     tms = _require(params, "tilematrixset")
     if tms != TILE_MATRIX_SET:
         raise WMTSException(
-            400, "InvalidParameterValue", "TILEMATRIXSET",
+            400,
+            "InvalidParameterValue",
+            "TILEMATRIXSET",
             f"TileMatrixSet {tms!r} not served — only {TILE_MATRIX_SET}",
         )
     fmt = params.get("format")
     if fmt is not None and fmt != TILE_FORMAT:
         raise WMTSException(
-            400, "InvalidParameterValue", "FORMAT", f"Format {fmt!r} not served — only {TILE_FORMAT}",
+            400,
+            "InvalidParameterValue",
+            "FORMAT",
+            f"Format {fmt!r} not served — only {TILE_FORMAT}",
         )
 
 
@@ -400,7 +427,9 @@ def _validate_info_format(params: dict[str, str]) -> None:
     info_format = params.get("infoformat")
     if info_format and info_format != INFO_FORMAT:
         raise WMTSException(
-            400, "InvalidParameterValue", "INFOFORMAT",
+            400,
+            "InvalidParameterValue",
+            "INFOFORMAT",
             f"InfoFormat {info_format!r} not served — only {INFO_FORMAT}",
         )
 
@@ -421,12 +450,16 @@ def _parse_pixel(params: dict[str, str], zoom: int) -> tuple[int, int]:
         value = _require(params, name)
         if not value.isdigit():
             raise WMTSException(
-                400, "InvalidParameterValue", name.upper(),
+                400,
+                "InvalidParameterValue",
+                name.upper(),
                 f"{name.upper()} must be a non-negative integer",
             )
         if int(value) >= size:
             raise WMTSException(
-                400, "PointIJOutOfRange", name.upper(),
+                400,
+                "PointIJOutOfRange",
+                name.upper(),
                 f"{name.upper()} {value} outside the tile (0..{size - 1})",
             )
         pixel[name] = int(value)
@@ -471,16 +504,23 @@ async def _tile_config_for(address: tuple[str, str, str, str], style: Optional[s
     try:
         return await run_in_threadpool(
             dependencies.SemanticTileConfig,
-            org_slug=org_slug, catalog_slug=catalog, collection_slug=collection,
-            variable_slug=variable, style=style,
+            org_slug=org_slug,
+            catalog_slug=catalog,
+            collection_slug=collection,
+            variable_slug=variable,
+            style=style,
         )
     except HTTPException as exc:
         raise _translate_tile_error(exc.status_code, str(exc.detail or ""), style) from exc
 
 
 async def _read_point(
-        request: Request, address: tuple[str, str, str, str],
-        lon: float, lat: float, query: dict[str, str], style: Optional[str],
+    request: Request,
+    address: tuple[str, str, str, str],
+    lon: float,
+    lat: float,
+    query: dict[str, str],
+    style: Optional[str],
 ) -> Optional[float]:
     """The raw physical value under ``(lon, lat)``, or ``None`` where there is none.
 
@@ -522,9 +562,15 @@ async def _read_point(
 
 
 async def _identify(
-        request: Request, address: tuple[str, str, str, str],
-        zoom: int, row: int, col: int, i: int, j: int,
-        style: Optional[str], query: dict[str, str],
+    request: Request,
+    address: tuple[str, str, str, str],
+    zoom: int,
+    row: int,
+    col: int,
+    i: int,
+    j: int,
+    style: Optional[str],
+    query: dict[str, str],
 ) -> dict:
     """The identify answer for one pixel, whichever binding asked (#363, #379).
 
@@ -565,7 +611,9 @@ async def _identify(
 
 
 async def _dispatch_get_feature_info(
-        request: Request, org_slug: str, params: dict[str, str],
+    request: Request,
+    org_slug: str,
+    params: dict[str, str],
 ) -> Response:
     """Answer KVP GetFeatureInfo with the value under the clicked pixel (#363)."""
     _validate_service_and_version(params)
@@ -576,8 +624,15 @@ async def _dispatch_get_feature_info(
     i, j = _parse_pixel(params, zoom)
 
     payload = await _identify(
-        request, (org_slug, catalog, collection, variable), zoom, row, col, i, j,
-        _resolve_style(params), _time_query(params),
+        request,
+        (org_slug, catalog, collection, variable),
+        zoom,
+        row,
+        col,
+        i,
+        j,
+        _resolve_style(params),
+        _time_query(params),
     )
     return JSONResponse(payload, media_type=INFO_FORMAT)
 
@@ -610,15 +665,22 @@ def _translate_capabilities_error(status_code: int) -> WMTSException:
     """
     if status_code == 404:
         return WMTSException(
-            404, "InvalidParameterValue", None, "No WMTS service for this organisation",
+            404,
+            "InvalidParameterValue",
+            None,
+            "No WMTS service for this organisation",
         )
     if status_code in (401, 403):
         return WMTSException(
-            status_code, "InvalidParameterValue", API_KEY_PARAM.upper(),
+            status_code,
+            "InvalidParameterValue",
+            API_KEY_PARAM.upper(),
             "The presented credential was refused",
         )
     return WMTSException(
-        502, "NoApplicableCode", None,
+        502,
+        "NoApplicableCode",
+        None,
         f"The capabilities document could not be built (upstream status {status_code})",
     )
 
@@ -671,12 +733,15 @@ async def _proxy_get_capabilities(request: Request, org_slug: str, params: dict[
         async with dependencies.django_client() as client:
             response = await client.get(
                 CAPABILITIES_PATH.format(org_slug=org_slug),
-                params=query, headers=forwarded,
+                params=query,
+                headers=forwarded,
             )
     except httpx.HTTPError as e:
         logger.warning("WMTS capabilities fetch failed for %s: %s", org_slug, e)
         raise WMTSException(
-            503, "NoApplicableCode", None,
+            503,
+            "NoApplicableCode",
+            None,
             "The capabilities document is unavailable — the metadata service could not be reached",
         )
 
@@ -720,7 +785,9 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
         if operation == "getfeatureinfo":
             return await _dispatch_get_feature_info(request, org_slug, params)
         raise WMTSException(
-            400, "InvalidParameterValue", "REQUEST",
+            400,
+            "InvalidParameterValue",
+            "REQUEST",
             f"Unknown request {params['request']!r}",
         )
     except WMTSException as exc:
@@ -731,10 +798,17 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
 
 @rest_router.get("/tiles/{tile_matrix_set}/{tile_matrix}/{tile_col}/{tile_row}/{j}/{i}.json")
 async def wmts_rest_feature_info(
-        request: Request,
-        org_slug: str, catalog_slug: str, collection_slug: str, variable_slug: str,
-        tile_matrix_set: str, tile_matrix: str, tile_col: str, tile_row: str,
-        j: str, i: str,
+    request: Request,
+    org_slug: str,
+    catalog_slug: str,
+    collection_slug: str,
+    variable_slug: str,
+    tile_matrix_set: str,
+    tile_matrix: str,
+    tile_col: str,
+    tile_row: str,
+    j: str,
+    i: str,
 ) -> Response:
     """RESTful GetFeatureInfo — the identify a ``ResourceURL`` client can reach (#379).
 
@@ -762,18 +836,30 @@ async def wmts_rest_feature_info(
         # request's address, so a query parameter of the same name may not
         # quietly stand in for one of its segments.
         params = _collect_params(request)
-        params.update({
-            "tilematrixset": tile_matrix_set, "tilematrix": tile_matrix,
-            "tilecol": tile_col, "tilerow": tile_row, "i": i, "j": j,
-        })
+        params.update(
+            {
+                "tilematrixset": tile_matrix_set,
+                "tilematrix": tile_matrix,
+                "tilecol": tile_col,
+                "tilerow": tile_row,
+                "i": i,
+                "j": j,
+            }
+        )
         _validate_tile_choices(params)
         zoom, row, col = _parse_tile_coords(params)
         pixel_i, pixel_j = _parse_pixel(params, zoom)
 
         payload = await _identify(
-            request, (org_slug, catalog_slug, collection_slug, variable_slug),
-            zoom, row, col, pixel_i, pixel_j,
-            _resolve_style(params), _time_query(params),
+            request,
+            (org_slug, catalog_slug, collection_slug, variable_slug),
+            zoom,
+            row,
+            col,
+            pixel_i,
+            pixel_j,
+            _resolve_style(params),
+            _time_query(params),
         )
         return JSONResponse(payload, media_type=INFO_FORMAT)
     except WMTSException as exc:

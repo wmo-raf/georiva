@@ -12,6 +12,7 @@ prefix. Classifies every conforming file in the incoming/sources buckets:
 In-flight (processing) and failed records are not the scan's business —
 failures are the Sweep's bounded-retry phase.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,8 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from georiva.core.storage.filename import validate_path
 from georiva.core.storage import BucketType, storage
+from georiva.core.storage.filename import validate_path
 
 
 @dataclass
@@ -46,16 +47,11 @@ def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
                 reference_time=unprocessed_file.reference_time,
             )
         elif unprocessed_file.reason == "reingest":
-            FileIngestion.reset_for_reingest(
-                unprocessed_file.bucket, unprocessed_file.file_path
-            )
+            FileIngestion.reset_for_reingest(unprocessed_file.bucket, unprocessed_file.file_path)
         tasks.process_incoming_file.delay(
             file_path=unprocessed_file.file_path,
             origin_bucket=unprocessed_file.bucket,
-            reference_time=(
-                unprocessed_file.reference_time.isoformat()
-                if unprocessed_file.reference_time else None
-            ),
+            reference_time=(unprocessed_file.reference_time.isoformat() if unprocessed_file.reference_time else None),
         )
     return len(found)
 
@@ -73,10 +69,7 @@ def reingest_records(records) -> int:
         tasks.process_incoming_file.delay(
             file_path=record.file_path,
             origin_bucket=record.bucket,
-            reference_time=(
-                record.reference_time.isoformat()
-                if record.reference_time else None
-            ),
+            reference_time=(record.reference_time.isoformat() if record.reference_time else None),
         )
         count += 1
     return count
@@ -104,15 +97,12 @@ def find_unprocessed(prefix: str | None = None) -> list[UnprocessedFile]:
             except ValueError:
                 continue
 
-            record = FileIngestion.objects.filter(
-                bucket=bucket_type, file_path=path
-            ).first()
+            record = FileIngestion.objects.filter(bucket=bucket_type, file_path=path).first()
 
             if record is None:
                 reason = "untracked"
             elif record.force_reingest or (
-                record.status == FileIngestion.Status.COMPLETED
-                and not record.has_live_data
+                record.status == FileIngestion.Status.COMPLETED and not record.has_live_data
             ):
                 # force_reingest wins regardless of status — matches the
                 # pre-extraction sweep.
@@ -122,10 +112,12 @@ def find_unprocessed(prefix: str | None = None) -> list[UnprocessedFile]:
             else:
                 continue
 
-            found.append(UnprocessedFile(
-                bucket=bucket_type,
-                file_path=path,
-                reason=reason,
-                reference_time=meta.get("reference_time"),
-            ))
+            found.append(
+                UnprocessedFile(
+                    bucket=bucket_type,
+                    file_path=path,
+                    reason=reason,
+                    reference_time=meta.get("reference_time"),
+                )
+            )
     return found

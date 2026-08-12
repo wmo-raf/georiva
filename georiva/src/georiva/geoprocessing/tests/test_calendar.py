@@ -14,8 +14,9 @@ class ConvertCalendarTests(unittest.TestCase):
 
         converted = convert_calendar(da, "standard")
         # Standard calendar — index is real datetimes now.
-        self.assertEqual(converted["time"].dt.calendar, "proleptic_gregorian") \
-            if hasattr(converted["time"].dt, "calendar") else None
+        self.assertEqual(converted["time"].dt.calendar, "proleptic_gregorian") if hasattr(
+            converted["time"].dt, "calendar"
+        ) else None
         # No Feb 29 was invented (missing=None drops unmapped dates).
         self.assertLessEqual(converted.sizes["time"], da.sizes["time"])
 

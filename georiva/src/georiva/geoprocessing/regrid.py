@@ -5,6 +5,7 @@ Uses ``rasterio.warp.reproject`` (already in the image) so the library needs
 no rioxarray/scipy. Operates on numpy arrays with affine transforms + CRS; the
 caller decides the target grid (the recipe's "target grid of production").
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -21,13 +22,13 @@ _RESAMPLING = {
 
 
 def regrid_array(
-        data,
-        src_transform,
-        src_crs,
-        dst_transform,
-        dst_crs,
-        dst_shape,
-        resampling: str = "bilinear",
+    data,
+    src_transform,
+    src_crs,
+    dst_transform,
+    dst_crs,
+    dst_shape,
+    resampling: str = "bilinear",
 ):
     """
     Reproject/resample a 2-D array onto a target grid.

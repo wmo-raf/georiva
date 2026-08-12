@@ -24,6 +24,7 @@ in the path, but this subrequest also carries the browser's real Host, so there
 is something to check the segment against — and where there is, ADR 0013 says it
 wins.
 """
+
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
@@ -59,8 +60,7 @@ def titiler_uri(collection_slug, org="kenya", catalog="forecast", variable=None)
     )
 
 
-def wmts_uri(collection_slug, org="kenya", catalog="forecast", request="GetTile",
-             layer=None, extra=""):
+def wmts_uri(collection_slug, org="kenya", catalog="forecast", request="GetTile", layer=None, extra=""):
     """A KVP request against the org-scoped WMTS endpoint under the proxy."""
     layer = layer if layer is not None else f"{catalog}:{collection_slug}:{collection_slug}"
     return (
@@ -116,14 +116,10 @@ class ScopeOfTests(TestCase):
         )
 
     def test_a_martin_tile_missing_part_of_the_triple_scopes_to_nothing(self):
-        self.assertIsNone(
-            scope_of("/martin/boundary_stats/6/38/32?org=kenya&catalog=forecast")
-        )
+        self.assertIsNone(scope_of("/martin/boundary_stats/6/38/32?org=kenya&catalog=forecast"))
 
     def test_a_martin_tile_with_a_blank_triple_member_scopes_to_nothing(self):
-        self.assertIsNone(
-            scope_of("/martin/boundary_stats/6/38/32?org=kenya&catalog=forecast&collection=")
-        )
+        self.assertIsNone(scope_of("/martin/boundary_stats/6/38/32?org=kenya&catalog=forecast&collection="))
 
     def test_a_repeated_parameter_scopes_to_nothing(self):
         """Which duplicate Martin would pick is not visible from here.
@@ -133,10 +129,7 @@ class ScopeOfTests(TestCase):
         open is refused rather than guessed at.
         """
         self.assertIsNone(
-            scope_of(
-                "/martin/boundary_stats/6/38/32"
-                "?org=kenya&org=uganda&catalog=forecast&collection=rainfall"
-            )
+            scope_of("/martin/boundary_stats/6/38/32?org=kenya&org=uganda&catalog=forecast&collection=rainfall")
         )
 
     def test_martins_other_endpoints_scope_to_nothing(self):
@@ -201,49 +194,32 @@ class WmtsScopeOfTests(TestCase):
         self.assertIsNone(scope_of("/titiler/kenya/wmts?LAYER=a:b:c"))
 
     def test_an_unknown_request_scopes_to_nothing(self):
-        self.assertIsNone(
-            scope_of("/titiler/kenya/wmts?REQUEST=GetLegendGraphic&LAYER=a:b:c")
-        )
+        self.assertIsNone(scope_of("/titiler/kenya/wmts?REQUEST=GetLegendGraphic&LAYER=a:b:c"))
 
     def test_a_gettile_without_a_layer_scopes_to_nothing(self):
         self.assertIsNone(scope_of("/titiler/kenya/wmts?REQUEST=GetTile"))
 
     def test_a_layer_short_of_three_parts_scopes_to_nothing(self):
-        self.assertIsNone(
-            scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast:rainfall")
-        )
+        self.assertIsNone(scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast:rainfall"))
 
     def test_a_layer_with_a_blank_part_scopes_to_nothing(self):
-        self.assertIsNone(
-            scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast::rain")
-        )
+        self.assertIsNone(scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast::rain"))
 
     def test_a_repeated_layer_scopes_to_nothing(self):
         """Which duplicate the shim would pick is not visible from here."""
         self.assertIsNone(
-            scope_of(
-                "/titiler/kenya/wmts?REQUEST=GetTile"
-                "&LAYER=forecast:public:rain&LAYER=forecast:private:rain"
-            )
+            scope_of("/titiler/kenya/wmts?REQUEST=GetTile&LAYER=forecast:public:rain&LAYER=forecast:private:rain")
         )
 
     def test_a_layer_repeated_across_spellings_scopes_to_nothing(self):
         """Case-insensitive names make ``layer`` and ``LAYER`` the same
         parameter, so two spellings are a repetition, not two parameters."""
         self.assertIsNone(
-            scope_of(
-                "/titiler/kenya/wmts?REQUEST=GetTile"
-                "&layer=forecast:public:rain&LAYER=forecast:private:rain"
-            )
+            scope_of("/titiler/kenya/wmts?REQUEST=GetTile&layer=forecast:public:rain&LAYER=forecast:private:rain")
         )
 
     def test_a_repeated_request_scopes_to_nothing(self):
-        self.assertIsNone(
-            scope_of(
-                "/titiler/kenya/wmts?REQUEST=GetCapabilities&REQUEST=GetTile"
-                "&LAYER=a:b:c"
-            )
-        )
+        self.assertIsNone(scope_of("/titiler/kenya/wmts?REQUEST=GetCapabilities&REQUEST=GetTile&LAYER=a:b:c"))
 
     def test_a_path_below_the_endpoint_scopes_to_nothing(self):
         self.assertIsNone(scope_of("/titiler/kenya/wmts/extra?REQUEST=GetCapabilities"))
@@ -293,9 +269,7 @@ class TileGatewayTestCase(TestCase):
 
     def ask(self, uri, **extra):
         """Put nginx's question to the gate: may this URI be proxied?"""
-        return self.client.get(
-            reverse("tile_auth"), HTTP_X_ORIGINAL_URI=uri, **extra
-        ).status_code
+        return self.client.get(reverse("tile_auth"), HTTP_X_ORIGINAL_URI=uri, **extra).status_code
 
 
 class TitilerTilesTests(TileGatewayTestCase):
@@ -332,9 +306,7 @@ class TitilerTilesTests(TileGatewayTestCase):
         self.assertEqual(self.ask(titiler_uri("no-such-collection")), DENY)
 
     def test_a_deactivated_collections_tile_is_refused(self):
-        Collection.objects.filter(
-            catalog__organisation=self.kenya, slug=PUBLIC_SLUG
-        ).update(is_active=False)
+        Collection.objects.filter(catalog__organisation=self.kenya, slug=PUBLIC_SLUG).update(is_active=False)
         self.assertEqual(self.ask(titiler_uri(PUBLIC_SLUG)), DENY)
 
     def test_a_uri_the_grammar_does_not_recognise_is_refused(self):
@@ -387,7 +359,8 @@ class TheHostNamesTheOrganisationTests(TileGatewayTestCase):
     def test_a_segment_naming_another_organisation_is_refused(self):
         self.login(self.member)
         self.assertEqual(
-            self.ask(titiler_uri(PUBLIC_SLUG, org="uganda")), DENY,
+            self.ask(titiler_uri(PUBLIC_SLUG, org="uganda")),
+            DENY,
         )
 
     def test_a_member_cannot_reach_their_own_private_tile_from_the_wrong_host(self):
@@ -399,7 +372,8 @@ class TheHostNamesTheOrganisationTests(TileGatewayTestCase):
         """Slugs collide across organisations (#267); the host decides whose."""
         self.client.defaults["HTTP_HOST"] = "uganda.georiva.test"
         self.assertEqual(
-            self.ask(titiler_uri(PUBLIC_SLUG, org="uganda")), ALLOW,
+            self.ask(titiler_uri(PUBLIC_SLUG, org="uganda")),
+            ALLOW,
         )
 
     def test_a_host_belonging_to_no_organisation_is_refused(self):
@@ -423,28 +397,34 @@ class ApiKeysReachPrivateTilesTests(TileGatewayTestCase):
 
     def ask_with_key(self, uri, secret):
         return self.client.get(
-            reverse("tile_auth"), {"api_key": secret}, HTTP_X_ORIGINAL_URI=uri,
+            reverse("tile_auth"),
+            {"api_key": secret},
+            HTTP_X_ORIGINAL_URI=uri,
         ).status_code
 
     def test_a_members_key_reaches_a_private_tile(self):
         self.assertEqual(
-            self.ask_with_key(titiler_uri(PRIVATE_SLUG), self.member_key), ALLOW,
+            self.ask_with_key(titiler_uri(PRIVATE_SLUG), self.member_key),
+            ALLOW,
         )
 
     def test_a_members_key_reaches_a_private_choropleth(self):
         self.assertEqual(
-            self.ask_with_key(martin_uri(PRIVATE_SLUG), self.member_key), ALLOW,
+            self.ask_with_key(martin_uri(PRIVATE_SLUG), self.member_key),
+            ALLOW,
         )
 
     def test_another_organisations_key_does_not(self):
         """The key carries identity and no organisation; the host decides the rest."""
         self.assertEqual(
-            self.ask_with_key(titiler_uri(PRIVATE_SLUG), self.outsider_key), DENY,
+            self.ask_with_key(titiler_uri(PRIVATE_SLUG), self.outsider_key),
+            DENY,
         )
 
     def test_a_members_key_still_does_not_reach_an_internal_tile(self):
         self.assertEqual(
-            self.ask_with_key(titiler_uri(INTERNAL_SLUG), self.member_key), DENY,
+            self.ask_with_key(titiler_uri(INTERNAL_SLUG), self.member_key),
+            DENY,
         )
 
     def test_a_bearer_header_reaches_a_private_tile_too(self):
@@ -465,7 +445,8 @@ class ApiKeysReachPrivateTilesTests(TileGatewayTestCase):
         (ADR 0014). Nginx maps 403 to 404 and leaves 401 alone for that reason.
         """
         self.assertEqual(
-            self.ask_with_key(titiler_uri(PUBLIC_SLUG), "grv_not-a-real-key"), 401,
+            self.ask_with_key(titiler_uri(PUBLIC_SLUG), "grv_not-a-real-key"),
+            401,
         )
 
 
@@ -500,17 +481,20 @@ class WmtsGatewayTests(TileGatewayTestCase):
 
     def test_a_private_getfeatureinfo_is_gated_like_its_tile(self):
         self.assertEqual(
-            self.ask(wmts_uri(PRIVATE_SLUG, request="GetFeatureInfo")), DENY,
+            self.ask(wmts_uri(PRIVATE_SLUG, request="GetFeatureInfo")),
+            DENY,
         )
         self.login(self.member)
         self.assertEqual(
-            self.ask(wmts_uri(PRIVATE_SLUG, request="GetFeatureInfo")), ALLOW,
+            self.ask(wmts_uri(PRIVATE_SLUG, request="GetFeatureInfo")),
+            ALLOW,
         )
 
     def test_a_members_key_reaches_a_private_gettile(self):
         self.assertEqual(
             self.client.get(
-                reverse("tile_auth"), {"api_key": self.member_key},
+                reverse("tile_auth"),
+                {"api_key": self.member_key},
                 HTTP_X_ORIGINAL_URI=wmts_uri(PRIVATE_SLUG),
             ).status_code,
             ALLOW,
@@ -599,9 +583,11 @@ class ThePublicFastPathTests(TileGatewayTestCase):
     def test_a_private_tile_pays_for_the_second_look(self):
         """The miss is the cost of the tier, and it falls only on the tier."""
         self.assertEqual(
-            len(self.collection_queries(
-                titiler_uri(PRIVATE_SLUG),
-                HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
-            )),
+            len(
+                self.collection_queries(
+                    titiler_uri(PRIVATE_SLUG),
+                    HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+                )
+            ),
             2,
         )

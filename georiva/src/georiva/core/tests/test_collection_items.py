@@ -12,7 +12,9 @@ User = get_user_model()
 
 
 def _setup():
-    catalog = Catalog.objects.create(organisation=make_organisation(), name="Models", slug="models", file_format="grib2")
+    catalog = Catalog.objects.create(
+        organisation=make_organisation(), name="Models", slug="models", file_format="grib2"
+    )
     collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface")
     return catalog, collection
 
@@ -52,8 +54,10 @@ class CollectionItemsIngestionBadgeTests(TestCase):
     def test_failed_ingestion_shows_failed_badge_with_error(self):
         _make_item(self.collection, "mybucket:models/surface/failed.grib")
         _make_fi(
-            "mybucket", "models/surface/failed.grib",
-            FileIngestion.Status.FAILED, error="Decoding error",
+            "mybucket",
+            "models/surface/failed.grib",
+            FileIngestion.Status.FAILED,
+            error="Decoding error",
         )
 
         response = self.client.get(self.url)

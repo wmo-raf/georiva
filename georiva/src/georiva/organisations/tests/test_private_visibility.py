@@ -17,6 +17,7 @@ Three tiers, three audiences, and the third is the one to keep honest:
 organisation, ``internal`` to nothing that serves — a derivation intermediate is
 never a private dataset with a smaller audience, it is not a dataset at all.
 """
+
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
@@ -47,21 +48,30 @@ def build_tiered_catalog(organisation):
     unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
     built = {"catalog": catalog}
     for slug, visibility in (
-            (PUBLIC_SLUG, Collection.Visibility.PUBLIC),
-            (PRIVATE_SLUG, Collection.Visibility.PRIVATE),
-            (INTERNAL_SLUG, Collection.Visibility.INTERNAL),
+        (PUBLIC_SLUG, Collection.Visibility.PUBLIC),
+        (PRIVATE_SLUG, Collection.Visibility.PRIVATE),
+        (INTERNAL_SLUG, Collection.Visibility.INTERNAL),
     ):
         collection = Collection.objects.create(
-            catalog=catalog, name=slug, slug=slug, visibility=visibility,
+            catalog=catalog,
+            name=slug,
+            slug=slug,
+            visibility=visibility,
         )
         variable = Variable.objects.create(
-            collection=collection, name=slug, slug=slug,
-            unit=unit, value_min=0, value_max=50,
+            collection=collection,
+            name=slug,
+            slug=slug,
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         item = Item.objects.create(collection=collection, time="2026-03-01T12:00:00Z")
         Asset.objects.create(item=item, variable=variable, href=f"{slug}.tif")
         built[visibility] = {
-            "collection": collection, "variable": variable, "item": item,
+            "collection": collection,
+            "variable": variable,
+            "item": item,
         }
     return built
 
@@ -138,9 +148,7 @@ class PrivateCollectionsOnTheStacPlaneTests(PrivateTierTestCase):
         )
 
     def detail_status(self, slug):
-        return self.client.get(
-            reverse("stac:collection-detail", args=["forecast", slug, slug])
-        ).status_code
+        return self.client.get(reverse("stac:collection-detail", args=["forecast", slug, slug])).status_code
 
     def test_fetching_a_private_collection_anonymously_is_not_found(self):
         self.assertEqual(self.detail_status(PRIVATE_SLUG), 404)
@@ -169,9 +177,7 @@ class PrivateCollectionsOnTheStacPlaneTests(PrivateTierTestCase):
         """
         response = self.client.get(reverse("stac:catalog-detail", args=["forecast"]))
         self.assertEqual(response.status_code, 200)
-        return " ".join(
-            link["href"] for link in response.json()["links"] if link["rel"] == "child"
-        )
+        return " ".join(link["href"] for link in response.json()["links"] if link["rel"] == "child")
 
     def test_the_catalog_never_links_to_an_internal_collection(self):
         self.login(self.member)
@@ -207,9 +213,7 @@ class PrivateCollectionsOnTheStacPlaneTests(PrivateTierTestCase):
         )
 
     def test_search_named_at_a_private_collection_returns_nothing_anonymously(self):
-        response = self.client.get(
-            reverse("stac:search"), {"collections": self.stac_id(PRIVATE_SLUG)}
-        )
+        response = self.client.get(reverse("stac:search"), {"collections": self.stac_id(PRIVATE_SLUG)})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["features"], [])
 
@@ -240,9 +244,7 @@ class PrivateCollectionsOnTheEdrPlaneTests(PrivateTierTestCase):
         self.assertNotIn(INTERNAL_SLUG, self.collection_ids())
 
     def detail_status(self, slug):
-        return self.client.get(
-            reverse("edr:collection-detail", args=[slug])
-        ).status_code
+        return self.client.get(reverse("edr:collection-detail", args=[slug])).status_code
 
     def test_fetching_a_private_collection_anonymously_is_not_found(self):
         self.assertEqual(self.detail_status(PRIVATE_SLUG), 404)

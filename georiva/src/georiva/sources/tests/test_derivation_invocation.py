@@ -7,6 +7,7 @@ engine's run(recipe, selector) — stamping the run with the product origin. Thi
 application-layer dispatcher is the only place that knows about DerivedProduct;
 the engine stays generic.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +19,7 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.organisations.testing import make_organisation
 from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import (
     collection_routes_to_staging,
@@ -28,7 +30,6 @@ from georiva.sources.derivation_invocation import (
 )
 from georiva.sources.models import DataFeed, DerivedProduct
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
-from georiva.organisations.testing import make_organisation
 
 
 def _mock_writer():
@@ -70,30 +71,32 @@ def _pin(product, definition, catalog):
     from georiva.sources.models import DerivedProductInput, DerivedProductOutput
 
     def _col(slug):
-        col, _ = Collection.objects.get_or_create(
-            catalog=catalog, slug=slug, defaults={"name": slug}
-        )
+        col, _ = Collection.objects.get_or_create(catalog=catalog, slug=slug, defaults={"name": slug})
         return col
 
     for ref in definition.inputs:
         DerivedProductInput.objects.update_or_create(
-            product=product, role=ref.role,
+            product=product,
+            role=ref.role,
             defaults={
-                "tier": ref.tier, "required": ref.required,
-                "source_key": ref.collection, "collection": _col(ref.collection),
+                "tier": ref.tier,
+                "required": ref.required,
+                "source_key": ref.collection,
+                "collection": _col(ref.collection),
             },
         )
     for ref in definition.outputs:
         DerivedProductOutput.objects.update_or_create(
-            product=product, role=ref.role,
+            product=product,
+            role=ref.role,
             defaults={"output_key": ref.collection, "collection": _col(ref.collection)},
         )
 
 
 class DispatchForInputTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
@@ -113,7 +116,8 @@ class DispatchForInputTests(TestCase):
             catalog=self.catalog, slug=collection_slug, defaults={"name": collection_slug}
         )
         return _staging_trigger(
-            collection_slug=collection_slug, staging_item_id=staging_item_id,
+            collection_slug=collection_slug,
+            staging_item_id=staging_item_id,
             collection_id=col.pk,
         )
 
@@ -145,8 +149,7 @@ class DispatchForInputTests(TestCase):
         selector = run.call_args.args[1]
         self.assertEqual(
             selector["inputs"],
-            [{"role": "source", "collection": "rainfall", "tier": "staging",
-              "collection_id": rain.pk}],
+            [{"role": "source", "collection": "rainfall", "tier": "staging", "collection_id": rain.pk}],
         )
         self.assertEqual(
             selector["outputs"],
@@ -157,11 +160,17 @@ class DispatchForInputTests(TestCase):
         # OutputRef's title/description/visibility drive catalog materialisation,
         # NOT recipe behaviour — they must never enter the selector, or a display
         # edit would change a recipe's unit identity.
-        definition = _definition(outputs=(
-            OutputRef(role="served", collection="rainfall",
-                      title="Served rainfall", description="Raw, promoted.",
-                      visibility="internal"),
-        ))
+        definition = _definition(
+            outputs=(
+                OutputRef(
+                    role="served",
+                    collection="rainfall",
+                    title="Served rainfall",
+                    description="Raw, promoted.",
+                    visibility="internal",
+                ),
+            )
+        )
         self._product(definition)
 
         with patch("georiva.processing.engine.run") as run:
@@ -176,9 +185,7 @@ class DispatchForInputTests(TestCase):
     def test_product_on_a_different_collection_is_not_dispatched(self):
         # The product consumes 'temperature'; a 'rainfall' arrival (a distinct,
         # existing collection) must not match its binding.
-        definition = _definition(inputs=(
-            InputRef(role="source", collection="temperature", tier="staging"),
-        ))
+        definition = _definition(inputs=(InputRef(role="source", collection="temperature", tier="staging"),))
         self._product(definition)
 
         with patch("georiva.processing.engine.run") as run:
@@ -198,9 +205,7 @@ class DispatchForInputTests(TestCase):
     def test_product_consuming_a_different_tier_is_not_dispatched(self):
         # The product wants rainfall at the published tier; a staging arrival
         # must not trigger it.
-        definition = _definition(inputs=(
-            InputRef(role="source", collection="rainfall", tier="published"),
-        ))
+        definition = _definition(inputs=(InputRef(role="source", collection="rainfall", tier="published"),))
         self._product(definition)
 
         with patch("georiva.processing.engine.run") as run:
@@ -215,36 +220,49 @@ class EndToEndPromotionTests(TestCase):
     carries the product origin."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
-        self.pub_col = Collection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall"
-        )
-        self.unit_dim, _ = Unit.objects.get_or_create(
-            symbol="mm", defaults={"name": "millimetre"}
-        )
+        self.pub_col = Collection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
+        self.unit_dim, _ = Unit.objects.get_or_create(symbol="mm", defaults={"name": "millimetre"})
         self.variable = Variable.objects.create(
-            collection=self.pub_col, slug="precip", name="Precipitation",
-            unit=self.unit_dim, value_min=0, value_max=2000,
+            collection=self.pub_col,
+            slug="precip",
+            name="Precipitation",
+            unit=self.unit_dim,
+            value_min=0,
+            value_max=2000,
         )
         self.scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall",
+            catalog=self.catalog,
+            slug="rainfall",
+            name="Rainfall",
             collection=self.pub_col,
         )
         self.sitem = StagingItem.objects.create(
-            collection=self.scol, datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=10, height=10,
+            collection=self.scol,
+            datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
         StagingAsset.objects.create(
-            item=self.sitem, href="chirps/rainfall/f.tif", roles=["source"],
-            format="geotiff", checksum="abc123", variable=self.variable,
+            item=self.sitem,
+            href="chirps/rainfall/f.tif",
+            roles=["source"],
+            format="geotiff",
+            checksum="abc123",
+            variable=self.variable,
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
         self.definition = _definition()
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key=self.definition.key,
-            recipe_type="promotion", config={}, is_enabled=True,
+            data_feed=self.feed,
+            definition_key=self.definition.key,
+            recipe_type="promotion",
+            config={},
+            is_enabled=True,
         )
         _pin(self.product, self.definition, self.catalog)
 
@@ -263,7 +281,8 @@ class EndToEndPromotionTests(TestCase):
         with (
             patch("georiva.ingestion.asset_writer.AssetWriter", return_value=_mock_writer()),
             patch.object(
-                PromotionRecipe, "read_raster",
+                PromotionRecipe,
+                "read_raster",
                 return_value=(data, [0, 0, 1, 1], "EPSG:4326", 10, 10),
             ),
         ):
@@ -287,15 +306,17 @@ class StagingArrivalRoutesToProductsTests(TestCase):
     file dispatches the input to its consuming products."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
-        self.scol = StagingCollection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall"
-        )
+        self.scol = StagingCollection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
         self.sitem = StagingItem.objects.create(
-            collection=self.scol, datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            bounds=[0, 0, 1, 1], crs="EPSG:4326", width=10, height=10,
+            collection=self.scol,
+            datetime=datetime(2020, 1, 1, tzinfo=timezone.utc),
+            bounds=[0, 0, 1, 1],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
         )
 
     def test_process_staging_file_dispatches_input_to_products(self):
@@ -307,13 +328,9 @@ class StagingArrivalRoutesToProductsTests(TestCase):
                 "georiva.ingestion.staging_consumer.register_staging_file",
                 return_value=self.sitem,
             ),
-            patch(
-                "georiva.sources.derivation_invocation.dispatch_for_input"
-            ) as dispatch,
+            patch("georiva.sources.derivation_invocation.dispatch_for_input") as dispatch,
         ):
-            process_staging_file.apply(
-                kwargs={"bucket": BucketType.STAGING, "key": "chirps/rainfall/f.tif"}
-            )
+            process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": "chirps/rainfall/f.tif"})
 
         dispatch.assert_called_once()
         trigger = dispatch.call_args.args[0]
@@ -329,13 +346,9 @@ class StagingArrivalRoutesToProductsTests(TestCase):
                 "georiva.ingestion.staging_consumer.register_staging_file",
                 return_value=None,
             ),
-            patch(
-                "georiva.sources.derivation_invocation.dispatch_for_input"
-            ) as dispatch,
+            patch("georiva.sources.derivation_invocation.dispatch_for_input") as dispatch,
         ):
-            process_staging_file.apply(
-                kwargs={"bucket": BucketType.STAGING, "key": "bad/path.tif"}
-            )
+            process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": "bad/path.tif"})
 
         dispatch.assert_not_called()
 
@@ -345,14 +358,17 @@ class RunProductNowTests(TestCase):
     selector (its config), so the recipe enumerates all its units."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
         self.definition = _definition()
         self.product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="serve-raw",
-            recipe_type="promotion", config={"baseline": "1991-2020"}, is_enabled=True,
+            data_feed=self.feed,
+            definition_key="serve-raw",
+            recipe_type="promotion",
+            config={"baseline": "1991-2020"},
+            is_enabled=True,
         )
         _pin(self.product, self.definition, self.catalog)
 
@@ -371,8 +387,7 @@ class RunProductNowTests(TestCase):
         self.assertEqual(selector["baseline"], "1991-2020")
         self.assertEqual(
             selector["inputs"],
-            [{"role": "source", "collection": "rainfall", "tier": "staging",
-              "collection_id": rain.pk}],
+            [{"role": "source", "collection": "rainfall", "tier": "staging", "collection_id": rain.pk}],
         )
         self.assertEqual(
             selector["outputs"],
@@ -388,7 +403,8 @@ class RunProductNowTests(TestCase):
             run_product_now(self.product, dispatch=False)
 
         self.assertEqual(
-            run.call_args.kwargs["reason"], DerivationRun.RetryReason.MANUAL_RERUN,
+            run.call_args.kwargs["reason"],
+            DerivationRun.RetryReason.MANUAL_RERUN,
         )
 
     def test_disabled_product_dispatches_nothing(self):
@@ -414,14 +430,16 @@ class OrphanExclusionTests(TestCase):
     dispatcher skips it. This locks that in (issue #171)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
         # An enabled row for a definition the (patched-empty) declaration omits.
         self.orphan = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="serve-raw",
-            recipe_type="promotion", is_enabled=True,
+            data_feed=self.feed,
+            definition_key="serve-raw",
+            recipe_type="promotion",
+            is_enabled=True,
         )
 
     def _orphaned(self):
@@ -430,9 +448,7 @@ class OrphanExclusionTests(TestCase):
     def test_orphan_is_excluded_from_event_dispatch(self):
         # A real, existing collection — the orphan is skipped because it has no
         # binding row on it (unbound), not because the trigger is empty.
-        col = Collection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall"
-        )
+        col = Collection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
         trigger = _staging_trigger(collection_id=col.pk)
         with self._orphaned(), patch("georiva.processing.engine.run") as run:
             result = dispatch_for_input(trigger, dispatch=False)
@@ -463,14 +479,16 @@ class CrossCatalogIsolationTests(TestCase):
     because dispatch matches the collection FK, not the slug (ADR-0010 §4 AC2)."""
 
     def _feed_with_product(self, catalog_slug):
-        catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name=catalog_slug, slug=catalog_slug, file_format="geotiff"
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name=catalog_slug, slug=catalog_slug, file_format="geotiff"
         )
         feed = DataFeed.objects.create(name=f"Feed {catalog_slug}", catalog=catalog)
         definition = _definition()
         product = DerivedProduct.objects.create(
-            data_feed=feed, definition_key=definition.key,
-            recipe_type=definition.recipe_type, is_enabled=True,
+            data_feed=feed,
+            definition_key=definition.key,
+            recipe_type=definition.recipe_type,
+            is_enabled=True,
         )
         _pin(product, definition, catalog)
         rainfall = Collection.objects.get(catalog=catalog, slug="rainfall")
@@ -486,9 +504,7 @@ class CrossCatalogIsolationTests(TestCase):
             dispatch_for_input(trigger, dispatch=False)
 
         run.assert_called_once()
-        self.assertEqual(
-            run.call_args.kwargs["origin"], product_origin(product_a)
-        )
+        self.assertEqual(run.call_args.kwargs["origin"], product_origin(product_a))
 
 
 class UnboundProductSkippedTests(TestCase):
@@ -497,20 +513,20 @@ class UnboundProductSkippedTests(TestCase):
     (ADR-0010 §4 AC4)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
-        self.rainfall = Collection.objects.create(
-            catalog=self.catalog, slug="rainfall", name="Rainfall"
-        )
+        self.rainfall = Collection.objects.create(catalog=self.catalog, slug="rainfall", name="Rainfall")
 
     def test_enabled_product_without_bindings_is_not_dispatched(self):
         definition = _definition()
         # Enabled + declared, but never pinned -> no DerivedProductInput rows.
         DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key=definition.key,
-            recipe_type=definition.recipe_type, is_enabled=True,
+            data_feed=self.feed,
+            definition_key=definition.key,
+            recipe_type=definition.recipe_type,
+            is_enabled=True,
         )
 
         trigger = _staging_trigger(collection_id=self.rainfall.pk)
@@ -531,14 +547,15 @@ class NotReadyWakeupTests(TestCase):
     never through candidate_units (the double-fire guard stays untouched)."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(),
-            name="CHIRPS", slug="chirps", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
         )
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
     def _anomaly_product(self, *, is_enabled=True):
         definition = _definition(
-            key="anomaly", recipe_type="chirps-anomaly",
+            key="anomaly",
+            recipe_type="chirps-anomaly",
             inputs=(
                 InputRef(role="value", collection="rainfall", tier="staging"),
                 InputRef(role="baseline", collection="climatology", tier="published"),
@@ -546,8 +563,10 @@ class NotReadyWakeupTests(TestCase):
             outputs=(OutputRef(role="anomaly", collection="anomaly"),),
         )
         product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key=definition.key,
-            recipe_type=definition.recipe_type, is_enabled=is_enabled,
+            data_feed=self.feed,
+            definition_key=definition.key,
+            recipe_type=definition.recipe_type,
+            is_enabled=is_enabled,
         )
         _pin(product, definition, self.catalog)
         return product
@@ -557,9 +576,7 @@ class NotReadyWakeupTests(TestCase):
         reads ``collection_id``/``pk``."""
         from types import SimpleNamespace
 
-        col, _ = Collection.objects.get_or_create(
-            catalog=self.catalog, slug=slug, defaults={"name": slug}
-        )
+        col, _ = Collection.objects.get_or_create(catalog=self.catalog, slug=slug, defaults={"name": slug})
         return SimpleNamespace(pk=99, collection_id=col.pk)
 
     def test_published_input_match_revives_the_products_parked_runs(self):
@@ -588,9 +605,7 @@ class NotReadyWakeupTests(TestCase):
         # derived item, so a published arrival there wakes nothing.
         item = self._completed_item("rainfall")
 
-        with patch(
-            "georiva.processing.invocation.resurrect_not_ready_units"
-        ) as revive:
+        with patch("georiva.processing.invocation.resurrect_not_ready_units") as revive:
             self.assertEqual(resurrect_dependents(item), 0)
         revive.assert_not_called()
 
@@ -600,9 +615,7 @@ class NotReadyWakeupTests(TestCase):
         self._anomaly_product(is_enabled=False)
         item = self._completed_item("climatology")
 
-        with patch(
-            "georiva.processing.invocation.resurrect_not_ready_units"
-        ) as revive:
+        with patch("georiva.processing.invocation.resurrect_not_ready_units") as revive:
             self.assertEqual(resurrect_dependents(item), 0)
         revive.assert_not_called()
 
@@ -612,9 +625,7 @@ class NotReadyWakeupTests(TestCase):
         from georiva.processing.signals import unit_completed
 
         item = self._completed_item("climatology")
-        with patch(
-            "georiva.sources.derivation_invocation.resurrect_dependents"
-        ) as wake:
+        with patch("georiva.sources.derivation_invocation.resurrect_dependents") as wake:
             unit_completed.send(sender=None, item=item, recipe_type="chirps-climatology")
         wake.assert_called_once_with(item)
 

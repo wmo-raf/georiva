@@ -7,6 +7,7 @@ which the pipelines do thousands) would synchronously run Wagtail's
 ``update_reference_index_task`` in-process. They are machine data, not editorial
 content whose "usage" or delete-protection matters, so they opt out.
 """
+
 from django.test import SimpleTestCase
 from wagtail.models import ReferenceIndex
 

@@ -1,13 +1,14 @@
 import logging
 
 from django.apps import AppConfig
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_delete, post_save
 
 logger = logging.getLogger(__name__)
 
 
 def on_variable_save(sender, instance, **kwargs):
     from georiva.core.machine_plane.palette_cache import warm_variable
+
     warm_variable(instance)
 
 
@@ -25,13 +26,13 @@ def on_style_change(sender, instance, **kwargs):
     warm.
     """
     from georiva.core.machine_plane.palette_cache import warm_variable
+
     from .models import Variable
 
     variable = (
-        Variable.objects
-        .filter(pk=instance.variable_id)
-        .select_related('collection__catalog__organisation')
-        .prefetch_related('styles')
+        Variable.objects.filter(pk=instance.variable_id)
+        .select_related("collection__catalog__organisation")
+        .prefetch_related("styles")
         .first()
     )
     if variable is not None:
@@ -51,6 +52,7 @@ def on_variable_delete(sender, instance, **kwargs):
     """A deleted variable's render config must not outlive it until the next
     sweep — the old missing-delete-signal gap."""
     from georiva.core.machine_plane.palette_cache import prune_variable
+
     prune_variable(instance)
 
 
@@ -74,11 +76,11 @@ def _sync_keep_for_collection(collection):
     """Create or remove the incoming/.keep for a collection based on whether
     it has any linked DataFeeds. Automated collections (with a feed) don't
     use the manual dropzone, so no .keep is needed there."""
-    from georiva.core.storage import storage, BucketType
-    
+    from georiva.core.storage import BucketType, storage
+
     bucket = storage.bucket(BucketType.INCOMING)
     keep_path = f"{collection.catalog.storage_prefix}/{collection.slug}/.keep"
-    
+
     if collection.feed_links.exists():
         _delete_keep(bucket, keep_path)
     else:
@@ -113,16 +115,16 @@ def data_feed_collection_link_deleted(sender, instance, **kwargs):
 
 
 class CoreConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'georiva.core'
-    label = 'georivacore'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "georiva.core"
+    label = "georivacore"
     verbose_name = "GeoRIVA Core"
-    
+
     def ready(self):
-        from .models import Collection, Variable
         from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
+
+        from .models import Collection, Variable
         from .models.visualization import VariableStyle
-        from georiva.sources.models import DataFeed
 
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
         post_save.connect(collection_post_save, sender=Collection)
@@ -135,11 +137,12 @@ class CoreConfig(AppConfig):
         # When a collection is linked/unlinked from a DataFeed:
         # keep the incoming/.keep in sync and recalculate the PeriodicTask interval.
         from georiva.sources.models import DataFeedCollectionLink
+
         post_save.connect(data_feed_collection_link_saved, sender=DataFeedCollectionLink)
         post_delete.connect(data_feed_collection_link_deleted, sender=DataFeedCollectionLink)
         post_save.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
         post_delete.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
-        
+
         post_save.connect(on_variable_save, sender=Variable)
         post_delete.connect(on_variable_delete, sender=Variable)
         post_save.connect(on_style_change, sender=VariableStyle)

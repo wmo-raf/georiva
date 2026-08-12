@@ -8,9 +8,9 @@ from urllib.parse import unquote
 import redis
 from django.conf import settings
 
+from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
-from georiva.core.storage import BucketType, get_bucket_config
 from georiva.ingestion.models import FileIngestion
 from georiva.ingestion.tasks import process_incoming_file
 
@@ -51,9 +51,7 @@ def _required_time_error(catalog, key: str) -> str | None:
         return None  # time is read from file content during ingestion
 
     formats = list(
-        ManualUploadConfig.objects.filter(catalog=catalog)
-        .values_list("valid_time_format", flat=True)
-        .distinct()
+        ManualUploadConfig.objects.filter(catalog=catalog).values_list("valid_time_format", flat=True).distinct()
     )
     if not formats:
         return None
@@ -77,26 +75,26 @@ def _should_stop(stop_event) -> bool:
 def _handle_event(ev: dict):
     bucket_name = ev.get("s3", {}).get("bucket", {}).get("name", "")
     key_raw = ev.get("s3", {}).get("object", {}).get("key", "")
-    
+
     if not key_raw or not bucket_name:
         return
-    
+
     key = unquote(key_raw)
 
     # Skip placeholder and hidden files (.keep, .gitkeep, etc.)
-    if Path(key).name.startswith('.'):
+    if Path(key).name.startswith("."):
         return
 
     origin_bucket = _resolve_origin(bucket_name)
     if not origin_bucket:
         return
-    
+
     try:
         meta = validate_path(key)
     except ValueError as e:
         logger.warning("Invalid path %s: %s", key, e)
         return
-    
+
     org_slug = meta["org"]
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
@@ -132,17 +130,18 @@ def _handle_event(ev: dict):
         if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
             logger.warning("Completed but no live data, re-ingesting: %s", key)
             FileIngestion.reset_for_reingest(origin_bucket, key)
-    
+
     process_incoming_file.delay(
         file_path=key,
         origin_bucket=origin_bucket,
-        reference_time=(
-            meta["reference_time"].isoformat() if meta["reference_time"] else None
-        ),
+        reference_time=(meta["reference_time"].isoformat() if meta["reference_time"] else None),
     )
     logger.info(
         "Queued: %s/%s (org=%s, catalog=%s, collection=%s, ref=%s)",
-        bucket_name, key, org_slug, catalog_slug,
+        bucket_name,
+        key,
+        org_slug,
+        catalog_slug,
         collection_slug or "(to resolve)",
         meta.get("reference_time"),
     )
@@ -150,7 +149,7 @@ def _handle_event(ev: dict):
 
 def _consume_loop(stop_event=None):
     r = redis.from_url(settings.REDIS_URL)
-    
+
     while not _should_stop(stop_event):
         try:
             result = r.blpop(REDIS_KEY, timeout=5)
@@ -163,24 +162,24 @@ def _consume_loop(stop_event=None):
             logger.error("Redis error in consumer, retrying in 5s: %s", e)
             time.sleep(5)
             continue
-        
+
         if result is None:
             continue
-        
+
         _, raw = result
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as e:
             logger.warning("Invalid event JSON: %s", e)
             continue
-        
+
         # MinIO Redis access format: [{"Event": [{...}], "EventTime": "..."}]
         # Fallback to webhook-style {"Records": [...]} just in case
         if isinstance(payload, list):
             records = [ev for item in payload for ev in item.get("Event", [])]
         else:
             records = payload.get("Records", [payload])
-        
+
         for ev in records:
             try:
                 _handle_event(ev)
@@ -196,12 +195,12 @@ def run_minio_consumer(stop_event=None):
     stop_event is a threading.Event; set it to trigger a clean shutdown.
     """
     logger.info("MinIO event consumer started, listening on key: %s", REDIS_KEY)
-    
+
     while not _should_stop(stop_event):
         try:
             _consume_loop(stop_event)
         except Exception as e:
             logger.exception("MinIO event consumer crashed, restarting in 5s: %s", e)
             time.sleep(5)
-    
+
     logger.info("MinIO event consumer stopped.")

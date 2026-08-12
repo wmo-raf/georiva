@@ -13,7 +13,9 @@ from georiva.organisations.testing import make_organisation
 def _setup():
     catalog = Catalog.objects.create(organisation=make_organisation(), name="wrf", slug="wrf", file_format="netcdf")
     collection = Collection.objects.create(
-        catalog=catalog, name="Forecast", slug="wrf-forecast-collection-1",
+        catalog=catalog,
+        name="Forecast",
+        slug="wrf-forecast-collection-1",
     )
     log, _ = FileIngestion.register(
         bucket="incoming",
@@ -48,15 +50,11 @@ class FileIngestionItemLinkTests(TestCase):
         )
 
         # Timestamp 1: item created, then all variables fail and orphan is deleted.
-        item1, _ = handler.get_or_create(
-            timestamp=pytz.utc.localize(datetime(2023, 7, 1, 6)), **kwargs
-        )
+        item1, _ = handler.get_or_create(timestamp=pytz.utc.localize(datetime(2023, 7, 1, 6)), **kwargs)
         handler.delete_orphan(item1)
 
         # Timestamp 2 must still succeed — FileIngestion must still exist.
-        item2, created = handler.get_or_create(
-            timestamp=pytz.utc.localize(datetime(2023, 7, 2, 6)), **kwargs
-        )
+        item2, created = handler.get_or_create(timestamp=pytz.utc.localize(datetime(2023, 7, 2, 6)), **kwargs)
         self.assertTrue(created)
         log.refresh_from_db()
         self.assertEqual(log.status, FileIngestion.Status.PENDING)
@@ -74,9 +72,7 @@ class FileIngestionJobLinkTests(TestCase):
 
     def test_multiple_jobs_can_link_the_same_file_ingestion(self):
         _, log = _setup()
-        ct = ContentType.objects.get_for_model(
-            FileIngestionJob, for_concrete_model=False
-        )
+        ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
 
         for _run in range(2):
             job = FileIngestionJob.objects.create(
@@ -102,12 +98,12 @@ class JobCrashLockReleaseTests(TestCase):
     """
 
     def _job_for(self, log):
-        ct = ContentType.objects.get_for_model(
-            FileIngestionJob, for_concrete_model=False
-        )
+        ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
         return FileIngestionJob.objects.create(
-            user=None, content_type=ct,
-            file_path=log.file_path, bucket=log.bucket,
+            user=None,
+            content_type=ct,
+            file_path=log.file_path,
+            bucket=log.bucket,
         )
 
     def test_on_error_releases_own_lock(self):
@@ -115,9 +111,7 @@ class JobCrashLockReleaseTests(TestCase):
 
         _, log = _setup()
         job = self._job_for(log)
-        self.assertTrue(
-            FileIngestion.acquire(log.bucket, log.file_path, f"task-ferry-job-{job.id}")
-        )
+        self.assertTrue(FileIngestion.acquire(log.bucket, log.file_path, f"task-ferry-job-{job.id}"))
 
         FileIngestionJobType().on_error(job, RuntimeError("boom"))
 
@@ -131,16 +125,13 @@ class JobCrashLockReleaseTests(TestCase):
 
         _, log = _setup()
         job = self._job_for(log)
-        self.assertTrue(
-            FileIngestion.acquire(log.bucket, log.file_path, "some-other-worker")
-        )
+        self.assertTrue(FileIngestion.acquire(log.bucket, log.file_path, "some-other-worker"))
 
         FileIngestionJobType().on_error(job, RuntimeError("boom"))
 
         log.refresh_from_db()
         self.assertEqual(log.status, FileIngestion.Status.PROCESSING)
         self.assertEqual(log.locked_by, "some-other-worker")
-
 
 
 class FileIngestionSummaryFieldTests(TestCase):
@@ -157,7 +148,7 @@ class FileIngestionSummaryFieldTests(TestCase):
         log.valid_time_start = t_start
         log.valid_time_end = t_end
         log.timestep_count = 30
-        log.save(update_fields=['variables_discovered', 'valid_time_start', 'valid_time_end', 'timestep_count'])
+        log.save(update_fields=["variables_discovered", "valid_time_start", "valid_time_end", "timestep_count"])
 
         log.refresh_from_db()
         self.assertEqual(log.variables_discovered, 5)

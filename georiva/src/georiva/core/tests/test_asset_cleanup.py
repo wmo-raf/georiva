@@ -3,6 +3,7 @@ management command). An orphan is a *raster/visual* object in the assets bucket
 that no live Asset.href references — e.g. a file left behind when a re-derivation
 rewrote an asset's href in place. Non-asset objects (e.g. legacy .json metadata
 sidecars, pre-ADR-0024) are never selected, so legitimate files are safe."""
+
 from django.test import SimpleTestCase
 
 from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
@@ -11,8 +12,8 @@ from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orph
 class SelectOrphanObjectsTests(SimpleTestCase):
     def test_selects_raster_objects_no_live_href_points_at(self):
         objects = [
-            "chirps/chirps-monthly/precip/2026/05/01/precip_000000.tif",   # live
-            "chirps/chirps-monthly/precip/2026/05/01/precip_000000.png",   # live
+            "chirps/chirps-monthly/precip/2026/05/01/precip_000000.tif",  # live
+            "chirps/chirps-monthly/precip/2026/05/01/precip_000000.png",  # live
             "chirps/chirps-monthly/precip/2026/05/01/precip_20260501T000000.tif",  # orphan
             "chirps/chirps-monthly/precip/2026/05/01/precip_20260501T000000.png",  # orphan
         ]
@@ -23,10 +24,13 @@ class SelectOrphanObjectsTests(SimpleTestCase):
 
         orphans = select_orphan_objects(objects, live, DELETABLE_EXTENSIONS)
 
-        self.assertEqual(sorted(orphans), [
-            "chirps/chirps-monthly/precip/2026/05/01/precip_20260501T000000.png",
-            "chirps/chirps-monthly/precip/2026/05/01/precip_20260501T000000.tif",
-        ])
+        self.assertEqual(
+            sorted(orphans),
+            [
+                "chirps/chirps-monthly/precip/2026/05/01/precip_20260501T000000.png",
+                "chirps/chirps-monthly/precip/2026/05/01/precip_20260501T000000.tif",
+            ],
+        )
 
     def test_never_selects_non_asset_sidecars(self):
         # Legacy .json metadata sidecars (ingestion wrote these before
@@ -34,9 +38,9 @@ class SelectOrphanObjectsTests(SimpleTestCase):
         # indefinitely and must never be treated as orphans, even though no
         # href points at them.
         objects = [
-            "cat/coll/v/2026/05/01/v_000000.tif",       # live
-            "cat/coll/v/2026/05/01/v_000000.json",      # sidecar — keep
-            "cat/coll/v/2026/05/01/v_stale.tif",        # orphan raster
+            "cat/coll/v/2026/05/01/v_000000.tif",  # live
+            "cat/coll/v/2026/05/01/v_000000.json",  # sidecar — keep
+            "cat/coll/v/2026/05/01/v_stale.tif",  # orphan raster
         ]
         live = {"cat/coll/v/2026/05/01/v_000000.tif"}
 
@@ -48,9 +52,7 @@ class SelectOrphanObjectsTests(SimpleTestCase):
         objects = ["cat/coll/v/2026/05/01/v_000000.tif"]
         live = {"cat/coll/v/2026/05/01/v_000000.tif"}
 
-        self.assertEqual(
-            select_orphan_objects(objects, live, DELETABLE_EXTENSIONS), []
-        )
+        self.assertEqual(select_orphan_objects(objects, live, DELETABLE_EXTENSIONS), [])
 
     def test_extension_match_is_case_insensitive(self):
         objects = ["cat/coll/v/2026/05/01/v_stale.TIF"]

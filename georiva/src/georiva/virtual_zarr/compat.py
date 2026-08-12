@@ -28,9 +28,9 @@ class ArraySpec:
 
 
 def assert_compatible(
-        existing: ArraySpec,
-        candidate: ArraySpec,
-        source: str,
+    existing: ArraySpec,
+    candidate: ArraySpec,
+    source: str,
 ) -> None:
     """Raise HeterogeneousAssetError if ``candidate`` diverges from ``existing``."""
     for field in ("shape", "chunks", "dtype", "codecs"):
@@ -47,6 +47,7 @@ def assert_compatible(
 # ---------------------------------------------------------------------------
 # Extractors
 # ---------------------------------------------------------------------------
+
 
 def _serialise_codecs(codecs) -> tuple[str, ...]:
     out = []

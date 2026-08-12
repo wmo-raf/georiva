@@ -51,6 +51,7 @@ so both statuses are given an ExceptionReport body by the gateway on that path
 alone (#372). The decision is still entirely this view's; the gateway only
 spells it in a dialect those clients can read.
 """
+
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView

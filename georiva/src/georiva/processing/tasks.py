@@ -5,6 +5,7 @@ Per-unit compute runs on the dedicated ``georiva-processing`` queue so a heavy
 backfill cannot starve live ingestion. Recovery is via the backfill sweep
 (a later slice), so retries are bounded.
 """
+
 import logging
 
 from georiva.config.celery import app
@@ -23,7 +24,8 @@ def setup_periodic_tasks(sender, **kwargs):
         from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
         schedule_5min, _ = IntervalSchedule.objects.get_or_create(
-            every=5, period=IntervalSchedule.MINUTES,
+            every=5,
+            period=IntervalSchedule.MINUTES,
         )
         PeriodicTask.objects.update_or_create(
             name="georiva.processing.sweep_derivations",
@@ -50,9 +52,15 @@ def setup_periodic_tasks(sender, **kwargs):
     soft_time_limit=RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
     time_limit=RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
 )
-def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
-                  unit_index: int = None, unit_total: int = None,
-                  reason: str = "initial"):
+def run_unit_task(
+    self,
+    recipe_type: str,
+    unit: dict,
+    origin: str = None,
+    unit_index: int = None,
+    unit_total: int = None,
+    reason: str = "initial",
+):
     """Run a single ProductionUnit for a recipe (one DerivationRun).
 
     ``unit_index``/``unit_total`` are the batch ordinal stamped at dispatch
@@ -80,14 +88,22 @@ def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
     pos = f"{unit_index}/{unit_total}" if unit_index and unit_total else "?"
     logger.info(
         "[task %s] run_unit_task received recipe=%s origin=%s reason=%s (celery_id=%s)",
-        pos, recipe_type, origin, reason, worker_id or "-",
+        pos,
+        recipe_type,
+        origin,
+        reason,
+        worker_id or "-",
     )
     result = run_unit(
-        recipe, unit, worker_id=worker_id, origin=origin,
-        unit_index=unit_index, unit_total=unit_total, reason=reason,
+        recipe,
+        unit,
+        worker_id=worker_id,
+        origin=origin,
+        unit_index=unit_index,
+        unit_total=unit_total,
+        reason=reason,
     )
-    logger.info("[task %s] run_unit_task finished recipe=%s → %s",
-                pos, recipe_type, result.status)
+    logger.info("[task %s] run_unit_task finished recipe=%s → %s", pos, recipe_type, result.status)
 
     # Completion chaining: a produced Published item is itself a derivation
     # input, so stream a downstream trigger to its consumers (internal
@@ -137,9 +153,10 @@ def sweep_derivations():
     reclaimed = reclaim_stale_running()
     revived = resurrect_not_ready_units()
     logger.info(
-        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING "
-        "reclaimed, %d not-ready revived",
-        input_stale, reclaimed, revived,
+        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING reclaimed, %d not-ready revived",
+        input_stale,
+        reclaimed,
+        revived,
     )
     return {"input_stale": input_stale, "reclaimed": reclaimed, "revived": revived}
 

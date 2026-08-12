@@ -10,6 +10,7 @@ Usage:
         "quantities": ["value", "anomaly", "trend"],
         "baselines": [[1981, 2010]]}'
 """
+
 import json
 
 from django.core.management.base import BaseCommand, CommandError
@@ -25,16 +26,22 @@ class Command(BaseCommand):
         parser.add_argument("recipe_type")
         parser.add_argument("--collection", dest="collection_slug", default=None)
         parser.add_argument(
-            "--staging-item-id", dest="staging_item_ids", type=int,
-            action="append", default=None,
+            "--staging-item-id",
+            dest="staging_item_ids",
+            type=int,
+            action="append",
+            default=None,
         )
         parser.add_argument(
-            "--selector-json", dest="selector_json", default=None,
+            "--selector-json",
+            dest="selector_json",
+            default=None,
             help="A full selector as a JSON object (for richer recipes like "
-                 "climatology). Merged over --collection/--staging-item-id.",
+            "climatology). Merged over --collection/--staging-item-id.",
         )
         parser.add_argument(
-            "--sync", action="store_true",
+            "--sync",
+            action="store_true",
             help="Run units inline instead of dispatching to the queue.",
         )
 
@@ -63,11 +70,10 @@ class Command(BaseCommand):
             by_status = {}
             for r in results:
                 by_status[r.status] = by_status.get(r.status, 0) + 1
-            self.stdout.write(self.style.SUCCESS(
-                f"Ran {len(results)} unit(s): "
-                + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
-            ))
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Ran {len(results)} unit(s): " + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items()))
+                )
+            )
         else:
-            self.stdout.write(self.style.SUCCESS(
-                f"Dispatched {len(results)} unit(s) to georiva-processing."
-            ))
+            self.stdout.write(self.style.SUCCESS(f"Dispatched {len(results)} unit(s) to georiva-processing."))

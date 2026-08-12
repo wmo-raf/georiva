@@ -15,6 +15,7 @@ with the three dependency edges faked where they already are:
 Nothing here reaches into call structure — fakes answer at the same seams the
 real services answer at, and assertions live on responses.
 """
+
 import os
 import shutil
 import tempfile
@@ -32,11 +33,10 @@ os.environ["DJANGO_BASE_URL"] = "http://never-connected:8000"
 import numpy
 import pytest
 import rasterio
-from fastapi.testclient import TestClient
-from rasterio.transform import from_bounds
-
 from app import dependencies
 from app.main import app
+from fastapi.testclient import TestClient
+from rasterio.transform import from_bounds
 
 #: The address every test speaks unless it says otherwise.
 ORG, CATALOG, COLLECTION, VARIABLE = "kenya", "forecasts", "gfs", "temperature"
@@ -104,7 +104,8 @@ WORLD_EXTENT = 20037508.342789244
 #: a read one cell off answers a different number.
 COG_SIZE = 64
 COG_VALUES = numpy.linspace(0, 50, COG_SIZE * COG_SIZE, dtype="float32").reshape(
-    COG_SIZE, COG_SIZE,
+    COG_SIZE,
+    COG_SIZE,
 )
 
 
@@ -171,9 +172,17 @@ def seed_cog():
     need a pixel holding nothing.
     """
 
-    def write(time="2026-03-23T12:00:00Z", reftime=None,
-              org=ORG, catalog=CATALOG, collection=COLLECTION, variable=VARIABLE,
-              bounds=None, data=None, nodata=None):
+    def write(
+        time="2026-03-23T12:00:00Z",
+        reftime=None,
+        org=ORG,
+        catalog=CATALOG,
+        collection=COLLECTION,
+        variable=VARIABLE,
+        bounds=None,
+        data=None,
+        nodata=None,
+    ):
         time_dt = datetime.fromisoformat(time.replace("Z", "+00:00")).astimezone(timezone.utc)
         date_path = time_dt.strftime("%Y/%m/%d")
         time_str = time_dt.strftime("%H%M%S")
@@ -184,20 +193,31 @@ def seed_cog():
             filename = f"{variable}_{time_str}.tif"
 
         path = os.path.join(
-            _STORAGE_ROOT, os.environ["MINIO_BUCKET_NAME"],
-            org, catalog, collection, variable, date_path, filename,
+            _STORAGE_ROOT,
+            os.environ["MINIO_BUCKET_NAME"],
+            org,
+            catalog,
+            collection,
+            variable,
+            date_path,
+            filename,
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         if data is None:
             data = COG_VALUES
         height, width = data.shape
-        left, bottom, right, top = bounds or (
-            -WORLD_EXTENT, -WORLD_EXTENT, WORLD_EXTENT, WORLD_EXTENT
-        )
+        left, bottom, right, top = bounds or (-WORLD_EXTENT, -WORLD_EXTENT, WORLD_EXTENT, WORLD_EXTENT)
         with rasterio.open(
-            path, "w", driver="GTiff", width=width, height=height, count=1,
-            dtype="float32", crs="EPSG:3857", nodata=nodata,
+            path,
+            "w",
+            driver="GTiff",
+            width=width,
+            height=height,
+            count=1,
+            dtype="float32",
+            crs="EPSG:3857",
+            nodata=nodata,
             transform=from_bounds(left, bottom, right, top, width, height),
         ) as dst:
             dst.write(data, 1)

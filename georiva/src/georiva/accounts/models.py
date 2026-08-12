@@ -21,6 +21,7 @@ is 256 bits from ``secrets``, not something a person chose, so there is no
 dictionary to run and nothing for a slow KDF to buy — while a slow KDF on a
 credential checked once per tile request would be its own denial of service.
 """
+
 import hashlib
 import secrets
 from datetime import timedelta
@@ -84,7 +85,6 @@ class ApiKeyQuerySet(models.QuerySet):
 
 
 class ApiKeyManager(models.Manager.from_queryset(ApiKeyQuerySet)):
-
     def mint(self, *, user, name, expires_at=None):
         """Create a key, returning ``(row, secret)``.
 
@@ -96,7 +96,7 @@ class ApiKeyManager(models.Manager.from_queryset(ApiKeyQuerySet)):
             user=user,
             name=name,
             expires_at=expires_at,
-            prefix=secret[:len(KEY_PREFIX) + DISPLAY_CHARS],
+            prefix=secret[: len(KEY_PREFIX) + DISPLAY_CHARS],
             hashed_key=hash_secret(secret),
         )
         return key, secret
@@ -109,9 +109,7 @@ class ApiKeyManager(models.Manager.from_queryset(ApiKeyQuerySet)):
         """
         if not secret or not secret.startswith(KEY_PREFIX):
             return None
-        key = self.live().select_related("user").filter(
-            hashed_key=hash_secret(secret)
-        ).first()
+        key = self.live().select_related("user").filter(hashed_key=hash_secret(secret)).first()
         if key is not None:
             key.touch()
         return key
@@ -150,7 +148,8 @@ class ApiKey(models.Model):
     hashed_key = models.CharField(max_length=64, unique=True, editable=False)
     created = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text="Optional. After this moment the key stops working.",
     )
     revoked_at = models.DateTimeField(null=True, blank=True, editable=False)

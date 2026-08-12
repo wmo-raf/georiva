@@ -3,14 +3,14 @@ from django.contrib import admin
 from django.urls import include, path
 from wagtail import urls as wagtail_urls
 from wagtail.admin import urls as wagtailadmin_urls
-from wagtail.documents import urls as wagtaildocs_urls
-
 from wagtail.admin.auth import require_admin_access
+from wagtail.documents import urls as wagtaildocs_urls
 
 from georiva.api import urls as georiva_urls
 from georiva.core.machine_plane.auth_view import TileAuthView
 from georiva.organisations.hopper import org_hopper_script
 from georiva.organisations.pages import OrgScopedPageSearchView
+
 from .views import health, page_not_found, permission_denied
 
 # Django's stock error pages are unbranded and, in the 403's case, a dead end for
@@ -67,7 +67,7 @@ urlpatterns = [
 if settings.DEBUG:
     from django.conf.urls.static import static
     from django.contrib.staticfiles.urls import staticfiles_urlpatterns
-    
+
     # Serve static and media files from development server
     urlpatterns += staticfiles_urlpatterns()
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

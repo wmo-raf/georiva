@@ -24,7 +24,7 @@ if os.path.isfile(dev_env_path):
     # reading .env file
     environ.Env.read_env(dev_env_path)
 
-DEBUG = env('DEBUG', False)
+DEBUG = env("DEBUG", False)
 
 INSTALLED_APPS = [
     "wagtail.contrib.forms",
@@ -42,18 +42,17 @@ INSTALLED_APPS = [
     "modelcluster",
     "taggit",
     "django_filters",
-    'django_extensions',
+    "django_extensions",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    'django.contrib.postgres',
+    "django.contrib.postgres",
     "django.contrib.gis",
-    
-    'django_cleanup',
-    'rest_framework',
+    "django_cleanup",
+    "rest_framework",
     "corsheaders",
     "adminboundarymanager",
     "django_countries",
@@ -63,10 +62,8 @@ INSTALLED_APPS = [
     "wagtailiconchooser",
     "wagtailfontawesomesvg",
     "wagtail_color_panel",
-    
     # third-party utilities
     "task_ferry",
-    
     # georiva
     "georiva.core",
     "georiva.staging",
@@ -84,7 +81,6 @@ INSTALLED_APPS = [
     "georiva.sources",
     "georiva.organisations",
     "georiva.accounts",
-
     # pages
     "georiva.pages.home",
     "georiva.pages.datasets",
@@ -97,6 +93,7 @@ GEORIVA_PLUGIN_DIRS = env.list("GEORIVA_PLUGIN_DIRS", default=["/georiva/plugins
 _dev_plugin_dir = os.environ.get("GEORIVA_DEV_PLUGIN_DIR", "/georiva/dev-plugins")
 if Path(_dev_plugin_dir).exists() and _dev_plugin_dir not in GEORIVA_PLUGIN_DIRS:
     GEORIVA_PLUGIN_DIRS.append(_dev_plugin_dir)
+
 
 def _discover_plugin_apps(plugin_folder):
     """Resolve a plugin checkout dir into ``(sys_path_entry, [app_module_names])``.
@@ -143,11 +140,7 @@ for plugin_dir in GEORIVA_PLUGIN_DIRS:
     if plugin_dir.exists():
         # Skip hidden dirs (.idea, .git, .DS_Store…) that can sit alongside plugin
         # packages when the whole dev-plugins folder is bind-mounted.
-        GEORIVA_PLUGIN_FOLDERS.extend(
-            f
-            for f in plugin_dir.iterdir()
-            if f.is_dir() and not f.name.startswith(".")
-        )
+        GEORIVA_PLUGIN_FOLDERS.extend(f for f in plugin_dir.iterdir() if f.is_dir() and not f.name.startswith("."))
 
 # Derive each plugin's importable app module name from its contents (not its
 # folder name) and make it importable even when not pip-installed (dev bind-mounts).
@@ -270,34 +263,30 @@ MEDIA_ROOT = env.str("MEDIA_ROOT", default=os.path.join(BASE_DIR, "media"))
 MEDIA_URL = "/media/"
 
 # Storage backend selection
-GEORIVA_STORAGE_BACKEND = env('GEORIVA_STORAGE_BACKEND', default='local')
+GEORIVA_STORAGE_BACKEND = env("GEORIVA_STORAGE_BACKEND", default="local")
 
 # Local storage settings
-GEORIVA_STORAGE_ROOT = env('GEORIVA_STORAGE_ROOT', default=os.path.join(BASE_DIR, "georiva_data"))
+GEORIVA_STORAGE_ROOT = env("GEORIVA_STORAGE_ROOT", default=os.path.join(BASE_DIR, "georiva_data"))
 
 # S3/MinIO settings
-AWS_ACCESS_KEY_ID = env('AWS_ACCESS_KEY_ID', default=None)
-AWS_SECRET_ACCESS_KEY = env('AWS_SECRET_ACCESS_KEY', default=None)
-AWS_STORAGE_BUCKET_NAME = env('AWS_STORAGE_BUCKET_NAME', default='georiva')
-AWS_S3_REGION_NAME = env('AWS_S3_REGION_NAME', default='us-east-1')
-AWS_S3_ENDPOINT_URL = env('AWS_S3_ENDPOINT_URL', default=None)  # For MinIO
-AWS_S3_CUSTOM_DOMAIN = env('AWS_S3_CUSTOM_DOMAIN', default=None)
-AWS_DEFAULT_ACL = env('AWS_DEFAULT_ACL', default=None)
-AWS_QUERYSTRING_AUTH = env.bool('AWS_QUERYSTRING_AUTH', default=True)
-AWS_S3_FILE_OVERWRITE = env.bool('AWS_S3_FILE_OVERWRITE', default=True)
-AWS_S3_SIGNATURE_VERSION = env('AWS_S3_SIGNATURE_VERSION', default='s3v4')
-AWS_S3_ADDRESSING_STYLE = env('AWS_S3_ADDRESSING_STYLE', default='path')
+AWS_ACCESS_KEY_ID = env("AWS_ACCESS_KEY_ID", default=None)
+AWS_SECRET_ACCESS_KEY = env("AWS_SECRET_ACCESS_KEY", default=None)
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="georiva")
+AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="us-east-1")
+AWS_S3_ENDPOINT_URL = env("AWS_S3_ENDPOINT_URL", default=None)  # For MinIO
+AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default=None)
+AWS_DEFAULT_ACL = env("AWS_DEFAULT_ACL", default=None)
+AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH", default=True)
+AWS_S3_FILE_OVERWRITE = env.bool("AWS_S3_FILE_OVERWRITE", default=True)
+AWS_S3_SIGNATURE_VERSION = env("AWS_S3_SIGNATURE_VERSION", default="s3v4")
+AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="path")
 
 MINIO_REDIS_ARN = env("MINIO_REDIS_ARN", default="arn:minio:sqs::primary:redis")
 
 # Staging events use a SEPARATE MinIO notification target and Redis list so the
 # published consumer's destructive blpop never steals (and drops) them.
-MINIO_STAGING_REDIS_ARN = env(
-    "MINIO_STAGING_REDIS_ARN", default="arn:minio:sqs::staging:redis"
-)
-MINIO_STAGING_REDIS_KEY = env(
-    "MINIO_STAGING_REDIS_KEY", default="georiva:minio:staging-events"
-)
+MINIO_STAGING_REDIS_ARN = env("MINIO_STAGING_REDIS_ARN", default="arn:minio:sqs::staging:redis")
+MINIO_STAGING_REDIS_KEY = env("MINIO_STAGING_REDIS_KEY", default="georiva:minio:staging-events")
 
 MINIO_PUBLIC_ENDPOINT = env.str("MINIO_PUBLIC_ENDPOINT", default="localhost:9000")
 MINIO_PUBLIC_ENDPOINT_USE_SSL = env.bool("MINIO_PUBLIC_ENDPOINT_USE_SSL", default=False)
@@ -367,7 +356,7 @@ if GEORIVA_STORAGE_BACKEND == "s3":
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
     }
-    
+
     # Register one Django storage backend per bucket
     for _key, _bucket_conf in GEORIVA_BUCKETS.items():
         _options = {
@@ -375,7 +364,7 @@ if GEORIVA_STORAGE_BACKEND == "s3":
             "bucket_name": _bucket_conf["name"],
             **_bucket_conf.get("overrides", {}),
         }
-        
+
         STORAGES[f"georiva-{_key}"] = {
             "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
             "OPTIONS": _options,
@@ -391,7 +380,7 @@ else:
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
     }
-    
+
     for _key, _bucket_conf in GEORIVA_BUCKETS.items():
         _bucket_name = _bucket_conf.get("name")
         STORAGES[f"georiva-{_key}"] = {
@@ -475,7 +464,7 @@ WAGTAILADMIN_BASE_URL = "http://example.com"
 # This can be omitted to allow all files, but note that this may present a security risk
 # if untrusted users are allowed to upload files -
 # see https://docs.wagtail.org/en/stable/advanced_topics/deploying.html#user-uploaded-files
-WAGTAILDOCS_EXTENSIONS = ['csv', 'docx', 'key', 'odt', 'pdf', 'pptx', 'rtf', 'txt', 'xlsx', 'zip']
+WAGTAILDOCS_EXTENSIONS = ["csv", "docx", "key", "odt", "pdf", "pptx", "rtf", "txt", "xlsx", "zip"]
 
 REDIS_HOST = env.str("REDIS_HOST", "georiva-redis")
 REDIS_PORT = env.str("REDIS_PORT", "6379")
@@ -503,19 +492,15 @@ CACHES = {
 # once and shared. The cost is a document that lags: an item ingested now
 # appears when the entry expires and no sooner — minutes, not hours, so the
 # newest run is never far behind. 0 switches the cache off entirely.
-GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS = env.int(
-    "GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS", default=300
-)
+GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS = env.int("GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS", default=300)
 
 CELERY_BROKER_URL = REDIS_URL
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
-CELERY_SINGLETON_BACKEND_CLASS = (
-    "georiva.celery_singleton_backend.RedisBackendForSingleton"
-)
+CELERY_SINGLETON_BACKEND_CLASS = "georiva.celery_singleton_backend.RedisBackendForSingleton"
 
-CELERY_RESULT_BACKEND = 'django-db'
+CELERY_RESULT_BACKEND = "django-db"
 CELERY_RESULT_EXTENDED = True
 
 CELERY_CACHE_BACKEND = "default"
@@ -535,9 +520,7 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # crash-recovery sweep (sources.acquisition_recovery). Must comfortably exceed
 # the longest legitimate fetch run — a false "dead" verdict enqueues a
 # duplicate run racing the live one.
-GEORIVA_FETCH_RUN_STALE_AFTER_HOURS = env.int(
-    "GEORIVA_FETCH_RUN_STALE_AFTER_HOURS", 6
-)
+GEORIVA_FETCH_RUN_STALE_AFTER_HOURS = env.int("GEORIVA_FETCH_RUN_STALE_AFTER_HOURS", 6)
 
 # With acks_late, Redis redelivers an unacked message after visibility_timeout
 # (default 1h) — which would duplicate-execute any legitimate task running
@@ -570,10 +553,7 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "console": {
-            "format": "%(levelname)s %(asctime)s %(name)s.%(funcName)s:%(lineno)s- %("
-                      "message)s "
-        },
+        "console": {"format": "%(levelname)s %(asctime)s %(name)s.%(funcName)s:%(lineno)s- %(message)s "},
     },
     "handlers": {
         "console": {
@@ -608,9 +588,9 @@ LOGGING = {
 
 VUE_FRONTEND_USE_TYPESCRIPT = False
 VUE_FRONTEND_USE_DEV_SERVER = DEBUG
-VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
-VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
-VUE_FRONTEND_STATIC_PATH = 'vue'
+VUE_FRONTEND_DEV_SERVER_URL = "http://localhost:5173"
+VUE_FRONTEND_DEV_SERVER_PATH = "/static/vue/src"
+VUE_FRONTEND_STATIC_PATH = "vue"
 
 # Temp directory for intermediate files processing.
 GEORIVA_TEMP_DIR = env("GEORIVA_TEMP_DIR", default="/var/tmp/georiva")
@@ -618,7 +598,4 @@ GEORIVA_TEMP_DIR = env("GEORIVA_TEMP_DIR", default="/var/tmp/georiva")
 # Pixel threshold above which variable processing switches to chunked mode.
 # 4096×4096 = 16M pixels ≈ 64MB float32 per array.
 # Increase for machines with more RAM, decrease for constrained workers.
-GEORIVA_CHUNK_THRESHOLD_PIXELS = env.int(
-    "GEORIVA_CHUNK_THRESHOLD_PIXELS",
-    default=4096 * 4096
-)
+GEORIVA_CHUNK_THRESHOLD_PIXELS = env.int("GEORIVA_CHUNK_THRESHOLD_PIXELS", default=4096 * 4096)

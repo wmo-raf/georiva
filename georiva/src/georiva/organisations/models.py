@@ -9,6 +9,7 @@ organisation without one would be unreachable.
 organisation. Django superusers are the *instance* admin and deliberately hold
 no membership rows; every permission check short-circuits on ``is_superuser``.
 """
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models

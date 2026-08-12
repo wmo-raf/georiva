@@ -8,7 +8,6 @@ from georiva.ingestion.time_extraction import extract_times
 
 
 class GRPrefixExtractionTests(SimpleTestCase):
-
     def test_gr_prefix_yields_reference_time(self):
         result = extract_times("GR--20250115T0600--20250115.grib2", "YYYYMMDD")
         self.assertEqual(result["reference_time"], datetime(2025, 1, 15, 6, 0, tzinfo=timezone.utc))
@@ -24,7 +23,6 @@ class GRPrefixExtractionTests(SimpleTestCase):
 
 
 class ValidTimeStemParsingTests(SimpleTestCase):
-
     def test_YYYYMMDD(self):
         result = extract_times("20250115.grib2", "YYYYMMDD")
         self.assertEqual(result["valid_time"], datetime(2025, 1, 15, tzinfo=timezone.utc))
@@ -55,7 +53,6 @@ class ValidTimeStemParsingTests(SimpleTestCase):
 
 
 class EmptyResultTests(SimpleTestCase):
-
     def test_unrecognisable_stem_returns_empty_dict(self):
         result = extract_times("chirps-v2.0.grib2", "YYYYMMDD")
         self.assertEqual(result, {})
@@ -70,7 +67,6 @@ class EmptyResultTests(SimpleTestCase):
 
 
 class ContentFallbackTests(SimpleTestCase):
-
     def test_valid_time_read_from_grib_content_when_stem_unrecognised(self):
         expected_ts = datetime(2025, 1, 15, 6, 0, tzinfo=timezone.utc)
         mock_plugin = MagicMock()

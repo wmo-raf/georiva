@@ -32,16 +32,13 @@ def register_organisation_urls():
         path("org-members/", organisation_members, name="organisation_members"),
         path("org-members/add/", organisation_member_add, name="organisation_member_add"),
         path("org-members/<int:pk>/", organisation_member_edit, name="organisation_member_edit"),
-        path("org-members/<int:pk>/remove/", organisation_member_remove,
-             name="organisation_member_remove"),
+        path("org-members/<int:pk>/remove/", organisation_member_remove, name="organisation_member_remove"),
     ]
 
 
 @hooks.register("insert_global_admin_css")
 def org_hopper_css():
-    return format_html(
-        '<link rel="stylesheet" href="{}">', static("organisations/org_hopper.css")
-    )
+    return format_html('<link rel="stylesheet" href="{}">', static("organisations/org_hopper.css"))
 
 
 @hooks.register("insert_global_admin_js")
@@ -108,12 +105,12 @@ class OrgAdminSubmenuItem(SubmenuMenuItem, OrgAdminMenuItem):
 def register_organisation_menu_item():
     return OrgAdminSubmenuItem(
         _("Organisation"),
-        Menu(items=[
-            OrgAdminMenuItem(_("Settings"), reverse_lazy("organisation_settings"),
-                             icon_name="cogs", order=10),
-            OrgAdminMenuItem(_("Members"), reverse_lazy("organisation_members"),
-                             icon_name="user", order=20),
-        ]),
+        Menu(
+            items=[
+                OrgAdminMenuItem(_("Settings"), reverse_lazy("organisation_settings"), icon_name="cogs", order=10),
+                OrgAdminMenuItem(_("Members"), reverse_lazy("organisation_members"), icon_name="user", order=20),
+            ]
+        ),
         icon_name="group",
         order=100,
     )

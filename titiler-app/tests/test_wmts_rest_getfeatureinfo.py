@@ -13,24 +13,42 @@ click, which is the assertion that makes the omissions above safe: if the REST
 route ever stopped going through the shared identify, that test fails before
 any of the narrower ones do.
 """
+
 import json
 
 import pytest
 
 from tests.conftest import (
-    CATALOG, COLLECTION, ORG, TILE_CONFIG, VARIABLE, exception_of, kvp,
+    CATALOG,
+    COLLECTION,
+    ORG,
+    TILE_CONFIG,
+    VARIABLE,
+    exception_of,
+    kvp,
 )
 
 TIME = "2026-03-23T12:00:00Z"
 LAYER = f"{CATALOG}:{COLLECTION}:{VARIABLE}"
 
 #: The tile the clicks below land in, and the pixel within it.
-ZOOM, COL, ROW, I, J = "0", "0", "0", "128", "128"
+#: I and J are named for the WMTS GetFeatureInfo parameters they carry, so
+#: they keep the spec's spelling rather than one ruff finds unambiguous.
+ZOOM, COL, ROW, I, J = "0", "0", "0", "128", "128"  # noqa: E741
 
 
-def rest_url(zoom=ZOOM, col=COL, row=ROW, j=J, i=I,
-             org=ORG, catalog=CATALOG, collection=COLLECTION, variable=VARIABLE,
-             tile_matrix_set="WebMercatorQuad"):
+def rest_url(
+    zoom=ZOOM,
+    col=COL,
+    row=ROW,
+    j=J,
+    i=I,
+    org=ORG,
+    catalog=CATALOG,
+    collection=COLLECTION,
+    variable=VARIABLE,
+    tile_matrix_set="WebMercatorQuad",
+):
     """The identify address, spelt as the capabilities template writes it.
 
     Column before row and ``{J}`` before ``{I}``, matching
@@ -38,10 +56,7 @@ def rest_url(zoom=ZOOM, col=COL, row=ROW, j=J, i=I,
     two spellings are the whole contract between the document and this route,
     and this helper is where a drift in either shows up.
     """
-    return (
-        f"/{org}/{catalog}/{collection}/{variable}"
-        f"/tiles/{tile_matrix_set}/{zoom}/{col}/{row}/{j}/{i}.json"
-    )
+    return f"/{org}/{catalog}/{collection}/{variable}/tiles/{tile_matrix_set}/{zoom}/{col}/{row}/{j}/{i}.json"
 
 
 def seed_default(fake_redis, seed_cog, style=None, **cog_kwargs):
@@ -66,20 +81,27 @@ class TestOneIdentifyTwoBindings:
     other would have no way to tell which of them was looking at the data.
     """
 
-    def test_the_rest_answer_is_the_kvp_answer_for_the_same_pixel(
-            self, client, fake_redis, seed_cog):
+    def test_the_rest_answer_is_the_kvp_answer_for_the_same_pixel(self, client, fake_redis, seed_cog):
         seed_default(fake_redis, seed_cog)
 
         from_rest = identify(client).json()
-        from_kvp = client.get(f"/{ORG}/wmts", params=kvp(
-            REQUEST="GetFeatureInfo", INFOFORMAT="application/json",
-            TILEMATRIX=ZOOM, TILECOL=COL, TILEROW=ROW, I=I, J=J, TIME=TIME,
-        )).json()
+        from_kvp = client.get(
+            f"/{ORG}/wmts",
+            params=kvp(
+                REQUEST="GetFeatureInfo",
+                INFOFORMAT="application/json",
+                TILEMATRIX=ZOOM,
+                TILECOL=COL,
+                TILEROW=ROW,
+                I=I,
+                J=J,
+                TIME=TIME,
+            ),
+        ).json()
 
         assert from_rest == from_kvp
 
-    def test_the_answer_names_the_layer_the_document_advertises(
-            self, client, fake_redis, seed_cog):
+    def test_the_answer_names_the_layer_the_document_advertises(self, client, fake_redis, seed_cog):
         """The REST caller spelt the address as path segments and never sent a
         LAYER, so the identifier in its receipt is rebuilt rather than echoed —
         and it has to come back as the very string the Layer is listed under,
@@ -133,8 +155,7 @@ class TestTheQuery:
         assert exc.get("exceptionCode") == "MissingParameterValue"
         assert exc.get("locator") == "TIME"
 
-    def test_a_named_style_is_resolved_like_the_tile_route_resolves_it(
-            self, client, fake_redis, seed_cog):
+    def test_a_named_style_is_resolved_like_the_tile_route_resolves_it(self, client, fake_redis, seed_cog):
         seed_default(fake_redis, seed_cog, style="analyst")
 
         response = identify(client, {"time": TIME, "style": "analyst"})
@@ -142,8 +163,7 @@ class TestTheQuery:
         assert response.status_code == 200
         assert response.json()["value"] is not None
 
-    def test_an_unknown_style_is_refused_rather_than_quietly_defaulted(
-            self, client, fake_redis, seed_cog):
+    def test_an_unknown_style_is_refused_rather_than_quietly_defaulted(self, client, fake_redis, seed_cog):
         """ADR 0023 on this route too: identifying under a style the layer does
         not have would report a number nobody was shown."""
         seed_default(fake_redis, seed_cog)
@@ -153,8 +173,7 @@ class TestTheQuery:
         assert response.status_code == 404
         assert exception_of(response) is not None
 
-    def test_the_default_style_alias_reaches_the_styleless_config(
-            self, client, fake_redis, seed_cog):
+    def test_the_default_style_alias_reaches_the_styleless_config(self, client, fake_redis, seed_cog):
         """``default`` is what the document advertises for a variable with no
         named styles, and a client will send it back."""
         seed_default(fake_redis, seed_cog)
@@ -171,15 +190,19 @@ class TestRefusalsAreExceptionReports:
     strings and are validated here rather than declared as ints.
     """
 
-    @pytest.mark.parametrize("field,value,locator", [
-        ("zoom", "notanumber", "TILEMATRIX"),
-        ("col", "notanumber", "TILECOL"),
-        ("row", "notanumber", "TILEROW"),
-        ("i", "notanumber", "I"),
-        ("j", "notanumber", "J"),
-    ])
+    @pytest.mark.parametrize(
+        "field,value,locator",
+        [
+            ("zoom", "notanumber", "TILEMATRIX"),
+            ("col", "notanumber", "TILECOL"),
+            ("row", "notanumber", "TILEROW"),
+            ("i", "notanumber", "I"),
+            ("j", "notanumber", "J"),
+        ],
+    )
     def test_a_malformed_segment_is_an_ows_exception_not_a_422(
-            self, client, fake_redis, seed_cog, field, value, locator):
+        self, client, fake_redis, seed_cog, field, value, locator
+    ):
         seed_default(fake_redis, seed_cog)
 
         response = identify(client, **{field: value})
@@ -227,8 +250,7 @@ class TestRefusalsAreExceptionReports:
         assert response.status_code == 404
         assert exception_of(response) is not None
 
-    def test_a_time_the_archive_does_not_hold_is_reported_the_same_way(
-            self, client, fake_redis, seed_cog):
+    def test_a_time_the_archive_does_not_hold_is_reported_the_same_way(self, client, fake_redis, seed_cog):
         seed_default(fake_redis, seed_cog)
 
         response = identify(client, {"time": "2011-01-01T00:00:00Z"})
@@ -248,23 +270,20 @@ class TestRefusalsAreExceptionReports:
 
 
 class TestItShadowsNothing:
-    def test_the_tile_route_beside_it_still_serves_a_tile(
-            self, client, fake_redis, seed_cog):
+    def test_the_tile_route_beside_it_still_serves_a_tile(self, client, fake_redis, seed_cog):
         """Two segments deeper than the deepest route the tile factory
         registers, so mounting it on the same prefix may not capture tiles."""
         seed_default(fake_redis, seed_cog)
 
         response = client.get(
-            f"/{ORG}/{CATALOG}/{COLLECTION}/{VARIABLE}"
-            "/tiles/WebMercatorQuad/0/0/0.png",
+            f"/{ORG}/{CATALOG}/{COLLECTION}/{VARIABLE}/tiles/WebMercatorQuad/0/0/0.png",
             params={"time": TIME},
         )
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
 
-    def test_the_kvp_endpoint_still_answers_its_own_grammar(
-            self, client, fake_redis, seed_cog):
+    def test_the_kvp_endpoint_still_answers_its_own_grammar(self, client, fake_redis, seed_cog):
         seed_default(fake_redis, seed_cog)
 
         response = client.get(f"/{ORG}/wmts", params=kvp())

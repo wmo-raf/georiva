@@ -7,15 +7,16 @@ lives: every transition into RUNNING bumps `attempts` and records why the run
 directly — the highest seam — plus the synchronous `dispatch=False` paths that
 thread a reason down to it, so no Celery broker is needed.
 """
-from datetime import datetime, timedelta, timezone
 
-from georiva.processing.models import DerivationRun
-from georiva.processing.recipe import BaseRecipe, OutputItem, ResolvedInput, unit_hash
-from georiva.processing.registry import RecipeRegistry
+from datetime import datetime, timedelta, timezone
 
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
+
 from georiva.organisations.testing import make_organisation
+from georiva.processing.models import DerivationRun
+from georiva.processing.recipe import BaseRecipe, OutputItem, ResolvedInput, unit_hash
+from georiva.processing.registry import RecipeRegistry
 
 
 class _Asset:
@@ -62,7 +63,9 @@ class _InlineRecipeMixin:
         super().setUp()
         from georiva.core.models import Catalog, Collection
 
-        catalog = Catalog.objects.create(organisation=make_organisation(), name="Retry", slug="retry", file_format="geotiff")
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Retry", slug="retry", file_format="geotiff"
+        )
         Collection.objects.create(catalog=catalog, slug="retry-out", name="retry-out")
 
         self._saved = dict(RecipeRegistry._recipes)
@@ -117,8 +120,10 @@ class AcquireRetryTrackingTests(TestCase):
 class ReclaimReasonTests(_InlineRecipeMixin, TestCase):
     def _stale_running(self, unit):
         return DerivationRun.objects.create(
-            recipe_type=_CompletingRecipe.type, recipe_version="1",
-            unit_key=unit, unit_hash=unit_hash(unit),
+            recipe_type=_CompletingRecipe.type,
+            recipe_version="1",
+            unit_key=unit,
+            unit_hash=unit_hash(unit),
             status=DerivationRun.Status.RUNNING,
             locked_by="dead-worker",
             locked_at=dj_timezone.now() - (DerivationRun.LOCK_TIMEOUT + timedelta(minutes=1)),
@@ -142,9 +147,12 @@ class InputStaleReasonTests(_InlineRecipeMixin, TestCase):
 
         # A completed run whose recorded input_hash no longer matches its inputs.
         DerivationRun.objects.create(
-            recipe_type=_CompletingRecipe.type, recipe_version="1",
-            unit_key={"n": 1}, unit_hash=unit_hash({"n": 1}),
-            input_hash="STALE", status=DerivationRun.Status.COMPLETED,
+            recipe_type=_CompletingRecipe.type,
+            recipe_version="1",
+            unit_key={"n": 1},
+            unit_hash=unit_hash({"n": 1}),
+            input_hash="STALE",
+            status=DerivationRun.Status.COMPLETED,
         )
 
         sweep_stale_units(dispatch=False)
@@ -175,5 +183,6 @@ class CeleryRetryReasonTests(TestCase):
             )
 
         self.assertEqual(
-            run_unit.call_args.kwargs["reason"], DerivationRun.RetryReason.CELERY_RETRY,
+            run_unit.call_args.kwargs["reason"],
+            DerivationRun.RetryReason.CELERY_RETRY,
         )

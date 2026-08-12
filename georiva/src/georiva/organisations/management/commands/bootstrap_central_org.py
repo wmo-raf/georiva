@@ -16,5 +16,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         organisation = bootstrap_central_org(slug=options["slug"], name=options["name"])
         self.stdout.write(
-            self.style.SUCCESS(f"Central organisation: {organisation.name} ({organisation.slug}) at {organisation.hostname}")
+            self.style.SUCCESS(
+                f"Central organisation: {organisation.name} ({organisation.slug}) at {organisation.hostname}"
+            )
         )

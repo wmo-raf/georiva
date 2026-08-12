@@ -5,6 +5,7 @@ that collection at the staging tier; otherwise they land in SOURCES (the
 published path). Tier is computed from the product declarations, not a stored
 DataFeed.target_tier field.
 """
+
 import os
 import tempfile
 from pathlib import Path
@@ -19,14 +20,17 @@ from georiva.core.derived_products import (
 )
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
+from georiva.organisations.testing import make_organisation
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, DerivedProduct, DerivedProductInput
-from georiva.organisations.testing import make_organisation
 
 
 def _staging_definition(collection_slug="tas"):
     return DerivedProductDefinition(
-        key="anomaly", recipe_type="climatology", label="Anomaly", description="",
+        key="anomaly",
+        recipe_type="climatology",
+        label="Anomaly",
+        description="",
         config_schema=(),
         inputs=(InputRef(role="value", collection=collection_slug, tier="staging"),),
         outputs=(OutputRef(role="anomaly", collection=f"{collection_slug}-anomaly"),),
@@ -36,12 +40,10 @@ def _staging_definition(collection_slug="tas"):
 
 class TargetTierRoutingTests(TestCase):
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), 
-            name="CMIP6", slug="cmip6", file_format="netcdf"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="netcdf"
         )
-        self.collection = Collection.objects.create(
-            name="tas", slug="tas", catalog=self.catalog
-        )
+        self.collection = Collection.objects.create(name="tas", slug="tas", catalog=self.catalog)
         self.feed = DataFeed.objects.create(name="Feed", catalog=self.catalog)
 
     def _loader(self, feed):
@@ -54,11 +56,16 @@ class TargetTierRoutingTests(TestCase):
         # Routing is driven by the pinned staging-input binding (ADR-0010 §4),
         # so create the product and pin its input to the 'tas' collection.
         product = DerivedProduct.objects.create(
-            data_feed=self.feed, definition_key="anomaly",
-            recipe_type="climatology", is_enabled=True,
+            data_feed=self.feed,
+            definition_key="anomaly",
+            recipe_type="climatology",
+            is_enabled=True,
         )
         DerivedProductInput.objects.create(
-            product=product, role="value", tier="staging", source_key="tas",
+            product=product,
+            role="value",
+            tier="staging",
+            source_key="tas",
             collection=self.collection,
         )
 

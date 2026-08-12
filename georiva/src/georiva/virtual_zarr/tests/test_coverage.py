@@ -13,7 +13,8 @@ uses:
 
 import unittest
 import uuid
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
@@ -36,8 +37,7 @@ UTC = dt_timezone.utc
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 S3_READY = bool(
-    getattr(settings, "AWS_S3_ENDPOINT_URL", None)
-    and getattr(settings, "GEORIVA_STORAGE_BACKEND", "") == "s3"
+    getattr(settings, "AWS_S3_ENDPOINT_URL", None) and getattr(settings, "GEORIVA_STORAGE_BACKEND", "") == "s3"
 )
 
 BOUNDS = (30.0, -10.0, 40.0, 0.0)
@@ -50,6 +50,7 @@ def _t(hours: int) -> datetime:
 # ---------------------------------------------------------------------------
 # Pure functions
 # ---------------------------------------------------------------------------
+
 
 class AsUtcTests(SimpleTestCase):
     def test_naive_is_stamped_utc(self):
@@ -106,14 +107,10 @@ class LockExpiryTests(SimpleTestCase):
     TIMEOUT = timedelta(minutes=30)
 
     def test_fresh_lock_is_not_expired(self):
-        self.assertFalse(
-            is_lock_expired(_t(0), _t(0) + timedelta(minutes=10), self.TIMEOUT)
-        )
+        self.assertFalse(is_lock_expired(_t(0), _t(0) + timedelta(minutes=10), self.TIMEOUT))
 
     def test_old_lock_is_expired(self):
-        self.assertTrue(
-            is_lock_expired(_t(0), _t(0) + timedelta(minutes=31), self.TIMEOUT)
-        )
+        self.assertTrue(is_lock_expired(_t(0), _t(0) + timedelta(minutes=31), self.TIMEOUT))
 
     def test_missing_lock_stamp_counts_as_expired(self):
         # A BUILDING row without locked_at was abandoned before the stamp —
@@ -125,24 +122,31 @@ class LockExpiryTests(SimpleTestCase):
 # Service over DB fixtures (no repo behind the manifests)
 # ---------------------------------------------------------------------------
 
+
 class CoverageServiceTests(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.catalog = Catalog.objects.create(
             organisation=make_organisation(),
-            name="Models", slug="models", file_format="geotiff",
+            name="Models",
+            slug="models",
+            file_format="geotiff",
         )
         cls.collection = Collection.objects.create(
-            catalog=cls.catalog, name="Surface", slug="surface",
+            catalog=cls.catalog,
+            name="Surface",
+            slug="surface",
         )
-        cls.unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        cls.unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
 
     def _variable(self, slug):
         return Variable.objects.create(
-            collection=self.collection, name=slug, slug=slug,
-            unit=self.unit, value_min=0, value_max=1,
+            collection=self.collection,
+            name=slug,
+            slug=slug,
+            unit=self.unit,
+            value_min=0,
+            value_max=1,
         )
 
     def _item(self, hours):
@@ -150,7 +154,9 @@ class CoverageServiceTests(TestCase):
 
     def _cog(self, item, variable):
         return Asset.objects.create(
-            item=item, variable=variable, format=Asset.Format.COG,
+            item=item,
+            variable=variable,
+            format=Asset.Format.COG,
             href=f"models/surface/{variable.slug}/{item.time:%Y/%m/%d}/x.tif",
         )
 
@@ -218,7 +224,8 @@ class CoverageServiceTests(TestCase):
         variable = self._variable("precip")
         for ref_hours in (0, 6):
             item = Item.objects.create(
-                collection=self.collection, time=_t(24),
+                collection=self.collection,
+                time=_t(24),
                 reference_time=_t(ref_hours),
             )
             self._cog(item, variable)
@@ -231,13 +238,12 @@ class CoverageServiceTests(TestCase):
     def test_stuck_build_is_distinct_from_active_build(self):
         variable = self._variable("precip")
         manifest = VirtualZarrManifest.objects.create(
-            variable=variable, status=VirtualZarrManifest.Status.BUILDING,
+            variable=variable,
+            status=VirtualZarrManifest.Status.BUILDING,
         )
         now = timezone.now()
 
-        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
-            locked_at=now - timedelta(minutes=5)
-        )
+        VirtualZarrManifest.objects.filter(pk=manifest.pk).update(locked_at=now - timedelta(minutes=5))
         active = variable_coverage(variable)
         self.assertFalse(active.stuck)
         self.assertEqual(active.display_status, VirtualZarrManifest.Status.BUILDING)
@@ -253,7 +259,8 @@ class CoverageServiceTests(TestCase):
         variable = self._variable("precip")
         manifest = VirtualZarrManifest.objects.create(variable=variable)
         VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
-            repo_size_bytes=1234, repo_object_count=7,
+            repo_size_bytes=1234,
+            repo_object_count=7,
         )
 
         report = variable_coverage(variable)
@@ -287,6 +294,7 @@ class CoverageServiceTests(TestCase):
 # Service over a real Icechunk repo (existing integration-test pattern)
 # ---------------------------------------------------------------------------
 
+
 def _purge_prefix(bucket, prefix: str) -> None:
     for entry in bucket.list_files(prefix, recursive=True):
         try:
@@ -307,26 +315,27 @@ class CoverageServiceIcechunkTests(TestCase):
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="Itest", slug=f"itest-{uuid.uuid4().hex[:8]}",
+            name="Itest",
+            slug=f"itest-{uuid.uuid4().hex[:8]}",
             file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Daily", slug="daily",
+            catalog=self.catalog,
+            name="Daily",
+            slug="daily",
         )
-        unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precip", name="Precip",
-            unit=unit, value_min=0, value_max=500,
+            collection=self.collection,
+            slug="precip",
+            name="Precip",
+            unit=unit,
+            value_min=0,
+            value_max=500,
         )
         self.rng = np.random.default_rng(4)
-        self.addCleanup(
-            _purge_prefix, storage.assets, self.catalog.storage_prefix
-        )
-        self.addCleanup(
-            _purge_prefix, storage.zarr, self.catalog.storage_prefix
-        )
+        self.addCleanup(_purge_prefix, storage.assets, self.catalog.storage_prefix)
+        self.addCleanup(_purge_prefix, storage.zarr, self.catalog.storage_prefix)
 
     def _add_item(self, day: int, *, with_cog: bool = True):
         from georiva.core.storage import storage
@@ -334,20 +343,21 @@ class CoverageServiceIcechunkTests(TestCase):
 
         ts = datetime(2026, 3, day, tzinfo=UTC)
         item = Item.objects.create(
-            collection=self.collection, time=ts,
-            bounds=list(BOUNDS), crs="EPSG:4326", width=64, height=64,
+            collection=self.collection,
+            time=ts,
+            bounds=list(BOUNDS),
+            crs="EPSG:4326",
+            width=64,
+            height=64,
         )
         if with_cog:
-            key = (
-                f"{self.catalog.storage_prefix}/daily/precip/"
-                f"2026/03/{day:02d}/precip.tif"
-            )
-            AssetWriter(storage.assets).write_cog(
-                self.rng.random((64, 64), dtype="float32"), key, BOUNDS
-            )
+            key = f"{self.catalog.storage_prefix}/daily/precip/2026/03/{day:02d}/precip.tif"
+            AssetWriter(storage.assets).write_cog(self.rng.random((64, 64), dtype="float32"), key, BOUNDS)
             Asset.objects.create(
-                item=item, variable=self.variable,
-                format=Asset.Format.COG, href=key,
+                item=item,
+                variable=self.variable,
+                format=Asset.Format.COG,
+                href=key,
             )
         return item
 
@@ -409,6 +419,4 @@ class CoverageServiceIcechunkTests(TestCase):
         report = variable_coverage(self.variable)
 
         self.assertEqual(report.repo_count, 1)
-        self.assertEqual(
-            report.items_without_cog, (datetime(2026, 3, 2, tzinfo=UTC),)
-        )
+        self.assertEqual(report.items_without_cog, (datetime(2026, 3, 2, tzinfo=UTC),))

@@ -20,7 +20,6 @@ from georiva.pages.home.models import HomePage
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
 class ProvisionOrganisationTests(TestCase):
-
     def test_creates_site_root_page_and_group(self):
         organisation = provision_organisation(name="Kenya Met", slug="kenya")
 
@@ -127,7 +126,6 @@ class ProvisionOrganisationTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test")
 class BootstrapCentralOrgTests(TestCase):
-
     def setUp(self):
         # Back to a pre-tenancy instance: a default Site, no organisations. The
         # suite's own central org (bootstrapped on migrate) is what we're here
@@ -203,7 +201,8 @@ class SyncSitePortsTests(TestCase):
         # A Site without an organisation is not ours to move: nothing serves it
         # under tenancy, and its port may mean something to whoever made it.
         orphan = Site.objects.create(
-            hostname="orphan.georiva.test", port=8000,
+            hostname="orphan.georiva.test",
+            port=8000,
             root_page=provision_organisation(name="Kenya Met", slug="kenya").site.root_page,
         )
 
@@ -275,7 +274,9 @@ class SyncSiteDomainsTests(TestCase):
         with override_settings(GEORIVA_BASE_DOMAIN="wrong.test"):
             kenya = provision_organisation(name="Kenya Met", slug="kenya")
         orphan = Site.objects.create(
-            hostname="orphan.wrong.test", port=80, root_page=kenya.site.root_page,
+            hostname="orphan.wrong.test",
+            port=80,
+            root_page=kenya.site.root_page,
         )
 
         sync_site_domains("wrong.test")
@@ -290,7 +291,9 @@ class SyncSiteDomainsTests(TestCase):
             kenya = provision_organisation(name="Kenya Met", slug="kenya")
             icpac = provision_organisation(name="ICPAC", slug="icpac")
         Site.objects.create(
-            hostname="kenya.georiva.test", port=kenya.site.port, root_page=kenya.site.root_page,
+            hostname="kenya.georiva.test",
+            port=kenya.site.port,
+            root_page=kenya.site.root_page,
         )
 
         with self.assertRaises(ValueError):

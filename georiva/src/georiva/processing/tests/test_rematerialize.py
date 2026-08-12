@@ -2,6 +2,7 @@
 rematerialize_derived_assets — replays the shared materialization over
 existing derived items (the backfill for pre-materializer history).
 """
+
 from datetime import datetime, timezone
 from io import StringIO
 from unittest.mock import MagicMock, patch
@@ -25,27 +26,42 @@ class RematerializeDerivedAssetsTests(TestCase):
     def setUp(self):
         self.catalog = Catalog.objects.create(
             organisation=make_organisation(),
-            name="CHIRPS", slug="chirps", file_format="geotiff",
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, slug="precip-anomaly", name="Precip anomaly",
+            catalog=self.catalog,
+            slug="precip-anomaly",
+            name="Precip anomaly",
         )
         unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"},
+            name="Millimetre",
+            defaults={"symbol": "mm"},
         )
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precip", name="Precipitation",
-            unit=unit, value_min=-150, value_max=150,
+            collection=self.collection,
+            slug="precip",
+            name="Precipitation",
+            unit=unit,
+            value_min=-150,
+            value_max=150,
         )
         self.item = Item.objects.create(
             collection=self.collection,
             time=datetime(2024, 5, 1, tzinfo=timezone.utc),
-            bounds=[10, -5, 20, 5], crs="EPSG:4326", width=10, height=10,
+            bounds=[10, -5, 20, 5],
+            crs="EPSG:4326",
+            width=10,
+            height=10,
             properties={"derivation": {"recipe": "chirps-anomaly"}},
         )
         self.cog = Asset.objects.create(
-            item=self.item, variable=self.variable,
-            format=Asset.Format.COG, roles=["data"], href="k/old.tif",
+            item=self.item,
+            variable=self.variable,
+            format=Asset.Format.COG,
+            roles=["data"],
+            href="k/old.tif",
         )
         # A non-derived item in the same collection must be left alone.
         self.plain_item = Item.objects.create(
@@ -57,12 +73,18 @@ class RematerializeDerivedAssetsTests(TestCase):
         data = np.full((10, 10), -12.0, dtype="float32")
         writer_cls, writer = _mock_writer_cls()
         out = StringIO()
-        with patch(
-            "georiva.processing.management.commands.rematerialize_derived_assets._read_cog",
-            return_value=(data, [10, -5, 20, 5], "EPSG:4326"),
-        ), patch("georiva.ingestion.asset_writer.AssetWriter", writer_cls):
+        with (
+            patch(
+                "georiva.processing.management.commands.rematerialize_derived_assets._read_cog",
+                return_value=(data, [10, -5, 20, 5], "EPSG:4326"),
+            ),
+            patch("georiva.ingestion.asset_writer.AssetWriter", writer_cls),
+        ):
             call_command(
-                "rematerialize_derived_assets", *args, stdout=out, stderr=out,
+                "rematerialize_derived_assets",
+                *args,
+                stdout=out,
+                stderr=out,
                 **kwargs,
             )
         return out.getvalue(), writer
@@ -72,9 +94,7 @@ class RematerializeDerivedAssetsTests(TestCase):
 
         writer.write_cog.assert_called_once()
         # No stored visual: textures are derived on demand (ADR 0021).
-        self.assertFalse(
-            self.item.assets.filter(format=Asset.Format.PNG).exists()
-        )
+        self.assertFalse(self.item.assets.filter(format=Asset.Format.PNG).exists())
 
         self.collection.refresh_from_db()
         self.assertEqual(self.collection.bounds, [10, -5, 20, 5])
