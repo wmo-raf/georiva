@@ -336,6 +336,13 @@ class AdminUrlSweepTests(TestCase):
             # Matched by URL prefix: the manifest snippet's admin paths use a
             # bare <pk>, and "manifest" appears in the model's URL segment.
             "manifest": tree["manifest"].pk,
+            # Two different models answer to a name starting "var", and the
+            # longer one is listed first on purpose: "var" is a substring of
+            # "variable_pk", so without these entries the substring pass hands
+            # the virtual-zarr routes a ManualUploadConfigVariable pk. Both
+            # passes below walk this dict in order, so specific precedes vague.
+            "variable": tree["variable"].pk,
+            "variable_pk": tree["variable"].pk,
             "var": tree["config_variable"].pk,
             "var_pk": tree["config_variable"].pk,
             # Matches page_id, parent_page_id and page_to_move_id by substring;
