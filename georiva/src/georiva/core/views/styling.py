@@ -152,6 +152,46 @@ def _add_model_errors(form, error):
             form.add_error(target, message)
 
 
+#: The order the ramp picker groups its catalog in (#383). Sequential first
+#: because most fields are magnitudes; diverging next because the fields that
+#: need it — anomalies, differences — are the ones where picking a sequential
+#: ramp by accident actively misleads.
+RAMP_TYPE_ORDER = (
+    ColorRamp.RampType.SEQUENTIAL,
+    ColorRamp.RampType.DIVERGING,
+    ColorRamp.RampType.QUALITATIVE,
+)
+
+
+def _ramp_groups(ramp_queryset, selected_ramp_id):
+    """The ramp catalog as headed groups for the picker (#383).
+
+    Grouping is by ``ramp_type`` rather than left flat, because the distinction
+    is load-bearing rather than decorative: an anomaly field wants a diverging
+    ramp and a rainfall total wants a sequential one, and a picker that sorts
+    them together leaves that entirely to the operator's memory.
+
+    Each row carries its own gradient so the markup needs no lookup table
+    beside it, and the browser can repaint the toggle from the row it was
+    given.
+    """
+    labels = dict(ColorRamp.RampType.choices)
+    by_type = {}
+    for ramp in ramp_queryset:
+        by_type.setdefault(ramp.ramp_type, []).append({
+            "pk": ramp.pk,
+            "name": ramp.name,
+            "gradient": ramp.css_gradient(),
+            "owner_label": ramp.owner_label(),
+            "selected": ramp.pk == selected_ramp_id,
+        })
+    return [
+        {"label": labels.get(ramp_type, ramp_type), "ramps": by_type[ramp_type]}
+        for ramp_type in RAMP_TYPE_ORDER
+        if ramp_type in by_type
+    ]
+
+
 def _preview_context(variable):
     """What the map preview draws, or why it draws nothing (#382).
 
@@ -363,9 +403,22 @@ def variable_styling(request, collection_pk, variable_pk):
             messages.success(request, _("Style deleted."))
             return redirect(form_url)
 
-    ramp_gradients = {
-        str(ramp.pk): ramp.css_gradient() for ramp in ramp_queryset
-    }
+    # The field's current value, whichever way the form got here: a string on a
+    # bound POST, the initial pk otherwise.
+    try:
+        selected_ramp_id = int(style_form["ramp"].value())
+    except (TypeError, ValueError):
+        selected_ramp_id = None
+    ramp_groups = _ramp_groups(ramp_queryset, selected_ramp_id)
+    selected_ramp = next(
+        (
+            ramp
+            for group in ramp_groups
+            for ramp in group["ramps"]
+            if ramp["selected"]
+        ),
+        None,
+    )
 
     context = {
         "breadcrumbs_items": [
@@ -391,7 +444,9 @@ def variable_styling(request, collection_pk, variable_pk):
         "range_form": range_form,
         "style_form": style_form,
         "stop_rows": stop_rows,
-        "ramp_gradients": ramp_gradients,
+        "ramp_groups": ramp_groups,
+        "selected_ramp": selected_ramp,
+        "ramp_catalog_url": reverse("colorramp:index"),
         "form_url": form_url,
         "stops_url": reverse(
             "variable_style_stops", args=[collection.pk, variable.pk]

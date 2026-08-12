@@ -74,13 +74,84 @@
             margin-bottom: 0.75rem;
         }
 
-        .vs-ramp-swatch {
-            display: inline-block;
-            width: 160px;
-            height: 14px;
+        /* The ramp picker: a gradient-bar toggle over a grouped swatch menu. */
+        .vs-ramp-field {
+            min-inline-size: 16rem;
+        }
+
+        .vs-ramp-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            inline-size: 100%;
+            padding: 0.4rem 0.5rem;
+            border: 1px solid var(--w-color-border-field-default);
+            border-radius: 3px;
+            background: var(--w-color-surface-field);
+        }
+
+        .vs-ramp-toggle-bar {
+            flex: 1 1 auto;
+            block-size: 18px;
             border-radius: 3px;
             border: 1px solid var(--w-color-border-furniture);
-            vertical-align: middle;
+        }
+
+        .vs-ramp-toggle-name {
+            flex: 0 0 auto;
+            font-weight: 600;
+            color: var(--w-color-text-label);
+        }
+
+        /*
+         * .w-dropdown__content is already a scrolling flex column capped at
+         * 50vh, which is what makes a growing catalog behave — the menu just
+         * scrolls. Only the rows need styling, and Wagtail's own :where(a,
+         * button) rules are zero-specificity so these win without !important.
+         */
+        .vs-ramp-menu {
+            min-inline-size: 15rem;
+        }
+
+        .vs-ramp-option {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            inline-size: 100%;
+            padding: 0.3rem 0.75rem;
+            font-weight: 400;
+            text-align: start;
+        }
+
+        .vs-ramp-option[aria-current="true"] {
+            background: var(--w-color-surface-menu-item-active);
+            font-weight: 700;
+        }
+
+        .vs-ramp-option-swatch {
+            flex: 0 0 auto;
+            inline-size: 22px;
+            block-size: 22px;
+            border-radius: 3px;
+            border: 1px solid var(--w-color-border-furniture);
+        }
+
+        .vs-ramp-option-swatch--none {
+            background: repeating-linear-gradient(
+                45deg,
+                var(--w-color-grey-100) 0 4px,
+                var(--w-color-white) 4px 8px
+            );
+        }
+
+        .vs-ramp-group {
+            margin: 0.5rem 0 0.15rem;
+            padding-inline: 0.75rem;
+            color: var(--w-color-grey-400);
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         .vs-stops-table {
@@ -160,6 +231,12 @@
             display: flex;
             gap: 0.75rem;
             margin-top: 1rem;
+        }
+
+        .vs-stop-tools {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
         }
 
         /*
@@ -330,11 +407,70 @@
                             <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
                             {{ style_form.name }}
                         </div>
-                        <div class="vs-field">
-                            <label for="{{ style_form.ramp.id_for_label }}">{% trans "Color ramp" %}</label>
-                            {{ style_form.ramp }}
+                        {% comment %}
+                            The ramp picker (#383). A native <option> cannot
+                            render a gradient — Chrome and Safari ignore
+                            background-image on one — so choosing by color at
+                            all means replacing the select. The markup is
+                            Wagtail's own w-dropdown Stimulus contract rather
+                            than the {% templatetag openblock %} dropdown {% templatetag closeblock %} tag, because the
+                            tag renders its toggle label as escaped text and
+                            this toggle has to carry a gradient bar the browser
+                            repaints on every pick.
+
+                            The field itself is unchanged: a hidden input named
+                            `ramp`, so validation and org scoping stay exactly
+                            where they were.
+                        {% endcomment %}
+                        <div class="vs-field vs-ramp-field">
+                            <label id="vs-ramp-label">{% trans "Color ramp" %}</label>
+                            <input type="hidden" name="ramp" id="vs-ramp-input"
+                                   value="{{ selected_ramp.pk|default_if_none:'' }}">
+                            <div class="w-dropdown vs-ramp-dropdown"
+                                 data-controller="w-dropdown"
+                                 data-w-dropdown-hide-on-click-value="true">
+                                <button type="button"
+                                        class="w-dropdown__toggle vs-ramp-toggle"
+                                        data-w-dropdown-target="toggle"
+                                        aria-labelledby="vs-ramp-label vs-ramp-toggle-name">
+                                    <span class="vs-ramp-toggle-bar" id="vs-ramp-toggle-bar"
+                                          {% if selected_ramp %}style="background: {{ selected_ramp.gradient }};"{% endif %}></span>
+                                    <span class="vs-ramp-toggle-name" id="vs-ramp-toggle-name">
+                                        {% if selected_ramp %}{{ selected_ramp.name }}{% else %}{% trans "Choose a ramp" %}{% endif %}
+                                    </span>
+                                    <svg class="icon icon-arrow-down w-dropdown__toggle-icon" aria-hidden="true">
+                                        <use href="#icon-arrow-down"></use>
+                                    </svg>
+                                </button>
+                                <div data-w-dropdown-target="content"
+                                     class="w-dropdown__content vs-ramp-menu" hidden>
+                                    <button type="button" class="vs-ramp-option" data-ramp-pk=""
+                                            data-ramp-name="{% trans 'Choose a ramp' %}" data-ramp-gradient="">
+                                        <span class="vs-ramp-option-swatch vs-ramp-option-swatch--none"></span>
+                                        <span class="vs-ramp-option-name">{% trans "No ramp" %}</span>
+                                    </button>
+                                    {% for group in ramp_groups %}
+                                        <p class="vs-ramp-group">{{ group.label }}</p>
+                                        {% for ramp in group.ramps %}
+                                            <button type="button" class="vs-ramp-option"
+                                                    data-ramp-pk="{{ ramp.pk }}"
+                                                    data-ramp-name="{{ ramp.name }}"
+                                                    data-ramp-gradient="{{ ramp.gradient }}"
+                                                    {% if ramp.selected %}aria-current="true"{% endif %}>
+                                                <span class="vs-ramp-option-swatch"
+                                                      style="background: {{ ramp.gradient }};"></span>
+                                                <span class="vs-ramp-option-name">{{ ramp.name }}</span>
+                                            </button>
+                                        {% endfor %}
+                                    {% empty %}
+                                        <p class="vs-ramp-group">
+                                            {% trans "No color ramps yet." %}
+                                            <a href="{{ ramp_catalog_url }}">{% trans "Add one" %}</a>
+                                        </p>
+                                    {% endfor %}
+                                </div>
+                            </div>
                         </div>
-                        <span class="vs-ramp-swatch" id="vs-ramp-swatch"></span>
                     </div>
 
                     <div class="vs-field-row">
@@ -377,7 +513,20 @@
                     <template id="vs-stop-row-template">
                         {% include "core/_styling_stop_row.html" with value="" color="" %}
                     </template>
-                    <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
+                    <div class="vs-stop-tools">
+                        <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
+                        {% comment %}
+                            Reversal lives here rather than in the ramp menu,
+                            where QGIS puts it. There the ramp is the live
+                            style; under ADR 0022 it is only a seed and the
+                            snapshot is the truth — so reversing the snapshot
+                            reverses hand-tuned stops and pinned thresholds
+                            too, not only freshly generated ones.
+                        {% endcomment %}
+                        <button type="button" class="vs-inline-button" id="vs-reverse-stops">
+                            {% trans "Reverse colors" %}
+                        </button>
+                    </div>
 
                     <div class="vs-actions">
                         <button type="submit" name="action" value="save-style" class="button">
@@ -512,7 +661,6 @@
         </aside>
     </div>
 
-    {{ ramp_gradients|json_script:"vs-ramp-gradients" }}
     {{ preview.config|json_script:"vs-preview-config" }}
 {% endblock %}
 
@@ -524,12 +672,10 @@
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            const rampGradients = JSON.parse(
-                document.getElementById('vs-ramp-gradients').textContent
-            );
             const form = document.getElementById('vs-style-form');
-            const rampSelect = form.querySelector('[name="ramp"]');
-            const rampSwatch = document.getElementById('vs-ramp-swatch');
+            const rampInput = document.getElementById('vs-ramp-input');
+            const rampToggleBar = document.getElementById('vs-ramp-toggle-bar');
+            const rampToggleName = document.getElementById('vs-ramp-toggle-name');
             const modeSelect = form.querySelector('[name="mode"]');
             const stepsField = document.getElementById('vs-steps-field');
             const stepsInput = form.querySelector('[name="steps"]');
@@ -548,11 +694,44 @@
             const stopsUrl = '{{ stops_url }}';
             let mapPreview = null;
 
-            function renderRampSwatch() {
-                const gradient = rampGradients[rampSelect.value] || '';
-                rampSwatch.style.background = gradient;
-                rampSwatch.style.visibility = gradient ? 'visible' : 'hidden';
+            /**
+             Picking a ramp only picks it — "Apply ramp" is still the one thing
+             that fills the stops table. Each option carries its own gradient,
+             so the toggle repaints from the row that was clicked and the page
+             needs no lookup table beside the markup.
+             **/
+
+            function selectRamp(option) {
+                rampInput.value = option.dataset.rampPk;
+                rampToggleName.textContent = option.dataset.rampName;
+                rampToggleBar.style.background = option.dataset.rampGradient;
+                // Scoped to the menu the option lives in, not the document:
+                // Tippy owns that subtree and it is not always where the
+                // markup put it.
+                option.parentElement.querySelectorAll('.vs-ramp-option').forEach(
+                    function (other) {
+                        other.removeAttribute('aria-current');
+                    }
+                );
+                if (option.dataset.rampPk) {
+                    option.setAttribute('aria-current', 'true');
+                }
             }
+
+            /**
+             Delegated from the document because the dropdown's content is not
+             in the DOM at load: the w-dropdown controller hands the subtree to
+             Tippy, which detaches it while the menu is closed and re-parents it
+             on open. Listeners bound per option at startup would bind to
+             nothing, or to nodes that are about to be replaced.
+             **/
+
+            document.addEventListener('click', function (event) {
+                const option = event.target.closest('.vs-ramp-option');
+                if (option) {
+                    selectRamp(option);
+                }
+            });
 
             function toggleSteps() {
                 const stepped = modeSelect.value === 'stepped';
@@ -733,6 +912,26 @@
             });
 
             /**
+             Reverse the colors against fixed values, which is what "reverse a
+             ramp" means once the ramp has been applied. Stepped snapshots
+             survive it because they are a list of doubled class colors, and
+             reversing a doubled list is still a doubled list — the class
+             boundaries stay paired and the values stay ascending.
+             **/
+
+            document.getElementById('vs-reverse-stops').addEventListener('click', function () {
+                const rows = [...body.querySelectorAll('.vs-stop-row')];
+                const colors = rows.map(function (row) {
+                    return row.querySelector('[name="stop_color"]').value;
+                }).reverse();
+                rows.forEach(function (row, i) {
+                    row.querySelector('[name="stop_color"]').value = colors[i];
+                    syncPicker(row);
+                });
+                renderPreview();
+            });
+
+            /**
              Applying a ramp asks the server for the stops it would generate
              and fills the form with them — the same generate_stops() the
              model's apply_ramp() runs, so there is one implementation of the
@@ -741,7 +940,7 @@
              **/
 
             async function applyRamp() {
-                if (!rampSelect.value) {
+                if (!rampInput.value) {
                     showApplyError(applyError.dataset.pickRamp);
                     return;
                 }
@@ -749,7 +948,7 @@
                     return;
                 }
                 const params = new URLSearchParams({
-                    ramp: rampSelect.value,
+                    ramp: rampInput.value,
                     mode: modeSelect.value
                 });
                 if (modeSelect.value === 'stepped') {
@@ -834,9 +1033,7 @@
             }
 
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
-            rampSelect.addEventListener('change', renderRampSwatch);
             modeSelect.addEventListener('change', toggleSteps);
-            renderRampSwatch();
             toggleSteps();
             initMap();
             renderPreview();
