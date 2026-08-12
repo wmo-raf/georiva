@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "How the Django suite is split across CI jobs. One source of truth, read",
+    "twice: .github/workflows/ci.yml turns a shard index into test labels with",
+    "jq, and core/tests/test_shard_partition.py proves the split still covers",
+    "every test. JSON rather than a Python module because georiva/__init__.py",
+    "imports celery, and the CI runner resolving these labels has no celery.",
+    "",
+    "Balanced by measured time, not by test count — the two disagree sharply.",
+    "organisations is 370 tests and 170s because its sweep walks every",
+    "registered admin route; sources is 403 tests and 82s. Splitting on counts",
+    "produced shards of 99s, 253s and 171s from near-identical totals.",
+    "",
+    "Per-app test seconds when this was last measured, on one developer machine",
+    "against the CI service images. Re-measure before trusting them; the useful",
+    "part is the ratios:",
+    "  organisations 170 | ingestion 89 | sources 82 | core 74",
+    "  virtual_zarr   43 | wmts      31 | everything else together ~26",
+    "",
+    "Shard 0 is deliberately the lightest. It carries the work no other shard",
+    "repeats — the prod image build, the missing-migration check, and the only",
+    "write of the build cache — so its tests have to fit in the slack, or those",
+    "extras land on the critical path.",
+    "",
+    "Apps may be left out only if they hold no tests. Nothing enforces the",
+    "balance, but the guard test enforces the coverage: add a test to an app",
+    "named in no shard and it fails."
+  ],
+  "shards": [
+    [
+      "georiva.core",
+      "georiva.virtual_zarr",
+      "georiva.wmts"
+    ],
+    [
+      "georiva.organisations",
+      "georiva.pages",
+      "georiva.edr"
+    ],
+    [
+      "georiva.sources",
+      "georiva.ingestion",
+      "georiva.processing",
+      "georiva.geoprocessing",
+      "georiva.accounts",
+      "georiva.stac",
+      "georiva.analysis"
+    ]
+  ]
+}

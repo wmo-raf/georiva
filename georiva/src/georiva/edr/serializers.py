@@ -20,9 +20,10 @@ Temporal values strategy:
 
 from itertools import groupby
 
+from rest_framework import serializers
+
 from georiva.core.models import Collection, Item
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
-from rest_framework import serializers
 
 # =============================================================================
 # Base URL mixin

@@ -42,9 +42,16 @@ class GeoRivaTestRunner(DiscoverRunner):
         taken inside ``super().setup_databases()``, before this runs, so they do
         not inherit the table — the idempotent creation in ``PolymorphicHealthTests``
         stays as the fallback for those.
+
+        ``old_config`` is empty when Django built no test database, which happens
+        for any run whose tests are all ``SimpleTestCase``. Creating the table
+        then would issue DDL against whatever the connection actually points at
+        — the real database, unmigrated — so the guard is not defensive tidiness.
+        Narrow label runs became routine when CI started sharding by label.
         """
         old_config = super().setup_databases(**kwargs)
-        self._create_stub_feed_table()
+        if old_config:
+            self._create_stub_feed_table()
         return old_config
 
     def _create_stub_feed_table(self):

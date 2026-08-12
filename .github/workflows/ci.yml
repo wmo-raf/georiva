@@ -25,9 +25,25 @@ permissions:
 
 jobs:
   django:
-    name: Django tests
+    name: Django tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
+    # Each matrix entry is a separate job, so each gets its own Postgres and
+    # Redis below. That is the reason the split is by job rather than by
+    # Django's --parallel: parallel workers get a database each but still share
+    # one Redis, and wmts/tests/test_capabilities_cache.py asserts that no test
+    # inherits another's cached document. Shards share nothing.
+    #
+    # Which labels a shard runs comes from config/test_shards.json — the same
+    # file core/tests/test_shard_partition.py holds to Django's own discovery,
+    # so an app in no shard fails there instead of quietly going untested.
+    strategy:
+      # A failure in shard 1 says nothing about shard 3, and cancelling the
+      # others just hides whether the change broke one thing or everything.
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
 
     services:
       # The app's own database image. Tests connect to it directly rather than
@@ -74,6 +90,21 @@ jobs:
 
       # The expensive layer is keyed on georiva/uv.lock alone, so a source-only
       # change re-runs nothing more than the cheap project-level sync.
+      #
+      # Only the run on main writes the cache, and only from shard 0. PR runs
+      # read it and write nothing.
+      #
+      # This is what the trigger comment at the top already argues: a cache
+      # written on a PR branch is visible only to that PR, so PR writes buy
+      # almost nothing. They cost something real, though — the first sharded
+      # run had shard 0 exporting multi-gigabyte layers while two other shards
+      # read the same cache, and GitHub's cache service answered 503. buildx
+      # treats that as fatal rather than falling back to a cold build, so a
+      # cache hiccup failed a job whose code was fine.
+      #
+      # ignore-error keeps the remaining write from ever doing that again: a
+      # failed cache export should cost the next run some time, not fail this
+      # one.
       - name: Build dev image
         uses: docker/build-push-action@v6
         with:
@@ -85,12 +116,14 @@ jobs:
             UID=${{ steps.ids.outputs.uid }}
             GID=${{ steps.ids.outputs.gid }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ (github.event_name == 'push' && matrix.shard == 0) && 'type=gha,mode=max,ignore-error=true' || '' }}
 
       # prod shares builder and runtime-base with dev, so this is a couple of
       # COPY layers. It is what actually deploys, and it differs from dev in
       # real ways: production settings, non-editable install, gunicorn entry.
+      # One shard proves it builds; the others would prove the same thing again.
       - name: Build prod image
+        if: matrix.shard == 0
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -100,7 +133,7 @@ jobs:
             UID=${{ steps.ids.outputs.uid }}
             GID=${{ steps.ids.outputs.gid }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max,ignore-error=true' || '' }}
 
       - name: Write container environment
         run: |
@@ -117,17 +150,27 @@ jobs:
       #
       # Django builds the test database FROM migrations, so a model changed
       # without one usually passes the suite and only fails in production. The
-      # suite structurally cannot catch this; this step can.
+      # suite structurally cannot catch this; this step can. It is not
+      # shard-specific, so one shard asks and the others do not.
       - name: Check for missing migrations
+        if: matrix.shard == 0
         run: |
           docker run --rm --network host \
             --env-file "$RUNNER_TEMP/ci.env" \
             -v "$PWD/georiva:/georiva/app" \
             georiva:dev manage makemigrations --check --dry-run
 
-      # Serial by design. Django's --parallel would give each worker its own
-      # database but they would still share one Redis, and the capabilities
-      # cache tests assert that no test inherits another's cached document.
+      - name: Resolve this shard's test labels
+        id: labels
+        run: |
+          labels=$(jq -r ".shards[${{ matrix.shard }}] | join(\" \")" \
+            georiva/src/georiva/config/test_shards.json)
+          test -n "$labels" || { echo "shard ${{ matrix.shard }} has no labels"; exit 1; }
+          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          echo "shard ${{ matrix.shard }}: $labels"
+
+      # Serial *within* a shard. Parallelism here is the matrix above, which
+      # gives each shard its own Redis; --parallel would not.
       #
       # --noinput is not decoration: on a leftover test database the runner
       # prompts, and with no tty attached that is an EOFError, not a failure
@@ -137,7 +180,7 @@ jobs:
           docker run --rm --network host \
             --env-file "$RUNNER_TEMP/ci.env" \
             -v "$PWD/georiva:/georiva/app" \
-            georiva:dev manage test --noinput --verbosity 2
+            georiva:dev manage test --noinput --verbosity 2 ${{ steps.labels.outputs.labels }}
 
   titiler:
     name: Titiler tests
