@@ -42,8 +42,8 @@ def _coerce(field, value):
         return value
     try:
         return _SCALAR_COERCERS[field.type](value)
-    except (TypeError, ValueError):
-        raise ValueError(f"ConfigField '{field.key}': '{value}' is not a valid {field.type}")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"ConfigField '{field.key}': '{value}' is not a valid {field.type}") from exc
 
 
 @dataclass(frozen=True)

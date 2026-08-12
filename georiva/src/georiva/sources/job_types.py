@@ -52,7 +52,7 @@ class LoaderJobType(JobType):
         try:
             data_feed = DataFeed.objects.get(pk=job.data_feed_id)
         except DataFeed.DoesNotExist:
-            raise ValueError(f"DataFeed {job.data_feed_id} not found.")
+            raise ValueError(f"DataFeed {job.data_feed_id} not found.") from None
 
         job.data_feed = data_feed
         job.save(update_fields=["data_feed"])
@@ -61,7 +61,7 @@ class LoaderJobType(JobType):
             try:
                 collections = [Collection.objects.get(pk=job.collection_id)]
             except Collection.DoesNotExist:
-                raise ValueError(f"Collection {job.collection_id} not found.")
+                raise ValueError(f"Collection {job.collection_id} not found.") from None
         else:
             collections = [link.collection for link in data_feed.collection_links.select_related("collection__catalog")]
 

@@ -742,7 +742,7 @@ async def _proxy_get_capabilities(request: Request, org_slug: str, params: dict[
             "NoApplicableCode",
             None,
             "The capabilities document is unavailable — the metadata service could not be reached",
-        )
+        ) from e
 
     if response.status_code != 200:
         raise _translate_capabilities_error(response.status_code)

@@ -116,7 +116,7 @@ class Command(BaseCommand):
                 slug=collection_slug,
             )
         except Collection.DoesNotExist:
-            raise CommandError(f"Collection not found: {collection_arg}")
+            raise CommandError(f"Collection not found: {collection_arg}") from None
 
         # Active variables to consider — optionally filtered by slug
         variables_qs = collection.variables.filter(is_active=True)

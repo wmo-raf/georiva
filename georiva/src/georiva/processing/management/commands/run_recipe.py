@@ -62,7 +62,7 @@ class Command(BaseCommand):
             try:
                 selector.update(json.loads(options["selector_json"]))
             except json.JSONDecodeError as e:
-                raise CommandError(f"Invalid --selector-json: {e}")
+                raise CommandError(f"Invalid --selector-json: {e}") from e
 
         results = run(recipe, selector, dispatch=not options["sync"])
 

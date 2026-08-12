@@ -38,7 +38,7 @@ class ColorRampModelTests(TestCase):
     def _ramp(self, hexes, *, ramp_type=ColorRamp.RampType.SEQUENTIAL, positions=None):
         ramp = ColorRamp.objects.create(name="Test ramp", ramp_type=ramp_type)
         positions = positions or [None] * len(hexes)
-        for i, (hex_value, position) in enumerate(zip(hexes, positions)):
+        for i, (hex_value, position) in enumerate(zip(hexes, positions, strict=True)):
             ColorRampStop.objects.create(ramp=ramp, hex_value=hex_value, position=position, sort_order=i)
         return ramp
 

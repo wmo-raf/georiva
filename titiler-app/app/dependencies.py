@@ -146,7 +146,7 @@ def parse_iso_datetime(value: str, param_name: str) -> datetime:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid {param_name} — expected ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)",
-        )
+        ) from None
 
 
 # ---------------------------------------------------------------------------

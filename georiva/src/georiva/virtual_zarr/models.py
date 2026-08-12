@@ -333,7 +333,10 @@ class VirtualZarrManifest(TimeStampedModel):
     # Dataset access
     # -------------------------------------------------------------------------
 
-    def open_dataset(self, *, internal: bool = True, chunks: dict | None = {}):
+    # `chunks={}` is not the mutable-default bug B006 catches: it is never
+    # mutated, only handed to xr.open_zarr, and to xarray `{}` and `None` mean
+    # different things — dask with default chunk sizes, versus no dask at all.
+    def open_dataset(self, *, internal: bool = True, chunks: dict | None = {}):  # noqa: B006
         """
         Open this variable's Icechunk repo as a lazy xarray Dataset.
 

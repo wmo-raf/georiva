@@ -555,7 +555,7 @@ def feed_product_edit(request, feed_pk, product_pk):
             "product": product,
             "definition": definition,
             "display_form": display_form,
-            "collection_pairs": list(zip(collections, collection_forms)),
+            "collection_pairs": list(zip(collections, collection_forms, strict=True)),
             "config_form": config_form,
             "is_scheduled": is_scheduled,
             "interval_value": (
@@ -1154,7 +1154,7 @@ def build_product_config_form(definition):
         try:
             self.cleaned_config = definition.validate_config(raw)
         except ValueError as exc:
-            raise forms.ValidationError(str(exc))
+            raise forms.ValidationError(str(exc)) from exc
         return cleaned
 
     attrs["clean"] = clean
@@ -1311,7 +1311,7 @@ def wizard_step1_catalog(request, model_name):
         "georivasources/wizard_step1_catalog.html",
         {
             "breadcrumbs_items": breadcrumbs,
-            "header_title": "%s — %s" % (verbose_name, _("Step 1 of 3 — Catalog")),
+            "header_title": f"{verbose_name} — {_('Step 1 of 3 — Catalog')}",
             "header_icon": "folder-open-inverse",
             "model_name": model_name,
             "source_verbose_name": verbose_name,
@@ -1376,7 +1376,7 @@ def wizard_step2_feed(request, model_name):
         "georivasources/wizard_step2_feed.html",
         {
             "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Step 2 of 3 — Feed Details")),
-            "header_title": "%s — %s" % (verbose_name, _("Step 2 of 3 — Feed Details")),
+            "header_title": f"{verbose_name} — {_('Step 2 of 3 — Feed Details')}",
             "header_icon": "file-import",
             "model_name": model_name,
             "source_verbose_name": verbose_name,
@@ -1509,7 +1509,7 @@ def wizard_step3_collections(request, model_name):
         "georivasources/wizard_step3_collections.html",
         {
             "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Step 3 of 3 — Collections")),
-            "header_title": "%s — %s" % (verbose_name, _("Step 3 of 3 — Collections")),
+            "header_title": f"{verbose_name} — {_('Step 3 of 3 — Collections')}",
             "header_icon": "file-import",
             "model_name": model_name,
             "source_verbose_name": verbose_name,
@@ -1668,7 +1668,7 @@ def wizard_step4_products(request, model_name):
         "georivasources/wizard_step4_products.html",
         {
             "breadcrumbs_items": _wizard_breadcrumbs(model_name, verbose_name, _("Step 4 — Derived Products")),
-            "header_title": "%s — %s" % (verbose_name, _("Step 4 — Derived Products")),
+            "header_title": f"{verbose_name} — {_('Step 4 — Derived Products')}",
             "header_icon": "cogs",
             "model_name": model_name,
             "source_verbose_name": verbose_name,

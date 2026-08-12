@@ -194,7 +194,7 @@ class TimeseriesService:
                 f"--collection {variable.collection.catalog.storage_prefix}"
                 f"/{variable.collection.slug} "
                 f"--variable {variable.slug}"
-            )
+            ) from None
 
         return manifest.open_dataset(internal=self._internal, chunks={})
 

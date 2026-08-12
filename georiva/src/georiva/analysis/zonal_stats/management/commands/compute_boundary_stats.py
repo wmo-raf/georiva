@@ -124,7 +124,7 @@ class Command(BaseCommand):
                             with transaction.atomic():
                                 cog_bytes = storage.assets.read_bytes(asset.href)
                                 total_written_asset = 0
-                                for level, boundaries in boundaries_by_level.items():
+                                for boundaries in boundaries_by_level.values():
                                     stats_rows = compute_stats_from_cog_bytes(cog_bytes, boundaries)
                                     written = persist_stats(
                                         item=asset.item,
@@ -196,7 +196,7 @@ class Command(BaseCommand):
                     )
                 ]
             except Collection.DoesNotExist:
-                raise CommandError(f"Collection not found: {options['collection']}")
+                raise CommandError(f"Collection not found: {options['collection']}") from None
 
         raise CommandError("Pass --collection <org/catalog/collection> or --all.")
 
@@ -212,4 +212,4 @@ class Command(BaseCommand):
                 dt = pytz.utc.localize(dt)
             return dt
         except ValueError:
-            raise CommandError(f"Invalid date format: {value!r}. Use ISO format, e.g. 2020-01-01")
+            raise CommandError(f"Invalid date format: {value!r}. Use ISO format, e.g. 2020-01-01") from None

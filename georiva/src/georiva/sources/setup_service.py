@@ -285,15 +285,10 @@ class SourceSetupService:
         seed_stops, stops_error = _validated_palette_stops(var_def.palette_stops)
         seed_warnings = []
         if stops_error:
+            fallback = f"ramp {var_def.palette!r}" if var_def.palette else "grayscale"
             seed_warnings.append(
-                "Variable %s/%s: ignoring palette_stops (%s) — falling back "
-                "to %s"
-                % (
-                    collection.slug,
-                    slug,
-                    stops_error,
-                    f"ramp {var_def.palette!r}" if var_def.palette else "grayscale",
-                )
+                f"Variable {collection.slug}/{slug}: ignoring palette_stops "
+                f"({stops_error}) — falling back to {fallback}"
             )
         if seed_stops:
             seed_min = seed_stops[0]["value"]
@@ -302,15 +297,9 @@ class SourceSetupService:
                 math.isclose(seed_min, var_def.value_range[0]) and math.isclose(seed_max, var_def.value_range[1])
             ):
                 seed_warnings.append(
-                    "Variable %s/%s: declared value_range %s disagrees with "
-                    "palette_stops span (%s, %s) — the stops win"
-                    % (
-                        collection.slug,
-                        slug,
-                        var_def.value_range,
-                        seed_min,
-                        seed_max,
-                    )
+                    f"Variable {collection.slug}/{slug}: declared value_range "
+                    f"{var_def.value_range} disagrees with palette_stops span "
+                    f"({seed_min}, {seed_max}) — the stops win"
                 )
         elif var_def.value_range:
             seed_min, seed_max = var_def.value_range

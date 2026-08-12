@@ -24,7 +24,7 @@ from georiva.organisations.testing import make_org_tree, make_organisation
 def make_ramp(hexes, *, ramp_type=ColorRamp.RampType.SEQUENTIAL, positions=None, name="Test ramp"):
     ramp = ColorRamp.objects.create(name=name, ramp_type=ramp_type)
     positions = positions or [None] * len(hexes)
-    for i, (hex_value, position) in enumerate(zip(hexes, positions)):
+    for i, (hex_value, position) in enumerate(zip(hexes, positions, strict=True)):
         ColorRampStop.objects.create(ramp=ramp, hex_value=hex_value, position=position, sort_order=i)
     return ramp
 

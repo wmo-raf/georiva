@@ -146,7 +146,7 @@ def generate_stops(ramp, value_min: float, value_max: float, mode: str = "contin
 
     return [
         {"value": value_min + position * val_range, "color": _rgba_to_hex(color)}
-        for color, position in zip(colors, positions)
+        for color, position in zip(colors, positions, strict=True)
     ]
 
 
@@ -252,7 +252,8 @@ class ColorRamp(ClusterableModel):
             parts = [f"{stop.css_color()} {i * width:g}% {(i + 1) * width:g}%" for i, stop in enumerate(stops)]
         else:
             parts = [
-                f"{stop.css_color()} {position * 100:g}%" for stop, position in zip(stops, _spread_positions(stops))
+                f"{stop.css_color()} {position * 100:g}%"
+                for stop, position in zip(stops, _spread_positions(stops), strict=True)
             ]
         return f"linear-gradient(to right, {', '.join(parts)})"
 
@@ -402,7 +403,9 @@ class VariableStyle(TimeStampedModel):
                 break
         if "stops" not in errors and self.stops:
             values = [entry["value"] for entry in self.stops]
-            if any(b < a for a, b in zip(values, values[1:])):
+            # strict=False, unlike every other zip here: this is the pairwise
+            # idiom, so the two sides differ in length by one by construction.
+            if any(b < a for a, b in zip(values, values[1:], strict=False)):
                 # Equal neighbours stay legal: stepped snapshots share their
                 # class-boundary values by construction.
                 errors["stops"] = "Stop values must be in ascending order."
