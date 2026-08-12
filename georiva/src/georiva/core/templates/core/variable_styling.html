@@ -74,13 +74,84 @@
             margin-bottom: 0.75rem;
         }
 
-        .vs-ramp-swatch {
-            display: inline-block;
-            width: 160px;
-            height: 14px;
+        /* The ramp picker: a gradient-bar toggle over a grouped swatch menu. */
+        .vs-ramp-field {
+            min-inline-size: 16rem;
+        }
+
+        .vs-ramp-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            inline-size: 100%;
+            padding: 0.4rem 0.5rem;
+            border: 1px solid var(--w-color-border-field-default);
+            border-radius: 3px;
+            background: var(--w-color-surface-field);
+        }
+
+        .vs-ramp-toggle-bar {
+            flex: 1 1 auto;
+            block-size: 18px;
             border-radius: 3px;
             border: 1px solid var(--w-color-border-furniture);
-            vertical-align: middle;
+        }
+
+        .vs-ramp-toggle-name {
+            flex: 0 0 auto;
+            font-weight: 600;
+            color: var(--w-color-text-label);
+        }
+
+        /*
+         * .w-dropdown__content is already a scrolling flex column capped at
+         * 50vh, which is what makes a growing catalog behave — the menu just
+         * scrolls. Only the rows need styling, and Wagtail's own :where(a,
+         * button) rules are zero-specificity so these win without !important.
+         */
+        .vs-ramp-menu {
+            min-inline-size: 15rem;
+        }
+
+        .vs-ramp-option {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            inline-size: 100%;
+            padding: 0.3rem 0.75rem;
+            font-weight: 400;
+            text-align: start;
+        }
+
+        .vs-ramp-option[aria-current="true"] {
+            background: var(--w-color-surface-menu-item-active);
+            font-weight: 700;
+        }
+
+        .vs-ramp-option-swatch {
+            flex: 0 0 auto;
+            inline-size: 22px;
+            block-size: 22px;
+            border-radius: 3px;
+            border: 1px solid var(--w-color-border-furniture);
+        }
+
+        .vs-ramp-option-swatch--none {
+            background: repeating-linear-gradient(
+                45deg,
+                var(--w-color-grey-100) 0 4px,
+                var(--w-color-white) 4px 8px
+            );
+        }
+
+        .vs-ramp-group {
+            margin: 0.5rem 0 0.15rem;
+            padding-inline: 0.75rem;
+            color: var(--w-color-grey-400);
+            font-size: 0.75em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
 
         .vs-stops-table {
@@ -160,6 +231,33 @@
             display: flex;
             gap: 0.75rem;
             margin-top: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        /*
+         * The `hidden` attribute alone loses to any author rule that sets
+         * `display`, and .button sets one — so both toggled controls need this
+         * spelled out.
+         */
+        .vs-apply-ramp[hidden],
+        .vs-unsaved[hidden] {
+            display: none;
+        }
+
+        .vs-unsaved {
+            margin: 0;
+            padding: 0.3rem 0.6rem;
+            border-radius: 3px;
+            background: var(--w-color-warning-100);
+            color: var(--w-color-text-label);
+            font-size: 0.85em;
+        }
+
+        .vs-stop-tools {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
         }
 
         /*
@@ -330,11 +428,70 @@
                             <label for="{{ style_form.name.id_for_label }}">{% trans "Name" %}</label>
                             {{ style_form.name }}
                         </div>
-                        <div class="vs-field">
-                            <label for="{{ style_form.ramp.id_for_label }}">{% trans "Color ramp" %}</label>
-                            {{ style_form.ramp }}
+                        {% comment %}
+                            The ramp picker (#383). A native <option> cannot
+                            render a gradient — Chrome and Safari ignore
+                            background-image on one — so choosing by color at
+                            all means replacing the select. The markup is
+                            Wagtail's own w-dropdown Stimulus contract rather
+                            than the {% templatetag openblock %} dropdown {% templatetag closeblock %} tag, because the
+                            tag renders its toggle label as escaped text and
+                            this toggle has to carry a gradient bar the browser
+                            repaints on every pick.
+
+                            The field itself is unchanged: a hidden input named
+                            `ramp`, so validation and org scoping stay exactly
+                            where they were.
+                        {% endcomment %}
+                        <div class="vs-field vs-ramp-field">
+                            <label id="vs-ramp-label">{% trans "Color ramp" %}</label>
+                            <input type="hidden" name="ramp" id="vs-ramp-input"
+                                   value="{{ selected_ramp.pk|default_if_none:'' }}">
+                            <div class="w-dropdown vs-ramp-dropdown"
+                                 data-controller="w-dropdown"
+                                 data-w-dropdown-hide-on-click-value="true">
+                                <button type="button"
+                                        class="w-dropdown__toggle vs-ramp-toggle"
+                                        data-w-dropdown-target="toggle"
+                                        aria-labelledby="vs-ramp-label vs-ramp-toggle-name">
+                                    <span class="vs-ramp-toggle-bar" id="vs-ramp-toggle-bar"
+                                          {% if selected_ramp %}style="background: {{ selected_ramp.gradient }};"{% endif %}></span>
+                                    <span class="vs-ramp-toggle-name" id="vs-ramp-toggle-name">
+                                        {% if selected_ramp %}{{ selected_ramp.name }}{% else %}{% trans "Choose a ramp" %}{% endif %}
+                                    </span>
+                                    <svg class="icon icon-arrow-down w-dropdown__toggle-icon" aria-hidden="true">
+                                        <use href="#icon-arrow-down"></use>
+                                    </svg>
+                                </button>
+                                <div data-w-dropdown-target="content"
+                                     class="w-dropdown__content vs-ramp-menu" hidden>
+                                    <button type="button" class="vs-ramp-option" data-ramp-pk=""
+                                            data-ramp-name="{% trans 'Choose a ramp' %}" data-ramp-gradient="">
+                                        <span class="vs-ramp-option-swatch vs-ramp-option-swatch--none"></span>
+                                        <span class="vs-ramp-option-name">{% trans "No ramp" %}</span>
+                                    </button>
+                                    {% for group in ramp_groups %}
+                                        <p class="vs-ramp-group">{{ group.label }}</p>
+                                        {% for ramp in group.ramps %}
+                                            <button type="button" class="vs-ramp-option"
+                                                    data-ramp-pk="{{ ramp.pk }}"
+                                                    data-ramp-name="{{ ramp.name }}"
+                                                    data-ramp-gradient="{{ ramp.gradient }}"
+                                                    {% if ramp.selected %}aria-current="true"{% endif %}>
+                                                <span class="vs-ramp-option-swatch"
+                                                      style="background: {{ ramp.gradient }};"></span>
+                                                <span class="vs-ramp-option-name">{{ ramp.name }}</span>
+                                            </button>
+                                        {% endfor %}
+                                    {% empty %}
+                                        <p class="vs-ramp-group">
+                                            {% trans "No color ramps yet." %}
+                                            <a href="{{ ramp_catalog_url }}">{% trans "Add one" %}</a>
+                                        </p>
+                                    {% endfor %}
+                                </div>
+                            </div>
                         </div>
-                        <span class="vs-ramp-swatch" id="vs-ramp-swatch"></span>
                     </div>
 
                     <div class="vs-field-row">
@@ -346,6 +503,19 @@
                             <label for="{{ style_form.steps.id_for_label }}">{% trans "Classes" %}</label>
                             {{ style_form.steps }}
                         </div>
+                        {% comment %}
+                            The same gesture as the one below the stops table.
+                            It is duplicated rather than moved because the two
+                            ends of the form are two different moments: here it
+                            sits beside the ramp and mode that feed it, which is
+                            where an operator who has just changed either one
+                            reaches for it, and the stops table is taller than a
+                            screen.
+                        {% endcomment %}
+                        <button type="button" class="button button-small button-secondary vs-apply-ramp"
+                                data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
+                            {% trans "Apply ramp" %}
+                        </button>
                     </div>
 
                     <h3 class="w-label-2">{% trans "Preview" %}</h3>
@@ -377,7 +547,20 @@
                     <template id="vs-stop-row-template">
                         {% include "core/_styling_stop_row.html" with value="" color="" %}
                     </template>
-                    <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
+                    <div class="vs-stop-tools">
+                        <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
+                        {% comment %}
+                            Reversal lives here rather than in the ramp menu,
+                            where QGIS puts it. There the ramp is the live
+                            style; under ADR 0022 it is only a seed and the
+                            snapshot is the truth — so reversing the snapshot
+                            reverses hand-tuned stops and pinned thresholds
+                            too, not only freshly generated ones.
+                        {% endcomment %}
+                        <button type="button" class="vs-inline-button" id="vs-reverse-stops">
+                            {% trans "Reverse colors" %}
+                        </button>
+                    </div>
 
                     <div class="vs-actions">
                         <button type="submit" name="action" value="save-style" class="button">
@@ -390,10 +573,13 @@
                             work, recoverable by reloading, so the confirm is
                             about the form and not about the database.
                         {% endcomment %}
-                        <button type="button" class="button button-secondary" id="vs-apply-ramp"
+                        <button type="button" class="button button-secondary vs-apply-ramp"
                                 data-confirm="{% trans 'Replace the current stops with stops generated from this ramp?' %}">
                             {% trans "Apply ramp" %}
                         </button>
+                        <p class="vs-unsaved" id="vs-unsaved" hidden>
+                            {% trans "Unsaved — the map shows these stops, the served style still has the old ones." %}
+                        </p>
                     </div>
                     <ul class="vs-errors" id="vs-apply-error" hidden
                         data-pick-ramp="{% trans 'Pick a ramp to apply.' %}"
@@ -512,7 +698,6 @@
         </aside>
     </div>
 
-    {{ ramp_gradients|json_script:"vs-ramp-gradients" }}
     {{ preview.config|json_script:"vs-preview-config" }}
 {% endblock %}
 
@@ -524,12 +709,10 @@
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            const rampGradients = JSON.parse(
-                document.getElementById('vs-ramp-gradients').textContent
-            );
             const form = document.getElementById('vs-style-form');
-            const rampSelect = form.querySelector('[name="ramp"]');
-            const rampSwatch = document.getElementById('vs-ramp-swatch');
+            const rampInput = document.getElementById('vs-ramp-input');
+            const rampToggleBar = document.getElementById('vs-ramp-toggle-bar');
+            const rampToggleName = document.getElementById('vs-ramp-toggle-name');
             const modeSelect = form.querySelector('[name="mode"]');
             const stepsField = document.getElementById('vs-steps-field');
             const stepsInput = form.querySelector('[name="steps"]');
@@ -543,16 +726,99 @@
                 : null;
             const clipWarning = document.getElementById('vs-clip-warning');
             const mapStatus = document.getElementById('vs-map-status');
-            const applyButton = document.getElementById('vs-apply-ramp');
+            const applyButtons = [...document.querySelectorAll('.vs-apply-ramp')];
             const applyError = document.getElementById('vs-apply-error');
+            const unsavedNote = document.getElementById('vs-unsaved');
+
+            /**
+             Two pieces of state the page keeps about itself.
+
+             `appliedSignature` is the ramp, mode and class count the stops in
+             the table were last generated from — the saved style's own on load,
+             the chosen ones after an apply. Apply shows only when pressing it
+             would actually change something: when those inputs have moved on,
+             when the stops have been edited away from what they produced, or
+             when there are no stops at all. Editing counts because otherwise
+             applying would hide itself the moment an operator hand-tuned a
+             stop, leaving no way back to the clean ramp.
+
+             `styleDirty` is the simpler one: anything on this form that the
+             database has not been told about. Applying a ramp writes nothing,
+             and the swatch in the Styles list keeps showing the saved style —
+             so without saying so, the page would show two different palettes
+             and claim both.
+             **/
+
+            let appliedSignature = null;
+            let stopsEdited = false;
+            let styleDirty = false;
+
+            function currentSignature() {
+                return JSON.stringify([
+                    rampInput.value,
+                    modeSelect.value,
+                    modeSelect.value === 'stepped' ? stepsInput.value : ''
+                ]);
+            }
+
+            function refreshState() {
+                const changed = currentSignature() !== appliedSignature
+                    || stopsEdited
+                    || !body.querySelector('.vs-stop-row');
+                applyButtons.forEach(function (button) {
+                    button.hidden = !changed;
+                });
+                unsavedNote.hidden = !styleDirty;
+            }
+
+            function markStopsEdited() {
+                stopsEdited = true;
+                styleDirty = true;
+                refreshState();
+            }
             const stopsUrl = '{{ stops_url }}';
             let mapPreview = null;
 
-            function renderRampSwatch() {
-                const gradient = rampGradients[rampSelect.value] || '';
-                rampSwatch.style.background = gradient;
-                rampSwatch.style.visibility = gradient ? 'visible' : 'hidden';
+            /**
+             Picking a ramp only picks it — "Apply ramp" is still the one thing
+             that fills the stops table. Each option carries its own gradient,
+             so the toggle repaints from the row that was clicked and the page
+             needs no lookup table beside the markup.
+             **/
+
+            function selectRamp(option) {
+                rampInput.value = option.dataset.rampPk;
+                rampToggleName.textContent = option.dataset.rampName;
+                rampToggleBar.style.background = option.dataset.rampGradient;
+                // Scoped to the menu the option lives in, not the document:
+                // Tippy owns that subtree and it is not always where the
+                // markup put it.
+                option.parentElement.querySelectorAll('.vs-ramp-option').forEach(
+                    function (other) {
+                        other.removeAttribute('aria-current');
+                    }
+                );
+                if (option.dataset.rampPk) {
+                    option.setAttribute('aria-current', 'true');
+                }
+                styleDirty = true;
+                refreshState();
             }
+
+            /**
+             Delegated from the document because the dropdown's content is not
+             in the DOM at load: the w-dropdown controller hands the subtree to
+             Tippy, which detaches it while the menu is closed and re-parents it
+             on open. Listeners bound per option at startup would bind to
+             nothing, or to nodes that are about to be replaced.
+             **/
+
+            document.addEventListener('click', function (event) {
+                const option = event.target.closest('.vs-ramp-option');
+                if (option) {
+                    selectRamp(option);
+                }
+            });
 
             function toggleSteps() {
                 const stepped = modeSelect.value === 'stepped';
@@ -699,6 +965,7 @@
                     input.addEventListener('input', function () {
                         syncPicker(row);
                         renderPreview();
+                        markStopsEdited();
                     });
                 });
                 const picker = row.querySelector('.vs-stop-picker');
@@ -706,6 +973,7 @@
                     picker.addEventListener('input', function () {
                         row.querySelector('[name="stop_color"]').value = picker.value;
                         renderPreview();
+                        markStopsEdited();
                     });
                 }
                 const remove = row.querySelector('.vs-remove-stop');
@@ -713,6 +981,7 @@
                     remove.addEventListener('click', function () {
                         row.remove();
                         renderPreview();
+                        markStopsEdited();
                     });
                 }
                 syncPicker(row);
@@ -730,6 +999,28 @@
 
             document.getElementById('vs-add-stop').addEventListener('click', function () {
                 addRow('', '');
+                markStopsEdited();
+            });
+
+            /**
+             Reverse the colors against fixed values, which is what "reverse a
+             ramp" means once the ramp has been applied. Stepped snapshots
+             survive it because they are a list of doubled class colors, and
+             reversing a doubled list is still a doubled list — the class
+             boundaries stay paired and the values stay ascending.
+             **/
+
+            document.getElementById('vs-reverse-stops').addEventListener('click', function () {
+                const rows = [...body.querySelectorAll('.vs-stop-row')];
+                const colors = rows.map(function (row) {
+                    return row.querySelector('[name="stop_color"]').value;
+                }).reverse();
+                rows.forEach(function (row, i) {
+                    row.querySelector('[name="stop_color"]').value = colors[i];
+                    syncPicker(row);
+                });
+                renderPreview();
+                markStopsEdited();
             });
 
             /**
@@ -740,22 +1031,24 @@
              repaints and Save is still the only thing that persists.
              **/
 
-            async function applyRamp() {
-                if (!rampSelect.value) {
+            async function applyRamp(trigger) {
+                if (!rampInput.value) {
                     showApplyError(applyError.dataset.pickRamp);
                     return;
                 }
-                if (readStops().length && !window.confirm(applyButton.dataset.confirm)) {
+                if (readStops().length && !window.confirm(trigger.dataset.confirm)) {
                     return;
                 }
                 const params = new URLSearchParams({
-                    ramp: rampSelect.value,
+                    ramp: rampInput.value,
                     mode: modeSelect.value
                 });
                 if (modeSelect.value === 'stepped') {
                     params.set('steps', stepsInput.value);
                 }
-                applyButton.disabled = true;
+                applyButtons.forEach(function (button) {
+                    button.disabled = true;
+                });
                 try {
                     const response = await fetch(stopsUrl + '?' + params.toString(), {
                         headers: {'Accept': 'application/json'}
@@ -771,11 +1064,20 @@
                         addRow(stop.value, stop.color);
                     });
                     renderPreview();
+                    // The table is now exactly what these inputs produce, so
+                    // Apply has nothing left to do — but the database still
+                    // holds the old snapshot.
+                    appliedSignature = currentSignature();
+                    stopsEdited = false;
+                    styleDirty = true;
+                    refreshState();
                 } catch (error) {
                     console.error('Applying the ramp failed', error);
                     showApplyError(applyError.dataset.unreachable);
                 } finally {
-                    applyButton.disabled = false;
+                    applyButtons.forEach(function (button) {
+                        button.disabled = false;
+                    });
                 }
             }
 
@@ -786,10 +1088,18 @@
                     const item = document.createElement('li');
                     item.textContent = message;
                     applyError.appendChild(item);
+                    // There is one error list but two buttons, at opposite
+                    // ends of a form taller than the screen — so bring it to
+                    // whoever pressed one.
+                    applyError.scrollIntoView({block: 'nearest'});
                 }
             }
 
-            applyButton.addEventListener('click', applyRamp);
+            applyButtons.forEach(function (button) {
+                button.addEventListener('click', function () {
+                    applyRamp(button);
+                });
+            });
 
             document.querySelectorAll('form[data-confirm]').forEach(function (confirmForm) {
                 confirmForm.addEventListener('submit', function (event) {
@@ -834,12 +1144,27 @@
             }
 
             body.querySelectorAll('.vs-stop-row').forEach(wireRow);
-            rampSelect.addEventListener('change', renderRampSwatch);
-            modeSelect.addEventListener('change', toggleSteps);
-            renderRampSwatch();
+            modeSelect.addEventListener('change', function () {
+                toggleSteps();
+                styleDirty = true;
+                refreshState();
+            });
+            stepsInput.addEventListener('input', function () {
+                styleDirty = true;
+                refreshState();
+            });
+            form.querySelector('[name="name"]').addEventListener('input', function () {
+                styleDirty = true;
+                refreshState();
+            });
+
             toggleSteps();
             initMap();
             renderPreview();
+            // The stops on the page came from the saved style, so this is what
+            // they were generated from until something says otherwise.
+            appliedSignature = currentSignature();
+            refreshState();
         });
     </script>
 {% endblock %}

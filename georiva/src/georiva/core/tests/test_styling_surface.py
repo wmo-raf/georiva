@@ -213,6 +213,82 @@ class VariableStylingFormTests(StylingSurfaceTestCase):
         response = self.client.get(self.form_url)
         self.assertNotContains(response, "Foreign Rainfall")
 
+    # -- the ramp picker (#383) --------------------------------------------
+
+    def test_ramps_reach_the_page_grouped_by_type(self):
+        """Grouping is the picker's one piece of teaching: an anomaly field
+        wants a diverging ramp and a total wants a sequential one, and a flat
+        list leaves that to memory."""
+        diverging = make_ramp("House Anomaly", organisation=self.org)
+        diverging.ramp_type = ColorRamp.RampType.DIVERGING
+        diverging.save()
+
+        response = self.client.get(self.form_url)
+        groups = response.context["ramp_groups"]
+
+        self.assertEqual(
+            [group["label"] for group in groups], ["Sequential", "Diverging"]
+        )
+        names = {
+            group["label"]: [ramp["name"] for ramp in group["ramps"]]
+            for group in groups
+        }
+        self.assertIn("viridis", names["Sequential"])
+        self.assertIn("RdBu", names["Diverging"])
+        # Each ramp appears under its own type and nowhere else.
+        self.assertIn("House Anomaly", names["Diverging"])
+        self.assertNotIn("House Anomaly", names["Sequential"])
+
+    def test_every_ramp_carries_its_own_gradient(self):
+        # The markup needs no lookup table beside it, and the browser repaints
+        # the toggle from the row it was handed.
+        response = self.client.get(self.form_url)
+        ramps = [
+            ramp
+            for group in response.context["ramp_groups"]
+            for ramp in group["ramps"]
+        ]
+        self.assertTrue(ramps)
+        self.assertTrue(all(ramp["gradient"].startswith("linear-gradient") for ramp in ramps))
+
+    def test_another_organisations_ramp_is_in_no_group(self):
+        response = self.client.get(self.form_url)
+        names = [
+            ramp["name"]
+            for group in response.context["ramp_groups"]
+            for ramp in group["ramps"]
+        ]
+        self.assertIn("House Rainfall", names)
+        self.assertNotIn("Foreign Rainfall", names)
+
+    def test_the_saved_ramp_comes_back_marked_selected(self):
+        VariableStyle.objects.create(
+            variable=self.variable, name="Official", slug="official",
+            is_default=True, ramp=self.org_ramp,
+        )
+        response = self.client.get(self.form_url)
+        self.assertEqual(response.context["selected_ramp"]["name"], "House Rainfall")
+
+    def test_a_styleless_variable_has_no_selected_ramp(self):
+        response = self.client.get(self.form_url)
+        self.assertIsNone(response.context["selected_ramp"])
+
+    def test_the_ramp_still_saves_through_the_hidden_input(self):
+        """The picker is presentation: the field is still a scoped
+        ModelChoiceField named `ramp`, so nothing about saving moved."""
+        response = self.client.post(self.form_url, {
+            "action": "save-style",
+            "style_slug": "",
+            "name": "Official",
+            "ramp": str(self.org_ramp.pk),
+            "mode": VariableStyle.Mode.CONTINUOUS,
+            "steps": "",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            VariableStyle.objects.get(variable=self.variable).ramp, self.org_ramp
+        )
+
     # -- range -------------------------------------------------------------
 
     def test_saving_the_range_updates_the_variable(self):
