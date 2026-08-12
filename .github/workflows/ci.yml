@@ -1,0 +1,158 @@
+name: CI
+
+# The test gate. Two suites run in parallel: the Django suite inside the real
+# dev image, and the Titiler app's pytest suite on the bare runner.
+#
+# `push: main` is not redundant with `pull_request`. A GHA cache written on a PR
+# branch is visible only to that PR; only entries written on the default branch
+# are readable from every other branch. Main's runs are what keep PR builds warm.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded PR runs when a fixup is pushed, but never cancel a run on
+# main — that would throw away both the "main is green" signal and the cache
+# write every subsequent PR reads from.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  django:
+    name: Django tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      # The app's own database image. Tests connect to it directly rather than
+      # through PgBouncer, which cannot CREATE DATABASE — the same reason
+      # `make dev-test` overrides DATABASE_URL locally.
+      postgres:
+        image: timescale/timescaledb-ha:pg18
+        env:
+          POSTGRES_USER: georiva
+          POSTGRES_PASSWORD: georiva
+          POSTGRES_DB: georiva
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U georiva"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+      # Not a convenience: the suite exercises the real django-redis cache
+      # backend, and wmts/tests/test_capabilities_cache.py asserts against it.
+      redis:
+        image: redis:alpine3.22
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The dev image ships no source — compose bind-mounts it, and so do we
+      # below. Building as the runner's own user keeps that mount writable.
+      - name: Resolve runner uid/gid
+        id: ids
+        run: |
+          echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
+          echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # The expensive layer is keyed on georiva/uv.lock alone, so a source-only
+      # change re-runs nothing more than the cheap project-level sync.
+      - name: Build dev image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: dev
+          tags: georiva:dev
+          load: true
+          build-args: |
+            UID=${{ steps.ids.outputs.uid }}
+            GID=${{ steps.ids.outputs.gid }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # prod shares builder and runtime-base with dev, so this is a couple of
+      # COPY layers. It is what actually deploys, and it differs from dev in
+      # real ways: production settings, non-editable install, gunicorn entry.
+      - name: Build prod image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: prod
+          tags: georiva:prod
+          build-args: |
+            UID=${{ steps.ids.outputs.uid }}
+            GID=${{ steps.ids.outputs.gid }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Write container environment
+        run: |
+          cat > "$RUNNER_TEMP/ci.env" <<'EOF'
+          DATABASE_URL=timescalegis://georiva:georiva@localhost:5432/georiva
+          REDIS_URL=redis://localhost:6379/0
+          PYTHONDONTWRITEBYTECODE=1
+          GEORIVA_LOG_LEVEL=WARNING
+          EOF
+
+      # `manage` execs manage.py directly, skipping the entrypoint's
+      # migrate/collectstatic/setup_minio startup path. --network host reaches
+      # the service containers on localhost.
+      #
+      # Django builds the test database FROM migrations, so a model changed
+      # without one usually passes the suite and only fails in production. The
+      # suite structurally cannot catch this; this step can.
+      - name: Check for missing migrations
+        run: |
+          docker run --rm --network host \
+            --env-file "$RUNNER_TEMP/ci.env" \
+            -v "$PWD/georiva:/georiva/app" \
+            georiva:dev manage makemigrations --check --dry-run
+
+      # Serial by design. Django's --parallel would give each worker its own
+      # database but they would still share one Redis, and the capabilities
+      # cache tests assert that no test inherits another's cached document.
+      #
+      # --noinput is not decoration: on a leftover test database the runner
+      # prompts, and with no tty attached that is an EOFError, not a failure
+      # message you can read.
+      - name: Run Django test suite
+        run: |
+          docker run --rm --network host \
+            --env-file "$RUNNER_TEMP/ci.env" \
+            -v "$PWD/georiva:/georiva/app" \
+            georiva:dev manage test --noinput --verbosity 2
+
+  titiler:
+    name: Titiler tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # No services and no GDAL image: the suite drives the app at the HTTP
+    # boundary with Redis and Django faked and storage pointed at a tmpdir.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Run Titiler test suite
+        run: make titiler-test
