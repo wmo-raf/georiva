@@ -429,8 +429,13 @@
             {# escapejs: the URL carries query params, and `&amp;` would break JSON.parse #}
             "martinBoundaryStatsUrl": "{{ martin_boundary_stats_url|escapejs }}",
             "boundaryStatsLevels":  {{ boundary_stats_levels|to_json }},
-            {# Per-variable availability: the Boundaries control only means something where rows exist. #}
-            "boundaryLevelsByVariable": {{ boundary_levels_by_variable|to_json }}
+            {% comment %}
+                Per-variable availability: the Boundaries control only means
+                something where rows exist. |safe for the same reason as
+                textureUrls above — the keys are variable slugs, and autoescaping
+                their quotes into `&quot;` breaks JSON.parse over the whole block.
+            {% endcomment %}
+            "boundaryLevelsByVariable": {{ boundary_levels_by_variable|to_json|default:'{}'|safe }}
         }
     </script>
 

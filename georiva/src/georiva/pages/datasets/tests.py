@@ -220,6 +220,12 @@ class ItemDetailBoundaryAvailabilityTests(TestCase):
     def _availability(self):
         return self._response().context["boundary_levels_by_variable"]
 
+    def _config(self):
+        body = self._response().content.decode()
+        start = body.index('id="grItemConfig"')
+        start = body.index(">", start) + 1
+        return json.loads(body[start : body.index("</script>", start)])
+
     # -- assertions --------------------------------------------------------
 
     def test_no_aggregates_means_no_boundaries_button(self):
@@ -261,3 +267,16 @@ class ItemDetailBoundaryAvailabilityTests(TestCase):
         self._stats(self.variable, self.level_1)
 
         self.assertEqual(self._availability(), {self.variable.slug: [1, 2]})
+
+    def test_the_config_block_survives_a_populated_availability_map(self):
+        """The map reads availability out of the JSON config, so the block has
+        to parse once it carries any.
+
+        An empty dict renders as `{}` and parses whatever the template does with
+        it; only a populated one has quoted keys to autoescape into `&quot;`, and
+        that breaks JSON.parse for the whole block — the map never initialises,
+        not just the boundary control.
+        """
+        self._stats(self.variable, self.level_1)
+
+        self.assertEqual(self._config()["boundaryLevelsByVariable"], {self.variable.slug: [1]})
