@@ -159,10 +159,14 @@
                 <div class="gr-map-canvas" id="grMapCanvas">
                     <div id="grMap"></div>
 
-                    {# Layer mode switcher — floats inside map, only if boundary stats configured #}
+                    {# Layer mode switcher — floats inside map, only where aggregates actually exist.
+                       boundary_stats_levels is the union across variables; the switcher and the
+                       individual pills are hidden for variables that have no rows at that level. #}
                     {% if boundary_stats_levels %}
                         <div class="gr-map-layer-controls">
-                            <div class="gr-map-layer-switcher" id="grLayerSwitcher">
+                            <div class="gr-map-layer-switcher"
+                                 id="grLayerSwitcher"
+                                 {% if not boundary_levels_active %}style="display:none"{% endif %}>
                                 <button type="button" class="gr-map-layer-btn is-active" data-mode="raster">
                                     <i class="bi bi-image"></i> {% trans "Raster" %}
                                 </button>
@@ -174,8 +178,9 @@
                                 <div class="gr-map-level-pills">
                                     {% for level in boundary_stats_levels %}
                                         <button type="button"
-                                                class="gr-map-level-pill {% if forloop.first %}is-active{% endif %}"
-                                                data-level="{{ level }}">
+                                                class="gr-map-level-pill {% if level == boundary_levels_active.0 %}is-active{% endif %}"
+                                                data-level="{{ level }}"
+                                                {% if level not in boundary_levels_active %}style="display:none"{% endif %}>
                                             Level {{ level }}
                                         </button>
                                     {% endfor %}
@@ -423,7 +428,9 @@
             "textureUrls":          {{ texture_urls|to_json|default:'{}'|safe }},
             {# escapejs: the URL carries query params, and `&amp;` would break JSON.parse #}
             "martinBoundaryStatsUrl": "{{ martin_boundary_stats_url|escapejs }}",
-            "boundaryStatsLevels":  {{ boundary_stats_levels|to_json }}
+            "boundaryStatsLevels":  {{ boundary_stats_levels|to_json }},
+            {# Per-variable availability: the Boundaries control only means something where rows exist. #}
+            "boundaryLevelsByVariable": {{ boundary_levels_by_variable|to_json }}
         }
     </script>
 

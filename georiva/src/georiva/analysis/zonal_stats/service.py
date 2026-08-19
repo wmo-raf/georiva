@@ -180,3 +180,45 @@ def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
     from adminboundarymanager.models import AdminBoundary
 
     return {level: list(AdminBoundary.objects.filter(level=level)) for level in levels}
+
+
+# ---------------------------------------------------------------------------
+# Availability — what a viewer can actually be shown
+# ---------------------------------------------------------------------------
+
+
+def available_levels_by_variable(item, collection) -> dict[str, list[int]]:
+    """
+    Return ``{variable_slug: [level, ...]}`` for the aggregates that exist
+    for this item and are still wanted by the collection.
+
+    A level counts as available only when it is both listed in the
+    collection's ``boundary_stats_levels`` (de-configuring a level hides it,
+    even if stale rows survive) and backed by at least one row with a
+    non-null mean (a run that covered nothing would otherwise promise a
+    blank choropleth).
+
+    One query. Filtering on ``time`` prunes the hypertable to the item's own
+    chunk, which the (boundary, variable, item) index cannot do on its own.
+    """
+    wanted = set(getattr(collection, "boundary_stats_levels", None) or [])
+    if not wanted:
+        return {}
+
+    from .models import BoundaryZonalStats
+
+    rows = (
+        BoundaryZonalStats.objects.filter(
+            item=item,
+            time=item.time,
+            mean__isnull=False,
+            boundary__level__in=wanted,
+        )
+        .values_list("variable__slug", "boundary__level")
+        .distinct()
+    )
+
+    by_variable: dict[str, list[int]] = {}
+    for slug, level in rows:
+        by_variable.setdefault(slug, []).append(level)
+    return {slug: sorted(levels) for slug, levels in by_variable.items()}
