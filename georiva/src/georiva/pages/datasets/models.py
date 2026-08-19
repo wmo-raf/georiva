@@ -7,6 +7,7 @@ from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.contrib.routable_page.models import RoutablePageMixin, path
 from wagtail.models import Page
 
+from georiva.analysis.zonal_stats.service import available_levels_by_variable
 from georiva.core.machine_plane import (
     MARTIN_PREFIX,
     martin_boundary_stats_url,
@@ -365,6 +366,15 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         if active_var_slug not in cog_slugs:
             active_var_slug = cog_slugs[0] if cog_slugs else ""
 
+        # Boundary aggregates the viewer can actually be shown, per variable.
+        # The control is configuration-gated *and* data-gated: a level appears
+        # only where rows exist for it.
+        boundary_levels_by_variable = available_levels_by_variable(item, collection)
+        boundary_levels_shown = sorted({level for levels in boundary_levels_by_variable.values() for level in levels})
+        # Initial state is rendered truthfully for the active variable so the
+        # control never flashes in before JS can hide it.
+        boundary_levels_active = boundary_levels_by_variable.get(active_var_slug, [])
+
         # Previous / next item by time
         prev_item = (
             Item.objects.filter(collection=collection, time__lt=item.time).order_by("-time").values("pk").first()
@@ -426,7 +436,9 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "collection_url": f"{self.url}{catalog.slug}/{collection.slug}/",
                 "catalog_slug": catalog.slug,
                 "collection_slug": collection.slug,
-                "boundary_stats_levels": collection.boundary_stats_levels or [],
+                "boundary_stats_levels": boundary_levels_shown,
+                "boundary_levels_by_variable": boundary_levels_by_variable,
+                "boundary_levels_active": boundary_levels_active,
                 "org_slug": org_slug_of(collection),
                 # Tenancy travels in the URL Django writes, not in anything the map
                 # decides: the tile servers see no usable Host (#272).
