@@ -38,7 +38,8 @@
     - [5.2 Tile Serving with Titiler](#52-tile-serving-with-titiler)
     - [5.3 On-Demand Encoded Textures for Frontend Shading Libraries](#53-on-demand-encoded-textures-for-frontend-shading-libraries)
     - [5.4 STAC Browser](#54-stac-browser)
-    - [5.5 Vector Tiles with Martin](#55-vector-tiles-with-martin)
+    - [5.5 WMTS for OGC Clients](#55-wmts-for-ogc-clients)
+    - [5.6 Vector Tiles with Martin](#56-vector-tiles-with-martin)
 - [6. Staging & Derivation](#6-staging--derivation)
     - [6.1 The Two Tiers](#61-the-two-tiers)
     - [6.2 The Derivation Engine](#62-the-derivation-engine)
@@ -160,7 +161,7 @@ them and cannot be opted out of:
 | **Ingestion Pipeline**   | Celery workers validate, extract, convert units, clip to boundaries, write COGs, and index STAC Items. Runs on `georiva-ingestion`.                      | `ingestion/`                   |
 | **Storage & Data Core**  | The STAC-aligned models across two tiers, plus lineage and feed/product configuration. PostgreSQL + TimescaleDB + PostGIS; MinIO for binary assets.      | `core/`, `staging/`            |
 | **Derivation**           | The generic engine that turns Staging (and Published) inputs into new Published products via declarative recipes. Runs on `georiva-processing`.          | `processing/`, `geoprocessing/`|
-| **Data Serving**         | STAC API and EDR for discovery, Titiler for raster tiles and on-demand textures, Martin for vector tiles, WMTS capabilities, and the Wagtail frontend.   | `stac/`, `edr/`, `wmts/`       |
+| **Data Serving**         | STAC API and EDR for discovery, Titiler for raster tiles and on-demand textures, Martin for vector tiles, WMTS for OGC clients, and the Wagtail frontend. | `stac/`, `edr/`, `wmts/`       |
 | **Analysis**             | Compute-on-read: point and area time-series, zonal statistics. Results are returned, not persisted.                                                       | `analysis/`                    |
 | **Tenancy & Access**     | Cuts across all of the above: org-scoped rows, org-first storage paths, visibility tiers, and proxy-level authorization for the machine plane.           | `organisations/`, `accounts/`  |
 
@@ -368,7 +369,26 @@ with no regeneration, no staleness marking, and no mixed old/new serving window
 A standalone STAC Browser service is included in the Docker stack, connected to GeoRiva's STAC API. This provides an
 out-of-the-box discovery and preview interface without requiring custom frontend development.
 
-### 5.5 Vector Tiles with Martin
+### 5.5 WMTS for OGC Clients
+
+Desktop GIS and other OGC tooling speak WMTS rather than XYZ or STAC, so GeoRiva serves it across both halves of the
+stack:
+
+- **Capabilities** — `GET /api/wmts/{org}/WMTSCapabilities.xml`, served by Django (`wmts/`). It is a DRF view so that a
+  presented `grv_` key becomes `request.user` through the project's one identity path, and a member's key widens the
+  advertised layers exactly as their login would.
+- **`GetTile`** — the KVP shim in `titiler-app` at `/titiler/{org}/wmts?REQUEST=GetTile`, which translates WMTS
+  parameters onto the same tile machinery every other raster request uses.
+
+The organisation appears both in the dialled host and in the path, and the host is the authority — the path may only
+agree with it ([ADR-0013](../adr/0013-org-in-the-path-on-the-machine-plane.md)). A mismatch is reported as *absent*,
+not forbidden: which catalogs another institution runs is not the caller's business. The same reasoning shapes the
+error surface, which nginx renders as OWS `ExceptionReport` documents so a WMTS client gets XML it can parse rather
+than an HTML error page — a denial says neither which check failed nor whether anything is there, since distinguishing
+them would answer precisely the question the `private` tier exists to keep quiet
+([ADR-0014](../adr/0014-private-tier-and-per-user-api-keys.md)).
+
+### 5.6 Vector Tiles with Martin
 
 For vector overlays — primarily administrative boundaries used in clipping and zonal statistics — the stack includes a
 **Martin** vector tile server (`georiva-martin`) reading directly from PostGIS. This serves boundary geometries as
@@ -854,9 +874,8 @@ Remaining work, roughly in the order it blocks other things:
 2. **Read-side analysis plugin contract** — formalize the base contract so a third module needs no core changes
    (§11.1).
 3. **Index recipes** — SPI, SPEI, CDD, R95p and friends, which forces the Xclim integration question (§11.4).
-4. **WMTS `GetTile`** — capabilities are served; tile fetching still has to be proxied through Titiler.
-5. **Collection-level virtual Zarr** — multi-variable and collection-level aggregation (§11.5).
-6. **Derivation backpressure** — ordering and coalescing under bulk backfill (§11.3).
+4. **Collection-level virtual Zarr** — multi-variable and collection-level aggregation (§11.5).
+5. **Derivation backpressure** — ordering and coalescing under bulk backfill (§11.3).
 
 Beyond that, three capability areas are designed-for but unbuilt, and appear dashed on Figure 1: ML/forecast
 post-processing, impact-based analysis, and threshold alerting with CAP/MQTT delivery. Each is a recipe family or a new

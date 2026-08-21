@@ -72,7 +72,7 @@ georiva/src/georiva/          # Main Django application
 ├── stac/                     # STAC API (views, serializers, URLs)
 ├── edr/                      # EDR API — metadata plane only (data queries not yet implemented)
 ├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry)
-├── wmts/                     # WMTS capabilities documents (per-org, metadata plane)
+├── wmts/                     # WMTS capabilities (per-org); GetTile lives in titiler-app/app/wmts.py
 ├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk / Icechunk) manifests over COG assets
 ├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)
 ├── accounts/                 # Per-user identity: API keys (grv_…) + DRF auth + account panel
@@ -134,7 +134,8 @@ Defined in `api/urls.py`:
 
 - `/api/stac/` — STAC API (collections, items, search, queryables)
 - `/api/edr/` — Environmental Data Retrieval API (metadata plane only so far)
-- `/api/wmts/<org>/WMTSCapabilities.xml` — WMTS capabilities (GetTile not yet implemented)
+- `/api/wmts/<org>/WMTSCapabilities.xml` — WMTS capabilities; `GetTile` is the KVP shim in `titiler-app`
+  at `/titiler/<org>/wmts?REQUEST=GetTile` (gated by nginx like every other tile route)
 - `/api/jobs/` — Async job status (task_ferry)
 - `/api/analysis/` — Analysis API (e.g. `timeseries/point`, `timeseries/area`)
 - `/api/tile-config/<org>/<catalog>/<collection>/<variable>/` — Tile/render config (machine plane; see ADR 0013)

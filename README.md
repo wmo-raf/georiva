@@ -12,8 +12,8 @@ raster data. Built on Django/Wagtail, it provides a plugin-driven architecture f
 serving it through modern standards-compliant APIs, and enabling analytical workflows on top of it.
 
 > **Status:** Active development — core ingestion, the two-tier STAC data model, the derivation engine, multi-tenancy,
-> STAC API, tile serving (Titiler + Martin), and the analysis modules are built; some areas (EDR data-retrieval plane,
-> WMTS `GetTile`, generic analysis-plugin framework) are still in progress. See
+> STAC API, tile serving (Titiler + Martin), WMTS, and the analysis modules are built; some areas (EDR data-retrieval
+> plane, generic analysis-plugin framework) are still in progress. See
 > the [Architecture Design Document](docs/architecture/README.md) for the as-built design and open discussion points.
 
 ---
@@ -196,7 +196,7 @@ georiva/src/georiva/      # Main Django/Wagtail application
 ├── geoprocessing/        # Pure compute library (algebra, regrid, temporal, zonal) — no Django
 ├── stac/                 # STAC API
 ├── edr/                  # OGC API – EDR (metadata plane)
-├── wmts/                 # WMTS capabilities documents
+├── wmts/                 # WMTS capabilities (GetTile is served by titiler-app)
 ├── analysis/             # Time-series + zonal-statistics modules
 ├── virtual_zarr/         # Per-Variable virtual Zarr (kerchunk / Icechunk) manifests
 ├── visualization/        # Wagtail admin hooks for map/tile config
