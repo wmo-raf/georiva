@@ -4,7 +4,7 @@
 
 ## Overview
 
-GeoRiva is a geospatial data platform that ingests raw Earth observation and meteorological files, processes them into standardized assets (PNGs, COGs, metadata JSON), and serves them via STAC-compliant APIs and visualization layers.
+GeoRiva is a geospatial data platform that ingests raw Earth observation and meteorological files, processes them into standardized Cloud-Optimized GeoTIFFs, and serves them via STAC-compliant APIs and visualization layers.
 
 The system is built around a multi-bucket MinIO storage architecture. Data flows through dedicated buckets based on its lifecycle stage. Ingestion is event-driven — files landing in a bucket automatically trigger processing. MinIO publishes bucket notifications to a **Redis list**, a dedicated consumer process (`georiva-minio-consumer`) drains that list, and processing runs on a **Celery task queue** (`georiva-ingestion`).
 
@@ -41,7 +41,7 @@ Before diving into storage, it helps to understand GeoRiva's data hierarchy:
 
 **Item** → A single observation or forecast timestep in a collection. Each Item has a timestamp, optional reference time, spatial bounds, and one or more Assets.
 
-**Asset** → A processed output file for a single variable at a single time. Assets come in three formats: PNG (visual), COG (data), and JSON (metadata).
+**Asset** → A processed output file for a single variable at a single time. Ingestion writes one COG per variable per timestep. Visualization textures are *not* stored: Titiler derives them on demand from the COG against the variable's current render range (see [ADR-0021](../adr/0021-on-demand-encoded-textures.md)), and the JSON metadata sidecar was removed in [ADR-0024](../adr/0024-remove-the-json-metadata-sidecar.md).
 
 ---
 
@@ -112,12 +112,15 @@ georiva-assets/{org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/{filenam
 **Example:**
 
 ```
-georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.png
 georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.tif
-georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temperature_060000.json
 ```
 
-Each variable at each timestep produces three files: a PNG for visualization (e.g., WeatherLayers GL), a Cloud-Optimized GeoTIFF for data access, and a JSON sidecar with metadata, stats, and color map information.
+Each variable at each timestep produces **one** file: a Cloud-Optimized GeoTIFF holding the raw values.
+
+This used to be a trio — a COG, an encoded RGBA PNG for WeatherLayers GL, and a JSON metadata sidecar. Both extras are gone:
+
+- The **encoded PNG** baked the variable's `value_min`/`value_max` into pixels, so editing the range silently made every existing PNG numerically wrong. Titiler now derives the same texture on demand from the COG, resolving the current range per request — pixel-identical to the baked artifact, with no staleness class to own ([ADR-0021](../adr/0021-on-demand-encoded-textures.md)).
+- The **JSON sidecar** turned out to be write-only — written by materialization, read by nothing. Everything it carried is available authoritatively from the `Asset`/`Item`/`Variable` rows, the COG's own georeferencing and tags, and the STAC API ([ADR-0024](../adr/0024-remove-the-json-metadata-sidecar.md)).
 
 ### Archive bucket
 
@@ -217,9 +220,7 @@ The pipeline is event-driven and runs asynchronously:
         · Extract raw data array
         · Apply unit conversion
         · Apply boundary clipping/masking
-        · Encode to RGBA PNG (visual asset)
         · Write COG (data asset)
-        · Write metadata JSON (sidecar)
         · Create/update Asset records
       - Update Collection extent (time + spatial)
    i. Archive raw file (if catalog.archive_source_files)
@@ -476,7 +477,7 @@ Private buckets (internal + signed):
   http://georiva-minio:9000/georiva-sources/...?X-Amz-Signature=...
 
 Assets bucket (public + clean):
-  http://localhost:9000/georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temp.png
+  http://localhost:9000/georiva-assets/kenya/weather-models/gfs/temperature/2025/01/15/temp.tif
 ```
 
 ### Serving public assets through nginx
