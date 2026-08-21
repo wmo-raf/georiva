@@ -707,7 +707,8 @@ database lookup.
 
 ![docker_compose_stack](../images/docker-compose-stack.png)
 
-*Figure 4: Docker Compose Stack*
+*Figure 4: Docker Compose Stack. This figure predates the `georiva-processing` worker and the
+`staging-consumer`; the inventory below is authoritative until it is regenerated.*
 
 ### 9.1 Service Inventory
 
