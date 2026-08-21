@@ -38,19 +38,40 @@
     - [5.2 Tile Serving with Titiler](#52-tile-serving-with-titiler)
     - [5.3 On-Demand Encoded Textures for Frontend Shading Libraries](#53-on-demand-encoded-textures-for-frontend-shading-libraries)
     - [5.4 STAC Browser](#54-stac-browser)
-    - [5.5 Vector Tiles with Martin](#55-vector-tiles-with-martin)
-- [6. Analysis Layer](#6-analysis-layer)
-    - [6.1 Core Analysis Capabilities](#61-core-analysis-capabilities)
-    - [6.2 Pluggable Analysis Modules](#62-pluggable-analysis-modules)
-    - [6.3 Integration with Existing Analysis Libraries](#63-integration-with-existing-analysis-libraries)
-    - [6.4 Zarr for Analysis-Ready Data](#64-zarr-for-analysis-ready-data)
-    - [6.5 Mini-Dashboards](#65-mini-dashboards)
-- [7. Infrastructure & Deployment](#7-infrastructure--deployment)
-    - [7.1 Service Inventory](#71-service-inventory)
-    - [7.2 Key Infrastructure Decisions](#72-key-infrastructure-decisions)
-- [8. Technology Stack Summary](#8-technology-stack-summary)
-- [9. Open Questions & Discussion Points](#9-open-questions--discussion-points)
-- [10. Next Steps](#10-next-steps)
+    - [5.5 WMTS for OGC Clients](#55-wmts-for-ogc-clients)
+    - [5.6 Vector Tiles with Martin](#56-vector-tiles-with-martin)
+- [6. Staging & Derivation](#6-staging--derivation)
+    - [6.1 The Two Tiers](#61-the-two-tiers)
+    - [6.2 The Derivation Engine](#62-the-derivation-engine)
+    - [6.3 Recipes](#63-recipes)
+    - [6.4 Derived Products & Pinned Bindings](#64-derived-products--pinned-bindings)
+    - [6.5 Lineage](#65-lineage)
+    - [6.6 Shared Geoprocessing](#66-shared-geoprocessing)
+- [7. Analysis Layer](#7-analysis-layer)
+    - [7.1 Core Analysis Capabilities](#71-core-analysis-capabilities)
+    - [7.2 Pluggable Analysis Modules](#72-pluggable-analysis-modules)
+    - [7.3 Integration with Existing Analysis Libraries](#73-integration-with-existing-analysis-libraries)
+    - [7.4 Zarr for Analysis-Ready Data](#74-zarr-for-analysis-ready-data)
+    - [7.5 Mini-Dashboards](#75-mini-dashboards)
+- [8. Multi-Tenancy & Access Control](#8-multi-tenancy--access-control)
+    - [8.1 The Organisation](#81-the-organisation)
+    - [8.2 Row-Level Scoping](#82-row-level-scoping)
+    - [8.3 Visibility Tiers](#83-visibility-tiers)
+    - [8.4 Identity](#84-identity)
+    - [8.5 The Machine Plane](#85-the-machine-plane)
+    - [8.6 Storage Paths](#86-storage-paths)
+- [9. Infrastructure & Deployment](#9-infrastructure--deployment)
+    - [9.1 Service Inventory](#91-service-inventory)
+    - [9.2 Key Infrastructure Decisions](#92-key-infrastructure-decisions)
+- [10. Technology Stack Summary](#10-technology-stack-summary)
+- [11. Open Questions & Discussion Points](#11-open-questions--discussion-points)
+    - [11.1 Read-Side Analysis Plugin Contract](#111-read-side-analysis-plugin-contract)
+    - [11.2 EDR Data-Retrieval Plane](#112-edr-data-retrieval-plane)
+    - [11.3 Derivation Backpressure](#113-derivation-backpressure)
+    - [11.4 Analysis Library Integration Depth](#114-analysis-library-integration-depth)
+    - [11.5 Zarr Beyond the Variable Level](#115-zarr-beyond-the-variable-level)
+    - [11.6 Cross-Feed Derivation Inputs](#116-cross-feed-derivation-inputs)
+- [12. Next Steps](#12-next-steps)
 
 ---
 
@@ -80,16 +101,27 @@ monitoring, etc.) should be able to build on GeoRiva.
 
 - **STAC-first mental model:** We think in terms of Catalogs, Collections, and Items from the start, aligning our
   internal data model with the SpatioTemporal Asset Catalog (STAC) specification.
-- **Plugin-driven extensibility:** Data sources and analysis modules are implemented as plugins (Wagtail apps) that
-  conform to defined contracts, enabling community contributions without modifying the core engine.
+- **Plugin-driven extensibility:** Data sources and derivation recipes are implemented as plugins conforming to
+  defined contracts, enabling community contributions without modifying the core engine. Read-side analysis is
+  intended to follow the same pattern (§7.2).
+- **Generic engines, declarative plugins:** The two engines — the Loader on the read-from-the-world side, the
+  Derivation Engine on the write side — own their run loops entirely. Plugins *declare* (what to fetch, what to
+  compute, what to emit) and never orchestrate. Nothing in either engine knows about climate semantics.
+- **Compute once, share everywhere:** Numerical operations live in a pure, non-Django library (`geoprocessing/`) used
+  identically by compute-on-write and compute-on-read, so "anomaly" has one implementation and one set of tests.
 - **Modern, client-first visualization:** Prefer browser-side rendering of encoded data tiles — enabling smooth temporal
   animation, interactive value picking, client-side color ramps, and interpolation — over legacy server-styled WMS.
   Dynamically served tiles (Titiler for raster COGs, Martin for vector) remain available where server-side rendering is
   the better fit.
 - **Cloud-optimized storage:** Cloud Optimized GeoTIFF (COG) as the canonical storage format, with MinIO (S3-compatible)
   as the object store.
-- **Async-first processing:** All long-running operations (ingestion, processing, analysis) run as Celery tasks, keeping
-  the web layer responsive.
+- **Async-first processing:** All long-running operations (ingestion, derivation, analysis) run as Celery tasks on
+  dedicated queues, keeping the web layer responsive and preventing any one workload from starving another.
+- **Tenancy as an invariant, not a filter:** Several institutions share one deployment. Every model declares its
+  owning organisation, all scoping goes through a single choke point, and every storage key begins with an org slug —
+  so isolation is structural rather than something each query has to remember (§8).
+- **One place to decide who sees what:** Tile servers and other general-purpose components hold no tenancy logic.
+  Authorization happens at the proxy, in front of them.
 - **Composable via Docker:** The entire stack is orchestrated via Docker Compose for consistent development and
   deployment.
 
@@ -103,28 +135,35 @@ where they first appear.
 
 ## 2. System Architecture Overview
 
-GeoRiva is composed of six distinct architectural layers, each with well-defined responsibilities. Data flows from
-ingestion sources through processing into a STAC-aligned core, then out through serving and analysis layers to frontend
-consumers.
+Data enters GeoRiva two ways — a source plugin fetches it, or a person drops it in — and lands in object storage. From
+there, everything is driven by what arrives: an event bus wakes the ingestion pipeline, which writes a STAC-aligned
+core; configured derived products decide whether anything further must be computed; and the serving layer reads that
+core without knowing or caring how any of it got there.
 
-![system_architecture_overview](../images/system-architecture-overview.png)
+![system_architecture_overview](../images/georiva-architecture.png)
 
-*Figure 1: GeoRiva System Architecture Overview*
+*Figure 1: GeoRiva System Architecture Overview. Dashed elements are planned rather than built.*
 
-The layers are designed to be loosely coupled. The ingestion layer knows nothing about visualization. The analysis layer
-produces new Items that flow back into the core, making derived products indistinguishable from raw ingested data. The
-serving layer reads from the core and object storage without concern for how data arrived there.
+The layers are deliberately loosely coupled. Ingestion knows nothing about visualization. The Derivation Engine knows
+nothing about climate semantics. The tile servers know nothing about who is asking. Two properties cut across all of
+them and cannot be opted out of:
+
+- **Tenancy** (§8) — every row belongs to an organisation, every storage key begins with its slug, and every serving
+  path is authorized before it reaches data.
+- **The two tiers** (§6.1) — data is either *Staging* (source-grained, never served) or *Published* (product-grained,
+  served). Which one a file lands in is computed from configuration, not chosen by hand.
 
 ### 2.1 Layer Responsibilities
 
-| Layer              | Responsibility                                                                                                                                     |
-|--------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Data Ingestion** | Source plugins and MinIO drop zones bring external data into the system. Each path handles scheduling, downloading, and pre-processing.            |
-| **Processing**     | Celery workers execute the ingestion pipeline: validation, COG generation, PNG encoding, STAC indexing, and storage.                               |
-| **Core Engine**    | Django/Wagtail application housing the STAC-aligned data models, admin interface, and coordination logic. PostgreSQL with TimescaleDB and PostGIS. |
-| **Object Storage** | MinIO provides S3-compatible storage for all binary assets (COGs, PNGs, Zarr archives). Titiler reads directly from here.                          |
-| **Data Serving**   | STAC API for discovery, Titiler for tile serving, and encoded PNG endpoints for frontend shading library integration.                              |
-| **Analysis**       | Pluggable analysis modules that leverage existing Xarray-compatible libraries. Output feeds back into the core as new Items.                       |
+| Layer                    | Responsibility                                                                                                                                            | Where                          |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------|
+| **Data Ingestion**       | Source plugins fetch on a schedule; the MinIO drop zone and admin upload accept files from people. Both land in object storage and raise the same event. | `sources/`, `ingestion/`       |
+| **Ingestion Pipeline**   | Celery workers validate, extract, convert units, clip to boundaries, write COGs, and index STAC Items. Runs on `georiva-ingestion`.                      | `ingestion/`                   |
+| **Storage & Data Core**  | The STAC-aligned models across two tiers, plus lineage and feed/product configuration. PostgreSQL + TimescaleDB + PostGIS; MinIO for binary assets.      | `core/`, `staging/`            |
+| **Derivation**           | The generic engine that turns Staging (and Published) inputs into new Published products via declarative recipes. Runs on `georiva-processing`.          | `processing/`, `geoprocessing/`|
+| **Data Serving**         | STAC API and EDR for discovery, Titiler for raster tiles and on-demand textures, Martin for vector tiles, WMTS for OGC clients, and the Wagtail frontend. | `stac/`, `edr/`, `wmts/`       |
+| **Analysis**             | Compute-on-read: point and area time-series, zonal statistics. Results are returned, not persisted.                                                       | `analysis/`                    |
+| **Tenancy & Access**     | Cuts across all of the above: org-scoped rows, org-first storage paths, visibility tiers, and proxy-level authorization for the machine plane.           | `organisations/`, `accounts/`  |
 
 ---
 
@@ -291,7 +330,7 @@ exposes the status of long-running loader and processing jobs.
 > **Gaps:** The EDR **data-retrieval plane is not yet implemented** — `position`, `area`, `locations`,
 > `instances`, and `cube` endpoints are stubbed/commented out. CoverageJSON output is not yet offered
 > (only JSON/GeoJSON). In the interim, equivalent point/area extraction is available through the
-> Analysis API (§6.1), which is not yet wired under the EDR query paths.
+> Analysis API (§7.1), which is not yet wired under the EDR query paths.
 
 ### 5.2 Tile Serving with Titiler
 
@@ -307,7 +346,7 @@ Both tile strategies originally under discussion are now served, and the choice 
 - **Encoded textures:** Titiler returns raw data-encoded pixels that the frontend shading library interprets and styles
   itself — see §5.3.
 
-Titiler carries no tenancy logic. Every tile request is authorized by nginx before it arrives (§7.2).
+Titiler carries no tenancy logic. Every tile request is authorized by nginx before it arrives (§9.2).
 
 ### 5.3 On-Demand Encoded Textures for Frontend Shading Libraries
 
@@ -330,7 +369,26 @@ with no regeneration, no staleness marking, and no mixed old/new serving window
 A standalone STAC Browser service is included in the Docker stack, connected to GeoRiva's STAC API. This provides an
 out-of-the-box discovery and preview interface without requiring custom frontend development.
 
-### 5.5 Vector Tiles with Martin
+### 5.5 WMTS for OGC Clients
+
+Desktop GIS and other OGC tooling speak WMTS rather than XYZ or STAC, so GeoRiva serves it across both halves of the
+stack:
+
+- **Capabilities** — `GET /api/wmts/{org}/WMTSCapabilities.xml`, served by Django (`wmts/`). It is a DRF view so that a
+  presented `grv_` key becomes `request.user` through the project's one identity path, and a member's key widens the
+  advertised layers exactly as their login would.
+- **`GetTile`** — the KVP shim in `titiler-app` at `/titiler/{org}/wmts?REQUEST=GetTile`, which translates WMTS
+  parameters onto the same tile machinery every other raster request uses.
+
+The organisation appears both in the dialled host and in the path, and the host is the authority — the path may only
+agree with it ([ADR-0013](../adr/0013-org-in-the-path-on-the-machine-plane.md)). A mismatch is reported as *absent*,
+not forbidden: which catalogs another institution runs is not the caller's business. The same reasoning shapes the
+error surface, which nginx renders as OWS `ExceptionReport` documents so a WMTS client gets XML it can parse rather
+than an HTML error page — a denial says neither which check failed nor whether anything is there, since distinguishing
+them would answer precisely the question the `private` tier exists to keep quiet
+([ADR-0014](../adr/0014-private-tier-and-per-user-api-keys.md)).
+
+### 5.6 Vector Tiles with Martin
 
 For vector overlays — primarily administrative boundaries used in clipping and zonal statistics — the stack includes a
 **Martin** vector tile server (`georiva-martin`) reading directly from PostGIS. This serves boundary geometries as
@@ -338,13 +396,130 @@ MVT/PBF tiles to the frontend, complementing Titiler's raster tiles.
 
 ---
 
-## 6. Analysis Layer
+## 6. Staging & Derivation
+
+Not every file that arrives is ready to serve. A raw CHIRPS series is an *input* to a monthly anomaly, not a layer
+anyone should see on a map; a climatological baseline is consumed by an index and never rendered on its own. GeoRiva
+separates those two populations into **tiers**, and the act of turning one into the other is **Derivation**.
+
+This is the write-side counterpart of §3's ingestion. It has its own app (`processing/`), its own Celery queue
+(`georiva-processing`), and its own decision record ([ADR-0005](../adr/0005-generic-derivation-engine.md)).
+
+### 6.1 The Two Tiers
+
+| Tier          | Grain            | Served? | Model                                   |
+|---------------|------------------|---------|-----------------------------------------|
+| **Staging**   | source / acquisition — one Item per raw file | No  | `staging/` — `StagingCollection`, `StagingItem`, `StagingAsset` |
+| **Published** | product — one Item per timestep              | Yes | `core/` — `Collection`, `Item`, `Asset` |
+
+Both mirror the STAC spec (Collection / Item / Asset) and share abstract base models, but they answer different
+questions. A `StagingItem` follows the shape of the *file that arrived*: one row per raw artifact, a flexible temporal
+extent (nullable `datetime` plus optional `start_datetime`/`end_datetime`), and assets carrying the `source` role. It is
+deliberately **not** a TimescaleDB hypertable, because there is no per-timestep row to key one on. A Published `Item`
+*is* a hypertable row — one per timestep — because that is the access pattern serving needs
+([ADR-0004](../adr/0004-staging-tier-and-abstract-stac-models.md)).
+
+"Raw" is expressed as an asset *role*, not as a tier name. And "Published" does not mean "public": a Published
+Collection carries a `visibility` of `public`, `private`, or `internal` (§8). **Intermediate products** — a climatology
+that only exists to feed an index — live in Published with `visibility=internal`: they are product-shaped and derived,
+so Staging would be the wrong tier, but nothing should ever serve them.
+
+Which tier a file lands in is **computed, not configured**. The Loader routes a fetched file to the staging bucket if
+and only if some enabled derived product of that feed declares a staging-tier input on that collection; otherwise it
+goes straight to Published. There is no operator toggle, because a toggle produces a drift class — "configured to
+publish, but a product needs staging, so the product silently never runs" ([ADR-0008](../adr/0008-configurable-derivation-products.md)).
+The rule is: *no derivation, no staging.*
+
+### 6.2 The Derivation Engine
+
+The engine (`processing/engine.py`) is the generic, domain-agnostic run loop — the write-side counterpart of the
+Loader. It owns:
+
+```
+enumerate units → take the run lock → resolve inputs → idempotency check → readiness
+    → compute (recipe.transform) → write asset → register Published Item/Asset
+    → write DerivationLinks → emit event
+```
+
+It knows nothing about climate semantics — no seasons, no baselines, no indices. The same primitive,
+`run(recipe, selector)`, serves event-driven, scheduled, and manual invocation, so a backfill and a live trigger take
+the same path through the same code.
+
+Per-unit compute is dispatched to the `georiva-processing` queue so a long derivation run cannot starve ingestion, and
+ingestion cannot starve it.
+
+### 6.3 Recipes
+
+A **recipe** is a declarative plugin registered against the engine (`@RecipeRegistry.register`) describing one family of
+derivation. It declares, and does not execute:
+
+| Hook                | Declares                                                          |
+|---------------------|-------------------------------------------------------------------|
+| `enumerate_units`   | the production units this run should cover                        |
+| `declared_inputs` / `resolve_inputs` | named selectors over Staging and/or Published        |
+| `readiness`         | whether a unit's inputs are complete enough to compute            |
+| `transform`         | the pure computation                                              |
+| `outputs`           | the Published Collection slug and Item time key to write into     |
+
+Two recipes ship today: **promotion** (Direct → Published, for ready products needing only inline normalization) and
+**climatology** (a staging series → climatologies, anomalies, relative anomalies and trends across
+`period × season × quantity`). Recipe families for ML/forecast post-processing and impact-based analysis register the
+same way, without editing the engine.
+
+### 6.4 Derived Products & Pinned Bindings
+
+Recipes describe *how*. What decides **which** recipe runs, on what, and when, is configuration:
+
+- A **Derived Product Definition** is the plugin-agnostic blueprint a feed offers — `recipe_type`, a `config_schema`,
+  declared inputs/outputs, and a `trigger_mode` of `event | scheduled | manual`. Pure declaration in `core`, so both the
+  feed layer and the engine can read it without a circular dependency.
+- A **`DerivedProduct`** is the operator's saved configuration of one such blueprint, created through the setup wizard.
+- **Pinned bindings** (`DerivedProductInput` / `DerivedProductOutput`) resolve the product's feed-local collection keys
+  to actual catalog `Collection` FKs, **once**, at enable time ([ADR-0010](../adr/0010-pinned-collection-bindings-for-derived-products.md)).
+
+Pinning is what makes dispatch cheap and safe. When an input lands,
+`sources.derivation_invocation.dispatch_for_input` matches the trigger's `(collection_id, tier)` against the pinned rows
+in one indexed query, then calls the engine's generic `run(recipe, selector)`. Because the match is by foreign key,
+catalog scoping falls out for free — an Item in one catalog cannot trigger another catalog's products even under a
+shared slug — and renaming a collection cannot break a binding. This module is the *only* place that joins product
+configuration to the engine, which is what keeps the engine free of any import from the feed layer.
+
+### 6.5 Lineage
+
+Every derived Item records where it came from. A **`DerivationLink`** is one row per (output, input) edge, tagged with
+the recipe id, recipe version, and an input hash. Inputs may be Staging or Published Items — exactly one of the two
+source FKs is set, enforced by a check constraint.
+
+Lineage is **descriptive, not an execution plan**: it records what happened, and is not consulted to decide what to run
+next. It lives in the `staging` app so the data-layer dependency direction stays `staging → core`, leaving `core`
+dependency-free.
+
+### 6.6 Shared Geoprocessing
+
+The numerical work lives in `geoprocessing/` — a pure, **non-Django** library. Functions take in-memory rasters (numpy
+arrays with an affine transform and CRS, or xarray objects) plus parameters, and return rasters or scalars. No Django,
+no storage, no request layer: callers own their own I/O.
+
+| Module        | Provides                                                        |
+|---------------|-----------------------------------------------------------------|
+| `algebra`     | `raster_combine`, `safe_divide`                                 |
+| `temporal`    | `climatology`, `anomaly`, `trend`, `temporal_aggregate`, seasons |
+| `regrid`      | `regrid_array` (via `rasterio.warp.reproject`)                  |
+| `calendar`    | `convert_calendar` (via xarray + cftime)                        |
+| `zonal`       | `zonal_stats_from_array`, `mask_and_aggregate`, geometry reprojection |
+
+This is deliberately shared between **compute-on-write** (derivation, §6.2) and **compute-on-read** (analysis, §7). One
+implementation of "anomaly" serves both, and every operation is unit-testable without a database.
+
+---
+
+## 7. Analysis Layer
 
 The analysis layer is where GeoRiva moves beyond data serving into data processing. The vision is to provide
 analysis-ready datasets and a pluggable framework that can leverage the broader ecosystem of scientific Python libraries
 for domain-specific computation.
 
-### 6.1 Core Analysis Capabilities
+### 7.1 Core Analysis Capabilities
 
 At its foundation, the system will support:
 
@@ -355,10 +530,10 @@ At its foundation, the system will support:
 These are the building blocks that all higher-level analysis modules can rely on.
 
 > **As-built status (v0.2):** The analysis layer is implemented as two concrete, purpose-built modules
-> under `analysis/` rather than the generic operator framework originally envisioned in §6.2.
+> under `analysis/` rather than the generic operator framework originally envisioned in §7.2.
 >
 > **Time-series (`analysis/timeseries/`)** — extracts series from the per-variable **virtual Zarr
-> manifests** (§6.4) via xarray. Two endpoints:
+> manifests** (§7.4) via xarray. Two endpoints:
 > - `GET /api/analysis/timeseries/point/` — nearest-grid-cell series for a lat/lon (synchronous).
 > - `POST /api/analysis/timeseries/area/` — zonal series over an arbitrary GeoJSON polygon: bbox
     > subset → `regionmask` polygon mask → `mean`/`sum`/`min`/`max`/`std` aggregation (synchronous;
@@ -375,32 +550,38 @@ These are the building blocks that all higher-level analysis modules can rely on
 > organisation travels in the URL Django writes (ADR 0013). There is no DRF endpoint for zonal stats
 > yet — they are consumed through Martin/DB.
 
-### 6.2 Pluggable Analysis Modules
+### 7.2 Pluggable Analysis Modules
 
-Analysis modules follow the same plugin pattern as data sources. Each module implements a base contract that defines:
+> **Terminology.** Earlier revisions of this document described analysis modules as producing new derived Items that
+> flow back into the core. That work is now **Derivation** (§6) and lives in `processing/`, not here. The distinction is
+> load-bearing:
+>
+> - **Derivation** is the write-side act — compute *and persist*. Runs on the `georiva-processing` queue, writes
+>   Published Items, records lineage. "Derivation = analysis you persist."
+> - **Analysis** is the read-side act — compute *on read*, in response to a request, and do not persist.
+>
+> Both call the same `geoprocessing/` library (§6.6). What separates them is whether the result becomes a row.
 
-- **Input requirements** — which Items/Variables the module consumes
-- **Computation logic** — the actual processing
-- **Output specification** — new Items/Assets to generate
+What remains open here is a plugin contract for the **read side**: a base contract letting contributors add new
+compute-on-read operations — agricultural indices, hydrological summaries, forecast verification — without modifying
+the core. Such a module would define:
 
-The output of any analysis module flows back into the core as new derived Items, fully indexed and discoverable through
-the STAC API. This means derived products (climatological means, anomalies, composite indices, etc.) are first-class
-citizens in the system, indistinguishable from raw ingested data.
+- **Input requirements** — which Items/Variables it consumes
+- **Computation logic** — the actual processing, ideally delegated to `geoprocessing/` or the wider Xarray ecosystem
+- **Output specification** — the response shape it returns
 
-This plugin architecture is intentionally open-ended. Contributors can build modules for any domain: climatological
-analysis, agricultural indices, hydrological modeling, forecast verification — whatever the use case demands.
+A module that needs to *persist* its output should be a recipe (§6.3), not an analysis module.
 
-> **As-built gaps (v0.2):** This generic, pluggable framework is **not yet implemented**. There is no
-> analysis operator registry or plugin contract today (an earlier `analysis/registry.py` /
-> `OperatorRegistry` no longer exists); the two shipped modules (§6.1) are wired directly. Crucially,
-> analysis output does **not** yet flow back as new derived Items — time-series are computed on demand
-> and zonal stats live in their own hypertable. Integration with external libraries (Xclim, Verde,
-> scikit-learn, §6.3) is also not yet present; current analysis uses xarray, `regionmask`, and
-> rasterio only. Formalizing the analysis-plugin contract — ideally sharing the parameter-manifest
+> **As-built gaps:** This read-side plugin framework is **not yet implemented**. There is no analysis
+> operator registry or plugin contract today (an earlier `analysis/registry.py` / `OperatorRegistry`
+> no longer exists); the two shipped modules (§7.1) are wired directly. Integration with external
+> libraries (Xclim, Verde, scikit-learn, §7.3) is also not yet present; current analysis uses xarray,
+> `regionmask`, and rasterio only. Formalizing the contract — ideally sharing the parameter-manifest
 > vocabulary from [`plugin-parameter-contract.md`](./plugin-parameter-contract.md) — remains future
-> work.
+> work. Note that the *write-side* equivalent is done: recipes register against the Derivation Engine
+> today (§6.3).
 
-### 6.3 Integration with Existing Analysis Libraries
+### 7.3 Integration with Existing Analysis Libraries
 
 A core design goal is to not reinvent the wheel. The scientific Python ecosystem already has excellent libraries for
 working with gridded data, and GeoRiva's data formats (COGs, Zarr, Xarray-compatible structures) are chosen specifically
@@ -422,7 +603,7 @@ The key consideration is Xarray compatibility — if a library works with Xarray
 analysis framework with minimal friction. The system is not tied to any single analysis domain; the plugin contract
 simply needs a module that can read Items in and produce Items out.
 
-### 6.4 Zarr for Analysis-Ready Data
+### 7.4 Zarr for Analysis-Ready Data
 
 While COG is the canonical storage format for individual Items, Zarr is planned as an additional format for
 analysis-ready data cubes. Zarr archives can be generated at the Catalog, Collection, or Variable level, aggregating
@@ -440,16 +621,16 @@ Dask.
     > a lazy, dask-backed `xarray.Dataset`.
 > - Built by the `build_virtual_zarr` command and Celery tasks; a signal marks a manifest **stale**
     > when new COG assets land, and a sweep debounces rebuilds.
-> - This is what the time-series analysis service reads from (§6.1).
+> - This is what the time-series analysis service reads from (§7.1).
 >
-> **Resolved design question:** This answers §9.2 — virtual Zarr is generated at the **Variable** level
+> **Resolved design question:** This answers §11.2 — virtual Zarr is generated at the **Variable** level
 > and maintained automatically (stale-on-write + sweep), with no data duplication.
 >
 > **Gaps:** Only Variable-level virtual cubes exist; Collection/Catalog-level aggregation and
 > materialized Zarr (for heavy Dask workloads or external sharing) are not implemented. Manifests
 > cover COG assets only.
 
-### 6.5 Mini-Dashboards
+### 7.5 Mini-Dashboards
 
 Analysis results and key data summaries will be presentable as mini-dashboards embedded throughout the system. These are
 lightweight, auto-updating views that surface insights from the analysis layer without requiring users to build custom
@@ -463,13 +644,93 @@ visualizations.
 
 ---
 
-## 7. Infrastructure & Deployment
+## 8. Multi-Tenancy & Access Control
+
+GeoRiva is designed to host several institutions on one deployment — a regional centre and the national services it
+serves, each seeing their own data and each other's only where that was intended. Tenancy is therefore not a feature
+bolted onto the side; it is an invariant that every layer has to honour.
+
+### 8.1 The Organisation
+
+An **Organisation** is an institution. It owns a Wagtail `Site` (so each org answers on its own hostname), a page tree,
+a page-permission group, and everything downstream: catalogs, collections, items, assets, feeds, boundaries. The active
+organisation is resolved from the request's host.
+
+Provision one with `create_organisation <slug> --name "…"`. A fresh install has none — `bootstrap_central_org` claims
+Wagtail's default Site for a first, central org, and must be run before anything is ingested.
+
+### 8.2 Row-Level Scoping
+
+Every model declares where it stands via an `ORGANISATION_LOOKUP`: an ORM path to the owning organisation, or one of the
+sentinels `SHARED_REFERENCE_DATA`, `ORGANISATION_SELF`, `PAGE_TREE`, `NOT_ORM_SCOPABLE`, `via_related(path)`, or
+`via_content_object(...)`. A model that declares nothing cannot be scoped, and **raises** rather than silently leaking
+([ADR-0011](../adr/0011-row-level-tenancy-choke-point.md)).
+
+Scoping goes through one dispatcher in `organisations/ownership.py` — `scope_rows` for a queryset,
+`belongs_to_active_org` for an object in hand. Callers never read declarations themselves. A nullable lookup path
+combined with `ORGANISATION_GLOBAL_TIER` means *null = the instance-wide tier*: readable by every org, writable only by
+the instance administrator.
+
+Wagtail pages are org-owned through the Site → root-page link. The dispatcher scopes them, and Wagtail's own
+pk-taking page views — which would otherwise let one org open another's page by guessing an id — are closed separately
+([ADR-0016](../adr/0016-per-org-page-trees-in-the-admin.md)).
+
+### 8.3 Visibility Tiers
+
+A Published Collection carries one of three visibilities:
+
+| Visibility | Who may see it                                    |
+|------------|---------------------------------------------------|
+| `public`   | anyone                                            |
+| `private`  | members of the organisation owning the host       |
+| `internal` | nobody — never served, on any plane, to anyone    |
+
+Serving code never filters `visibility` by hand; it goes through `Collection.objects.visible_to(request)`.
+`internal` is what makes intermediate derivation products (§6.1) safe to keep in the Published tier.
+
+### 8.4 Identity
+
+Two credentials reach the same `request.user`: a session (browser, admin) and a per-user API key prefixed `grv_`
+(machines, notebooks, GIS clients). Every serving plane applies them in the same order —
+`ApiKeyAuthentication`, then session — so a member's key widens what they can see exactly as their login would, and a
+broken key produces the same 401 everywhere ([ADR-0014](../adr/0014-private-tier-and-per-user-api-keys.md)).
+
+### 8.5 The Machine Plane
+
+Tile servers and other machine consumers cannot rely on a `Host` header alone, so the organisation travels **in the
+path**: `/titiler/<org>/<catalog>/<collection>/<variable>/…`, `/api/tile-config/<org>/…`,
+`/martin/boundary_stats/{z}/{x}/{y}?org=…` ([ADR-0013](../adr/0013-org-in-the-path-on-the-machine-plane.md)). These URLs
+are always built through `core/machine_plane/addresses.py`, never by hand.
+
+Authorization for those routes happens at the **proxy**, not in the tile servers (§9.2). Titiler and Martin stay
+general-purpose and tenancy-free; nginx asks `core/machine_plane/auth_view.py` first
+([ADR-0015](../adr/0015-nginx-auth-request-gateway-for-tiles.md)).
+
+One deliberate exception: the `tile-config` callback is `public`-only. Titiler forwards no credential when it calls
+back for render configuration, so there is nobody to ask — and answering anything but `public` there would leak.
+
+### 8.6 Storage Paths
+
+Tenancy is expressed in object storage too. The first segment of every key on every bucket is the owning organisation's
+slug:
+
+```
+{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/
+```
+
+This makes ownership legible from a path alone, and makes per-org bucket policies or exports possible without a
+database lookup.
+
+---
+
+## 9. Infrastructure & Deployment
 
 ![docker_compose_stack](../images/docker-compose-stack.png)
 
-*Figure 4: Docker Compose Stack*
+*Figure 4: Docker Compose Stack. This figure predates the `georiva-processing` worker and the
+`staging-consumer`; the inventory below is authoritative until it is regenerated.*
 
-### 7.1 Service Inventory
+### 9.1 Service Inventory
 
 | Service (compose name)                    | Technology                            | Purpose                                                                   |
 |-------------------------------------------|---------------------------------------|---------------------------------------------------------------------------|
@@ -489,7 +750,7 @@ visualizations.
 | Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and MinIO event bus                     |
 | Object Storage (`...-minio`)              | MinIO                                 | S3-compatible storage for all binary assets                               |
 
-### 7.2 Key Infrastructure Decisions
+### 9.2 Key Infrastructure Decisions
 
 - **MinIO over cloud S3:** MinIO provides S3 API compatibility while keeping the entire stack self-contained for
   on-premises deployment, which is critical for many National Meteorological Services.
@@ -512,7 +773,7 @@ visualizations.
 
 ---
 
-## 8. Technology Stack Summary
+## 10. Technology Stack Summary
 
 | Category         | Technology                            | Notes                                       |
 |------------------|---------------------------------------|---------------------------------------------|
@@ -536,82 +797,90 @@ visualizations.
 
 ---
 
-## 9. Open Questions & Discussion Points
+## 11. Open Questions & Discussion Points
 
-This section captures areas where the design is not yet settled and contributor input is especially welcome.
+This section is a live list of what is **not** settled. Decisions that *have* been made live in
+[`docs/adr/`](../adr/) — see the table at the end of this section for the ones this document used to debate.
 
-### 9.1 Titiler Strategy
+### 11.1 Read-Side Analysis Plugin Contract
 
-Should Titiler serve encoded tiles or pre-styled tiles? The current leaning is toward encoded tiles for maximum frontend
-flexibility, but this adds complexity to the frontend rendering pipeline. Contributor feedback on real-world experience
-with either approach would be valuable.
+The write side is done: recipes register against the Derivation Engine and new families need no core changes (§6.3).
+The read side has no equivalent. The two shipped modules (time-series, zonal stats) are wired directly, and there is no
+contract a contributor could implement to add a third.
 
-> **Update (v0.2):** Largely resolved — the encoded-data approach is implemented via encoded PNGs consumed by
-> WeatherLayers GL for client-side styling/animation, with Titiler available for COG-native raster tiles.
+Open: should it share the parameter-manifest vocabulary from
+[`plugin-parameter-contract.md`](./plugin-parameter-contract.md)? Should a read-side module be allowed to be
+long-running (Celery + job polling), or must it answer within a request?
 
-### 9.2 Zarr Generation Strategy
+### 11.2 EDR Data-Retrieval Plane
 
-At which level should Zarr archives be generated — Catalog, Collection, or Variable? Should Zarr generation be triggered
-automatically as Items accumulate, or on-demand? What chunking strategies make sense for the expected access patterns?
+The metadata plane is complete; `position`, `area`, `locations`, `instances` and `cube` are not implemented (§5.1a).
+Equivalent point/area extraction exists today under the Analysis API, which raises the real question: should the EDR
+query endpoints be implemented natively, or should they be a thin OGC-conformant façade over the analysis services —
+and is CoverageJSON output worth the dependency?
 
-> **Update (v0.2):** Resolved for the common case — see §6.4. GeoRiva uses **virtual Zarr (kerchunk)**
-> manifests at the **Variable** level, built automatically (stale-on-write + debounced sweep) and
-> referencing COGs in place (no re-chunking). Collection/Catalog-level and materialized Zarr remain
-> open.
+### 11.3 Derivation Backpressure
 
-### 9.3 Plugin Distribution
+Trigger mode is settled (`event | scheduled | manual`, per product). What is not settled is what happens under load:
+a bulk backfill can enqueue a very large number of per-unit compute tasks at once. The dedicated `georiva-processing`
+queue stops that starving ingestion, but says nothing about ordering, coalescing, or fairness *within* derivation when
+several products are triggered by the same arriving input.
 
-How should source plugins and analysis plugins be distributed? Options include: bundled with the core repository, as
-separate Python packages installable via pip, or as Docker sidecar containers.
-
-> **Update (v0.3):** Resolved — plugins are distributed as standalone Python packages (flat PEP 621
-> repos — the repo root is the package) and installed via one of three mechanisms: (1) **build-time** —
-> declared in `plugins.toml` and baked into the Docker image; (2) **runtime** — downloaded at container
-> startup via `GEORIVA_PLUGIN_URLS`; (3) **local dev** — plugin repos checked out into `dev-plugins/`,
-> which is bind-mounted whole into the stack and editable-installed (`pip install -e --no-build-isolation`)
-> by `startup_plugin_setup`. Settings auto-discovers installed plugins from `GEORIVA_PLUGIN_DIRS`,
-> deriving each app's import name from its package (so checkout folder names are free), and adds them to
-> `INSTALLED_APPS`.
-> Example plugins are maintained as standalone packages (e.g. `georiva-source-chirps`, `georiva-source-ecmwf`,
-> `georiva-source-cds`); a cookiecutter template is provided in
-> `source-plugin-boilerplate/`. See [`docs/plugins/installation.md`](../plugins/installation.md) for the
-> full installation guide.
-
-### 9.4 Analysis Scheduling
-
-Should analysis tasks run reactively (triggered when new Items are ingested) or on a schedule? Reactive execution
-ensures derived products are always up-to-date but could create processing storms during bulk ingestion.
-
-### 9.5 Authentication & Multi-Tenancy
-
-The current design does not address authentication or multi-tenancy. Should the STAC API be publicly accessible? Should
-different Catalogs be access-controlled? This needs further discussion based on deployment requirements.
-
-### 9.6 Analysis Library Integration Depth
+### 11.4 Analysis Library Integration Depth
 
 How deeply should GeoRiva integrate with external analysis libraries? Should the system provide thin wrappers that make
-it easy to call libraries like Xclim or Verde from within analysis plugins, or should plugins be fully responsible for
-managing their own dependencies?
+it easy to call libraries like Xclim or Verde from within plugins, or should plugins be fully responsible for managing
+their own dependencies? This becomes concrete as soon as the planned index recipes (SPI, SPEI, CDD, R95p) need Xclim.
+
+### 11.5 Zarr Beyond the Variable Level
+
+Variable-level virtual Zarr is built and maintained automatically (§7.4). Collection- and Catalog-level aggregation,
+and materialized (re-chunked) Zarr for heavy Dask workloads or external sharing, are not. Open: is the demand real
+enough to justify the maintenance surface, and would materialized Zarr reintroduce the staleness problem that
+[ADR-0021](../adr/0021-on-demand-encoded-textures.md) removed elsewhere?
+
+### 11.6 Cross-Feed Derivation Inputs
+
+A derived product's inputs resolve within its own feed — every collection reference is a feed-local key
+([ADR-0010](../adr/0010-pinned-collection-bindings-for-derived-products.md)). Combining collections from *different*
+feeds (say, satellite rainfall with a reanalysis temperature) is deliberately deferred. Open: what should the
+namespace look like, and who owns a product whose inputs span two feeds?
+
+### Decided — see the ADRs
+
+Questions this document used to carry, and where their answers now live:
+
+| Question                          | Decision                                                                        | Record |
+|-----------------------------------|---------------------------------------------------------------------------------|--------|
+| Titiler: encoded or styled tiles? | Both. Styled via admin-configured ramps; encoded textures derived on demand.     | [0021](../adr/0021-on-demand-encoded-textures.md), [0022](../adr/0022-two-layer-styling-ramps-and-variable-styles.md), [0023](../adr/0023-style-multiplicity-on-the-machine-plane.md) |
+| At what level is Zarr generated?  | Virtual (kerchunk) manifests per **Variable**, built automatically, no re-chunking. | §7.4 |
+| How are plugins distributed?      | Standalone PEP 621 packages: build-time, runtime, or editable local dev.          | [installation.md](../plugins/installation.md) |
+| Where does raw-but-unserved data live? | A **Staging** tier, source-grained, mirroring STAC but not a hypertable.     | [0004](../adr/0004-staging-tier-and-abstract-stac-models.md) |
+| Who orchestrates derivation?      | A generic engine owns the run loop; recipes only declare.                        | [0005](../adr/0005-generic-derivation-engine.md) |
+| How is a derived product configured and triggered? | Declared blueprints, saved per feed, bound to collections by FK at enable time. | [0008](../adr/0008-configurable-derivation-products.md), [0009](../adr/0009-derived-product-chain-and-lifecycle.md), [0010](../adr/0010-pinned-collection-bindings-for-derived-products.md) |
+| Should the STAC API be public? Are catalogs access-controlled? | Three visibility tiers per collection; org membership decides `private`. | [0014](../adr/0014-private-tier-and-per-user-api-keys.md) |
+| How is multi-tenancy enforced?    | One row-level choke point; every model declares its owning organisation.          | [0011](../adr/0011-row-level-tenancy-choke-point.md) |
+| How do tile servers learn who is asking? | They don't — nginx authorizes via `auth_request` before proxying.           | [0015](../adr/0015-nginx-auth-request-gateway-for-tiles.md) |
+| Should encoded PNGs be stored?    | No — derived per request against the variable's current range.                    | [0021](../adr/0021-on-demand-encoded-textures.md) |
 
 ---
 
-## 10. Next Steps
+## 12. Next Steps
 
-> **v0.3 update:** The items listed below reflect remaining work. Steps 2–7 from earlier revisions
-> are complete: plugin contracts are fully specified (see
-> [`plugin-parameter-contract.md`](./plugin-parameter-contract.md)), the Docker stack is running,
-> core models are implemented, the ingestion pipeline is operational, CHIRPS and ECMWF sample plugins
-> are shipping, and Titiler is serving tiles. Remaining open items:
+Remaining work, roughly in the order it blocks other things:
 
-1. **Analysis plugin contract** — Formalize the base class interface for analysis modules (§6.2).
-   Currently the two built-in modules (timeseries, zonal stats) are wired directly; a generic
-   registry does not yet exist.
-2. **EDR data retrieval plane** — Implement `position`, `area`, and `cube` endpoints (§5.1a). The
-   metadata plane is complete; data queries are stubbed.
-3. **Collection/Catalog-level virtual Zarr** — Variable-level manifests are working; multi-variable
-   and collection-level aggregation is not yet implemented (§6.4).
-4. **Authentication & access control** — The STAC API is currently public; per-catalog access control
-   is not yet designed (§9.5).
+1. **EDR data-retrieval plane** — implement the query endpoints, or decide they are a façade over the Analysis API
+   (§11.2).
+2. **Read-side analysis plugin contract** — formalize the base contract so a third module needs no core changes
+   (§11.1).
+3. **Index recipes** — SPI, SPEI, CDD, R95p and friends, which forces the Xclim integration question (§11.4).
+4. **Collection-level virtual Zarr** — multi-variable and collection-level aggregation (§11.5).
+5. **Derivation backpressure** — ordering and coalescing under bulk backfill (§11.3).
+
+Beyond that, three capability areas are designed-for but unbuilt, and appear dashed on Figure 1: ML/forecast
+post-processing, impact-based analysis, and threshold alerting with CAP/MQTT delivery. Each is a recipe family or a new
+app rather than a change to the engine — which is the point of §6.2's split between the generic run loop and
+declarative plugins.
 
 ---
 

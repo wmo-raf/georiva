@@ -1,11 +1,13 @@
 """GET /api/wmts/{org_slug}/WMTSCapabilities.xml — the REST capabilities document.
 
 The metadata-plane spelling of WMTS discovery (#354): what API tooling reads
-directly, and what Titiler will fetch when proxying a KVP GetCapabilities in a
-later slice. The org appears twice — in the dialled host and in the path — and
-the host is the authority: the path may only agree with it, exactly as on the
-tile-config callback. A mismatch is reported as absent, not forbidden, because
-which catalogs another institution runs is not this caller's business.
+directly, and what the KVP shim in ``titiler-app`` fetches and hands on unread
+when answering ``REQUEST=GetCapabilities`` (#362), so one pasted URL discovers
+layers and then serves their tiles. The org appears twice — in the dialled
+host and in the path — and the host is the authority: the path may only agree
+with it, exactly as on the tile-config callback. A mismatch is reported as
+absent, not forbidden, because which catalogs another institution runs is not
+this caller's business.
 
 A DRF view rather than a plain one so a presented API key becomes
 ``request.user`` through the project's one identity path (#360): the same

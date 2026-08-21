@@ -12,8 +12,8 @@ raster data. Built on Django/Wagtail, it provides a plugin-driven architecture f
 serving it through modern standards-compliant APIs, and enabling analytical workflows on top of it.
 
 > **Status:** Active development — core ingestion, the two-tier STAC data model, the derivation engine, multi-tenancy,
-> STAC API, tile serving (Titiler + Martin), and the analysis modules are built; some areas (EDR data-retrieval plane,
-> WMTS `GetTile`, generic analysis-plugin framework) are still in progress. See
+> STAC API, tile serving (Titiler + Martin), WMTS, and the analysis modules are built; some areas (EDR data-retrieval
+> plane, generic analysis-plugin framework) are still in progress. See
 > the [Architecture Design Document](docs/architecture/README.md) for the as-built design and open discussion points.
 
 ---
@@ -196,7 +196,7 @@ georiva/src/georiva/      # Main Django/Wagtail application
 ├── geoprocessing/        # Pure compute library (algebra, regrid, temporal, zonal) — no Django
 ├── stac/                 # STAC API
 ├── edr/                  # OGC API – EDR (metadata plane)
-├── wmts/                 # WMTS capabilities documents
+├── wmts/                 # WMTS capabilities (GetTile is served by titiler-app)
 ├── analysis/             # Time-series + zonal-statistics modules
 ├── virtual_zarr/         # Per-Variable virtual Zarr (kerchunk / Icechunk) manifests
 ├── visualization/        # Wagtail admin hooks for map/tile config
@@ -219,7 +219,7 @@ GeoRiva is in its early stages and contributions are welcome — especially feed
 **Where to start:**
 
 1. Read the [Architecture Design Document](docs/architecture/README.md) to understand the system design
-2. Check the [Open Questions](docs/architecture/README.md#9-open-questions--discussion-points) section for areas where
+2. Check the [Open Questions](docs/architecture/README.md#11-open-questions--discussion-points) section for areas where
    input is needed
 3. See [docs/contributing.md](docs/contributing.md) for development setup and guidelines
 
@@ -245,7 +245,7 @@ Start at the [documentation index](docs/README.md), which ties everything togeth
 | [Format Plugin System](docs/format-plugins.md)                                   | Reading GRIB/NetCDF/GeoTIFF; writing a new format plugin   |
 | [Storage & Ingestion Architecture](docs/plugins/georiva-storage-architecture.md) | Buckets, event-driven ingestion, IngestionLog              |
 | [Download Deduplication](docs/architecture/download-dedup.md)                    | Multi-collection feeds and download dedup                  |
-| [Plugin Parameter Contract](docs/architecture/plugin-parameter-contract.md)      | Proposed declarative parameter manifest (RFC)              |
+| [Source Plugin Contract](docs/architecture/plugin-parameter-contract.md)         | CollectionDefinition contract and the setup wizard         |
 | [Architecture Decision Records](docs/adr/)                                       | Every architectural decision, with the reasoning behind it |
 | [Contributing Guide](docs/contributing.md)                                       | How to set up a dev environment and contribute             |
 
