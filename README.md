@@ -11,8 +11,9 @@ GeoRiva is a geospatial backend platform for automated ingestion, processing, vi
 raster data. Built on Django/Wagtail, it provides a plugin-driven architecture for pulling data from diverse sources,
 serving it through modern standards-compliant APIs, and enabling analytical workflows on top of it.
 
-> **Status:** Active development — core ingestion, data model, STAC API, tile serving, and analysis modules are built;
-> some areas (EDR data-retrieval plane, generic analysis-plugin framework) are still in progress. See
+> **Status:** Active development — core ingestion, the two-tier STAC data model, the derivation engine, multi-tenancy,
+> STAC API, tile serving (Titiler + Martin), and the analysis modules are built; some areas (EDR data-retrieval plane,
+> WMTS `GetTile`, generic analysis-plugin framework) are still in progress. See
 > the [Architecture Design Document](docs/architecture/README.md) for the as-built design and open discussion points.
 
 ---
@@ -20,9 +21,12 @@ serving it through modern standards-compliant APIs, and enabling analytical work
 ## What It Does
 
 - **Ingest** gridded data from multiple sources via plugin apps or by dropping files into a MinIO directory
-- **Process** data into cloud-optimized formats (COG, encoded PNG) through an async Celery pipeline
+- **Process** data into cloud-optimized COGs through an async Celery pipeline
 - **Index** everything as STAC-compliant Catalogs, Collections, and Items with time-series optimized storage
-- **Serve** tiles and data through a STAC API, Titiler tile server, and encoded PNGs for browser-side rendering
+- **Serve** tiles and data through a STAC API, Titiler and Martin tile servers, and on-demand encoded textures for
+  browser-side rendering
+- **Derive** new products from ingested data — climatologies, anomalies, promotions — with declarative recipes run by
+  a generic derivation engine
 - **Analyze** data using pluggable modules that integrate with the Xarray-compatible scientific Python ecosystem
 - **Visualize** with modern browser-side rendering (WeatherLayers GL), moving beyond legacy WMS
 
@@ -42,11 +46,12 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 | Core Framework   | Django 5.x + Wagtail 7.x                              |
 | Database         | PostgreSQL 18 + TimescaleDB + PostGIS (via PgBouncer) |
 | Object Storage   | MinIO (S3-compatible), multi-bucket                   |
-| Task Queue       | Celery + Redis (two queues)                           |
+| Task Queue       | Celery + Redis (three queues)                         |
 | Tile Servers     | Titiler (raster COGs) + Martin (vector/MVT)           |
 | Discovery APIs   | STAC API + OGC API – EDR                              |
-| Data Formats     | COG, virtual Zarr (kerchunk), Encoded PNG             |
+| Data Formats     | COG, virtual Zarr (kerchunk / Icechunk)               |
 | Event Bus        | MinIO → Redis list → `minio-consumer`                 |
+| Multi-tenancy    | Org-scoped rows, org-first storage paths, API keys    |
 | Containerization | Docker Compose                                        |
 | Package Manager  | uv (`pyproject.toml` + `uv.lock`)                     |
 
@@ -93,7 +98,19 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 
    On first run, the entrypoint automatically handles database migrations and static file collection.
 
-4. **Access GeoRiva**
+4. **Bootstrap the central organisation**
+
+   GeoRiva is multi-tenant: every row, and the first segment of every storage key, belongs to an organisation. A fresh
+   install has none, so create one before ingesting anything.
+
+   ```bash
+   docker compose exec georiva python manage.py bootstrap_central_org
+   ```
+
+   This is idempotent, and claims Wagtail's default Site at your base domain. Additional institutions get their own
+   org (and their own hostname) via the `create_organisation` command.
+
+5. **Access GeoRiva**
 
    Open [http://localhost](http://localhost) in your browser.
 
@@ -168,14 +185,20 @@ docker compose build georiva
 ```
 georiva/src/georiva/      # Main Django/Wagtail application
 ├── config/               # Settings (base/dev/production), URLs, Celery, WSGI/ASGI
-├── core/                 # STAC-aligned data models, multi-bucket storage, filename conventions
+├── core/                 # Published STAC data models, multi-bucket storage, machine plane
+├── staging/              # Staging tier — source-grained STAC models + DerivationLink lineage
+├── organisations/        # Multi-tenancy: row-level scoping, membership, per-org page trees
+├── accounts/             # Per-user API keys (grv_…) + DRF authentication
 ├── ingestion/            # Async ingestion pipeline, IngestionLog, MinIO event consumer
 ├── formats/              # Format handler plugins (GRIB, NetCDF, GeoTIFF) + registry
 ├── sources/              # Source-plugin framework (DataSource, LoaderProfile, fetch strategies)
+├── processing/           # Derivation engine, recipe registry, derivation tasks
+├── geoprocessing/        # Pure compute library (algebra, regrid, temporal, zonal) — no Django
 ├── stac/                 # STAC API
 ├── edr/                  # OGC API – EDR (metadata plane)
+├── wmts/                 # WMTS capabilities documents
 ├── analysis/             # Time-series + zonal-statistics modules
-├── virtual_zarr/         # Per-Variable virtual Zarr (kerchunk) manifests
+├── virtual_zarr/         # Per-Variable virtual Zarr (kerchunk / Icechunk) manifests
 ├── visualization/        # Wagtail admin hooks for map/tile config
 └── pages/                # Wagtail CMS pages
 
@@ -223,6 +246,7 @@ Start at the [documentation index](docs/README.md), which ties everything togeth
 | [Storage & Ingestion Architecture](docs/plugins/georiva-storage-architecture.md) | Buckets, event-driven ingestion, IngestionLog              |
 | [Download Deduplication](docs/architecture/download-dedup.md)                    | Multi-collection feeds and download dedup                  |
 | [Plugin Parameter Contract](docs/architecture/plugin-parameter-contract.md)      | Proposed declarative parameter manifest (RFC)              |
+| [Architecture Decision Records](docs/adr/)                                       | Every architectural decision, with the reasoning behind it |
 | [Contributing Guide](docs/contributing.md)                                       | How to set up a dev environment and contribute             |
 
 ---

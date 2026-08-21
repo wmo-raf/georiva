@@ -34,9 +34,11 @@
     - [4.2 Key Design Decisions](#42-key-design-decisions)
 - [5. Data Serving & Visualization](#5-data-serving--visualization)
     - [5.1 STAC API](#51-stac-api)
+    - [5.1a EDR API](#51a-edr-api)
     - [5.2 Tile Serving with Titiler](#52-tile-serving-with-titiler)
-    - [5.3 Encoded PNGs for Frontend Shading Libraries](#53-encoded-pngs-for-frontend-shading-libraries)
+    - [5.3 On-Demand Encoded Textures for Frontend Shading Libraries](#53-on-demand-encoded-textures-for-frontend-shading-libraries)
     - [5.4 STAC Browser](#54-stac-browser)
+    - [5.5 Vector Tiles with Martin](#55-vector-tiles-with-martin)
 - [6. Analysis Layer](#6-analysis-layer)
     - [6.1 Core Analysis Capabilities](#61-core-analysis-capabilities)
     - [6.2 Pluggable Analysis Modules](#62-pluggable-analysis-modules)
@@ -186,12 +188,14 @@ Regardless of the ingestion path, all data passes through the same Celery-powere
 
 1. **Queue:** A Celery task is created and queued for async execution.
 2. **Validate:** The incoming file is parsed and validated against expected formats and metadata.
-3. **Generate COG:** The data is converted to a Cloud Optimized GeoTIFF, the canonical storage format.
-4. **Generate Encoded PNG:** A visualization-ready encoded PNG is produced for use with frontend shading libraries.
-5. **Index as STAC Item:** A STAC Item record is created in TimescaleDB with the appropriate Catalog/Collection/Variable
+3. **Generate COG:** The data is converted to a Cloud Optimized GeoTIFF, the canonical (and only) stored asset format.
+4. **Index as STAC Item:** A STAC Item record is created in TimescaleDB with the appropriate Catalog/Collection/Variable
    linkage.
-6. **Store Assets:** The COG, PNG, and any other derived assets are stored in MinIO, and Asset records are linked to the
-   Item.
+5. **Store Assets:** The COG is stored in MinIO and an Asset record is linked to the Item.
+
+Visualization textures are *not* produced here. Encoded PNGs used to be baked at ingestion time, which made every
+existing PNG numerically wrong the moment an operator edited a variable's render range; Titiler now derives them on
+demand instead (see [ADR-0021](../adr/0021-on-demand-encoded-textures.md) and §5.3).
 
 ---
 
@@ -233,8 +237,11 @@ products computed from U/V components (`VECTOR_MAGNITUDE` for wind speed, `VECTO
 model is backed by a TimescaleDB hypertable keyed on the `time` column (the valid time), with an additional
 `reference_time` column for forecast data (the model run time). Time-range queries are the dominant access pattern.
 
-**Asset** represents a physical data object associated with an Item (following STAC conventions). An Item may have
-multiple Assets: a COG for analysis, an encoded PNG for visualization, a thumbnail, metadata sidecar files, etc.
+**Asset** represents a physical data object associated with an Item (following STAC conventions). Ingestion writes one
+COG per variable per timestep. Encoded textures are derived on demand rather than stored
+([ADR-0021](../adr/0021-on-demand-encoded-textures.md)), and the JSON metadata sidecar was removed
+([ADR-0024](../adr/0024-remove-the-json-metadata-sidecar.md)), so a freshly ingested Item typically carries exactly one
+Asset.
 
 **DataFeed** (a polymorphic model, `sources/models.py`) tracks a configured data source: its global
 scheduling interval (`interval_minutes`), source-specific operator configuration, and aggregate run
@@ -288,23 +295,23 @@ exposes the status of long-running loader and processing jobs.
 
 ### 5.2 Tile Serving with Titiler
 
-Titiler serves map tiles directly from Cloud Optimized GeoTIFFs stored in MinIO. A critical design goal is to keep
-Titiler stateless and database-free — it should read COGs from object storage and serve tiles without hitting
-PostgreSQL.
+Titiler serves map tiles directly from Cloud Optimized GeoTIFFs stored in MinIO. It holds no database connection of its
+own: render configuration reaches it through a Redis cache, falling back to a Django callback
+(`/api/tile-config/{org}/{catalog}/{collection}/{variable}/`) on a miss.
 
-We are exploring two strategies:
+Both tile strategies originally under discussion are now served, and the choice belongs to the caller:
 
-- **Encoded tiles:** Titiler returns raw data-encoded tiles that the frontend shading library interprets and styles.
-  This keeps server-side logic minimal and gives the frontend full control over visualization.
-- **Styled tiles:** Titiler applies a color ramp server-side and returns pre-styled image tiles. This reduces frontend
-  complexity but limits interactivity.
+- **Styled tiles:** Titiler applies a color ramp server-side and returns pre-styled image tiles. Ramps and per-variable
+  styles are configured in the admin ([ADR-0022](../adr/0022-two-layer-styling-ramps-and-variable-styles.md)), and a
+  variable may expose several ([ADR-0023](../adr/0023-style-multiplicity-on-the-machine-plane.md)).
+- **Encoded textures:** Titiler returns raw data-encoded pixels that the frontend shading library interprets and styles
+  itself — see §5.3.
 
-The preferred direction is encoded tiles for maximum frontend flexibility, with styled tiles as a fallback for simpler
-use cases.
+Titiler carries no tenancy logic. Every tile request is authorized by nginx before it arrives (§7.2).
 
-### 5.3 Encoded PNGs for Frontend Shading Libraries
+### 5.3 On-Demand Encoded Textures for Frontend Shading Libraries
 
-For integration with frontend shading libraries like WeatherLayers GL, the system generates encoded PNGs where pixel
+For integration with frontend shading libraries like WeatherLayers GL, Titiler serves encoded textures where pixel
 values represent actual data values (not visual colors). The frontend library decodes these values and applies styling,
 interpolation, and animation in the browser. This approach enables:
 
@@ -312,6 +319,11 @@ interpolation, and animation in the browser. This approach enables:
 - Interactive value picking (hover to see the value at any point)
 - Custom color ramps applied client-side in real time
 - Particle/wind animations from vector data
+
+These textures are **derived per request, never stored**. `SemanticRescale` in `titiler-app` resolves the variable's
+current `value_min`/`value_max` from Redis/Django at request time, so editing a render range takes effect immediately
+with no regeneration, no staleness marking, and no mixed old/new serving window
+([ADR-0021](../adr/0021-on-demand-encoded-textures.md)).
 
 ### 5.4 STAC Browser
 
@@ -464,12 +476,14 @@ visualizations.
 | Web Application (`georiva`)               | Django / Wagtail                      | Core engine, admin, STAC API, EDR API, Jobs API, plugin host              |
 | Default Worker (`...-default-worker`)     | Celery                                | Lightweight tasks (sweeps, cleanup, scheduling) — `georiva-default` queue |
 | Ingestion Worker (`...-ingestion-worker`) | Celery                                | Heavy data processing — `georiva-ingestion` queue                         |
+| Processing Worker (`...-processing-worker`) | Celery                              | Per-unit derivation compute — `georiva-processing` queue                  |
 | Scheduler (`...-celery-beat`)             | Celery Beat                           | Schedules periodic tasks (source polling, sweeps, maintenance)            |
 | MinIO Consumer (`...-minio-consumer`)     | App process (BLPOP)                   | Consumes MinIO events from a Redis list and enqueues drop-zone ingestion  |
+| Staging Consumer (`...-staging-consumer`) | App process (BLPOP)                   | Same, for files landing in the staging bucket ahead of derivation         |
 | Tile Server (`...-titiler-app`)           | Titiler (FastAPI)                     | Serves raster map tiles from COGs in MinIO                                |
 | Vector Tiles (`...-martin`)               | Martin                                | Serves boundary/vector MVT tiles from PostGIS                             |
 | STAC Browser (`...-stac-browser`)         | stac-browser                          | Standalone STAC catalog browsing UI                                       |
-| Web Proxy (`...-web-proxy`)               | Nginx                                 | Reverse proxy / static & media serving, routes to all services            |
+| Web Proxy (`...-web-proxy`)               | Nginx                                 | Reverse proxy, static & media, **and the `auth_request` tile auth gateway**|
 | Database (`...-db`)                       | PostgreSQL 18 + TimescaleDB + PostGIS | Models, time-series hypertables, spatial data                             |
 | Connection Pooler (`...-pgbouncer`)       | PgBouncer                             | Pools DB connections for the app and Martin                               |
 | Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and MinIO event bus                     |
@@ -484,8 +498,13 @@ visualizations.
 - **Redis-based event ingestion:** MinIO publishes bucket notifications to a Redis list via its native Redis target; a
   dedicated consumer (`georiva-minio-consumer`) drains the list and enqueues Celery tasks for the drop-zone path. This
   replaced the originally-planned MQTT/Mosquitto broker, removing an infrastructure component and reusing Redis.
-- **Split Celery workers:** Two queues and two worker services separate lightweight orchestration (`georiva-default`)
-  from heavy data processing (`georiva-ingestion`) so large ingest jobs cannot starve routine tasks.
+- **Split Celery workers:** Three queues and three worker services separate lightweight orchestration
+  (`georiva-default`) from heavy ingestion (`georiva-ingestion`) and from per-unit derivation compute
+  (`georiva-processing`), so neither large ingests nor long derivation runs can starve routine tasks — or each other.
+- **Tile authorization at the proxy:** Titiler and Martin hold no tenancy logic. Nginx issues an `auth_request`
+  subrequest into `core/machine_plane/auth_view.py` before proxying any tile, so both tile servers stay
+  general-purpose and there is exactly one place that decides who may see what
+  ([ADR-0015](../adr/0015-nginx-auth-request-gateway-for-tiles.md)).
 - **PgBouncer connection pooling:** A pooler fronts PostgreSQL so the app workers and Martin can share a bounded set of
   database connections.
 - **Redis as triple-purpose:** Redis serves as the Celery broker, the application cache, *and* the MinIO event bus,
@@ -501,18 +520,19 @@ visualizations.
 | Database         | PostgreSQL 18 + TimescaleDB + PostGIS | Primary data store (TimescaleDB HA image)   |
 | Connection Pool  | PgBouncer                             | DB connection pooling                       |
 | Object Storage   | MinIO                                 | S3-compatible, self-hosted                  |
-| Task Queue       | Celery + Redis                        | Async processing, two queues                |
+| Task Queue       | Celery + Redis                        | Async processing, three queues              |
 | Raster Tiles     | Titiler                               | COG-native tile serving                     |
 | Vector Tiles     | Martin                                | MVT tiles from PostGIS (boundaries)         |
 | Discovery APIs   | STAC API + OGC API – EDR              | Catalog search + environmental retrieval    |
 | STAC Browser     | Radiant Earth stac-browser            | Data discovery UI                           |
 | Analysis         | Xarray-compatible ecosystem           | Pluggable, domain-agnostic                  |
-| Data Formats     | COG, Zarr, Encoded PNG                | Storage and serving formats                 |
+| Data Formats     | COG, virtual Zarr (kerchunk/Icechunk) | Stored formats; textures derived on demand  |
 | Frontend Viz     | WeatherLayers GL                      | Browser-side rendering                      |
 | Event Ingestion  | MinIO → Redis list → consumer         | Drop-zone notifications (Mosquitto dropped) |
-| Reverse Proxy    | Nginx                                 | Routing, static/media serving               |
+| Reverse Proxy    | Nginx                                 | Routing, static/media, tile auth gateway    |
+| Multi-tenancy    | Org-scoped rows + org-first paths     | Row-level choke point, visibility tiers     |
 | Containerization | Docker + Docker Compose               | Full stack orchestration                    |
-| Language         | Python 3.10+                          | Primary development language                |
+| Language         | Python 3.12+                          | Primary development language                |
 
 ---
 
