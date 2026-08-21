@@ -219,7 +219,7 @@ GeoRiva is in its early stages and contributions are welcome — especially feed
 **Where to start:**
 
 1. Read the [Architecture Design Document](docs/architecture/README.md) to understand the system design
-2. Check the [Open Questions](docs/architecture/README.md#9-open-questions--discussion-points) section for areas where
+2. Check the [Open Questions](docs/architecture/README.md#11-open-questions--discussion-points) section for areas where
    input is needed
 3. See [docs/contributing.md](docs/contributing.md) for development setup and guidelines
 
@@ -245,7 +245,7 @@ Start at the [documentation index](docs/README.md), which ties everything togeth
 | [Format Plugin System](docs/format-plugins.md)                                   | Reading GRIB/NetCDF/GeoTIFF; writing a new format plugin   |
 | [Storage & Ingestion Architecture](docs/plugins/georiva-storage-architecture.md) | Buckets, event-driven ingestion, IngestionLog              |
 | [Download Deduplication](docs/architecture/download-dedup.md)                    | Multi-collection feeds and download dedup                  |
-| [Plugin Parameter Contract](docs/architecture/plugin-parameter-contract.md)      | Proposed declarative parameter manifest (RFC)              |
+| [Source Plugin Contract](docs/architecture/plugin-parameter-contract.md)         | CollectionDefinition contract and the setup wizard         |
 | [Architecture Decision Records](docs/adr/)                                       | Every architectural decision, with the reasoning behind it |
 | [Contributing Guide](docs/contributing.md)                                       | How to set up a dev environment and contribute             |
 

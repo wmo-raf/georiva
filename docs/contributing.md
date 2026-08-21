@@ -8,7 +8,7 @@ conventions we follow, and how to submit your work.
 ## Getting Oriented
 
 Before diving into code, it's worth reading the [Architecture Design Document](architecture/README.md) to understand how
-the system is structured. The [Open Questions](architecture/README.md#9-open-questions--discussion-points) section is a
+the system is structured. The [Open Questions](architecture/README.md#11-open-questions--discussion-points) section is a
 good starting point if you're looking for areas where input is especially valuable.
 
 ---
@@ -117,11 +117,24 @@ Key references for plugin authors:
 - [Download Deduplication](architecture/download-dedup.md) — how to avoid re-fetching data already ingested
 - [Storage Architecture](plugins/storage.md) — how to read and write files using the multi-bucket storage system
 
+### Derivation Recipes
+
+If you have domain expertise — climate indices, agricultural or hydrological products, forecast post-processing — a
+**recipe** is the most useful thing you can contribute. Recipes register against the Derivation Engine
+(`@RecipeRegistry.register`) and only *declare*: what units to produce, what inputs they need, when those inputs are
+ready, the pure transform, and what to emit. The engine owns the run loop, so a new recipe family needs no core
+changes. See [Architecture §6.3](architecture/README.md#63-recipes) and
+[Derived Products](plugins/derived-products.md).
+
+Numerical operations belong in `geoprocessing/` — a pure, non-Django library shared by write-side derivation and
+read-side analysis, so anything you add there is unit-testable without a database and reusable on both sides.
+
 ### Analysis Modules
 
-Analysis modules follow a similar plugin pattern. If you have domain expertise and know which Xarray-compatible
-libraries would be useful, an analysis module is a great contribution. See
-the [Analysis Layer section](architecture/README.md#6-analysis-layer) for context.
+Read-side analysis (compute on request, return, don't persist) is intended to be pluggable too, but that contract does
+not exist yet — the two shipped modules are wired directly. If you want to help design it, see
+the [Analysis Layer section](architecture/README.md#7-analysis-layer) and open questions
+[§11.1](architecture/README.md#111-read-side-analysis-plugin-contract).
 
 ### Bug Fixes and Improvements
 
