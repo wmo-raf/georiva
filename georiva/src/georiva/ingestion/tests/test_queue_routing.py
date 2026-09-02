@@ -2,10 +2,11 @@
 
 The ingestion worker defaults to concurrency 1, which makes ``georiva-ingestion``
 a strict FIFO: whatever is on it delays every file behind it. One ECMWF IFS
-fetch (2 collections x 81 variables x 16 steps) fans out ~1,300 per-asset
-follow-up tasks at ~1.5s each, and while those shared the ingestion queue the
-*next* feed's ``process_staging_file`` waited 30-40 minutes behind bookkeeping
-nobody was waiting on. Not a stall — new COGs simply appeared half an hour late
+fetch (2 collections x 81 variables x 16 steps) fans out ~1,300 follow-up tasks
+at ~1.5s each — per COG asset for zonal statistics, per variable for
+virtual-Zarr builds — and while those shared the ingestion queue the *next*
+feed's ``process_staging_file`` waited 30-40 minutes behind bookkeeping nobody
+was waiting on. Not a stall — new COGs simply appeared half an hour late
 because derived bookkeeping held the line.
 
 So what is pinned here is not "two tasks moved" but the admission rule that
@@ -40,9 +41,11 @@ TIME_CRITICAL = {
     "georiva.sources.tasks.retry_fetched_file",
 }
 
-#: Per-asset bookkeeping derived from an ingested COG. Nothing waits on it, and
-#: both are re-dispatched by a sweep if they are dropped, so they are deferrable
-#: by construction.
+#: Bookkeeping derived from an ingested COG. Nothing a reader can observe waits
+#: on it — tiles, STAC and EDR all answer without it — so it is deferrable.
+#: (Recovery differs: a dropped manifest build is re-dispatched by the
+#: virtual-Zarr sweep; a dropped zonal-stats task needs the
+#: ``compute_boundary_stats`` backfill. Orthogonal to routing.)
 DEFERRABLE_FOLLOWUPS = {
     "georiva.analysis.zonal_stats.tasks.compute_boundary_zonal_stats",
     "georiva.virtual_zarr.tasks.build_virtual_zarr_manifest",
@@ -100,6 +103,33 @@ class IngestionQueueAdmissionTests(TestCase):
         for name in DEFERRABLE_FOLLOWUPS:
             with self.subTest(task=name):
                 self.assertEqual(getattr(tasks[name], "queue", None), PROCESSING_QUEUE)
+
+
+class TaskFerryQueueTests(TestCase):
+    """The other way onto the ingestion queue.
+
+    django-task-ferry runs every registered ``JobType`` through one task,
+    ``task_ferry.tasks.run_async_job``, dispatched to ``TASK_FERRY["CELERY_QUEUE"]``
+    — so the closed set above is only closed if that setting and the job types
+    riding it are held to the same rule. They are not ``georiva.*`` tasks and
+    the AST sweep does not reach into the package, so they are asserted here.
+    """
+
+    def test_job_types_on_the_ingestion_queue_are_fetch_and_extraction(self):
+        from django.conf import settings
+        from task_ferry.registry import job_type_registry
+
+        if settings.TASK_FERRY["CELERY_QUEUE"] != INGESTION_QUEUE:
+            self.skipTest("task_ferry no longer dispatches to the ingestion queue")
+
+        registered = {type(job_type).__name__ for job_type in job_type_registry.all()}
+
+        self.assertEqual(
+            registered,
+            {"FileIngestionJobType", "LoaderJobType"},
+            "every registered JobType rides TASK_FERRY['CELERY_QUEUE'] — a new one "
+            "joins georiva-ingestion silently. Route it elsewhere or admit it here.",
+        )
 
 
 class QueueDeclarationIsAuthoritativeTests(SimpleTestCase):

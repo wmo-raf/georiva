@@ -18,18 +18,23 @@ extraction are memory-hungry and oversubscribing them puts the worker into the
 OOM killer. One pool process makes the queue a strict FIFO: whatever sits on it
 delays every file behind it, in order, with no way past.
 
-Two tasks fan out once per COG asset after extraction — boundary zonal
-statistics (`analysis/zonal_stats`) and virtual-Zarr manifest builds
-(`virtual_zarr`) — and both were routed to `georiva-ingestion` on the "heavy
-work" reading. They are individually small (~1.3–1.9s), which is exactly why
-the routing looked harmless.
+Two kinds of derived bookkeeping follow extraction, and both were routed to
+`georiva-ingestion` on the "heavy work" reading. They are individually small
+(~1.3–1.9s), which is exactly why the routing looked harmless:
+
+- **Boundary zonal statistics** (`analysis/zonal_stats`) — one task per COG
+  asset, dispatched straight from the after-save hook.
+- **Virtual-Zarr manifest builds** (`virtual_zarr`) — one task per *Variable*,
+  not per asset. A saved COG only marks that variable's manifest STALE; the
+  5-minute sweep is what dispatches the build.
 
 It is not harmless at fan-out. The first fetch of an ECMWF IFS feed
-(2 collections × 81 variables × 16 steps) enqueued roughly 1,300 of them. Files
-staged *after* that fan-out — a second run of the same feed, or an unrelated
-AIFS fetch — waited 30–40 minutes for their `process_staging_file` to start
-(wmo-raf/georiva-source-ecmwf#9, #398). Nothing was stalled and nothing failed;
-new COGs and items simply became available half an hour late, behind
+(2 collections × 81 variables × 16 steps) put roughly 1,300 such tasks on the
+queue — overwhelmingly zonal statistics, with one build per variable behind
+them. Files staged *after* that fan-out — a second run of the same feed, or an
+unrelated AIFS fetch — waited 30–40 minutes for their `process_staging_file` to
+start (wmo-raf/georiva-source-ecmwf#9, #398). Nothing was stalled and nothing
+failed; new COGs and items simply became available half an hour late, behind
 bookkeeping that no reader was waiting on. Every additional many-variable feed
 makes that worse for every other feed on the instance.
 
@@ -37,16 +42,34 @@ The distinction that matters is not how heavy a task is but **whether data
 availability waits on it**. Fetching a file and extracting it into COGs and
 STAC items is the critical path: until they run, the data does not exist to a
 user. Zonal statistics and virtual-Zarr manifests are derived from an item that
-is already published and already servable; both are re-dispatched by a periodic
-sweep if dropped, which is what makes them deferrable by construction.
+is already published and already servable — tiles, STAC and EDR all answer
+without them — so delaying them delays nothing a reader can observe.
+
+Their recovery stories differ, and neither is a reason to keep them on the
+critical path. A dropped manifest build is re-dispatched by the virtual-Zarr
+sweep on its next pass. A dropped zonal-stats task is not: `sweep_stale_boundary_stats`
+prunes rows, it does not re-issue work, so recovery there is the
+`compute_boundary_stats` backfill command an operator runs. That gap is
+orthogonal to queue routing — it was equally true on `georiva-ingestion` — but
+it should not be mistaken for an automatic safety net.
 
 ## Decision
 
 **`georiva-ingestion` carries fetch and extraction, and nothing else.** Four
 tasks: `process_incoming_file`, `process_staging_file`, `run_data_feed_loader`,
-`retry_fetched_file`. The queue's admission rule is a closed set, asserted in
-`ingestion/tests/test_queue_routing.py`, so adding a fifth is a deliberate edit
-rather than a default.
+`retry_fetched_file`.
+
+There is a fifth entrance, and it is easy to miss: django-task-ferry runs every
+registered `JobType` through one task, `task_ferry.tasks.run_async_job`,
+dispatched to `TASK_FERRY["CELERY_QUEUE"]` — which is `georiva-ingestion`. So a
+new job type joins the queue without naming it, and without being a `georiva.*`
+task at all. The two that exist (`FileIngestionJobType`, `LoaderJobType`) are
+extraction and fetch respectively, so they belong; the point is that the set is
+only closed if that door is watched too.
+
+Both are asserted in `ingestion/tests/test_queue_routing.py` — the `georiva.*`
+tasks by exact set, the job types by registry — so admitting a fifth of either
+kind is a deliberate edit rather than a default.
 
 **Deferrable derived work goes to `georiva-processing`.** This widens ADR
 0005's queue from "per-unit derivation compute" to *deferrable derived work* in
@@ -73,6 +96,14 @@ they overlap, and two writers on one Icechunk repo raise `ConflictError` and
 flip the manifest to FAILED. `VirtualZarrManifest.claim_for_build` now takes
 the lock in the same conditional UPDATE that decides whether to dispatch, and
 every dispatch goes through `tasks.dispatch_build`.
+
+Claiming alone leaves one case open: a queue wait longer than `LOCK_TIMEOUT`
+lets `reset_stale_locks` free the row and a later sweep dispatch a replacement,
+so both copies are live. The claim is therefore unique per dispatch and travels
+with the task, which compares it before building; a copy holding a recycled
+claim stands down. An operator rebuild (`build_virtual_zarr`) claims with
+`force=True`, because naming a manifest means "rebuild it" even when it is
+READY — but it still refuses one a worker is actively holding.
 
 ## Alternatives considered
 
@@ -117,6 +148,9 @@ headroom is small and it trades an availability delay for OOM risk.
 - A manifest claimed but never built stays BUILDING until `reset_stale_locks`
   recovers it after `LOCK_TIMEOUT` (30 minutes). The queued window now counts
   against that clock, so a backlog deeper than 30 minutes can still produce a
-  duplicate — far less likely now that builds no longer queue behind ingestion,
-  and the build re-stamps the lock when it actually starts.
+  second dispatch — the per-dispatch claim is what keeps that from becoming a
+  second *build*.
+- Zonal-stats recovery remains manual (`compute_boundary_stats`); there is no
+  sweep that re-issues a dropped `compute_boundary_zonal_stats`. Unchanged by
+  this ADR, and worth its own issue.
 - No new queue, no new worker, no new container.

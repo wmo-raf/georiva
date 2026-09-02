@@ -39,21 +39,26 @@ class Command(BaseCommand):
 
         for manifest in manifests:
             label = str(manifest)
+            # force=True throughout: an operator naming a manifest means
+            # "rebuild it", which --all and --collection routinely resolve to
+            # READY rows the sweep would rightly leave alone.  The claim still
+            # refuses a manifest a worker is actively building.
             if options["sync"]:
                 self.stdout.write(f"  [sync] {label}")
-                manifest.mark_building("management-command")
+                if not VirtualZarrManifest.claim_for_build(manifest.pk, "management-command", force=True):
+                    self.stdout.write(self.style.WARNING("    → already building elsewhere, skipped"))
+                    continue
                 try:
                     _run_build(manifest)
                     self.stdout.write(self.style.SUCCESS("    ✓ READY"))
                 except Exception as exc:
                     manifest.mark_failed(str(exc))
                     self.stdout.write(self.style.ERROR(f"    ✗ FAILED: {exc}"))
-            elif dispatch_build(manifest.pk, worker_id="management-command"):
+            elif dispatch_build(manifest.pk, claimed_by="management-command", force=True):
                 self.stdout.write(f"  [async] {label} → dispatched to Celery")
             else:
-                # Claimed by the sweep or another operator; dispatching anyway
-                # would put two writers on one Icechunk repo.
-                self.stdout.write(self.style.WARNING(f"  [async] {label} → already building, skipped"))
+                # Dispatching anyway would put two writers on one Icechunk repo.
+                self.stdout.write(self.style.WARNING(f"  [async] {label} → already building elsewhere, skipped"))
 
     # -------------------------------------------------------------------------
     # Helpers

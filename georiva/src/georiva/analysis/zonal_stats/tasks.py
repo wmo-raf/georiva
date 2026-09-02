@@ -11,10 +11,12 @@ logger = logging.getLogger(__name__)
     max_retries=3,
     acks_late=True,
     # Deferrable bookkeeping: an ingested COG is already servable without its
-    # zonal statistics, and one large fetch fans this out per asset.  Keeping
-    # it off georiva-ingestion stops that fan-out delaying the next file to be
-    # extracted (#398).  Idempotent — persist_stats upserts on its unique
-    # constraint — so it is safe on a multi-slot worker.
+    # zonal statistics — tiles, STAC and EDR all answer without them — and one
+    # large fetch fans this out per asset.  Keeping it off georiva-ingestion
+    # stops that fan-out delaying the next file to be extracted (#398).
+    # Idempotent — persist_stats upserts on its unique constraint — so it is
+    # safe on a multi-slot worker.  Note there is no sweep that re-issues a
+    # dropped run: recovery is the compute_boundary_stats backfill.
     queue="georiva-processing",
 )
 def compute_boundary_zonal_stats(self, asset_id: int) -> None:

@@ -29,7 +29,11 @@ from django.utils import timezone
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.organisations.testing import make_organisation
 from georiva.virtual_zarr.models import VirtualZarrManifest
-from georiva.virtual_zarr.tasks import build_virtual_zarr_manifest, sweep_virtual_zarr_pending
+from georiva.virtual_zarr.tasks import (
+    build_virtual_zarr_manifest,
+    dispatch_build,
+    sweep_virtual_zarr_pending,
+)
 
 
 class SweepDispatchTests(TestCase):
@@ -107,6 +111,47 @@ class SweepDispatchTests(TestCase):
         )
 
         self.assertEqual(self._sweep(), [manifest.pk])
+
+    def test_a_copy_whose_claim_was_recycled_stands_down(self):
+        """The one duplicate claiming alone cannot prevent.
+
+        A queue wait longer than ``LOCK_TIMEOUT`` lets ``reset_stale_locks``
+        free the row and a later sweep dispatch a replacement. Both copies are
+        then live, and whichever runs holding a stale claim must not build.
+        """
+        manifest = self._manifest()
+        self._sweep()
+        manifest.refresh_from_db()
+        current_claim = manifest.locked_by
+
+        build_virtual_zarr_manifest.apply(args=[manifest.pk, "sweep-deadbeef"])
+
+        manifest.refresh_from_db()
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.BUILDING)
+        self.assertEqual(manifest.locked_by, current_claim, "the stale copy took a lock it does not hold")
+
+    # -- the operator's rebuild ----------------------------------------------
+
+    def test_an_operator_rebuild_claims_a_ready_manifest_the_sweep_would_skip(self):
+        """``build_virtual_zarr`` resolves --all and --collection to manifests in
+        any status; naming one means rebuild it, READY included."""
+        manifest = self._manifest(status=VirtualZarrManifest.Status.READY)
+
+        with patch.object(build_virtual_zarr_manifest, "apply_async"):
+            self.assertFalse(dispatch_build(manifest.pk))
+            self.assertTrue(dispatch_build(manifest.pk, force=True))
+
+        manifest.refresh_from_db()
+        self.assertEqual(manifest.status, VirtualZarrManifest.Status.BUILDING)
+
+    def test_an_operator_rebuild_still_refuses_a_manifest_being_built(self):
+        manifest = self._manifest(
+            status=VirtualZarrManifest.Status.BUILDING,
+            locked_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        with patch.object(build_virtual_zarr_manifest, "apply_async"):
+            self.assertFalse(dispatch_build(manifest.pk, force=True))
 
     def test_a_manifest_actively_building_is_left_to_its_worker(self):
         manifest = self._manifest(

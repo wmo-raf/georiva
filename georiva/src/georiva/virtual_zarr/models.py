@@ -167,7 +167,17 @@ class VirtualZarrManifest(TimeStampedModel):
     # State transitions
     # -------------------------------------------------------------------------
 
-    def mark_building(self, worker_id: str = "") -> None:
+    def refresh_build_lock(self, worker_id: str = "") -> None:
+        """
+        Re-stamp a lock this worker already holds, now that its build is
+        actually starting.
+
+        Not a way to *take* the lock — that is ``claim_for_build``, which
+        refuses a row someone else holds.  This is unconditional by design: the
+        caller is the copy that won the claim, and restarting the clock here
+        stops a long queue wait eating into the window ``reset_stale_locks``
+        allows the build itself.
+        """
         self.__class__.objects.filter(pk=self.pk).update(
             status=self.Status.BUILDING,
             locked_at=timezone.now(),
@@ -245,7 +255,7 @@ class VirtualZarrManifest(TimeStampedModel):
         a BUILDING row with a fresh lock is left to its worker (returns
         False); a stuck one (expired or missing lock stamp) is reset like
         ``reset_stale_locks`` would.  Single conditional UPDATE, so it
-        cannot race a concurrent ``mark_building``.
+        cannot race a concurrent ``claim_for_build``.
         """
         stale_cutoff = timezone.now() - self.LOCK_TIMEOUT
         updated = (
@@ -281,7 +291,7 @@ class VirtualZarrManifest(TimeStampedModel):
         )
 
     @classmethod
-    def claim_for_build(cls, pk, worker_id: str = "") -> bool:
+    def claim_for_build(cls, pk, claim: str = "", force: bool = False) -> bool:
         """
         Take the build lock for one manifest; return whether we got it.
 
@@ -293,17 +303,32 @@ class VirtualZarrManifest(TimeStampedModel):
         the duplicate is not merely wasted work once builds run on a queue with
         more than one pool slot.
 
-        One conditional UPDATE over the buildable statuses, so two sweeps
-        racing each other can only have one winner.
+        One conditional UPDATE, so two sweeps racing each other can only have
+        one winner.  ``claim`` is stored in ``locked_by`` and identifies *this*
+        claim, not just the worker: the build task compares it before starting,
+        so a copy whose claim was recycled by ``reset_stale_locks`` stands down
+        instead of running alongside its replacement.
+
+        ``force`` claims a manifest that does not *need* building — the
+        operator's explicit rebuild, which may target a READY or NO_DATA row.
+        It still refuses one another worker is actively holding, mirroring
+        ``queue_rebuild``'s guard.
 
         A claim whose task never runs is indistinguishable from a worker that
         died mid-build, and ``reset_stale_locks`` recovers both.
         """
+        rows = cls.objects.filter(pk=pk)
+        if force:
+            stale_cutoff = timezone.now() - cls.LOCK_TIMEOUT
+            rows = rows.exclude(status=cls.Status.BUILDING, locked_at__gte=stale_cutoff)
+        else:
+            rows = rows.filter(status__in=cls.BUILDABLE_STATUSES)
+
         return bool(
-            cls.objects.filter(pk=pk, status__in=cls.BUILDABLE_STATUSES).update(
+            rows.update(
                 status=cls.Status.BUILDING,
                 locked_at=timezone.now(),
-                locked_by=worker_id,
+                locked_by=claim,
                 error="",
             )
         )
