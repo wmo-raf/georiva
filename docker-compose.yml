@@ -186,6 +186,11 @@ services:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      # The entrypoint reads only this queue-agnostic name — the per-queue name
+      # the operator sets in .env never reaches the container, which is what
+      # broke the dev workers in issue #399. So these three mappings are where
+      # each queue's default pool size lives; the entrypoint decides no sizes of
+      # its own, and the dev worker commands inherit these.
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_DEFAULT_WORKER_CONCURRENCY:-4}
     depends_on:
       - georiva
