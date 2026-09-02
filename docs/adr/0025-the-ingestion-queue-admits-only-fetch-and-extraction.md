@@ -49,7 +49,7 @@ Their recovery stories differ, and neither is a reason to keep them on the
 critical path. A dropped manifest build is re-dispatched by the virtual-Zarr
 sweep on its next pass. A dropped zonal-stats task is not: `sweep_stale_boundary_stats`
 prunes rows, it does not re-issue work, so recovery there is the
-`compute_boundary_stats` backfill command an operator runs. That gap is
+`compute_boundary_stats` backfill command an operator runs (#402). That gap is
 orthogonal to queue routing — it was equally true on `georiva-ingestion` — but
 it should not be mistaken for an automatic safety net.
 
@@ -152,5 +152,7 @@ headroom is small and it trades an availability delay for OOM risk.
   second *build*.
 - Zonal-stats recovery remains manual (`compute_boundary_stats`); there is no
   sweep that re-issues a dropped `compute_boundary_zonal_stats`. Unchanged by
-  this ADR, and worth its own issue.
+  this ADR — pre-existing, and equally true on `georiva-ingestion` — but it is
+  why the deferrability argument above rests on what a reader can observe
+  rather than on an automatic safety net. Tracked as #402.
 - No new queue, no new worker, no new container.
