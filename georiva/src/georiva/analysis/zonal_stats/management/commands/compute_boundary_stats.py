@@ -146,10 +146,7 @@ class Command(BaseCommand):
                                 )
                             )
                     else:
-                        compute_boundary_zonal_stats.apply_async(
-                            args=[asset.pk],
-                            queue="georiva-ingestion",
-                        )
+                        compute_boundary_zonal_stats.delay(asset.pk)
                         total_written += 1
                         if i % 50 == 0:
                             self.stdout.write(f"  Dispatched {i}/{total}…")

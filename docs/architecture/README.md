@@ -540,7 +540,8 @@ These are the building blocks that all higher-level analysis modules can rely on
     > designed to move to Celery for large areas).
 >
 > **Zonal statistics (`analysis/zonal_stats/`)** — *precomputed* admin-boundary statistics. A Celery
-> task (`compute_boundary_zonal_stats`, `georiva-ingestion` queue) runs per COG asset using
+> task (`compute_boundary_zonal_stats`, `georiva-processing` queue — deferrable derived work, ADR 0025)
+> runs per COG asset using
 > `rasterio.mask`, writing `mean/min/max/sum/std/count` per (Item × Variable × AdminBoundary) into the
 > `BoundaryZonalStats` TimescaleDB hypertable. Levels come from `Collection.boundary_stats_levels` and
 > the `adminboundarymanager` package; a `compute_boundary_stats` command backfills history. These
@@ -736,8 +737,8 @@ database lookup.
 |-------------------------------------------|---------------------------------------|---------------------------------------------------------------------------|
 | Web Application (`georiva`)               | Django / Wagtail                      | Core engine, admin, STAC API, EDR API, Jobs API, plugin host              |
 | Default Worker (`...-default-worker`)     | Celery                                | Lightweight tasks (sweeps, cleanup, scheduling) — `georiva-default` queue |
-| Ingestion Worker (`...-ingestion-worker`) | Celery                                | Heavy data processing — `georiva-ingestion` queue                         |
-| Processing Worker (`...-processing-worker`) | Celery                              | Per-unit derivation compute — `georiva-processing` queue                  |
+| Ingestion Worker (`...-ingestion-worker`) | Celery                                | Fetch and extraction only — `georiva-ingestion` queue (1 process by default) |
+| Processing Worker (`...-processing-worker`) | Celery                              | Deferrable derived work: derivation units + per-asset bookkeeping — `georiva-processing` queue |
 | Scheduler (`...-celery-beat`)             | Celery Beat                           | Schedules periodic tasks (source polling, sweeps, maintenance)            |
 | MinIO Consumer (`...-minio-consumer`)     | App process (BLPOP)                   | Consumes MinIO events from a Redis list and enqueues drop-zone ingestion  |
 | Staging Consumer (`...-staging-consumer`) | App process (BLPOP)                   | Same, for files landing in the staging bucket ahead of derivation         |
@@ -759,9 +760,12 @@ database lookup.
 - **Redis-based event ingestion:** MinIO publishes bucket notifications to a Redis list via its native Redis target; a
   dedicated consumer (`georiva-minio-consumer`) drains the list and enqueues Celery tasks for the drop-zone path. This
   replaced the originally-planned MQTT/Mosquitto broker, removing an infrastructure component and reusing Redis.
-- **Split Celery workers:** Three queues and three worker services separate lightweight orchestration
-  (`georiva-default`) from heavy ingestion (`georiva-ingestion`) and from per-unit derivation compute
-  (`georiva-processing`), so neither large ingests nor long derivation runs can starve routine tasks — or each other.
+- **Split Celery workers:** Three queues and three worker services, split by *what waits on the task* rather than by
+  how heavy it is ([ADR-0025](../adr/0025-the-ingestion-queue-admits-only-fetch-and-extraction.md)): lightweight
+  orchestration (`georiva-default`), fetch and extraction (`georiva-ingestion` — the critical path for data
+  availability, and nothing else), and deferrable derived work (`georiva-processing` — derivation units plus
+  per-asset bookkeeping). So neither large ingests nor long derivation runs can starve routine tasks — or each
+  other — and no amount of derived bookkeeping delays the next file becoming available.
 - **Tile authorization at the proxy:** Titiler and Martin hold no tenancy logic. Nginx issues an `auth_request`
   subrequest into `core/machine_plane/auth_view.py` before proxying any tile, so both tile servers stay
   general-purpose and there is exactly one place that decides who may see what

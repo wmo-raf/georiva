@@ -396,11 +396,18 @@ lightweight routine tasks:
 
 | Queue | Worker service | Workload |
 |---|---|---|
-| `georiva-ingestion` | `georiva-celery-ingestion-worker` | Heavy data processing (`process_incoming_file`, zonal stats, virtual-Zarr builds) |
+| `georiva-ingestion` | `georiva-celery-ingestion-worker` | Fetch and extraction, and nothing else (`process_incoming_file`, `process_staging_file`, `run_data_feed_loader`, `retry_fetched_file`) |
+| `georiva-processing` | `georiva-celery-processing-worker` | Deferrable derived work: derivation units, zonal stats, virtual-Zarr builds |
 | `georiva-default` | `georiva-celery-default-worker` | Lightweight tasks (`sweep_unprocessed`, `cleanup_archives`, `prune_ingestion_logs`, scheduling) |
 
+The ingestion worker runs a single pool process by default (extraction is memory-hungry), which makes its queue a
+strict FIFO — so per-asset bookkeeping deliberately does not sit on it, where a large fetch's fan-out would delay
+every file behind it ([ADR-0025](../adr/0025-the-ingestion-queue-admits-only-fetch-and-extraction.md)).
+
 A separate `georiva-celery-beat` service schedules the periodic tasks. Each task declares its queue explicitly via the
-`queue=` argument (see `ingestion/tasks.py`). The workers are configured for reliability:
+`queue=` argument (see `ingestion/tasks.py`) and callers dispatch with `delay(...)`, never
+`apply_async(queue=...)` — an override there silently beats the declaration. The workers are configured for
+reliability:
 
 ```python
 # settings.py

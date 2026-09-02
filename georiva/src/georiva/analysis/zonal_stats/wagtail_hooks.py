@@ -31,10 +31,7 @@ def enqueue_zonal_stats_on_cog_save(asset) -> None:
     try:
         from .tasks import compute_boundary_zonal_stats
 
-        compute_boundary_zonal_stats.apply_async(
-            args=[asset.pk],
-            queue="georiva-ingestion",
-        )
+        compute_boundary_zonal_stats.delay(asset.pk)
         logger.debug(
             "Enqueued zonal stats for asset %d (%s @ %s)",
             asset.pk,

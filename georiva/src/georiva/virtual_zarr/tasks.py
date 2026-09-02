@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pandas as pd
 from django.db.models import Prefetch
@@ -60,9 +61,13 @@ SNAPSHOT_RETENTION = timedelta(days=7)
     bind=True,
     max_retries=0,  # failures go to FAILED status; sweep retries
     acks_late=True,
-    queue="georiva-ingestion",
+    # Deferrable bookkeeping: nothing a reader can observe waits on a manifest,
+    # and the sweep re-dispatches anything dropped.  Keeping it off
+    # georiva-ingestion keeps one large fetch's fan-out out of the way of the
+    # next file to be extracted (#398).  Always dispatch via ``dispatch_build``.
+    queue="georiva-processing",
 )
-def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
+def build_virtual_zarr_manifest(self, manifest_id: int, claim: str = "") -> None:
     """
     Build or update the Icechunk repo for one Variable.
 
@@ -93,8 +98,21 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
         logger.error("build_virtual_zarr_manifest: manifest %d not found", manifest_id)
         return
 
+    # Stand down if this copy's claim was recycled while it waited: a queue
+    # wait longer than LOCK_TIMEOUT lets reset_stale_locks free the row and a
+    # later sweep dispatch a replacement, and two writers on one Icechunk repo
+    # conflict.  Blank claim means a task queued before claims existed.
+    if claim and manifest.locked_by != claim:
+        logger.info(
+            "build_virtual_zarr_manifest: manifest %d reclaimed (%s now holds it, not %s) — standing down",
+            manifest_id,
+            manifest.locked_by or "nobody",
+            claim,
+        )
+        return
+
     worker_id = f"celery-{self.request.id or 'unknown'}"
-    manifest.mark_building(worker_id)
+    manifest.refresh_build_lock(worker_id)
 
     col = manifest.variable.collection
     logger.info(
@@ -371,6 +389,31 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
 # =============================================================================
 
 
+def dispatch_build(manifest_id: int, claimed_by: str = "dispatch", force: bool = False) -> bool:
+    """
+    Claim a manifest and queue its build; return whether it was queued.
+
+    The only way a build should reach Celery.  Claiming first is what stops a
+    manifest waiting in the queue from being dispatched again by the next
+    sweep — see ``VirtualZarrManifest.claim_for_build``.  The claim is unique
+    per dispatch and travels with the task, so the one case claiming alone does
+    not cover — a queue wait long enough for ``reset_stale_locks`` to recycle
+    the lock and a later sweep to dispatch a second copy — resolves in favour
+    of the newer copy rather than running both.
+
+    A claim we then fail to dispatch leaves the row BUILDING until
+    ``reset_stale_locks`` recovers it, which is the same path a worker crash
+    takes.  ``force`` is the operator's rebuild of a manifest that does not
+    need one.
+    """
+    claim = f"{claimed_by}-{uuid4().hex[:8]}"
+    if not VirtualZarrManifest.claim_for_build(manifest_id, claim, force=force):
+        return False
+
+    build_virtual_zarr_manifest.delay(manifest_id, claim)
+    return True
+
+
 @app.task(
     name="georiva.virtual_zarr.tasks.sweep_virtual_zarr_pending",
     queue="georiva-default",
@@ -381,22 +424,17 @@ def sweep_virtual_zarr_pending() -> None:
 
     Runs every 5 minutes:
       1. Reset stale BUILDING locks (crash recovery) → PENDING
-      2. Dispatch build_virtual_zarr_manifest for every buildable manifest
+      2. Claim and dispatch every buildable manifest
     """
     reset_count = VirtualZarrManifest.reset_stale_locks()
     if reset_count:
         logger.info("sweep_virtual_zarr_pending: reset %d stale lock(s)", reset_count)
 
     buildable = list(VirtualZarrManifest.get_buildable().values_list("pk", flat=True))
+    dispatched = sum(dispatch_build(manifest_id, claimed_by="sweep") for manifest_id in buildable)
 
-    for manifest_id in buildable:
-        build_virtual_zarr_manifest.apply_async(
-            args=[manifest_id],
-            queue="georiva-ingestion",
-        )
-
-    if buildable:
-        logger.info("sweep_virtual_zarr_pending: dispatched %d build task(s)", len(buildable))
+    if dispatched:
+        logger.info("sweep_virtual_zarr_pending: dispatched %d build task(s)", dispatched)
 
 
 # =============================================================================
