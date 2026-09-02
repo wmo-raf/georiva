@@ -126,7 +126,17 @@ def exception_report(exc: WMTSException) -> Response:
         f"<ExceptionText>{escape(exc.text)}</ExceptionText>"
         "</Exception></ExceptionReport>"
     )
-    return Response(xml, status_code=exc.status_code, media_type="application/xml")
+    # Never cached. A GetFeatureInfo or GetTile whose COG had not landed yet
+    # leaves this endpoint as an ExceptionReport, and a 404 carrying no cache
+    # headers is one a browser may reuse on its own initiative (RFC 9111's
+    # heuristic freshness) — which would put back, at the client, exactly the
+    # stale failure #400 was about. Nothing else here is worth caching either.
+    return Response(
+        xml,
+        status_code=exc.status_code,
+        media_type="application/xml",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _collect_params(request: Request) -> dict[str, str]:

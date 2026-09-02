@@ -32,10 +32,10 @@ os.environ["DJANGO_BASE_URL"] = "http://never-connected:8000"
 
 import numpy
 import pytest
-import rasterio
 from app import dependencies
 from app.main import app
 from fastapi.testclient import TestClient
+from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
 
 #: The address every test speaks unless it says otherwise.
@@ -158,6 +158,34 @@ def client(fake_redis, django_configs):
     return TestClient(app)
 
 
+def cog_bytes(bounds=None, data=None, nodata=None) -> bytes:
+    """The seeded grid as a byte string: one definition of what a test COG is.
+
+    ``seed_cog`` puts these bytes on disk at the key the app will derive; the
+    storage-recovery suite serves the same bytes over HTTP, because the defect
+    it tests lives in GDAL's ``/vsicurl/`` layer and never touches a filesystem
+    path. Both must read the same raster or a value assertion means two things.
+    """
+    if data is None:
+        data = COG_VALUES
+    height, width = data.shape
+    left, bottom, right, top = bounds or (-WORLD_EXTENT, -WORLD_EXTENT, WORLD_EXTENT, WORLD_EXTENT)
+
+    with MemoryFile() as memfile:
+        with memfile.open(
+            driver="GTiff",
+            width=width,
+            height=height,
+            count=1,
+            dtype="float32",
+            crs="EPSG:3857",
+            nodata=nodata,
+            transform=from_bounds(left, bottom, right, top, width, height),
+        ) as dst:
+            dst.write(data, 1)
+        return memfile.read()
+
+
 @pytest.fixture
 def seed_cog():
     """Write a small COG at the storage path the app will derive for a time.
@@ -204,23 +232,8 @@ def seed_cog():
         )
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        if data is None:
-            data = COG_VALUES
-        height, width = data.shape
-        left, bottom, right, top = bounds or (-WORLD_EXTENT, -WORLD_EXTENT, WORLD_EXTENT, WORLD_EXTENT)
-        with rasterio.open(
-            path,
-            "w",
-            driver="GTiff",
-            width=width,
-            height=height,
-            count=1,
-            dtype="float32",
-            crs="EPSG:3857",
-            nodata=nodata,
-            transform=from_bounds(left, bottom, right, top, width, height),
-        ) as dst:
-            dst.write(data, 1)
+        with open(path, "wb") as sink:
+            sink.write(cog_bytes(bounds=bounds, data=data, nodata=nodata))
         return path
 
     return write
