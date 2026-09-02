@@ -28,8 +28,10 @@ OPTIONS (via environment variables):
   TTL_ROOT_PATH             ASGI root_path for reverse proxy prefix (default: empty)
 
 GDAL TUNING (via environment variables):
-  GDAL_CACHEMAX             Block cache in MB (default: unset)
-  CPL_VSIL_CURL_CACHE_SIZE  HTTP response cache in bytes (default: unset)
+  GDAL_CACHEMAX                 Block cache in MB (default: unset)
+  CPL_VSIL_CURL_CACHE_SIZE      HTTP response cache in bytes (default: unset)
+  GDAL_DISABLE_READDIR_ON_OPEN  Sidecar lookup on open (app pins EMPTY_DIR; see
+                                app/reader.py before overriding it)
 
   help : Show this message
 """
