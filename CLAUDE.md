@@ -154,7 +154,12 @@ Defined in `api/urls.py`:
 - **Plugins**: Register via decorator (`@FormatRegistry.register`) or programmatic `registry.register()`
 - **Singletons**: `storage`, `format_registry`, `loader_profile_viewset_registry` — import from their modules
 - **Celery tasks**: Late imports inside task body to avoid circular imports; `bind=True` + `acks_late=True`
-- **Celery queues**: Heavy processing on `georiva-ingestion`, lightweight on `georiva-default`
+- **Celery queues**: split by what waits on the task, not by weight (ADR 0025). `georiva-ingestion` carries fetch
+  and extraction *and nothing else* — it runs one pool process, so anything on it delays every file behind it;
+  the admitted set is closed and asserted in `ingestion/tests/test_queue_routing.py`. Deferrable derived work
+  (derivation units, zonal stats, virtual-Zarr manifests) goes to `georiva-processing`; sweeps, cleanup and
+  scheduling to `georiva-default`. Declare the queue on the task and dispatch with `delay(...)` — never
+  `apply_async(queue=...)`, which silently overrides the declaration
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`

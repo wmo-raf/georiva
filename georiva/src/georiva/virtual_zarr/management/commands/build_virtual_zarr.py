@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from georiva.core.models import Collection
 from georiva.virtual_zarr.models import VirtualZarrManifest
-from georiva.virtual_zarr.tasks import _run_build, build_virtual_zarr_manifest
+from georiva.virtual_zarr.tasks import _run_build, dispatch_build
 
 
 class Command(BaseCommand):
@@ -48,12 +48,12 @@ class Command(BaseCommand):
                 except Exception as exc:
                     manifest.mark_failed(str(exc))
                     self.stdout.write(self.style.ERROR(f"    ✗ FAILED: {exc}"))
-            else:
-                build_virtual_zarr_manifest.apply_async(
-                    args=[manifest.pk],
-                    queue="georiva-ingestion",
-                )
+            elif dispatch_build(manifest.pk, worker_id="management-command"):
                 self.stdout.write(f"  [async] {label} → dispatched to Celery")
+            else:
+                # Claimed by the sweep or another operator; dispatching anyway
+                # would put two writers on one Icechunk repo.
+                self.stdout.write(self.style.WARNING(f"  [async] {label} → already building, skipped"))
 
     # -------------------------------------------------------------------------
     # Helpers

@@ -60,7 +60,11 @@ SNAPSHOT_RETENTION = timedelta(days=7)
     bind=True,
     max_retries=0,  # failures go to FAILED status; sweep retries
     acks_late=True,
-    queue="georiva-ingestion",
+    # Deferrable bookkeeping: nothing waits on a manifest, and the sweep
+    # re-dispatches anything dropped.  Keeping it off georiva-ingestion keeps
+    # the fan-out from one large fetch out of the way of the next file to be
+    # extracted (#398).  Always dispatch via ``dispatch_build`` below.
+    queue="georiva-processing",
 )
 def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
     """
@@ -93,6 +97,9 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
         logger.error("build_virtual_zarr_manifest: manifest %d not found", manifest_id)
         return
 
+    # Already claimed (BUILDING) by dispatch_build; re-stamping the lock here
+    # restarts the clock now that the build is actually running, so a long
+    # queue wait cannot eat into the window reset_stale_locks allows it.
     worker_id = f"celery-{self.request.id or 'unknown'}"
     manifest.mark_building(worker_id)
 
@@ -371,6 +378,23 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
 # =============================================================================
 
 
+def dispatch_build(manifest_id: int, worker_id: str = "") -> bool:
+    """
+    Claim a manifest and queue its build; return whether it was queued.
+
+    The only way a build should reach Celery.  Claiming first is what stops a
+    manifest waiting in the queue from being dispatched again by the next
+    sweep — see ``VirtualZarrManifest.claim_for_build``.  A claim we then fail
+    to dispatch leaves the row BUILDING until ``reset_stale_locks`` recovers
+    it, which is the same path a worker crash takes.
+    """
+    if not VirtualZarrManifest.claim_for_build(manifest_id, worker_id):
+        return False
+
+    build_virtual_zarr_manifest.delay(manifest_id)
+    return True
+
+
 @app.task(
     name="georiva.virtual_zarr.tasks.sweep_virtual_zarr_pending",
     queue="georiva-default",
@@ -381,22 +405,17 @@ def sweep_virtual_zarr_pending() -> None:
 
     Runs every 5 minutes:
       1. Reset stale BUILDING locks (crash recovery) → PENDING
-      2. Dispatch build_virtual_zarr_manifest for every buildable manifest
+      2. Claim and dispatch every buildable manifest
     """
     reset_count = VirtualZarrManifest.reset_stale_locks()
     if reset_count:
         logger.info("sweep_virtual_zarr_pending: reset %d stale lock(s)", reset_count)
 
     buildable = list(VirtualZarrManifest.get_buildable().values_list("pk", flat=True))
+    dispatched = sum(dispatch_build(manifest_id, worker_id="sweep") for manifest_id in buildable)
 
-    for manifest_id in buildable:
-        build_virtual_zarr_manifest.apply_async(
-            args=[manifest_id],
-            queue="georiva-ingestion",
-        )
-
-    if buildable:
-        logger.info("sweep_virtual_zarr_pending: dispatched %d build task(s)", len(buildable))
+    if dispatched:
+        logger.info("sweep_virtual_zarr_pending: dispatched %d build task(s)", dispatched)
 
 
 # =============================================================================

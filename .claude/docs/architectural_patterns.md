@@ -132,10 +132,17 @@ retries failures.
 
 ## 7. Celery Task Conventions
 
-**Queue routing** — Two queues separate workloads:
+**Queue routing** — three queues, split by *what waits on the task*, not by how heavy it is (ADR 0025):
 
 - `georiva-default`: Lightweight tasks (sweeps, cleanup, scheduling)
-- `georiva-ingestion`: Heavy data processing tasks
+- `georiva-ingestion`: Fetch and extraction — and nothing else. One pool process by default, so this queue is a
+  strict FIFO and anything on it delays every file behind it. The admitted set is closed and asserted in
+  `ingestion/tests/test_queue_routing.py`
+- `georiva-processing`: Deferrable derived work — per-unit derivation compute *and* per-asset bookkeeping
+  (zonal stats, virtual-Zarr manifests). Derived from published data, awaited by nobody, sweep-recoverable
+
+Declare the queue on the task and dispatch with `delay(...)`. `apply_async(queue=...)` silently overrides the
+declaration, so the same test walks the package AST and fails if any dispatch site names a queue.
 
 **Task patterns** (seen in `ingestion/tasks.py` and `core/tasks.py`):
 

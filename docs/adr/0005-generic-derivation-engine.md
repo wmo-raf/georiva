@@ -77,7 +77,9 @@ failed or in-progress unit, since those produce no Published item), and the **mo
 Celery task each (each task takes the `DerivationRun` lock). Event-driven, scheduled/backfill, and manual
 invocation are all thin callers differing only in how wide a selector they build — backfill and streaming share
 one code path. Per-unit compute runs on a **dedicated `georiva-processing` queue**, isolated from
-`georiva-ingestion`, so a multi-year backfill cannot starve live ingestion.
+`georiva-ingestion`, so a multi-year backfill cannot starve live ingestion. (ADR 0025 later widened that queue
+from per-unit derivation compute to *deferrable derived work* generally, adding per-asset bookkeeping — zonal
+stats and virtual-Zarr manifests — for the same reason.)
 
 **Compute is a shared, pure library.** `geoprocessing` is a non-Django package (no models, no migrations) holding
 raster algebra, regridding, temporal aggregation, calendar conversion, and zonal stats. Functions take in-memory

@@ -39,6 +39,10 @@ class VirtualZarrManifest(TimeStampedModel):
         # save/delete signals flip it back to STALE when reality changes.
         NO_DATA = "no_data", "No data"
 
+    #: Statuses a build may be claimed from.  READY needs no build, BUILDING is
+    #: already claimed, and NO_DATA is terminal until data arrives.
+    BUILDABLE_STATUSES = (Status.PENDING, Status.STALE, Status.FAILED)
+
     # -------------------------------------------------------------------------
     # Identity — one manifest per variable
     # -------------------------------------------------------------------------
@@ -267,26 +271,40 @@ class VirtualZarrManifest(TimeStampedModel):
         """
         Return manifests that need building: PENDING, STALE, or retryable FAILED.
 
-        Excludes any currently locked (BUILDING with a fresh lock) to avoid
-        duplicate dispatches when the sweep runs concurrently with a build task.
+        A manifest already in flight is BUILDING — claimed at dispatch by
+        ``claim_for_build`` — and so is excluded by the status filter itself.
         """
-        stale_cutoff = timezone.now() - cls.LOCK_TIMEOUT
-        return (
-            cls.objects.filter(
-                status__in=[
-                    cls.Status.PENDING,
-                    cls.Status.STALE,
-                    cls.Status.FAILED,
-                ]
-            )
-            .exclude(
+        return cls.objects.filter(status__in=cls.BUILDABLE_STATUSES).select_related(
+            "variable",
+            "variable__collection",
+            "variable__collection__catalog",
+        )
+
+    @classmethod
+    def claim_for_build(cls, pk, worker_id: str = "") -> bool:
+        """
+        Take the build lock for one manifest; return whether we got it.
+
+        The claim happens at *dispatch*, not when the task starts running.  A
+        manifest queued behind a backlog would otherwise still be PENDING when
+        the next 5-minute sweep looked, and be dispatched again — once per
+        sweep for as long as the backlog lasted (#398).  Two writers on one
+        Icechunk repo raise ConflictError and flip the manifest to FAILED, so
+        the duplicate is not merely wasted work once builds run on a queue with
+        more than one pool slot.
+
+        One conditional UPDATE over the buildable statuses, so two sweeps
+        racing each other can only have one winner.
+
+        A claim whose task never runs is indistinguishable from a worker that
+        died mid-build, and ``reset_stale_locks`` recovers both.
+        """
+        return bool(
+            cls.objects.filter(pk=pk, status__in=cls.BUILDABLE_STATUSES).update(
                 status=cls.Status.BUILDING,
-                locked_at__gte=stale_cutoff,
-            )
-            .select_related(
-                "variable",
-                "variable__collection",
-                "variable__collection__catalog",
+                locked_at=timezone.now(),
+                locked_by=worker_id,
+                error="",
             )
         )
 

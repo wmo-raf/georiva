@@ -96,6 +96,7 @@ newest thinking last:
 | [0003](adr/0003-acquisition-model-fetchrun-uploadsession.md) | Acquisition model — FetchRun, UploadSession |
 | [0019](adr/0019-retire-the-monitoring-menu-and-acquisition-feed.md) | Retire the Monitoring menu and the org-wide Acquisition Feed |
 | [0020](adr/0020-not-ready-runs-are-resurrected.md) | Not-ready runs are resurrected |
+| [0025](adr/0025-the-ingestion-queue-admits-only-fetch-and-extraction.md) | The ingestion queue admits only fetch and extraction |
 
 ## Cross-cutting patterns (for maintainers)
 
