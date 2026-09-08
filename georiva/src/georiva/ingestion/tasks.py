@@ -292,6 +292,22 @@ def prune_ingestion_logs(max_age_days: int = 30):
     return result
 
 
+@app.task(name="georiva.ingestion.tasks.close_quiet_run_ingestions", queue="georiva-default")
+def close_quiet_run_ingestions(minutes: int = None):
+    """Close model runs that have gone quiet (ADR 0026).
+
+    The safety net under the two evidence-based closers, which fire on arrival.
+    On ``georiva-default`` with the other sweeps, never on ``georiva-ingestion``:
+    nothing a reader can observe waits on a run being marked closed (ADR 0025).
+    """
+    from georiva.ingestion.run_closers import close_quiet_runs
+
+    closed = close_quiet_runs(minutes)
+    if closed:
+        logger.info("Closed %d quiet run ingestion(s)", closed)
+    return closed
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     try:
@@ -312,6 +328,14 @@ def setup_periodic_tasks(sender, **kwargs):
             defaults={
                 "task": "georiva.ingestion.tasks.cleanup_archives",
                 "interval": schedule_1day,
+                "enabled": True,
+            },
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.ingestion.close_quiet_run_ingestions",
+            defaults={
+                "task": "georiva.ingestion.tasks.close_quiet_run_ingestions",
+                "interval": schedule_5min,
                 "enabled": True,
             },
         )

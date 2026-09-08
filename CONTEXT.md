@@ -200,8 +200,10 @@ _Avoid_: processing, import, fetch (for this phase)
 ### Pipeline records
 
 **FetchRun**:
-The record of a single automated DataFeed execution. Created at the start of the run — before any files are fetched —
-to enable real-time monitoring. One `FetchRun` per DataFeed execution, covering all collections in that feed.
+The record of one collection's share of an automated DataFeed execution. Created at the start of the run — before any
+files are fetched — to enable real-time monitoring. One `FetchRun` per `(feed execution, collection)`: `LoaderJobType`
+loops the feed's collections and `Loader.run()` creates a `FetchRun` for each. It carries no collection FK, so the
+collection is recovered from `FetchedFile.file_path`'s third segment.
 Status: `running → completed / failed / cancelled`. Success vs partial outcome is derived from `FetchedFile` children,
 not stored on the run itself.
 _Avoid_: DataArrival, LoaderRun, DataFeedRun
@@ -234,6 +236,18 @@ when no Items are created. Summary fields populated on completion: `variables_di
 Items produced by a FileIngestion are found via `Item.source_file` (indexed, value: `"{bucket}:{file_path}"`) —
 correct for all formats, including GRIB/NetCDF multi-item files.
 _Avoid_: IngestionLog
+
+**RunIngestion**:
+The per-run record of one model run arriving into one collection — one row per `(collection, reference_time)`, forecast
+collections only (ADR 0026). Where `FileIngestion` is one *file* arriving, this is one *model run* arriving. Opens on the
+first `FileIngestion` reaching `completed` for that key, from inside `mark_completed` (the sole writer of `completed`,
+and a bulk `update()` that emits no `post_save`). Status: `open → closed`, and **back to `open`** on any later file for
+the same key, bumping `revision`. Closed by whichever signal its arrival route has, recorded in `closed_by`:
+`declared_set` (DataFeed — every key the Loader declared has arrived; exact, cannot close early), `upload_session`
+(every feeding `UploadSession` is closed and all its stored files have ingested), `quiet_period` (the safety net for
+drops and sweeps). Exposes `version` = `ref_epoch_seconds × 100 + revision`. Emits `run_ingestion_closed` /
+`run_ingestion_reopened` from `ingestion/domain_signals.py`.
+_Avoid_: cycle, ModelRun, RunArrival, DataArrival
 
 ### Triggers
 
