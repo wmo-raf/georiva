@@ -15,10 +15,13 @@ Bucket layout:
         {org}/{incoming|sources}/{catalog}/{collection}/file.ext
     georiva-assets/    Final processed datasets
         {org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/file.ext
+    georiva-publications/  Data transposed for a reader that is not GeoRiva
+        {org}/{publication-slug}/...
 
 Flow:
     incoming/sources → process → assets
                      └→ archive (raw copy)
+                     └→ publications (re-exported for a foreign reader)
 """
 
 import logging
@@ -46,8 +49,9 @@ class BucketType:
     ARCHIVE = "archive"
     ASSETS = "assets"
     ZARR = "zarr"
+    PUBLICATIONS = "publications"
 
-    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR]
+    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR, PUBLICATIONS]
 
 
 def get_bucket_config() -> dict[str, str]:
@@ -193,6 +197,36 @@ class Bucket:
 
         return files
 
+    def list_keys(self, path: str = "", recursive: bool = True) -> list[str]:
+        """Key names under a path, and nothing else.
+
+        ``list_files`` costs two extra API calls per object to fill in size and
+        modified time. A caller that only wants to delete a prefix, or count
+        what is under one, is paying three requests where it needs one — and a
+        published area is thousands of small objects.
+        """
+        keys = []
+
+        try:
+            dirs, filenames = self.storage.listdir(path)
+        except FileNotFoundError:
+            # A prefix nobody has written to yet. S3 answers with an empty
+            # listing; local storage raises. Both mean "nothing there", which is
+            # an ordinary answer on a first run — not a failure worth logging.
+            return keys
+        except Exception as e:
+            logger.error("Failed to list keys in %s: %s", path, e)
+            return keys
+
+        keys.extend(f"{path}/{name}" if path else name for name in filenames)
+
+        if recursive:
+            for dir_name in dirs:
+                dir_path = f"{path}/{dir_name}" if path else dir_name
+                keys.extend(self.list_keys(dir_path, recursive=True))
+
+        return keys
+
     def list_directories(self, path: str = "") -> list[str]:
         try:
             dirs, _ = self.storage.listdir(path)
@@ -316,6 +350,22 @@ class StorageManager:
     def zarr(self) -> Bucket:
         """Zarr analysis-ready store bucket (derived cache of COG assets)."""
         return self._get_bucket(BucketType.ZARR)
+
+    @property
+    def publications(self) -> Bucket:
+        """Data re-exported in a foreign reader's own format.
+
+        Everything on the other buckets is written for GeoRiva to read back;
+        this one holds bytes laid out for something else entirely — a point
+        forecast transposed out of per-timestep COGs, say, for a service that
+        knows nothing about STAC. Keys stay org-first
+        (``{org}/{publication-slug}/…``) so a reader can be pointed at one
+        organisation's prefix and be unable to see another's.
+
+        Written through ``core.publishing.PublicationSink``, which is where the
+        rule that completion markers go last lives.
+        """
+        return self._get_bucket(BucketType.PUBLICATIONS)
 
     def get_zarr_fs(self):
         """

@@ -319,9 +319,16 @@ GEORIVA_BUCKETS = {
     "zarr": {
         "name": "georiva-zarr",
     },
+    # Data re-exported in a foreign reader's own format. Private and
+    # notification-free on purpose: a publication's own writes must never
+    # arrive back at the ingestion consumer as a file to ingest.
+    "publications": {
+        "name": "georiva-publications",
+    },
 }
 
 GEORIVA_ASSETS_BUCKET = GEORIVA_BUCKETS.get("assets", {}).get("name")
+GEORIVA_PUBLICATIONS_BUCKET = GEORIVA_BUCKETS.get("publications", {}).get("name")
 
 # =============================================================================
 # Zarr Analysis-Ready Store
