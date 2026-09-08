@@ -583,3 +583,35 @@ STAC Render extension (`renders`): the default style's render entry carries a ve
 the Render spec has no vocabulary for "served when unnamed" — and items reference render names without repeating the
 collection's colormaps. See ADR 0023.
 _Avoid_: style endpoint, style URL segment
+
+### Publication
+
+**Publication**:
+GeoRiva's data re-exported in a foreign reader's own format — the same data, laid out for a service that knows
+nothing about STAC, COGs or tiles. Not a tier and not a Derivation: nothing new is computed and no `Item` is
+produced, so it does not appear in any catalog. Lives on the `georiva-publications` bucket under
+`{org}/{publication-slug}/`, and that root is the tenancy boundary — a foreign reader is pointed at one
+organisation's prefix and cannot resolve outside it. Written through `core.publishing.PublicationSink`; what a
+publication contains belongs to the plugin that publishes it, never to core. See ADR 0027.
+_Avoid_: export (as a model name), Published (that is the served STAC tier), publish (as a verb for Promotion)
+
+**Completion marker**:
+The object whose existence tells a foreign reader that a publication is ready, and the only signal it has —
+object stores have no transaction, and a listing mid-write looks like a listing of something small. **The engine
+writes markers last and the writer never writes them**: a marker that lands before its bytes is a reader loading a
+partial dataset with nothing anywhere reporting an error. Order matters between markers too — a dataset's own
+manifest before the pointer naming it as current. Enforced by the sink, not by the writer's discipline:
+`write()` refuses a declared marker path and `publish_markers()` refuses everything else. See ADR 0027.
+_Avoid_: ready file, sentinel, done marker
+
+**Build discipline**:
+The shared machinery for anything rebuilt from data that keeps arriving — a virtual-Zarr manifest over a variable's
+COGs, a publication over a collection's run. Six states (`pending → building → ready`, plus `stale`, `failed`,
+`no_data`), a lock claimed **at dispatch** in the same conditional UPDATE that decides to queue the build, a claim
+token that travels with the task so a copy whose claim was recycled stands down, lock expiry as the only crash
+recovery, an input fingerprint that skips an unchanged build, and a durable per-attempt log with retention. Lives in
+`core.build_discipline` as abstract models (`BuildDisciplinedModel`, `BuildAttemptLog`) plus `dispatch_build` /
+`sweep_builds`; grain-free, so a per-`Variable` and a per-`Collection` builder use the same base. Deliberately **not**
+a writer abstraction — no `BasePublisher`, no registry. `VirtualZarrManifest` is the shape it was extracted from and
+is not migrated onto it. See ADR 0027.
+_Avoid_: publisher framework, build pipeline, BasePublisher

@@ -6,6 +6,7 @@ Sets up:
     georiva-sources    → Redis notifications (triggers ingestion)
     georiva-archive    → no notifications, private
     georiva-assets     → public read access (serves processed data)
+    georiva-publications → no notifications, private (re-exported for foreign readers)
 
 Usage:
     python manage.py setup_minio
@@ -51,6 +52,14 @@ BUCKET_CONFIGS = {
         "public_read": False,
         "notify_on_create": False,
         "description": "Zarr stores for ingestion output (private)",
+    },
+    # No notifications: these objects are GeoRiva's own output, and a
+    # notification would hand them straight back to the ingestion consumer.
+    # Private: readers are internal services holding credentials, not browsers.
+    "publications": {
+        "public_read": False,
+        "notify_on_create": False,
+        "description": "Data re-exported for a foreign reader (private)",
     },
 }
 
