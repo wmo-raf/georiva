@@ -240,6 +240,14 @@ class ListingAndPruningTests(SinkTestCase):
     def test_the_versions_of_an_area_are_its_child_directories(self):
         self.assertEqual(sorted(self.sink.children("nairobi")), ["100", "200"])
 
+    def test_an_emptied_version_stops_being_a_version(self):
+        """Local storage leaves the directory behind when its last object goes;
+        S3 has no directory to leave. A retention pass counting versions must
+        agree with the object store, not with the filesystem."""
+        self.sink.delete_prefix("nairobi/100", include_markers=True)
+
+        self.assertEqual(self.sink.children("nairobi"), ["200"])
+
     def test_a_superseded_version_can_be_pruned_whole(self):
         removed = self.sink.delete_prefix("nairobi/100")
 

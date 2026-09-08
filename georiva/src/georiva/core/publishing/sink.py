@@ -213,13 +213,24 @@ class PublicationSink:
         return [_strip_root(key, self.root) for key in self.bucket.list_keys(prefix, recursive=recursive)]
 
     def children(self, relpath: str = "") -> list[str]:
-        """Immediate child directory names under ``relpath``.
+        """Immediate child names under ``relpath`` that actually hold objects.
 
         How a retention pass enumerates the versions of an area: the layout puts
-        each version in its own directory, so this is the version list.
+        each version under its own path segment, so this is the version list.
+
+        Derived from the keys rather than from a directory listing, because an
+        object store has no directories — and on a backend that does, a prefix
+        whose objects have all been deleted leaves an empty directory behind,
+        which would then be counted as a version that still exists. One listing
+        either way.
         """
-        prefix = self.key(relpath) if relpath else self.root.rstrip("/")
-        return [posixpath.basename(path) for path in self.bucket.list_directories(prefix)]
+        offset = len(relpath) + 1 if relpath else 0
+        names = set()
+        for key in self.list_keys(relpath, recursive=True):
+            head, separator, _ = key[offset:].partition("/")
+            if separator:
+                names.add(head)
+        return sorted(names)
 
     def delete(self, relpath: str) -> bool:
         return self.bucket.delete(self.key(relpath))
