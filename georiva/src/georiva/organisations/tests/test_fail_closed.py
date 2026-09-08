@@ -459,6 +459,15 @@ class OrgOwnedLookupDeclarationTests(TestCase):
             if model.__module__.startswith(access.OWN_MODULE_PREFIX)
             # The undeclared stand-in below is undeclared on purpose.
             and model is not Undeclared
+            # Fixture models defined in a test module are registered for the
+            # length of a run but are not models this codebase ships, so they
+            # are not what these assertions are about. Excluded by module rather
+            # than by name because the ones that matter live in *other* apps'
+            # tests: core's build-discipline fixtures declare
+            # `app_label = "georivacore"`, so they land here whenever core's
+            # tests and these share a process — which CI's sharding means is
+            # never, and a developer running both in one command means always.
+            and ".tests" not in model.__module__
         ]
 
     def test_every_model_declares_its_tenancy(self):
