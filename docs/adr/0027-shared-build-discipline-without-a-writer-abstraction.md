@@ -7,6 +7,15 @@ accepted
 Refines ADR 0025 (the ingestion queue admits only fetch and extraction), whose
 claim-at-dispatch rule is one of the things extracted here.
 
+> **Amended 2026-09-10: the root is not always the tenancy boundary.** This ADR
+> says a publication is rooted at `{org}/{publication-slug}/` and that the root
+> *is* the boundary, a foreign reader being unable to resolve outside one
+> organisation. `PublicationSink` now also offers an **instance-wide root**,
+> `{root}/`, for a reader built to hold several organisations at once — see
+> *Consequences* below, where the original claim is left standing as written and
+> the amendment records what replaces it. The org-rooted form is unchanged and
+> remains the default.
+
 ## Context
 
 GeoRiva is about to grow a second thing that is *built* rather than ingested. The
@@ -162,3 +171,53 @@ belongs in the code that can refuse it.
   missing-version error, so it is never the default — but dropping a superseded
   version whole does require it, because that version's own manifest is a
   marker and a directory that cannot lose it never goes away.
+
+### Amendment, 2026-09-10 — the instance-wide root
+
+The paragraph above beginning *"Core also gains the publications bucket"* says
+keys are rooted at `{org}/{publication-slug}/` and that **that root is the
+tenancy boundary**. That is still true of the org-rooted form, which is still the
+default and still what every existing caller uses. It is no longer true of every
+publication.
+
+**What changed.** The reader this ADR was written for — met.no's
+`rawdataforecaster` — gained a per-request area filter and reports the area that
+answered. Before that, the process was the only place a tenant could be
+distinguished, so a prefix per organisation implied a *process* per organisation.
+It no longer does, and one process holding every organisation's areas needs one
+prefix holding every organisation's data.
+
+**What core does about it.** `PublicationSink.instance_wide(root)` roots a
+publication at `{root}/`. It is a second constructor rather than a flag because
+the two forms make different promises, and the call site should say which one it
+is making.
+
+**What is given up, precisely.** Cross-tenant resolution is no longer impossible
+by construction. A reader given `{root}/` can see every organisation publishing
+there, by design, so the boundary moves out of the storage layer to whatever
+decides which tenant a request may be answered from — and that check is now
+somebody's code and somebody's test, not a property of the prefix. Core cannot
+give this back; pretending otherwise by adding a check here would only move the
+same trust to a place with less information.
+
+**What is kept, by construction.** Two things, both narrower than the sentence
+they replace:
+
+1. *An instance-wide root cannot be spelled as an organisation slug.* A root of
+   `kenya` **is** organisation `kenya`'s prefix: a publication rooted there
+   writes into a tenant's space today, and a tenant registered tomorrow inherits
+   a prefix already full of another's data — silently in both directions, since
+   neither side is looking. The test is `ORG_SLUG_RE` rather than the
+   organisations that exist, because the collision that matters is with the one
+   created *after* the root was chosen; the reserved-name list is deliberately
+   not consulted, since it can shrink and a root that was safe must not stop
+   being so. `_forti` is safe because `_` is outside the grammar.
+2. *`delete_prefix` refuses an empty relpath on an instance-wide sink.* Under
+   `{org}/{slug}/` "delete the root" means dropping one publication, which a
+   caller may legitimately want. Under a shared root it means dropping every
+   organisation's, which no retention pass wants and which nothing downstream
+   would report — the readers would simply stop finding data.
+
+Everything else is unchanged: key derivation, the escape check, the marker
+patterns and the marker-ordering rules are all written against `root` and behave
+identically under both forms.
