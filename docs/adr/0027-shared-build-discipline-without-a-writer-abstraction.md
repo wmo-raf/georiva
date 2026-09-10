@@ -218,6 +218,23 @@ they replace:
    organisation's, which no retention pass wants and which nothing downstream
    would report — the readers would simply stop finding data.
 
+   This second one is a backstop, not a boundary, and it is worth being blunt
+   about the gap it leaves. On an instance-wide sink *any* prefix may be shared:
+   a publisher's pointer directory or its config file is as instance-wide as the
+   root, and deleting either costs every organisation. Core cannot guard those,
+   because which names mean what under the root is the publisher's grammar and
+   core does not have it — the same reason `children()` at such a root can no
+   longer promise to be enumerating areas. Retention on a shared root is the
+   publisher's to get right, and its tests are where that is established.
+
+   The identity is fixed at construction for the same reason the checks exist at
+   all: `organisation_slug`, `slug` and `root` are read-only, so a sink cannot
+   be re-rooted into something no rule ever saw. And the grammar rule runs in
+   both directions — an `organisation_slug` must *match* `ORG_SLUG_RE`, or
+   `PublicationSink("_forti", "central")` would root a supposedly org-owned
+   publication inside the shared prefix, where a shared reader would serve it as
+   though somebody had published it there.
+
 Everything else is unchanged: key derivation, the escape check, the marker
 patterns and the marker-ordering rules are all written against `root` and behave
 identically under both forms.

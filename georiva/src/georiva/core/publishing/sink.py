@@ -42,7 +42,7 @@ class PublicationSink:
 
     * The root cannot be spelled as an organisation slug, so it can neither
       shadow a tenant's prefix nor be silently inherited by a tenant created
-      later. ``_forti`` is safe because ``_`` is outside the slug grammar.
+      later. ``_shared`` is safe because ``_`` is outside the slug grammar.
     * ``delete_prefix`` refuses to take the whole root, which under this form is
       every organisation's data rather than one publication's.
 
@@ -88,11 +88,18 @@ class PublicationSink:
         if organisation_slug is None:
             _validate_instance_root(slug)
         else:
-            _validate_segment(organisation_slug, "organisation_slug")
-            _validate_segment(slug, "slug")
+            _validate_organisation_slug(organisation_slug)
+        _validate_segment(slug, "slug")
 
-        self.organisation_slug = organisation_slug
-        self.slug = slug
+        self._organisation_slug = organisation_slug
+        self._slug = slug
+        # Derived once, at the only point the parts are checked. Deriving it on
+        # each access would leave the guarantee resting on the attributes
+        # staying as they were validated, and `sink.organisation_slug = None`
+        # would silently turn an organisation's publication into an
+        # instance-wide one rooted at its publication slug.
+        self._root = f"{slug}/" if organisation_slug is None else f"{organisation_slug}/{slug}/"
+
         self.marker_patterns = tuple(marker_patterns)
         self._bucket = bucket
 
@@ -128,16 +135,28 @@ class PublicationSink:
         return self._bucket
 
     @property
+    def organisation_slug(self) -> str | None:
+        """The owning organisation, or None on an instance-wide sink.
+
+        Read-only, with `slug` and `root`: together they are the validated
+        identity, and a sink that could be re-rooted after construction would
+        have been validated as something it no longer is.
+        """
+        return self._organisation_slug
+
+    @property
+    def slug(self) -> str:
+        return self._slug
+
+    @property
     def is_instance_wide(self) -> bool:
         """Whether this root spans organisations rather than bounding one."""
-        return self.organisation_slug is None
+        return self._organisation_slug is None
 
     @property
     def root(self) -> str:
         """The prefix a reader is pointed at. Trailing slash: it names a prefix."""
-        if self.is_instance_wide:
-            return f"{self.slug}/"
-        return f"{self.organisation_slug}/{self.slug}/"
+        return self._root
 
     def key(self, relpath: str) -> str:
         """Absolute bucket key for a path relative to this publication.
@@ -275,6 +294,13 @@ class PublicationSink:
         How a retention pass enumerates the versions of an area: the layout puts
         each version under its own path segment, so this is the version list.
 
+        That reading holds for a ``relpath`` the caller knows names an area. It
+        does **not** hold at the root of an instance-wide sink, where the
+        children are whatever the publisher put there — every organisation's
+        areas, and any documents it keeps beside them. Core cannot tell those
+        apart, because which names are areas is the publisher's grammar and not
+        core's; a caller enumerating areas must know its own layout.
+
         Derived from the keys rather than from a directory listing, because an
         object store has no directories — and on a backend that does, a prefix
         whose objects have all been deleted leaves an empty directory behind,
@@ -311,6 +337,13 @@ class PublicationSink:
         instance-wide one it is every organisation's, which no retention pass
         wants and which nothing downstream would report — the readers would
         simply stop finding data.
+
+        That refusal is a backstop and not a boundary. On an instance-wide sink
+        *any* prefix may be shared — a publisher's pointer directory or its
+        config is as instance-wide as the root itself — and core cannot tell
+        which, because the layout under the root is the publisher's. What used
+        to cost one organisation now costs all of them, and only the caller
+        knows the difference.
         """
         if not relpath and self.is_instance_wide:
             raise ValueError(
@@ -339,6 +372,27 @@ def _validate_segment(value: str, what: str) -> None:
         raise ValueError(f"{what} must be a single path segment, got {value!r}")
 
 
+def _validate_organisation_slug(organisation_slug: str) -> None:
+    """Refuse an organisation segment that no organisation could be called.
+
+    The mirror of the rule below, and needed for the same reason read the other
+    way: without it ``PublicationSink("_shared", "central")`` roots a supposedly
+    org-owned publication *inside* the instance-wide prefix, where a shared
+    reader would serve it as though somebody had published it there.
+
+    Grammar only, again: the reserved-name list can grow, and an organisation
+    that already holds a name must not lose its sink the day that name is
+    reserved.
+    """
+    _validate_segment(organisation_slug, "organisation_slug")
+    if not ORG_SLUG_RE.match(organisation_slug):
+        raise ValueError(
+            f"organisation_slug {organisation_slug!r} is not a name an organisation can have "
+            f"(grammar {ORG_SLUG_RE.pattern!r}). Roots outside that grammar are instance-wide; "
+            f"build one with PublicationSink.instance_wide()."
+        )
+
+
 def _validate_instance_root(root: str) -> None:
     """Refuse an instance-wide root that an organisation could also be called.
 
@@ -359,7 +413,7 @@ def _validate_instance_root(root: str) -> None:
             f"{root!r} can be an organisation slug, so an instance-wide root of that name is "
             f"some organisation's own prefix — one that exists now, or one created later. "
             f"Choose a name outside the slug grammar {ORG_SLUG_RE.pattern!r}; a leading "
-            f"underscore (e.g. '_forti') is the obvious way."
+            f"underscore (e.g. '_shared') is the obvious way."
         )
 
 

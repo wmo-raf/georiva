@@ -287,14 +287,8 @@ class ListingAndPruningTests(SinkTestCase):
 
 class InstanceWideRootTests(SinkTestCase):
     """One root for the whole instance, for a reader meant to see several
-    organisations at once.
-
-    This is the form that costs ADR 0027 its strongest sentence. Under
-    ``{org}/{slug}/`` cross-tenant resolution was impossible by construction;
-    here the prefix deliberately spans tenants, and the boundary becomes
-    whatever decides which of them a request may be answered from. What core
-    keeps is the weaker, still-useful guarantee below: such a root cannot
-    collide with, or be mistaken for, an organisation's.
+    organisations at once — the form that costs ADR 0027 its strongest
+    sentence, and keeps only the collision guarantee below.
     """
 
     def make_instance_sink(self, root="_forti", marker_patterns=FORTI_MARKERS):
@@ -351,6 +345,28 @@ class InstanceWideRootTests(SinkTestCase):
 
     def test_an_instance_wide_root_cannot_be_reached_from_an_org_rooted_sink(self):
         self.assertNotEqual(self.make_instance_sink().key("latest/x"), self.make_sink().key("latest/x"))
+
+    def test_the_root_cannot_be_changed_after_it_is_validated(self):
+        """The parts are checked once, so the root has to be fixed once. A sink
+        whose ``organisation_slug`` could be set to None afterwards would be an
+        instance-wide sink rooted at a publication slug — ``forti/`` — that no
+        rule ever saw."""
+        sink = self.make_sink()
+
+        for attribute, value in (("organisation_slug", None), ("slug", "_forti"), ("root", "anything/")):
+            with self.subTest(attribute=attribute), self.assertRaises(AttributeError):
+                setattr(sink, attribute, value)
+
+        self.assertEqual(sink.root, "kenya/forti/")
+
+    def test_an_organisation_cannot_claim_an_instance_wide_root(self):
+        """The same rule read the other way. Without it an org-rooted sink can
+        be built *inside* the shared prefix, where a shared reader would serve
+        it as though somebody had published it there."""
+        with self.assertRaises(ValueError) as ctx:
+            PublicationSink("_forti", "central", bucket=self.bucket)
+
+        self.assertIn("instance_wide", str(ctx.exception))
 
 
 class InstanceWideMarkerTests(SinkTestCase):
@@ -447,3 +463,15 @@ class InstanceWideMarkerTests(SinkTestCase):
         org_sink.write("nairobi/100/grid/latitude", b"\x00")
 
         self.assertEqual(org_sink.delete_prefix("", include_markers=True), 1)
+
+    def test_the_children_of_a_shared_root_are_not_all_areas(self):
+        """What M5.4's retention has to know. Under ``{org}/{slug}/`` every
+        child of the root was an area; here the publisher's own documents sit
+        beside them, and core cannot tell which is which because the layout
+        under the root is the publisher's."""
+        sink = self.sink
+        sink.write("central.ecmwf-ifs/100/grid/latitude", b"\x00")
+        sink.write("config/rawdataforecaster.json", b"{}")
+        sink.write("jsonformat.json", b"{}")
+
+        self.assertEqual(sink.children(), ["central.ecmwf-ifs", "config"])
