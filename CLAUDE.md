@@ -178,7 +178,11 @@ Defined in `api/urls.py`:
   yourself. Wagtail pages are org-owned through the Site → root-page link; the dispatcher scopes them, and
   Wagtail's own pk-taking page views are closed by `organisations/pages.py` (ADR 0016)
 - **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
-  — the first segment of every key on every bucket is the owning organisation's slug
+  — the first segment of every key on every bucket is the owning organisation's slug. One exception, on the
+  `publications` bucket only: `PublicationSink.instance_wide(root)` roots a publication at `{root}/` for a foreign
+  reader built to serve several organisations from one process. Such a root must be unspellable as an organisation
+  slug (`_forti`, not `forti`), so it can never shadow a tenant's prefix — but it is not a tenancy boundary, and
+  whatever answers requests from it owns that check (ADR 0027)
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
   `requirements.txt`). Add via `make uv-add pkg="..."`; `uv sync --all-packages` builds the local dev env
 - **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no

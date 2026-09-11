@@ -2,10 +2,17 @@
 
 Two properties are load-bearing and neither is visible in a happy-path write.
 
-**The root is the tenancy boundary.** A foreign service is handed
-``{org}/{slug}/`` and cannot resolve anything above it, so a path that escapes
-the root is not a bug in one publication — it is one organisation's data
-appearing under another's prefix.
+**The root bounds what a reader can resolve.** A path that escapes the root is
+not a bug in one publication: under ``{org}/{slug}/`` it is one organisation's
+data appearing under another's prefix, and under an instance-wide root it is a
+publication reaching outside the prefix its reader was given.
+
+**Only the org-rooted form makes the root a tenancy boundary.** An
+instance-wide root holds several organisations on purpose, so the boundary moves
+to whoever answers requests from it. What core still guarantees by construction
+is that such a root cannot be *confused* with an organisation's: it must be
+unspellable as an organisation slug, so no tenant can ever be shadowed by one
+and no instance-wide prefix can ever be mistaken for a tenant's.
 
 **Completion markers go last, and the writer never writes them.** A reader
 polls for a marker and loads whatever it names; a marker that lands before its
@@ -276,3 +283,195 @@ class ListingAndPruningTests(SinkTestCase):
 
     def test_listing_a_prefix_that_does_not_exist_is_empty_not_an_error(self):
         self.assertEqual(self.sink.list_keys("mombasa"), [])
+
+
+class InstanceWideRootTests(SinkTestCase):
+    """One root for the whole instance, for a reader meant to see several
+    organisations at once — the form that costs ADR 0027 its strongest
+    sentence, and keeps only the collision guarantee below.
+    """
+
+    def make_instance_sink(self, root="_forti", marker_patterns=FORTI_MARKERS):
+        return PublicationSink.instance_wide(root, marker_patterns=marker_patterns, bucket=self.bucket)
+
+    def test_the_root_is_the_prefix_alone(self):
+        self.assertEqual(self.make_instance_sink().root, "_forti/")
+
+    def test_keys_carry_no_organisation_segment(self):
+        sink = self.make_instance_sink()
+
+        self.assertEqual(sink.key("central.ecmwf-ifs/100/complete.json"), "_forti/central.ecmwf-ifs/100/complete.json")
+
+    def test_it_says_which_kind_of_sink_it_is(self):
+        self.assertTrue(self.make_instance_sink().is_instance_wide)
+        self.assertFalse(self.make_sink().is_instance_wide)
+        self.assertIsNone(self.make_instance_sink().organisation_slug)
+
+    def test_a_root_an_organisation_could_be_called_is_refused(self):
+        """The replacement for the guarantee this form gives up. ``kenya/`` as an
+        instance-wide root *is* organisation ``kenya``'s prefix, so a publication
+        rooted there writes into a tenant's own space — and a tenant created
+        later silently inherits a prefix full of somebody else's data."""
+        for collides in ("kenya", "kenya-met", "forti", "x9"):
+            with self.subTest(root=collides), self.assertRaises(ValueError) as ctx:
+                self.make_instance_sink(root=collides)
+
+            self.assertIn("organisation", str(ctx.exception).lower())
+
+    def test_a_root_no_organisation_can_be_called_is_allowed(self):
+        """``_`` is not in the organisation slug grammar, so a leading
+        underscore is a namespace no tenant can reach."""
+        for safe in ("_forti", "_shared", "_a_b"):
+            with self.subTest(root=safe):
+                self.assertEqual(PublicationSink.instance_wide(safe, bucket=self.bucket).root, f"{safe}/")
+
+    def test_the_root_is_still_one_path_segment(self):
+        for nested in ("_forti/central", "_forti/", "/_forti", ""):
+            with self.subTest(root=nested), self.assertRaises(ValueError):
+                self.make_instance_sink(root=nested)
+
+    def test_the_constructor_validates_too(self):
+        """``instance_wide`` is the readable door, not the only one, so the rule
+        cannot live in it alone."""
+        with self.assertRaises(ValueError):
+            PublicationSink(None, "kenya", bucket=self.bucket)
+
+    def test_a_path_that_climbs_out_of_the_root_is_refused(self):
+        sink = self.make_instance_sink()
+
+        for escape in ("../kenya/forti/x", "central.x/../../etc/passwd", "/absolute", ""):
+            with self.subTest(path=escape), self.assertRaises(ValueError):
+                sink.key(escape)
+
+    def test_an_instance_wide_root_cannot_be_reached_from_an_org_rooted_sink(self):
+        self.assertNotEqual(self.make_instance_sink().key("latest/x"), self.make_sink().key("latest/x"))
+
+    def test_the_root_cannot_be_changed_after_it_is_validated(self):
+        """The parts are checked once, so the root has to be fixed once. A sink
+        whose ``organisation_slug`` could be set to None afterwards would be an
+        instance-wide sink rooted at a publication slug — ``forti/`` — that no
+        rule ever saw."""
+        sink = self.make_sink()
+
+        for attribute, value in (("organisation_slug", None), ("slug", "_forti"), ("root", "anything/")):
+            with self.subTest(attribute=attribute), self.assertRaises(AttributeError):
+                setattr(sink, attribute, value)
+
+        self.assertEqual(sink.root, "kenya/forti/")
+
+    def test_an_organisation_cannot_claim_an_instance_wide_root(self):
+        """The same rule read the other way. Without it an org-rooted sink can
+        be built *inside* the shared prefix, where a shared reader would serve
+        it as though somebody had published it there."""
+        with self.assertRaises(ValueError) as ctx:
+            PublicationSink("_forti", "central", bucket=self.bucket)
+
+        self.assertIn("instance_wide", str(ctx.exception))
+
+
+class InstanceWideMarkerTests(SinkTestCase):
+    """The marker grammar has to mean the same thing under the shared root.
+
+    The area key gains a dot (``{org}.{slug}``) and loses its parent segment, so
+    the patterns are being matched against differently shaped paths than the
+    ones they were written for.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.sink = PublicationSink.instance_wide("_forti", marker_patterns=FORTI_MARKERS, bucket=self.bucket)
+        self.area = "central.ecmwf-ifs"
+
+    def test_the_pointer_and_the_manifest_are_still_markers(self):
+        self.assertTrue(self.sink.is_marker(f"latest/{self.area}"))
+        self.assertTrue(self.sink.is_marker(f"{self.area}/100/complete.json"))
+
+    def test_the_shared_documents_beside_them_are_not(self):
+        """``jsonformat.json``, ``config/`` and ``status/`` share the root with
+        the areas. A marker pattern that caught one of them would make the
+        config undeletable and unwritable through ``write``."""
+        for ordinary in (
+            "jsonformat.json",
+            "config/rawdataforecaster.json",
+            "status/rawdataforecaster.json",
+            f"{self.area}/100/grid/latitude",
+        ):
+            with self.subTest(path=ordinary):
+                self.assertFalse(self.sink.is_marker(ordinary))
+
+    def test_the_writer_still_cannot_write_one(self):
+        with self.assertRaises(MarkerOrderingError):
+            self.sink.write(f"latest/{self.area}", b"100")
+
+    def test_markers_are_written_in_the_order_given(self):
+        written = []
+        self.bucket.save = lambda key, content: written.append(key) or key
+
+        self.sink.publish_markers(
+            [
+                CompletionMarker(f"{self.area}/100/complete.json", b"{}"),
+                CompletionMarker(f"latest/{self.area}", b"100"),
+            ]
+        )
+
+        self.assertEqual(
+            written,
+            [f"_forti/{self.area}/100/complete.json", f"_forti/latest/{self.area}"],
+        )
+
+    def test_a_superseded_version_can_be_dropped_whole(self):
+        """Retention under the shared root is per area, and an area's version
+        directory still cannot go away while its own manifest is a marker."""
+        for version in (100, 200):
+            self.sink.write(f"{self.area}/{version}/grid/latitude", b"\x00")
+        self.sink.publish_markers(
+            [
+                CompletionMarker(f"{self.area}/100/complete.json", b"{}"),
+                CompletionMarker(f"latest/{self.area}", b"200"),
+            ]
+        )
+
+        removed = self.sink.delete_prefix(f"{self.area}/100", include_markers=True)
+
+        self.assertEqual(removed, 2)
+        self.assertEqual(self.sink.list_keys(f"{self.area}/100"), [])
+        self.assertTrue(self.sink.exists(f"latest/{self.area}"))
+
+    def test_one_areas_retention_cannot_reach_another_organisations(self):
+        self.sink.write("central.ecmwf-ifs/100/grid/latitude", b"\x00")
+        self.sink.write("kenya-met.gfs/100/grid/latitude", b"\x00")
+
+        self.sink.delete_prefix("central.ecmwf-ifs/100", include_markers=True)
+
+        self.assertEqual(self.sink.list_keys("kenya-met.gfs"), ["kenya-met.gfs/100/grid/latitude"])
+
+    def test_the_whole_shared_root_cannot_be_pruned_in_one_call(self):
+        """``delete_prefix("")`` under ``{org}/{slug}/`` means "drop this
+        publication". Under a shared root it means "drop every organisation's",
+        which no retention pass wants and which nothing else would report."""
+        self.sink.write(f"{self.area}/100/grid/latitude", b"\x00")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.sink.delete_prefix("", include_markers=True)
+
+        self.assertIn("shared", str(ctx.exception).lower())
+        self.assertEqual(self.sink.list_keys(f"{self.area}/100"), [f"{self.area}/100/grid/latitude"])
+
+    def test_an_org_rooted_publication_can_still_be_dropped_whole(self):
+        """The guard is about the shared root, not about delete_prefix."""
+        org_sink = self.make_sink()
+        org_sink.write("nairobi/100/grid/latitude", b"\x00")
+
+        self.assertEqual(org_sink.delete_prefix("", include_markers=True), 1)
+
+    def test_the_children_of_a_shared_root_are_not_all_areas(self):
+        """What M5.4's retention has to know. Under ``{org}/{slug}/`` every
+        child of the root was an area; here the publisher's own documents sit
+        beside them, and core cannot tell which is which because the layout
+        under the root is the publisher's."""
+        sink = self.sink
+        sink.write("central.ecmwf-ifs/100/grid/latitude", b"\x00")
+        sink.write("config/rawdataforecaster.json", b"{}")
+        sink.write("jsonformat.json", b"{}")
+
+        self.assertEqual(sink.children(), ["central.ecmwf-ifs", "config"])
