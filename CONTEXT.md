@@ -589,11 +589,34 @@ _Avoid_: style endpoint, style URL segment
 **Publication**:
 GeoRiva's data re-exported in a foreign reader's own format — the same data, laid out for a service that knows
 nothing about STAC, COGs or tiles. Not a tier and not a Derivation: nothing new is computed and no `Item` is
-produced, so it does not appear in any catalog. Lives on the `georiva-publications` bucket under
-`{org}/{publication-slug}/`, and that root is the tenancy boundary — a foreign reader is pointed at one
-organisation's prefix and cannot resolve outside it. Written through `core.publishing.PublicationSink`; what a
-publication contains belongs to the plugin that publishes it, never to core. See ADR 0027.
+produced, so it does not appear in any catalog. Lives on the `georiva-publications` bucket, normally under
+`{org}/{publication-slug}/` — a root that is also the tenancy boundary, because the reader is pointed at one
+organisation's prefix and cannot resolve outside it. A reader built to serve several organisations from one
+process is rooted instead at an **instance-wide** `{root}/` shared by every organisation, in which case the root
+is not a boundary and whatever answers requests owns that check. Written through `core.publishing.PublicationSink`;
+what a publication contains belongs to the plugin that publishes it, never to core. See ADR 0027 and its amendment.
 _Avoid_: export (as a model name), Published (that is the served STAC tier), publish (as a verb for Promotion)
+
+**Area key**:
+The name one publication answers to under an instance-wide publication root: `{org}.{slug}`, **one path segment**,
+the owning organisation carried in the name rather than in the path. Dot-separated because a nested key fails
+silently — met.no Forti's `GetGridInfo` splits every key on `/` and skips anything that is not exactly four parts,
+so `{org}/{slug}/{version}/{grid}/` loads a dataset with no grids and no error. The dot is also what keeps an area
+from colliding with the documents beside it under the same root: every area key contains one and `latest`, `config`
+and `status` do not. Because the key is a segment of every object written for that publication, renaming either half
+of it after a publish orphans everything already on the bucket — which is why a publication's slug is immutable once
+published. See ADR 0027's amendment.
+_Avoid_: area name, prefix (for the key alone), publication path
+
+**Model** (public forecast model):
+The name a consumer asks a point forecast by: `GET /api/forecast/{model}/?lat=&lon=`. It is `FortiPublication.slug`,
+prefilled from the catalog's slug — a `Catalog` is "a data source that produces multiple collections" (GFS, CHIRPS,
+ERA5) and its slug is already unique per organisation, which is exactly the scope a public model name needs. One
+model is one publication is one collection × one window; two are never blended, and a request names exactly one.
+Immutable once published, for the same reason `Organisation.slug` is: it is a segment of every storage key *and* the
+name a consumer's client has hard-coded. A model the caller may not see is absent from the listing and 404s on its
+own URL, so the endpoint cannot enumerate what a tenant publishes.
+_Avoid_: dataset, product, area (that is the storage-side name for the same thing), collection slug
 
 **Completion marker**:
 The object whose existence tells a foreign reader that a publication is ready, and the only signal it has —
