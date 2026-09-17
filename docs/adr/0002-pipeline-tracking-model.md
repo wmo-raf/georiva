@@ -1,5 +1,26 @@
 # Pipeline Tracking Model — DataArrival, FileIngestion, Item
 
+## Status
+
+accepted — **partly superseded by [ADR 0003](0003-acquisition-model-fetchrun-uploadsession.md).**
+
+Everything this ADR decided about `DataArrival` is void: ADR 0003 removed the model outright (and with it the
+`data_arrival` FK on `FileIngestion` and `DataArrivalJob`), splitting acquisition into `FetchRun` / `FetchedFile`
+and `UploadSession` / `UploadedFile`. No `DataArrival` exists in the code or its migrations. The "DataArrival is
+catalog-scoped" decision, the "DataArrival with a `collections` M2M" alternative and the `DataArrival` migration
+under Consequences are kept below as history only.
+
+Still in force, and still how the code works:
+
+- `FileIngestion.collections` M2M, written straight after collection resolution — the basis of the Collection
+  Health Panel's success and failure signals.
+- No `FileIngestion.item` FK. `Item.source_file` (indexed, `"{bucket}:{file_path}"`) is the join from an Item back
+  to the `FileIngestion` that produced it.
+- The wizard's no-duplicate-`source_name`-per-catalog validation.
+
+The join from a `FileIngestion` back to how its file *arrived* is by `file_path` against `FetchedFile` /
+`UploadedFile`, with no FK (ADR 0003).
+
 ## Context
 
 The Collection Health Panel needs per-collection health data (sparklines, last-run time, failure counts) for
