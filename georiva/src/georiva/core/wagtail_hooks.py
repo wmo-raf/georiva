@@ -6,6 +6,7 @@ from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
 from wagtail.snippets.models import register_snippet
 
+from .menus import publications_menu
 from .views import (
     add_data_select,
     collection_items_list,
@@ -55,6 +56,20 @@ def register_data_menu():
         ),
         icon_name="folder-open-inverse",
         order=400,
+    )
+
+
+# The "Publications" menu group: what goes *out*, after Data, which is what
+# comes in. Empty by construction — every child arrives through the hook above —
+# and a SubmenuMenuItem hides itself when its menu has nothing to show, so an
+# instance with no publisher installed has no "Publications" entry at all.
+@hooks.register("register_admin_menu_item")
+def register_publications_menu():
+    return SubmenuMenuItem(
+        _("Publications"),
+        publications_menu,
+        icon_name="globe",
+        order=500,
     )
 
 
