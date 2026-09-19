@@ -239,8 +239,13 @@ class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
 
     model = ColorRamp
     icon = "palette"
-    add_to_admin_menu = True
-    menu_order = 600
+    # Under Settings, not the main menu: the ramp catalog is a reference library
+    # visited a handful of times in an instance's life, and the day-to-day route
+    # to it is the "Manage color ramps" link on the styling surface. Unlike
+    # Topics it is not superuser-only — org members author their own tier — so
+    # it sits with the entries every member sees, just after Boundaries (120).
+    add_to_settings_menu = True
+    menu_order = 130
     exclude_form_fields = ["created_at", "updated_at"]
     add_view_class = GlobalTierCreateView
     index_view_class = GlobalTierIndexView
