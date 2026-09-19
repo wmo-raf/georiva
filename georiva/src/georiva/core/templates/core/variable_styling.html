@@ -154,6 +154,12 @@
             letter-spacing: 0.04em;
         }
 
+        .vs-ramp-manage {
+            display: inline-block;
+            margin-block-start: 0.35rem;
+            font-size: 0.85em;
+        }
+
         .vs-stops-table {
             width: 100%;
             border-collapse: collapse;
@@ -491,6 +497,16 @@
                                     {% endfor %}
                                 </div>
                             </div>
+                            {% comment %}
+                                The day-to-day route to the ramp catalog, which
+                                otherwise lives under Settings. Below the toggle
+                                rather than inside the menu, which scrolls — a
+                                link at the foot of a long catalog is one nobody
+                                finds. A new tab, so unsaved stop edits on this
+                                form survive the detour.
+                            {% endcomment %}
+                            <a class="vs-ramp-manage" href="{{ ramp_catalog_url }}"
+                               target="_blank" rel="noopener">{% trans "Manage color ramps" %}</a>
                         </div>
                     </div>
 

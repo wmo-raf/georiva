@@ -96,7 +96,7 @@ class PublicationsMenuTests(TestCase):
         with patch.dict(publications_menu.__dict__, {"registered_menu_items": list(items)}):
             yield
 
-    def test_the_group_sits_between_data_and_color_ramps(self):
+    def test_the_group_sits_after_data(self):
         from wagtail.admin.menu import MenuItem
 
         with self._publishers(MenuItem("Stub", "/stub/")):
@@ -104,7 +104,6 @@ class PublicationsMenuTests(TestCase):
 
         self.assertIn("Publications", items)
         self.assertLess(items["Data"].order, items["Publications"].order)
-        self.assertLess(items["Publications"].order, items["Color Ramps"].order)
 
     def test_a_plugin_registers_into_it_through_the_hook(self):
         from wagtail import hooks
@@ -125,3 +124,36 @@ class PublicationsMenuTests(TestCase):
             items = self._top_level()
 
         self.assertNotIn("Publications", items)
+
+
+class ColorRampsMenuTests(TestCase):
+    """The ramp catalog is a reference library, so it lives under Settings.
+
+    It is visited a handful of times in an instance's life; the day-to-day route
+    is the link on the styling surface. It sits just after Boundaries, among the
+    GeoRiva entries at the top of Settings rather than down with Wagtail's own.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "a@a.com", "pw")
+
+    def _request(self):
+        from django.test import RequestFactory
+
+        request = RequestFactory().get("/admin/")
+        request.user = self.user
+        return request
+
+    def test_color_ramps_is_not_a_top_level_item(self):
+        from wagtail.admin.menu import admin_menu
+
+        labels = [str(i.label) for i in admin_menu.menu_items_for_request(self._request())]
+        self.assertNotIn("Color Ramps", labels)
+
+    def test_color_ramps_sits_in_settings_just_after_boundaries(self):
+        from wagtail.admin.menu import settings_menu
+
+        items = {str(i.label): i for i in settings_menu.menu_items_for_request(self._request())}
+        self.assertIn("Color Ramps", items)
+        self.assertLess(items["Boundaries"].order, items["Color Ramps"].order)
+        self.assertLess(items["Color Ramps"].order, items["Topics"].order)
