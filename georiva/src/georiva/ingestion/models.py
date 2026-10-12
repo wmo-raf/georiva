@@ -25,7 +25,7 @@ from django.db import models, transaction
 from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
 
-from georiva.events.context import ensure_context
+from georiva.events.context import ensure_context, update_context
 from georiva.events.models import DomainEvent
 from georiva.events.recording import record
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
@@ -354,9 +354,18 @@ class FileIngestion(models.Model):
             logger.exception("RunIngestion bookkeeping failed for %s:%s", bucket, file_path)
 
     @classmethod
-    def mark_failed(cls, bucket: str, file_path: str, error: str):
-        """Mark a file as failed. Releases the lock for future retry."""
+    def mark_failed(cls, bucket: str, file_path: str, error: str, *, outcome=None, unattributed=False):
+        """Mark a file as failed. Releases the lock for future retry.
+
+        ``outcome`` is the event's ending: ``failed`` by default, ``refused`` for a
+        file turned away rather than one that broke. ``unattributed`` records the
+        event under no organisation at all — for a key whose organisation or
+        catalog cannot be trusted to exist, so it is nobody's to show.
+        """
+        outcome = outcome or FileIngestionFinished.Outcome.FAILED
         with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            if unattributed:
+                update_context(organisation_id=None)
             with transaction.atomic():
                 updated = cls.objects.filter(
                     bucket=bucket,
@@ -368,7 +377,7 @@ class FileIngestion(models.Model):
                     error=error[:2000],
                 )
                 if updated:
-                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.FAILED)
+                    cls._record_finished(bucket, file_path, outcome)
 
     @classmethod
     def fail_if_held_by(cls, bucket: str, file_path: str, locked_by: str, error: str) -> bool:

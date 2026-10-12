@@ -12,7 +12,7 @@ from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
 from georiva.events.context import new_context, use_context
-from georiva.ingestion.models import FileIngestion, organisation_id_for_key
+from georiva.ingestion.models import FileIngestion, FileIngestionFinished, organisation_id_for_key
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -117,13 +117,23 @@ def _handle_event(ev: dict):
 
         if catalog is None:
             logger.warning("Refusing %s: %s", key, resolution_error)
-            FileIngestion.mark_failed(origin_bucket, key, resolution_error)
+            # A key naming an organisation or catalog that does not exist is
+            # nobody's: the event is unattributed, visible to the instance
+            # administrator only.
+            FileIngestion.mark_failed(
+                origin_bucket,
+                key,
+                resolution_error,
+                outcome=FileIngestionFinished.Outcome.REFUSED,
+                unattributed=True,
+            )
             return
 
         time_error = _required_time_error(catalog, key)
         if time_error:
             logger.warning("Time extraction failed for %s: %s", key, time_error)
-            FileIngestion.mark_failed(origin_bucket, key, time_error)
+            # Refused inside a known organisation: attributed to it.
+            FileIngestion.mark_failed(origin_bucket, key, time_error, outcome=FileIngestionFinished.Outcome.REFUSED)
             return
 
         if not created:
