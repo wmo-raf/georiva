@@ -557,16 +557,35 @@ GEORIVA_DATABASE_LOG_LEVEL = env.str("GEORIVA_DATABASE_LOG_LEVEL", "ERROR")
 # independently of the rest of the app's level.
 GEORIVA_PROCESSING_LOG_LEVEL = env.str("GEORIVA_PROCESSING_LOG_LEVEL", "INFO")
 
+# "text" (default) or "json". JSON makes the Correlation id a queryable field.
+GEORIVA_LOG_FORMAT = env.str("GEORIVA_LOG_FORMAT", "text")
+
+# How a chained task treats missing propagated context (ADR 0030): "warn" logs an
+# error, counts it and continues as ``system:unpropagated``; "strict" raises.
+# Production starts on warn — tasks already queued at deploy time carry no
+# headers — and flips to strict once the unpropagated metric has read zero for a
+# full release. Tests run strict.
+GEORIVA_TASK_CONTEXT_MODE = env.str("GEORIVA_TASK_CONTEXT_MODE", "warn")
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "event_context": {"()": "georiva.events.logs.EventContextFilter"},
+    },
     "formatters": {
-        "console": {"format": "%(levelname)s %(asctime)s %(name)s.%(funcName)s:%(lineno)s- %(message)s "},
+        "console": {
+            "format": (
+                "%(levelname)s %(asctime)s [cid=%(correlation_id)s] %(name)s.%(funcName)s:%(lineno)s- %(message)s "
+            )
+        },
+        "json": {"()": "georiva.events.logs.JsonFormatter"},
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "console",
+            "formatter": "json" if GEORIVA_LOG_FORMAT == "json" else "console",
+            "filters": ["event_context"],
         },
     },
     "loggers": {

@@ -6,12 +6,14 @@ from django.db.models import Min
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
+from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
 
 logger = logging.getLogger(__name__)
 
 
 @app.task(
     name="georiva.sources.tasks.sweep_scheduled_products",
+    base=EntryTask,
     queue="georiva-default",
 )
 def sweep_scheduled_products():
@@ -28,6 +30,8 @@ def sweep_scheduled_products():
 
 @app.task(
     name="georiva.sources.tasks.sweep_stale_fetch_runs",
+    base=SweepTask,
+    sweep_name="stale_fetch_runs",
     queue="georiva-default",
 )
 def sweep_stale_fetch_runs():
@@ -43,6 +47,7 @@ def sweep_stale_fetch_runs():
 
 @app.task(
     name="georiva.sources.tasks.retry_fetched_file",
+    base=ChainedTask,
     queue="georiva-ingestion",
     bind=True,
     acks_late=True,
@@ -112,6 +117,7 @@ def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
 @shared_task(
     bind=True,
     name="georiva.sources.tasks.run_data_feed_loader",
+    base=EntryTask,
     queue="georiva-ingestion",
 )
 def run_data_feed_loader(self, data_feed_id):

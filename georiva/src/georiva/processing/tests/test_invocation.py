@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 
+from georiva.events.testing import event_context
 from georiva.organisations.testing import make_organisation
 from georiva.processing.engine import run
 from georiva.processing.recipe import BaseRecipe, OutputItem
@@ -250,7 +251,8 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
             ),
             patch("georiva.processing.invocation.dispatch_for_trigger") as dispatch,
         ):
-            run_unit_task.apply(kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}})
+            with event_context():
+                run_unit_task.apply(kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}})
 
         dispatch.assert_called_once()
         trigger = dispatch.call_args.args[0]
@@ -268,7 +270,8 @@ class CompletionChainingTests(_RegistryIsolationMixin, TestCase):
             ),
             patch("georiva.processing.invocation.dispatch_for_trigger") as dispatch,
         ):
-            run_unit_task.apply(kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}})
+            with event_context():
+                run_unit_task.apply(kwargs={"recipe_type": "fake_relevant", "unit": {"n": 1}})
 
         dispatch.assert_not_called()
 

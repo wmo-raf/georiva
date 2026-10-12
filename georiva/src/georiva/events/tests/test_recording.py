@@ -8,10 +8,9 @@ from django.test import TestCase
 from georiva.events.context import NoEventContext, current_context
 from georiva.events.models import AppendOnlyError, EventIndex
 from georiva.events.recording import record
+from georiva.events.testing import event_context
 from georiva.ingestion.models import RunIngestionClosed
 from georiva.organisations.testing import make_organisation
-
-from .support import event_context
 
 
 def _closed(**overrides):

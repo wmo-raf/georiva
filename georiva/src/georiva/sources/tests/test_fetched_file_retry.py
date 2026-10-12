@@ -15,6 +15,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
+from georiva.events.testing import event_context
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.fetch.base import FetchResult, FileRequest
 from georiva.sources.loader import Loader
@@ -218,7 +219,8 @@ class RetryFetchedFileTaskTests(TestCase):
         )
 
         with patch.object(DataFeed, "get_loader", return_value=loader):
-            retry_fetched_file(self.ff.pk)
+            with event_context():
+                retry_fetched_file(self.ff.pk)
 
         self.ff.refresh_from_db()
         self.assertEqual(self.ff.status, FetchedFile.Status.STORED)
@@ -232,7 +234,8 @@ class RetryFetchedFileTaskTests(TestCase):
             status=FetchedFile.Status.FAILED,
         )
 
-        retry_fetched_file(legacy.pk)  # must not raise
+        with event_context():
+            retry_fetched_file(legacy.pk)  # must not raise
 
         legacy.refresh_from_db()
         self.assertEqual(legacy.status, FetchedFile.Status.FAILED)

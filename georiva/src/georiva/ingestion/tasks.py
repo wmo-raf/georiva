@@ -12,6 +12,7 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 from georiva.config.celery import app
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
+from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
 from georiva.ingestion.models import FileIngestion
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 @app.task(
     name="georiva.ingestion.tasks.process_incoming_file",
+    base=ChainedTask,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -74,6 +76,7 @@ def process_incoming_file(
 
 @app.task(
     name="georiva.ingestion.tasks.process_staging_file",
+    base=ChainedTask,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -99,7 +102,9 @@ def process_staging_file(self, bucket: str, key: str):
         dispatch_for_input(staging_item_trigger(item))
 
 
-@app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")
+@app.task(
+    name="georiva.ingestion.tasks.sweep_unprocessed", base=SweepTask, sweep_name="unprocessed", queue="georiva-default"
+)
 def sweep_unprocessed(sync: bool = False):
     """
     Safety net — finds files that the webhook missed and retries failures.
@@ -213,7 +218,7 @@ def sweep_unprocessed(sync: bool = False):
     )
 
 
-@app.task(name="georiva.ingestion.tasks.sweep_staging", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.sweep_staging", base=SweepTask, sweep_name="staging", queue="georiva-default")
 def sweep_staging(sync: bool = False):
     """
     Reconcile the STAGING bucket against StagingItems — the staging-tier mirror
@@ -254,7 +259,7 @@ def sweep_staging(sync: bool = False):
     return dispatched
 
 
-@app.task(name="georiva.ingestion.tasks.cleanup_archives", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.cleanup_archives", base=EntryTask, queue="georiva-default")
 def cleanup_archives(max_age_days: int = 5):
     from georiva.core.storage import BucketType, storage
     from georiva.ingestion.models import FileIngestion
@@ -283,7 +288,7 @@ def cleanup_archives(max_age_days: int = 5):
     return {"deleted": deleted, "failed": failed}
 
 
-@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", base=EntryTask, queue="georiva-default")
 def prune_ingestion_logs(max_age_days: int = 30):
     from georiva.ingestion.models import FileIngestion
 
@@ -292,7 +297,7 @@ def prune_ingestion_logs(max_age_days: int = 30):
     return result
 
 
-@app.task(name="georiva.ingestion.tasks.close_quiet_run_ingestions", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.close_quiet_run_ingestions", base=EntryTask, queue="georiva-default")
 def close_quiet_run_ingestions(minutes: int = None):
     """Close model runs that have gone quiet (ADR 0026).
 

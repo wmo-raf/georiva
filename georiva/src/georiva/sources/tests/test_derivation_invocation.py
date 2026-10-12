@@ -19,6 +19,7 @@ from georiva.core.derived_products import (
     OutputRef,
 )
 from georiva.core.models import Catalog, Collection, Item, Unit, Variable
+from georiva.events.testing import event_context
 from georiva.organisations.testing import make_organisation
 from georiva.processing.models import DerivationRun
 from georiva.sources.derivation_invocation import (
@@ -330,7 +331,8 @@ class StagingArrivalRoutesToProductsTests(TestCase):
             ),
             patch("georiva.sources.derivation_invocation.dispatch_for_input") as dispatch,
         ):
-            process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": "chirps/rainfall/f.tif"})
+            with event_context():
+                process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": "chirps/rainfall/f.tif"})
 
         dispatch.assert_called_once()
         trigger = dispatch.call_args.args[0]
@@ -348,7 +350,8 @@ class StagingArrivalRoutesToProductsTests(TestCase):
             ),
             patch("georiva.sources.derivation_invocation.dispatch_for_input") as dispatch,
         ):
-            process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": "bad/path.tif"})
+            with event_context():
+                process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": "bad/path.tif"})
 
         dispatch.assert_not_called()
 

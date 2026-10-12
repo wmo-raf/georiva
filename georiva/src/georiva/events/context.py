@@ -75,6 +75,18 @@ def reset_context(token) -> None:
     _current.reset(token)
 
 
+def update_context(**changes) -> EventContext:
+    """Replace fields of the active context in place (it is reset when the task ends).
+
+    For entry points that learn the organisation only after they start — a feed's
+    fetch task knows it once it has loaded the feed.
+    """
+    context = require_context()
+    updated = replace(context, **changes)
+    _current.set(updated)
+    return updated
+
+
 @contextmanager
 def use_context(context: EventContext):
     """Run a block under ``context``, restoring whatever was there however it ends."""
@@ -96,6 +108,19 @@ def ensure_context(*, actor: str, organisation_id=None):
     if existing is not None:
         yield existing
         return
+    with use_context(new_context(actor=actor, organisation_id=organisation_id)) as context:
+        yield context
+
+
+@contextmanager
+def new_chain(*, organisation_id, actor=None):
+    """A fresh chain for one subject, keeping the surrounding Actor.
+
+    For an entry or sweep task that handles subjects of several organisations in
+    one run: a chain is single-organisation, so each subject gets its own.
+    """
+    current = _current.get()
+    actor = actor or (current.actor if current else "celery")
     with use_context(new_context(actor=actor, organisation_id=organisation_id)) as context:
         yield context
 

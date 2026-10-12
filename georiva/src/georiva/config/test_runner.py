@@ -26,6 +26,8 @@ class GeoRivaTestRunner(DiscoverRunner):
         from django.conf import settings
 
         settings.GEORIVA_BASE_DOMAIN = TEST_BASE_DOMAIN
+        # A dispatch site that loses the chain fails CI rather than production.
+        settings.GEORIVA_TASK_CONTEXT_MODE = "strict"
 
     def setup_databases(self, **kwargs):
         """Create the test-only ``DataFeed`` subclass table before any test runs.

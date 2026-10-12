@@ -29,6 +29,7 @@
   "shards": [
     [
       "georiva.core",
+      "georiva.events",
       "georiva.virtual_zarr",
       "georiva.wmts"
     ],

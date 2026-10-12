@@ -9,6 +9,7 @@ backfill cannot starve live ingestion. Recovery is via the backfill sweep
 import logging
 
 from georiva.config.celery import app
+from georiva.events.tasks import ChainedTask, SweepTask
 from georiva.processing.constants import (
     RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
     RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
@@ -41,6 +42,7 @@ def setup_periodic_tasks(sender, **kwargs):
 
 @app.task(
     name="georiva.processing.tasks.run_unit_task",
+    base=ChainedTask,
     bind=True,
     max_retries=2,
     acks_late=True,
@@ -128,6 +130,8 @@ def run_unit_task(
 
 @app.task(
     name="georiva.processing.tasks.sweep_derivations",
+    base=SweepTask,
+    sweep_name="derivations",
     queue="georiva-default",
 )
 def sweep_derivations():
@@ -163,6 +167,7 @@ def sweep_derivations():
 
 @app.task(
     name="georiva.processing.tasks.run_recipe_task",
+    base=ChainedTask,
     queue="georiva-default",
 )
 def run_recipe_task(recipe_type: str, selector: dict = None):
