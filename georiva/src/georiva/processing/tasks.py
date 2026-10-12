@@ -166,9 +166,9 @@ def sweep_derivations():
         sweep_stale_units,
     )
 
-    input_stale = sweep_stale_units()
-    reclaimed = reclaim_stale_running()
-    revived = resurrect_not_ready_units()
+    input_stale = sweep_stale_units(sweep="derivations")
+    reclaimed = reclaim_stale_running(sweep="derivations")
+    revived = resurrect_not_ready_units(sweep="derivations")
     logger.info(
         "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING reclaimed, %d not-ready revived",
         input_stale,

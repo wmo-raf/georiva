@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from georiva.core.models import ProductPublished
 from georiva.events.history import build_history
+from georiva.events.models import SweepIntervened
 from georiva.ingestion.models import (
     FileIngestion,
     FileIngestionFinished,
@@ -70,6 +71,7 @@ def file_ingestion_detail(request, file_ingestion_id):
         [
             (FileIngestionFinished, {"file_ingestion": log}),
             (ProductPublished, {"source_file": f"{log.bucket}:{log.file_path}"}),
+            (SweepIntervened, {"target_kind": "file_ingestion", "target_id": log.pk}),
         ],
     )
     return render(

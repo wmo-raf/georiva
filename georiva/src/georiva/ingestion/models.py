@@ -33,6 +33,29 @@ from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 logger = logging.getLogger(__name__)
 
 
+def record_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket: str, file_path: str) -> None:
+    """Write ``SweepIntervened`` for one file, under the chain the file already belongs to."""
+    from georiva.events.context import use_context
+    from georiva.ingestion.chains import context_for_revival
+
+    with use_context(context_for_revival(bucket, file_path, sweep)):
+        write_sweep_intervention(sweep, reason, file_ingestion_id, bucket, file_path)
+
+
+def write_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket: str, file_path: str) -> None:
+    """The write itself, under whatever context is active — for a sweep that also dispatches inside it."""
+    from georiva.events.models import SweepIntervened
+
+    record(
+        SweepIntervened,
+        sweep_name=sweep,
+        reason=reason,
+        target_kind="file_ingestion",
+        target_id=file_ingestion_id,
+        target_label=f"{bucket}:{file_path}",
+    )
+
+
 def organisation_id_for_key(file_path: str):
     """The organisation a storage key belongs to: its first segment is the slug.
 
@@ -444,7 +467,7 @@ class FileIngestion(models.Model):
         ).exists()
 
     @classmethod
-    def reset_stale_locks(cls) -> int:
+    def reset_stale_locks(cls, sweep=None) -> int:
         """
         Reset locks that have exceeded LOCK_TIMEOUT.
 
@@ -452,14 +475,14 @@ class FileIngestion(models.Model):
         """
         stale_cutoff = dj_timezone.now() - cls.LOCK_TIMEOUT
 
-        return cls.objects.filter(
-            status=cls.Status.PROCESSING,
-            locked_at__lt=stale_cutoff,
-        ).update(
-            status=cls.Status.PENDING,
-            locked_at=None,
-            locked_by="",
-        )
+        stale = cls.objects.filter(status=cls.Status.PROCESSING, locked_at__lt=stale_cutoff)
+        # Each reset file is a recorded intervention, inside the file's own chain.
+        # Read before the update: afterwards nothing says which rows it touched.
+        targets = list(stale.values_list("pk", "bucket", "file_path")) if sweep else []
+        updated = stale.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
+        for pk, bucket, file_path in targets:
+            record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
+        return updated
 
     @classmethod
     def get_retryable(cls, limit: int = 50):

@@ -16,6 +16,22 @@ from georiva.events.context import EventContext, new_context
 from georiva.ingestion.models import organisation_id_for_key
 
 
+def context_for_revival(bucket: str, file_path: str, sweep: str) -> EventContext:
+    """The context a sweep reviving ``file_path`` should act under.
+
+    It reuses the Correlation and organisation of the file's most recent event, as
+    the sweep and with no Caused-by, so a recovery does not split one story in two.
+    A file with no prior event is handled as a fresh arrival would be.
+    """
+    from georiva.ingestion.models import FileIngestionFinished
+
+    actor = f"sweep:{sweep}"
+    last = FileIngestionFinished.objects.filter(bucket=bucket, file_path=file_path).order_by("-occurred_at").first()
+    if last is not None:
+        return EventContext(correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id)
+    return context_for_arrival(file_path, actor=actor)
+
+
 def context_for_arrival(file_path: str, *, actor: str) -> EventContext:
     """The context an arrival of ``file_path`` should be handled under."""
     adopted = _adopt_latest(file_path, actor)

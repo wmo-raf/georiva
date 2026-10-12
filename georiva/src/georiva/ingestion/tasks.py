@@ -14,8 +14,8 @@ from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
 from georiva.events.context import use_context
 from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
-from georiva.ingestion.chains import context_for_arrival
-from georiva.ingestion.models import FileIngestion
+from georiva.ingestion.chains import context_for_arrival, context_for_revival
+from georiva.ingestion.models import FileIngestion, write_sweep_intervention
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ def sweep_unprocessed(sync: bool = False):
     # Phase 1: Reset stale locks
     # -----------------------------------------------------------------
 
-    stale_count = FileIngestion.reset_stale_locks()
+    stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
         logger.warning("Reset %d stale locks", stale_count)
 
@@ -135,9 +135,11 @@ def sweep_unprocessed(sync: bool = False):
 
     raw_dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
 
-    def dispatch(*, file_path, origin_bucket, reference_time):
-        """Each file is dispatched inside the chain it belongs to (ADR 0030)."""
-        with use_context(context_for_arrival(file_path, actor="sweep:unprocessed")):
+    def dispatch(*, file_path, origin_bucket, reference_time, why):
+        """Revive one file inside the chain it belongs to, and record that the sweep did (ADR 0030)."""
+        log = FileIngestion.objects.filter(bucket=origin_bucket, file_path=file_path).first()
+        with use_context(context_for_revival(origin_bucket, file_path, "unprocessed")):
+            write_sweep_intervention("unprocessed", why, log.pk if log else None, origin_bucket, file_path)
             raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
     from georiva.ingestion.unprocessed import find_unprocessed
@@ -156,6 +158,7 @@ def sweep_unprocessed(sync: bool = False):
                 file_path=unprocessed.file_path,
                 origin_bucket=unprocessed.bucket,
                 reference_time=reference_time_iso,
+                why="reingest_required",
             )
         elif unprocessed.reason == "untracked":
             logger.info(
@@ -172,6 +175,7 @@ def sweep_unprocessed(sync: bool = False):
                 file_path=unprocessed.file_path,
                 origin_bucket=unprocessed.bucket,
                 reference_time=reference_time_iso,
+                why="unprocessed_file_found",
             )
             new_files += 1
         # 'pending' records already await a dispatched task — the sweep
@@ -201,6 +205,7 @@ def sweep_unprocessed(sync: bool = False):
             file_path=log.file_path,
             origin_bucket=log.bucket,
             reference_time=(log.reference_time.isoformat() if log.reference_time else None),
+            why="failed_file_retried",
         )
         retry_count += 1
 

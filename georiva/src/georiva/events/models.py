@@ -163,3 +163,27 @@ class EventsPurged(DomainEvent):
     def summary(self):
         total = sum(self.counts.values())
         return f"{total} events removed that occurred before {self.cutoff:%Y-%m-%d %H:%M}"
+
+
+class SweepIntervened(DomainEvent):
+    """A recovery sweep re-dispatched something (ADR 0030).
+
+    The sweeps are the pipeline's reconciliation; this makes their interventions
+    visible, so an operator can see when recovery machinery is doing the
+    pipeline's job for it. The target is named by kind and id rather than a
+    foreign key: this app sits beneath the ones whose rows it points at.
+    """
+
+    label = "Sweep intervened"
+
+    sweep_name = models.CharField(max_length=100)
+    reason = models.CharField(max_length=50)
+    target_kind = models.CharField(max_length=30, help_text="``file_ingestion`` or ``derivation_run``.")
+    target_id = models.BigIntegerField(null=True, blank=True)
+    target_label = models.CharField(max_length=500, help_text="The file path or unit the sweep revived.")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["target_kind", "target_id"], name="idx_sweepint_target")]
+
+    def summary(self):
+        return f"Sweep '{self.sweep_name}' revived {self.target_label}: {self.reason.replace('_', ' ')}"
