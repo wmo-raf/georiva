@@ -122,7 +122,8 @@ The base `get_time_window()` calls these in sequence and returns `(start_time, e
 
 `generate_requests_for_collection(collection)` is the convenience entry point used by the job runner.
 It calls `get_time_window()` and passes `collection.source_variables_list()` as `variables` to
-`generate_requests()`.
+`generate_requests()`, along with `collection=<Collection>` as a keyword argument (read it from
+`**kwargs`) so a source shared by several collections knows which one it is generating for.
 
 **`post_process_fetched_file(request, local_path) -> (Path, str | None)`** is an optional hook for
 format conversion or renaming before the file is stored in MinIO. Return `(new_path, new_filename)`
