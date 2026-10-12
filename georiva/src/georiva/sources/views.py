@@ -1977,12 +1977,13 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     bytes, timing — with per-file and bulk retry for failed files that carry
     a stored request. The run is scoped to the feed in the URL.
     """
+    from georiva.events.history import build_history
     from georiva.sources.acquisition_tracking import (
         run_duration_seconds,
         run_liveness_display,
         with_live_counters,
     )
-    from georiva.sources.models import FetchedFile, FetchRun
+    from georiva.sources.models import FetchedFile, FetchRun, FetchRunFinished
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
     run = with_live_counters(get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed))
@@ -2044,6 +2045,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
         "files": files,
         "runs_url": runs_url,
         "liveness": liveness,
+        "history": build_history(request, [(FetchRunFinished, {"fetch_run": run})]),
     }
     return render(request, "georivasources/data_feed_fetch_run_detail.html", context)
 

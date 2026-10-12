@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n wagtailadmin_tags %}
+{% load i18n wagtailadmin_tags events_tags %}
 
 {% block titletag %}{% blocktrans with label=feed.name %}Fetch run — {{ label }}{% endblocktrans %}{% endblock %}
 
@@ -368,6 +368,9 @@
     {% endif %}
 
     <p class="gaqd-back"><a href="{{ runs_url }}">← {% trans "Back to Acquisition Activity" %}</a></p>
+
+    {% history_panel history %}
+
 {% endblock %}
 
 {% block extra_js %}

@@ -307,21 +307,29 @@ class Loader:
                     existing_path = self._find_existing_catalog_path(request)
                     if existing_path:
                         dest_path = storage_path
+                        # The record goes in *before* the object does: the copy raises a
+                        # Bucket notification, and the consumer finds this file's chain by
+                        # looking up its FetchedFile. A record written afterwards can lose
+                        # that race and leave the ingestion without its fetch.
+                        ff = None
+                        if fetch_run:
+                            ff = FetchedFile.objects.create(
+                                fetch_run=fetch_run,
+                                file_path=dest_path,
+                                request_payload=self._request_payload(request),
+                            )
+                            ff.mark_fetching()
                         try:
                             self._tier_bucket.copy(existing_path, dest_path)
                             result.files_fetched += 1
                             result.stored_paths.append(dest_path)
                             self.logger.info(f"Copied (no re-download): {existing_path} → {dest_path}")
-                            if fetch_run:
-                                ff = FetchedFile.objects.create(
-                                    fetch_run=fetch_run,
-                                    file_path=dest_path,
-                                    request_payload=self._request_payload(request),
-                                )
-                                ff.mark_fetching()
+                            if ff:
                                 ff.mark_stored(bytes_transferred=0)
                         except Exception as e:
                             self.logger.warning(f"Copy failed, will re-download: {e}")
+                            if ff:
+                                ff.delete()  # the re-download below records its own
                             requests_to_fetch.append(request)
                         continue
 

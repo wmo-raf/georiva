@@ -11,8 +11,9 @@ from django.conf import settings
 from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
-from georiva.events.context import new_context, use_context
-from georiva.ingestion.models import FileIngestion, FileIngestionFinished, organisation_id_for_key
+from georiva.events.context import use_context
+from georiva.ingestion.chains import context_for_arrival
+from georiva.ingestion.models import FileIngestion, FileIngestionFinished
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -100,10 +101,11 @@ def _handle_event(ev: dict):
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
 
-    # A Bucket notification starts a chain of its own — fetch and upload chains are
-    # adopted by lookup in later slices. The organisation is the key's first
-    # segment, and may name nobody: that arrival is recorded as unattributed.
-    with use_context(new_context(actor="system:bucket", organisation_id=organisation_id_for_key(key))):
+    # A Bucket notification belongs to the chain of the fetch (or upload) that stored
+    # the file, found by lookup; with none behind it, it is a drop-zone arrival and
+    # starts its own. The organisation is the key's first segment, and may name
+    # nobody: that arrival is recorded as unattributed.
+    with use_context(context_for_arrival(key, actor="system:bucket")):
         catalog, resolution_error = resolve_org_catalog(org_slug, catalog_slug)
 
         # Register before deciding: a file we refuse to ingest must still leave a

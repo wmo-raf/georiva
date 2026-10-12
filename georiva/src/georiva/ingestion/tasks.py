@@ -12,7 +12,9 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 from georiva.config.celery import app
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
+from georiva.events.context import use_context
 from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
+from georiva.ingestion.chains import context_for_arrival
 from georiva.ingestion.models import FileIngestion
 
 logger = logging.getLogger(__name__)
@@ -131,7 +133,12 @@ def sweep_unprocessed(sync: bool = False):
 
     new_files = 0
 
-    dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+    raw_dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+
+    def dispatch(*, file_path, origin_bucket, reference_time):
+        """Each file is dispatched inside the chain it belongs to (ADR 0030)."""
+        with use_context(context_for_arrival(file_path, actor="sweep:unprocessed")):
+            raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
     from georiva.ingestion.unprocessed import find_unprocessed
 

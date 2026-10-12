@@ -132,12 +132,16 @@ def run_data_feed_loader(self, data_feed_id):
     Running all collections sequentially keeps cross-collection copy dedup in
     Loader._find_existing_catalog_path() working correctly.
     """
+    from georiva.events.context import update_context
     from georiva.sources.models import DataFeed, DataFeedCollectionLink
 
     data_feed = DataFeed.objects.get(pk=data_feed_id)
 
     if not data_feed.is_active:
         return
+
+    # An entry point: the chain this fetch starts belongs to the feed's organisation.
+    update_context(organisation_id=data_feed.catalog.organisation_id)
 
     links = DataFeedCollectionLink.objects.filter(data_feed=data_feed).select_related("collection", "data_feed")
 
