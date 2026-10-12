@@ -7,6 +7,8 @@ backfill cannot starve live ingestion. Recovery is via the backfill sweep
 """
 
 import logging
+from contextlib import nullcontext
+from functools import partial
 
 from georiva.config.celery import app
 from georiva.events.tasks import ChainedTask, SweepTask
@@ -111,21 +113,32 @@ def run_unit_task(
     # input, so stream a downstream trigger to its consumers (internal
     # intermediates → their dependent products).
     if result.status == "completed" and result.item_id:
+        from django.db import transaction
+
         from georiva.core.models import Item
+        from georiva.events.context import caused_by
         from georiva.processing.invocation import (
             dispatch_for_trigger,
             published_item_trigger,
         )
+        from georiva.processing.models import DerivationAttemptFinished
         from georiva.processing.signals import unit_completed
 
         item = Item.objects.filter(pk=result.item_id).select_related("collection").first()
+        event = DerivationAttemptFinished.objects.filter(pk=result.event_id).first()
         if item is not None:
-            dispatch_for_trigger(published_item_trigger(item))
-            # Wake-up for parked dependents (ADR-0020): recipes ignore
-            # published triggers by design (double-fire guard), so units that
-            # went not_ready waiting for this item are revived through the
-            # feed layer's signal receiver instead.
-            unit_completed.send(sender=None, item=item, recipe_type=recipe_type)
+            # Everything this completion sets in motion is caused by the attempt that
+            # completed: downstream units, and the wake-up of parked dependents.
+            with caused_by(event) if event is not None else nullcontext():
+                dispatch_for_trigger(published_item_trigger(item))
+                # Wake-up for parked dependents (ADR-0020): recipes ignore
+                # published triggers by design (double-fire guard), so units that
+                # went not_ready waiting for this item are revived through the
+                # feed layer's signal receiver instead. After commit, and carrying
+                # the event, so a consumer never reads state that is not yet visible.
+                transaction.on_commit(
+                    partial(unit_completed.send, sender=None, item=item, recipe_type=recipe_type, event=event)
+                )
 
 
 @app.task(

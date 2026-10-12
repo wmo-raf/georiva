@@ -215,9 +215,12 @@ def _handle_event(ev: dict):
         logger.warning("Staging: invalid path %s: %s", key, e)
         return
 
+    from georiva.events.context import use_context
+    from georiva.ingestion.chains import context_for_arrival
     from georiva.ingestion.tasks import process_staging_file
 
-    process_staging_file.delay(bucket=BucketType.STAGING, key=key)
+    with use_context(context_for_arrival(key, actor="system:bucket")):
+        process_staging_file.delay(bucket=BucketType.STAGING, key=key)
 
 
 def _consume_loop(stop_event=None):

@@ -13,10 +13,13 @@ See docs/adr/0005-generic-derivation-engine.md.
 
 from datetime import timedelta
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone as dj_timezone
 from django_extensions.db.models import TimeStampedModel
 
+from georiva.events.context import ensure_context
+from georiva.events.models import DomainEvent
+from georiva.events.recording import record
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 from georiva.processing.constants import DERIVATION_LOCK_TIMEOUT_SECONDS
 
@@ -202,6 +205,35 @@ class DerivationRun(TimeStampedModel):
         run.refresh_from_db()
         return run
 
+    # -- transitions ---------------------------------------------------------
+    #
+    # Each ending is one atomic block: the row update and the attempt event commit
+    # together or not at all. Only the worker holding the lock reaches these, which
+    # is what makes it the winner — a worker refused the lock in ``acquire`` never
+    # gets here, so it writes nothing. The context is whatever the dispatcher
+    # carried; the engine never resolves an organisation of its own.
+
+    def _finish_attempt(self, outcome, update_fields, **extra):
+        with ensure_context(actor="system:engine"):
+            with transaction.atomic():
+                self.save(update_fields=[*update_fields, "modified"])
+                self.last_event = record(
+                    DerivationAttemptFinished,
+                    derivation_run=self,
+                    outcome=outcome,
+                    recipe_type=self.recipe_type,
+                    recipe_version=self.recipe_version,
+                    unit_hash=self.unit_hash,
+                    unit_key=self.unit_key,
+                    attempt_number=self.attempts,
+                    retry_reason=self.last_retry_reason,
+                    input_hash=self.input_hash,
+                    origin=self.origin or "",
+                    produced_item_id=self.produced_item_id,
+                    error=self.error,
+                )
+        return self.last_event
+
     def mark_completed(self, *, produced_item=None, input_hash=""):
         self.status = self.Status.COMPLETED
         self.produced_item = produced_item
@@ -209,16 +241,9 @@ class DerivationRun(TimeStampedModel):
         self.completed_at = dj_timezone.now()
         self.locked_at = None
         self.locked_by = ""
-        self.save(
-            update_fields=[
-                "status",
-                "produced_item",
-                "input_hash",
-                "completed_at",
-                "locked_at",
-                "locked_by",
-                "modified",
-            ]
+        return self._finish_attempt(
+            DerivationAttemptFinished.Outcome.COMPLETED,
+            ["status", "produced_item", "input_hash", "completed_at", "locked_at", "locked_by"],
         )
 
     def mark_skipped(self, *, input_hash=""):
@@ -227,22 +252,19 @@ class DerivationRun(TimeStampedModel):
         self.completed_at = dj_timezone.now()
         self.locked_at = None
         self.locked_by = ""
-        self.save(
-            update_fields=[
-                "status",
-                "input_hash",
-                "completed_at",
-                "locked_at",
-                "locked_by",
-                "modified",
-            ]
+        return self._finish_attempt(
+            DerivationAttemptFinished.Outcome.SKIPPED,
+            ["status", "input_hash", "completed_at", "locked_at", "locked_by"],
         )
 
     def mark_not_ready(self):
         self.status = self.Status.NOT_READY
         self.locked_at = None
         self.locked_by = ""
-        self.save(update_fields=["status", "locked_at", "locked_by", "modified"])
+        return self._finish_attempt(
+            DerivationAttemptFinished.Outcome.NOT_READY,
+            ["status", "locked_at", "locked_by"],
+        )
 
     def mark_failed(self, error: str):
         self.status = self.Status.FAILED
@@ -250,13 +272,57 @@ class DerivationRun(TimeStampedModel):
         self.completed_at = dj_timezone.now()
         self.locked_at = None
         self.locked_by = ""
-        self.save(
-            update_fields=[
-                "status",
-                "error",
-                "completed_at",
-                "locked_at",
-                "locked_by",
-                "modified",
-            ]
+        return self._finish_attempt(
+            DerivationAttemptFinished.Outcome.FAILED,
+            ["status", "error", "completed_at", "locked_at", "locked_by"],
         )
+
+
+class DerivationAttemptFinished(DomainEvent):
+    """One attempt at a Derivation unit ended (ADR 0030).
+
+    ``DerivationRun`` keeps an attempt count and the latest retry reason and
+    nothing about the attempts before it; this is the record of each. The unit's
+    identity is snapshotted, so the event stays true after the next attempt has
+    overwritten the row. ``produced_item_id`` is a plain column: Item is a
+    hypertable and is removed by retention.
+    """
+
+    label = "Derivation attempt"
+
+    class Outcome(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+        NOT_READY = "not_ready", "Not ready"
+
+    derivation_run = models.ForeignKey(
+        DerivationRun, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    outcome = models.CharField(max_length=10, choices=Outcome.choices)
+    recipe_type = models.CharField(max_length=100)
+    recipe_version = models.CharField(max_length=50)
+    unit_hash = models.CharField(max_length=64)
+    unit_key = models.JSONField(default=dict)
+    attempt_number = models.PositiveIntegerField()
+    retry_reason = models.CharField(max_length=32)
+    input_hash = models.CharField(max_length=64, blank=True)
+    origin = models.CharField(max_length=255, blank=True)
+    produced_item_id = models.BigIntegerField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [
+            models.Index(fields=["derivation_run", "-occurred_at"], name="idx_derivatt_run"),
+            models.Index(fields=["origin", "-occurred_at"], name="idx_derivatt_origin"),
+        ]
+
+    @property
+    def outcome_class(self):
+        return "failed" if self.outcome == self.Outcome.FAILED else "ok"
+
+    def summary(self):
+        text = f"{self.recipe_type} v{self.recipe_version} attempt {self.attempt_number}: {self.get_outcome_display()}"
+        if self.error:
+            text += f" — {self.error.splitlines()[0][:150]}"
+        return text

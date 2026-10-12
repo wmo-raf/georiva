@@ -259,7 +259,8 @@ def sweep_staging(sync: bool = False):
         except ValueError:
             logger.debug("sweep_staging: skipping non-conforming path: %s", key)
             continue
-        dispatch(bucket=BucketType.STAGING, key=key)
+        with use_context(context_for_arrival(key, actor="sweep:staging")):
+            dispatch(bucket=BucketType.STAGING, key=key)
         dispatched += 1
 
     logger.info("sweep_staging: dispatched %d new staging file(s)", dispatched)

@@ -15,6 +15,8 @@ import logging
 import time
 from dataclasses import dataclass
 
+from georiva.events.context import ensure_context
+
 from .recipe import (
     BaseRecipe,
     ProductionUnit,
@@ -31,6 +33,7 @@ class UnitResult:
     status: str  # completed | skipped | not_ready | locked | failed
     item_id: int | None = None
     input_hash: str = ""
+    event_id: object = None  # the DerivationAttemptFinished this attempt wrote, if any
 
 
 def _asset_output_path(item, variable, fmt: str) -> str:
@@ -291,7 +294,13 @@ def _log_progress(origin, unit_total) -> None:
     )
 
 
-def run_unit(
+def run_unit(recipe: BaseRecipe, unit: ProductionUnit, **kwargs) -> UnitResult:
+    """Run one unit under the active event context, or a fresh one when called bare (a shell, a test)."""
+    with ensure_context(actor="system:engine"):
+        return _run_unit(recipe, unit, **kwargs)
+
+
+def _run_unit(
     recipe: BaseRecipe,
     unit: ProductionUnit,
     *,
@@ -381,9 +390,9 @@ def run_unit(
                 pos,
                 tag,
             )
-            run.mark_skipped(input_hash=ihash)
+            event = run.mark_skipped(input_hash=ihash)
             _log_progress(origin, unit_total)
-            return UnitResult(status="skipped", input_hash=ihash)
+            return UnitResult(status="skipped", input_hash=ihash, event_id=event.pk)
 
         logger.info("[unit %s] %s step 3/6 — readiness check…", pos, tag)
         if not recipe.readiness(unit, resolved):
@@ -395,9 +404,9 @@ def run_unit(
                 tag,
                 ", ".join(missing) or "unknown",
             )
-            run.mark_not_ready()
+            event = run.mark_not_ready()
             _log_progress(origin, unit_total)
-            return UnitResult(status="not_ready")
+            return UnitResult(status="not_ready", event_id=event.pk)
 
         if writer is None:
             from georiva.core.storage import storage
@@ -444,7 +453,8 @@ def run_unit(
                 item.bounds, item.width, item.height = item_grid
                 item.save(update_fields=["bounds", "width", "height"])
             _write_links(item, resolved, recipe, ihash)
-            run.mark_completed(produced_item=item, input_hash=ihash)
+            event = run.mark_completed(produced_item=item, input_hash=ihash)
+            _record_published(out_item, item, event)
         logger.info(
             "[unit %s] %s registered item id=%s + %d asset(s), lineage links written",
             pos,
@@ -464,7 +474,7 @@ def run_unit(
             time.monotonic() - t_start,
         )
         _log_progress(origin, unit_total)
-        return UnitResult(status="completed", item_id=item.pk, input_hash=ihash)
+        return UnitResult(status="completed", item_id=item.pk, input_hash=ihash, event_id=event.pk)
 
     except Exception as exc:
         logger.exception(
@@ -477,6 +487,32 @@ def run_unit(
         run.mark_failed(str(exc))
         _log_progress(origin, unit_total)
         raise
+
+
+def _record_published(out_item, item, attempt_event) -> None:
+    """One ``ProductPublished`` per completed unit, caused by the attempt that wrote it.
+
+    Recorded for ``internal`` Intermediate products too: the tier is snapshotted
+    on the event, and consumers of the record decide what to do with it.
+    """
+    from georiva.core.models import ProductPublished
+    from georiva.events.context import caused_by
+    from georiva.events.recording import record
+
+    collection = out_item.collection
+    with caused_by(attempt_event):
+        record(
+            ProductPublished,
+            collection=collection,
+            collection_slug=collection.slug,
+            catalog_slug=collection.catalog.slug,
+            visibility=collection.visibility,
+            origin=ProductPublished.Origin.DERIVED,
+            item_count=1,
+            valid_time_start=item.time,
+            valid_time_end=item.time,
+            produced_item_id=item.pk,
+        )
 
 
 def _emit_event(recipe, unit, item, input_hash):

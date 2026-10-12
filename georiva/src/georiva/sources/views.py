@@ -1777,7 +1777,9 @@ def derived_product_runs(request, product_pk):
     """
     from django.core.paginator import Paginator
 
-    from georiva.processing.models import DerivationRun
+    from georiva.events.history import build_history
+    from georiva.processing.models import DerivationAttemptFinished, DerivationRun
+    from georiva.sources.derivation_invocation import product_origin
     from georiva.sources.derivation_tracking import product_runs, run_duration_seconds
     from georiva.sources.models import DerivedProduct
 
@@ -1804,6 +1806,10 @@ def derived_product_runs(request, product_pk):
         "page": page,
         "statuses": DerivationRun.Status.choices,
         "current_status": status or "",
+        "history": build_history(
+            request,
+            [(DerivationAttemptFinished, {"origin": product_origin(product)})],
+        ),
     }
     return render(request, "georivasources/derived_product_runs.html", context)
 
