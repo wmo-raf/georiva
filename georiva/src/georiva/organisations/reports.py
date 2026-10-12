@@ -25,7 +25,9 @@ hook can only append, so replacing a view means claiming its URL.
 """
 
 from django.urls import path
+from django.views.decorators.cache import never_cache
 from wagtail.admin.auth import require_admin_access
+from wagtail.admin.urls import display_custom_404
 from wagtail.admin.views.reports.aging_pages import AgingPagesView
 from wagtail.admin.views.reports.audit_logging import LogEntriesView
 from wagtail.admin.views.reports.locked_pages import LockedPagesView
@@ -107,10 +109,6 @@ class OrgScopedPageTypesUsageView(PageTypesUsageReportView):
     filterset_class = OrgScopedPageTypesUsageFilterSet
 
 
-#: Wagtail's report URL name → the scoped view that stands in for it. Read by the
-#: URL claims below and by the test that fails when a Wagtail release adds a report.
-ORG_SCOPED_REPORTS = {}
-
 _REPORT_ROUTES = [
     ("locked/", "locked_pages", OrgScopedLockedPagesView),
     ("workflow/", "workflow", OrgScopedWorkflowView),
@@ -120,19 +118,31 @@ _REPORT_ROUTES = [
     ("page-types-usage/", "page_types_usage", OrgScopedPageTypesUsageView),
 ]
 
+#: Each report and its results-only twin: URL-name suffix, path suffix, view kwargs.
+_VARIANTS = [("", "", {}), ("_results", "results/", {"results_only": True})]
+
+#: Wagtail's report URL name → the scoped view that stands in for it. Read by the
+#: test that fails when a Wagtail release adds a report nobody has claimed.
+ORG_SCOPED_REPORTS = {f"{name}{suffix}": view for _, name, view in _REPORT_ROUTES for suffix, _, _ in _VARIANTS}
+
+
+def _as_wagtail_serves_it(view):
+    """``view`` wrapped as Wagtail wraps every admin URL: admin access, a Wagtail 404, never cached.
+
+    Claiming a route means standing in for the decorators Wagtail applies to its
+    own admin patterns (``wagtail.admin.urls``), or the report would lose them.
+    """
+    return never_cache(display_custom_404(require_admin_access(view)))
+
 
 def report_urlpatterns(admin_prefix):
-    """The twelve claims — each report and its results-only twin — under ``admin_prefix``."""
-    patterns = []
-    for route, name, view in _REPORT_ROUTES:
-        for suffix, kwargs in (("", {}), ("_results", {"results_only": True})):
-            full_name = f"{name}{suffix}"
-            ORG_SCOPED_REPORTS[full_name] = view
-            patterns.append(
-                path(
-                    f"{admin_prefix}reports/{route}{'results/' if suffix else ''}",
-                    require_admin_access(view.as_view(**kwargs)),
-                    name=f"georiva_org_scoped_report_{full_name}",
-                )
-            )
-    return patterns
+    """The claims — each report and its results-only twin — under ``admin_prefix``."""
+    return [
+        path(
+            f"{admin_prefix}reports/{route}{path_suffix}",
+            _as_wagtail_serves_it(view.as_view(**kwargs)),
+            name=f"georiva_org_scoped_report_{name}{name_suffix}",
+        )
+        for route, name, view in _REPORT_ROUTES
+        for name_suffix, path_suffix, kwargs in _VARIANTS
+    ]

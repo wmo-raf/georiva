@@ -115,17 +115,43 @@ class AdminReportScopingTests(TestCase):
             with self.subTest(report=name):
                 self.assertNotContains(self.read(name, False), "Kampala Bulletin")
 
-    def test_every_report_url_is_claimed_by_a_scoped_view(self):
-        """Fails on the Wagtail release that adds a report nobody has scoped."""
+    def test_the_query_string_cannot_widen_page_types_usage_to_another_site(self):
+        response = self.client.get(
+            reverse("wagtailadmin_reports:page_types_usage"), {"site": self.uganda.site.root_page.path}
+        )
+        self.assertNotContains(response, "Kampala Bulletin")
+        self.assertContains(response, "Nairobi Bulletin")
+
+    def test_the_instance_admin_is_scoped_on_the_results_twins_and_usage_report_too(self):
+        admin = make_user("root", superuser=True)
+        add_member(admin, self.kenya)
+        self.client.logout()
+        self.client.login(username="root", password=PASSWORD)
+        for name in (*PAGE_REPORTS, "page_types_usage"):
+            with self.subTest(report=name):
+                self.assertNotContains(self.read(name, True), "Kampala Bulletin")
+
+    def test_a_csv_export_is_scoped_like_the_listing(self):
+        response = self.client.get(reverse("wagtailadmin_reports:aging_pages"), {"export": "csv"})
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode() if response.streaming else response.content.decode()
+        self.assertIn("Nairobi Bulletin", body)
+        self.assertNotIn("Kampala Bulletin", body)
+
+    def test_every_report_wagtail_registers_is_claimed_by_a_scoped_view(self):
+        """Fails on the Wagtail release that adds a report nobody has scoped.
+
+        The names come from Wagtail's own report routes, not from a list kept here,
+        so a report added upstream appears in this set before anyone has decided
+        how to scope it.
+        """
         from django.urls import resolve
+        from wagtail.admin.urls import reports as wagtail_reports
 
         from georiva.organisations.reports import ORG_SCOPED_REPORTS
 
-        wagtail_names = {
-            f"wagtailadmin_reports:{name}{suffix}"
-            for name in (*PAGE_REPORTS, "page_types_usage")
-            for suffix in ("", "_results")
-        }
-        self.assertEqual({f"wagtailadmin_reports:{n}" for n in ORG_SCOPED_REPORTS}, wagtail_names)
+        wagtail_names = {pattern.name for pattern in wagtail_reports.urlpatterns}
+        self.assertEqual(set(ORG_SCOPED_REPORTS), wagtail_names)
         for name in wagtail_names:
-            self.assertTrue(resolve(reverse(name)).url_name.startswith("georiva_org_scoped_report_"), name)
+            url_name = resolve(reverse(f"wagtailadmin_reports:{name}")).url_name
+            self.assertEqual(url_name, f"georiva_org_scoped_report_{name}")
