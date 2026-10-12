@@ -178,6 +178,9 @@ class BaseDataSource(ABC):
     ) -> Iterator[FileRequest]:
         """
         Convenience wrapper: compute time window automatically then generate requests.
+
+        The collection is forwarded to `generate_requests()` as the `collection` keyword
+        argument, so a source serving several collections can tell which one it is for.
         """
         start_time, end_time = self.get_time_window(collection=collection)
         data_variables = collection.source_variables_list()
@@ -185,6 +188,7 @@ class BaseDataSource(ABC):
             start_time=start_time,
             end_time=end_time,
             variables=data_variables,
+            collection=collection,
             **kwargs,
         )
 
