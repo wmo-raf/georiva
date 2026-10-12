@@ -1,6 +1,7 @@
 """A model run's page: its current state, and its history (ADR 0026, ADR 0030)."""
 
-from django.shortcuts import render
+from django.contrib import messages
+from django.shortcuts import redirect, render
 from django.urls import reverse
 
 from georiva.core.models import ProductPublished
@@ -21,6 +22,14 @@ def run_ingestion_detail(request, run_ingestion_id):
         RunIngestion.objects.select_related("collection__catalog"),
         pk=run_ingestion_id,
     )
+    if request.method == "POST" and request.POST.get("action") == "close":
+        # An operator's call: the closer is recorded as manual, and the event names the
+        # user, because the request's middleware context carries them.
+        if run.close(RunIngestion.Closer.MANUAL):
+            messages.success(request, "Run closed.")
+        else:
+            messages.info(request, "That run was already closed.")
+        return redirect("run_ingestion_detail", run_ingestion_id=run.pk)
     history = build_history(
         request,
         [

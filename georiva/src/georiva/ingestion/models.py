@@ -963,6 +963,12 @@ class UploadedFile(models.Model):
     )
     original_filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=500, blank=True)
+    correlation_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="The chain this upload started; the Bucket-notification consumer adopts it by key (ADR 0030).",
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     error = models.TextField(blank=True)
     bytes = models.BigIntegerField(default=0)
@@ -972,6 +978,13 @@ class UploadedFile(models.Model):
     class Meta:
         app_label = "georivaingestion"
         ordering = ["id"]
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.correlation_id is None:
+            from georiva.events.context import starting_correlation
+
+            self.correlation_id = starting_correlation()
+        super().save(*args, **kwargs)
 
     def mark_uploading(self):
         from django.utils import timezone

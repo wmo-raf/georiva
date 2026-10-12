@@ -20,6 +20,10 @@
         .gr-run__facts dd {
             margin: 0;
         }
+
+        .gr-run__actions {
+            margin-top: 1.5em;
+        }
     </style>
 {% endblock %}
 
@@ -38,6 +42,14 @@
         <dt>{% trans "Files" %}</dt>
         <dd>{{ run.file_count }}{% if run.expected_file_count %} / {{ run.expected_file_count }}{% endif %}</dd>
     </dl>
+
+    {% if run.is_open %}
+        <form method="post" class="gr-run__actions">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="close">
+            <button type="submit" class="button button-secondary">{% trans "Close this run" %}</button>
+        </form>
+    {% endif %}
 
     {% history_panel history %}
 {% endblock %}

@@ -722,14 +722,10 @@ class FetchRun(models.Model):
 
     def _starting_correlation(self):
         """A resumed run stays in its interrupted run's chain; otherwise the active chain, or a new one."""
-        import uuid
+        from georiva.events.context import starting_correlation
 
-        from georiva.events.context import current_context
-
-        if self.resumed_from_id and self.resumed_from.correlation_id:
-            return self.resumed_from.correlation_id
-        context = current_context()
-        return context.correlation_id if context else uuid.uuid4()
+        continuing = self.resumed_from.correlation_id if self.resumed_from_id else None
+        return starting_correlation(continuing=continuing)
 
     #: Terminal statuses that are a Domain event, and the outcome each records.
     #: Cancelled is deliberate and leaves no event; an interrupted run is a failure

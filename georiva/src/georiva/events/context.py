@@ -52,6 +52,15 @@ def new_context(*, actor: str, organisation_id=None, correlation_id=None, caused
     )
 
 
+def starting_correlation(*, continuing=None) -> uuid.UUID:
+    """The Correlation a new tracking row should carry: ``continuing`` if given,
+    else the active chain's, else a new one."""
+    if continuing is not None:
+        return continuing
+    context = _current.get()
+    return context.correlation_id if context else uuid.uuid4()
+
+
 def current_context() -> EventContext | None:
     return _current.get()
 

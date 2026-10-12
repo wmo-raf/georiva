@@ -169,6 +169,8 @@ MIDDLEWARE = [
     "georiva.organisations.middleware.OrganisationMiddleware",
     # After that: page-tree scoping needs the organisation it resolved.
     "georiva.organisations.pages.OrgPageTreeMiddleware",
+    # After both: the event context carries the user and the organisation they resolved.
+    "georiva.events.middleware.EventContextMiddleware",
     "wagtail.contrib.redirects.middleware.RedirectMiddleware",
 ]
 
