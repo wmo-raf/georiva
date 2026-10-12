@@ -122,6 +122,11 @@ def disable_admin_copy():
     Setting it on the base class covers our viewsets, snippet viewsets, Wagtail's
     own users and sites, and any plugin viewset, rather than each one remembering
     to opt out. Page copy is a separate implementation and is not touched.
+
+    Copy stays off until a working one exists. A viewset that opts back in must
+    detach the row (clear its pk, re-parent modelcluster children, vary unique
+    fields) before saving, and ``core/tests/test_admin_copy_disabled.py`` will
+    need its exemption updated to match.
     """
     from wagtail.admin.viewsets.model import ModelViewSet
 
