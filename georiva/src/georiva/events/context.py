@@ -96,6 +96,27 @@ def update_context(**changes) -> EventContext:
     return updated
 
 
+def context_after(event, *, actor: str) -> EventContext:
+    """The context for work caused by ``event`` — for a Domain-signal receiver.
+
+    A receiver is handed the event that was just written, and usually runs after
+    commit with no context of its own. This continues the event's chain, with the
+    event as the cause of whatever the receiver records next::
+
+        def on_run_closed(sender, run, event=None, **kwargs):
+            with use_context(context_after(event, actor="system:my_plugin")):
+                record(MyEvent, ...)
+
+    Part of the supported plugin API.
+    """
+    return EventContext(
+        correlation_id=event.correlation_id,
+        actor=actor,
+        organisation_id=event.organisation_id,
+        caused_by=event.pk,
+    )
+
+
 @contextmanager
 def use_context(context: EventContext):
     """Run a block under ``context``, restoring whatever was there however it ends."""
