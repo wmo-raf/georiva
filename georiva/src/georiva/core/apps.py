@@ -114,6 +114,25 @@ def data_feed_collection_link_deleted(sender, instance, **kwargs):
     _sync_keep_for_collection(instance.collection)
 
 
+def disable_admin_copy():
+    """Switch off the Copy action on every Wagtail ``ModelViewSet`` (#285).
+
+    The generic copy view binds the submitted form to the *source* row, so a
+    "copy" renames and overwrites the original and no second row is created.
+    Setting it on the base class covers our viewsets, snippet viewsets, Wagtail's
+    own users and sites, and any plugin viewset, rather than each one remembering
+    to opt out. Page copy is a separate implementation and is not touched.
+
+    Copy stays off until a working one exists. A viewset that opts back in must
+    detach the row (clear its pk, re-parent modelcluster children, vary unique
+    fields) before saving, and ``core/tests/test_admin_copy_disabled.py`` will
+    need its exemption updated to match.
+    """
+    from wagtail.admin.viewsets.model import ModelViewSet
+
+    ModelViewSet.copy_view_enabled = False
+
+
 class CoreConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "georiva.core"
@@ -121,6 +140,8 @@ class CoreConfig(AppConfig):
     verbose_name = "GeoRIVA Core"
 
     def ready(self):
+        disable_admin_copy()
+
         from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
 
         from .models import Collection, Variable
