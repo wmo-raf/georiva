@@ -9,14 +9,8 @@
             {% blocktrans %}This source file was ingested more than once. Each ingestion is listed, newest first; which one produced this item is not guessed.{% endblocktrans %}
         </p>
         <ul class="gr-history__list">
-            {% for entry in entries %}
-                <li class="gr-history__row">
-                    <span class="gr-history__when">{{ entry.occurred_at|date:"Y-m-d H:i:s" }}</span>
-                    <strong>{{ entry.label }}</strong>
-                    <span>{{ entry.summary }}</span>
-                    <span class="gr-history__actor">{{ entry.actor }}</span>
-                    <a href="{{ entry.timeline_url }}">{% trans "Timeline" %}</a>
-                </li>
+            {% for row in entries %}
+                {% include "georivaevents/_history_row.html" %}
             {% endfor %}
         </ul>
     {% else %}

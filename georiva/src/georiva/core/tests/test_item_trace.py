@@ -88,7 +88,7 @@ class ItemTraceTests(TestCase):
         response = self._trace(item)
 
         self.assertEqual(response.status_code, 200)
-        urls = [entry["timeline_url"] for entry in response.context["entries"]]
+        urls = [entry.timeline_url for entry in response.context["entries"]]
         self.assertEqual(
             urls,
             [reverse("events_timeline", args=[e.correlation_id]) for e in (second, first)],

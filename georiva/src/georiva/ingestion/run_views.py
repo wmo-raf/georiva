@@ -3,6 +3,7 @@
 from django.contrib import messages
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils.translation import gettext as _
 
 from georiva.core.models import ProductPublished
 from georiva.events.history import build_history
@@ -27,9 +28,9 @@ def run_ingestion_detail(request, run_ingestion_id):
         # An operator's call: the closer is recorded as manual, and the event names the
         # user, because the request's middleware context carries them.
         if run.close(RunIngestion.Closer.MANUAL):
-            messages.success(request, "Run closed.")
+            messages.success(request, _("Run closed."))
         else:
-            messages.info(request, "That run was already closed.")
+            messages.info(request, _("That run was already closed."))
         return redirect("run_ingestion_detail", run_ingestion_id=run.pk)
     history = build_history(
         request,
@@ -45,10 +46,10 @@ def run_ingestion_detail(request, run_ingestion_id):
             "run": run,
             "history": history,
             "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": "Home"},
-                {"url": None, "label": f"Run — {run}"},
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("Run — %s") % run},
             ],
-            "header_title": f"Run — {run}",
+            "header_title": _("Run — %s") % run,
             "header_icon": "history",
         },
     )
@@ -81,10 +82,10 @@ def file_ingestion_detail(request, file_ingestion_id):
             "log": log,
             "history": history,
             "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": "Home"},
-                {"url": None, "label": f"File — {log.file_path}"},
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("File — %s") % log.file_path},
             ],
-            "header_title": f"File — {log.file_path}",
+            "header_title": _("File — %s") % log.file_path,
             "header_icon": "doc-empty",
         },
     )

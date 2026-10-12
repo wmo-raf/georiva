@@ -9,28 +9,28 @@ page is where: superusers only, and unscoped on purpose.
 """
 
 from django.core.exceptions import PermissionDenied
-from django.db import connection
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils.translation import gettext as _
 
-from .history import HistoryRow, _row
-from .registry import event_types
+from .history import HistoryRow, row_for
+from .registry import event_types, installed_tables
 
 LIMIT = 200
 
 
 def unattributed_events(request):
     if not request.user.is_superuser:
-        raise PermissionDenied("Unattributed events are visible to the instance administrator only.")
+        raise PermissionDenied(_("Unattributed events are visible to the instance administrator only."))
 
-    existing = set(connection.introspection.table_names())
+    existing = installed_tables()
     rows: list[HistoryRow] = []
     for model in event_types():
         if model._meta.db_table not in existing:
             continue
         # Deliberately not ``scope_rows``: these rows belong to nobody.
         for event in model._default_manager.filter(organisation__isnull=True).order_by("-occurred_at")[:LIMIT]:
-            rows.append(_row(event))
+            rows.append(row_for(event))
     rows.sort(key=lambda row: row.occurred_at, reverse=True)
 
     return render(
@@ -39,10 +39,10 @@ def unattributed_events(request):
         {
             "rows": rows[:LIMIT],
             "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": "Home"},
-                {"url": None, "label": "Unattributed events"},
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("Unattributed events")},
             ],
-            "header_title": "Unattributed events",
+            "header_title": _("Unattributed events"),
             "header_icon": "warning",
         },
     )
@@ -58,7 +58,6 @@ def timeline(request, correlation_id):
     when rows exist beyond their scope.
     """
     from django.http import Http404
-    from django.utils.translation import gettext as _
 
     from georiva.organisations.ownership import scope_rows
 
@@ -73,7 +72,7 @@ def timeline(request, correlation_id):
     # organisation's part of the chain is.
     continues_elsewhere = everything.filter(organisation__isnull=False).count() > len(visible)
 
-    existing = set(connection.introspection.table_names())
+    existing = installed_tables()
     by_type: dict[str, list] = {}
     for row in visible:
         by_type.setdefault(row.event_type, []).append(row.event_id)
@@ -118,10 +117,10 @@ def timeline(request, correlation_id):
             "continues_elsewhere": continues_elsewhere,
             "correlation_id": correlation_id,
             "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": "Home"},
-                {"url": None, "label": f"Timeline {str(correlation_id)[:8]}"},
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("Timeline %(id)s") % {"id": str(correlation_id)[:8]}},
             ],
-            "header_title": f"Timeline {str(correlation_id)[:8]}",
+            "header_title": _("Timeline %(id)s") % {"id": str(correlation_id)[:8]},
             "header_icon": "history",
         },
     )

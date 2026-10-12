@@ -11,15 +11,17 @@ the link is resolved here, on demand, through the Item's own provenance.
 
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils.translation import gettext as _
 
 from georiva.core.models import Item
+from georiva.events.history import row_for
 from georiva.events.timeline import timeline_url
 from georiva.organisations.access import get_org_object_or_404
 from georiva.organisations.ownership import scope_rows
 
 
 def _candidates(request, item):
-    """Events that could be the story of ``item``, newest first, as ``(label, event)``."""
+    """Events that could be the story of ``item``: derived attempts first, then ingestions, newest first."""
     from georiva.ingestion.models import FileIngestionFinished
     from georiva.processing.models import DerivationAttemptFinished
 
@@ -29,7 +31,7 @@ def _candidates(request, item):
             produced_item_id=item.pk, outcome=DerivationAttemptFinished.Outcome.COMPLETED
         ),
     ).order_by("-occurred_at")
-    found = [("Derivation attempt", event) for event in derived]
+    found = list(derived)
 
     if item.source_file and ":" in item.source_file:
         bucket, path = item.source_file.split(":", 1)
@@ -39,7 +41,7 @@ def _candidates(request, item):
                 bucket=bucket, file_path=path, outcome=FileIngestionFinished.Outcome.COMPLETED
             ),
         ).order_by("-occurred_at")
-        found += [("File ingestion", event) for event in ingested]
+        found += list(ingested)
     return found
 
 
@@ -48,18 +50,9 @@ def item_trace(request, item_id):
     found = _candidates(request, item)
 
     if len(found) == 1:
-        return redirect(timeline_url(found[0][1].correlation_id))
+        return redirect(timeline_url(found[0].correlation_id))
     # No match falls through to the page below: a clear "no history" state, not a 404.
-    entries = [
-        {
-            "label": label,
-            "summary": event.summary(),
-            "occurred_at": event.occurred_at,
-            "actor": event.actor,
-            "timeline_url": timeline_url(event.correlation_id),
-        }
-        for label, event in found
-    ]
+    entries = [row_for(event) for event in found]
     return render(
         request,
         "core/item_trace.html",
@@ -67,11 +60,11 @@ def item_trace(request, item_id):
             "item": item,
             "entries": entries,
             "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": "Home"},
-                {"url": reverse("item_preview", args=[item.pk]), "label": "Item"},
-                {"url": None, "label": "Trace"},
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse("item_preview", args=[item.pk]), "label": _("Item")},
+                {"url": None, "label": _("Trace")},
             ],
-            "header_title": "Trace",
+            "header_title": _("Trace"),
             "header_icon": "history",
         },
     )

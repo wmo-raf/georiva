@@ -27,6 +27,13 @@ def populate() -> None:
             _types[type_key(model)] = model
 
 
+def installed_tables() -> set[str]:
+    """Tables that exist right now — a registered type may belong to a plugin that was removed."""
+    from django.db import connection
+
+    return set(connection.introspection.table_names())
+
+
 def event_types() -> list[type]:
     return list(_types.values())
 

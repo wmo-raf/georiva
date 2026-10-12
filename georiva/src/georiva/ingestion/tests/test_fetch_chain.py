@@ -233,3 +233,37 @@ class FetchRunHistoryPanelTests(TestCase):
         rows = response.context["history"].rows
         self.assertEqual([row.type_label for row in rows], ["Fetch finished"])
         self.assertEqual({row.event.organisation_id for row in rows}, {self.kenya.pk})
+
+
+class StagingArrivalCauseTests(TestCase):
+    """A derivation triggered by a fetched file is caused by that fetch's event."""
+
+    def test_the_attempts_context_carries_the_fetchs_event_as_its_cause(self):
+        from georiva.ingestion.tasks import process_staging_file
+
+        kenya = make_organisation("kenya")
+        feed, _ = _feed(kenya)
+        key = "kenya/chirps/rainfall/f.tif"
+        with event_context(actor="celery", organisation_id=kenya.pk):
+            run = FetchRun.objects.create(data_feed=feed)
+        FetchedFile.objects.create(fetch_run=run, file_path=key, status=FetchedFile.Status.STORED)
+        run.mark_completed(files_fetched=1)
+
+        seen = []
+        with (
+            patch("georiva.ingestion.staging_consumer.register_staging_file", return_value=MagicMock()),
+            patch("georiva.processing.invocation.staging_item_trigger", return_value={}),
+            patch(
+                "georiva.sources.derivation_invocation.dispatch_for_input",
+                side_effect=lambda trigger, **kw: seen.append(current_context()),
+            ),
+        ):
+            from georiva.events.context import use_context
+            from georiva.ingestion.chains import context_for_arrival
+
+            with use_context(context_for_arrival(key, actor="system:bucket")):
+                process_staging_file.apply(kwargs={"bucket": BucketType.STAGING, "key": key})
+
+        (context,) = seen
+        self.assertEqual(context.caused_by, FetchRunFinished.objects.get().pk)
+        self.assertEqual(context.correlation_id, run.correlation_id)

@@ -11,14 +11,13 @@ which is bounded by the row limit however many event types are installed.
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import connection
 from django.utils import timezone
 
 from georiva.organisations.ownership import scope_rows
 
+from .history import row_for
 from .models import EventIndex, OutcomeClass
-from .registry import model_for
-from .timeline import timeline_url
+from .registry import installed_tables, model_for
 
 DEFAULT_DAYS = 7
 DEFAULT_LIMIT = 20
@@ -28,7 +27,7 @@ def window_days() -> int:
     return int(getattr(settings, "GEORIVA_FAILURES_PANEL_DAYS", DEFAULT_DAYS))
 
 
-def recent_failures(request, *, days=None, limit=DEFAULT_LIMIT) -> list[dict]:
+def recent_failures(request, *, days=None, limit=DEFAULT_LIMIT) -> list:
     since = timezone.now() - timedelta(days=days if days is not None else window_days())
     rows = list(
         scope_rows(
@@ -39,7 +38,7 @@ def recent_failures(request, *, days=None, limit=DEFAULT_LIMIT) -> list[dict]:
         ).order_by("-occurred_at")[:limit]
     )
 
-    existing = set(connection.introspection.table_names())
+    existing = installed_tables()
     wanted: dict[str, list] = {}
     for row in rows:
         wanted.setdefault(row.event_type, []).append(row.event_id)
@@ -56,14 +55,5 @@ def recent_failures(request, *, days=None, limit=DEFAULT_LIMIT) -> list[dict]:
         event = events.get(row.event_id)
         if event is None:
             continue
-        failures.append(
-            {
-                "label": event.label,
-                "summary": event.summary(),
-                "occurred_at": event.occurred_at,
-                "outcome_class": row.outcome_class,
-                "subject_url": event.subject_url(),
-                "timeline_url": timeline_url(row.correlation_id),
-            }
-        )
+        failures.append(row_for(event))
     return failures

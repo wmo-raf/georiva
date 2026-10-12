@@ -10,22 +10,7 @@
     {% if rows %}
         <ul class="gr-history__list">
             {% for row in rows %}
-                <li class="gr-history__row gr-history__row--{{ row.outcome_class }}">
-                    <details>
-                        <summary>
-                            <span class="gr-history__when">{{ row.occurred_at|date:"Y-m-d H:i:s" }}</span>
-                            <span class="gr-history__type">{{ row.type_label }}</span>
-                            <span class="gr-history__summary">{{ row.summary }}</span>
-                            <span class="gr-history__actor">{{ row.actor }}</span>
-                        </summary>
-                        <dl class="gr-history__facts">
-                            {% for label, value in row.items %}
-                                <dt>{{ label }}</dt>
-                                <dd>{{ value }}</dd>
-                            {% endfor %}
-                        </dl>
-                    </details>
-                </li>
+                {% include "georivaevents/_history_row.html" %}
             {% endfor %}
         </ul>
     {% else %}

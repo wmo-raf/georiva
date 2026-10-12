@@ -28,6 +28,7 @@ class HistoryRow:
     outcome_class: str = "ok"
     correlation_id: object = None
     timeline_url: str | None = None
+    subject_url: str | None = None
 
 
 @dataclass
@@ -46,12 +47,13 @@ def build_history(request, sources, *, limit=DEFAULT_LIMIT) -> History:
     for model, filters in sources:
         queryset = scope_rows(request, model._default_manager.filter(**filters))
         for event in queryset.order_by("-occurred_at")[:limit]:
-            rows.append(_row(event))
+            rows.append(row_for(event))
     rows.sort(key=lambda row: row.occurred_at, reverse=True)
     return History(rows=rows[:limit], recorded_since=recorded_since())
 
 
-def _row(event) -> HistoryRow:
+def row_for(event) -> HistoryRow:
+    """The one shape every list of events renders from: History, failures, Trace."""
     from .timeline import timeline_url
 
     return HistoryRow(
@@ -64,4 +66,5 @@ def _row(event) -> HistoryRow:
         outcome_class=event.outcome_class,
         correlation_id=event.correlation_id,
         timeline_url=timeline_url(event.correlation_id),
+        subject_url=event.subject_url(),
     )

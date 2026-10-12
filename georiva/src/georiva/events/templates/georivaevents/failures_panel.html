@@ -3,14 +3,8 @@
     <h2 class="gr-failures__title">{% trans "Recent failures" %}</h2>
     {% if failures %}
         <ul class="gr-history__list">
-            {% for failure in failures %}
-                <li class="gr-history__row gr-history__row--{{ failure.outcome_class }}">
-                    <span class="gr-history__when">{{ failure.occurred_at|date:"Y-m-d H:i" }}</span>
-                    <strong>{{ failure.label }}</strong>
-                    <span>{{ failure.summary }}</span>
-                    {% if failure.subject_url %}<a href="{{ failure.subject_url }}">{% trans "Open" %}</a>{% endif %}
-                    {% if failure.timeline_url %}<a href="{{ failure.timeline_url }}">{% trans "Timeline" %}</a>{% endif %}
-                </li>
+            {% for row in failures %}
+                {% include "georivaevents/_history_row.html" %}
             {% endfor %}
         </ul>
     {% else %}

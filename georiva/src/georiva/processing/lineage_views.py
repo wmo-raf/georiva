@@ -8,6 +8,7 @@ without triggering it are not in the chain; they are reached through
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils.translation import gettext as _
 
 from georiva.organisations.ownership import scope_rows
 from georiva.processing.models import DerivationAttemptFinished
@@ -48,11 +49,11 @@ def attempt_inputs(request, event_id):
             "attempt": attempt,
             "inputs": inputs,
             "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": "Home"},
-                {"url": reverse("events_timeline", args=[attempt.correlation_id]), "label": "Timeline"},
-                {"url": None, "label": "Inputs"},
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse("events_timeline", args=[attempt.correlation_id]), "label": _("Timeline")},
+                {"url": None, "label": _("Inputs")},
             ],
-            "header_title": "Inputs",
+            "header_title": _("Inputs"),
             "header_icon": "doc-full",
         },
     )

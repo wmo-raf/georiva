@@ -69,10 +69,10 @@ class FailuresPanelTests(TestCase):
         failures = self._panel()
 
         self.assertEqual(
-            sorted(f["label"] for f in failures),
+            sorted(f.type_label for f in failures),
             ["Derivation attempt", "Fetch finished", "File ingestion finished"],
         )
-        self.assertEqual(failures, sorted(failures, key=lambda f: f["occurred_at"], reverse=True))
+        self.assertEqual(failures, sorted(failures, key=lambda f: f.occurred_at, reverse=True))
 
     def test_other_organisations_and_unattributed_events_never_appear(self):
         page = self.client.get(reverse("wagtailadmin_home"))
@@ -82,10 +82,10 @@ class FailuresPanelTests(TestCase):
         self.assertNotContains(page, "atlantis")
 
     def test_each_entry_links_to_its_object_and_its_timeline(self):
-        file_failure = next(f for f in self._panel() if f["label"] == "File ingestion finished")
+        file_failure = next(f for f in self._panel() if f.type_label == "File ingestion finished")
 
-        self.assertTrue(file_failure["subject_url"].startswith("/admin/ingestion/files/"))
-        self.assertIn("/events/timeline/", file_failure["timeline_url"])
+        self.assertTrue(file_failure.subject_url.startswith("/admin/ingestion/files/"))
+        self.assertIn("/events/timeline/", file_failure.timeline_url)
 
     def test_nothing_older_than_the_window_is_listed(self):
         long_ago = timezone.now() - datetime.timedelta(days=30)
