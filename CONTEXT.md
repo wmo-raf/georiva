@@ -249,6 +249,48 @@ drops and sweeps). Exposes `version` = `ref_epoch_seconds × 100 + revision`. Em
 `run_ingestion_reopened` from `ingestion/domain_signals.py`.
 _Avoid_: cycle, ModelRun, RunArrival, DataArrival
 
+### Traceability
+
+**Domain event**:
+A durable, append-only, tenant-owned fact written at the moment a pipeline transition happens, in the same database
+transaction as the state change it describes (ADR 0030). The truth for *history*; the run rows stay the truth for
+*current state*.
+_Avoid_: event (bare), audit log, activity, history row
+
+**Run row**:
+A tracking record that is a lock and state machine — `FileIngestion`, `RunIngestion`, `FetchRun`, `DerivationRun` —
+overwritten in place. Authoritative for current state where it and an event disagree.
+_Avoid_: event, log
+
+**Correlation**:
+The id shared by everything one arrival set in motion. The first event of a chain sets it; downstream events copy it.
+_Avoid_: trace id, request id, chain id (in code)
+
+**Caused-by**:
+The pointer from a Domain event to the event that directly triggered it. Gives causality within a Correlation.
+_Avoid_: parent, trigger (for the pointer)
+
+**Actor**:
+Who or what caused the event: `user:<id>`, `celery`, `sweep:<name>` or `system:<name>`.
+_Avoid_: user (when it may be automation), source, author
+
+**Domain signal**:
+A Django signal other apps subscribe to for a pipeline transition (`run_ingestion_closed`, `unit_completed`). Fires after
+commit and carries the Domain event just written.
+_Avoid_: event, hook
+
+**Live update**:
+An ephemeral message published to the Redis channel behind the SSE activity stream. Never persisted. (Module
+`ingestion/live_updates.py`.)
+_Avoid_: event, SSE event, ingestion event
+
+**Bucket notification**:
+The object-storage message MinIO pushes onto a Redis list when an object lands, consumed by `minio-consumer` /
+`staging-consumer`.
+_Avoid_: MinIO event, webhook, event (bare)
+
+The Derived Product Definition's `event` trigger mode keeps its value; it means "on arrival", not a Domain event.
+
 ### Triggers
 
 **DataFeed**:

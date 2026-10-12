@@ -22,11 +22,11 @@ from georiva.core.storage.path_resolution import org_slug_from_key
 
 @receiver(post_save, sender="georivaingestion.FileIngestion")
 def _file_ingestion_post_save(sender, instance, created, update_fields, **kwargs):
-    from georiva.ingestion.events import publish_event
+    from georiva.ingestion.live_updates import publish_update
 
     org = org_slug_from_key(instance.file_path)
     if created:
-        publish_event(
+        publish_update(
             {
                 "type": "file_ingestion.created",
                 "org": org,
@@ -40,7 +40,7 @@ def _file_ingestion_post_save(sender, instance, created, update_fields, **kwargs
         return
     if update_fields is None or "status" not in update_fields:
         return
-    publish_event(
+    publish_update(
         {
             "type": "file_ingestion.status_changed",
             "org": org,
@@ -56,9 +56,9 @@ def _file_ingestion_job_state_changed(sender, instance, created, update_fields, 
         return
     if update_fields is None or "state" not in update_fields:
         return
-    from georiva.ingestion.events import publish_event
+    from georiva.ingestion.live_updates import publish_update
 
-    publish_event(
+    publish_update(
         {
             "type": "job.state_changed",
             "org": org_slug_from_key(instance.file_path),

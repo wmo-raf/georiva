@@ -20,9 +20,9 @@ class PublishingProgress(Progress):
     def _publish(self, state: str) -> None:
         if self._job_id is None:
             return
-        from georiva.ingestion.events import publish_event
+        from georiva.ingestion.live_updates import publish_update
 
-        publish_event(
+        publish_update(
             {
                 "type": "job.progress_updated",
                 "job_id": self._job_id,

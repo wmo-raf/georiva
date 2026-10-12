@@ -142,7 +142,7 @@ Defined in `api/urls.py`:
 - `/api/datasets/` — Dataset pages API
 - `/admin/` — Wagtail CMS admin (mounted in `config/urls.py`)
 
-> MinIO events arrive via a Redis list consumed by `minio-consumer`, **not** an HTTP webhook
+> Bucket notifications arrive via a Redis list consumed by `minio-consumer`, **not** an HTTP webhook
 > endpoint. Vector tiles for zonal stats are served by Martin at `/martin/boundary_stats/{z}/{x}/{y}`,
 > which requires `org`, `catalog`, `collection` and `variable` query params. Titiler raster tiles live
 > under `/titiler/<org>/<catalog>/<collection>/<variable>/…`. Build every such URL through

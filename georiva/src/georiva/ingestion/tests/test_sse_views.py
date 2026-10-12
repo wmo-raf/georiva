@@ -199,7 +199,7 @@ class SSELiveEventForwardingTests(TestCase):
         import redis.asyncio as aioredis
         from django.conf import settings
 
-        from georiva.ingestion.events import CHANNEL
+        from georiva.ingestion.live_updates import CHANNEL
 
         await self.async_client.aforce_login(self.user)
         response = await self.async_client.get("/admin/api/ingestion/events/")

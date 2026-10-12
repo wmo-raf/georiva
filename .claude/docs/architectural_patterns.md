@@ -253,7 +253,7 @@ config/urls.py  →  api/urls.py  →  stac/urls.py
 - Each API app defines `app_name` for namespacing (e.g., `stac/urls.py:5`)
 - RESTful nesting for STAC
 - Wagtail catch-all at the end of `config/urls.py`
-- MinIO events are **not** an HTTP route — they arrive via a Redis list consumed by `minio-consumer`.
+- Bucket notifications (MinIO events) are **not** an HTTP route — they arrive via a Redis list consumed by `minio-consumer`.
 
 ## 14. Result Dataclass Pattern
 

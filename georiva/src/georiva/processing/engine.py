@@ -481,9 +481,9 @@ def run_unit(
 
 def _emit_event(recipe, unit, item, input_hash):
     try:
-        from georiva.ingestion.events import publish_event
+        from georiva.ingestion.live_updates import publish_update
 
-        publish_event(
+        publish_update(
             {
                 "type": "derivation.completed",
                 "recipe": recipe.type,

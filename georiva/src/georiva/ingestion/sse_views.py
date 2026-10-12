@@ -63,7 +63,7 @@ async def _event_stream(allowed_types, snapshot_fn, org_slug):
     import redis.asyncio as aioredis
     from django.conf import settings
 
-    from .events import CHANNEL
+    from .live_updates import CHANNEL
 
     r = aioredis.from_url(settings.REDIS_URL)
     try:

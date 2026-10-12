@@ -72,3 +72,10 @@ inputs exist, via two paths sharing one readiness-gated primitive,
   `input_arrived`) let the tracking UI show *why* a unit revived.
 - First engine→feed-layer notification exists, but as a signal — ADR 0005's
   "engine never imports DerivedProduct" boundary is preserved.
+
+## Amendment — ADR 0030 (Domain events)
+
+`unit_completed` now fires **after commit** and passes the
+`DerivationAttemptFinished` event just written as the keyword argument `event`.
+The wake-up it triggers continues the completing attempt's Correlation, with
+that event as its cause.

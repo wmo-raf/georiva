@@ -191,3 +191,13 @@ a consumer that distinguishes them would be guessing.
   subscribers, each on its own decision.
 - `CONTEXT.md`'s `FetchRun` entry is corrected: one per
   `(feed execution, collection)`, not one per feed execution.
+
+## Amendment — ADR 0030 (Domain events)
+
+`run_ingestion_closed` and `run_ingestion_reopened` now fire **after commit**
+(`transaction.on_commit`), and pass the Domain event that was just written
+(`RunIngestionClosed` / `RunIngestionReopened`) as the keyword argument `event`
+beside `run`. Receivers written as `(sender, run, **kwargs)` keep working. The
+`georiva-publisher-forti` plugin already subscribes to both; moving the signals
+after commit is a live behaviour change for it, and a beneficial one — its
+publish task reads the run, which is now guaranteed visible.

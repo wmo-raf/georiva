@@ -8,7 +8,7 @@ GeoRiva is a geospatial data platform that ingests raw Earth observation and met
 
 The system is built around a multi-bucket MinIO storage architecture. Data flows through dedicated buckets based on its lifecycle stage. Ingestion is event-driven — files landing in a bucket automatically trigger processing. MinIO publishes bucket notifications to a **Redis list**, a dedicated consumer process (`georiva-minio-consumer`) drains that list, and processing runs on a **Celery task queue** (`georiva-ingestion`).
 
-> **Architecture note:** Earlier revisions of GeoRiva used an HTTP webhook (and, before that, an MQTT/Mosquitto broker) to deliver MinIO events. The current implementation uses MinIO's native **Redis** notification target consumed by `georiva-minio-consumer`. There is no webhook endpoint and no MQTT broker in the stack. This document reflects the as-built Redis-based design.
+> **Architecture note:** Earlier revisions of GeoRiva used an HTTP webhook (and, before that, an MQTT/Mosquitto broker) to deliver Bucket notifications. The current implementation uses MinIO's native **Redis** notification target consumed by `georiva-minio-consumer`. There is no webhook endpoint and no MQTT broker in the stack. This document reflects the as-built Redis-based design.
 
 ```
                     ┌─────────────────┐
@@ -230,9 +230,9 @@ The pipeline is event-driven and runs asynchronously:
 8. IngestionLog updated (status: completed or failed)
 ```
 
-### MinIO event consumer
+### Bucket notification consumer
 
-The entry point for all MinIO events is the `georiva-minio-consumer` process (the `minio_event_consumer` management
+The entry point for all Bucket notifications is the `georiva-minio-consumer` process (the `minio_event_consumer` management
 command, implemented in `ingestion/consumer.py`). It is intentionally lightweight — drain, validate, register, queue:
 
 ```
@@ -781,7 +781,7 @@ services:
     depends_on:
       - georiva-redis
 
-  georiva-minio-consumer:            # drains MinIO events from the Redis list
+  georiva-minio-consumer:            # drains Bucket notifications from the Redis list
     command: minio-consumer
     depends_on:
       - georiva-minio
