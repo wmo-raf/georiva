@@ -560,7 +560,6 @@ class FileIngestion(models.Model):
 # ---------------------------------------------------------------------------
 
 
-@register_snippet
 class RunIngestion(models.Model):
     """One model run arriving into one collection.
 

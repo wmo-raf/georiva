@@ -1,7 +1,19 @@
 from django.urls import path
 from wagtail import hooks
+from wagtail.snippets.models import register_snippet
+from wagtail.snippets.views.snippets import SnippetViewSet
 
+from georiva.organisations.scoping import OrgScopedViewSetMixin
+
+from .models import RunIngestion
 from .panels import IngestionActivityPanel
+
+
+class RunIngestionViewSet(OrgScopedViewSetMixin, SnippetViewSet):
+    model = RunIngestion
+
+
+register_snippet(RunIngestionViewSet)
 
 # No menu item: the Ingestion Activity page is reached through the homepage
 # activity panel, and acquisition monitoring lives on each feed's dashboard
