@@ -19,11 +19,15 @@ Max retries exceeded:
 import logging
 import os
 from datetime import timedelta
+from functools import partial
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
 
+from georiva.events.context import ensure_context
+from georiva.events.models import DomainEvent
+from georiva.events.recording import record
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
 logger = logging.getLogger(__name__)
@@ -613,44 +617,50 @@ class RunIngestion(models.Model):
         ``file_count`` is recomputed from ``FileIngestion`` rather than
         incremented, so a re-ingest of a file already counted does not inflate it.
         """
-        from django.db import transaction
-
         if reference_time is None:
             return None, False
 
         completed_at = completed_at or dj_timezone.now()
 
-        with transaction.atomic():
-            run, created = cls.objects.select_for_update().get_or_create(
-                collection=collection,
-                reference_time=reference_time,
-                defaults={"last_file_at": completed_at},
-            )
-            reopened = False
-            if not created and run.status == cls.Status.CLOSED:
-                run.status = cls.Status.OPEN
-                run.revision += 1
-                run.closed_at = None
-                run.closed_by = ""
-                reopened = True
+        with ensure_context(actor="system:ingestion", organisation_id=collection.catalog.organisation_id):
+            with transaction.atomic():
+                run, created = cls.objects.select_for_update().get_or_create(
+                    collection=collection,
+                    reference_time=reference_time,
+                    defaults={"last_file_at": completed_at},
+                )
+                reopened = False
+                if not created and run.status == cls.Status.CLOSED:
+                    run.status = cls.Status.OPEN
+                    run.revision += 1
+                    run.closed_at = None
+                    run.closed_by = ""
+                    reopened = True
 
-            run.file_count = cls._completed_file_count(collection, reference_time)
-            if run.last_file_at is None or completed_at > run.last_file_at:
-                run.last_file_at = completed_at
-            run.save(
-                update_fields=[
-                    "status",
-                    "revision",
-                    "closed_at",
-                    "closed_by",
-                    "file_count",
-                    "last_file_at",
-                    "updated_at",
-                ]
-            )
-
-        if reopened:
-            _emit_run_reopened(run)
+                run.file_count = cls._completed_file_count(collection, reference_time)
+                if run.last_file_at is None or completed_at > run.last_file_at:
+                    run.last_file_at = completed_at
+                run.save(
+                    update_fields=[
+                        "status",
+                        "revision",
+                        "closed_at",
+                        "closed_by",
+                        "file_count",
+                        "last_file_at",
+                        "updated_at",
+                    ]
+                )
+                if reopened:
+                    event = record(
+                        RunIngestionReopened,
+                        run=run,
+                        collection_slug=collection.slug,
+                        catalog_slug=collection.catalog.slug,
+                        reference_time=run.reference_time,
+                        revision=run.revision,
+                    )
+                    transaction.on_commit(partial(_emit_run_reopened, run, event))
         return run, reopened
 
     def close(self, closer) -> bool:
@@ -660,20 +670,32 @@ class RunIngestion(models.Model):
         closers can race on one row, and only the first one to land emits the
         signal.
         """
-        updated = (
-            type(self)
-            .objects.filter(pk=self.pk, status=self.Status.OPEN)
-            .update(
-                status=self.Status.CLOSED,
-                closed_at=dj_timezone.now(),
-                closed_by=closer,
-                updated_at=dj_timezone.now(),
-            )
-        )
-        if not updated:
-            return False
-        self.refresh_from_db()
-        _emit_run_closed(self)
+        organisation_id = self.collection.catalog.organisation_id
+        with ensure_context(actor="system:run_closer", organisation_id=organisation_id):
+            with transaction.atomic():
+                updated = (
+                    type(self)
+                    .objects.filter(pk=self.pk, status=self.Status.OPEN)
+                    .update(
+                        status=self.Status.CLOSED,
+                        closed_at=dj_timezone.now(),
+                        closed_by=closer,
+                        updated_at=dj_timezone.now(),
+                    )
+                )
+                if not updated:
+                    return False
+                self.refresh_from_db()
+                event = record(
+                    RunIngestionClosed,
+                    run=self,
+                    collection_slug=self.collection.slug,
+                    catalog_slug=self.collection.catalog.slug,
+                    reference_time=self.reference_time,
+                    revision=self.revision,
+                    closer=closer,
+                )
+                transaction.on_commit(partial(_emit_run_closed, self, event))
         return True
 
     # =========================================================================
@@ -698,16 +720,53 @@ class RunIngestion(models.Model):
         return cls.objects.filter(collection=collection, status=cls.Status.CLOSED).order_by("-reference_time").first()
 
 
-def _emit_run_closed(run):
+def _emit_run_closed(run, event):
     from georiva.ingestion.domain_signals import run_ingestion_closed
 
-    run_ingestion_closed.send(sender=RunIngestion, run=run)
+    run_ingestion_closed.send(sender=RunIngestion, run=run, event=event)
 
 
-def _emit_run_reopened(run):
+def _emit_run_reopened(run, event):
     from georiva.ingestion.domain_signals import run_ingestion_reopened
 
-    run_ingestion_reopened.send(sender=RunIngestion, run=run)
+    run_ingestion_reopened.send(sender=RunIngestion, run=run, event=event)
+
+
+class RunIngestionClosed(DomainEvent):
+    """A model run finished arriving into a collection (ADR 0026, ADR 0030)."""
+
+    label = "Run closed"
+
+    run = models.ForeignKey(RunIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    collection_slug = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    reference_time = models.DateTimeField()
+    revision = models.PositiveIntegerField()
+    closer = models.CharField(max_length=20, choices=RunIngestion.Closer.choices)
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["run", "-occurred_at"], name="idx_runclosed_run")]
+
+    def summary(self):
+        return f"Closed at revision {self.revision} by {self.get_closer_display().lower()}"
+
+
+class RunIngestionReopened(DomainEvent):
+    """A late file reopened a closed run; ``revision`` is the bumped one."""
+
+    label = "Run reopened"
+
+    run = models.ForeignKey(RunIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    collection_slug = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    reference_time = models.DateTimeField()
+    revision = models.PositiveIntegerField()
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["run", "-occurred_at"], name="idx_runreopened_run")]
+
+    def summary(self):
+        return f"Reopened by a late file; now revision {self.revision}"
 
 
 # ---------------------------------------------------------------------------

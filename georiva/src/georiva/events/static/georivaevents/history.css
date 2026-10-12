@@ -1,0 +1,62 @@
+.gr-history {
+    margin-top: 2em;
+}
+
+.gr-history__since,
+.gr-history__empty {
+    color: var(--w-color-grey-400);
+    font-size: 0.85em;
+}
+
+.gr-history__list {
+    list-style: none;
+    margin: 1em 0 0;
+    padding: 0;
+    border-top: 1px solid var(--w-color-border-furniture);
+}
+
+.gr-history__row {
+    border-bottom: 1px solid var(--w-color-border-furniture);
+    padding: 0.5em 0.8em;
+}
+
+.gr-history__row summary {
+    cursor: pointer;
+    display: flex;
+    gap: 1em;
+    flex-wrap: wrap;
+    align-items: baseline;
+}
+
+.gr-history__row--failed,
+.gr-history__row--refused {
+    border-left: 3px solid var(--w-color-critical-200);
+}
+
+.gr-history__when,
+.gr-history__actor {
+    font-family: monospace;
+    font-size: 0.8em;
+    color: var(--w-color-grey-400);
+}
+
+.gr-history__type {
+    font-weight: 600;
+}
+
+.gr-history__facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2em 1.2em;
+    margin: 0.8em 0 0.4em;
+    font-size: 0.85em;
+}
+
+.gr-history__facts dt {
+    color: var(--w-color-grey-400);
+}
+
+.gr-history__facts dd {
+    margin: 0;
+    word-break: break-all;
+}

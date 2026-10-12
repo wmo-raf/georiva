@@ -22,6 +22,7 @@ from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import (
     ManualUploadConfig,
     ManualUploadConfigVariable,
+    RunIngestion,
     UploadSession,
 )
 from georiva.organisations import access, ownership
@@ -136,6 +137,7 @@ def build_org_tree(organisation, *, name):
         config=config, collection=collection, variable_name=SHARED_SLUG
     )
     session = UploadSession.objects.create(catalog=catalog)
+    model_run = RunIngestion.objects.create(collection=collection, reference_time="2026-01-01T00:00:00Z")
     return {
         "catalog": catalog,
         "collection": collection,
@@ -150,6 +152,7 @@ def build_org_tree(organisation, *, name):
         "config": config,
         "config_variable": config_variable,
         "session": session,
+        "model_run": model_run,
         "page": build_org_page(organisation, name=name),
     }
 
@@ -328,6 +331,7 @@ class AdminUrlSweepTests(TestCase):
             "product_pk": tree["product"].pk,
             "link": tree["link"].pk,
             "link_pk": tree["link"].pk,
+            "run_ingestion_id": tree["model_run"].pk,
             "run": tree["run"].pk,
             "run_pk": tree["run"].pk,
             "config": tree["config"].pk,

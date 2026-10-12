@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     # third-party utilities
     "task_ferry",
     # georiva
+    "georiva.events",
     "georiva.core",
     "georiva.staging",
     "georiva.processing",
