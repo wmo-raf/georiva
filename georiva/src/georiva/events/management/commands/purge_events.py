@@ -68,9 +68,10 @@ class Command(BaseCommand):
                 )
                 if removed:
                     counts[type_key(model)] = removed
-            EventIndex._default_manager.filter(organisation=org, occurred_at__lt=cutoff)._raw_delete(
-                using=connection.alias
-            )
+            # EventsPurged is never purged, so its index rows stay with it.
+            EventIndex._default_manager.filter(organisation=org, occurred_at__lt=cutoff).exclude(
+                event_type=type_key(EventsPurged)
+            )._raw_delete(using=connection.alias)
             with connection.cursor() as cursor:
                 for table in tables:
                     cursor.execute(f'ALTER TABLE "{table}" ENABLE TRIGGER "{trigger_name(table)}"')

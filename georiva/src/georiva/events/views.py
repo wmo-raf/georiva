@@ -69,7 +69,9 @@ def timeline(request, correlation_id):
     visible = list(scope_rows(request, everything).order_by("occurred_at", "event_id"))
     if not visible:
         raise Http404(_("No such chain."))
-    continues_elsewhere = everything.count() > len(visible)
+    # Unattributed rows belong to nobody and are not hinted at; only another
+    # organisation's part of the chain is.
+    continues_elsewhere = everything.filter(organisation__isnull=False).count() > len(visible)
 
     existing = set(connection.introspection.table_names())
     by_type: dict[str, list] = {}

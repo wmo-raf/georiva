@@ -125,3 +125,10 @@ class PurgeTests(TestCase):
         self._purge()
         self._purge()
         self.assertEqual(EventsPurged.objects.count(), 2)
+
+    def test_a_second_purge_leaves_the_first_purges_index_row_in_place(self):
+        self._purge()
+        first = EventsPurged.objects.get()
+        self._purge()
+
+        self.assertTrue(EventIndex.objects.filter(event_id=first.pk).exists())
