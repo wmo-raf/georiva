@@ -12,9 +12,13 @@ def history_panel_css():
 
 @hooks.register("register_admin_urls")
 def register_event_urls():
-    from .views import unattributed_events
+    from .views import timeline, unattributed_events
 
-    return [path("events/unattributed/", unattributed_events, name="events_unattributed")]
+    # No menu entry for the Timeline: it is reached by link, from a History row.
+    return [
+        path("events/unattributed/", unattributed_events, name="events_unattributed"),
+        path("events/timeline/<uuid:correlation_id>/", timeline, name="events_timeline"),
+    ]
 
 
 class UnattributedEventsMenuItem(MenuItem):

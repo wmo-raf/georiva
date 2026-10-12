@@ -46,3 +46,80 @@ def unattributed_events(request):
             "header_icon": "warning",
         },
     )
+
+
+def timeline(request, correlation_id):
+    """One whole chain, oldest first (ADR 0030): everything that shares a Correlation.
+
+    Reads the index table and fetches details per type from the registry, so it
+    works whichever plugins are installed — a type whose table is absent is
+    skipped. Scoped through the tenancy dispatcher: a viewer sees their own
+    organisation's events, and learns only that the chain continues elsewhere
+    when rows exist beyond their scope.
+    """
+    from django.http import Http404
+    from django.utils.translation import gettext as _
+
+    from georiva.organisations.ownership import scope_rows
+
+    from .models import EventIndex
+    from .registry import model_for
+
+    everything = EventIndex.objects.filter(correlation_id=correlation_id)
+    visible = list(scope_rows(request, everything).order_by("occurred_at", "event_id"))
+    if not visible:
+        raise Http404(_("No such chain."))
+    continues_elsewhere = everything.count() > len(visible)
+
+    existing = set(connection.introspection.table_names())
+    by_type: dict[str, list] = {}
+    for row in visible:
+        by_type.setdefault(row.event_type, []).append(row.event_id)
+
+    events = {}
+    for key, ids in by_type.items():
+        model = model_for(key)
+        if model is None or model._meta.db_table not in existing:
+            continue
+        for event in model._default_manager.filter(pk__in=ids):
+            events[event.pk] = event
+
+    rows = []
+    for index_row in visible:
+        event = events.get(index_row.event_id)
+        if event is None:
+            # Indexed, but its type is not installed here or its table is gone.
+            rows.append(
+                {"label": index_row.event_type, "summary": "", "occurred_at": index_row.occurred_at, "unreadable": True}
+            )
+            continue
+        cause = events.get(event.caused_by_id) if event.caused_by_id else None
+        rows.append(
+            {
+                "label": event.label,
+                "summary": event.summary(),
+                "occurred_at": event.occurred_at,
+                "actor": event.actor,
+                "outcome_class": event.outcome_class,
+                "cause": f"{cause.label}: {cause.summary()}" if cause else None,
+                "cause_hidden": bool(event.caused_by_id) and cause is None,
+                "subject_url": event.subject_url(),
+                "links": event.extra_links(),
+            }
+        )
+
+    return render(
+        request,
+        "georivaevents/timeline.html",
+        {
+            "rows": rows,
+            "continues_elsewhere": continues_elsewhere,
+            "correlation_id": correlation_id,
+            "breadcrumbs_items": [
+                {"url": reverse("wagtailadmin_home"), "label": "Home"},
+                {"url": None, "label": f"Timeline {str(correlation_id)[:8]}"},
+            ],
+            "header_title": f"Timeline {str(correlation_id)[:8]}",
+            "header_icon": "history",
+        },
+    )

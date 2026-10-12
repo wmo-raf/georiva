@@ -865,6 +865,13 @@ class FileIngestionFinished(DomainEvent):
     def outcome_class(self):
         return {"completed": "ok", "failed": "failed", "refused": "refused"}[self.outcome]
 
+    def subject_url(self):
+        if self.file_ingestion_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("file_ingestion_detail", args=[self.file_ingestion_id])
+
     def summary(self):
         if self.outcome == self.Outcome.COMPLETED:
             return f"Completed: {self.items_created} items, {self.assets_created} assets"
@@ -887,6 +894,13 @@ class RunIngestionClosed(DomainEvent):
     class Meta(DomainEvent.Meta):
         indexes = [models.Index(fields=["run", "-occurred_at"], name="idx_runclosed_run")]
 
+    def subject_url(self):
+        if self.run_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("run_ingestion_detail", args=[self.run_id])
+
     def summary(self):
         return f"Closed at revision {self.revision} by {self.get_closer_display().lower()}"
 
@@ -904,6 +918,13 @@ class RunIngestionReopened(DomainEvent):
 
     class Meta(DomainEvent.Meta):
         indexes = [models.Index(fields=["run", "-occurred_at"], name="idx_runreopened_run")]
+
+    def subject_url(self):
+        if self.run_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("run_ingestion_detail", args=[self.run_id])
 
     def summary(self):
         return f"Reopened by a late file; now revision {self.revision}"

@@ -38,6 +38,13 @@ class ProductPublished(DomainEvent):
     class Meta(DomainEvent.Meta):
         indexes = [models.Index(fields=["collection", "-occurred_at"], name="idx_prodpub_collection")]
 
+    def subject_url(self):
+        if self.collection_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("collection_items_list", args=[self.collection_id])
+
     def summary(self):
         noun = "item" if self.item_count == 1 else "items"
         return f"{self.item_count} {noun} published to {self.catalog_slug}/{self.collection_slug}"

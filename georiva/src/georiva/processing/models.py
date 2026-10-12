@@ -317,6 +317,23 @@ class DerivationAttemptFinished(DomainEvent):
             models.Index(fields=["origin", "-occurred_at"], name="idx_derivatt_origin"),
         ]
 
+    def subject_url(self):
+        """The product's run list, when this attempt came from a product that still exists."""
+        prefix = "derived_product:"
+        if not self.origin.startswith(prefix) or not self.origin[len(prefix) :].isdigit():
+            return None
+        from django.urls import reverse
+
+        return reverse("derived_product_runs", args=[int(self.origin[len(prefix) :])])
+
+    def extra_links(self):
+        """The lineage of inputs that went into the product — which did not trigger the attempt."""
+        if self.produced_item_id is None:
+            return []
+        from django.urls import reverse
+
+        return [("See inputs", reverse("derivation_attempt_inputs", args=[self.pk]))]
+
     @property
     def outcome_class(self):
         return "failed" if self.outcome == self.Outcome.FAILED else "ok"

@@ -933,6 +933,13 @@ class FetchRunFinished(DomainEvent):
     class Meta(DomainEvent.Meta):
         indexes = [models.Index(fields=["fetch_run", "-occurred_at"], name="idx_fetchfin_run")]
 
+    def subject_url(self):
+        if self.fetch_run_id is None or self.data_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("data_feed_fetch_run_detail", kwargs={"feed_pk": self.data_feed_id, "run_pk": self.fetch_run_id})
+
     @property
     def outcome_class(self):
         return "ok" if self.outcome == self.Outcome.COMPLETED else "failed"

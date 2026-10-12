@@ -103,6 +103,18 @@ class DomainEvent(AppendOnlyModel):
         """One line for a History row; concrete types override."""
         return self.label
 
+    def subject_url(self) -> str | None:
+        """Where the object this event describes lives now, or ``None`` once it is gone.
+
+        The Timeline links to it when it exists and reads from the event's own
+        snapshot fields when it does not.
+        """
+        return None
+
+    def extra_links(self) -> list[tuple[str, str]]:
+        """``(label, url)`` pairs beyond the subject, such as a Derivation attempt's inputs."""
+        return []
+
     def snapshot_items(self) -> list[tuple[str, object]]:
         """``(label, value)`` pairs for the expandable row: every snapshot column."""
         base = {"id", "organisation", "occurred_at", "correlation_id", "caused_by_id", "actor"}

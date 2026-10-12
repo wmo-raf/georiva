@@ -1,0 +1,21 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Inputs" %}{% endblock %}
+
+{% block main_content %}
+    <p class="help-text">
+        {% blocktrans with summary=attempt.summary %}Inputs recorded for the product of: {{ summary }}{% endblocktrans %}
+    </p>
+    {% if inputs %}
+        <ul>
+            {% for input in inputs %}
+                <li>
+                    <strong>{{ input.collection }}</strong> ({{ input.tier }})                    {% if input.time %} · {{ input.time|date:"Y-m-d H:i" }}{% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="help-text">{% trans "No inputs are recorded for this attempt." %}</p>
+    {% endif %}
+{% endblock %}
