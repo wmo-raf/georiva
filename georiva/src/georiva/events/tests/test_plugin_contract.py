@@ -5,8 +5,10 @@ stands in for one, exactly as a plugin would declare its own.
 """
 
 import uuid
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from django.db import DatabaseError, connection, models, transaction
+from django.db import DatabaseError, connection, transaction
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -15,10 +17,10 @@ from georiva.core.models import Catalog, Collection
 from georiva.events import registry
 from georiva.events.context import context_after, use_context
 from georiva.events.history import build_history
-from georiva.events.models import DomainEvent, EventIndex
-from georiva.events.operations import install_sql
+from georiva.events.models import EventIndex
 from georiva.events.recording import record
 from georiva.events.testing import event_context
+from georiva.events.tests.plugin_event import PluginThingHappened
 from georiva.ingestion.domain_signals import run_ingestion_closed
 from georiva.ingestion.models import RunIngestion
 from georiva.organisations.models import OrganisationMembership
@@ -26,41 +28,10 @@ from georiva.organisations.provisioning import provision_organisation
 from georiva.organisations.tests.factories import PASSWORD, add_member, make_user
 
 
-class PluginThingHappened(DomainEvent):
-    """What a plugin's own event looks like: the base, a label, snapshot columns."""
-
-    label = "Plugin thing happened"
-    note = models.CharField(max_length=100)
-
-    class Meta(DomainEvent.Meta):
-        app_label = "georivaevents"
-
-    def summary(self):
-        return f"thing: {self.note}"
-
-
-class EventWhoseTableIsAbsent(DomainEvent):
-    """Registered, but its table was never created — a plugin that was uninstalled."""
-
-    label = "Absent"
-
-    class Meta(DomainEvent.Meta):
-        app_label = "georivaevents"
-
-
-def _create_plugin_table():
-    """What a plugin's migration does: create the table, then call the shared operation."""
-    with connection.schema_editor() as editor:
-        editor.create_model(PluginThingHappened)
-        for statement in install_sql(PluginThingHappened):
-            editor.execute(statement, params=None)
-
-
 class PluginContractBase(TestCase):
     @classmethod
     def setUpTestData(cls):
-        _create_plugin_table()
-        registry.populate()  # app-ready did this once; a late-declared type needs the same call
+        registry.populate()  # app-ready did this once; a type declared later needs the same call
 
 
 class PluginEventTests(PluginContractBase):
@@ -125,9 +96,12 @@ class PluginTimelineAndSignalTests(PluginContractBase):
 
     def test_the_timeline_renders_when_a_registered_types_table_is_absent(self):
         absent = uuid.uuid4()
+        # A registered type whose table does not exist: a plugin that was uninstalled.
+        ghost = SimpleNamespace(_meta=SimpleNamespace(db_table="gone_plugin_ghost"))
+        self.enterContext(patch.dict(registry._types, {"gone_plugin.ghost": ghost}))
         EventIndex.objects.create(
             event_id=uuid.uuid4(),
-            event_type=registry.type_key(EventWhoseTableIsAbsent),
+            event_type="gone_plugin.ghost",
             correlation_id=absent,
             occurred_at=timezone.now(),
             organisation=self.kenya,

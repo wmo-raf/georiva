@@ -54,7 +54,14 @@ class GeoRivaTestRunner(DiscoverRunner):
         old_config = super().setup_databases(**kwargs)
         if old_config:
             self._create_stub_feed_table()
+            self._create_plugin_event_table()
         return old_config
+
+    def _create_plugin_event_table(self):
+        """The plugin-shaped event type the events suite declares (events/tests/plugin_event.py)."""
+        from georiva.events.tests.plugin_event import create_table
+
+        create_table()
 
     def _create_stub_feed_table(self):
         from georiva.sources.tests.test_health_states import StubPluginFeed
