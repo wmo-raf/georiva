@@ -46,6 +46,30 @@ def published_item_trigger(item) -> dict:
     }
 
 
+_origin_organisation_resolver = None
+
+
+def register_origin_organisation_resolver(resolver) -> None:
+    """Let the feed layer say which organisation owns a run's ``origin``.
+
+    The engine never resolves tenancy or imports the feed layer, so a sweep reviving
+    a run that has no event of its own yet asks whoever registered here. ``resolver``
+    takes the opaque ``origin`` string and returns an organisation id or ``None``.
+    """
+    global _origin_organisation_resolver
+    _origin_organisation_resolver = resolver
+
+
+def _organisation_for_origin(origin):
+    if not origin or _origin_organisation_resolver is None:
+        return None
+    try:
+        return _origin_organisation_resolver(origin)
+    except Exception:  # a resolver must never break recovery
+        logger.exception("Could not resolve an organisation for origin %s", origin)
+        return None
+
+
 def _revival_context(run_rec, sweep: str):
     """A sweep reviving a run speaks in that run's own story (ADR 0030).
 
@@ -60,7 +84,7 @@ def _revival_context(run_rec, sweep: str):
     last = DerivationAttemptFinished.objects.filter(derivation_run=run_rec).order_by("-occurred_at").first()
     actor = f"sweep:{sweep}"
     if last is None:
-        return new_context(actor=actor)
+        return new_context(actor=actor, organisation_id=_organisation_for_origin(run_rec.origin))
     return EventContext(correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id)
 
 

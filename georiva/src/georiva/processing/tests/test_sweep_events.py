@@ -108,3 +108,25 @@ class DerivationSweepTests(TestCase):
         reclaim_stale_running(dispatch=False, sweep="derivations")
         resurrect_not_ready_units(dispatch=False, sweep="derivations")
         self.assertFalse(SweepIntervened.objects.exists())
+
+    def test_a_run_with_no_prior_event_is_attributed_through_the_feed_layers_resolver(self):
+        from georiva.core.models import Catalog
+        from georiva.sources.models import DataFeed, DerivedProduct
+
+        catalog = Catalog.objects.get(slug="out")
+        product = DerivedProduct.objects.create(
+            data_feed=DataFeed.objects.create(name="f", catalog=catalog), definition_key="k", recipe_type="promotion"
+        )
+        DerivationRun.objects.create(
+            recipe_type=_Recipe.type,
+            recipe_version="3",
+            unit_key=UNIT,
+            unit_hash=unit_hash(UNIT),
+            status=DerivationRun.Status.COMPLETED,
+            input_hash="STALE",
+            origin=f"derived_product:{product.pk}",
+        )
+
+        sweep_stale_units(dispatch=False, sweep="derivations")
+
+        self.assertEqual(SweepIntervened.objects.get().organisation_id, self.kenya.pk)

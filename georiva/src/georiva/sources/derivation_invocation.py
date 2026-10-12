@@ -49,6 +49,23 @@ def product_origin(product) -> str:
     return f"derived_product:{product.pk}"
 
 
+def organisation_for_origin(origin: str):
+    """The organisation owning a ``derived_product:<id>`` origin, or ``None``.
+
+    Registered with the engine so a sweep can attribute a run that has no event yet.
+    """
+    prefix = "derived_product:"
+    if not origin.startswith(prefix) or not origin[len(prefix) :].isdigit():
+        return None
+    from georiva.sources.models import DerivedProduct
+
+    return (
+        DerivedProduct.objects.filter(pk=int(origin[len(prefix) :]))
+        .values_list("data_feed__catalog__organisation_id", flat=True)
+        .first()
+    )
+
+
 def _trigger_tier(trigger: dict) -> str:
     """The tier of the arriving input: staging items vs published items."""
     return "staging" if trigger.get("staging_item_id") else "published"

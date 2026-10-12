@@ -478,10 +478,12 @@ class FileIngestion(models.Model):
         stale = cls.objects.filter(status=cls.Status.PROCESSING, locked_at__lt=stale_cutoff)
         # Each reset file is a recorded intervention, inside the file's own chain.
         # Read before the update: afterwards nothing says which rows it touched.
-        targets = list(stale.values_list("pk", "bucket", "file_path")) if sweep else []
-        updated = stale.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
-        for pk, bucket, file_path in targets:
-            record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
+        # The reset and its events commit together or not at all.
+        with transaction.atomic():
+            targets = list(stale.values_list("pk", "bucket", "file_path")) if sweep else []
+            updated = stale.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
+            for pk, bucket, file_path in targets:
+                record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
         return updated
 
     @classmethod

@@ -2151,7 +2151,9 @@ def derived_product_run_detail(request, product_pk, run_pk):
     lineage. Static (reflects current DB state on load); the engine is not
     touched. The run is scoped to the product by its origin key.
     """
-    from georiva.processing.models import DerivationRun
+    from georiva.events.history import build_history
+    from georiva.events.models import SweepIntervened
+    from georiva.processing.models import DerivationAttemptFinished, DerivationRun
     from georiva.sources.derivation_invocation import product_origin
     from georiva.sources.derivation_tracking import run_duration_seconds
     from georiva.sources.models import DerivedProduct
@@ -2182,6 +2184,13 @@ def derived_product_run_detail(request, product_pk, run_pk):
         "run": run,
         "duration": duration,
         "runs_url": runs_url,
+        "history": build_history(
+            request,
+            [
+                (DerivationAttemptFinished, {"derivation_run": run}),
+                (SweepIntervened, {"target_kind": "derivation_run", "target_id": run.pk}),
+            ],
+        ),
     }
     return render(request, "georivasources/derived_product_run_detail.html", context)
 

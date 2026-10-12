@@ -76,6 +76,18 @@ class IngestionSweepTests(TestCase):
         self.assertEqual(intervention.reason, "stale_lock_reclaimed")
         self.assertEqual(intervention.correlation_id, ctx.correlation_id)
 
+    def test_a_stale_lock_reset_and_its_event_commit_together(self):
+        self._failed_file()
+        FileIngestion.objects.update(
+            status=FileIngestion.Status.PROCESSING, locked_at=dj_timezone.now() - timedelta(hours=2)
+        )
+
+        with patch("georiva.ingestion.models.record_sweep_intervention", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                FileIngestion.reset_stale_locks(sweep="unprocessed")
+
+        self.assertEqual(FileIngestion.objects.get().status, FileIngestion.Status.PROCESSING)
+
     def test_a_pass_that_redispatches_nothing_writes_nothing(self):
         _sweep()
         FileIngestion.reset_stale_locks(sweep="unprocessed")

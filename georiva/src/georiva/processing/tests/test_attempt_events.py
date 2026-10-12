@@ -230,6 +230,15 @@ class UnitHistoryPanelTests(TestCase):
         self.client.login(username="amina", password=PASSWORD)
         self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
 
+    def test_the_per_unit_page_shows_that_units_attempts(self):
+        run = DerivationRun.objects.get(unit_hash="kenya".ljust(64, "0"))
+        url = reverse("derived_product_run_detail", args=[self.products["kenya"].pk, run.pk])
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row.event.outcome for row in response.context["history"].rows], ["failed"])
+
     def test_a_failed_unit_with_no_item_is_in_its_organisations_history_and_no_one_elses(self):
         response = self.client.get(reverse("derived_product_runs", args=[self.products["kenya"].pk]))
 
