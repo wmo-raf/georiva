@@ -279,9 +279,26 @@ def collection_items_list(request, collection_pk):
         "page_obj": page_obj,
         "paginator": paginator,
         "elided_page_range": elided_page_range,
+        "history": _collection_history(request, collection),
     }
 
     return render(request, "core/collection_items.html", context)
+
+
+def _collection_history(request, collection):
+    """Each time new data was published into the collection, and each run it closed or reopened."""
+    from georiva.core.models import ProductPublished
+    from georiva.events.history import build_history
+    from georiva.ingestion.models import RunIngestionClosed, RunIngestionReopened
+
+    return build_history(
+        request,
+        [
+            (ProductPublished, {"collection": collection}),
+            (RunIngestionClosed, {"run__collection": collection}),
+            (RunIngestionReopened, {"run__collection": collection}),
+        ],
+    )
 
 
 def plugin_list(request):

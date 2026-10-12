@@ -4,10 +4,12 @@ from datetime import datetime
 import pytz
 from django.db.models import Prefetch
 
-from georiva.core.models import Catalog, Collection, Variable
+from georiva.core.models import Catalog, Collection, ProductPublished, Variable
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import parse_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
+from georiva.events.context import ensure_context
+from georiva.events.recording import record
 from georiva.formats.registry import format_registry
 from georiva.ingestion.asset_writer import AssetWriter
 from georiva.ingestion.clipper import BoundaryClipper
@@ -223,6 +225,7 @@ class IngestionService:
                         n_vars = len([v for v in collection.variables.all() if v.is_active])
                         loop = progress.create_child(represents=70, total=max(1, len(timestamps)))
 
+                        published_times = []
                         for ts in timestamps:
                             ts_slot = loop.create_child(represents=1, total=max(1, n_vars))
                             try:
@@ -246,6 +249,7 @@ class IngestionService:
 
                                 result.items_created.append(str(item.pk))
                                 result.assets_created.extend([str(a.pk) for a in assets])
+                                published_times.append(ts)
 
                                 if clip_info and result.original_size is None:
                                     result.original_size = clip_info.get("original_size")
@@ -253,6 +257,8 @@ class IngestionService:
 
                             except Exception as e:
                                 result.add_error(f"Failed {collection.slug} @ {ts}: {e}")
+
+                        self._record_published(collection, f"{origin_bucket}:{file_path}", published_times)
 
                 result.success = len(result.items_created) > 0
 
@@ -289,6 +295,32 @@ class IngestionService:
     # =========================================================================
     # Collection Resolution
     # =========================================================================
+
+    def _record_published(self, collection, source_file: str, valid_times: list) -> None:
+        """One ``ProductPublished`` per file-and-collection — never one per Item.
+
+        Recorded for ``internal`` collections too. The event is traceability, not
+        part of producing the data, so a failure to write it is logged and never
+        fails the ingestion.
+        """
+        if not valid_times:
+            return
+        try:
+            with ensure_context(actor="system:ingestion", organisation_id=collection.catalog.organisation_id):
+                record(
+                    ProductPublished,
+                    collection=collection,
+                    collection_slug=collection.slug,
+                    catalog_slug=collection.catalog.slug,
+                    visibility=collection.visibility,
+                    origin=ProductPublished.Origin.INGESTED,
+                    item_count=len(valid_times),
+                    valid_time_start=min(valid_times),
+                    valid_time_end=max(valid_times),
+                    source_file=source_file,
+                )
+        except Exception:
+            self.logger.exception("Could not record ProductPublished for %s", collection.slug)
 
     def _resolve_collections(
         self,

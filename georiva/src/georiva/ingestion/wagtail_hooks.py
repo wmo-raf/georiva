@@ -18,11 +18,16 @@ def register_ingestion_dashboard_urls():
         collection_upload_sessions_api,
         ingestion_dashboard_api,
     )
-    from .run_views import run_ingestion_detail
+    from .run_views import file_ingestion_detail, run_ingestion_detail
     from .sse_views import ingestion_events_sse
 
     return [
         path("ingestion/runs/<int:run_ingestion_id>/", run_ingestion_detail, name="run_ingestion_detail"),
+        path(
+            "ingestion/files/<int:file_ingestion_id>/",
+            file_ingestion_detail,
+            name="file_ingestion_detail",
+        ),
         path("ingestion/activity/", ingestion_activity_feed, name="ingestion_activity_feed"),
         path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),

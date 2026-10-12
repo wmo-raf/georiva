@@ -111,16 +111,11 @@ class FileIngestionJobType(JobType):
             job.file_path,
             exc,
         )
-        FileIngestion.objects.filter(
+        FileIngestion.fail_if_held_by(
             bucket=job.bucket,
             file_path=job.file_path,
-            status=FileIngestion.Status.PROCESSING,
             locked_by=f"task-ferry-job-{job.id}",
-        ).update(
-            status=FileIngestion.Status.FAILED,
-            locked_at=None,
-            locked_by="",
-            error=str(exc)[:2000],
+            error=str(exc),
         )
 
     def on_cancelled(self, job: FileIngestionJob) -> None:

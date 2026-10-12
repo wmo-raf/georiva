@@ -20,6 +20,7 @@ from django.urls import get_resolver, reverse
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.ingestion.models import (
+    FileIngestion,
     ManualUploadConfig,
     ManualUploadConfigVariable,
     RunIngestion,
@@ -137,6 +138,7 @@ def build_org_tree(organisation, *, name):
         config=config, collection=collection, variable_name=SHARED_SLUG
     )
     session = UploadSession.objects.create(catalog=catalog)
+    file_ingestion = FileIngestion.objects.create(bucket="sources", file_path=f"{organisation.slug}/x/y/z.tif")
     model_run = RunIngestion.objects.create(collection=collection, reference_time="2026-01-01T00:00:00Z")
     return {
         "catalog": catalog,
@@ -153,6 +155,7 @@ def build_org_tree(organisation, *, name):
         "config_variable": config_variable,
         "session": session,
         "model_run": model_run,
+        "file_ingestion": file_ingestion,
         "page": build_org_page(organisation, name=name),
     }
 
@@ -332,6 +335,7 @@ class AdminUrlSweepTests(TestCase):
             "link": tree["link"].pk,
             "link_pk": tree["link"].pk,
             "run_ingestion_id": tree["model_run"].pk,
+            "file_ingestion_id": tree["file_ingestion"].pk,
             "run": tree["run"].pk,
             "run_pk": tree["run"].pk,
             "config": tree["config"].pk,

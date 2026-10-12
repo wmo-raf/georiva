@@ -33,6 +33,18 @@ from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 logger = logging.getLogger(__name__)
 
 
+def organisation_id_for_key(file_path: str):
+    """The organisation a storage key belongs to: its first segment is the slug.
+
+    ``None`` when the slug names no organisation — a misaddressed delivery, which
+    is recorded as an unattributed event rather than guessed into someone's.
+    """
+    from georiva.organisations.models import Organisation
+
+    slug = file_path.split("/", 1)[0]
+    return Organisation.objects.filter(slug=slug).values_list("pk", flat=True).first()
+
+
 @register_snippet
 class FileIngestion(models.Model):
     """Per-file record of processing a single file from MinIO into STAC items and assets."""
@@ -277,22 +289,26 @@ class FileIngestion(models.Model):
         emits no ``post_save`` at all.
         """
         completed_at = dj_timezone.now()
-        cls.objects.filter(
-            bucket=bucket,
-            file_path=file_path,
-        ).update(
-            status=cls.Status.COMPLETED,
-            completed_at=completed_at,
-            archive_path=archive_path,
-            items_created=items_created,
-            assets_created=assets_created,
-            error="",
-            variables_discovered=variables_discovered,
-            valid_time_start=valid_time_start,
-            valid_time_end=valid_time_end,
-            timestep_count=timestep_count,
-        )
-        cls._record_run_arrival(bucket, file_path, completed_at)
+        with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            with transaction.atomic():
+                updated = cls.objects.filter(
+                    bucket=bucket,
+                    file_path=file_path,
+                ).update(
+                    status=cls.Status.COMPLETED,
+                    completed_at=completed_at,
+                    archive_path=archive_path,
+                    items_created=items_created,
+                    assets_created=assets_created,
+                    error="",
+                    variables_discovered=variables_discovered,
+                    valid_time_start=valid_time_start,
+                    valid_time_end=valid_time_end,
+                    timestep_count=timestep_count,
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.COMPLETED)
+            cls._record_run_arrival(bucket, file_path, completed_at)
 
     @classmethod
     def _record_run_arrival(cls, bucket: str, file_path: str, completed_at):
@@ -340,14 +356,64 @@ class FileIngestion(models.Model):
     @classmethod
     def mark_failed(cls, bucket: str, file_path: str, error: str):
         """Mark a file as failed. Releases the lock for future retry."""
-        cls.objects.filter(
+        with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            with transaction.atomic():
+                updated = cls.objects.filter(
+                    bucket=bucket,
+                    file_path=file_path,
+                ).update(
+                    status=cls.Status.FAILED,
+                    locked_at=None,
+                    locked_by="",
+                    error=error[:2000],
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.FAILED)
+
+    @classmethod
+    def fail_if_held_by(cls, bucket: str, file_path: str, locked_by: str, error: str) -> bool:
+        """Fail a file still locked by ``locked_by`` — the job crashed holding it.
+
+        The conditional UPDATE is what makes the winner: only the worker that
+        still holds the lock marks the failure, and only it writes the event.
+        """
+        with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            with transaction.atomic():
+                updated = cls.objects.filter(
+                    bucket=bucket,
+                    file_path=file_path,
+                    status=cls.Status.PROCESSING,
+                    locked_by=locked_by,
+                ).update(
+                    status=cls.Status.FAILED,
+                    locked_at=None,
+                    locked_by="",
+                    error=error[:2000],
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.FAILED)
+        return bool(updated)
+
+    @classmethod
+    def _record_finished(cls, bucket: str, file_path: str, outcome: str):
+        """Write ``FileIngestionFinished`` from the row as the winning UPDATE left it."""
+        log = cls.objects.filter(bucket=bucket, file_path=file_path).first()
+        if log is None:
+            return None
+        touched = [
+            f"{catalog}/{collection}" for catalog, collection in log.collections.values_list("catalog__slug", "slug")
+        ]
+        return record(
+            FileIngestionFinished,
+            file_ingestion=log,
+            outcome=outcome,
             bucket=bucket,
             file_path=file_path,
-        ).update(
-            status=cls.Status.FAILED,
-            locked_at=None,
-            locked_by="",
-            error=error[:2000],
+            collections_touched=sorted(touched),
+            items_created=log.items_created,
+            assets_created=log.assets_created,
+            retry_count=log.retry_count,
+            error=log.error,
         )
 
     # =========================================================================
@@ -730,6 +796,48 @@ def _emit_run_reopened(run, event):
     from georiva.ingestion.domain_signals import run_ingestion_reopened
 
     run_ingestion_reopened.send(sender=RunIngestion, run=run, event=event)
+
+
+class FileIngestionFinished(DomainEvent):
+    """A file ingestion reached a terminal state (ADR 0030).
+
+    The run row is overwritten by every retry and re-ingest; this is the record
+    of each ending. ``refused`` is a file turned away for a reason that is not a
+    processing failure — an unknown organisation, or a time that cannot be
+    extracted.
+    """
+
+    label = "File ingestion finished"
+
+    class Outcome(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        REFUSED = "refused", "Refused"
+
+    file_ingestion = models.ForeignKey(
+        FileIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    outcome = models.CharField(max_length=10, choices=Outcome.choices)
+    bucket = models.CharField(max_length=50)
+    file_path = models.CharField(max_length=500)
+    collections_touched = models.JSONField(default=list, help_text="``catalog/collection`` slugs the file touched.")
+    items_created = models.IntegerField(default=0)
+    assets_created = models.IntegerField(default=0)
+    retry_count = models.IntegerField(default=0)
+    error = models.TextField(blank=True, default="")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["file_ingestion", "-occurred_at"], name="idx_fileingfin_file")]
+
+    @property
+    def outcome_class(self):
+        return {"completed": "ok", "failed": "failed", "refused": "refused"}[self.outcome]
+
+    def summary(self):
+        if self.outcome == self.Outcome.COMPLETED:
+            return f"Completed: {self.items_created} items, {self.assets_created} assets"
+        first_line = (self.error or "").splitlines()[0] if self.error else ""
+        return f"{self.get_outcome_display()}: {first_line}"[:200]
 
 
 class RunIngestionClosed(DomainEvent):
