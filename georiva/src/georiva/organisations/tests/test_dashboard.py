@@ -133,9 +133,11 @@ class DashboardScopingTests(TestCase):
         rebuilt the list would drop the panels other GeoRiva modules registered,
         and their absence fails it too.
         """
+        from georiva.events.panels import FailuresPanel
         from georiva.ingestion.wagtail_hooks import IngestionActivityPanel
 
-        allowed = set(dashboard.SCOPED_DASHBOARD_PANELS.values()) | {IngestionActivityPanel}
+        # The failures panel scopes itself through the dispatcher (events/failures.py).
+        allowed = set(dashboard.SCOPED_DASHBOARD_PANELS.values()) | {IngestionActivityPanel, FailuresPanel}
         panels = self.dashboard().context["panels"]
         self.assertEqual({type(panel) for panel in panels}, allowed)
 

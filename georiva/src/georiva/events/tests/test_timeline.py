@@ -134,8 +134,10 @@ class TimelineTests(TestCase):
         self.assertContains(response, reverse("events_timeline", args=[self.chain]))
 
     def test_it_has_no_menu_entry(self):
-        response = self.client.get(reverse("wagtailadmin_home"))
-        self.assertNotContains(response, "/events/timeline/")
+        from wagtail.admin.menu import admin_menu
+
+        urls = [item.url for item in admin_menu.registered_menu_items if getattr(item, "url", None)]
+        self.assertFalse([url for url in urls if "/events/timeline" in url], urls)
 
     def test_a_cause_that_is_not_visible_is_not_named(self):
         # Caused-by pointing at an event of another organisation reveals nothing.

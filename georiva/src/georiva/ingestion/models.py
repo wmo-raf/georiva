@@ -874,9 +874,9 @@ class FileIngestionFinished(DomainEvent):
 
     def summary(self):
         if self.outcome == self.Outcome.COMPLETED:
-            return f"Completed: {self.items_created} items, {self.assets_created} assets"
+            return f"{self.file_path}: {self.items_created} items, {self.assets_created} assets"
         first_line = (self.error or "").splitlines()[0] if self.error else ""
-        return f"{self.get_outcome_display()}: {first_line}"[:200]
+        return f"{self.get_outcome_display()} {self.file_path}: {first_line}"[:300]
 
 
 class RunIngestionClosed(DomainEvent):

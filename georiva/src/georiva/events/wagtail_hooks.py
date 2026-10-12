@@ -31,3 +31,11 @@ def register_unattributed_events_menu_item():
     return UnattributedEventsMenuItem(
         "Unattributed events", reverse("events_unattributed"), icon_name="warning", order=900
     )
+
+
+@hooks.register("construct_homepage_panels")
+def add_failures_panel(request, panels):
+    """Failed and refused transitions, org-wide — the one deliberate exception to ADR 0019."""
+    from .panels import FailuresPanel
+
+    panels.append(FailuresPanel())
