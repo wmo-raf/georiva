@@ -6,12 +6,14 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
 from georiva.core.models import Collection, Item
+from georiva.events.tasks import EntryTask
 
 logger = logging.getLogger(__name__)
 
 
 @shared_task(
     name="georiva.core.tasks.prune_forecast_items",
+    base=EntryTask,
     queue="georiva-default",
 )
 def prune_forecast_items():

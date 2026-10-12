@@ -740,7 +740,7 @@ database lookup.
 | Ingestion Worker (`...-ingestion-worker`) | Celery                                | Fetch and extraction only — `georiva-ingestion` queue (1 process by default) |
 | Processing Worker (`...-processing-worker`) | Celery                              | Deferrable derived work: derivation units + per-asset bookkeeping — `georiva-processing` queue |
 | Scheduler (`...-celery-beat`)             | Celery Beat                           | Schedules periodic tasks (source polling, sweeps, maintenance)            |
-| MinIO Consumer (`...-minio-consumer`)     | App process (BLPOP)                   | Consumes MinIO events from a Redis list and enqueues drop-zone ingestion  |
+| MinIO Consumer (`...-minio-consumer`)     | App process (BLPOP)                   | Consumes Bucket notifications from a Redis list and enqueues drop-zone ingestion  |
 | Staging Consumer (`...-staging-consumer`) | App process (BLPOP)                   | Same, for files landing in the staging bucket ahead of derivation         |
 | Tile Server (`...-titiler-app`)           | Titiler (FastAPI)                     | Serves raster map tiles from COGs in MinIO                                |
 | Vector Tiles (`...-martin`)               | Martin                                | Serves boundary/vector MVT tiles from PostGIS                             |
@@ -748,7 +748,7 @@ database lookup.
 | Web Proxy (`...-web-proxy`)               | Nginx                                 | Reverse proxy, static & media, **and the `auth_request` tile auth gateway**|
 | Database (`...-db`)                       | PostgreSQL 18 + TimescaleDB + PostGIS | Models, time-series hypertables, spatial data                             |
 | Connection Pooler (`...-pgbouncer`)       | PgBouncer                             | Pools DB connections for the app and Martin                               |
-| Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and MinIO event bus                     |
+| Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and Bucket-notification bus                     |
 | Object Storage (`...-minio`)              | MinIO                                 | S3-compatible storage for all binary assets                               |
 
 ### 9.2 Key Infrastructure Decisions
@@ -772,7 +772,7 @@ database lookup.
   ([ADR-0015](../adr/0015-nginx-auth-request-gateway-for-tiles.md)).
 - **PgBouncer connection pooling:** A pooler fronts PostgreSQL so the app workers and Martin can share a bounded set of
   database connections.
-- **Redis as triple-purpose:** Redis serves as the Celery broker, the application cache, *and* the MinIO event bus,
+- **Redis as triple-purpose:** Redis serves as the Celery broker, the application cache, *and* the Bucket-notification bus,
   reducing the number of infrastructure components.
 
 ---

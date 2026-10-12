@@ -173,18 +173,23 @@ class SignalTests(TestCase):
     def _on_reopened(self, sender, run, **kwargs):
         self.reopened.append(run)
 
-    def test_close_emits_once(self):
+    def test_close_emits_once_after_commit(self):
         _complete_file(self.collection, 0)
         run = RunIngestion.objects.get()
 
-        self.assertTrue(run.close(RunIngestion.Closer.QUIET_PERIOD))
-        self.assertFalse(run.close(RunIngestion.Closer.QUIET_PERIOD))
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            self.assertTrue(run.close(RunIngestion.Closer.QUIET_PERIOD))
+            self.assertFalse(run.close(RunIngestion.Closer.QUIET_PERIOD))
+            # Nothing has been sent yet: the signal waits for the commit.
+            self.assertEqual(len(self.closed), 0)
+        self.assertEqual(len(callbacks), 1)
         self.assertEqual(len(self.closed), 1)
 
-    def test_reopen_emits(self):
+    def test_reopen_emits_after_commit(self):
         _complete_file(self.collection, 0)
         RunIngestion.objects.get().close(RunIngestion.Closer.QUIET_PERIOD)
-        _complete_file(self.collection, 6)
+        with self.captureOnCommitCallbacks(execute=True):
+            _complete_file(self.collection, 6)
 
         self.assertEqual(len(self.reopened), 1)
         self.assertEqual(self.reopened[0].revision, 1)

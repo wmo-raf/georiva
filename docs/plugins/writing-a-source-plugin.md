@@ -213,6 +213,15 @@ staging vs. published split, and recovery sweeps — see
 
 ---
 
+## Optional: recording Domain events
+
+A plugin that does something worth tracing (a publisher writing to an external system, say) can record its own
+**Domain events**, so its work appears in the same History panels and Timelines as core's. The boilerplate ships a
+working example in `events.py`; the full guide, including why your tasks should move onto the `georiva.events.tasks`
+base classes, is [domain-events.md](domain-events.md).
+
+---
+
 ## Suggested order of work
 
 1. `cookiecutter source-plugin-boilerplate`; fix `pyproject.toml` and

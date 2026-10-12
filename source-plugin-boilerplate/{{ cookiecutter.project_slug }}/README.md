@@ -14,6 +14,7 @@ database, Redis, MinIO, Titiler, and the workers.
 | --- | --- |
 | `src/{{ cookiecutter.project_module }}/models.py` | The `DataFeed` subclass — operator config + the `COLLECTIONS` spec (what collections/variables it creates) |
 | `src/{{ cookiecutter.project_module }}/source.py` | The `BaseDataSource` subclass — what files to fetch and how to build each `FileRequest` |
+| `src/{{ cookiecutter.project_module }}/events.py` | A working example of recording your own Domain events (optional — delete it if unused); see `docs/plugins/domain-events.md` |
 | `src/{{ cookiecutter.project_module }}/apps.py` | Plain `AppConfig` — **no registration code needed** |
 | `src/{{ cookiecutter.project_module }}/wagtail_hooks.py` | Optional Wagtail admin customisation |
 | `georiva_plugin_info.json` | Plugin metadata (name, version, declared `requires_env`) |

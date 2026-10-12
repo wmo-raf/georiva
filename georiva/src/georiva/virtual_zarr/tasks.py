@@ -13,6 +13,7 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
 from georiva.core.models import Asset, Item
+from georiva.events.tasks import EntryTask, ReadSideTask
 from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
 from georiva.virtual_zarr.compat import (
     assert_compatible,
@@ -58,6 +59,7 @@ SNAPSHOT_RETENTION = timedelta(days=7)
 
 @app.task(
     name="georiva.virtual_zarr.tasks.build_virtual_zarr_manifest",
+    base=ReadSideTask,
     bind=True,
     max_retries=0,  # failures go to FAILED status; sweep retries
     acks_late=True,
@@ -416,6 +418,7 @@ def dispatch_build(manifest_id: int, claimed_by: str = "dispatch", force: bool =
 
 @app.task(
     name="georiva.virtual_zarr.tasks.sweep_virtual_zarr_pending",
+    base=EntryTask,
     queue="georiva-default",
 )
 def sweep_virtual_zarr_pending() -> None:
@@ -444,6 +447,7 @@ def sweep_virtual_zarr_pending() -> None:
 
 @app.task(
     name="georiva.virtual_zarr.tasks.gc_virtual_zarr_repos",
+    base=EntryTask,
     bind=True,
     acks_late=True,
     queue="georiva-default",

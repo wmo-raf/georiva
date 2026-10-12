@@ -15,6 +15,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
+from georiva.events.context import new_context, use_context
 from georiva.processing.engine import run
 from georiva.processing.registry import recipe_registry
 
@@ -38,6 +39,12 @@ class Command(BaseCommand):
             default=None,
             help="A full selector as a JSON object (for richer recipes like "
             "climatology). Merged over --collection/--staging-item-id.",
+        )
+        parser.add_argument(
+            "--organisation",
+            dest="organisation_slug",
+            default=None,
+            help="Slug of the organisation the work is done for; recorded on its Domain events.",
         )
         parser.add_argument(
             "--sync",
@@ -64,7 +71,18 @@ class Command(BaseCommand):
             except json.JSONDecodeError as e:
                 raise CommandError(f"Invalid --selector-json: {e}") from e
 
-        results = run(recipe, selector, dispatch=not options["sync"])
+        organisation_id = None
+        if options.get("organisation_slug"):
+            from georiva.organisations.models import Organisation
+
+            organisation = Organisation.objects.filter(slug=options["organisation_slug"]).first()
+            if organisation is None:
+                raise CommandError(f"Unknown organisation '{options['organisation_slug']}'.")
+            organisation_id = organisation.pk
+
+        # Work started from a shell has no request or task behind it, so it names itself.
+        with use_context(new_context(actor="system:run_recipe", organisation_id=organisation_id)):
+            results = run(recipe, selector, dispatch=not options["sync"])
 
         if options["sync"]:
             by_status = {}

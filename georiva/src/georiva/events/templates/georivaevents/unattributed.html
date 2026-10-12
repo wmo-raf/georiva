@@ -1,0 +1,19 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Unattributed events" %}{% endblock %}
+
+{% block main_content %}
+    <p class="help-text">
+        {% blocktrans %}Events that belong to no organisation, such as a file whose key names an organisation or catalog that does not exist. Visible to the instance administrator only.{% endblocktrans %}
+    </p>
+    {% if rows %}
+        <ul class="gr-history__list">
+            {% for row in rows %}
+                {% include "georivaevents/_history_row.html" %}
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="help-text">{% trans "Nothing unattributed has been recorded." %}</p>
+    {% endif %}
+{% endblock %}

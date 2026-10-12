@@ -19,15 +19,19 @@ from django.test import TestCase, override_settings
 from django.urls import get_resolver, reverse
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.events.testing import event_context
 from georiva.ingestion.models import (
+    FileIngestion,
     ManualUploadConfig,
     ManualUploadConfigVariable,
+    RunIngestion,
     UploadSession,
 )
 from georiva.organisations import access, ownership
 from georiva.organisations.access import LOOKUP_ATTR
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
+from georiva.processing.models import DerivationRun
 from georiva.sources.models import (
     DataFeed,
     DataFeedCollectionLink,
@@ -136,6 +140,13 @@ def build_org_tree(organisation, *, name):
         config=config, collection=collection, variable_name=SHARED_SLUG
     )
     session = UploadSession.objects.create(catalog=catalog)
+    file_ingestion = FileIngestion.objects.create(bucket="sources", file_path=f"{organisation.slug}/x/y/z.tif")
+    model_run = RunIngestion.objects.create(collection=collection, reference_time="2026-01-01T00:00:00Z")
+    with event_context(organisation_id=organisation.pk):
+        model_run.close(RunIngestion.Closer.MANUAL)
+        attempt = DerivationRun.acquire(
+            recipe_type="promotion", recipe_version="1", unit_key={}, unit_hash=organisation.slug.ljust(64, "0")
+        ).mark_failed("x")
     return {
         "catalog": catalog,
         "collection": collection,
@@ -150,6 +161,9 @@ def build_org_tree(organisation, *, name):
         "config": config,
         "config_variable": config_variable,
         "session": session,
+        "model_run": model_run,
+        "attempt": attempt,
+        "file_ingestion": file_ingestion,
         "page": build_org_page(organisation, name=name),
     }
 
@@ -328,6 +342,10 @@ class AdminUrlSweepTests(TestCase):
             "product_pk": tree["product"].pk,
             "link": tree["link"].pk,
             "link_pk": tree["link"].pk,
+            "run_ingestion_id": tree["model_run"].pk,
+            "correlation_id": tree["attempt"].correlation_id,
+            "event_id": tree["attempt"].pk,
+            "file_ingestion_id": tree["file_ingestion"].pk,
             "run": tree["run"].pk,
             "run_pk": tree["run"].pk,
             "config": tree["config"].pk,

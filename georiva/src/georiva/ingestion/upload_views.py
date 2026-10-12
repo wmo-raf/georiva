@@ -234,7 +234,10 @@ def manual_upload_submit(request, pk):
 
         file_path = _build_incoming_path(config, variable, uploaded.name, reference_time, valid_time)
 
-        uf = UploadedFile.objects.create(session=session, original_filename=uploaded.name)
+        # The key is recorded *before* the object is stored. Storing raises a Bucket
+        # notification, and the consumer finds this upload's chain by looking up its
+        # key; a path written only afterwards loses that race and orphans the chain.
+        uf = UploadedFile.objects.create(session=session, original_filename=uploaded.name, file_path=file_path)
         uf.mark_uploading()
 
         try:

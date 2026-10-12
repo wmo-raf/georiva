@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n wagtailadmin_tags %}
+{% load i18n wagtailadmin_tags events_tags %}
 
 {% block titletag %}{% blocktrans with label=product.display_label %}Runs — {{ label }}{% endblocktrans %}{% endblock %}
 
@@ -180,4 +180,7 @@
     {% else %}
         <p class="gdr-empty">{% trans "No runs yet for this product." %}</p>
     {% endif %}
+
+    {% history_panel history %}
+
 {% endblock %}

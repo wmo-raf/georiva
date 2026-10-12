@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
 
+from georiva.events.testing import event_context
 from georiva.organisations.testing import make_organisation
 from georiva.processing.models import DerivationRun
 from georiva.processing.recipe import BaseRecipe, OutputItem, ResolvedInput, unit_hash
@@ -177,10 +178,11 @@ class CeleryRetryReasonTests(TestCase):
         ):
             run_unit.return_value = MagicMock(status="failed", item_id=None)
             # retries=1 → this is a Celery-driven retry, not the first attempt.
-            run_unit_task.apply(
-                kwargs={"recipe_type": "x", "unit": {"n": 1}, "reason": "input_stale"},
-                retries=1,
-            )
+            with event_context():
+                run_unit_task.apply(
+                    kwargs={"recipe_type": "x", "unit": {"n": 1}, "reason": "input_stale"},
+                    retries=1,
+                )
 
         self.assertEqual(
             run_unit.call_args.kwargs["reason"],

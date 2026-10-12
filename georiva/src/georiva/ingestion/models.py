@@ -19,14 +19,53 @@ Max retries exceeded:
 import logging
 import os
 from datetime import timedelta
+from functools import partial
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
 
+from georiva.events.context import ensure_context, update_context
+from georiva.events.models import DomainEvent
+from georiva.events.recording import record
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
 
 logger = logging.getLogger(__name__)
+
+
+def record_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket: str, file_path: str) -> None:
+    """Write ``SweepIntervened`` for one file, under the chain the file already belongs to."""
+    from georiva.events.context import use_context
+    from georiva.ingestion.chains import context_for_revival
+
+    with use_context(context_for_revival(bucket, file_path, sweep)):
+        write_sweep_intervention(sweep, reason, file_ingestion_id, bucket, file_path)
+
+
+def write_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket: str, file_path: str) -> None:
+    """The write itself, under whatever context is active — for a sweep that also dispatches inside it."""
+    from georiva.events.models import SweepIntervened
+
+    record(
+        SweepIntervened,
+        sweep_name=sweep,
+        reason=reason,
+        target_kind="file_ingestion",
+        target_id=file_ingestion_id,
+        target_label=f"{bucket}:{file_path}",
+    )
+
+
+def organisation_id_for_key(file_path: str):
+    """The organisation a storage key belongs to: its first segment is the slug.
+
+    ``None`` when the slug names no organisation — a misaddressed delivery, which
+    is recorded as an unattributed event rather than guessed into someone's.
+    """
+    from georiva.organisations.models import Organisation
+
+    slug = file_path.split("/", 1)[0]
+    return Organisation.objects.filter(slug=slug).values_list("pk", flat=True).first()
 
 
 @register_snippet
@@ -273,22 +312,26 @@ class FileIngestion(models.Model):
         emits no ``post_save`` at all.
         """
         completed_at = dj_timezone.now()
-        cls.objects.filter(
-            bucket=bucket,
-            file_path=file_path,
-        ).update(
-            status=cls.Status.COMPLETED,
-            completed_at=completed_at,
-            archive_path=archive_path,
-            items_created=items_created,
-            assets_created=assets_created,
-            error="",
-            variables_discovered=variables_discovered,
-            valid_time_start=valid_time_start,
-            valid_time_end=valid_time_end,
-            timestep_count=timestep_count,
-        )
-        cls._record_run_arrival(bucket, file_path, completed_at)
+        with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            with transaction.atomic():
+                updated = cls.objects.filter(
+                    bucket=bucket,
+                    file_path=file_path,
+                ).update(
+                    status=cls.Status.COMPLETED,
+                    completed_at=completed_at,
+                    archive_path=archive_path,
+                    items_created=items_created,
+                    assets_created=assets_created,
+                    error="",
+                    variables_discovered=variables_discovered,
+                    valid_time_start=valid_time_start,
+                    valid_time_end=valid_time_end,
+                    timestep_count=timestep_count,
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.COMPLETED)
+            cls._record_run_arrival(bucket, file_path, completed_at)
 
     @classmethod
     def _record_run_arrival(cls, bucket: str, file_path: str, completed_at):
@@ -334,16 +377,75 @@ class FileIngestion(models.Model):
             logger.exception("RunIngestion bookkeeping failed for %s:%s", bucket, file_path)
 
     @classmethod
-    def mark_failed(cls, bucket: str, file_path: str, error: str):
-        """Mark a file as failed. Releases the lock for future retry."""
-        cls.objects.filter(
+    def mark_failed(cls, bucket: str, file_path: str, error: str, *, outcome=None, unattributed=False):
+        """Mark a file as failed. Releases the lock for future retry.
+
+        ``outcome`` is the event's ending: ``failed`` by default, ``refused`` for a
+        file turned away rather than one that broke. ``unattributed`` records the
+        event under no organisation at all — for a key whose organisation or
+        catalog cannot be trusted to exist, so it is nobody's to show.
+        """
+        outcome = outcome or FileIngestionFinished.Outcome.FAILED
+        with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            if unattributed:
+                update_context(organisation_id=None)
+            with transaction.atomic():
+                updated = cls.objects.filter(
+                    bucket=bucket,
+                    file_path=file_path,
+                ).update(
+                    status=cls.Status.FAILED,
+                    locked_at=None,
+                    locked_by="",
+                    error=error[:2000],
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, outcome)
+
+    @classmethod
+    def fail_if_held_by(cls, bucket: str, file_path: str, locked_by: str, error: str) -> bool:
+        """Fail a file still locked by ``locked_by`` — the job crashed holding it.
+
+        The conditional UPDATE is what makes the winner: only the worker that
+        still holds the lock marks the failure, and only it writes the event.
+        """
+        with ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path)):
+            with transaction.atomic():
+                updated = cls.objects.filter(
+                    bucket=bucket,
+                    file_path=file_path,
+                    status=cls.Status.PROCESSING,
+                    locked_by=locked_by,
+                ).update(
+                    status=cls.Status.FAILED,
+                    locked_at=None,
+                    locked_by="",
+                    error=error[:2000],
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.FAILED)
+        return bool(updated)
+
+    @classmethod
+    def _record_finished(cls, bucket: str, file_path: str, outcome: str):
+        """Write ``FileIngestionFinished`` from the row as the winning UPDATE left it."""
+        log = cls.objects.filter(bucket=bucket, file_path=file_path).first()
+        if log is None:
+            return None
+        touched = [
+            f"{catalog}/{collection}" for catalog, collection in log.collections.values_list("catalog__slug", "slug")
+        ]
+        return record(
+            FileIngestionFinished,
+            file_ingestion=log,
+            outcome=outcome,
             bucket=bucket,
             file_path=file_path,
-        ).update(
-            status=cls.Status.FAILED,
-            locked_at=None,
-            locked_by="",
-            error=error[:2000],
+            collections_touched=sorted(touched),
+            items_created=log.items_created,
+            assets_created=log.assets_created,
+            retry_count=log.retry_count,
+            error=log.error,
         )
 
     # =========================================================================
@@ -365,7 +467,7 @@ class FileIngestion(models.Model):
         ).exists()
 
     @classmethod
-    def reset_stale_locks(cls) -> int:
+    def reset_stale_locks(cls, sweep=None) -> int:
         """
         Reset locks that have exceeded LOCK_TIMEOUT.
 
@@ -373,14 +475,16 @@ class FileIngestion(models.Model):
         """
         stale_cutoff = dj_timezone.now() - cls.LOCK_TIMEOUT
 
-        return cls.objects.filter(
-            status=cls.Status.PROCESSING,
-            locked_at__lt=stale_cutoff,
-        ).update(
-            status=cls.Status.PENDING,
-            locked_at=None,
-            locked_by="",
-        )
+        stale = cls.objects.filter(status=cls.Status.PROCESSING, locked_at__lt=stale_cutoff)
+        # Each reset file is a recorded intervention, inside the file's own chain.
+        # Read before the update: afterwards nothing says which rows it touched.
+        # The reset and its events commit together or not at all.
+        with transaction.atomic():
+            targets = list(stale.values_list("pk", "bucket", "file_path")) if sweep else []
+            updated = stale.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
+            for pk, bucket, file_path in targets:
+                record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
+        return updated
 
     @classmethod
     def get_retryable(cls, limit: int = 50):
@@ -456,7 +560,6 @@ class FileIngestion(models.Model):
 # ---------------------------------------------------------------------------
 
 
-@register_snippet
 class RunIngestion(models.Model):
     """One model run arriving into one collection.
 
@@ -613,44 +716,50 @@ class RunIngestion(models.Model):
         ``file_count`` is recomputed from ``FileIngestion`` rather than
         incremented, so a re-ingest of a file already counted does not inflate it.
         """
-        from django.db import transaction
-
         if reference_time is None:
             return None, False
 
         completed_at = completed_at or dj_timezone.now()
 
-        with transaction.atomic():
-            run, created = cls.objects.select_for_update().get_or_create(
-                collection=collection,
-                reference_time=reference_time,
-                defaults={"last_file_at": completed_at},
-            )
-            reopened = False
-            if not created and run.status == cls.Status.CLOSED:
-                run.status = cls.Status.OPEN
-                run.revision += 1
-                run.closed_at = None
-                run.closed_by = ""
-                reopened = True
+        with ensure_context(actor="system:ingestion", organisation_id=collection.catalog.organisation_id):
+            with transaction.atomic():
+                run, created = cls.objects.select_for_update().get_or_create(
+                    collection=collection,
+                    reference_time=reference_time,
+                    defaults={"last_file_at": completed_at},
+                )
+                reopened = False
+                if not created and run.status == cls.Status.CLOSED:
+                    run.status = cls.Status.OPEN
+                    run.revision += 1
+                    run.closed_at = None
+                    run.closed_by = ""
+                    reopened = True
 
-            run.file_count = cls._completed_file_count(collection, reference_time)
-            if run.last_file_at is None or completed_at > run.last_file_at:
-                run.last_file_at = completed_at
-            run.save(
-                update_fields=[
-                    "status",
-                    "revision",
-                    "closed_at",
-                    "closed_by",
-                    "file_count",
-                    "last_file_at",
-                    "updated_at",
-                ]
-            )
-
-        if reopened:
-            _emit_run_reopened(run)
+                run.file_count = cls._completed_file_count(collection, reference_time)
+                if run.last_file_at is None or completed_at > run.last_file_at:
+                    run.last_file_at = completed_at
+                run.save(
+                    update_fields=[
+                        "status",
+                        "revision",
+                        "closed_at",
+                        "closed_by",
+                        "file_count",
+                        "last_file_at",
+                        "updated_at",
+                    ]
+                )
+                if reopened:
+                    event = record(
+                        RunIngestionReopened,
+                        run=run,
+                        collection_slug=collection.slug,
+                        catalog_slug=collection.catalog.slug,
+                        reference_time=run.reference_time,
+                        revision=run.revision,
+                    )
+                    transaction.on_commit(partial(_emit_run_reopened, run, event))
         return run, reopened
 
     def close(self, closer) -> bool:
@@ -660,20 +769,32 @@ class RunIngestion(models.Model):
         closers can race on one row, and only the first one to land emits the
         signal.
         """
-        updated = (
-            type(self)
-            .objects.filter(pk=self.pk, status=self.Status.OPEN)
-            .update(
-                status=self.Status.CLOSED,
-                closed_at=dj_timezone.now(),
-                closed_by=closer,
-                updated_at=dj_timezone.now(),
-            )
-        )
-        if not updated:
-            return False
-        self.refresh_from_db()
-        _emit_run_closed(self)
+        organisation_id = self.collection.catalog.organisation_id
+        with ensure_context(actor="system:run_closer", organisation_id=organisation_id):
+            with transaction.atomic():
+                updated = (
+                    type(self)
+                    .objects.filter(pk=self.pk, status=self.Status.OPEN)
+                    .update(
+                        status=self.Status.CLOSED,
+                        closed_at=dj_timezone.now(),
+                        closed_by=closer,
+                        updated_at=dj_timezone.now(),
+                    )
+                )
+                if not updated:
+                    return False
+                self.refresh_from_db()
+                event = record(
+                    RunIngestionClosed,
+                    run=self,
+                    collection_slug=self.collection.slug,
+                    catalog_slug=self.collection.catalog.slug,
+                    reference_time=self.reference_time,
+                    revision=self.revision,
+                    closer=closer,
+                )
+                transaction.on_commit(partial(_emit_run_closed, self, event))
         return True
 
     # =========================================================================
@@ -698,16 +819,116 @@ class RunIngestion(models.Model):
         return cls.objects.filter(collection=collection, status=cls.Status.CLOSED).order_by("-reference_time").first()
 
 
-def _emit_run_closed(run):
+def _emit_run_closed(run, event):
     from georiva.ingestion.domain_signals import run_ingestion_closed
 
-    run_ingestion_closed.send(sender=RunIngestion, run=run)
+    run_ingestion_closed.send(sender=RunIngestion, run=run, event=event)
 
 
-def _emit_run_reopened(run):
+def _emit_run_reopened(run, event):
     from georiva.ingestion.domain_signals import run_ingestion_reopened
 
-    run_ingestion_reopened.send(sender=RunIngestion, run=run)
+    run_ingestion_reopened.send(sender=RunIngestion, run=run, event=event)
+
+
+class FileIngestionFinished(DomainEvent):
+    """A file ingestion reached a terminal state (ADR 0030).
+
+    The run row is overwritten by every retry and re-ingest; this is the record
+    of each ending. ``refused`` is a file turned away for a reason that is not a
+    processing failure — an unknown organisation, or a time that cannot be
+    extracted.
+    """
+
+    label = "File ingestion finished"
+
+    class Outcome(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        REFUSED = "refused", "Refused"
+
+    file_ingestion = models.ForeignKey(
+        FileIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    outcome = models.CharField(max_length=10, choices=Outcome.choices)
+    bucket = models.CharField(max_length=50)
+    file_path = models.CharField(max_length=500)
+    collections_touched = models.JSONField(default=list, help_text="``catalog/collection`` slugs the file touched.")
+    items_created = models.IntegerField(default=0)
+    assets_created = models.IntegerField(default=0)
+    retry_count = models.IntegerField(default=0)
+    error = models.TextField(blank=True, default="")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["file_ingestion", "-occurred_at"], name="idx_fileingfin_file")]
+
+    @property
+    def outcome_class(self):
+        return {"completed": "ok", "failed": "failed", "refused": "refused"}[self.outcome]
+
+    def subject_url(self):
+        if self.file_ingestion_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("file_ingestion_detail", args=[self.file_ingestion_id])
+
+    def summary(self):
+        if self.outcome == self.Outcome.COMPLETED:
+            return f"{self.file_path}: {self.items_created} items, {self.assets_created} assets"
+        first_line = (self.error or "").splitlines()[0] if self.error else ""
+        return f"{self.get_outcome_display()} {self.file_path}: {first_line}"[:300]
+
+
+class RunIngestionClosed(DomainEvent):
+    """A model run finished arriving into a collection (ADR 0026, ADR 0030)."""
+
+    label = "Run closed"
+
+    run = models.ForeignKey(RunIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    collection_slug = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    reference_time = models.DateTimeField()
+    revision = models.PositiveIntegerField()
+    closer = models.CharField(max_length=20, choices=RunIngestion.Closer.choices)
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["run", "-occurred_at"], name="idx_runclosed_run")]
+
+    def subject_url(self):
+        if self.run_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("run_ingestion_detail", args=[self.run_id])
+
+    def summary(self):
+        return f"Closed at revision {self.revision} by {self.get_closer_display().lower()}"
+
+
+class RunIngestionReopened(DomainEvent):
+    """A late file reopened a closed run; ``revision`` is the bumped one."""
+
+    label = "Run reopened"
+
+    run = models.ForeignKey(RunIngestion, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    collection_slug = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    reference_time = models.DateTimeField()
+    revision = models.PositiveIntegerField()
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["run", "-occurred_at"], name="idx_runreopened_run")]
+
+    def subject_url(self):
+        if self.run_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("run_ingestion_detail", args=[self.run_id])
+
+    def summary(self):
+        return f"Reopened by a late file; now revision {self.revision}"
 
 
 # ---------------------------------------------------------------------------
@@ -787,6 +1008,12 @@ class UploadedFile(models.Model):
     )
     original_filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=500, blank=True)
+    correlation_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="The chain this upload started; the Bucket-notification consumer adopts it by key (ADR 0030).",
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     error = models.TextField(blank=True)
     bytes = models.BigIntegerField(default=0)
@@ -796,6 +1023,13 @@ class UploadedFile(models.Model):
     class Meta:
         app_label = "georivaingestion"
         ordering = ["id"]
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.correlation_id is None:
+            from georiva.events.context import starting_correlation
+
+            self.correlation_id = starting_correlation()
+        super().save(*args, **kwargs)
 
     def mark_uploading(self):
         from django.utils import timezone

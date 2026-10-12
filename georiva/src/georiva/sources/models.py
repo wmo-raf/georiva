@@ -13,6 +13,9 @@ from polymorphic.models import PolymorphicModel
 from wagtail.admin.forms import WagtailAdminModelForm
 from wagtail.admin.panels import FieldPanel
 
+from georiva.events.models import DomainEvent
+from georiva.events.recording import record
+
 from .health import DataFeedManager
 from .source import BaseDataSource
 
@@ -694,6 +697,13 @@ class FetchRun(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    correlation_id = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="The chain this fetch started. The fetch → ingestion hop crosses object storage, so "
+        "the Bucket-notification consumer adopts it by looking up the stored file's run (ADR 0030).",
+    )
 
     files_requested = models.IntegerField(default=0)
     files_fetched = models.IntegerField(default=0)
@@ -705,15 +715,67 @@ class FetchRun(models.Model):
     class Meta:
         ordering = ["-started_at"]
 
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.correlation_id is None:
+            self.correlation_id = self._starting_correlation()
+        super().save(*args, **kwargs)
+
+    def _starting_correlation(self):
+        """A resumed run stays in its interrupted run's chain; otherwise the active chain, or a new one."""
+        from georiva.events.context import starting_correlation
+
+        continuing = self.resumed_from.correlation_id if self.resumed_from_id else None
+        return starting_correlation(continuing=continuing)
+
+    #: Terminal statuses that are a Domain event, and the outcome each records.
+    #: Cancelled is deliberate and leaves no event; an interrupted run is a failure
+    #: from the operator's point of view.
+    _EVENT_OUTCOMES = {
+        Status.COMPLETED: "completed",
+        Status.FAILED: "failed",
+        Status.INTERRUPTED: "failed",
+    }
+
     def _finish(self, status, **update_fields):
+        from django.db import transaction
         from django.utils import timezone
+
+        from georiva.events.context import current_context, new_context, use_context
 
         self.status = status
         self.finished_at = timezone.now()
         for k, v in update_fields.items():
             setattr(self, k, v)
         fields = ["status", "finished_at"] + list(update_fields.keys())
-        self.save(update_fields=fields)
+
+        outcome = self._EVENT_OUTCOMES.get(status)
+        if outcome is None:
+            self.save(update_fields=fields)
+            return
+
+        # The event belongs to this run's own chain, whoever finishes it — a
+        # sweep interrupting a dead run speaks in the run's story, not its own.
+        active = current_context()
+        context = new_context(
+            actor=active.actor if active else "celery",
+            organisation_id=self.data_feed.catalog.organisation_id,
+            correlation_id=self.correlation_id,
+        )
+        with use_context(context), transaction.atomic():
+            self.save(update_fields=fields)
+            record(
+                FetchRunFinished,
+                fetch_run=self,
+                data_feed=self.data_feed,
+                feed_name=self.data_feed.name,
+                catalog_slug=self.data_feed.catalog.slug,
+                outcome=outcome,
+                files_requested=self.files_requested,
+                files_fetched=self.files_fetched,
+                files_skipped=self.files_skipped,
+                files_failed=self.files_failed,
+                error=self.error_message,
+            )
 
     def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0):
         self._finish(
@@ -842,3 +904,48 @@ class FetchedFile(models.Model):
 # ---------------------------------------------------------------------------
 # Task-ferry Job model
 # ---------------------------------------------------------------------------
+
+
+class FetchRunFinished(DomainEvent):
+    """A fetch run reached a terminal state (ADR 0030).
+
+    Terminal transitions only: there are no per-file fetch events, because
+    ``FetchedFile`` already is that record.
+    """
+
+    label = "Fetch finished"
+
+    class Outcome(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    fetch_run = models.ForeignKey(FetchRun, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    data_feed = models.ForeignKey(DataFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    outcome = models.CharField(max_length=10, choices=Outcome.choices)
+    files_requested = models.IntegerField(default=0)
+    files_fetched = models.IntegerField(default=0)
+    files_skipped = models.IntegerField(default=0)
+    files_failed = models.IntegerField(default=0)
+    error = models.TextField(blank=True, default="")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["fetch_run", "-occurred_at"], name="idx_fetchfin_run")]
+
+    def subject_url(self):
+        if self.fetch_run_id is None or self.data_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("data_feed_fetch_run_detail", kwargs={"feed_pk": self.data_feed_id, "run_pk": self.fetch_run_id})
+
+    @property
+    def outcome_class(self):
+        return "ok" if self.outcome == self.Outcome.COMPLETED else "failed"
+
+    def summary(self):
+        text = (
+            f"{self.feed_name}: {self.files_fetched} fetched, {self.files_skipped} skipped, {self.files_failed} failed"
+        )
+        return f"{text} — {self.error.splitlines()[0]}" if self.error else text

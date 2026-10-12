@@ -16,6 +16,7 @@ from .views import (
     variable_styling,
 )
 from .views.summary_items import CatalogSummaryItem, CollectionSummaryItem, PluginSummaryItem
+from .views.trace import item_trace
 from .views.viewsets import AssetViewSet, BoundaryChooserViewSet, ItemViewSet, admin_viewsets
 
 
@@ -24,6 +25,7 @@ def urlconf_georivacore():
     return [
         path("data/add/", add_data_select, name="add_data"),
         path("collection/<int:collection_pk>/items/", collection_items_list, name="collection_items_list"),
+        path("item/<int:item_id>/trace/", item_trace, name="item_trace"),
         path("collection/<int:collection_pk>/styling/", collection_styling, name="collection_styling"),
         path(
             "collection/<int:collection_pk>/styling/<int:variable_pk>/",

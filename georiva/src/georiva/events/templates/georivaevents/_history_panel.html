@@ -1,0 +1,20 @@
+{% load i18n %}
+<section class="gr-history" aria-label="{% trans 'History' %}">
+    <h2 class="gr-history__title">{% trans "History" %}</h2>
+    <p class="gr-history__since">
+        {% if history.recorded_since %}
+            {% blocktrans with date=history.recorded_since|date:"j M Y" %}History is recorded from {{ date }}. Nothing earlier was reconstructed.{% endblocktrans %}
+        {% else %}
+            {% trans "No history has been recorded yet. It begins from the first transition after this feature was deployed." %}
+        {% endif %}
+    </p>
+    {% if history.rows %}
+        <ul class="gr-history__list">
+            {% for row in history.rows %}
+                {% include "georivaevents/_history_row.html" %}
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="gr-history__empty">{% trans "No events recorded for this yet." %}</p>
+    {% endif %}
+</section>

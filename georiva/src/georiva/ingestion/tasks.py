@@ -12,13 +12,17 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 from georiva.config.celery import app
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
-from georiva.ingestion.models import FileIngestion
+from georiva.events.context import use_context
+from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
+from georiva.ingestion.chains import context_for_arrival, context_for_revival
+from georiva.ingestion.models import FileIngestion, write_sweep_intervention
 
 logger = logging.getLogger(__name__)
 
 
 @app.task(
     name="georiva.ingestion.tasks.process_incoming_file",
+    base=ChainedTask,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -74,6 +78,7 @@ def process_incoming_file(
 
 @app.task(
     name="georiva.ingestion.tasks.process_staging_file",
+    base=ChainedTask,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -99,7 +104,9 @@ def process_staging_file(self, bucket: str, key: str):
         dispatch_for_input(staging_item_trigger(item))
 
 
-@app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")
+@app.task(
+    name="georiva.ingestion.tasks.sweep_unprocessed", base=SweepTask, sweep_name="unprocessed", queue="georiva-default"
+)
 def sweep_unprocessed(sync: bool = False):
     """
     Safety net — finds files that the webhook missed and retries failures.
@@ -116,7 +123,7 @@ def sweep_unprocessed(sync: bool = False):
     # Phase 1: Reset stale locks
     # -----------------------------------------------------------------
 
-    stale_count = FileIngestion.reset_stale_locks()
+    stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
         logger.warning("Reset %d stale locks", stale_count)
 
@@ -126,7 +133,14 @@ def sweep_unprocessed(sync: bool = False):
 
     new_files = 0
 
-    dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+    raw_dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+
+    def dispatch(*, file_path, origin_bucket, reference_time, why):
+        """Revive one file inside the chain it belongs to, and record that the sweep did (ADR 0030)."""
+        log = FileIngestion.objects.filter(bucket=origin_bucket, file_path=file_path).first()
+        with use_context(context_for_revival(origin_bucket, file_path, "unprocessed")):
+            write_sweep_intervention("unprocessed", why, log.pk if log else None, origin_bucket, file_path)
+            raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
     from georiva.ingestion.unprocessed import find_unprocessed
 
@@ -144,6 +158,7 @@ def sweep_unprocessed(sync: bool = False):
                 file_path=unprocessed.file_path,
                 origin_bucket=unprocessed.bucket,
                 reference_time=reference_time_iso,
+                why="reingest_required",
             )
         elif unprocessed.reason == "untracked":
             logger.info(
@@ -160,6 +175,7 @@ def sweep_unprocessed(sync: bool = False):
                 file_path=unprocessed.file_path,
                 origin_bucket=unprocessed.bucket,
                 reference_time=reference_time_iso,
+                why="unprocessed_file_found",
             )
             new_files += 1
         # 'pending' records already await a dispatched task — the sweep
@@ -189,6 +205,7 @@ def sweep_unprocessed(sync: bool = False):
             file_path=log.file_path,
             origin_bucket=log.bucket,
             reference_time=(log.reference_time.isoformat() if log.reference_time else None),
+            why="failed_file_retried",
         )
         retry_count += 1
 
@@ -213,7 +230,7 @@ def sweep_unprocessed(sync: bool = False):
     )
 
 
-@app.task(name="georiva.ingestion.tasks.sweep_staging", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.sweep_staging", base=SweepTask, sweep_name="staging", queue="georiva-default")
 def sweep_staging(sync: bool = False):
     """
     Reconcile the STAGING bucket against StagingItems — the staging-tier mirror
@@ -247,14 +264,15 @@ def sweep_staging(sync: bool = False):
         except ValueError:
             logger.debug("sweep_staging: skipping non-conforming path: %s", key)
             continue
-        dispatch(bucket=BucketType.STAGING, key=key)
+        with use_context(context_for_arrival(key, actor="sweep:staging")):
+            dispatch(bucket=BucketType.STAGING, key=key)
         dispatched += 1
 
     logger.info("sweep_staging: dispatched %d new staging file(s)", dispatched)
     return dispatched
 
 
-@app.task(name="georiva.ingestion.tasks.cleanup_archives", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.cleanup_archives", base=EntryTask, queue="georiva-default")
 def cleanup_archives(max_age_days: int = 5):
     from georiva.core.storage import BucketType, storage
     from georiva.ingestion.models import FileIngestion
@@ -283,7 +301,7 @@ def cleanup_archives(max_age_days: int = 5):
     return {"deleted": deleted, "failed": failed}
 
 
-@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", base=EntryTask, queue="georiva-default")
 def prune_ingestion_logs(max_age_days: int = 30):
     from georiva.ingestion.models import FileIngestion
 
@@ -292,7 +310,7 @@ def prune_ingestion_logs(max_age_days: int = 30):
     return result
 
 
-@app.task(name="georiva.ingestion.tasks.close_quiet_run_ingestions", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.close_quiet_run_ingestions", base=EntryTask, queue="georiva-default")
 def close_quiet_run_ingestions(minutes: int = None):
     """Close model runs that have gone quiet (ADR 0026).
 

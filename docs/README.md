@@ -43,9 +43,14 @@ reading order. If you're new, start at the top and work down.
    [ADR-0009](adr/0009-derived-product-chain-and-lifecycle.md), and
    [ADR-0010](adr/0010-pinned-collection-bindings-for-derived-products.md).
 
+10. **[Recording Domain Events from a Plugin](plugins/domain-events.md)** — the supported extension point for the
+   traceability record: defining an event type, installing the append-only trigger, `record()`, continuing a chain from a
+   Domain signal, and why a plugin that adopts events moves its tasks onto the task base classes. Decision recorded in
+   [ADR-0030](adr/0030-domain-events-beside-run-rows.md).
+
 ## Contributing
 
-10. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
+11. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
    conventions.
 
 ## Architecture Decision Records

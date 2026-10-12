@@ -13,7 +13,7 @@ def _get_redis():
     return redis.from_url(settings.REDIS_URL)
 
 
-def publish_event(event: dict) -> None:
+def publish_update(event: dict) -> None:
     try:
         r = _get_redis()
         r.publish(CHANNEL, json.dumps(event))

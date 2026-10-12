@@ -1,7 +1,19 @@
 from django.urls import path
 from wagtail import hooks
+from wagtail.snippets.models import register_snippet
+from wagtail.snippets.views.snippets import SnippetViewSet
 
+from georiva.organisations.scoping import OrgScopedViewSetMixin
+
+from .models import RunIngestion
 from .panels import IngestionActivityPanel
+
+
+class RunIngestionViewSet(OrgScopedViewSetMixin, SnippetViewSet):
+    model = RunIngestion
+
+
+register_snippet(RunIngestionViewSet)
 
 # No menu item: the Ingestion Activity page is reached through the homepage
 # activity panel, and acquisition monitoring lives on each feed's dashboard
@@ -18,9 +30,16 @@ def register_ingestion_dashboard_urls():
         collection_upload_sessions_api,
         ingestion_dashboard_api,
     )
+    from .run_views import file_ingestion_detail, run_ingestion_detail
     from .sse_views import ingestion_events_sse
 
     return [
+        path("ingestion/runs/<int:run_ingestion_id>/", run_ingestion_detail, name="run_ingestion_detail"),
+        path(
+            "ingestion/files/<int:file_ingestion_id>/",
+            file_ingestion_detail,
+            name="file_ingestion_detail",
+        ),
         path("ingestion/activity/", ingestion_activity_feed, name="ingestion_activity_feed"),
         path("api/ingestion/events/", ingestion_events_sse, name="ingestion_events_sse"),
         path("api/ingestion/dashboard/", ingestion_dashboard_api, name="ingestion_dashboard_api"),

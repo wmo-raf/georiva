@@ -28,6 +28,8 @@ import pytz
 from django.conf import settings
 from django.utils import timezone as dj_timezone
 
+from georiva.events.context import new_chain
+
 logger = logging.getLogger(__name__)
 
 #: How long a collection must go without a new file before the quiet-period
@@ -230,6 +232,8 @@ def close_quiet_runs(minutes: int | None = None) -> int:
     for run in candidates:
         if has_files_in_flight(run.collection):
             continue
-        if run.close(RunIngestion.Closer.QUIET_PERIOD):
-            closed += 1
+        # One chain per run: this task spans organisations, a chain does not.
+        with new_chain(organisation_id=run.collection.catalog.organisation_id):
+            if run.close(RunIngestion.Closer.QUIET_PERIOD):
+                closed += 1
     return closed

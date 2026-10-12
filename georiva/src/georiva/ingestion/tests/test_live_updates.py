@@ -4,7 +4,7 @@ import redis
 from django.conf import settings
 from django.test import TestCase
 
-from georiva.ingestion.events import CHANNEL
+from georiva.ingestion.live_updates import CHANNEL
 
 
 class IngestionEventsTestCase(TestCase):
@@ -33,15 +33,15 @@ class IngestionEventsTestCase(TestCase):
 
 
 # =============================================================================
-# Cycle 1: publish_event() delivers to the channel
+# Cycle 1: publish_update() delivers to the channel
 # =============================================================================
 
 
 class PublishEventTests(IngestionEventsTestCase):
     def test_published_event_is_received_on_channel(self):
-        from georiva.ingestion.events import publish_event
+        from georiva.ingestion.live_updates import publish_update
 
-        publish_event({"type": "test.ping", "value": 42})
+        publish_update({"type": "test.ping", "value": 42})
 
         event = self._next_event()
         self.assertIsNotNone(event)
@@ -131,7 +131,7 @@ class FileIngestionJobStateEventTests(IngestionEventsTestCase):
         self.assertEqual(event["id"], job.pk)
         self.assertEqual(event["state"], "started")
 
-    def test_creation_does_not_publish_event(self):
+    def test_creation_does_not_publish_update(self):
         self._make_job()
 
         event = self._next_event(timeout=0.5)

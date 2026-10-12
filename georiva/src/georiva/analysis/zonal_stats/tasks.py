@@ -1,12 +1,14 @@
 import logging
 
 from georiva.config.celery import app
+from georiva.events.tasks import EntryTask, ReadSideTask
 
 logger = logging.getLogger(__name__)
 
 
 @app.task(
     name="georiva.analysis.zonal_stats.tasks.compute_boundary_zonal_stats",
+    base=ReadSideTask,
     bind=True,
     max_retries=3,
     acks_late=True,
@@ -96,6 +98,7 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
 
 @app.task(
     name="georiva.analysis.zonal_stats.tasks.sweep_stale_boundary_stats",
+    base=EntryTask,
     queue="georiva-default",
 )
 def sweep_stale_boundary_stats() -> None:

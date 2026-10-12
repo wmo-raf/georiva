@@ -11,7 +11,9 @@ from django.conf import settings
 from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
-from georiva.ingestion.models import FileIngestion
+from georiva.events.context import use_context
+from georiva.ingestion.chains import context_for_arrival
+from georiva.ingestion.models import FileIngestion, FileIngestionFinished
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -99,52 +101,67 @@ def _handle_event(ev: dict):
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
 
-    catalog, resolution_error = resolve_org_catalog(org_slug, catalog_slug)
+    # A Bucket notification belongs to the chain of the fetch (or upload) that stored
+    # the file, found by lookup; with none behind it, it is a drop-zone arrival and
+    # starts its own. The organisation is the key's first segment, and may name
+    # nobody: that arrival is recorded as unattributed.
+    with use_context(context_for_arrival(key, actor="system:bucket")):
+        catalog, resolution_error = resolve_org_catalog(org_slug, catalog_slug)
 
-    # Register before deciding: a file we refuse to ingest must still leave a
-    # visible, actionable record. It is left in place in its bucket — never
-    # guessed into some other organisation, never deleted.
-    log, created = FileIngestion.register(
-        bucket=origin_bucket,
-        file_path=key,
-        reference_time=meta.get("reference_time"),
-    )
+        # Register before deciding: a file we refuse to ingest must still leave a
+        # visible, actionable record. It is left in place in its bucket — never
+        # guessed into some other organisation, never deleted.
+        log, created = FileIngestion.register(
+            bucket=origin_bucket,
+            file_path=key,
+            reference_time=meta.get("reference_time"),
+        )
 
-    if catalog is None:
-        logger.warning("Refusing %s: %s", key, resolution_error)
-        FileIngestion.mark_failed(origin_bucket, key, resolution_error)
-        return
-
-    time_error = _required_time_error(catalog, key)
-    if time_error:
-        logger.warning("Time extraction failed for %s: %s", key, time_error)
-        FileIngestion.mark_failed(origin_bucket, key, time_error)
-        return
-
-    if not created:
-        if log.status == FileIngestion.Status.PROCESSING:
-            logger.debug("Already processing: %s/%s", origin_bucket, key)
+        if catalog is None:
+            logger.warning("Refusing %s: %s", key, resolution_error)
+            # A key naming an organisation or catalog that does not exist is
+            # nobody's: the event is unattributed, visible to the instance
+            # administrator only.
+            FileIngestion.mark_failed(
+                origin_bucket,
+                key,
+                resolution_error,
+                outcome=FileIngestionFinished.Outcome.REFUSED,
+                unattributed=True,
+            )
             return
-        if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
-            return
-        if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
-            logger.warning("Completed but no live data, re-ingesting: %s", key)
-            FileIngestion.reset_for_reingest(origin_bucket, key)
 
-    process_incoming_file.delay(
-        file_path=key,
-        origin_bucket=origin_bucket,
-        reference_time=(meta["reference_time"].isoformat() if meta["reference_time"] else None),
-    )
-    logger.info(
-        "Queued: %s/%s (org=%s, catalog=%s, collection=%s, ref=%s)",
-        bucket_name,
-        key,
-        org_slug,
-        catalog_slug,
-        collection_slug or "(to resolve)",
-        meta.get("reference_time"),
-    )
+        time_error = _required_time_error(catalog, key)
+        if time_error:
+            logger.warning("Time extraction failed for %s: %s", key, time_error)
+            # Refused inside a known organisation: attributed to it.
+            FileIngestion.mark_failed(origin_bucket, key, time_error, outcome=FileIngestionFinished.Outcome.REFUSED)
+            return
+
+        if not created:
+            if log.status == FileIngestion.Status.PROCESSING:
+                logger.debug("Already processing: %s/%s", origin_bucket, key)
+                return
+            if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
+                return
+            if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
+                logger.warning("Completed but no live data, re-ingesting: %s", key)
+                FileIngestion.reset_for_reingest(origin_bucket, key)
+
+        process_incoming_file.delay(
+            file_path=key,
+            origin_bucket=origin_bucket,
+            reference_time=(meta["reference_time"].isoformat() if meta["reference_time"] else None),
+        )
+        logger.info(
+            "Queued: %s/%s (org=%s, catalog=%s, collection=%s, ref=%s)",
+            bucket_name,
+            key,
+            org_slug,
+            catalog_slug,
+            collection_slug or "(to resolve)",
+            meta.get("reference_time"),
+        )
 
 
 def _consume_loop(stop_event=None):

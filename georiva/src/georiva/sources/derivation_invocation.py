@@ -15,14 +15,55 @@ depending on the engine is the allowed direction.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from dataclasses import replace
+
+from georiva.events.context import caused_by, current_context, new_context, use_context
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _product_context(product, *, actor="system:derivation"):
+    """Run a dispatch under a context owned by ``product``'s organisation.
+
+    The feed layer is the entry point that resolves the organisation — the engine
+    only carries the context it is handed and never resolves tenancy. An active
+    chain is continued (its Correlation and Caused-by kept); one without an owner
+    gets the product's. With no chain at all — a beat, a shell — a new one starts.
+    """
+    organisation_id = product.data_feed.catalog.organisation_id
+    active = current_context()
+    context = (
+        replace(active, organisation_id=organisation_id)
+        if active is not None
+        else new_context(actor=actor, organisation_id=organisation_id)
+    )
+    with use_context(context):
+        yield
 
 
 def product_origin(product) -> str:
     """The opaque DerivationRun.origin key for a product — the stable identity
     the tracking UI groups runs by (ADR-0008)."""
     return f"derived_product:{product.pk}"
+
+
+def organisation_for_origin(origin: str):
+    """The organisation owning a ``derived_product:<id>`` origin, or ``None``.
+
+    Registered with the engine so a sweep can attribute a run that has no event yet.
+    """
+    prefix = "derived_product:"
+    if not origin.startswith(prefix) or not origin[len(prefix) :].isdigit():
+        return None
+    from georiva.sources.models import DerivedProduct
+
+    return (
+        DerivedProduct.objects.filter(pk=int(origin[len(prefix) :]))
+        .values_list("data_feed__catalog__organisation_id", flat=True)
+        .first()
+    )
 
 
 def _trigger_tier(trigger: dict) -> str:
@@ -132,7 +173,8 @@ def dispatch_for_input(trigger: dict, *, dispatch: bool = True) -> list:
             logger.error("Product %s names unknown recipe '%s'", product.pk, product.recipe_type)
             continue
         selector = {**(product.config or {}), **_binding(product), **trigger}
-        results.extend(run(recipe, selector, origin=product_origin(product), dispatch=dispatch))
+        with _product_context(product):
+            results.extend(run(recipe, selector, origin=product_origin(product), dispatch=dispatch))
     return results
 
 
@@ -177,13 +219,14 @@ def run_product_now(product, *, dispatch: bool = True) -> list:
     selector = {**(product.config or {}), **_binding(product)}
     from georiva.processing.models import DerivationRun
 
-    return run(
-        recipe,
-        selector,
-        origin=origin,
-        dispatch=dispatch,
-        reason=DerivationRun.RetryReason.MANUAL_RERUN,
-    )
+    with _product_context(product):
+        return run(
+            recipe,
+            selector,
+            origin=origin,
+            dispatch=dispatch,
+            reason=DerivationRun.RetryReason.MANUAL_RERUN,
+        )
 
 
 def resurrect_dependents(item, *, dispatch: bool = True) -> int:
@@ -221,14 +264,21 @@ def resurrect_dependents(item, *, dispatch: bool = True) -> int:
     )
 
 
-def on_unit_completed(sender, *, item=None, **kwargs):
+def on_unit_completed(sender, *, item=None, event=None, **kwargs):
     """Receiver for the engine's ``unit_completed`` signal (connected in
     ``SourcesConfig.ready``). Best-effort: a wake-up failure must never fail
-    the producing task — the periodic sweep is the safety net behind it."""
+    the producing task — the periodic sweep is the safety net behind it.
+
+    ``event`` is the attempt that completed. Revived dependents are caused by it,
+    so the wake-up continues the same chain rather than starting one."""
     if item is None:
         return
     try:
-        resurrect_dependents(item)
+        if event is not None and current_context() is not None:
+            with caused_by(event):
+                resurrect_dependents(item)
+        else:
+            resurrect_dependents(item)
     except Exception:
         logger.exception("not-ready wake-up failed for item %s", item.pk)
 

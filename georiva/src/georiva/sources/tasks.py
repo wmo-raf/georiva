@@ -6,12 +6,14 @@ from django.db.models import Min
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
+from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
 
 logger = logging.getLogger(__name__)
 
 
 @app.task(
     name="georiva.sources.tasks.sweep_scheduled_products",
+    base=EntryTask,
     queue="georiva-default",
 )
 def sweep_scheduled_products():
@@ -28,6 +30,8 @@ def sweep_scheduled_products():
 
 @app.task(
     name="georiva.sources.tasks.sweep_stale_fetch_runs",
+    base=SweepTask,
+    sweep_name="stale_fetch_runs",
     queue="georiva-default",
 )
 def sweep_stale_fetch_runs():
@@ -43,6 +47,7 @@ def sweep_stale_fetch_runs():
 
 @app.task(
     name="georiva.sources.tasks.retry_fetched_file",
+    base=ChainedTask,
     queue="georiva-ingestion",
     bind=True,
     acks_late=True,
@@ -112,6 +117,7 @@ def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
 @shared_task(
     bind=True,
     name="georiva.sources.tasks.run_data_feed_loader",
+    base=EntryTask,
     queue="georiva-ingestion",
 )
 def run_data_feed_loader(self, data_feed_id):
@@ -126,12 +132,16 @@ def run_data_feed_loader(self, data_feed_id):
     Running all collections sequentially keeps cross-collection copy dedup in
     Loader._find_existing_catalog_path() working correctly.
     """
+    from georiva.events.context import update_context
     from georiva.sources.models import DataFeed, DataFeedCollectionLink
 
     data_feed = DataFeed.objects.get(pk=data_feed_id)
 
     if not data_feed.is_active:
         return
+
+    # An entry point: the chain this fetch starts belongs to the feed's organisation.
+    update_context(organisation_id=data_feed.catalog.organisation_id)
 
     links = DataFeedCollectionLink.objects.filter(data_feed=data_feed).select_related("collection", "data_feed")
 
