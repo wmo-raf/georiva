@@ -146,3 +146,20 @@ class EventIndex(AppendOnlyModel):
             models.Index(fields=["organisation", "outcome_class", "-occurred_at"], name="idx_evidx_org_outcome"),
         ]
         verbose_name = "Event index entry"
+
+
+class EventsPurged(DomainEvent):
+    """The purge command ran: who purged what, up to when, and how many of each type.
+
+    Written by ``purge_events`` after its deletes, so removal is itself part of
+    the record. Never purged.
+    """
+
+    label = "Events purged"
+
+    cutoff = models.DateTimeField(help_text="Events that occurred before this instant were removed.")
+    counts = models.JSONField(help_text="Rows removed, by event type.")
+
+    def summary(self):
+        total = sum(self.counts.values())
+        return f"{total} events removed that occurred before {self.cutoff:%Y-%m-%d %H:%M}"
