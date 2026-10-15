@@ -19,25 +19,40 @@ its view leaves open:
   pages of each. Its counts are scoped by pinning the report's own *site* filter
   to the organisation's root page, which both counts and "last edited" read.
 
+The filter dropdowns are narrowed too (#452): they name users, workflows, tasks
+and content types, and Wagtail builds each list from the whole instance. Every
+filterset below narrows its own choices to what this organisation's rows use.
+
 Wagtail's views are claimed at their own paths ahead of Wagtail's routes, the way
 page search is (``pages.OrgScopedPageSearchView``): the ``register_admin_urls``
 hook can only append, so replacing a view means claiming its URL.
 """
 
+from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.urls import path
 from django.views.decorators.cache import never_cache
 from wagtail.admin.auth import require_admin_access
 from wagtail.admin.urls import display_custom_404
 from wagtail.admin.views.reports.aging_pages import AgingPagesView
-from wagtail.admin.views.reports.audit_logging import LogEntriesView
-from wagtail.admin.views.reports.locked_pages import LockedPagesView
+from wagtail.admin.views.reports.audit_logging import LogEntriesView, SiteHistoryReportFilterSet
+from wagtail.admin.views.reports.locked_pages import LockedPagesReportFilterSet, LockedPagesView
 from wagtail.admin.views.reports.page_types_usage import (
     PageTypesUsageReportFilterSet,
     PageTypesUsageReportView,
     SiteFilter,
 )
-from wagtail.admin.views.reports.workflows import WorkflowTasksView, WorkflowView
+from wagtail.admin.views.reports.workflows import (
+    WorkflowReportFilterSet,
+    WorkflowTasksReportFilterSet,
+    WorkflowTasksView,
+    WorkflowView,
+)
+from wagtail.log_actions import registry as log_action_registry
+from wagtail.models import TaskState, Workflow, WorkflowState
 
+from .access import require_active_org
+from .models import OrganisationMembership
 from .ownership import scope_rows
 from .pages import org_root_page
 
@@ -49,8 +64,81 @@ class OrgScopedQuerysetReportMixin:
         return scope_rows(self.request, super().get_queryset())
 
 
+def _members_of_host(request, users):
+    """``users`` limited to members of the organisation serving ``request``."""
+    members = OrganisationMembership.objects.filter(organisation=require_active_org(request))
+    return users.filter(pk__in=members.values("user"))
+
+
+class OrgScopedLockedPagesFilterSet(LockedPagesReportFilterSet):
+    """ "Locked by" offers members of the host organisation, not everyone holding a lock."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        locked_by = self.filters["locked_by"]
+        locked_by.queryset = _members_of_host(self.request, locked_by.get_queryset(self.request))
+
+
+class OrgScopedWorkflowFilterSet(WorkflowReportFilterSet):
+    """ "Requested by" offers members of the host organisation, "workflow" those its states ran."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        states = scope_rows(self.request, WorkflowState.objects.all())
+        self.filters["workflow"].queryset = Workflow.objects.filter(pk__in=states.values("workflow"))
+        requested_by = self.filters["requested_by"]
+        requested_by.queryset = _members_of_host(self.request, requested_by.get_queryset(self.request))
+
+
+class OrgScopedWorkflowTasksFilterSet(WorkflowTasksReportFilterSet):
+    """Workflow and task filters offer only those this organisation's rows have run.
+
+    Workflows and tasks are configuration shared by the instance and declare no
+    owner, so what scopes them is use: the ones behind a workflow or task state
+    the dispatcher lets this organisation see.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        states = scope_rows(self.request, WorkflowState.objects.all())
+        task_states = scope_rows(self.request, TaskState.objects.all())
+        self.filters["workflow"].queryset = Workflow.objects.filter(pk__in=states.values("workflow"))
+        self.filters["task"].queryset = self.filters["task"].queryset.filter(pk__in=task_states.values("task"))
+
+
+class OrgScopedSiteHistoryFilterSet(SiteHistoryReportFilterSet):
+    """Users, types and actions offered are those of the log entries this organisation can see."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.filters["object_type"].queryset = self._content_types()
+
+    def _log_entries(self):
+        for log_model in log_action_registry.get_log_entry_models():
+            yield scope_rows(self.request, log_model.objects.viewable_by_user(self.request.user))
+
+    def _content_types(self):
+        ids = set()
+        for entries in self._log_entries():
+            ids.update(entries.get_content_type_ids())
+        return ContentType.objects.filter(pk__in=ids).order_by("model")
+
+    def get_users_queryset(self):
+        ids = set()
+        for entries in self._log_entries():
+            ids.update(entries.get_user_ids())
+        User = get_user_model()
+        return User.objects.filter(pk__in=ids).order_by(User.USERNAME_FIELD)
+
+    def get_action_choices(self):
+        actions = set()
+        for entries in self._log_entries():
+            actions.update(entries.get_actions())
+        return [choice for choice in log_action_registry.get_choices() if choice[0] in actions]
+
+
 class OrgScopedLockedPagesView(OrgScopedQuerysetReportMixin, LockedPagesView):
-    pass
+    filterset_class = OrgScopedLockedPagesFilterSet
 
 
 class OrgScopedAgingPagesView(OrgScopedQuerysetReportMixin, AgingPagesView):
@@ -58,15 +146,17 @@ class OrgScopedAgingPagesView(OrgScopedQuerysetReportMixin, AgingPagesView):
 
 
 class OrgScopedWorkflowView(OrgScopedQuerysetReportMixin, WorkflowView):
-    pass
+    filterset_class = OrgScopedWorkflowFilterSet
 
 
 class OrgScopedWorkflowTasksView(OrgScopedQuerysetReportMixin, WorkflowTasksView):
-    pass
+    filterset_class = OrgScopedWorkflowTasksFilterSet
 
 
 class OrgScopedLogEntriesView(LogEntriesView):
     """Site history. Each log model's rows are scoped before they are unioned."""
+
+    filterset_class = OrgScopedSiteHistoryFilterSet
 
     def filter_queryset(self, queryset):
         return super().filter_queryset(scope_rows(self.request, queryset))
