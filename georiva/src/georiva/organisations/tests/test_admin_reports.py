@@ -155,3 +155,114 @@ class AdminReportScopingTests(TestCase):
         for name in wagtail_names:
             url_name = resolve(reverse(f"wagtailadmin_reports:{name}")).url_name
             self.assertEqual(url_name, f"georiva_org_scoped_report_{name}")
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class AdminReportFilterDropdownTests(TestCase):
+    """The filter dropdowns name users, workflows and tasks: only the host's may appear (#452).
+
+    Uganda's people and configuration are given names no Kenyan row shares, and
+    the reports are read on Kenya's host by someone who belongs to both.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        cls.uganda = provision_organisation(name="Uganda Met", slug="uganda")
+        cls.kenya_page = add_child_page(cls.kenya.site.root_page, "Nairobi Bulletin", "bulletin")
+        cls.uganda_page = add_child_page(cls.uganda.site.root_page, "Kampala Bulletin", "bulletin")
+        cls.kenya_catalog = cls.make_catalog(cls.kenya, "Nairobi Feed")
+        cls.uganda_catalog = cls.make_catalog(cls.uganda, "Kampala Feed")
+
+    @staticmethod
+    def make_catalog(organisation, name):
+        from georiva.core.models import Catalog
+
+        return Catalog.objects.create(organisation=organisation, name=name, slug=name.lower().replace(" ", "-"))
+
+    def setUp(self):
+        self.user = make_user("amina")
+        add_member(self.user, self.kenya)
+        add_member(self.user, self.uganda)
+        self.kenyan = make_user("wanjiru")
+        add_member(self.kenyan, self.kenya)
+        self.ugandan = make_user("baraka")
+        add_member(self.ugandan, self.uganda)
+        everything = Group.objects.create(name="everything")
+        everything.permissions.add(*Permission.objects.all())
+        self.user.groups.add(everything)
+        for slug in ("kenya", "uganda"):
+            self.user.groups.add(Group.objects.get(name=org_page_group_name(slug)))
+        unlock = Permission.objects.get(content_type__app_label="wagtailcore", codename="unlock_page")
+        for organisation in (self.kenya, self.uganda):
+            GroupPagePermission.objects.create(group=everything, page=organisation.site.root_page, permission=unlock)
+        self.everything = everything
+        for page, who, prefix in (
+            (self.kenya_page, self.kenyan, "Nairobi"),
+            (self.uganda_page, self.ugandan, "Kampala"),
+        ):
+            self.touch(page, who, prefix)
+        log(instance=self.kenya_catalog, action="wagtail.create", user=self.kenyan)
+        log(instance=self.uganda_catalog, action="wagtail.delete", user=self.ugandan)
+        self.client.login(username="amina", password=PASSWORD)
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def touch(self, page, who, prefix):
+        page.save_revision(user=who).publish()
+        log(instance=page, action="wagtail.edit", user=who)
+        task = GroupApprovalTask.objects.create(name=f"{prefix} Review")
+        task.groups.set([self.everything])
+        workflow = Workflow.objects.create(name=f"{prefix} Sign-off")
+        WorkflowTask.objects.create(workflow=workflow, task=task, sort_order=0)
+        page.save_revision(user=who)
+        workflow.start(page, who)
+        # Last, because publishing and starting a workflow both reset the lock.
+        type(page).objects.filter(pk=page.pk).update(locked=True, locked_by=who, locked_at=timezone.now())
+
+    def read(self, name):
+        url = reverse(f"wagtailadmin_reports:{name}")
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, url)
+        return response
+
+    def choices(self, response, field):
+        return list(response.context["filters"].form.fields[field].queryset)
+
+    def test_locked_pages_offers_only_this_organisations_users(self):
+        names = [u.username for u in self.choices(self.read("locked_pages"), "locked_by")]
+        self.assertIn("wanjiru", names)
+        self.assertNotIn("baraka", names)
+
+    def test_workflow_requested_by_offers_only_this_organisations_users(self):
+        names = [u.username for u in self.choices(self.read("workflow"), "requested_by")]
+        self.assertIn("wanjiru", names)
+        self.assertNotIn("baraka", names)
+
+    def test_workflow_report_offers_only_this_organisations_workflows(self):
+        workflows = [w.name for w in self.choices(self.read("workflow"), "workflow")]
+        self.assertEqual(workflows, ["Nairobi Sign-off"])
+
+    def test_workflow_tasks_offers_only_this_organisations_workflows_and_tasks(self):
+        response = self.read("workflow_tasks")
+        workflows = [w.name for w in self.choices(response, "workflow")]
+        tasks = [t.name for t in self.choices(response, "task")]
+        self.assertEqual(workflows, ["Nairobi Sign-off"])
+        self.assertEqual(tasks, ["Nairobi Review"])
+
+    def test_site_history_offers_only_this_organisations_users_types_and_actions(self):
+        response = self.read("site_history")
+        form = response.context["filters"].form
+        users = [u.username for u in self.choices(response, "user")]
+        self.assertIn("wanjiru", users)
+        self.assertNotIn("baraka", users)
+        actions = [value for value, _ in form.fields["action"].choices]
+        self.assertIn("wagtail.create", actions)
+        self.assertNotIn("wagtail.delete", actions)
+        self.assertIn("catalog", [ct.model for ct in self.choices(response, "object_type")])
+
+    def test_site_history_does_not_offer_a_type_only_another_organisation_logged(self):
+        from wagtail.models import ModelLogEntry
+
+        ModelLogEntry.objects.filter(object_id=str(self.kenya_catalog.pk)).delete()
+        types = self.choices(self.read("site_history"), "object_type")
+        self.assertNotIn("catalog", [ct.model for ct in types])
