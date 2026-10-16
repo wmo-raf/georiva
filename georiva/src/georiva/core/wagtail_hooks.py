@@ -1,4 +1,6 @@
 from adminboundarymanager.models import AdminBoundarySettings
+from adminboundarymanager.views import load_boundary, preview_boundary
+from django.contrib.auth.decorators import user_passes_test
 from django.urls import path, reverse, reverse_lazy
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -79,6 +81,21 @@ def register_publications_menu():
 def register_viewset():
     return admin_viewsets + [
         BoundaryChooserViewSet("boundary_chooser"),
+    ]
+
+
+# The package gates its two views on "holds any page permission", which every
+# editor does, yet a load rewrites the instance-wide AdminBoundary table
+# (SHARED_REFERENCE_DATA, written by the instance admin alone, ADR 0011). The
+# menu below is superuser-only; these keep the URLs in step with it. order=-1
+# runs this hook before the package's, so Django resolves our wrapped views
+# first; the paths and names are the package's own, so reverse() is unchanged.
+@hooks.register("register_admin_urls", order=-1)
+def urlconf_boundary_loader_superuser_only():
+    superuser_only = user_passes_test(lambda user: user.is_superuser)
+    return [
+        path("load-boundary/", superuser_only(load_boundary), name="adminboundarymanager_load_boundary"),
+        path("preview-boundary/", superuser_only(preview_boundary), name="adminboundarymanager_preview_boundary"),
     ]
 
 
