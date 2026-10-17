@@ -34,7 +34,9 @@ def setup_periodic_tasks(sender, **kwargs):
                 5,
                 IntervalSchedule.MINUTES,
             )
-        ]
+        ],
+        # DB may be unavailable at import/finalize time
+        log=logger.debug,
     )
 
 

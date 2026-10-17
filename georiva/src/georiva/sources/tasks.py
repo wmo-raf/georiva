@@ -86,7 +86,9 @@ def setup_scheduled_product_beat(sender, **kwargs):
                 5,
                 IntervalSchedule.MINUTES,
             )
-        ]
+        ],
+        # DB may be unavailable at import/finalize time
+        log=logger.debug,
     )
 
 
@@ -101,7 +103,9 @@ def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
                 30,
                 IntervalSchedule.MINUTES,
             )
-        ]
+        ],
+        # DB may be unavailable at import/finalize time
+        log=logger.debug,
     )
 
 
