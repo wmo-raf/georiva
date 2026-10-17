@@ -122,6 +122,11 @@ This used to be a trio — a COG, an encoded RGBA PNG for WeatherLayers GL, and 
 - The **encoded PNG** baked the variable's `value_min`/`value_max` into pixels, so editing the range silently made every existing PNG numerically wrong. Titiler now derives the same texture on demand from the COG, resolving the current range per request — pixel-identical to the baked artifact, with no staleness class to own ([ADR-0021](../adr/0021-on-demand-encoded-textures.md)).
 - The **JSON sidecar** turned out to be write-only — written by materialization, read by nothing. Everything it carried is available authoritatively from the `Asset`/`Item`/`Variable` rows, the COG's own georeferencing and tags, and the STAC API ([ADR-0024](../adr/0024-remove-the-json-metadata-sidecar.md)).
 
+> **Older prefixes still carry the old files.** Nothing sweeps them away, so prefixes written before ADR-0021/0024 may
+> still hold a `.json` sidecar (and a baked `.png`) beside each `.tif`, while newer prefixes hold only the `.tif`. This
+> is expected — do not "fix" it. The orphan-cleanup sweep deliberately never deletes `.json` objects, which also keeps
+> the virtual-Zarr manifests safe.
+
 ### Archive bucket
 
 The archive preserves raw source files before processing. It mirrors the source path but names the origin bucket type just after the org segment, so you can always trace a raw file back to where it came from:
