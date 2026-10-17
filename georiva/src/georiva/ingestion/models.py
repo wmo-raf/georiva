@@ -168,6 +168,8 @@ class FileIngestion(models.Model):
 
     MAX_RETRIES = 3
     LOCK_TIMEOUT = timedelta(minutes=30)
+    # A pending row older than this has lost its dispatched task (#401).
+    PENDING_TIMEOUT = timedelta(minutes=45)
 
     class Meta:
         unique_together = ["bucket", "file_path"]
@@ -485,6 +487,14 @@ class FileIngestion(models.Model):
             for pk, bucket, file_path in targets:
                 record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
         return updated
+
+    @classmethod
+    def is_stale_pending(cls, bucket, file_path) -> bool:
+        """True when the file is pending and has sat past PENDING_TIMEOUT."""
+        cutoff = dj_timezone.now() - cls.PENDING_TIMEOUT
+        return cls.objects.filter(
+            bucket=bucket, file_path=file_path, status=cls.Status.PENDING, updated_at__lt=cutoff
+        ).exists()
 
     @classmethod
     def get_retryable(cls, limit: int = 50):

@@ -106,3 +106,33 @@ class IngestionSweepTests(TestCase):
         events = FileIngestionFinished.objects.order_by("occurred_at")
         self.assertEqual({e.correlation_id for e in events}, {ctx.correlation_id})
         self.assertEqual(events.last().actor, "sweep:unprocessed")
+
+
+class PendingRedispatchTests(TestCase):
+    """A pending row whose dispatched task was lost is revived once stale (#401)."""
+
+    def setUp(self):
+        self.kenya = make_organisation("kenya")
+
+    def _pending(self, age):
+        FileIngestion.register(BucketType.SOURCES, KEY)
+        FileIngestion.objects.update(updated_at=dj_timezone.now() - age)
+        return [UnprocessedFile(bucket=BucketType.SOURCES, file_path=KEY, reason="pending")]
+
+    def test_a_stale_pending_file_is_redispatched_and_recorded(self):
+        found = self._pending(FileIngestion.PENDING_TIMEOUT + timedelta(minutes=1))
+
+        seen = _sweep(found)
+
+        self.assertEqual(len(seen), 1)
+        intervention = SweepIntervened.objects.get()
+        self.assertEqual(intervention.reason, "stale_pending_redispatched")
+        self.assertEqual(intervention.target_label, f"sources:{KEY}")
+
+    def test_a_recent_pending_file_is_left_to_its_dispatched_task(self):
+        found = self._pending(timedelta(minutes=1))
+
+        seen = _sweep(found)
+
+        self.assertEqual(seen, [])
+        self.assertFalse(SweepIntervened.objects.exists())
