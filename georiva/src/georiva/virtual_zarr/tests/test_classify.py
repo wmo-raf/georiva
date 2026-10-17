@@ -133,3 +133,25 @@ class ClassifyTests(SimpleTestCase):
         plan = classify(committed, rows)
         self.assertEqual(plan.mode, BuildMode.APPEND)
         self.assertEqual(plan.watermark, T0 + timedelta(hours=60))
+
+
+class ForecastNewRunTests(SimpleTestCase):
+    """A new forecast run reaches classify() as rows only from that run (#412)."""
+
+    committed = CommittedState(
+        watermark=T0 + timedelta(hours=50),
+        time_end=T0 + timedelta(hours=10),
+        item_count=3,
+    )
+
+    def test_new_run_overlapping_committed_range_rebuilds(self):
+        rows = [_row(6, 60), _row(8, 60), _row(12, 60)]
+        self.assertEqual(classify(self.committed, rows).mode, BuildMode.REBUILD)
+
+    def test_new_run_entirely_before_committed_end_rebuilds(self):
+        rows = [_row(1, 60), _row(2, 60), _row(3, 60)]
+        self.assertEqual(classify(self.committed, rows).mode, BuildMode.REBUILD)
+
+    def test_new_run_entirely_after_committed_end_rebuilds(self):
+        rows = [_row(20, 60), _row(21, 60)]
+        self.assertEqual(classify(self.committed, rows).mode, BuildMode.REBUILD)

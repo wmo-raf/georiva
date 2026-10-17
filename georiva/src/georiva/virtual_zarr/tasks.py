@@ -167,7 +167,8 @@ def _collect_rows(
 ) -> tuple[list[SourceRow], int]:
     """
     COG asset rows for this variable, one per Item, ordered by item time
-    (newest run only for a forecast collection), plus the count of Items skipped for having no COG asset.
+    (newest run only for a forecast collection), plus the count of Items
+    skipped for having no COG asset.
     """
     variable = manifest.variable
     collection = variable.collection
@@ -187,9 +188,20 @@ def _collect_rows(
     # a new run changes the in-range rows, which classify() answers with REBUILD.
     items_qs = Item.objects.filter(collection=collection)
     if collection.is_forecast:
-        latest_run = Item.objects.latest_forecast_run(collection)
-        if latest_run.exists():
-            items_qs = latest_run
+        # Newest run that has a COG for *this* variable, so a run still
+        # ingesting elsewhere cannot park the variable as NO_DATA.
+        latest_ref = (
+            items_qs.filter(
+                reference_time__isnull=False,
+                assets__variable=variable,
+                assets__format=Asset.Format.COG,
+            )
+            .order_by("-reference_time")
+            .values_list("reference_time", flat=True)
+            .first()
+        )
+        if latest_ref is not None:
+            items_qs = items_qs.filter(reference_time=latest_ref)
     items_qs = items_qs.prefetch_related(cog_prefetch).only("time").order_by("time")
 
     rows = []

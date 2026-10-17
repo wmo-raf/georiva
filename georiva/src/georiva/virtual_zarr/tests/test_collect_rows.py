@@ -56,6 +56,22 @@ class CollectRowsTests(TestCase):
 
         self.assertEqual(times, [T0 + timedelta(hours=6), T0 + timedelta(hours=12)])
 
+    def test_newest_run_without_a_cog_for_this_variable_is_ignored(self):
+        self._item(0, 0)
+        self._item(6, 0)
+        # Newest run exists but has no COG for this variable yet.
+        Item.objects.create(
+            collection=self.collection,
+            time=T0 + timedelta(hours=6),
+            reference_time=T0 + timedelta(hours=6),
+        )
+        self.collection.is_forecast = True
+        self.collection.save()
+
+        times = [r.time for r in self._collect()]
+
+        self.assertEqual(times, [T0, T0 + timedelta(hours=6)])
+
     def test_observational_collection_keeps_every_item(self):
         self._item(0)
         self._item(6)
