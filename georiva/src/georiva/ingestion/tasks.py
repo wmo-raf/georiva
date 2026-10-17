@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.utils import timezone as dj_timezone
-from django_celery_beat.models import IntervalSchedule, PeriodicTask
+from django_celery_beat.models import IntervalSchedule
 
 from georiva.config.celery import app
 from georiva.core.storage import BucketType, storage
@@ -16,6 +16,7 @@ from georiva.events.context import use_context
 from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
 from georiva.ingestion.chains import context_for_arrival, context_for_revival
 from georiva.ingestion.models import FileIngestion, write_sweep_intervention
+from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -345,42 +346,31 @@ def close_quiet_run_ingestions(minutes: int = None):
 
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
-    try:
-        schedule_5min, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
-        schedule_1day, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.DAYS)
-        schedule_7days, _ = IntervalSchedule.objects.get_or_create(every=7, period=IntervalSchedule.DAYS)
-
-        PeriodicTask.objects.update_or_create(
-            name="georiva.ingestion.sweep_unprocessed",
-            defaults={
-                "task": "georiva.ingestion.tasks.sweep_unprocessed",
-                "interval": schedule_5min,
-                "enabled": True,
-            },
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.ingestion.cleanup_archives",
-            defaults={
-                "task": "georiva.ingestion.tasks.cleanup_archives",
-                "interval": schedule_1day,
-                "enabled": True,
-            },
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.ingestion.close_quiet_run_ingestions",
-            defaults={
-                "task": "georiva.ingestion.tasks.close_quiet_run_ingestions",
-                "interval": schedule_5min,
-                "enabled": True,
-            },
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.ingestion.prune_ingestion_logs",
-            defaults={
-                "task": "georiva.ingestion.tasks.prune_ingestion_logs",
-                "interval": schedule_7days,
-                "enabled": True,
-            },
-        )
-    except Exception as e:
-        logger.warning("Could not register periodic tasks: %s", e)
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                "georiva.ingestion.sweep_unprocessed",
+                "georiva.ingestion.tasks.sweep_unprocessed",
+                5,
+                IntervalSchedule.MINUTES,
+            ),
+            PeriodicSpec(
+                "georiva.ingestion.cleanup_archives",
+                "georiva.ingestion.tasks.cleanup_archives",
+                1,
+                IntervalSchedule.DAYS,
+            ),
+            PeriodicSpec(
+                "georiva.ingestion.close_quiet_run_ingestions",
+                "georiva.ingestion.tasks.close_quiet_run_ingestions",
+                5,
+                IntervalSchedule.MINUTES,
+            ),
+            PeriodicSpec(
+                "georiva.ingestion.prune_ingestion_logs",
+                "georiva.ingestion.tasks.prune_ingestion_logs",
+                7,
+                IntervalSchedule.DAYS,
+            ),
+        ]
+    )

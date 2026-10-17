@@ -16,6 +16,7 @@ from georiva.processing.constants import (
     RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
     RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
 )
+from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -23,23 +24,18 @@ logger = logging.getLogger(__name__)
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     """Register the periodic backfill sweep (mirror of sweep_unprocessed)."""
-    try:
-        from django_celery_beat.models import IntervalSchedule, PeriodicTask
+    from django_celery_beat.models import IntervalSchedule
 
-        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
-            every=5,
-            period=IntervalSchedule.MINUTES,
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.processing.sweep_derivations",
-            defaults={
-                "task": "georiva.processing.tasks.sweep_derivations",
-                "interval": schedule_5min,
-                "enabled": True,
-            },
-        )
-    except Exception as e:  # DB may be unavailable at import/finalize time
-        logger.debug("Skipped derivation sweep schedule setup: %s", e)
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                "georiva.processing.sweep_derivations",
+                "georiva.processing.tasks.sweep_derivations",
+                5,
+                IntervalSchedule.MINUTES,
+            )
+        ]
+    )
 
 
 @app.task(

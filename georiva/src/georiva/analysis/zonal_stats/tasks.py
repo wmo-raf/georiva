@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from georiva.config.celery import app
 from georiva.events.tasks import EntryTask, ReadSideTask
+from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -285,18 +286,16 @@ def _claim_redispatch(asset_id: int) -> bool:
 @app.on_after_finalize.connect
 def setup_zonal_stats_periodic_tasks(sender, **kwargs) -> None:
     """Register the two zonal-stats sweeps as periodic tasks (every 5 min)."""
-    try:
-        from django_celery_beat.models import IntervalSchedule, PeriodicTask
+    from django_celery_beat.models import IntervalSchedule
 
-        schedule, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
-        for name in ("sweep_stale_boundary_stats", "sweep_missing_boundary_stats"):
-            PeriodicTask.objects.update_or_create(
-                name=f"georiva.analysis.zonal_stats.{name}",
-                defaults={
-                    "task": f"georiva.analysis.zonal_stats.tasks.{name}",
-                    "interval": schedule,
-                    "enabled": True,
-                },
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                f"georiva.analysis.zonal_stats.{name}",
+                f"georiva.analysis.zonal_stats.tasks.{name}",
+                5,
+                IntervalSchedule.MINUTES,
             )
-    except Exception as exc:
-        logger.warning("Could not register zonal stats periodic task: %s", exc)
+            for name in ("sweep_stale_boundary_stats", "sweep_missing_boundary_stats")
+        ]
+    )
