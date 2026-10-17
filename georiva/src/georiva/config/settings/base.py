@@ -146,11 +146,21 @@ for plugin_dir in GEORIVA_PLUGIN_DIRS:
 # Derive each plugin's importable app module name from its contents (not its
 # folder name) and make it importable even when not pip-installed (dev bind-mounts).
 GEORIVA_PLUGIN_NAMES = []
+# App name -> checkout folder, so ``georiva_plugin_info.json`` (which sits at the
+# checkout root, beside ``src/``) can be found from the app name later.
+GEORIVA_PLUGIN_FOLDER_BY_APP = {}
 for _plugin_folder in GEORIVA_PLUGIN_FOLDERS:
     _path, _apps = _discover_plugin_apps(_plugin_folder)
     if _path and _path not in sys.path:
         sys.path.append(_path)
     GEORIVA_PLUGIN_NAMES.extend(_apps)
+    for _app in _apps:
+        GEORIVA_PLUGIN_FOLDER_BY_APP[_app] = str(_plugin_folder)
+
+# Turn missing required plugin env vars (``requires_env``) from a warning into an
+# error in ``manage.py check`` / migrate / runserver. Off by default: a hard fail
+# can wedge container startup.
+GEORIVA_STRICT_PLUGIN_ENV = env.bool("GEORIVA_STRICT_PLUGIN_ENV", default=False)
 
 if GEORIVA_PLUGIN_NAMES:
     print(f"Loaded GeoRiva plugins: {','.join(GEORIVA_PLUGIN_NAMES)}")

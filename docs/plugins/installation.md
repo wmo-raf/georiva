@@ -241,3 +241,4 @@ tag  = "1.0.0"
 | `GEORIVA_DEV_PLUGIN_DIR` | `/georiva/dev-plugins` | Dir for bind-mounted dev plugins; auto-added to `GEORIVA_PLUGIN_DIRS` when it exists |
 | `GEORIVA_PLUGIN_URLS` | _(empty)_ | Comma-separated tarball URLs to download and install at startup |
 | `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` | _(unset)_ | Set to `"true"` to skip all startup plugin installation (used in prod where plugins are baked in) |
+| `GEORIVA_STRICT_PLUGIN_ENV` | `false` | When `true`, a plugin's missing required `requires_env` variable is a `manage.py check` error instead of a warning |
