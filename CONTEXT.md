@@ -200,8 +200,10 @@ _Avoid_: processing, import, fetch (for this phase)
 ### Pipeline records
 
 **FetchRun**:
-The record of a single automated DataFeed execution. Created at the start of the run — before any files are fetched —
-to enable real-time monitoring. One `FetchRun` per DataFeed execution, covering all collections in that feed.
+The record of one collection's share of an automated DataFeed execution. Created at the start of the run — before any
+files are fetched — to enable real-time monitoring. One `FetchRun` per `(feed execution, collection)`: `LoaderJobType`
+loops the feed's collections and `Loader.run()` creates a `FetchRun` for each. It carries no collection FK, so the
+collection is recovered from `FetchedFile.file_path`'s third segment.
 Status: `running → completed / failed / cancelled`. Success vs partial outcome is derived from `FetchedFile` children,
 not stored on the run itself.
 _Avoid_: DataArrival, LoaderRun, DataFeedRun
@@ -234,6 +236,60 @@ when no Items are created. Summary fields populated on completion: `variables_di
 Items produced by a FileIngestion are found via `Item.source_file` (indexed, value: `"{bucket}:{file_path}"`) —
 correct for all formats, including GRIB/NetCDF multi-item files.
 _Avoid_: IngestionLog
+
+**RunIngestion**:
+The per-run record of one model run arriving into one collection — one row per `(collection, reference_time)`, forecast
+collections only (ADR 0026). Where `FileIngestion` is one *file* arriving, this is one *model run* arriving. Opens on the
+first `FileIngestion` reaching `completed` for that key, from inside `mark_completed` (the sole writer of `completed`,
+and a bulk `update()` that emits no `post_save`). Status: `open → closed`, and **back to `open`** on any later file for
+the same key, bumping `revision`. Closed by whichever signal its arrival route has, recorded in `closed_by`:
+`declared_set` (DataFeed — every key the Loader declared has arrived; exact, cannot close early), `upload_session`
+(every feeding `UploadSession` is closed and all its stored files have ingested), `quiet_period` (the safety net for
+drops and sweeps). Exposes `version` = `ref_epoch_seconds × 100 + revision`. Emits `run_ingestion_closed` /
+`run_ingestion_reopened` from `ingestion/domain_signals.py`.
+_Avoid_: cycle, ModelRun, RunArrival, DataArrival
+
+### Traceability
+
+**Domain event**:
+A durable, append-only, tenant-owned fact written at the moment a pipeline transition happens, in the same database
+transaction as the state change it describes (ADR 0030). The truth for *history*; the run rows stay the truth for
+*current state*.
+_Avoid_: event (bare), audit log, activity, history row
+
+**Run row**:
+A tracking record that is a lock and state machine — `FileIngestion`, `RunIngestion`, `FetchRun`, `DerivationRun` —
+overwritten in place. Authoritative for current state where it and an event disagree.
+_Avoid_: event, log
+
+**Correlation**:
+The id shared by everything one arrival set in motion. The first event of a chain sets it; downstream events copy it.
+_Avoid_: trace id, request id, chain id (in code)
+
+**Caused-by**:
+The pointer from a Domain event to the event that directly triggered it. Gives causality within a Correlation.
+_Avoid_: parent, trigger (for the pointer)
+
+**Actor**:
+Who or what caused the event: `user:<id>`, `celery`, `sweep:<name>` or `system:<name>`.
+_Avoid_: user (when it may be automation), source, author
+
+**Domain signal**:
+A Django signal other apps subscribe to for a pipeline transition (`run_ingestion_closed`, `unit_completed`). Fires after
+commit and carries the Domain event just written.
+_Avoid_: event, hook
+
+**Live update**:
+An ephemeral message published to the Redis channel behind the SSE activity stream. Never persisted. (Module
+`ingestion/live_updates.py`.)
+_Avoid_: event, SSE event, ingestion event
+
+**Bucket notification**:
+The object-storage message MinIO pushes onto a Redis list when an object lands, consumed by `minio-consumer` /
+`staging-consumer`.
+_Avoid_: MinIO event, webhook, event (bare)
+
+The Derived Product Definition's `event` trigger mode keeps its value; it means "on arrival", not a Domain event.
 
 ### Triggers
 
@@ -519,8 +575,10 @@ request line and the caller's own credentials (session cookie, `Authorization`, 
 address through `machine_plane.scope_of` — the inverse of the URL builders beside it — checks the org segment
 against the Host, and answers from the same `public()` / `visible_to()` vocabulary every other serving plane uses.
 Titiler and Martin gain no tenancy logic, which is the property it exists to preserve. Denials are 403 on the wire
-(all `auth_request` understands) and 404 to the caller; a broken key stays 401. Cached ~60s per
-collection-and-credential, so revocation lags on tiles and nowhere else. See ADR 0015.
+(all `auth_request` understands) and 404 to the caller; a broken key stays 401. Both carry an OWS
+ExceptionReport body on the WMTS KVP endpoint alone, whose clients parse nothing else, and nginx's own error page
+everywhere else. Cached ~60s per collection-and-credential, so revocation lags on tiles and nowhere else.
+See ADR 0015.
 _Avoid_: tile auth middleware, tile permission check, signed tile URL
 
 ### Styling
@@ -567,3 +625,58 @@ STAC Render extension (`renders`): the default style's render entry carries a ve
 the Render spec has no vocabulary for "served when unnamed" — and items reference render names without repeating the
 collection's colormaps. See ADR 0023.
 _Avoid_: style endpoint, style URL segment
+
+### Publication
+
+**Publication**:
+GeoRiva's data re-exported in a foreign reader's own format — the same data, laid out for a service that knows
+nothing about STAC, COGs or tiles. Not a tier and not a Derivation: nothing new is computed and no `Item` is
+produced, so it does not appear in any catalog. Lives on the `georiva-publications` bucket, normally under
+`{org}/{publication-slug}/` — a root that is also the tenancy boundary, because the reader is pointed at one
+organisation's prefix and cannot resolve outside it. A reader built to serve several organisations from one
+process is rooted instead at an **instance-wide** `{root}/` shared by every organisation, in which case the root
+is not a boundary and whatever answers requests owns that check. Written through `core.publishing.PublicationSink`;
+what a publication contains belongs to the plugin that publishes it, never to core. See ADR 0027 and its amendment.
+_Avoid_: export (as a model name), Published (that is the served STAC tier), publish (as a verb for Promotion)
+
+**Area key**:
+The name one publication answers to under an instance-wide publication root: `{org}.{slug}`, **one path segment**,
+the owning organisation carried in the name rather than in the path. Dot-separated because a nested key fails
+silently — met.no Forti's `GetGridInfo` splits every key on `/` and skips anything that is not exactly four parts,
+so `{org}/{slug}/{version}/{grid}/` loads a dataset with no grids and no error. The dot is also what keeps an area
+from colliding with the documents beside it under the same root: every area key contains one and `latest`, `config`
+and `status` do not. Because the key is a segment of every object written for that publication, renaming either half
+of it after a publish orphans everything already on the bucket — which is why a publication's slug is immutable once
+published. See ADR 0027's amendment.
+_Avoid_: area name, prefix (for the key alone), publication path
+
+**Model** (public forecast model):
+The name a consumer asks a point forecast by: `GET /api/forecast/{model}/?lat=&lon=`. It is `FortiPublication.slug`,
+prefilled from the catalog's slug — a `Catalog` is "a data source that produces multiple collections" (GFS, CHIRPS,
+ERA5) and its slug is already unique per organisation, which is exactly the scope a public model name needs. One
+model is one publication is one collection × one window; two are never blended, and a request names exactly one.
+Immutable once published, for the same reason `Organisation.slug` is: it is a segment of every storage key *and* the
+name a consumer's client has hard-coded. A model the caller may not see is absent from the listing and 404s on its
+own URL, so the endpoint cannot enumerate what a tenant publishes.
+_Avoid_: dataset, product, area (that is the storage-side name for the same thing), collection slug
+
+**Completion marker**:
+The object whose existence tells a foreign reader that a publication is ready, and the only signal it has —
+object stores have no transaction, and a listing mid-write looks like a listing of something small. **The engine
+writes markers last and the writer never writes them**: a marker that lands before its bytes is a reader loading a
+partial dataset with nothing anywhere reporting an error. Order matters between markers too — a dataset's own
+manifest before the pointer naming it as current. Enforced by the sink, not by the writer's discipline:
+`write()` refuses a declared marker path and `publish_markers()` refuses everything else. See ADR 0027.
+_Avoid_: ready file, sentinel, done marker
+
+**Build discipline**:
+The shared machinery for anything rebuilt from data that keeps arriving — a virtual-Zarr manifest over a variable's
+COGs, a publication over a collection's run. Six states (`pending → building → ready`, plus `stale`, `failed`,
+`no_data`), a lock claimed **at dispatch** in the same conditional UPDATE that decides to queue the build, a claim
+token that travels with the task so a copy whose claim was recycled stands down, lock expiry as the only crash
+recovery, an input fingerprint that skips an unchanged build, and a durable per-attempt log with retention. Lives in
+`core.build_discipline` as abstract models (`BuildDisciplinedModel`, `BuildAttemptLog`) plus `dispatch_build` /
+`sweep_builds`; grain-free, so a per-`Variable` and a per-`Collection` builder use the same base. Deliberately **not**
+a writer abstraction — no `BasePublisher`, no registry. `VirtualZarrManifest` is the shape it was extracted from and
+is not migrated onto it. See ADR 0027.
+_Avoid_: publisher framework, build pipeline, BasePublisher

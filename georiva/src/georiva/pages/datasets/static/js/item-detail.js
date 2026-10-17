@@ -87,7 +87,9 @@ class ItemDetailMap {
         this.currentBasemap = 'dark';
         this.currentVarSlug = config.activeVarSlug;
         this.layerMode = 'raster';
-        this.activeLevel = config.boundaryStatsLevels?.[0] ?? null;
+        // Only levels with rows for the current variable — the server rendered
+        // the control to match, so this agrees with the initial markup.
+        this.activeLevel = this._availableLevels()[0] ?? null;
         this.currentPalette = null;
 
         // EDR / parameters
@@ -527,16 +529,57 @@ class ItemDetailMap {
             btn.addEventListener('click', async () => {
                 const mode = btn.dataset.mode;
                 if (mode === this.layerMode) return;
-                this.layerMode = mode;
-
-                document.querySelectorAll('.gr-map-layer-btn').forEach(b => b.classList.remove('is-active'));
-                btn.classList.add('is-active');
-
-                const levelSel = document.getElementById('grLevelSelector');
-                if (levelSel) levelSel.style.display = mode === 'raster' ? 'none' : 'block';
-
+                this._setLayerMode(mode);
                 await this._applyLayerMode();
             });
+        });
+    }
+
+    // Move the switcher to a mode without going through a click — used when
+    // the variable changes under us and boundaries stop being an option.
+    _setLayerMode(mode) {
+        this.layerMode = mode;
+        document.querySelectorAll('.gr-map-layer-btn').forEach(b => {
+            b.classList.toggle('is-active', b.dataset.mode === mode);
+        });
+        const levelSel = document.getElementById('grLevelSelector');
+        if (levelSel) levelSel.style.display = mode === 'raster' ? 'none' : 'block';
+    }
+
+    // ── Boundary control availability ──────────────────────────────────────
+
+    /** Levels that actually have aggregates for the variable on screen. */
+    _availableLevels() {
+        return this.config.boundaryLevelsByVariable?.[this.currentVarSlug] ?? [];
+    }
+
+    /**
+     * Point the Boundaries control at what the current variable actually has:
+     * hide it where nothing was aggregated, drop pills for levels with no rows,
+     * and fall back to raster rather than strand the user on a mode that can
+     * only render an empty map.
+     */
+    _syncBoundaryControls() {
+        const levels = this._availableLevels();
+
+        const switcher = document.getElementById('grLayerSwitcher');
+        if (switcher) switcher.style.display = levels.length ? '' : 'none';
+
+        document.querySelectorAll('.gr-map-level-pill').forEach(pill => {
+            pill.style.display = levels.includes(parseInt(pill.dataset.level, 10)) ? '' : 'none';
+        });
+
+        if (!levels.length) {
+            this.activeLevel = null;
+            if (this.layerMode !== 'raster') this._setLayerMode('raster');
+            return;
+        }
+
+        // The variable may have stats, just not at the level we were showing.
+        if (!levels.includes(this.activeLevel)) this.activeLevel = levels[0];
+
+        document.querySelectorAll('.gr-map-level-pill').forEach(pill => {
+            pill.classList.toggle('is-active', parseInt(pill.dataset.level, 10) === this.activeLevel);
         });
     }
 
@@ -576,6 +619,7 @@ class ItemDetailMap {
                 url.searchParams.set('variable', slug);
                 history.replaceState(null, '', url.toString());
 
+                this._syncBoundaryControls();
                 await this._applyLayerMode();
 
                 if (this.tsPoint) await this._fetchAndRenderTimeseries(this.tsPoint.lat, this.tsPoint.lng);

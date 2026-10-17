@@ -15,11 +15,12 @@ logger = logging.getLogger(__name__)
 # Collection list API
 # =============================================================================
 
+
 def ingestion_dashboard_api(request):
     """
     Returns collections grouped under their parent Catalog with health roll-ups.
     """
-    from georiva.core.models import Catalog, Collection
+    from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestion
     from georiva.sources.models import DataFeedCollectionLink
 
@@ -40,9 +41,7 @@ def ingestion_dashboard_api(request):
     # nullable, so filtering on it would drop links whose feed has no catalog
     # and quietly report those collections as manual.
     automated_collection_ids = set(
-        DataFeedCollectionLink.objects
-        .filter(collection__in=collection_ids)
-        .values_list('collection_id', flat=True)
+        DataFeedCollectionLink.objects.filter(collection__in=collection_ids).values_list("collection_id", flat=True)
     )
 
     today = timezone.now().date()
@@ -53,8 +52,7 @@ def ingestion_dashboard_api(request):
     # this request already scoped. `collections__in` also subsumes the old
     # `collections__isnull=False`.
     recent_logs = (
-        FileIngestion.objects
-        .filter(created_at__date__gte=thirty_days_ago)
+        FileIngestion.objects.filter(created_at__date__gte=thirty_days_ago)
         .filter(collections__in=collection_ids)
         .values("collections", "status", "created_at")
         .order_by("created_at")
@@ -66,8 +64,7 @@ def ingestion_dashboard_api(request):
 
     latest_fi_by_collection = {}
     for fi in (
-        FileIngestion.objects
-        .filter(collections__in=collection_ids)
+        FileIngestion.objects.filter(collections__in=collection_ids)
         .values("collections", "status", "created_at")
         .order_by("collections", "-created_at")
         .distinct("collections")
@@ -109,14 +106,16 @@ def ingestion_dashboard_api(request):
     for catalog_pk, col_entries in collections_by_catalog.items():
         catalog = catalog_index[catalog_pk]
         cat_status, summary = _derive_catalog_status(col_entries)
-        result.append({
-            "id": catalog.pk,
-            "slug": catalog.slug,
-            "name": catalog.name,
-            "status": cat_status,
-            "summary": summary,
-            "collections": col_entries,
-        })
+        result.append(
+            {
+                "id": catalog.pk,
+                "slug": catalog.slug,
+                "name": catalog.name,
+                "status": cat_status,
+                "summary": summary,
+                "collections": col_entries,
+            }
+        )
 
     result.sort(key=lambda c: c["slug"])
     return JsonResponse({"catalogs": result})
@@ -136,19 +135,16 @@ def collection_ingestion_jobs_api(request, collection_id):
     so the frontend knows whether to keep polling.
     """
     from django.db.models import Case, IntegerField, When
-    
+
     from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestionJob
-    
-    collection = get_org_object_or_404(
-        request, Collection.objects.select_related("catalog"), pk=collection_id
-    )
-    
+
+    collection = get_org_object_or_404(request, Collection.objects.select_related("catalog"), pk=collection_id)
+
     active_states = ("pending", "started")
-    
+
     jobs = (
-        FileIngestionJob.objects
-        .filter(file_ingestion__collections=collection)
+        FileIngestionJob.objects.filter(file_ingestion__collections=collection)
         .annotate(
             _active=Case(
                 When(state__in=active_states, then=0),
@@ -159,7 +155,7 @@ def collection_ingestion_jobs_api(request, collection_id):
         .order_by("_active", "-created_at")
         .select_related("file_ingestion")[:50]
     )
-    
+
     result = []
     has_active = False
     for job in jobs:
@@ -167,20 +163,22 @@ def collection_ingestion_jobs_api(request, collection_id):
         if state in active_states:
             has_active = True
         fi = job.file_ingestion
-        result.append({
-            "id": job.pk,
-            "state": state,
-            "progress_percentage": job.get_cached_progress_percentage(),
-            "progress_state": job.get_cached_progress_state(),
-            "file_path": job.file_path,
-            "bucket": job.bucket,
-            "items_created": fi.items_created if fi else job.items_created,
-            "assets_created": fi.assets_created if fi else job.assets_created,
-            "error": job.error or "",
-            "created_at": job.created_at.isoformat(),
-            "updated_at": job.updated_at.isoformat(),
-        })
-    
+        result.append(
+            {
+                "id": job.pk,
+                "state": state,
+                "progress_percentage": job.get_cached_progress_percentage(),
+                "progress_state": job.get_cached_progress_state(),
+                "file_path": job.file_path,
+                "bucket": job.bucket,
+                "items_created": fi.items_created if fi else job.items_created,
+                "assets_created": fi.assets_created if fi else job.assets_created,
+                "error": job.error or "",
+                "created_at": job.created_at.isoformat(),
+                "updated_at": job.updated_at.isoformat(),
+            }
+        )
+
     return JsonResponse({"jobs": result, "has_active": has_active})
 
 
@@ -191,40 +189,36 @@ def collection_ingestion_logs_api(request, collection_id):
     """
     from georiva.core.models import Collection
     from georiva.ingestion.models import FileIngestion
-    
-    collection = get_org_object_or_404(
-        request, Collection.objects.select_related("catalog"), pk=collection_id
-    )
-    
-    logs = (
-        FileIngestion.objects
-        .filter(collections=collection)
-        .order_by(
-            # Failed records first, then most-recent-first within each group.
-            models.Case(
-                models.When(status=FileIngestion.Status.FAILED, then=0),
-                default=1,
-                output_field=models.IntegerField(),
-            ),
-            "-created_at",
-        )[:200]
-    )
-    
+
+    collection = get_org_object_or_404(request, Collection.objects.select_related("catalog"), pk=collection_id)
+
+    logs = FileIngestion.objects.filter(collections=collection).order_by(
+        # Failed records first, then most-recent-first within each group.
+        models.Case(
+            models.When(status=FileIngestion.Status.FAILED, then=0),
+            default=1,
+            output_field=models.IntegerField(),
+        ),
+        "-created_at",
+    )[:200]
+
     result = []
     for log in logs:
-        result.append({
-            "id": log.pk,
-            "status": log.status,
-            "file_path": log.file_path,
-            "reference_time": log.reference_time.isoformat() if log.reference_time else None,
-            "items_created": log.items_created,
-            "assets_created": log.assets_created,
-            "retry_count": log.retry_count,
-            "error": log.error or "",
-            "created_at": log.created_at.isoformat(),
-            "completed_at": log.completed_at.isoformat() if log.completed_at else None,
-        })
-    
+        result.append(
+            {
+                "id": log.pk,
+                "status": log.status,
+                "file_path": log.file_path,
+                "reference_time": log.reference_time.isoformat() if log.reference_time else None,
+                "items_created": log.items_created,
+                "assets_created": log.assets_created,
+                "retry_count": log.retry_count,
+                "error": log.error or "",
+                "created_at": log.created_at.isoformat(),
+                "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+            }
+        )
+
     return JsonResponse({"logs": result})
 
 
@@ -235,43 +229,38 @@ def collection_fetch_runs_api(request, collection_id):
     """
     from georiva.core.models import Collection
     from georiva.sources.models import DataFeedCollectionLink, FetchRun
-    
+
     get_org_object_or_404(request, Collection, pk=collection_id)
-    
+
     feed_ids = list(
-        DataFeedCollectionLink.objects
-        .filter(collection_id=collection_id)
-        .values_list("data_feed_id", flat=True)
+        DataFeedCollectionLink.objects.filter(collection_id=collection_id).values_list("data_feed_id", flat=True)
     )
-    
-    runs = (
-        FetchRun.objects
-        .filter(data_feed_id__in=feed_ids)
-        .select_related("data_feed")
-        .order_by("-started_at")[:100]
-    )
-    
+
+    runs = FetchRun.objects.filter(data_feed_id__in=feed_ids).select_related("data_feed").order_by("-started_at")[:100]
+
     result = []
     for run in runs:
         duration = None
         if run.finished_at and run.started_at:
             duration = (run.finished_at - run.started_at).total_seconds()
-        
+
         errors = [run.error_message] if run.error_message else []
-        
-        result.append({
-            "id": run.pk,
-            "status": run.status,
-            "started_at": run.started_at.isoformat(),
-            "duration_seconds": duration,
-            "data_feed_name": run.data_feed.name,
-            "files_fetched": run.files_fetched,
-            "files_skipped": run.files_skipped,
-            "files_failed": run.files_failed,
-            "bytes_transferred": run.bytes_transferred,
-            "errors": errors,
-        })
-    
+
+        result.append(
+            {
+                "id": run.pk,
+                "status": run.status,
+                "started_at": run.started_at.isoformat(),
+                "duration_seconds": duration,
+                "data_feed_name": run.data_feed.name,
+                "files_fetched": run.files_fetched,
+                "files_skipped": run.files_skipped,
+                "files_failed": run.files_failed,
+                "bytes_transferred": run.bytes_transferred,
+                "errors": errors,
+            }
+        )
+
     return JsonResponse({"fetch_runs": result})
 
 
@@ -285,22 +274,12 @@ def collection_upload_sessions_api(request, collection_id):
 
     get_org_object_or_404(request, Collection, pk=collection_id)
 
-    fi_paths = (
-        FileIngestion.objects
-        .filter(collections=collection_id)
-        .values_list("file_path", flat=True)
-    )
+    fi_paths = FileIngestion.objects.filter(collections=collection_id).values_list("file_path", flat=True)
 
-    session_ids = (
-        UploadedFile.objects
-        .filter(file_path__in=fi_paths)
-        .values_list("session_id", flat=True)
-        .distinct()
-    )
+    session_ids = UploadedFile.objects.filter(file_path__in=fi_paths).values_list("session_id", flat=True).distinct()
 
     sessions = (
-        UploadSession.objects
-        .filter(pk__in=session_ids)
+        UploadSession.objects.filter(pk__in=session_ids)
         .select_related("user")
         .prefetch_related("uploaded_files")
         .order_by("-started_at")[:100]
@@ -313,17 +292,19 @@ def collection_upload_sessions_api(request, collection_id):
             duration = (session.completed_at - session.started_at).total_seconds()
 
         files = list(session.uploaded_files.all())
-        result.append({
-            "id": session.pk,
-            "status": session.status,
-            "started_at": session.started_at.isoformat(),
-            "completed_at": session.completed_at.isoformat() if session.completed_at else None,
-            "duration_seconds": duration,
-            "files_count": len(files),
-            "files_stored": sum(1 for f in files if f.status == "stored"),
-            "files_failed": sum(1 for f in files if f.status == "failed"),
-            "uploaded_by": session.user.username if session.user else None,
-        })
+        result.append(
+            {
+                "id": session.pk,
+                "status": session.status,
+                "started_at": session.started_at.isoformat(),
+                "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+                "duration_seconds": duration,
+                "files_count": len(files),
+                "files_stored": sum(1 for f in files if f.status == "stored"),
+                "files_failed": sum(1 for f in files if f.status == "failed"),
+                "uploaded_by": session.user.username if session.user else None,
+            }
+        )
 
     return JsonResponse({"upload_sessions": result})
 
@@ -331,40 +312,41 @@ def collection_upload_sessions_api(request, collection_id):
 def upload_session_status_api(request, session_id):
     """Returns {id, status, files} for a single UploadSession."""
     from georiva.ingestion.models import UploadSession
-    
-    session = get_org_object_or_404(
-        request, UploadSession.objects.prefetch_related('uploaded_files'), pk=session_id
+
+    session = get_org_object_or_404(request, UploadSession.objects.prefetch_related("uploaded_files"), pk=session_id)
+
+    return JsonResponse(
+        {
+            "id": session.pk,
+            "status": session.status,
+            "files": [
+                {
+                    "id": uf.pk,
+                    "status": uf.status,
+                    "file_path": uf.file_path,
+                    "error": uf.error,
+                }
+                for uf in session.uploaded_files.all()
+            ],
+        }
     )
-    
-    return JsonResponse({
-        "id": session.pk,
-        "status": session.status,
-        "files": [
-            {
-                "id": uf.pk,
-                "status": uf.status,
-                "file_path": uf.file_path,
-                "error": uf.error,
-            }
-            for uf in session.uploaded_files.all()
-        ],
-    })
 
 
 # =============================================================================
 # Helpers
 # =============================================================================
 
+
 def _build_sparkline(logs, today):
     daily = defaultdict(lambda: {"success": 0, "failed": 0})
-    
+
     for log in logs:
         d = log["created_at"].date()
         if log["status"] == "completed":
             daily[d]["success"] += 1
         elif log["status"] == "failed":
             daily[d]["failed"] += 1
-    
+
     sparkline = []
     for i in range(29, -1, -1):
         d = today - timedelta(days=i)
@@ -376,7 +358,7 @@ def _build_sparkline(logs, today):
         else:
             status = "failed"
         sparkline.append({"date": str(d), "status": status})
-    
+
     return sparkline
 
 

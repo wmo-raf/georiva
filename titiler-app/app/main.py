@@ -4,12 +4,9 @@ configure_logging()
 
 import logging
 
-from typing import Optional
-
 from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
 from rasterio.errors import RasterioIOError
-from rio_tiler.io import Reader
 from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -22,6 +19,8 @@ from app.dependencies import (
     SemanticTileConfig,
 )
 from app.middleware import RequestLoggingMiddleware
+from app.reader import ResilientReader, is_not_found
+from app.wmts import rest_router as wmts_rest_router
 from app.wmts import router as wmts_router
 
 logger = logging.getLogger(__name__)
@@ -38,6 +37,7 @@ logger = logging.getLogger(__name__)
 TILE_ROUTE_PREFIX = "/{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
 
 cog = TilerFactory(
+    reader=ResilientReader,
     path_dependency=SemanticPathParams,
     colormap_dependency=SemanticColorMap,
     process_dependency=SemanticRescale,
@@ -61,21 +61,29 @@ app.add_middleware(
 )
 
 
+#: No cache may hold on to a storage failure. GDAL's own copy of one is dropped
+#: by the reader before a request ever reaches this handler (#400); this says
+#: the same thing to nginx and to the browser, so that a request made a second
+#: after the COG lands is answered from storage rather than from a record of
+#: the moment before it existed.
+_NEVER_CACHED = {"Cache-Control": "no-store"}
+
+
 @app.exception_handler(RasterioIOError)
 async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> JSONResponse:
     msg = str(exc)
-    # MinIO answers a missing object with HTTP 404; a local-filesystem backend
-    # says ENOENT. Both mean the same thing: no asset at this time/reftime.
-    if "404" in msg or "HTTP response code: 404" in msg or "No such file or directory" in msg:
+    if is_not_found(exc):
         logger.warning("COG not found: %s", request.url)
         return JSONResponse(
             status_code=404,
             content={"detail": "File not found in storage — check that the time/reftime parameters are correct."},
+            headers=_NEVER_CACHED,
         )
     logger.error("RasterioIOError: %s | path: %s", msg, request.url)
     return JSONResponse(
         status_code=502,
         content={"detail": f"Storage read error: {msg}"},
+        headers=_NEVER_CACHED,
     )
 
 
@@ -89,17 +97,30 @@ app.include_router(
 #: the org is carried, never resolved (ADR 0013).
 app.include_router(wmts_router)
 
+#: RESTful GetFeatureInfo (#379), on the same prefix the tiles are on: the
+#: identify address is the tile address with the clicked pixel appended, which
+#: is why it mounts here rather than under the KVP endpoint. Two segments
+#: deeper than the deepest route the factory registers, so it shadows none of
+#: them, and the auth gate scopes it by the four segments it already reads.
+app.include_router(wmts_rest_router, prefix=TILE_ROUTE_PREFIX)
+
 
 # ---------------------------------------------------------------------------
 # Encoded texture (ADR 0021)
 # ---------------------------------------------------------------------------
+
 
 @app.get(TILE_ROUTE_PREFIX + "/encoded-preview.png")
 def encoded_preview(
     src_path: str = Depends(SemanticPathParams),
     tile_config: dict = Depends(SemanticTileConfig),
     max_size: int = Query(4096, ge=1, description="Cap on the longest image side (native grid if smaller)"),
-    v: Optional[str] = Query(None, description="Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"),
+    v: str | None = Query(
+        None,
+        description=(
+            "Render-config version token; varies the URL so caches never serve a texture scaled to a superseded range"
+        ),
+    ),
 ) -> Response:
     """The whole extent as one value-encoded texture: pixel = rescale(value, vmin→vmax, 0→255).
 
@@ -110,7 +131,7 @@ def encoded_preview(
     this service and exists only to key caches. The immutable cache header is
     safe for exactly that reason: a range change arrives as a different URL.
     """
-    with Reader(src_path) as src:
+    with ResilientReader(src_path) as src:
         img = src.preview(max_size=max_size)
 
     img.rescale(in_range=((tile_config["vmin"], tile_config["vmax"]),))
@@ -120,7 +141,7 @@ def encoded_preview(
         media_type="image/png",
         headers={
             "Cache-Control": "public, max-age=31536000, immutable",
-            "X-Image-Unscale": f'{tile_config["vmin"]},{tile_config["vmax"]}',
+            "X-Image-Unscale": f"{tile_config['vmin']},{tile_config['vmax']}",
             "X-Image-Bounds": ",".join(str(b) for b in img.bounds) if img.bounds else "",
         },
     )

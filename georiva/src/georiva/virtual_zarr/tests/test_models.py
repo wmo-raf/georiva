@@ -6,7 +6,7 @@ bucket) instead of a kerchunk JSON key.  Django fields are derived caches;
 the repo's commit metadata is the source of truth (design decision 5).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.test import TestCase
 
@@ -14,7 +14,7 @@ from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.organisations.testing import make_organisation
 from georiva.virtual_zarr.models import VirtualZarrManifest
 
-UTC = timezone.utc
+UTC = UTC
 
 
 class VirtualZarrManifestTests(TestCase):
@@ -22,23 +22,27 @@ class VirtualZarrManifestTests(TestCase):
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="CHIRPS", slug="chirps", file_format="geotiff",
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Monthly", slug="chirps-monthly",
+            catalog=self.catalog,
+            name="Monthly",
+            slug="chirps-monthly",
         )
-        self.unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        self.unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precipitation",
-            name="Precipitation", unit=self.unit, value_min=0, value_max=500,
+            collection=self.collection,
+            slug="precipitation",
+            name="Precipitation",
+            unit=self.unit,
+            value_min=0,
+            value_max=500,
         )
 
     def _manifest(self, **kwargs) -> VirtualZarrManifest:
-        return VirtualZarrManifest.objects.create(
-            variable=self.variable, **kwargs
-        )
+        return VirtualZarrManifest.objects.create(variable=self.variable, **kwargs)
 
     # -- repo path derivation ------------------------------------------------
 
@@ -84,9 +88,7 @@ class VirtualZarrManifestTests(TestCase):
         )
         manifest.refresh_from_db()
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.READY)
-        self.assertEqual(
-            manifest.repo_path, "kenya/chirps/chirps-monthly/precipitation/"
-        )
+        self.assertEqual(manifest.repo_path, "kenya/chirps/chirps-monthly/precipitation/")
         self.assertEqual(manifest.item_count, 6)
         self.assertEqual(manifest.time_start, t0)
         self.assertEqual(manifest.time_end, t1)
@@ -102,12 +104,10 @@ class VirtualZarrManifestTests(TestCase):
         self.assertEqual(manifest.status, VirtualZarrManifest.Status.PENDING)
 
         for status in (
-                VirtualZarrManifest.Status.READY,
-                VirtualZarrManifest.Status.NO_DATA,
+            VirtualZarrManifest.Status.READY,
+            VirtualZarrManifest.Status.NO_DATA,
         ):
-            VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
-                status=status
-            )
+            VirtualZarrManifest.objects.filter(pk=manifest.pk).update(status=status)
             manifest.mark_stale()
             manifest.refresh_from_db()
             self.assertEqual(manifest.status, VirtualZarrManifest.Status.STALE)
@@ -118,7 +118,8 @@ class VirtualZarrManifestTests(TestCase):
         manifest = self._manifest()
         VirtualZarrManifest.objects.filter(pk=manifest.pk).update(
             status=VirtualZarrManifest.Status.BUILDING,
-            locked_by="celery-x", error="boom",
+            locked_by="celery-x",
+            error="boom",
         )
         manifest.mark_no_data()
         manifest.refresh_from_db()

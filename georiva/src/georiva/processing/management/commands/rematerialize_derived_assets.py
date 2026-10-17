@@ -22,6 +22,7 @@ Usage:
     georiva rematerialize_derived_assets --collection precip-anomaly
     georiva rematerialize_derived_assets --dry-run            # report only
 """
+
 import logging
 
 import numpy as np
@@ -51,7 +52,8 @@ class Command(BaseCommand):
         parser.add_argument("--catalog", default=None, help="Catalog slug filter")
         parser.add_argument("--collection", default=None, help="Collection slug filter")
         parser.add_argument(
-            "--dry-run", action="store_true",
+            "--dry-run",
+            action="store_true",
             help="Read and report only — write nothing.",
         )
 
@@ -63,8 +65,7 @@ class Command(BaseCommand):
         from georiva.processing.engine import catalog_clipper
 
         items = (
-            Item.objects
-            .filter(properties__has_key="derivation")
+            Item.objects.filter(properties__has_key="derivation")
             .select_related("collection__catalog")
             .order_by("collection_id", "time")
         )
@@ -75,8 +76,8 @@ class Command(BaseCommand):
 
         dry_run = options["dry_run"]
         materializer = AssetMaterializer(AssetWriter(storage.assets))
-        clippers = {}          # collection_id -> BoundaryClipper | None
-        observed = {}          # variable pk -> {"variable", "min", "max", "n"}
+        clippers = {}  # collection_id -> BoundaryClipper | None
+        observed = {}  # variable pk -> {"variable", "min", "max", "n"}
         done = failed = 0
 
         for item in items.iterator():
@@ -87,7 +88,8 @@ class Command(BaseCommand):
 
             cogs = list(
                 item.assets.filter(format=Asset.Format.COG).select_related(
-                    "variable", "variable__unit",
+                    "variable",
+                    "variable__unit",
                 )
             )
             if not cogs:
@@ -130,9 +132,9 @@ class Command(BaseCommand):
                 item.bounds, item.width, item.height = item_grid
                 item.save(update_fields=["bounds", "width", "height"])
 
-        self.stdout.write(self.style.SUCCESS(
-            f"{'Scanned' if dry_run else 'Rematerialized'} {done} asset(s), {failed} failure(s)."
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(f"{'Scanned' if dry_run else 'Rematerialized'} {done} asset(s), {failed} failure(s).")
+        )
         self._report_ranges(observed)
 
     def _track_range(self, observed, variable, data):

@@ -33,6 +33,7 @@ naming a rule of its own: pages come out narrowed to this organisation's tree
 and log entries to the entries about them, because that is what those models
 declare, not because this module knows anything about trees.
 """
+
 from django.conf import settings
 from django.db.models import Max
 from wagtail.admin.views.home import (
@@ -99,9 +100,7 @@ class OrgScopedLockedPagesPanel(LockedPagesPanel):
 
     def get_context_data(self, parent_context):
         context = super().get_context_data(parent_context)
-        context["locked_pages"] = scope_rows(
-            parent_context["request"], context["locked_pages"]
-        )
+        context["locked_pages"] = scope_rows(parent_context["request"], context["locked_pages"])
         return context
 
 
@@ -120,8 +119,7 @@ class OrgScopedUserObjectsInWorkflowModerationPanel(UserObjectsInWorkflowModerat
         context = super().get_context_data(parent_context)
         request = parent_context["request"]
         context["workflow_states"] = [
-            state for state in context["workflow_states"]
-            if belongs_to_active_org(request, state.content_object)
+            state for state in context["workflow_states"] if belongs_to_active_org(request, state.content_object)
         ]
         return context
 
@@ -132,10 +130,7 @@ class OrgScopedWorkflowObjectsToModeratePanel(WorkflowObjectsToModeratePanel):
     def get_context_data(self, parent_context):
         context = super().get_context_data(parent_context)
         request = parent_context["request"]
-        context["states"] = [
-            state for state in context["states"]
-            if belongs_to_active_org(request, state["obj"])
-        ]
+        context["states"] = [state for state in context["states"] if belongs_to_active_org(request, state["obj"])]
         return context
 
 

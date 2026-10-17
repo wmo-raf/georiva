@@ -1,0 +1,25 @@
+{% load i18n %}
+{% comment %}
+    One event as a row. Rendered from a georiva.events.history.HistoryRow, so the History
+    panel, the failures panel, the Trace page and the unattributed listing all share it.
+{% endcomment %}
+<li class="gr-history__row gr-history__row--{{ row.outcome_class }}">
+    <details>
+        <summary>
+            <span class="gr-history__when">{{ row.occurred_at|date:"Y-m-d H:i:s" }}</span>
+            <span class="gr-history__type">{{ row.type_label }}</span>
+            <span class="gr-history__summary">{{ row.summary }}</span>
+            <span class="gr-history__actor">{{ row.actor }}</span>
+        </summary>
+        {% if row.items %}
+            <dl class="gr-history__facts">
+                {% for label, value in row.items %}
+                    <dt>{{ label }}</dt>
+                    <dd>{{ value }}</dd>
+                {% endfor %}
+            </dl>
+        {% endif %}
+        {% if row.subject_url %}<a class="gr-history__timeline" href="{{ row.subject_url }}">{% trans "Open" %}</a>{% endif %}
+        {% if row.timeline_url %}<a class="gr-history__timeline" href="{{ row.timeline_url }}">{% trans "View timeline" %}</a>{% endif %}
+    </details>
+</li>

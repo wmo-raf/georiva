@@ -9,6 +9,7 @@ resolver (InputRef -> ResolvedInput) is tested in the processing app.
 Mirrors the validation style of sources/collection_definitions.py's
 CollectionVariable.
 """
+
 from django.test import SimpleTestCase
 
 from georiva.core.derived_products import (
@@ -22,18 +23,14 @@ from georiva.core.derived_products import (
 class InputRefTests(SimpleTestCase):
     def test_staging_and_published_tiers_are_accepted(self):
         for tier in ("staging", "published"):
-            self.assertEqual(
-                InputRef(role="value", collection="rainfall", tier=tier).tier, tier
-            )
+            self.assertEqual(InputRef(role="value", collection="rainfall", tier=tier).tier, tier)
 
     def test_unknown_tier_is_rejected(self):
         with self.assertRaises(ValueError):
             InputRef(role="value", collection="rainfall", tier="archive")
 
     def test_required_defaults_to_true(self):
-        self.assertTrue(
-            InputRef(role="value", collection="rainfall", tier="staging").required
-        )
+        self.assertTrue(InputRef(role="value", collection="rainfall", tier="staging").required)
 
     def test_empty_role_or_collection_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -63,8 +60,10 @@ class OutputRefTests(SimpleTestCase):
 
     def test_display_metadata_is_settable(self):
         ref = OutputRef(
-            role="climatology", collection="rainfall-normals",
-            title="Rainfall normals", description="1991–2020 baseline.",
+            role="climatology",
+            collection="rainfall-normals",
+            title="Rainfall normals",
+            description="1991–2020 baseline.",
             visibility="internal",
         )
         self.assertEqual(ref.title, "Rainfall normals")
@@ -73,8 +72,7 @@ class OutputRefTests(SimpleTestCase):
 
     def test_unknown_visibility_is_rejected(self):
         with self.assertRaises(ValueError):
-            OutputRef(role="anomaly", collection="rainfall-anomaly",
-                      visibility="secret")
+            OutputRef(role="anomaly", collection="rainfall-anomaly", visibility="secret")
 
 
 def _definition(**overrides):
@@ -133,9 +131,7 @@ class DerivedProductDefinitionTests(SimpleTestCase):
     def test_depends_on_accepts_declared_extras(self):
         # Non-data-flow dependencies the tier-aware rule can't infer are declared
         # explicitly; the chain module unions them with the inferred edges.
-        self.assertEqual(
-            _definition(depends_on=("climatology",)).depends_on, ("climatology",)
-        )
+        self.assertEqual(_definition(depends_on=("climatology",)).depends_on, ("climatology",))
 
     def test_empty_depends_on_entry_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -149,11 +145,12 @@ class DerivedProductDefinitionTests(SimpleTestCase):
         # The dependency graph is computable from the declaration alone — no DB,
         # no recipe execution — so the chain UI and readiness can be built ahead
         # of any run.
-        definition = _definition(inputs=(
-            InputRef(role="value", collection="rainfall", tier="staging"),
-            InputRef(role="normals", collection="rainfall-normals",
-                     tier="published", required=False),
-        ))
+        definition = _definition(
+            inputs=(
+                InputRef(role="value", collection="rainfall", tier="staging"),
+                InputRef(role="normals", collection="rainfall-normals", tier="published", required=False),
+            )
+        )
 
         self.assertEqual(
             definition.dependency_edges(),
@@ -171,8 +168,7 @@ class ValidateConfigTests(SimpleTestCase):
     def test_fills_defaults_for_missing_keys(self):
         definition = self._definition_with_schema(
             ConfigField(key="min_years", type="int", default=30),
-            ConfigField(key="quantity", type="choice",
-                        choices=("anomaly", "value"), default="anomaly"),
+            ConfigField(key="quantity", type="choice", choices=("anomaly", "value"), default="anomaly"),
         )
 
         cleaned = definition.validate_config({})
@@ -228,13 +224,17 @@ class ConfigFieldTests(SimpleTestCase):
     def test_choice_default_must_be_among_choices(self):
         with self.assertRaises(ValueError):
             ConfigField(
-                key="quantity", type="choice",
-                choices=("anomaly", "value"), default="trend",
+                key="quantity",
+                type="choice",
+                choices=("anomaly", "value"),
+                default="trend",
             )
 
     def test_choice_default_within_choices_is_accepted(self):
         field = ConfigField(
-            key="quantity", type="choice",
-            choices=("anomaly", "value"), default="anomaly",
+            key="quantity",
+            type="choice",
+            choices=("anomaly", "value"),
+            default="anomaly",
         )
         self.assertEqual(field.default, "anomaly")

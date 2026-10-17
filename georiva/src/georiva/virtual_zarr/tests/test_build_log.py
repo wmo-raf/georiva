@@ -19,17 +19,23 @@ class BuildLogTestCase(TestCase):
         self.organisation = make_organisation()
         self.catalog = Catalog.objects.create(
             organisation=self.organisation,
-            name="CHIRPS", slug="chirps", file_format="geotiff",
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
         )
         self.collection = Collection.objects.create(
-            catalog=self.catalog, name="Monthly", slug="chirps-monthly",
+            catalog=self.catalog,
+            name="Monthly",
+            slug="chirps-monthly",
         )
-        self.unit, _ = Unit.objects.get_or_create(
-            name="Millimetre", defaults={"symbol": "mm"}
-        )
+        self.unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="precipitation",
-            name="Precipitation", unit=self.unit, value_min=0, value_max=500,
+            collection=self.collection,
+            slug="precipitation",
+            name="Precipitation",
+            unit=self.unit,
+            value_min=0,
+            value_max=500,
         )
         self.manifest = VirtualZarrManifest.objects.create(
             variable=self.variable,
@@ -53,9 +59,7 @@ class BuildLogModelTests(BuildLogTestCase):
     def test_ordering_is_latest_first(self):
         older = self._log(age=timedelta(hours=2))
         newer = self._log()
-        self.assertEqual(
-            list(VirtualZarrBuildLog.objects.all()), [newer, older]
-        )
+        self.assertEqual(list(VirtualZarrBuildLog.objects.all()), [newer, older])
 
     def test_prune_expired_removes_only_rows_past_retention(self):
         expired = self._log(age=VirtualZarrBuildLog.RETENTION + timedelta(days=1))
@@ -79,9 +83,7 @@ class BuildTaskNoDataLogTests(BuildLogTestCase):
         build_virtual_zarr_manifest.apply(args=[self.manifest.pk])
 
         self.manifest.refresh_from_db()
-        self.assertEqual(
-            self.manifest.status, VirtualZarrManifest.Status.NO_DATA
-        )
+        self.assertEqual(self.manifest.status, VirtualZarrManifest.Status.NO_DATA)
         self.assertEqual(self.manifest.error, "")
 
         log = self.manifest.build_logs.get()
@@ -116,12 +118,8 @@ class GcPruneTests(BuildLogTestCase):
 
         # Blank repo_path keeps the manifest out of the per-repo GC loop, so
         # this exercises pruning without needing MinIO.
-        VirtualZarrManifest.objects.filter(pk=self.manifest.pk).update(
-            repo_path=""
-        )
-        expired = self._log(
-            age=VirtualZarrBuildLog.RETENTION + timedelta(days=1)
-        )
+        VirtualZarrManifest.objects.filter(pk=self.manifest.pk).update(repo_path="")
+        expired = self._log(age=VirtualZarrBuildLog.RETENTION + timedelta(days=1))
         kept = self._log()
 
         gc_virtual_zarr_repos.apply()

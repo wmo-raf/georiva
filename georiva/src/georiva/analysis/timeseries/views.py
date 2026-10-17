@@ -37,10 +37,7 @@ logger = logging.getLogger(__name__)
 
 def _series_to_data(series) -> list[dict]:
     """Convert a pandas Series to the [{time, value}] response format."""
-    return [
-        {"time": ts.isoformat() + "Z", "value": None if v != v else float(v)}
-        for ts, v in series.items()
-    ]
+    return [{"time": ts.isoformat() + "Z", "value": None if v != v else float(v)} for ts, v in series.items()]
 
 
 class PointTimeseriesView(APIView):
@@ -56,24 +53,25 @@ class PointTimeseriesView(APIView):
 
     Returns the full time series for the nearest grid cell to (lat, lon).
     """
-    
+
     def get(self, request: Request) -> Response:
         serializer = PointRequestSerializer(
-            data=request.query_params, context={"request": request},
+            data=request.query_params,
+            context={"request": request},
         )
         if not serializer.is_valid():
             return Response(
                 serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         data = serializer.validated_data
         variable = data["variable"]
         lat = data["lat"]
         lon = data["lon"]
         time_start = data.get("time_start")
         time_end = data.get("time_end")
-        
+
         try:
             service = TimeseriesService(internal=True)
             series = service.point(
@@ -91,13 +89,15 @@ class PointTimeseriesView(APIView):
         except Exception as exc:
             logger.exception(
                 "Point timeseries failed for %s @ (%.4f, %.4f)",
-                variable.slug, lat, lon,
+                variable.slug,
+                lat,
+                lon,
             )
             return Response(
                 {"detail": "Timeseries extraction failed.", "error": str(exc)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        
+
         payload = {
             "variable": variable.slug,
             "units": variable.unit.symbol if variable.unit else "",
@@ -108,7 +108,7 @@ class PointTimeseriesView(APIView):
             "count": len(series),
             "data": _series_to_data(series),
         }
-        
+
         return Response(
             PointResponseSerializer(payload).data,
             status=status.HTTP_200_OK,
@@ -131,24 +131,25 @@ class AreaTimeseriesView(APIView):
     Runs synchronously.  For large areas or long time ranges, wrap this
     in a Celery task and return a task_id instead (see tasks.py).
     """
-    
+
     def post(self, request: Request) -> Response:
         serializer = AreaRequestSerializer(
-            data=request.data, context={"request": request},
+            data=request.data,
+            context={"request": request},
         )
         if not serializer.is_valid():
             return Response(
                 serializer.errors,
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         data = serializer.validated_data
         variable = data["variable"]
         geometry = data["geometry"]
         aggregation = data["aggregation"]
         time_start = data.get("time_start")
         time_end = data.get("time_end")
-        
+
         try:
             service = TimeseriesService(internal=True)
             series = service.area(
@@ -169,14 +170,12 @@ class AreaTimeseriesView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as exc:
-            logger.exception(
-                "Area timeseries failed for %s", variable.slug
-            )
+            logger.exception("Area timeseries failed for %s", variable.slug)
             return Response(
                 {"detail": "Timeseries extraction failed.", "error": str(exc)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        
+
         payload = {
             "variable": variable.slug,
             "units": variable.unit.symbol if variable.unit else "",
@@ -186,7 +185,7 @@ class AreaTimeseriesView(APIView):
             "count": len(series),
             "data": _series_to_data(series),
         }
-        
+
         return Response(
             AreaResponseSerializer(payload).data,
             status=status.HTTP_200_OK,

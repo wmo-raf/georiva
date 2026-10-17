@@ -13,6 +13,7 @@ An event whose organisation cannot be determined is published with ``org: None``
 and reaches nobody's stream. That is deliberate: an unattributable event is not
 one to broadcast to everybody.
 """
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -21,27 +22,32 @@ from georiva.core.storage.path_resolution import org_slug_from_key
 
 @receiver(post_save, sender="georivaingestion.FileIngestion")
 def _file_ingestion_post_save(sender, instance, created, update_fields, **kwargs):
-    from georiva.ingestion.events import publish_event
+    from georiva.ingestion.live_updates import publish_update
+
     org = org_slug_from_key(instance.file_path)
     if created:
-        publish_event({
-            "type": "file_ingestion.created",
-            "org": org,
-            "id": instance.pk,
-            "status": instance.status,
-            "bucket": instance.bucket,
-            "file_path": instance.file_path,
-            "created_at": instance.created_at.isoformat() if instance.created_at else None,
-        })
+        publish_update(
+            {
+                "type": "file_ingestion.created",
+                "org": org,
+                "id": instance.pk,
+                "status": instance.status,
+                "bucket": instance.bucket,
+                "file_path": instance.file_path,
+                "created_at": instance.created_at.isoformat() if instance.created_at else None,
+            }
+        )
         return
     if update_fields is None or "status" not in update_fields:
         return
-    publish_event({
-        "type": "file_ingestion.status_changed",
-        "org": org,
-        "id": instance.pk,
-        "status": instance.status,
-    })
+    publish_update(
+        {
+            "type": "file_ingestion.status_changed",
+            "org": org,
+            "id": instance.pk,
+            "status": instance.status,
+        }
+    )
 
 
 @receiver(post_save, sender="georivaingestion.FileIngestionJob")
@@ -50,10 +56,13 @@ def _file_ingestion_job_state_changed(sender, instance, created, update_fields, 
         return
     if update_fields is None or "state" not in update_fields:
         return
-    from georiva.ingestion.events import publish_event
-    publish_event({
-        "type": "job.state_changed",
-        "org": org_slug_from_key(instance.file_path),
-        "id": instance.pk,
-        "state": instance.state,
-    })
+    from georiva.ingestion.live_updates import publish_update
+
+    publish_update(
+        {
+            "type": "job.state_changed",
+            "org": org_slug_from_key(instance.file_path),
+            "id": instance.pk,
+            "state": instance.state,
+        }
+    )

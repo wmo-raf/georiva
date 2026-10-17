@@ -3,12 +3,16 @@ from django.urls import reverse
 
 
 def ingestion_activity_feed(request):
-    return render(request, "georivaingestion/activity_feed.html", {
-        # Rendered by the slim header via wagtailadmin/generic/base.html.
-        "breadcrumbs_items": [
-            {"url": reverse("wagtailadmin_home"), "label": "Home"},
-            {"url": None, "label": "Ingestion Activity"},
-        ],
-        "header_title": "Ingestion Activity",
-        "header_icon": "history",
-    })
+    return render(
+        request,
+        "georivaingestion/activity_feed.html",
+        {
+            # Rendered by the slim header via wagtailadmin/generic/base.html.
+            "breadcrumbs_items": [
+                {"url": reverse("wagtailadmin_home"), "label": "Home"},
+                {"url": None, "label": "Ingestion Activity"},
+            ],
+            "header_title": "Ingestion Activity",
+            "header_icon": "history",
+        },
+    )

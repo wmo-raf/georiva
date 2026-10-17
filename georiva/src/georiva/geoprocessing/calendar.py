@@ -6,6 +6,7 @@ standard output cadence the time axis must be converted. Uses xarray's native
 ``convert_calendar`` (backed by cftime, already in the image) so no xclim
 dependency is required for this operation.
 """
+
 from __future__ import annotations
 
 

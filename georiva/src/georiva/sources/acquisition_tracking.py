@@ -6,6 +6,7 @@ the acquisition analogue of derivation_tracking: query logic lives here,
 the views stay dumb. Runs are collection-agnostic (ADR-0003): per-file
 collection context is encoded in FetchedFile.file_path, not on the run.
 """
+
 from __future__ import annotations
 
 from statistics import median
@@ -94,11 +95,10 @@ def run_liveness(run, now=None):
         "sample_count": len(samples),
         # No median below the sample floor: two data points make a guess,
         # not a baseline, and the panel must not dress a guess as one.
-        "median_seconds": (
-            median(samples) if len(samples) >= LIVENESS_MIN_SAMPLES else None
-        ),
+        "median_seconds": (median(samples) if len(samples) >= LIVENESS_MIN_SAMPLES else None),
         "current_file": next(
-            (f for f in files if f.status == FetchedFile.Status.FETCHING), None,
+            (f for f in files if f.status == FetchedFile.Status.FETCHING),
+            None,
         ),
     }
 

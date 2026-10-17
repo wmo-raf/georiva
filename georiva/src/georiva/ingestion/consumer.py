@@ -8,10 +8,12 @@ from urllib.parse import unquote
 import redis
 from django.conf import settings
 
+from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
-from georiva.core.storage import BucketType, get_bucket_config
-from georiva.ingestion.models import FileIngestion
+from georiva.events.context import use_context
+from georiva.ingestion.chains import context_for_arrival
+from georiva.ingestion.models import FileIngestion, FileIngestionFinished
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
@@ -51,9 +53,7 @@ def _required_time_error(catalog, key: str) -> str | None:
         return None  # time is read from file content during ingestion
 
     formats = list(
-        ManualUploadConfig.objects.filter(catalog=catalog)
-        .values_list("valid_time_format", flat=True)
-        .distinct()
+        ManualUploadConfig.objects.filter(catalog=catalog).values_list("valid_time_format", flat=True).distinct()
     )
     if not formats:
         return None
@@ -77,80 +77,96 @@ def _should_stop(stop_event) -> bool:
 def _handle_event(ev: dict):
     bucket_name = ev.get("s3", {}).get("bucket", {}).get("name", "")
     key_raw = ev.get("s3", {}).get("object", {}).get("key", "")
-    
+
     if not key_raw or not bucket_name:
         return
-    
+
     key = unquote(key_raw)
 
     # Skip placeholder and hidden files (.keep, .gitkeep, etc.)
-    if Path(key).name.startswith('.'):
+    if Path(key).name.startswith("."):
         return
 
     origin_bucket = _resolve_origin(bucket_name)
     if not origin_bucket:
         return
-    
+
     try:
         meta = validate_path(key)
     except ValueError as e:
         logger.warning("Invalid path %s: %s", key, e)
         return
-    
+
     org_slug = meta["org"]
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
 
-    catalog, resolution_error = resolve_org_catalog(org_slug, catalog_slug)
+    # A Bucket notification belongs to the chain of the fetch (or upload) that stored
+    # the file, found by lookup; with none behind it, it is a drop-zone arrival and
+    # starts its own. The organisation is the key's first segment, and may name
+    # nobody: that arrival is recorded as unattributed.
+    with use_context(context_for_arrival(key, actor="system:bucket")):
+        catalog, resolution_error = resolve_org_catalog(org_slug, catalog_slug)
 
-    # Register before deciding: a file we refuse to ingest must still leave a
-    # visible, actionable record. It is left in place in its bucket — never
-    # guessed into some other organisation, never deleted.
-    log, created = FileIngestion.register(
-        bucket=origin_bucket,
-        file_path=key,
-        reference_time=meta.get("reference_time"),
-    )
+        # Register before deciding: a file we refuse to ingest must still leave a
+        # visible, actionable record. It is left in place in its bucket — never
+        # guessed into some other organisation, never deleted.
+        log, created = FileIngestion.register(
+            bucket=origin_bucket,
+            file_path=key,
+            reference_time=meta.get("reference_time"),
+        )
 
-    if catalog is None:
-        logger.warning("Refusing %s: %s", key, resolution_error)
-        FileIngestion.mark_failed(origin_bucket, key, resolution_error)
-        return
-
-    time_error = _required_time_error(catalog, key)
-    if time_error:
-        logger.warning("Time extraction failed for %s: %s", key, time_error)
-        FileIngestion.mark_failed(origin_bucket, key, time_error)
-        return
-
-    if not created:
-        if log.status == FileIngestion.Status.PROCESSING:
-            logger.debug("Already processing: %s/%s", origin_bucket, key)
+        if catalog is None:
+            logger.warning("Refusing %s: %s", key, resolution_error)
+            # A key naming an organisation or catalog that does not exist is
+            # nobody's: the event is unattributed, visible to the instance
+            # administrator only.
+            FileIngestion.mark_failed(
+                origin_bucket,
+                key,
+                resolution_error,
+                outcome=FileIngestionFinished.Outcome.REFUSED,
+                unattributed=True,
+            )
             return
-        if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
+
+        time_error = _required_time_error(catalog, key)
+        if time_error:
+            logger.warning("Time extraction failed for %s: %s", key, time_error)
+            # Refused inside a known organisation: attributed to it.
+            FileIngestion.mark_failed(origin_bucket, key, time_error, outcome=FileIngestionFinished.Outcome.REFUSED)
             return
-        if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
-            logger.warning("Completed but no live data, re-ingesting: %s", key)
-            FileIngestion.reset_for_reingest(origin_bucket, key)
-    
-    process_incoming_file.delay(
-        file_path=key,
-        origin_bucket=origin_bucket,
-        reference_time=(
-            meta["reference_time"].isoformat() if meta["reference_time"] else None
-        ),
-    )
-    logger.info(
-        "Queued: %s/%s (org=%s, catalog=%s, collection=%s, ref=%s)",
-        bucket_name, key, org_slug, catalog_slug,
-        collection_slug or "(to resolve)",
-        meta.get("reference_time"),
-    )
+
+        if not created:
+            if log.status == FileIngestion.Status.PROCESSING:
+                logger.debug("Already processing: %s/%s", origin_bucket, key)
+                return
+            if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
+                return
+            if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
+                logger.warning("Completed but no live data, re-ingesting: %s", key)
+                FileIngestion.reset_for_reingest(origin_bucket, key)
+
+        process_incoming_file.delay(
+            file_path=key,
+            origin_bucket=origin_bucket,
+            reference_time=(meta["reference_time"].isoformat() if meta["reference_time"] else None),
+        )
+        logger.info(
+            "Queued: %s/%s (org=%s, catalog=%s, collection=%s, ref=%s)",
+            bucket_name,
+            key,
+            org_slug,
+            catalog_slug,
+            collection_slug or "(to resolve)",
+            meta.get("reference_time"),
+        )
 
 
 def _consume_loop(stop_event=None):
     r = redis.from_url(settings.REDIS_URL)
-    
+
     while not _should_stop(stop_event):
         try:
             result = r.blpop(REDIS_KEY, timeout=5)
@@ -163,24 +179,24 @@ def _consume_loop(stop_event=None):
             logger.error("Redis error in consumer, retrying in 5s: %s", e)
             time.sleep(5)
             continue
-        
+
         if result is None:
             continue
-        
+
         _, raw = result
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as e:
             logger.warning("Invalid event JSON: %s", e)
             continue
-        
+
         # MinIO Redis access format: [{"Event": [{...}], "EventTime": "..."}]
         # Fallback to webhook-style {"Records": [...]} just in case
         if isinstance(payload, list):
             records = [ev for item in payload for ev in item.get("Event", [])]
         else:
             records = payload.get("Records", [payload])
-        
+
         for ev in records:
             try:
                 _handle_event(ev)
@@ -196,12 +212,12 @@ def run_minio_consumer(stop_event=None):
     stop_event is a threading.Event; set it to trigger a clean shutdown.
     """
     logger.info("MinIO event consumer started, listening on key: %s", REDIS_KEY)
-    
+
     while not _should_stop(stop_event):
         try:
             _consume_loop(stop_event)
         except Exception as e:
             logger.exception("MinIO event consumer crashed, restarting in 5s: %s", e)
             time.sleep(5)
-    
+
     logger.info("MinIO event consumer stopped.")

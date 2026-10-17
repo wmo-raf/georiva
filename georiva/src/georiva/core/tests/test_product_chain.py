@@ -16,6 +16,7 @@ that consumes staging value + the *published* climatology baseline. The one true
 edge is anomaly -> climatology; a tier-blind rule would fabricate
 anomaly -> promotion, which these tests guard against.
 """
+
 from django.test import SimpleTestCase
 
 from georiva.core.derived_products import (
@@ -99,12 +100,8 @@ class ProductDependenciesTests(SimpleTestCase):
     def test_optional_or_staging_inputs_never_create_edges(self):
         # Only required + published inputs infer a dependency.
         producer = _product("p", outputs=(OutputRef(role="o", collection="shared"),))
-        optional = _product("opt", inputs=(
-            InputRef(role="x", collection="shared", tier="published", required=False),
-        ))
-        staging = _product("stg", inputs=(
-            InputRef(role="x", collection="shared", tier="staging"),
-        ))
+        optional = _product("opt", inputs=(InputRef(role="x", collection="shared", tier="published", required=False),))
+        staging = _product("stg", inputs=(InputRef(role="x", collection="shared", tier="staging"),))
 
         deps = product_dependencies([producer, optional, staging])
         self.assertEqual(deps["opt"], set())
@@ -231,9 +228,7 @@ class ValidateChainTests(SimpleTestCase):
             inputs=(InputRef(role="value", collection="chirps-monthly", tier="staging"),),
             outputs=(OutputRef(role="o", collection="chirps-monthly-climatology"),),
         )
-        self.assertIsNone(
-            validate_chain([product], collection_keys={"chirps-monthly"})
-        )
+        self.assertIsNone(validate_chain([product], collection_keys={"chirps-monthly"}))
 
     def test_promotion_output_may_reuse_the_raw_collection_key(self):
         # A promotion serves the raw collection 1:1, so its output key *equals*
@@ -245,9 +240,7 @@ class ValidateChainTests(SimpleTestCase):
             inputs=(InputRef(role="source", collection="chirps-monthly", tier="staging"),),
             outputs=(OutputRef(role="served", collection="chirps-monthly"),),
         )
-        self.assertIsNone(
-            validate_chain([promotion], collection_keys={"chirps-monthly"})
-        )
+        self.assertIsNone(validate_chain([promotion], collection_keys={"chirps-monthly"}))
 
 
 class TopologicalStagesTests(SimpleTestCase):
@@ -261,9 +254,7 @@ class TopologicalStagesTests(SimpleTestCase):
 
     def test_stage_order_is_stable_by_declaration(self):
         stages = topological_stages(_three_tier_chain())
-        self.assertEqual(
-            [[d.key for d in stage] for stage in stages], [["a"], ["b"], ["c"]]
-        )
+        self.assertEqual([[d.key for d in stage] for stage in stages], [["a"], ["b"], ["c"]])
 
     def test_a_cyclic_chain_raises_rather_than_looping(self):
         a = _product("a", depends_on=("b",))

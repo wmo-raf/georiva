@@ -7,6 +7,7 @@ under the first `HomePage` (the tree the central org later adopts). These tests
 pin it to that page — it must not read another tenant's index as evidence its
 own work is done, and must not delete one.
 """
+
 import importlib
 
 from django.test import TestCase, override_settings
@@ -15,9 +16,7 @@ from georiva.organisations.provisioning import provision_organisation
 from georiva.pages.datasets.models import DatasetsIndexPage
 from georiva.pages.home.models import HomePage
 
-migration = importlib.import_module(
-    "georiva.pages.datasets.migrations.0002_create_datasets_page"
-)
+migration = importlib.import_module("georiva.pages.datasets.migrations.0002_create_datasets_page")
 
 
 # `apps` and `schema_editor` go unused: the migration imports the concrete

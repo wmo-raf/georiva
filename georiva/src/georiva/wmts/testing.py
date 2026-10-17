@@ -22,6 +22,7 @@ Not a test module itself — it lives beside the app, in the pattern of
 ``organisations.testing``, so it is importable without reaching into a
 ``tests`` package.
 """
+
 from xml.etree import ElementTree as ET
 
 from django.core.cache import cache
@@ -74,7 +75,8 @@ class CapabilitiesReader(IsolatedCapabilitiesCache):
     def fetch(self, params=None, **extra):
         response = self.client.get(
             reverse("wmts:capabilities", args=[self.organisation.slug]),
-            params or {}, **extra,
+            params or {},
+            **extra,
         )
         self.assertEqual(response.status_code, 200)
         return response
@@ -84,10 +86,7 @@ class CapabilitiesReader(IsolatedCapabilitiesCache):
         return document.findall("wmts:Contents/wmts:Layer", NS)
 
     def identifiers(self, response):
-        return [
-            layer.findtext("ows:Identifier", namespaces=NS)
-            for layer in self.layers(response)
-        ]
+        return [layer.findtext("ows:Identifier", namespaces=NS) for layer in self.layers(response)]
 
     def layer(self, response, identifier):
         for layer in self.layers(response):
@@ -99,19 +98,17 @@ class CapabilitiesReader(IsolatedCapabilitiesCache):
         """Advertised KVP endpoint per operation name (#362)."""
         document = ET.fromstring(response.content)
         return {
-            operation.get("name"):
-                operation.find("ows:DCP/ows:HTTP/ows:Get", NS)
-                .get(f"{{{NS['xlink']}}}href")
+            operation.get("name"): operation.find("ows:DCP/ows:HTTP/ows:Get", NS).get(f"{{{NS['xlink']}}}href")
             for operation in document.findall(
-                "ows:OperationsMetadata/ows:Operation", NS,
+                "ows:OperationsMetadata/ows:Operation",
+                NS,
             )
         }
 
     def templates(self, response):
         """Advertised tile-URL template per layer identifier."""
         return {
-            layer.findtext("ows:Identifier", namespaces=NS):
-                layer.find("wmts:ResourceURL", NS).get("template")
+            layer.findtext("ows:Identifier", namespaces=NS): layer.find("wmts:ResourceURL", NS).get("template")
             for layer in self.layers(response)
         }
 
@@ -132,26 +129,31 @@ def make_tiered_catalog(organisation, slug="forecast"):
     from georiva.core.models import Catalog, Collection, Unit, Variable
 
     catalog = Catalog.objects.create(
-        organisation=organisation, name="Forecast", slug=slug,
+        organisation=organisation,
+        name="Forecast",
+        slug=slug,
         file_format="geotiff",
     )
     unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
     tiers = {}
     for visibility, name, collection_slug, variable_name in (
-        (Collection.Visibility.PUBLIC,
-         "Temperature", "temperature", "2m Temperature"),
-        (Collection.Visibility.PRIVATE,
-         "Members only", "members-only", "private t2m"),
-        (Collection.Visibility.INTERNAL,
-         "Intermediate", "intermediate", "internal t2m"),
+        (Collection.Visibility.PUBLIC, "Temperature", "temperature", "2m Temperature"),
+        (Collection.Visibility.PRIVATE, "Members only", "members-only", "private t2m"),
+        (Collection.Visibility.INTERNAL, "Intermediate", "intermediate", "internal t2m"),
     ):
         collection = Collection.objects.create(
-            catalog=catalog, name=name, slug=collection_slug,
+            catalog=catalog,
+            name=name,
+            slug=collection_slug,
             visibility=visibility,
         )
         Variable.objects.create(
-            collection=collection, slug="t2m", name=variable_name,
-            unit=unit, value_min=0, value_max=50,
+            collection=collection,
+            slug="t2m",
+            name=variable_name,
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         tiers[visibility.value] = collection
     return {"catalog": catalog, "unit": unit, **tiers}

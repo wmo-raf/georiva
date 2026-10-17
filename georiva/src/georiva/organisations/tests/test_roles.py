@@ -4,6 +4,7 @@ Member and Org Admin differ in exactly one place: org-management surfaces. Data
 work is identical for both, which is the point of a two-role launch — the split
 is about who runs the institution's account, not who may touch its data.
 """
+
 from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -19,7 +20,6 @@ HOST = {"host": "kenya.georiva.test"}
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class MembershipGrantsCapabilitiesTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
 
@@ -73,9 +73,7 @@ class OrganisationSettingsRoleTests(TestCase):
         if superuser:
             # Superusers hold no membership; they need admin access like anyone.
             group = Group.objects.create(name=f"{username} access")
-            group.permissions.add(
-                *Group.objects.get(name=DATA_MANAGERS_GROUP).permissions.all()
-            )
+            group.permissions.add(*Group.objects.get(name=DATA_MANAGERS_GROUP).permissions.all())
             user.groups.add(group)
         self.client.login(username=username, password=PASSWORD)
         return user
@@ -83,9 +81,7 @@ class OrganisationSettingsRoleTests(TestCase):
     def test_an_org_admin_can_edit_their_own_organisation(self):
         self._login("amina", role=OrganisationMembership.Role.ADMIN)
 
-        response = self.client.post(
-            self.url, {"name": "Kenya Meteorological Department"}, headers=HOST
-        )
+        response = self.client.post(self.url, {"name": "Kenya Meteorological Department"}, headers=HOST)
 
         self.assertEqual(response.status_code, 302)
         self.kenya.refresh_from_db()
@@ -98,9 +94,7 @@ class OrganisationSettingsRoleTests(TestCase):
 
         # Wagtail's admin turns a PermissionDenied into a redirect to the admin
         # home carrying a message, rather than a bare 403 page.
-        self.assertRedirects(
-            response, reverse("wagtailadmin_home"), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, reverse("wagtailadmin_home"), fetch_redirect_response=False)
 
     def test_a_member_cannot_post_past_the_gate_either(self):
         self._login("juma", role=OrganisationMembership.Role.MEMBER)
@@ -176,9 +170,7 @@ class MemberManagementTests(TestCase):
         response = self.client.post(url, headers=HOST)
 
         self.assertEqual(response.status_code, 404)
-        self.assertTrue(
-            OrganisationMembership.objects.filter(pk=self.ugandan_membership.pk).exists()
-        )
+        self.assertTrue(OrganisationMembership.objects.filter(pk=self.ugandan_membership.pk).exists())
 
     def test_adding_a_member_creates_an_account_that_can_work_immediately(self):
         response = self.client.post(
@@ -198,9 +190,7 @@ class MemberManagementTests(TestCase):
         self.assertEqual(response.status_code, 302)
         membership = OrganisationMembership.objects.get(user__username="wanjiru")
         self.assertEqual(membership.organisation, self.kenya)
-        self.assertTrue(
-            membership.user.groups.filter(name=DATA_MANAGERS_GROUP).exists()
-        )
+        self.assertTrue(membership.user.groups.filter(name=DATA_MANAGERS_GROUP).exists())
 
     def test_a_role_can_be_promoted(self):
         self.client.post(
@@ -218,9 +208,7 @@ class MemberManagementTests(TestCase):
             headers=HOST,
         )
 
-        self.assertFalse(
-            OrganisationMembership.objects.filter(pk=self.kenyan_membership.pk).exists()
-        )
+        self.assertFalse(OrganisationMembership.objects.filter(pk=self.kenyan_membership.pk).exists())
         self.colleague.refresh_from_db()
         self.assertTrue(self.colleague.is_active)
 
@@ -229,9 +217,7 @@ class MemberManagementTests(TestCase):
 
         response = self.client.get(reverse("organisation_members"), headers=HOST)
 
-        self.assertRedirects(
-            response, reverse("wagtailadmin_home"), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, reverse("wagtailadmin_home"), fetch_redirect_response=False)
 
     def test_a_plain_member_cannot_add_one(self):
         self.client.login(username="juma", password=PASSWORD)
@@ -248,6 +234,4 @@ class MemberManagementTests(TestCase):
             headers=HOST,
         )
 
-        self.assertFalse(
-            OrganisationMembership.objects.filter(user__username="smuggled").exists()
-        )
+        self.assertFalse(OrganisationMembership.objects.filter(user__username="smuggled").exists())

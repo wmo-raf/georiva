@@ -8,6 +8,7 @@ of after hours (the old fixed 2h). The soft limit is the graceful path: it raise
 inside the task, ``run_unit`` catches it and marks the run failed, freeing the
 lock immediately.
 """
+
 from datetime import timedelta
 
 from django.test import SimpleTestCase
@@ -27,17 +28,11 @@ class TaskTimeLimitInvariantTests(SimpleTestCase):
         # lock only becomes stealable strictly *after* the hard kill — so Celery's
         # guarantee that no task outlives the hard limit means a live task's lock
         # can never be stolen.
-        self.assertLess(
-            RUN_UNIT_SOFT_TIME_LIMIT_SECONDS, RUN_UNIT_HARD_TIME_LIMIT_SECONDS
-        )
-        self.assertLess(
-            RUN_UNIT_HARD_TIME_LIMIT_SECONDS, DERIVATION_LOCK_TIMEOUT_SECONDS
-        )
+        self.assertLess(RUN_UNIT_SOFT_TIME_LIMIT_SECONDS, RUN_UNIT_HARD_TIME_LIMIT_SECONDS)
+        self.assertLess(RUN_UNIT_HARD_TIME_LIMIT_SECONDS, DERIVATION_LOCK_TIMEOUT_SECONDS)
 
     def test_run_unit_task_declares_both_time_limits(self):
-        self.assertEqual(
-            run_unit_task.soft_time_limit, RUN_UNIT_SOFT_TIME_LIMIT_SECONDS
-        )
+        self.assertEqual(run_unit_task.soft_time_limit, RUN_UNIT_SOFT_TIME_LIMIT_SECONDS)
         self.assertEqual(run_unit_task.time_limit, RUN_UNIT_HARD_TIME_LIMIT_SECONDS)
 
     def test_lock_timeout_tracks_the_constant_and_is_far_below_the_old_2h(self):

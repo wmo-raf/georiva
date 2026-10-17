@@ -10,6 +10,7 @@ Styling surface is the one place that tunes them (ADR 0022).
 All tests run as a Data Managers group member (no raw model add/change
 permissions), proving the editor never depends on them.
 """
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.test import TestCase
@@ -31,20 +32,31 @@ class ManualVariableEditorTestCase(TestCase):
         dial_org(self.client)
         self.client.force_login(self.user)
 
-        self.catalog = Catalog.objects.create(organisation=make_organisation(), name="Local", slug="local", file_format="grib2")
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Local", slug="local", file_format="grib2"
+        )
         self.collection = Collection.objects.create(catalog=self.catalog, name="Surface", slug="surface")
         self.config = ManualUploadConfig.objects.create(
-            catalog=self.catalog, name="Surface variables", valid_time_format="CONTENT",
+            catalog=self.catalog,
+            name="Surface variables",
+            valid_time_format="CONTENT",
         )
         self.kelvin, _ = Unit.objects.get_or_create(symbol="K", defaults={"name": "kelvin"})
         self.mcv = ManualUploadConfigVariable.objects.create(
-            config=self.config, collection=self.collection,
-            variable_name="2t", long_name="2m temperature", units="K",
+            config=self.config,
+            collection=self.collection,
+            variable_name="2t",
+            long_name="2m temperature",
+            units="K",
         )
         self.variable = Variable.objects.create(
-            collection=self.collection, slug="2t", name="2m temperature",
+            collection=self.collection,
+            slug="2t",
+            name="2m temperature",
             transform_type=Variable.TransformType.PASSTHROUGH,
-            unit=self.kelvin, value_min=-40.0, value_max=50.0,
+            unit=self.kelvin,
+            value_min=-40.0,
+            value_max=50.0,
             sources=passthrough_sources("2t"),
         )
 
@@ -54,13 +66,17 @@ class EditVariableTests(ManualVariableEditorTestCase):
         celsius, _ = Unit.objects.get_or_create(symbol="degC", defaults={"name": "degree Celsius"})
         url = reverse("manual_upload_variable_edit", args=[self.config.pk, self.mcv.pk])
 
-        response = self.client.post(url, {
-            "name": "Temperature (2 m)",
-            "unit": celsius.pk,
-        })
+        response = self.client.post(
+            url,
+            {
+                "name": "Temperature (2 m)",
+                "unit": celsius.pk,
+            },
+        )
 
         self.assertRedirects(
-            response, reverse("manual_upload_config_edit", args=[self.config.pk]),
+            response,
+            reverse("manual_upload_config_edit", args=[self.config.pk]),
             fetch_redirect_response=False,
         )
         self.variable.refresh_from_db()
@@ -74,12 +90,15 @@ class EditVariableTests(ManualVariableEditorTestCase):
         """Demoted surface (issue #323): only the Styling page writes the
         range, so range values smuggled into the POST change nothing."""
         url = reverse("manual_upload_variable_edit", args=[self.config.pk, self.mcv.pk])
-        self.client.post(url, {
-            "name": "2m temperature",
-            "unit": self.kelvin.pk,
-            "value_min": "-60",
-            "value_max": "60",
-        })
+        self.client.post(
+            url,
+            {
+                "name": "2m temperature",
+                "unit": self.kelvin.pk,
+                "value_min": "-60",
+                "value_max": "60",
+            },
+        )
         self.variable.refresh_from_db()
         self.assertEqual(self.variable.value_min, -40.0)
         self.assertEqual(self.variable.value_max, 50.0)
@@ -104,15 +123,19 @@ class AddVariableTests(ManualVariableEditorTestCase):
         page."""
         url = reverse("manual_upload_variable_add", args=[self.config.pk])
 
-        response = self.client.post(url, {
-            "variable_name": "10u",
-            "long_name": "10m U wind",
-            "collection": self.collection.pk,
-            "unit": self.kelvin.pk,
-        })
+        response = self.client.post(
+            url,
+            {
+                "variable_name": "10u",
+                "long_name": "10m U wind",
+                "collection": self.collection.pk,
+                "unit": self.kelvin.pk,
+            },
+        )
 
         self.assertRedirects(
-            response, reverse("manual_upload_config_edit", args=[self.config.pk]),
+            response,
+            reverse("manual_upload_config_edit", args=[self.config.pk]),
             fetch_redirect_response=False,
         )
         variable = Variable.objects.get(collection=self.collection, slug="10u")
@@ -133,26 +156,30 @@ class AddVariableTests(ManualVariableEditorTestCase):
 
     def test_adding_a_duplicate_variable_is_rejected(self):
         url = reverse("manual_upload_variable_add", args=[self.config.pk])
-        response = self.client.post(url, {
-            "variable_name": "2t",
-            "long_name": "Duplicate",
-            "collection": self.collection.pk,
-            "unit": self.kelvin.pk,
-        })
+        response = self.client.post(
+            url,
+            {
+                "variable_name": "2t",
+                "long_name": "Duplicate",
+                "collection": self.collection.pk,
+                "unit": self.kelvin.pk,
+            },
+        )
         self.assertEqual(response.status_code, 200)  # re-rendered with error
         self.assertEqual(Variable.objects.filter(collection=self.collection, slug="2t").count(), 1)
-        self.assertEqual(
-            ManualUploadConfigVariable.objects.filter(config=self.config, variable_name="2t").count(), 1
-        )
+        self.assertEqual(ManualUploadConfigVariable.objects.filter(config=self.config, variable_name="2t").count(), 1)
 
     def test_add_with_new_unit_symbol_resolves_or_creates_the_unit(self):
         url = reverse("manual_upload_variable_add", args=[self.config.pk])
-        self.client.post(url, {
-            "variable_name": "msl",
-            "long_name": "Mean sea level pressure",
-            "collection": self.collection.pk,
-            "new_unit_symbol": "hPa",
-        })
+        self.client.post(
+            url,
+            {
+                "variable_name": "msl",
+                "long_name": "Mean sea level pressure",
+                "collection": self.collection.pk,
+                "new_unit_symbol": "hPa",
+            },
+        )
         variable = Variable.objects.get(collection=self.collection, slug="msl")
         self.assertEqual(variable.unit.symbol.lower(), "hpa")
 
@@ -168,7 +195,8 @@ class RemoveVariableTests(ManualVariableEditorTestCase):
         response = self.client.post(url)
 
         self.assertRedirects(
-            response, reverse("manual_upload_config_edit", args=[self.config.pk]),
+            response,
+            reverse("manual_upload_config_edit", args=[self.config.pk]),
             fetch_redirect_response=False,
         )
         self.assertFalse(Variable.objects.filter(pk=self.variable.pk).exists())
@@ -183,9 +211,7 @@ class RemoveVariableTests(ManualVariableEditorTestCase):
 
 class ConfigPageAffordanceTests(ManualVariableEditorTestCase):
     def test_config_edit_page_links_to_the_variable_editor(self):
-        html = self.client.get(
-            reverse("manual_upload_config_edit", args=[self.config.pk])
-        ).content.decode()
+        html = self.client.get(reverse("manual_upload_config_edit", args=[self.config.pk])).content.decode()
         self.assertIn(reverse("manual_upload_variable_add", args=[self.config.pk]), html)
         self.assertIn(reverse("manual_upload_variable_edit", args=[self.config.pk, self.mcv.pk]), html)
         self.assertIn(reverse("manual_upload_variable_remove", args=[self.config.pk, self.mcv.pk]), html)

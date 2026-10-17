@@ -1,6 +1,6 @@
 {% extends "wagtailadmin/generic/base.html" %}
 
-{% load i18n wagtailadmin_tags static %}
+{% load i18n wagtailadmin_tags static events_tags %}
 
 {% block titletag %}{{ collection.name }} — Items{% endblock %}
 
@@ -706,5 +706,6 @@
         </div>
     {% endif %}
 
+    {% history_panel history %}
 
 {% endblock %}

@@ -18,6 +18,7 @@ and ADR 0013 for why the machine plane needs it at all.
 Membership is re-read from the database on every request. A session that
 outlives its membership row loses access on its next request, not at logout.
 """
+
 import logging
 
 from django.conf import settings
@@ -251,7 +252,8 @@ class OrganisationMiddleware:
         if request.active_org_role is None:
             logger.warning(
                 "Rejected %s from %s's admin: not a member",
-                user, request.active_org.slug,
+                user,
+                request.active_org.slug,
             )
             raise PermissionDenied("You are not a member of this organisation.")
 

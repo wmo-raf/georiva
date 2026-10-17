@@ -37,12 +37,8 @@ def _fetch_file_ingestions(org_slug: str, terminal_limit: int) -> list[dict]:
             queryset=FileIngestionJob.objects.order_by("-created_at"),
         )
     )
-    active = list(
-        base.exclude(status__in=TERMINAL_STATUSES).order_by("-created_at")
-    )
-    terminal = list(
-        base.filter(status__in=TERMINAL_STATUSES).order_by("-created_at")[:terminal_limit]
-    )
+    active = list(base.exclude(status__in=TERMINAL_STATUSES).order_by("-created_at"))
+    terminal = list(base.filter(status__in=TERMINAL_STATUSES).order_by("-created_at")[:terminal_limit])
 
     combined = sorted(active + terminal, key=lambda fi: fi.created_at, reverse=True)
     return [_build_file_ingestion_dict(fi) for fi in combined]

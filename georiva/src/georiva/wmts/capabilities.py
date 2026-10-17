@@ -27,8 +27,11 @@ Two bindings are advertised, and a client reads whichever it speaks: modern
 clients follow the per-layer REST ``ResourceURL`` templates, while a KVP-only
 client reads ``OperationsMetadata`` for the org-scoped endpoint under the
 Titiler prefix — the same address it fetched this document from, since that
-endpoint proxies GetCapabilities straight back here (#362).
+endpoint proxies GetCapabilities straight back here (#362). Each layer carries
+both a ``tile`` and a ``FeatureInfo`` template (#379), so neither binding is
+shown an operation it has no address for.
 """
+
 from xml.etree import ElementTree as ET
 
 from georiva.accounts.authentication import query_presented_secret
@@ -38,6 +41,7 @@ from georiva.core.machine_plane import (
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,
+    wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
 from georiva.core.models import Collection, Item, Variable
@@ -91,15 +95,22 @@ def visible_variables(request):
     ``scoped_queryset`` then pins the rows to the dialled organisation — the
     same double filter the STAC views apply.
     """
-    return scoped_queryset(
-        request,
-        Variable.objects.filter(
-            is_active=True,
-            collection__catalog__is_active=True,
-            collection__in=Collection.objects.visible_to(request),
-        ),
-    ).select_related("collection__catalog").prefetch_related("styles").order_by(
-        "collection__catalog__slug", "collection__slug", "slug",
+    return (
+        scoped_queryset(
+            request,
+            Variable.objects.filter(
+                is_active=True,
+                collection__catalog__is_active=True,
+                collection__in=Collection.objects.visible_to(request),
+            ),
+        )
+        .select_related("collection__catalog")
+        .prefetch_related("styles")
+        .order_by(
+            "collection__catalog__slug",
+            "collection__slug",
+            "slug",
+        )
     )
 
 
@@ -125,16 +136,24 @@ def build_capabilities(request, organisation) -> bytes:
         if collection.pk not in dimensions_by_collection:
             dimensions_by_collection[collection.pk] = layer_dimensions(collection)
         _append_layer(
-            contents, request, variable,
-            dimensions_by_collection[collection.pk], api_key,
+            contents,
+            request,
+            variable,
+            dimensions_by_collection[collection.pk],
+            api_key,
         )
     _append_tile_matrix_set(contents)
 
-    ET.SubElement(root, _wmts("ServiceMetadataURL"), {
-        f"{{{XLINK_NS}}}href": get_full_url_by_request(
-            request, wmts_capabilities_url(organisation, api_key=api_key),
-        ),
-    })
+    ET.SubElement(
+        root,
+        _wmts("ServiceMetadataURL"),
+        {
+            f"{{{XLINK_NS}}}href": get_full_url_by_request(
+                request,
+                wmts_capabilities_url(organisation, api_key=api_key),
+            ),
+        },
+    )
 
     return ET.tostring(root, encoding="UTF-8", xml_declaration=True)
 
@@ -150,7 +169,8 @@ def kvp_dcp_href(request, organisation, api_key=None) -> str:
     this document's, because it belongs to the encoding rather than the URL.
     """
     url = get_full_url_by_request(
-        request, wmts_kvp_endpoint(organisation, api_key=api_key),
+        request,
+        wmts_kvp_endpoint(organisation, api_key=api_key),
     )
     return f"{url}&" if "?" in url else f"{url}?"
 
@@ -182,37 +202,41 @@ def layer_dimensions(collection):
 
     Identifier → ``(values, default)``, in document order. A collection whose
     items carry a ``reference_time`` is a forecast and advertises two axes:
-    ``Reftime`` lists every run newest-first and defaults to the newest, and
-    ``Time`` lists that default run's valid times — so a dimension-ignorant
-    client substituting defaults gets coherent latest-forecast tiles, never a
-    time from one run against another run's reference. ``Time`` defaults to
-    the run's first valid time (the analysis — the run's "now"), while an
+    ``Reftime`` lists every run and defaults to the newest, and ``Time`` lists
+    that default run's valid times — so a dimension-ignorant client
+    substituting defaults gets coherent latest-forecast tiles, never a time
+    from one run against another run's reference. ``Time`` defaults to the
+    run's first valid time (the analysis — the run's "now"), while an
     observation collection advertises ``Time`` alone, defaulting to the newest
     value it has. Enumeration is complete on purpose — the accepted
     document-size trade-off of #354 — and a collection with no items yet
     advertises nothing: there are no honest values to list.
+
+    Both axes ascend (#378). WMTS 1.0 mandates no ordering and every axis here
+    carries an explicit ``Default``, but a client turning a ``Dimension`` into
+    a slider ordinarily reads document order — and two axes on one layer
+    running in opposite directions is worse than either direction alone.
+    Ascending is the spelling inherited from WMS 1.3 dimension declarations, so
+    the newest run is the *last* ``Reftime`` value rather than the first, which
+    is precisely what the ``Default`` element exists to say instead of position.
     """
     reftimes = list(
         Item.objects.filter(collection=collection, reference_time__isnull=False)
-        .order_by("-reference_time")
+        .order_by("reference_time")
         .values_list("reference_time", flat=True)
         .distinct()
     )
     if reftimes:
         times = list(
-            Item.objects.filter(collection=collection, reference_time=reftimes[0])
+            Item.objects.filter(collection=collection, reference_time=reftimes[-1])
             .order_by("time")
             .values_list("time", flat=True)
         )
         return {
             WMTS_TIME_DIMENSION: (times, times[0]),
-            WMTS_REFTIME_DIMENSION: (reftimes, reftimes[0]),
+            WMTS_REFTIME_DIMENSION: (reftimes, reftimes[-1]),
         }
-    times = list(
-        Item.objects.filter(collection=collection)
-        .order_by("time")
-        .values_list("time", flat=True)
-    )
+    times = list(Item.objects.filter(collection=collection).order_by("time").values_list("time", flat=True))
     if not times:
         return {}
     return {WMTS_TIME_DIMENSION: (times, times[-1])}
@@ -269,33 +293,60 @@ def _append_layer(contents, request, variable, dimensions, api_key=None):
     link = ET.SubElement(layer, _wmts("TileMatrixSetLink"))
     ET.SubElement(link, _wmts("TileMatrixSet")).text = TILE_MATRIX_SET
 
-    ET.SubElement(layer, _wmts("ResourceURL"), {
-        "format": TILE_FORMAT,
-        "resourceType": "tile",
-        "template": get_full_url_by_request(
-            request,
-            wmts_rest_tile_template(
-                variable, dimensions, styled=bool(styles), api_key=api_key,
+    ET.SubElement(
+        layer,
+        _wmts("ResourceURL"),
+        {
+            "format": TILE_FORMAT,
+            "resourceType": "tile",
+            "template": get_full_url_by_request(
+                request,
+                wmts_rest_tile_template(
+                    variable,
+                    dimensions,
+                    styled=bool(styles),
+                    api_key=api_key,
+                ),
             ),
-        ),
-    })
+        },
+    )
+
+    # The identify address, for the client that reads these templates and never
+    # speaks KVP (#379). Without it the InfoFormat above is an offer with no
+    # address behind it on this binding: a REST client would show its identify
+    # tool and have nowhere to send the click. The same dimensions and style as
+    # the tile template, because the pixel being explained belongs to the tile
+    # drawn from the line above.
+    ET.SubElement(
+        layer,
+        _wmts("ResourceURL"),
+        {
+            "format": INFO_FORMAT,
+            "resourceType": "FeatureInfo",
+            "template": get_full_url_by_request(
+                request,
+                wmts_rest_featureinfo_template(
+                    variable,
+                    dimensions,
+                    styled=bool(styles),
+                    api_key=api_key,
+                ),
+            ),
+        },
+    )
 
 
 def _append_tile_matrix_set(contents):
     tms = ET.SubElement(contents, _wmts("TileMatrixSet"))
     ET.SubElement(tms, _ows("Identifier")).text = TILE_MATRIX_SET
     ET.SubElement(tms, _ows("SupportedCRS")).text = "urn:ogc:def:crs:EPSG::3857"
-    ET.SubElement(tms, _wmts("WellKnownScaleSet")).text = (
-        "urn:ogc:def:wkss:OGC:1.0:GoogleMapsCompatible"
-    )
+    ET.SubElement(tms, _wmts("WellKnownScaleSet")).text = "urn:ogc:def:wkss:OGC:1.0:GoogleMapsCompatible"
     for zoom in range(MAX_ZOOM + 1):
         matrix = ET.SubElement(tms, _wmts("TileMatrix"))
         ET.SubElement(matrix, _ows("Identifier")).text = str(zoom)
-        ET.SubElement(matrix, _wmts("ScaleDenominator")).text = repr(
-            SCALE_DENOMINATOR_0 / 2 ** zoom
-        )
+        ET.SubElement(matrix, _wmts("ScaleDenominator")).text = repr(SCALE_DENOMINATOR_0 / 2**zoom)
         ET.SubElement(matrix, _wmts("TopLeftCorner")).text = TOP_LEFT_CORNER
         ET.SubElement(matrix, _wmts("TileWidth")).text = "256"
         ET.SubElement(matrix, _wmts("TileHeight")).text = "256"
-        ET.SubElement(matrix, _wmts("MatrixWidth")).text = str(2 ** zoom)
-        ET.SubElement(matrix, _wmts("MatrixHeight")).text = str(2 ** zoom)
+        ET.SubElement(matrix, _wmts("MatrixWidth")).text = str(2**zoom)
+        ET.SubElement(matrix, _wmts("MatrixHeight")).text = str(2**zoom)

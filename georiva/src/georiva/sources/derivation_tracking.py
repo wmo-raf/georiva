@@ -6,6 +6,7 @@ DerivedProduct's DerivationRuns for the tracking view by joining on the opaque
 `origin` key the invocation layer stamped. The engine never groups by product —
 this application-layer aggregate does, keeping the ADR-0005 layering intact.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -19,9 +20,10 @@ from georiva.sources.derivation_invocation import definition_for, product_origin
 class ProductReadiness:
     """Whether a product can run now (ADR-0008) — a coarse gate computed from the
     declared inputs, in front of the engine's per-unit readiness."""
+
     ready: bool
-    blocked_by: str | None = None     # role of the first empty required input
-    reason: str | None = None         # human reason, e.g. "normals empty"
+    blocked_by: str | None = None  # role of the first empty required input
+    reason: str | None = None  # human reason, e.g. "normals empty"
 
 
 def product_readiness(product) -> ProductReadiness:
@@ -45,7 +47,9 @@ def product_readiness(product) -> ProductReadiness:
             continue
         if ref.role not in bindings or not resolved[ref.role].present:
             return ProductReadiness(
-                ready=False, blocked_by=ref.role, reason=f"{ref.role} empty",
+                ready=False,
+                blocked_by=ref.role,
+                reason=f"{ref.role} empty",
             )
     return ProductReadiness(ready=True)
 
@@ -53,7 +57,8 @@ def product_readiness(product) -> ProductReadiness:
 @dataclass
 class ProductStatus:
     """A product's aggregate run state for the tracking view."""
-    status: str                                  # idle | running | failed | completed
+
+    status: str  # idle | running | failed | completed
     total: int = 0
     counts: dict = field(default_factory=dict)
     last_completed_at: datetime | None = None
@@ -100,11 +105,7 @@ def product_status(product) -> ProductStatus:
         return ProductStatus(status="idle")
 
     completed = runs.filter(status=DerivationRun.Status.COMPLETED)
-    last_completed_at = (
-        completed.order_by("-completed_at")
-        .values_list("completed_at", flat=True)
-        .first()
-    )
+    last_completed_at = completed.order_by("-completed_at").values_list("completed_at", flat=True).first()
 
     if runs.filter(status=DerivationRun.Status.RUNNING).exists():
         status = "running"
@@ -116,5 +117,8 @@ def product_status(product) -> ProductStatus:
         status = "idle"
 
     return ProductStatus(
-        status=status, total=total, counts=counts, last_completed_at=last_completed_at,
+        status=status,
+        total=total,
+        counts=counts,
+        last_completed_at=last_completed_at,
     )

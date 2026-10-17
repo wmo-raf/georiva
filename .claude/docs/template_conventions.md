@@ -15,6 +15,17 @@ Conventions for all HTML templates in GeoRiva. Referenced from `CLAUDE.md`.
       reports which broker stack an installation runs.
   {% endcomment %}
   ```
+
+  **This applies to the HTML only.** Inside executable `<script>` and `<style>` blocks, use the
+  language's own comments — `/* … */` in CSS, `/** … **/` or `//` in JS. A `{% comment %}` there does
+  work at render time, but editors and formatters read those blocks as JS/CSS, cannot parse the tag,
+  and mangle the code that follows it.
+
+  **Data blocks are the exception, and go back to `{% comment %}`.** A
+  `<script type="application/json">` payload is JSON, which has no comment syntax at all — `//` or
+  `/* … */` inside one is a parse error that takes the page's JS down with it. Django strips
+  `{% comment %}` before the browser sees the block, so it is the only way to annotate one. See
+  `pages/datasets/templates/datasets/item_detail.html`'s `grItemConfig`.
 - **Modern JS** — use `const` and `let`; never `var`.
 - **JS placement** — all JavaScript goes in `{% block extra_js %}…{% endblock %}` at the bottom of the template. Wrap
   code in `document.addEventListener('DOMContentLoaded', function () { … })` instead of IIFEs `(function(){ … }())`.

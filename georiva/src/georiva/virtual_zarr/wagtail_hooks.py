@@ -9,9 +9,9 @@ from wagtail.snippets.views.snippets import SnippetViewSet
 from georiva.core.models import Asset
 from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from georiva.organisations.scoping import OrgScopedViewSetMixin
+from georiva.virtual_zarr.models import VirtualZarrManifest
 
 logger = logging.getLogger(__name__)
-from georiva.virtual_zarr.models import VirtualZarrManifest
 
 
 class VirtualZarrManifestViewSet(OrgScopedViewSetMixin, SnippetViewSet):
@@ -70,10 +70,10 @@ def after_save_asset(asset, **kwargs):
     After an Asset is confirmed written:
       1. If COG, Mark the virtual Zarr manifest stale so the next sweep rebuilds it
     """
-    
+
     if asset.format == Asset.Format.COG:
         variable = asset.variable
-        
+
         try:
             VirtualZarrManifest.objects.filter(
                 variable=variable,
@@ -83,6 +83,4 @@ def after_save_asset(asset, **kwargs):
                 ],
             ).update(status=VirtualZarrManifest.Status.STALE)
         except Exception as exc:
-            logger.warning(
-                "Virtual Zarr stale mark failed for %s: %s", variable.slug, exc
-            )
+            logger.warning("Virtual Zarr stale mark failed for %s: %s", variable.slug, exc)

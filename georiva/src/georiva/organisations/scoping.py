@@ -22,6 +22,7 @@ for models that declare themselves shared reference data (topics, units,
 administrative boundaries): instance-global on purpose. A model that has
 declared nothing is refused, not passed through.
 """
+
 from django.core.exceptions import ImproperlyConfigured
 from django.db.models import QuerySet
 
@@ -39,17 +40,19 @@ VIEW_CLASS_SUFFIX = "_view_class"
 #: both mixins scope to the same rows. It decides one thing: whether the global
 #: tier of a model that has one (colour ramps) is readable here but not
 #: editable. See ``access.require_writable_org_object``.
-READ_ONLY_VIEW_CLASS_ATTRS = frozenset({
-    "index_view_class",
-    "index_results_view_class",
-    "inspect_view_class",
-    "history_view_class",
-    "usage_view_class",
-    "revisions_compare_view_class",
-    "revisions_view_class",
-    "workflow_history_view_class",
-    "workflow_history_detail_view_class",
-})
+READ_ONLY_VIEW_CLASS_ATTRS = frozenset(
+    {
+        "index_view_class",
+        "index_results_view_class",
+        "inspect_view_class",
+        "history_view_class",
+        "usage_view_class",
+        "revisions_compare_view_class",
+        "revisions_view_class",
+        "workflow_history_view_class",
+        "workflow_history_detail_view_class",
+    }
+)
 
 
 class OrgScopedViewMixin:
@@ -155,19 +158,12 @@ class OrgScopedChosenMultipleMixin:
 
 def view_class_attrs(viewset):
     """Every attribute on ``viewset`` that names a view class, declared or passed."""
-    return sorted(
-        attr
-        for attr in set(dir(type(viewset))) | set(viewset.__dict__)
-        if attr.endswith(VIEW_CLASS_SUFFIX)
-    )
+    return sorted(attr for attr in set(dir(type(viewset))) | set(viewset.__dict__) if attr.endswith(VIEW_CLASS_SUFFIX))
 
 
 def mixin_for(attr):
     """The scoping mixin a view class named ``attr`` gets — read, or write."""
-    return (
-        OrgScopedViewMixin if attr in READ_ONLY_VIEW_CLASS_ATTRS
-        else OrgScopedWriteViewMixin
-    )
+    return OrgScopedViewMixin if attr in READ_ONLY_VIEW_CLASS_ATTRS else OrgScopedWriteViewMixin
 
 
 def _subclass(view_class, mixin):
@@ -195,9 +191,7 @@ class OrgScopedViewSetMixinBase:
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        wanted = self.SCOPED_VIEW_CLASSES or {
-            attr: mixin_for(attr) for attr in view_class_attrs(self)
-        }
+        wanted = self.SCOPED_VIEW_CLASSES or {attr: mixin_for(attr) for attr in view_class_attrs(self)}
         for attr, mixin in wanted.items():
             # Read the raw attribute rather than `getattr(self, …)`: some view
             # classes are cached properties whose evaluation needs a configured

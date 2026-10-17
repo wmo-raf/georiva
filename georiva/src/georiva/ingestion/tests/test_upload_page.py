@@ -10,46 +10,60 @@ from georiva.ingestion.models import (
     FileIngestionJob,
     ManualUploadConfig,
     ManualUploadConfigVariable,
-    UploadSession,
     UploadedFile,
+    UploadSession,
 )
 from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
-PAGE_URL    = "/admin/manual-uploads/{}/upload/"
+PAGE_URL = "/admin/manual-uploads/{}/upload/"
 EXTRACT_URL = "/admin/manual-uploads/{}/upload/extract-times/"
-SUBMIT_URL  = "/admin/manual-uploads/{}/upload/submit/"
+SUBMIT_URL = "/admin/manual-uploads/{}/upload/submit/"
 
 INCOMING_BUCKET_NAME = "georiva-incoming"
 
 
 def _geotiff_setup():
     """Observation GeoTIFF catalog: dated path, valid time from filename."""
-    catalog = Catalog.objects.create(organisation=make_organisation(), name="Imagery", slug="imagery", file_format="geotiff")
+    catalog = Catalog.objects.create(
+        organisation=make_organisation(), name="Imagery", slug="imagery", file_format="geotiff"
+    )
     collection = Collection.objects.create(catalog=catalog, name="NDVI", slug="ndvi")
     config = ManualUploadConfig.objects.create(
-        catalog=catalog, name="NDVI uploads",
-        is_forecast=False, valid_time_format="YYYYMMDD",
+        catalog=catalog,
+        name="NDVI uploads",
+        is_forecast=False,
+        valid_time_format="YYYYMMDD",
     )
     variable = ManualUploadConfigVariable.objects.create(
-        config=config, collection=collection,
-        variable_name="band_1", long_name="NDVI", units="",
+        config=config,
+        collection=collection,
+        variable_name="band_1",
+        long_name="NDVI",
+        units="",
     )
     return catalog, collection, config, variable
 
 
 def _grib_setup():
     """Forecast GRIB catalog: flat path with GR-- prefix, time from content."""
-    catalog = Catalog.objects.create(organisation=make_organisation(), name="Models", slug="models", file_format="grib2")
+    catalog = Catalog.objects.create(
+        organisation=make_organisation(), name="Models", slug="models", file_format="grib2"
+    )
     collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface")
     config = ManualUploadConfig.objects.create(
-        catalog=catalog, name="Surface uploads",
-        is_forecast=True, valid_time_format="CONTENT",
+        catalog=catalog,
+        name="Surface uploads",
+        is_forecast=True,
+        valid_time_format="CONTENT",
     )
     variable = ManualUploadConfigVariable.objects.create(
-        config=config, collection=collection,
-        variable_name="2t", long_name="2m temperature", units="K",
+        config=config,
+        collection=collection,
+        variable_name="2t",
+        long_name="2m temperature",
+        units="K",
     )
     return catalog, collection, config, variable
 
@@ -172,11 +186,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = bucket
         catalog, collection, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -196,11 +213,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(UploadSession.objects.count(), 1)
 
@@ -208,11 +228,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         fi = FileIngestion.objects.get(file_path="test-org/imagery/ndvi/band_1/2025/01/15/20250115.tif")
         self.assertEqual(fi.bucket, "incoming")
@@ -221,11 +244,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": ["2025-03-02T00:00"],
-            "files": [SimpleUploadedFile("scene.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": ["2025-03-02T00:00"],
+                "files": [SimpleUploadedFile("scene.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
@@ -235,28 +261,32 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _grib_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "times": ["2025-01-15T06:00"],
-            "files": [SimpleUploadedFile("gfs.grib2", b"grib-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "times": ["2025-01-15T06:00"],
+                "files": [SimpleUploadedFile("gfs.grib2", b"grib-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
         self.assertEqual(uf.file_path, "test-org/models/GR--20250115T0600--gfs.grib2")
 
         mock_task.delay.assert_called_once()
-        self.assertEqual(
-            mock_task.delay.call_args[1]["reference_time"], "2025-01-15T06:00:00+00:00"
-        )
+        self.assertEqual(mock_task.delay.call_args[1]["reference_time"], "2025-01-15T06:00:00+00:00")
 
     def test_grib_forecast_gr_prefix_in_filename_wins_over_form(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _grib_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "times": ["2025-06-01T00:00"],
-            "files": [SimpleUploadedFile("GR--20250115T0600--gfs.grib2", b"grib-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "times": ["2025-06-01T00:00"],
+                "files": [SimpleUploadedFile("GR--20250115T0600--gfs.grib2", b"grib-bytes")],
+            },
+        )
 
         uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
         self.assertEqual(uf.file_path, "test-org/models/GR--20250115T0600--gfs.grib2")
@@ -265,10 +295,13 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _grib_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "times": [""],
-            "files": [SimpleUploadedFile("gfs.grib2", b"grib-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "times": [""],
+                "files": [SimpleUploadedFile("gfs.grib2", b"grib-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Model run time", response.json()["error"])
@@ -278,20 +311,27 @@ class UploadSubmitTests(TestCase):
     def test_missing_file_returns_400(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk], "times": ["2025-01-15T00:00"],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": ["2025-01-15T00:00"],
+            },
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_variable_from_other_config_rejected(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, _ = _geotiff_setup()
         _, _, _, other_variable = _grib_setup()
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [other_variable.pk],
-            "times": ["2025-01-15T00:00"],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [other_variable.pk],
+                "times": ["2025-01-15T00:00"],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_reupload_resets_spent_file_ingestion(self, mock_incoming, mock_task):
@@ -309,11 +349,14 @@ class UploadSubmitTests(TestCase):
             error="old failure",
         )
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         spent.refresh_from_db()
@@ -328,11 +371,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = bucket
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -349,11 +395,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -363,11 +412,14 @@ class UploadSubmitTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk],
-            "times": [""],
-            "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk],
+                "times": [""],
+                "files": [SimpleUploadedFile("20250115.tif", b"tiff-bytes")],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         job_id = response.json()["files"][0]["job_id"]
@@ -377,6 +429,7 @@ class UploadSubmitTests(TestCase):
 # =============================================================================
 # Multi-file batch upload
 # =============================================================================
+
 
 @patch("georiva.ingestion.tasks.process_incoming_file")
 @patch("georiva.core.storage.StorageManager.incoming", new_callable=PropertyMock)
@@ -390,14 +443,17 @@ class UploadSubmitMultiFileTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk, variable.pk],
-            "times": ["", ""],
-            "files": [
-                SimpleUploadedFile("20250115.tif", b"bytes-1"),
-                SimpleUploadedFile("20250116.tif", b"bytes-2"),
-            ],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [
+                    SimpleUploadedFile("20250115.tif", b"bytes-1"),
+                    SimpleUploadedFile("20250116.tif", b"bytes-2"),
+                ],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(UploadSession.objects.count(), 1)
@@ -409,13 +465,16 @@ class UploadSubmitMultiFileTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, _ = _grib_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "times": ["2025-01-15T06:00", "2025-01-16T06:00"],
-            "files": [
-                SimpleUploadedFile("GR--20250115T0600--gfs.grib2", b"bytes-1"),
-                SimpleUploadedFile("GR--20250116T0600--gfs.grib2", b"bytes-2"),
-            ],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "times": ["2025-01-15T06:00", "2025-01-16T06:00"],
+                "files": [
+                    SimpleUploadedFile("GR--20250115T0600--gfs.grib2", b"bytes-1"),
+                    SimpleUploadedFile("GR--20250116T0600--gfs.grib2", b"bytes-2"),
+                ],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(UploadSession.objects.count(), 1)
@@ -435,14 +494,17 @@ class UploadSubmitMultiFileTests(TestCase):
         mock_incoming.return_value = bucket
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk, variable.pk],
-            "times": ["", ""],
-            "files": [
-                SimpleUploadedFile("20250115.tif", b"bytes-1"),
-                SimpleUploadedFile("20250116.tif", b"bytes-2"),
-            ],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [
+                    SimpleUploadedFile("20250115.tif", b"bytes-1"),
+                    SimpleUploadedFile("20250116.tif", b"bytes-2"),
+                ],
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -455,14 +517,17 @@ class UploadSubmitMultiFileTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk, variable.pk],
-            "times": ["", ""],
-            "files": [
-                SimpleUploadedFile("20250115.tif", b"bytes-1"),
-                SimpleUploadedFile("20250116.tif", b"bytes-2"),
-            ],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [
+                    SimpleUploadedFile("20250115.tif", b"bytes-1"),
+                    SimpleUploadedFile("20250116.tif", b"bytes-2"),
+                ],
+            },
+        )
 
         session = UploadSession.objects.get(pk=response.json()["upload_session_id"])
         self.assertEqual(session.status, "completed")
@@ -473,14 +538,17 @@ class UploadSubmitMultiFileTests(TestCase):
         mock_incoming.return_value = bucket
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk, variable.pk],
-            "times": ["", ""],
-            "files": [
-                SimpleUploadedFile("20250115.tif", b"bytes-1"),
-                SimpleUploadedFile("20250116.tif", b"bytes-2"),
-            ],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [
+                    SimpleUploadedFile("20250115.tif", b"bytes-1"),
+                    SimpleUploadedFile("20250116.tif", b"bytes-2"),
+                ],
+            },
+        )
 
         session = UploadSession.objects.get(pk=response.json()["upload_session_id"])
         self.assertEqual(session.status, "completed")
@@ -489,14 +557,17 @@ class UploadSubmitMultiFileTests(TestCase):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
-        response = self.client.post(SUBMIT_URL.format(config.pk), {
-            "variable_ids": [variable.pk, variable.pk],
-            "times": ["", ""],
-            "files": [
-                SimpleUploadedFile("20250115.tif", b"bytes-1"),
-                SimpleUploadedFile("20250116.tif", b"bytes-2"),
-            ],
-        })
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [
+                    SimpleUploadedFile("20250115.tif", b"bytes-1"),
+                    SimpleUploadedFile("20250116.tif", b"bytes-2"),
+                ],
+            },
+        )
 
         self.assertEqual(mock_task.delay.call_count, 2)
         data = response.json()
@@ -519,6 +590,7 @@ class DirectDropTimeValidationTests(TestCase):
 
     def test_unparseable_geotiff_drop_fails_file_ingestion(self, mock_task):
         from georiva.ingestion.consumer import _handle_event
+
         _geotiff_setup()
 
         _handle_event(self._event("test-org/imagery/random_name.tif"))
@@ -532,6 +604,7 @@ class DirectDropTimeValidationTests(TestCase):
 
     def test_parseable_geotiff_drop_is_enqueued(self, mock_task):
         from georiva.ingestion.consumer import _handle_event
+
         _geotiff_setup()
 
         _handle_event(self._event("test-org/imagery/20250115.tif"))
@@ -542,6 +615,7 @@ class DirectDropTimeValidationTests(TestCase):
 
     def test_grib_drop_not_subject_to_filename_check(self, mock_task):
         from georiva.ingestion.consumer import _handle_event
+
         _grib_setup()
 
         _handle_event(self._event("test-org/models/any_name.grib2"))
@@ -553,6 +627,7 @@ class DirectDropTimeValidationTests(TestCase):
     def test_consumer_applies_time_check_uniformly(self, mock_task):
         """Consumer checks time extractability for all drops — no bypass."""
         from georiva.ingestion.consumer import _handle_event
+
         _geotiff_setup()
 
         _handle_event(self._event("test-org/imagery/operator_named.tif"))
@@ -566,11 +641,12 @@ class DirectDropTimeValidationTests(TestCase):
 # process_incoming_file task — job_id wiring
 # =============================================================================
 
+
 @patch("task_ferry.handler.JobHandler.run")
 class ProcessIncomingFileJobIdTests(TestCase):
-
     def _make_job(self, file_path="chirps/rainfall/2024/01/15/file.tif", bucket="incoming"):
         from django.contrib.contenttypes.models import ContentType
+
         ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
         return FileIngestionJob.objects.create(
             user=None,
@@ -581,6 +657,7 @@ class ProcessIncomingFileJobIdTests(TestCase):
 
     def test_task_reuses_existing_job_when_job_id_provided(self, mock_run):
         from georiva.ingestion.tasks import process_incoming_file
+
         job = self._make_job()
 
         process_incoming_file.run(
@@ -621,6 +698,7 @@ class UploadSessionStatusEndpointTests(TestCase):
         session = UploadSession.objects.create(catalog=catalog)
         if status != UploadSession.Status.ACTIVE:
             from django.utils import timezone
+
             session.status = status
             session.completed_at = timezone.now()
             session.save()

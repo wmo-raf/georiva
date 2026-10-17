@@ -1,0 +1,46 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n events_tags %}
+
+{% block titletag %}{% blocktrans with path=log.file_path %}File — {{ path }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gr-file__facts {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 0.3em 1.5em;
+            margin: 0;
+        }
+
+        .gr-file__facts dt {
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-file__facts dd {
+            margin: 0;
+            word-break: break-all;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <dl class="gr-file__facts">
+        <dt>{% trans "Bucket" %}</dt>
+        <dd>{{ log.bucket }}</dd>
+        <dt>{% trans "Path" %}</dt>
+        <dd>{{ log.file_path }}</dd>
+        <dt>{% trans "Status" %}</dt>
+        <dd>{{ log.get_status_display }}</dd>
+        <dt>{% trans "Attempts" %}</dt>
+        <dd>{{ log.retry_count }}</dd>
+        <dt>{% trans "Items / assets" %}</dt>
+        <dd>{{ log.items_created }} / {{ log.assets_created }}</dd>
+        {% if log.error %}
+            <dt>{% trans "Error" %}</dt>
+            <dd>{{ log.error }}</dd>
+        {% endif %}
+    </dl>
+
+    {% history_panel history %}
+{% endblock %}

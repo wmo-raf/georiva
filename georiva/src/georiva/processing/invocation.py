@@ -15,6 +15,7 @@ helpers:
 
 See issue #125 and docs/adr/0005-generic-derivation-engine.md.
 """
+
 from __future__ import annotations
 
 import logging
@@ -45,16 +46,82 @@ def published_item_trigger(item) -> dict:
     }
 
 
-def _dispatch_unit(recipe_type: str, unit: dict, *, dispatch: bool = True, reason="initial") -> None:
+_origin_organisation_resolver = None
+
+
+def register_origin_organisation_resolver(resolver) -> None:
+    """Let the feed layer say which organisation owns a run's ``origin``.
+
+    The engine never resolves tenancy or imports the feed layer, so a sweep reviving
+    a run that has no event of its own yet asks whoever registered here. ``resolver``
+    takes the opaque ``origin`` string and returns an organisation id or ``None``.
+    """
+    global _origin_organisation_resolver
+    _origin_organisation_resolver = resolver
+
+
+def _organisation_for_origin(origin):
+    if not origin or _origin_organisation_resolver is None:
+        return None
+    try:
+        return _origin_organisation_resolver(origin)
+    except Exception:  # a resolver must never break recovery
+        logger.exception("Could not resolve an organisation for origin %s", origin)
+        return None
+
+
+def _revival_context(run_rec, sweep: str):
+    """A sweep reviving a run speaks in that run's own story (ADR 0030).
+
+    It reuses the Correlation and organisation of the run's most recent event, as
+    the sweep, with no Caused-by. Only a run with no prior event starts a fresh
+    chain — and the engine, which never resolves tenancy, leaves it unowned.
+    """
+    from georiva.events.context import EventContext, new_context
+
+    from .models import DerivationAttemptFinished
+
+    last = DerivationAttemptFinished.objects.filter(derivation_run=run_rec).order_by("-occurred_at").first()
+    actor = f"sweep:{sweep}"
+    if last is None:
+        return new_context(actor=actor, organisation_id=_organisation_for_origin(run_rec.origin))
+    return EventContext(correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id)
+
+
+def _dispatch_unit(
+    recipe_type: str, unit: dict, *, dispatch: bool = True, reason="initial", run_rec=None, sweep=None, why=""
+) -> None:
     """Re-run one known ProductionUnit via the same per-unit primitive ``run``
     fans out to — no enumeration/orchestration is duplicated. ``reason`` records
-    why this re-dispatch fired (recorded on the DerivationRun by ``acquire``)."""
+    why this re-dispatch fired (recorded on the DerivationRun by ``acquire``).
+
+    Called by a sweep (``sweep`` names it, ``run_rec`` is the run it is reviving),
+    it also records ``SweepIntervened`` and dispatches inside the revived chain, so
+    the unit's next attempt carries the sweep's Actor and the run's Correlation."""
+    if sweep and run_rec is not None:
+        from georiva.events.context import use_context
+        from georiva.events.models import SweepIntervened
+        from georiva.events.recording import record
+
+        with use_context(_revival_context(run_rec, sweep)):
+            record(
+                SweepIntervened,
+                sweep_name=sweep,
+                reason=why,
+                target_kind="derivation_run",
+                target_id=run_rec.pk,
+                target_label=str(run_rec),
+            )
+            _dispatch_unit(recipe_type, unit, dispatch=dispatch, reason=reason)
+        return
     if dispatch:
         from .tasks import run_unit_task
+
         run_unit_task.delay(recipe_type=recipe_type, unit=unit, reason=reason)
     else:
         from .engine import run_unit
         from .registry import recipe_registry
+
         recipe = recipe_registry.get(recipe_type)
         if recipe is not None:
             run_unit(recipe, unit, reason=reason)
@@ -68,7 +135,7 @@ def current_input_hash(recipe, unit: dict) -> str:
     return compute_input_hash(recipe.resolve_inputs(unit), recipe.version)
 
 
-def sweep_stale_units(*, dispatch: bool = True) -> int:
+def sweep_stale_units(*, dispatch: bool = True, sweep=None) -> int:
     """
     The write-side mirror of ``sweep_unprocessed``: find already-computed units
     whose inputs have since changed (recorded ``input_hash`` ≠ current) and
@@ -89,8 +156,13 @@ def sweep_stale_units(*, dispatch: bool = True) -> int:
             continue
         if current != run_rec.input_hash:
             _dispatch_unit(
-                run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+                run_rec.recipe_type,
+                run_rec.unit_key,
+                dispatch=dispatch,
                 reason=DerivationRun.RetryReason.INPUT_STALE,
+                run_rec=run_rec,
+                sweep=sweep,
+                why="inputs_changed",
             )
             stale += 1
             # Recomputing this unit will change its output, so anything derived
@@ -98,13 +170,13 @@ def sweep_stale_units(*, dispatch: bool = True) -> int:
             # intermediate hasn't recomputed yet, so a hash check wouldn't catch
             # it). Walks transitively through internal intermediates.
             if run_rec.produced_item_id:
-                invalidate_downstream(run_rec.produced_item, dispatch=dispatch)
+                invalidate_downstream(run_rec.produced_item, dispatch=dispatch, sweep=sweep)
     if stale:
         logger.info("Sweep: re-dispatched %d stale unit(s)", stale)
     return stale
 
 
-def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=None) -> int:
+def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=None, sweep=None) -> int:
     """
     Re-dispatch parked ``NOT_READY`` runs whose required inputs now resolve
     (ADR-0020). A unit that went not-ready waits for an input that hadn't been
@@ -146,7 +218,13 @@ def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=Non
         if not recipe.readiness(run_rec.unit_key, resolved):
             continue
         _dispatch_unit(
-            run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch, reason=reason,
+            run_rec.recipe_type,
+            run_rec.unit_key,
+            dispatch=dispatch,
+            reason=reason,
+            run_rec=run_rec,
+            sweep=sweep,
+            why="not_ready_revived",
         )
         revived += 1
     if revived:
@@ -154,7 +232,7 @@ def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=Non
     return revived
 
 
-def reclaim_stale_running(*, dispatch: bool = True) -> int:
+def reclaim_stale_running(*, dispatch: bool = True, sweep=None) -> int:
     """
     Re-dispatch units stuck in RUNNING past the lock timeout.
 
@@ -177,23 +255,33 @@ def reclaim_stale_running(*, dispatch: bool = True) -> int:
 
     cutoff = timezone.now() - DerivationRun.LOCK_TIMEOUT
     stale_runs = DerivationRun.objects.filter(
-        status=DerivationRun.Status.RUNNING, locked_at__lt=cutoff,
+        status=DerivationRun.Status.RUNNING,
+        locked_at__lt=cutoff,
     )
     reclaimed = 0
     for run_rec in stale_runs:
         if _recipe_for(run_rec.recipe_type) is None:
             logger.warning(
                 "Sweep: stale RUNNING unit %s names unknown recipe '%s' — leaving as-is",
-                run_rec, run_rec.recipe_type,
+                run_rec,
+                run_rec.recipe_type,
             )
             continue
         logger.warning(
             "Sweep: reclaiming stale RUNNING unit %s (locked_by=%s at %s, past %s) — re-dispatching",
-            run_rec, run_rec.locked_by or "-", run_rec.locked_at, DerivationRun.LOCK_TIMEOUT,
+            run_rec,
+            run_rec.locked_by or "-",
+            run_rec.locked_at,
+            DerivationRun.LOCK_TIMEOUT,
         )
         _dispatch_unit(
-            run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+            run_rec.recipe_type,
+            run_rec.unit_key,
+            dispatch=dispatch,
             reason=DerivationRun.RetryReason.STALE_RUNNING_RECLAIM,
+            run_rec=run_rec,
+            sweep=sweep,
+            why="stale_running_reclaimed",
         )
         reclaimed += 1
     if reclaimed:
@@ -207,7 +295,7 @@ def _recipe_for(recipe_type: str):
     return recipe_registry.get(recipe_type)
 
 
-def invalidate_downstream(changed_item, *, dispatch: bool = True) -> int:
+def invalidate_downstream(changed_item, *, dispatch: bool = True, sweep=None) -> int:
     """
     Walk ``DerivationLink`` forward from a changed input and recompute every
     item derived from it — transitively, through internal intermediates.
@@ -238,8 +326,13 @@ def invalidate_downstream(changed_item, *, dispatch: bool = True) -> int:
             seen.add(key)
             for run_rec in DerivationRun.objects.filter(produced_item=derived):
                 _dispatch_unit(
-                    run_rec.recipe_type, run_rec.unit_key, dispatch=dispatch,
+                    run_rec.recipe_type,
+                    run_rec.unit_key,
+                    dispatch=dispatch,
                     reason=DerivationRun.RetryReason.INPUT_STALE,
+                    run_rec=run_rec,
+                    sweep=sweep,
+                    why="inputs_changed",
                 )
                 count += 1
             frontier.append(derived)  # continue forward through intermediates

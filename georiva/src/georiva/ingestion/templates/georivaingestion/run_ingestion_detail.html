@@ -1,0 +1,55 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n events_tags %}
+
+{% block titletag %}{% blocktrans %}Run — {{ run }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gr-run__facts {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 0.3em 1.5em;
+            margin: 0;
+        }
+
+        .gr-run__facts dt {
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-run__facts dd {
+            margin: 0;
+        }
+
+        .gr-run__actions {
+            margin-top: 1.5em;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <dl class="gr-run__facts">
+        <dt>{% trans "Collection" %}</dt>
+        <dd>{{ run.collection.catalog.slug }} / {{ run.collection.slug }}</dd>
+        <dt>{% trans "Reference time" %}</dt>
+        <dd>{{ run.reference_time|date:"Y-m-d H:i" }}Z</dd>
+        <dt>{% trans "Status" %}</dt>
+        <dd>{{ run.get_status_display }}</dd>
+        <dt>{% trans "Revision" %}</dt>
+        <dd>{{ run.revision }}</dd>
+        <dt>{% trans "Closed by" %}</dt>
+        <dd>{{ run.get_closed_by_display|default:"—" }}</dd>
+        <dt>{% trans "Files" %}</dt>
+        <dd>{{ run.file_count }}{% if run.expected_file_count %} / {{ run.expected_file_count }}{% endif %}</dd>
+    </dl>
+
+    {% if run.is_open %}
+        <form method="post" class="gr-run__actions">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="close">
+            <button type="submit" class="button button-secondary">{% trans "Close this run" %}</button>
+        </form>
+    {% endif %}
+
+    {% history_panel history %}
+{% endblock %}

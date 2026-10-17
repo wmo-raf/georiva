@@ -1,5 +1,11 @@
 # Styling is two layers: value-free color ramps, per-variable style snapshots
 
+> **Amended by #382 — the styling surface previews on real data.**
+> The surface in §6 gains a live map of the latest item, colored in the browser
+> from the form's unsaved stops; and re-applying a ramp in §3 stops being a
+> database write. Both are amendments to how the surface behaves, not to the
+> two-layer model, which is untouched. See the amendments under **Decision**.
+
 ## Status
 
 accepted
@@ -62,6 +68,22 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    with a warning. (A live-linked or pinned-stop hybrid is deferred until an
    operator actually loses tuning they care about.)
 
+   **Amended (#382): applying a ramp writes nothing.** The gesture was a POST
+   that regenerated the snapshot in the database, guarded by a confirm
+   round-trip because it destroyed work. That guard existed to protect the
+   operator from a step they could not see the result of — the only way to find
+   out what a ramp looked like on real data was to commit to it first. With the
+   map preview, the answer is available before the commitment, so the
+   destruction is unnecessary: a read-only endpoint returns the stops
+   `generate_stops` would produce, the form is filled with them unsaved, and the
+   map repaints. Save is the only thing that persists, and a reload undoes it.
+   The warning survives, now telling the truth — it is about unsaved form state,
+   not a snapshot. `VariableStyle.apply_ramp()` is unchanged and still seeds a
+   style created with a ramp and no stops.
+
+   This removes the surface's last no-JS path. The page now carries a WebGL map;
+   assuming JavaScript there is not a new assumption.
+
 4. **`Variable` keeps `value_min`/`value_max`/`scale_type`.** They are the
    encoding contract (`imageUnscale`, the ADR 0021 render-config token), not
    styling. The `min < max` validation moves onto `Variable.clean()`,
@@ -91,6 +113,32 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    fields in favor of a read-only swatch + link. The upload wizard keeps its
    auto-scanned range inputs — that is seeding, not tuning.
 
+   **Amended (#382): the surface previews on real data.** A gradient bar cannot
+   answer the question the operator has while placing a threshold — does this
+   land where the weather is? — so the form carries a map of the latest item
+   beside the stops, pinned so it cannot scroll away while they work.
+
+   It costs no new serving machinery, because ADR 0021 already separated values
+   from color: `encoded-preview.png` is the item's extent with pixel =
+   rescale(value, vmin→vmax, 0→255), and the browser unscales it back to
+   physical units and colors it on the GPU. Recoloring is therefore a palette
+   swap — a stop edit repaints with no request and no write — and the palette is
+   built from the same stops `as_weatherlayers_palette()` hands the tile config,
+   so the preview is what Titiler will serve rather than an approximation of it.
+   Stepped mode needs no special case: §3's snapshots already carry their class
+   boundaries as doubled stops.
+
+   Which item: newest `reference_time`, then its earliest valid time. Plain
+   `-time` ordering would pick a forecast feed's furthest horizon, and styling
+   against a ten-day-out field judges a guess.
+
+   Two edges the panel names rather than hides. The texture is encoded against
+   the *saved* range, so stops outside it render as flat clipped color — the
+   panel says so instead of letting that read as a bad ramp. And when there is
+   nothing to draw, it says which of the three reasons applies (nothing ingested
+   yet, no COG, no recorded extent), because on a fresh feed only the specific
+   answer tells the operator the problem is not theirs.
+
 7. **`ColorPalette`/`PaletteStop` are retired.** A data migration
    materializes each variable's assigned palette into a default
    `VariableStyle` and normalizes each distinct palette (values → 0–1) into
@@ -118,3 +166,11 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
   snapshots into JSON sidecars — under snapshot styles and multiplicity they
   are stale by design and rebuildable from tile-config (extends ADR 0021's
   "no stored render-config-dependent artifacts").
+- **(#382)** The preview inherits ADR 0021's separation whole, including its
+  limits. `scale_type` is carried in the tile-config payload but consumed by no
+  Titiler code path, so a log-declared variable renders linearly on both sides
+  and the preview matches by accident rather than by design; implementing log
+  must change both or the preview silently diverges. The texture reaches the
+  browser through the ADR 0015 gate on the operator's own session, so an
+  operator on a host that resolves a different organisation gets the
+  texture-failed placeholder rather than a map.

@@ -18,8 +18,8 @@
     - [3.3 Storage Path Convention](#33-storage-path-convention)
 - [4. Full Run Flow](#4-full-run-flow)
 - [5. Mental Model: How to Organize Plugin Collections](#5-mental-model-how-to-organize-plugin-collections)
-    - [5.1 Collections by Period](#51-collections-by-period)
-    - [5.2 Collections by Level](#52-collections-by-level)
+    - [5.1 Collections by Level](#51-collections-by-level--same-file-dedup-applies)
+    - [5.2 Collections by Period](#52-collections-by-period--different-files-dedup-does-not-apply-cross-collection)
     - [5.3 Decision Guide](#53-decision-guide)
 
 ---

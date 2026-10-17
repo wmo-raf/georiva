@@ -1,7 +1,7 @@
-from georiva.pages.home.models import HomePage
-
 from wagtail.models import Page
 from wagtail.test.utils import WagtailPageTestCase
+
+from georiva.pages.home.models import HomePage
 
 
 class HomeSetUpTests(WagtailPageTestCase):

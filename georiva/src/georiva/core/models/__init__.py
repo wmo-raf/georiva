@@ -1,6 +1,7 @@
-from .catalog import Topic, Catalog
+from .catalog import Catalog, Topic
 from .collection import Collection, visible_visibilities
-from .item import Item, Asset
+from .item import Asset, Item
+from .product_published import ProductPublished
 from .units import Unit
 from .variable import Variable
 from .visualization import ColorRamp, ColorRampStop, VariableStyle
@@ -9,6 +10,7 @@ __all__ = [
     "Topic",
     "Catalog",
     "Collection",
+    "visible_visibilities",
     "Unit",
     "Variable",
     "ColorRamp",
@@ -16,4 +18,5 @@ __all__ = [
     "VariableStyle",
     "Item",
     "Asset",
+    "ProductPublished",
 ]

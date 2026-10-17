@@ -27,6 +27,7 @@ for one reason — it is the exact inverse of the builders above, and an inverse
 that drifts from its function is a gate that authorises one collection while the
 tile server reads another.
 """
+
 import hashlib
 import json
 from collections import namedtuple
@@ -208,10 +209,14 @@ def titiler_preview_url(item, variable, style=None) -> str:
         params["style"] = style.slug
     if variable is not None:
         params["v"] = style_version_token(
-            variable, style if style is not None else variable.default_style,
+            variable,
+            style if style is not None else variable.default_style,
         )
     root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable_slug,
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable_slug,
     )
 
     return f"{root}/preview.webp?{urlencode(params)}"
@@ -270,7 +275,10 @@ def titiler_encoded_preview_url(item, variable) -> str:
         params["reftime"] = item.reference_time_iso
     params["v"] = render_config_token(variable)
     root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable.slug,
     )
 
     return f"{root}/encoded-preview.png?{urlencode(params)}"
@@ -290,11 +298,13 @@ def martin_boundary_stats_url(collection, base) -> str:
     an absolute URL from the request, and a default would only ever be a wrong
     answer that looked like a working one.
     """
-    params = urlencode({
-        "org": org_slug_of(collection),
-        "catalog": collection.catalog.slug,
-        "collection": collection.slug,
-    })
+    params = urlencode(
+        {
+            "org": org_slug_of(collection),
+            "catalog": collection.catalog.slug,
+            "collection": collection.slug,
+        }
+    )
     return f"{base.rstrip('/')}/{MARTIN_BOUNDARY_STATS_SOURCE}/{{z}}/{{x}}/{{y}}?{params}"
 
 
@@ -380,6 +390,39 @@ def _keyed(url, api_key):
     return f"{url}?{_api_key_pair(api_key)}" if api_key else url
 
 
+def _wmts_rest_template(variable, leaf, dimensions, styled, api_key) -> str:
+    """A REST ``ResourceURL`` template addressing ``variable``'s tile grid.
+
+    The shared trunk of the two templates a Layer advertises (#354, #379): the
+    per-variable route down to ``{TileMatrix}/{TileCol}/{TileRow}``, then
+    ``leaf`` — ``.png`` for the tile itself, the clicked pixel for an identify
+    — and then the query both spell identically. Written once because the two
+    templates must name the same layer at the same instant in the same style,
+    or a client would identify a pixel of a tile it is not looking at.
+    """
+    collection = variable.collection
+    root = titiler_variable_root(
+        org_slug_of(collection),
+        collection.catalog.slug,
+        collection.slug,
+        variable.slug,
+    )
+    template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}{leaf}"
+    params = (
+        [
+            (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
+        ]
+        if styled
+        else []
+    )
+    params += [(WMTS_DIMENSION_PARAMS[identifier], identifier) for identifier in dimensions]
+    parts = [f"{param}={{{placeholder}}}" for param, placeholder in params]
+    if api_key:
+        parts.append(_api_key_pair(api_key))
+    query = "&".join(parts)
+    return f"{template}?{query}" if query else template
+
+
 def wmts_rest_tile_template(variable, dimensions=(), styled=False, api_key=None) -> str:
     """The REST ``ResourceURL`` template a capabilities Layer advertises (#354).
 
@@ -408,23 +451,27 @@ def wmts_rest_tile_template(variable, dimensions=(), styled=False, api_key=None)
     cannot append parameters. Only a document already personal to that caller
     may pass it, and such documents never enter a shared cache.
     """
-    collection = variable.collection
-    root = titiler_variable_root(
-        org_slug_of(collection), collection.catalog.slug, collection.slug, variable.slug,
-    )
-    template = f"{root}/tiles/WebMercatorQuad/{{TileMatrix}}/{{TileCol}}/{{TileRow}}.png"
-    params = [
-        (WMTS_STYLE_PARAM, WMTS_STYLE_PLACEHOLDER),
-    ] if styled else []
-    params += [
-        (WMTS_DIMENSION_PARAMS[identifier], identifier)
-        for identifier in dimensions
-    ]
-    parts = [f"{param}={{{placeholder}}}" for param, placeholder in params]
-    if api_key:
-        parts.append(_api_key_pair(api_key))
-    query = "&".join(parts)
-    return f"{template}?{query}" if query else template
+    return _wmts_rest_template(variable, ".png", dimensions, styled, api_key)
+
+
+def wmts_rest_featureinfo_template(variable, dimensions=(), styled=False, api_key=None) -> str:
+    """The REST identify template a capabilities Layer advertises (#379).
+
+    The tile template with the clicked pixel spliced in: ``{J}`` and ``{I}``
+    are WMTS 1.0's names for the row and column of a pixel *within* the tile,
+    and a client fills them from the same click that named the tile. The
+    answer comes back as the one ``InfoFormat`` the document offers, so the
+    leaf is ``.json`` rather than a format placeholder — there is no second
+    rendering to choose between.
+
+    Without this a Layer declares an ``InfoFormat`` no REST client can reach:
+    identify was KVP-only, discoverable through ``OperationsMetadata`` alone
+    (#363). ``dimensions``, ``styled`` and ``api_key`` mean exactly what they
+    mean on the tile template, and are passed through unchanged, because an
+    identify that named a different time or style than the tile beside it
+    would explain a pixel nobody is looking at.
+    """
+    return _wmts_rest_template(variable, "/{J}/{I}.json", dimensions, styled, api_key)
 
 
 def wmts_capabilities_url(organisation, api_key=None) -> str:
@@ -441,5 +488,6 @@ def wmts_capabilities_url(organisation, api_key=None) -> str:
     would silently drop the caller back to the public-only view.
     """
     return _keyed(
-        f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml", api_key,
+        f"/api/{WMTS_KVP_SEGMENT}/{organisation.slug}/WMTSCapabilities.xml",
+        api_key,
     )

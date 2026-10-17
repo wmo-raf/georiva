@@ -7,6 +7,8 @@ The engine never interprets it — these tests assert it is stored, threaded, an
 not clobbered by engine-internal re-runs. The product-driven dispatcher that
 *builds* the origin lives in the sources layer (tested separately).
 """
+
+from datetime import UTC
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -30,8 +32,9 @@ class _NotReadyRecipe(BaseRecipe):
         return {"src": ResolvedInput("src", required=True, items=[], assets=[])}
 
     def outputs(self, unit):
-        from datetime import datetime, timezone
-        return OutputItem(collection=None, time=datetime(2020, 1, 1, tzinfo=timezone.utc))
+        from datetime import datetime
+
+        return OutputItem(collection=None, time=datetime(2020, 1, 1, tzinfo=UTC))
 
     def transform(self, unit, resolved):
         return []

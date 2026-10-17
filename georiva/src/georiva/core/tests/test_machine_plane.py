@@ -19,10 +19,12 @@ catalog (#267), so every fixture here is duplicated across two organisations
 under the same slug. A key, a path or a lookup that drops the org segment stops
 distinguishing them, and each test below is written so that dropping it fails.
 """
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from django.test import TestCase, override_settings
-from django.urls import reverse
+from django.urls import resolve, reverse
 
 from georiva.core.machine_plane import (
     MARTIN_PREFIX,
@@ -36,10 +38,9 @@ from georiva.core.machine_plane import (
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,
+    wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
-from georiva.core.models import Item, Variable
-from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.core.machine_plane.palette_cache import (
     build_colormap_256,
     build_variable_payload,
@@ -47,8 +48,12 @@ from georiva.core.machine_plane.palette_cache import (
     variable_cache_key,
     warm_all,
 )
+from georiva.core.models import Item, Variable
+from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.testing import (
     SHARED_TREE_SLUG as SHARED_SLUG,
+)
+from georiva.organisations.testing import (
     make_org_tree,
     make_organisation,
 )
@@ -94,10 +99,7 @@ class MachinePlaneAddressTests(TestCase):
         variable = self.kenya_tree["variable"]
         url = titiler_encoded_preview_url(item, variable)
         self.assertTrue(
-            url.startswith(
-                f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}/"
-                "encoded-preview.png?"
-            ),
+            url.startswith(f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}/encoded-preview.png?"),
             url,
         )
         self.assertIn(f"v={render_config_token(variable)}", url)
@@ -118,8 +120,8 @@ class MachinePlaneAddressTests(TestCase):
     def test_a_forecast_preview_carries_its_reference_time(self):
         item = Item.objects.create(
             collection=self.kenya_tree["collection"],
-            time=datetime(2026, 3, 2, tzinfo=timezone.utc),
-            reference_time=datetime(2026, 3, 1, tzinfo=timezone.utc),
+            time=datetime(2026, 3, 2, tzinfo=UTC),
+            reference_time=datetime(2026, 3, 1, tzinfo=UTC),
         )
         url = titiler_preview_url(item, SHARED_SLUG)
         self.assertIn("reftime=2026-03-01T00", url)
@@ -135,9 +137,9 @@ class MachinePlaneAddressTests(TestCase):
         """The tag reads catalog and org from the item, so a page cannot mix them."""
         from django.template import Context, Template
 
-        rendered = Template(
-            "{% load georiva_tags %}{% titiler_preview_url item slug %}"
-        ).render(Context({"item": self.uganda_tree["item"], "slug": SHARED_SLUG}))
+        rendered = Template("{% load georiva_tags %}{% titiler_preview_url item slug %}").render(
+            Context({"item": self.uganda_tree["item"], "slug": SHARED_SLUG})
+        )
         self.assertTrue(rendered.startswith("/titiler/uganda/"), rendered)
 
     def test_a_martin_url_pins_the_tile_to_one_organisations_rows(self):
@@ -149,16 +151,14 @@ class MachinePlaneAddressTests(TestCase):
 
     def test_a_martin_url_can_be_absolute_without_losing_the_triple(self):
         url = martin_boundary_stats_url(
-            self.kenya_tree["collection"], base="https://kenya.example/martin/",
+            self.kenya_tree["collection"],
+            base="https://kenya.example/martin/",
         )
         self.assertTrue(url.startswith("https://kenya.example/martin/boundary_stats/"), url)
         self.assertIn("org=kenya", url)
 
     def test_palette_cache_keys_of_colliding_catalogs_differ(self):
-        keys = {
-            get_palette_cache_key(org, SHARED_SLUG, SHARED_SLUG, SHARED_SLUG)
-            for org in ("kenya", "uganda")
-        }
+        keys = {get_palette_cache_key(org, SHARED_SLUG, SHARED_SLUG, SHARED_SLUG) for org in ("kenya", "uganda")}
         self.assertEqual(len(keys), 2, keys)
         self.assertIn("georiva:palette:kenya:forecast:forecast:forecast", keys)
 
@@ -188,7 +188,8 @@ class WmtsAddressTests(TestCase):
 
     def test_two_organisations_get_different_kvp_endpoints(self):
         self.assertNotEqual(
-            wmts_kvp_endpoint(self.kenya), wmts_kvp_endpoint(self.uganda),
+            wmts_kvp_endpoint(self.kenya),
+            wmts_kvp_endpoint(self.uganda),
         )
 
     def test_a_keyed_kvp_endpoint_carries_the_credential_param(self):
@@ -206,9 +207,35 @@ class WmtsAddressTests(TestCase):
             "/api/wmts/uganda/WMTSCapabilities.xml",
         )
 
+    def test_the_capabilities_url_resolves_to_the_view_that_serves_it(self):
+        """#378: this is the one address the document advertises for itself, and
+        the only proof it had was a literal equal to another literal — rename
+        the route and both spellings agree while every client following
+        ``ServiceMetadataURL`` gets a silent 404. The tile template earns its
+        proof by being run through ``scope_of``; this earns the same by being
+        run through the URLconf that has to answer it.
+
+        Titiler holds a third spelling of this path (``CAPABILITIES_PATH`` in
+        ``titiler-app/app/wmts.py``) which no test on either side can reach —
+        that one stays a change-in-pairs, and every KVP GetCapabilities
+        exercises it.
+        """
+        match = resolve(wmts_capabilities_url(self.kenya))
+        self.assertEqual(match.view_name, "wmts:capabilities")
+        self.assertEqual(match.kwargs["org_slug"], self.kenya.slug)
+
+    def test_a_keyed_capabilities_url_still_resolves_to_that_view(self):
+        """The keyed spelling is the one a legacy client actually follows
+        (#360), and a credential in the query may not move the address."""
+        keyed = wmts_capabilities_url(self.kenya, api_key="grv_secret")
+        match = resolve(urlsplit(keyed).path)
+        self.assertEqual(match.view_name, "wmts:capabilities")
+        self.assertEqual(match.kwargs["org_slug"], self.kenya.slug)
+
     def test_two_organisations_get_different_capabilities_urls(self):
         self.assertNotEqual(
-            wmts_capabilities_url(self.kenya), wmts_capabilities_url(self.uganda),
+            wmts_capabilities_url(self.kenya),
+            wmts_capabilities_url(self.uganda),
         )
 
     def test_a_keyed_capabilities_url_carries_the_credential_param(self):
@@ -246,7 +273,8 @@ class WmtsRestTileTemplateTests(TestCase):
 
     def test_a_forecast_layer_carries_the_reftime_placeholder_too(self):
         template = wmts_rest_tile_template(
-            self.kenya_tree["variable"], ("Time", "Reftime"),
+            self.kenya_tree["variable"],
+            ("Time", "Reftime"),
         )
         self.assertTrue(template.endswith("?time={Time}&reftime={Reftime}"))
 
@@ -260,7 +288,9 @@ class WmtsRestTileTemplateTests(TestCase):
         param every other styled URL uses (ADR 0023) — one spelling, wired
         beside the dimension params so a client fills them all alike."""
         template = wmts_rest_tile_template(
-            self.kenya_tree["variable"], ("Time",), styled=True,
+            self.kenya_tree["variable"],
+            ("Time",),
+            styled=True,
         )
         self.assertTrue(template.endswith("?style={Style}&time={Time}"))
 
@@ -273,16 +303,17 @@ class WmtsRestTileTemplateTests(TestCase):
         subrequest reads, last so the placeholder grammar stays untouched —
         and it is written encoded, unlike the literal ``{…}`` placeholders."""
         template = wmts_rest_tile_template(
-            self.kenya_tree["variable"], ("Time",), styled=True,
+            self.kenya_tree["variable"],
+            ("Time",),
+            styled=True,
             api_key="grv_secret",
         )
-        self.assertTrue(
-            template.endswith("?style={Style}&time={Time}&api_key=grv_secret")
-        )
+        self.assertTrue(template.endswith("?style={Style}&time={Time}&api_key=grv_secret"))
 
     def test_a_keyed_template_without_dimensions_still_carries_the_key(self):
         template = wmts_rest_tile_template(
-            self.kenya_tree["variable"], api_key="grv_secret",
+            self.kenya_tree["variable"],
+            api_key="grv_secret",
         )
         self.assertTrue(template.endswith(".png?api_key=grv_secret"))
 
@@ -290,6 +321,60 @@ class WmtsRestTileTemplateTests(TestCase):
         self.assertNotEqual(
             wmts_rest_tile_template(self.kenya_tree["variable"], ("Time",)),
             wmts_rest_tile_template(self.uganda_tree["variable"], ("Time",)),
+        )
+
+    def test_the_identify_template_is_the_tile_template_plus_the_pixel(self):
+        """#379: the two templates a Layer advertises are one address written
+        twice, so they are asserted against each other rather than against a
+        second literal — a builder that drifted would still satisfy a literal
+        copied from it, and a client would then identify a pixel of a tile it
+        is not looking at."""
+        variable = self.kenya_tree["variable"]
+        for dimensions, styled, key in (
+            (("Time",), False, None),
+            (("Time", "Reftime"), True, None),
+            ((), False, None),
+            (("Time",), True, "grv_secret"),
+        ):
+            with self.subTest(dimensions=dimensions, styled=styled, keyed=bool(key)):
+                tile = wmts_rest_tile_template(variable, dimensions, styled, key)
+                info = wmts_rest_featureinfo_template(variable, dimensions, styled, key)
+                path, _, query = tile.partition("?")
+                info_path, _, info_query = info.partition("?")
+                self.assertEqual(info_query, query)
+                self.assertEqual(
+                    info_path,
+                    path.removesuffix(".png") + "/{J}/{I}.json",
+                )
+
+    def test_the_identify_template_is_the_identify_route_org_first(self):
+        self.assertEqual(
+            wmts_rest_featureinfo_template(self.kenya_tree["variable"], ("Time",)),
+            f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/{SHARED_SLUG}"
+            "/tiles/WebMercatorQuad/{TileMatrix}/{TileCol}/{TileRow}/{J}/{I}.json"
+            "?time={Time}",
+        )
+
+    def test_a_filled_identify_template_scopes_back_to_its_own_collection(self):
+        """Two segments deeper than a tile, and the gate must still read the
+        same collection out of it — otherwise the document advertises an
+        identify address nginx denies (ADR 0015)."""
+        from georiva.core.machine_plane import MachineScope, scope_of
+
+        filled = wmts_rest_featureinfo_template(
+            self.kenya_tree["variable"],
+            ("Time",),
+        ).format(
+            TileMatrix=6,
+            TileCol=38,
+            TileRow=32,
+            J=128,
+            I=64,
+            Time="2026-03-01T12:00:00Z",
+        )
+        self.assertEqual(
+            scope_of(filled),
+            MachineScope("kenya", SHARED_SLUG, SHARED_SLUG),
         )
 
     def test_a_layer_identifier_is_the_triple_a_kvp_layer_param_carries(self):
@@ -310,14 +395,19 @@ class WmtsRestTileTemplateTests(TestCase):
         from georiva.core.machine_plane import MachineScope, scope_of
 
         template = wmts_rest_tile_template(
-            self.uganda_tree["variable"], ("Time", "Reftime"),
+            self.uganda_tree["variable"],
+            ("Time", "Reftime"),
         )
         uri = template.format(
-            TileMatrix=6, TileCol=38, TileRow=32,
-            Time="2026-03-01T12:00:00Z", Reftime="2026-03-01T00:00:00Z",
+            TileMatrix=6,
+            TileCol=38,
+            TileRow=32,
+            Time="2026-03-01T12:00:00Z",
+            Reftime="2026-03-01T00:00:00Z",
         )
         self.assertEqual(
-            scope_of(uri), MachineScope("uganda", SHARED_SLUG, SHARED_SLUG),
+            scope_of(uri),
+            MachineScope("uganda", SHARED_SLUG, SHARED_SLUG),
         )
 
 
@@ -349,8 +439,7 @@ class PaletteCacheSweepTests(TestCase):
 
     def _keys(self):
         return {
-            key.decode() if isinstance(key, bytes) else key
-            for key in self.redis.scan_iter(match="georiva:palette:*")
+            key.decode() if isinstance(key, bytes) else key for key in self.redis.scan_iter(match="georiva:palette:*")
         }
 
     def test_warming_writes_the_active_variables_key(self):
@@ -399,10 +488,11 @@ class StyledPayloadTests(TestCase):
         from georiva.core.models import VariableStyle
 
         fields = dict(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ff0000"}],
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ff0000"}],
         )
         fields.update(overrides)
         return VariableStyle.objects.create(**fields)
@@ -420,7 +510,8 @@ class StyledPayloadTests(TestCase):
             "scale_type": "linear",
             "colormap": build_colormap_256(
                 [[0.0, [0, 0, 0]], [50.0, [255, 0, 0]]],
-                self.variable.value_min, self.variable.value_max,
+                self.variable.value_min,
+                self.variable.value_max,
             ),
         }
         payload = build_variable_payload(self.variable)
@@ -432,8 +523,7 @@ class StyledPayloadTests(TestCase):
     def test_a_styleless_variables_payload_still_omits_the_colormap(self):
         self.assertEqual(
             build_variable_payload(self.variable),
-            {"vmin": self.variable.value_min, "vmax": self.variable.value_max,
-             "scale_type": "linear"},
+            {"vmin": self.variable.value_min, "vmax": self.variable.value_max, "scale_type": "linear"},
         )
 
     def test_a_non_default_style_does_not_color_the_payload(self):
@@ -472,18 +562,18 @@ class StyleSignalTests(TestCase):
         from georiva.core.models import VariableStyle
 
         return VariableStyle.objects.create(
-            variable=self.variable, name="Official", slug="official",
+            variable=self.variable,
+            name="Official",
+            slug="official",
             is_default=True,
-            stops=[{"value": 0.0, "color": "#000000"},
-                   {"value": 50.0, "color": "#ff0000"}],
+            stops=[{"value": 0.0, "color": "#000000"}, {"value": 50.0, "color": "#ff0000"}],
         )
 
     def test_saving_a_style_warms_its_variables_key(self):
         style = self._make_style()
         self.assertIn("colormap", self._payload())
 
-        style.stops = [{"value": 0.0, "color": "#0000ff"},
-                       {"value": 50.0, "color": "#00ff00"}]
+        style.stops = [{"value": 0.0, "color": "#0000ff"}, {"value": 50.0, "color": "#00ff00"}]
         style.save()
         self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 255, 255])
 
@@ -520,7 +610,8 @@ class TileConfigOrgSegmentTests(TestCase):
 
     def _url(self, org_slug):
         return reverse(
-            "tile_config", args=[org_slug, SHARED_SLUG, SHARED_SLUG, SHARED_SLUG],
+            "tile_config",
+            args=[org_slug, SHARED_SLUG, SHARED_SLUG, SHARED_SLUG],
         )
 
     def test_it_answers_on_a_hostname_belonging_to_no_organisation(self):
@@ -591,7 +682,10 @@ class StyleSelectorAddressTests(TestCase):
         cls.variable = cls.tree["variable"]
         cls.official = make_style(cls.variable, "official")
         cls.analyst = make_style(
-            cls.variable, "analyst", is_default=False, stops=ANALYST_STOPS,
+            cls.variable,
+            "analyst",
+            is_default=False,
+            stops=ANALYST_STOPS,
         )
 
     def test_a_pinned_style_travels_as_a_query_param(self):
@@ -617,8 +711,7 @@ class StyleSelectorAddressTests(TestCase):
 
     def test_editing_a_styles_stops_changes_its_token(self):
         before = style_version_token(self.variable, self.analyst)
-        self.analyst.stops = [{"value": 0.0, "color": "#123456"},
-                              {"value": 50.0, "color": "#00ff00"}]
+        self.analyst.stops = [{"value": 0.0, "color": "#123456"}, {"value": 50.0, "color": "#00ff00"}]
         self.assertNotEqual(before, style_version_token(self.variable, self.analyst))
 
     def test_editing_the_range_changes_every_styles_token(self):
@@ -697,8 +790,7 @@ class StyleMultiplicityCacheTests(TestCase):
         return json.loads(raw) if raw else None
 
     def test_saving_a_style_warms_its_own_segmented_key(self):
-        analyst = make_style(self.variable, "analyst", is_default=False,
-                             stops=ANALYST_STOPS)
+        analyst = make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
         self.assertEqual(self._payload(analyst)["colormap"]["0"], [0, 0, 255, 255])
 
     def test_the_styleless_key_is_the_defaults_alias(self):
@@ -709,15 +801,13 @@ class StyleMultiplicityCacheTests(TestCase):
 
     def test_a_default_flip_rewrites_the_alias_immediately(self):
         make_style(self.variable, "official")
-        analyst = make_style(self.variable, "analyst", is_default=False,
-                             stops=ANALYST_STOPS)
+        analyst = make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
         analyst.promote_to_default()
         self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 255, 255])
 
     def test_deleting_a_style_prunes_its_key(self):
         make_style(self.variable, "official")
-        analyst = make_style(self.variable, "analyst", is_default=False,
-                             stops=ANALYST_STOPS)
+        analyst = make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
         key = variable_cache_key(self.variable, analyst)
         self.assertTrue(self.redis.exists(key))
         analyst.delete()
@@ -726,8 +816,7 @@ class StyleMultiplicityCacheTests(TestCase):
         self.assertEqual(self._payload()["colormap"]["0"], [0, 0, 0, 255])
 
     def test_deleting_the_variable_prunes_its_style_keys_too(self):
-        analyst = make_style(self.variable, "analyst", is_default=False,
-                             stops=ANALYST_STOPS)
+        analyst = make_style(self.variable, "analyst", is_default=False, stops=ANALYST_STOPS)
         key = variable_cache_key(self.variable, analyst)
         self.assertTrue(self.redis.exists(key))
         Variable.objects.get(pk=self.variable.pk).delete()
@@ -768,7 +857,10 @@ class TileConfigStyleParamTests(TestCase):
         cls.variable = cls.tree["variable"]
         cls.official = make_style(cls.variable, "official")
         cls.analyst = make_style(
-            cls.variable, "analyst", is_default=False, stops=ANALYST_STOPS,
+            cls.variable,
+            "analyst",
+            is_default=False,
+            stops=ANALYST_STOPS,
         )
 
     def _get(self, query=""):
@@ -811,7 +903,10 @@ class TileConfigStylesIndexTests(TestCase):
         cls.variable = cls.tree["variable"]
         cls.official = make_style(cls.variable, "official")
         cls.analyst = make_style(
-            cls.variable, "analyst", is_default=False, stops=ANALYST_STOPS,
+            cls.variable,
+            "analyst",
+            is_default=False,
+            stops=ANALYST_STOPS,
         )
 
     def _get(self, query=""):
@@ -886,8 +981,11 @@ class CogKeyGrammarTests(TestCase):
     def test_titilers_key_matches_the_prefix_django_writes_under(self):
         catalog = self.tree["catalog"]
         key = self._titiler_cog_path(
-            "kenya", catalog.slug, SHARED_SLUG, SHARED_SLUG,
-            datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            "kenya",
+            catalog.slug,
+            SHARED_SLUG,
+            SHARED_SLUG,
+            datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
         self.assertTrue(
             key.startswith(catalog.storage_prefix.rstrip("/") + "/"),
@@ -898,7 +996,10 @@ class CogKeyGrammarTests(TestCase):
         """A tile URL and the object behind it differ only by prefix, by design."""
         route = titiler_variable_root("kenya", SHARED_SLUG, SHARED_SLUG, SHARED_SLUG)
         key = self._titiler_cog_path(
-            "kenya", SHARED_SLUG, SHARED_SLUG, SHARED_SLUG,
-            datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc),
+            "kenya",
+            SHARED_SLUG,
+            SHARED_SLUG,
+            SHARED_SLUG,
+            datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
         )
         self.assertEqual(route, f"/titiler/{'/'.join(key.split('/')[:4])}")

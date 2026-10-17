@@ -3,14 +3,15 @@ from django.contrib import admin
 from django.urls import include, path
 from wagtail import urls as wagtail_urls
 from wagtail.admin import urls as wagtailadmin_urls
-from wagtail.documents import urls as wagtaildocs_urls
-
 from wagtail.admin.auth import require_admin_access
+from wagtail.documents import urls as wagtaildocs_urls
 
 from georiva.api import urls as georiva_urls
 from georiva.core.machine_plane.auth_view import TileAuthView
 from georiva.organisations.hopper import org_hopper_script
 from georiva.organisations.pages import OrgScopedPageSearchView
+from georiva.organisations.reports import report_urlpatterns
+
 from .views import health, page_not_found, permission_denied
 
 # Django's stock error pages are unbranded and, in the 403's case, a dead end for
@@ -43,6 +44,10 @@ urlpatterns = [
         require_admin_access(OrgScopedPageSearchView.as_view(results_only=True)),
         name="georiva_org_scoped_page_search_results",
     ),
+    # Wagtail's six admin reports, scoped to the host organisation (#297). Same
+    # technique as page search above; the menu already hides them, but the URL is
+    # what has to refuse.
+    *report_urlpatterns(ADMIN_PREFIX),
     # The org-hopper's per-request half (#270). Routed here rather than through
     # `register_admin_urls` because that hook wraps its URLs in
     # `require_admin_access`, whose login redirect the login page's own copy of
@@ -67,7 +72,7 @@ urlpatterns = [
 if settings.DEBUG:
     from django.conf.urls.static import static
     from django.contrib.staticfiles.urls import staticfiles_urlpatterns
-    
+
     # Serve static and media files from development server
     urlpatterns += staticfiles_urlpatterns()
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

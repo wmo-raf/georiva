@@ -7,6 +7,7 @@ claim over their members' credentials and neither does the instance admin.
 Somebody else's key is reported as absent, exactly as another organisation's row
 would be.
 """
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import Http404
@@ -62,14 +63,18 @@ def api_keys(request):
                 _("'%s' created. Copy it now — it is shown once.") % new_key.name,
             )
 
-    return render(request, "accounts/api_keys.html", {
-        "breadcrumbs_items": _breadcrumbs({"url": None, "label": _("API keys")}),
-        "header_title": _("API keys"),
-        "header_icon": "key",
-        "keys": ApiKey.objects.filter(user=request.user).order_by("-created"),
-        "form": form,
-        "new_secret": new_secret,
-    })
+    return render(
+        request,
+        "accounts/api_keys.html",
+        {
+            "breadcrumbs_items": _breadcrumbs({"url": None, "label": _("API keys")}),
+            "header_title": _("API keys"),
+            "header_icon": "key",
+            "keys": ApiKey.objects.filter(user=request.user).order_by("-created"),
+            "form": form,
+            "new_secret": new_secret,
+        },
+    )
 
 
 @login_required
@@ -78,15 +83,19 @@ def api_key_revoke(request, pk):
     key = _own_key(request, pk)
 
     if request.method != "POST":
-        return render(request, "accounts/api_key_revoke.html", {
-            "breadcrumbs_items": _breadcrumbs(
-                {"url": reverse("api_keys"), "label": _("API keys")},
-                {"url": None, "label": _("Revoke %s") % key.name},
-            ),
-            "header_title": _("Revoke %s") % key.name,
-            "header_icon": "key",
-            "key": key,
-        })
+        return render(
+            request,
+            "accounts/api_key_revoke.html",
+            {
+                "breadcrumbs_items": _breadcrumbs(
+                    {"url": reverse("api_keys"), "label": _("API keys")},
+                    {"url": None, "label": _("Revoke %s") % key.name},
+                ),
+                "header_title": _("Revoke %s") % key.name,
+                "header_icon": "key",
+                "key": key,
+            },
+        )
 
     key.revoke()
     messages.success(request, _("'%s' will no longer be accepted.") % key.name)

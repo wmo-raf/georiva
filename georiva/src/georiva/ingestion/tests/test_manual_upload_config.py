@@ -24,7 +24,6 @@ def _make_config(catalog, name="Surface variables", fmt="YYYYMMDD", is_forecast=
 
 
 class ManualUploadConfigCreationTests(TestCase):
-
     def test_config_can_be_created_with_required_fields(self):
         catalog = _make_catalog()
         config = ManualUploadConfig.objects.create(
@@ -52,7 +51,6 @@ class ManualUploadConfigCreationTests(TestCase):
 
 
 class ValidTimeFormatChoicesTests(TestCase):
-
     def test_YYYYMMDD_maps_to_correct_strptime_pattern(self):
         config = _make_config(_make_catalog(), fmt="YYYYMMDD")
         self.assertEqual(config.strptime_pattern(), "%Y%m%d")
@@ -79,7 +77,6 @@ class ValidTimeFormatChoicesTests(TestCase):
 
 
 class ManualUploadConfigVariableTests(TestCase):
-
     def setUp(self):
         catalog = _make_catalog()
         self.collection = _make_collection(catalog)
@@ -124,10 +121,6 @@ class ManualUploadConfigVariableTests(TestCase):
 
     def test_same_variable_name_allowed_on_different_configs(self):
         other_config = _make_config(self.config.catalog, name="Other")
-        ManualUploadConfigVariable.objects.create(
-            config=self.config, collection=self.collection, variable_name="2t"
-        )
-        ManualUploadConfigVariable.objects.create(
-            config=other_config, collection=self.collection, variable_name="2t"
-        )
+        ManualUploadConfigVariable.objects.create(config=self.config, collection=self.collection, variable_name="2t")
+        ManualUploadConfigVariable.objects.create(config=other_config, collection=self.collection, variable_name="2t")
         self.assertEqual(ManualUploadConfigVariable.objects.filter(variable_name="2t").count(), 2)

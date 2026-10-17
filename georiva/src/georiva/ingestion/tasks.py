@@ -3,33 +3,37 @@ GeoRiva Ingestion Celery Tasks
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 from django.utils import timezone as dj_timezone
-from django_celery_beat.models import PeriodicTask, IntervalSchedule
+from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
+from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
-from georiva.core.storage import storage, BucketType
-from georiva.ingestion.models import FileIngestion
+from georiva.events.context import use_context
+from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
+from georiva.ingestion.chains import context_for_arrival, context_for_revival
+from georiva.ingestion.models import FileIngestion, write_sweep_intervention
 
 logger = logging.getLogger(__name__)
 
 
 @app.task(
     name="georiva.ingestion.tasks.process_incoming_file",
+    base=ChainedTask,
     bind=True,
     max_retries=0,
     acks_late=True,
     queue="georiva-ingestion",
 )
 def process_incoming_file(
-        self,
-        file_path: str,
-        origin_bucket: str,
-        reference_time: str = None,  # kept for backwards compat; IngestionService resolves it
-        job_id: int = None,
+    self,
+    file_path: str,
+    origin_bucket: str,
+    reference_time: str = None,  # kept for backwards compat; IngestionService resolves it
+    job_id: int = None,
 ):
     """
     Process a single incoming file.
@@ -43,11 +47,10 @@ def process_incoming_file(
       - Marking the FileIngestion completed or failed
     """
     from django.contrib.contenttypes.models import ContentType
-    
     from task_ferry.handler import JobHandler
-    
+
     from georiva.ingestion.models import FileIngestionJob
-    
+
     logger.info("process_incoming_file: %s/%s", origin_bucket, file_path)
 
     if job_id is not None:
@@ -60,7 +63,7 @@ def process_incoming_file(
             file_path=file_path,
             bucket=origin_bucket,
         )
-    
+
     # Run in-place — we are already inside a Celery worker, so bypass the
     # executor and call JobHandler.run() directly.  This gives us the full
     # state machine (pending → started → finished/failed) and Redis progress
@@ -75,6 +78,7 @@ def process_incoming_file(
 
 @app.task(
     name="georiva.ingestion.tasks.process_staging_file",
+    base=ChainedTask,
     bind=True,
     max_retries=0,
     acks_late=True,
@@ -100,7 +104,9 @@ def process_staging_file(self, bucket: str, key: str):
         dispatch_for_input(staging_item_trigger(item))
 
 
-@app.task(name="georiva.ingestion.tasks.sweep_unprocessed", queue="georiva-default")
+@app.task(
+    name="georiva.ingestion.tasks.sweep_unprocessed", base=SweepTask, sweep_name="unprocessed", queue="georiva-default"
+)
 def sweep_unprocessed(sync: bool = False):
     """
     Safety net — finds files that the webhook missed and retries failures.
@@ -110,47 +116,55 @@ def sweep_unprocessed(sync: bool = False):
     2. Scan incoming/sources buckets for untracked files
     3. Retry failed files that haven't exceeded max retries
     """
-    
+
     logger.info("Starting sweep...")
-    
+
     # -----------------------------------------------------------------
     # Phase 1: Reset stale locks
     # -----------------------------------------------------------------
-    
-    stale_count = FileIngestion.reset_stale_locks()
+
+    stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
         logger.warning("Reset %d stale locks", stale_count)
-    
+
     # -----------------------------------------------------------------
     # Phase 2: Scan buckets for untracked files
     # -----------------------------------------------------------------
-    
+
     new_files = 0
 
-    dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+    raw_dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
+
+    def dispatch(*, file_path, origin_bucket, reference_time, why):
+        """Revive one file inside the chain it belongs to, and record that the sweep did (ADR 0030)."""
+        log = FileIngestion.objects.filter(bucket=origin_bucket, file_path=file_path).first()
+        with use_context(context_for_revival(origin_bucket, file_path, "unprocessed")):
+            write_sweep_intervention("unprocessed", why, log.pk if log else None, origin_bucket, file_path)
+            raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
     from georiva.ingestion.unprocessed import find_unprocessed
 
     for unprocessed in find_unprocessed():
-        reference_time_iso = (
-            unprocessed.reference_time.isoformat()
-            if unprocessed.reference_time else None
-        )
+        reference_time_iso = unprocessed.reference_time.isoformat() if unprocessed.reference_time else None
 
         if unprocessed.reason == "reingest":
             logger.warning(
-                "Re-ingesting %s/%s", unprocessed.bucket, unprocessed.file_path,
+                "Re-ingesting %s/%s",
+                unprocessed.bucket,
+                unprocessed.file_path,
             )
             FileIngestion.reset_for_reingest(unprocessed.bucket, unprocessed.file_path)
             dispatch(
                 file_path=unprocessed.file_path,
                 origin_bucket=unprocessed.bucket,
                 reference_time=reference_time_iso,
+                why="reingest_required",
             )
         elif unprocessed.reason == "untracked":
             logger.info(
                 "Found untracked file: %s/%s",
-                unprocessed.bucket, unprocessed.file_path,
+                unprocessed.bucket,
+                unprocessed.file_path,
             )
             FileIngestion.register(
                 bucket=unprocessed.bucket,
@@ -161,43 +175,44 @@ def sweep_unprocessed(sync: bool = False):
                 file_path=unprocessed.file_path,
                 origin_bucket=unprocessed.bucket,
                 reference_time=reference_time_iso,
+                why="unprocessed_file_found",
             )
             new_files += 1
         # 'pending' records already await a dispatched task — the sweep
         # leaves them alone (unchanged behavior).
-    
+
     if new_files:
         logger.info("Queued %d untracked files", new_files)
-    
+
     # -----------------------------------------------------------------
     # Phase 3: Retry failed files
     # -----------------------------------------------------------------
-    
+
     retryable = FileIngestion.get_retryable(limit=50)
     retry_count = 0
-    
+
     for log in retryable:
         logger.info(
             "Retrying (%d/%d): %s/%s — last error: %s",
-            log.retry_count, FileIngestion.MAX_RETRIES,
-            log.bucket, log.file_path,
-            log.error[:100] if log.error else 'unknown',
+            log.retry_count,
+            FileIngestion.MAX_RETRIES,
+            log.bucket,
+            log.file_path,
+            log.error[:100] if log.error else "unknown",
         )
-        
+
         dispatch(
             file_path=log.file_path,
             origin_bucket=log.bucket,
-            reference_time=(
-                log.reference_time.isoformat()
-                if log.reference_time else None
-            ),
+            reference_time=(log.reference_time.isoformat() if log.reference_time else None),
+            why="failed_file_retried",
         )
         retry_count += 1
-    
+
     # -----------------------------------------------------------------
     # Summary
     # -----------------------------------------------------------------
-    
+
     # Log permanently failed files for visibility
     permanently_failed = FileIngestion.get_permanently_failed().count()
     if permanently_failed:
@@ -205,14 +220,17 @@ def sweep_unprocessed(sync: bool = False):
             "%d files permanently failed (max retries exceeded)",
             permanently_failed,
         )
-    
+
     logger.info(
         "Sweep complete: %d stale reset, %d new files, %d retries, %d permanently failed",
-        stale_count, new_files, retry_count, permanently_failed,
+        stale_count,
+        new_files,
+        retry_count,
+        permanently_failed,
     )
 
 
-@app.task(name="georiva.ingestion.tasks.sweep_staging", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.sweep_staging", base=SweepTask, sweep_name="staging", queue="georiva-default")
 def sweep_staging(sync: bool = False):
     """
     Reconcile the STAGING bucket against StagingItems — the staging-tier mirror
@@ -246,70 +264,82 @@ def sweep_staging(sync: bool = False):
         except ValueError:
             logger.debug("sweep_staging: skipping non-conforming path: %s", key)
             continue
-        dispatch(bucket=BucketType.STAGING, key=key)
+        with use_context(context_for_arrival(key, actor="sweep:staging")):
+            dispatch(bucket=BucketType.STAGING, key=key)
         dispatched += 1
 
     logger.info("sweep_staging: dispatched %d new staging file(s)", dispatched)
     return dispatched
 
 
-@app.task(name="georiva.ingestion.tasks.cleanup_archives", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.cleanup_archives", base=EntryTask, queue="georiva-default")
 def cleanup_archives(max_age_days: int = 5):
-    from georiva.core.storage import storage, BucketType
+    from georiva.core.storage import BucketType, storage
     from georiva.ingestion.models import FileIngestion
-    
+
     cutoff = dj_timezone.now() - timedelta(days=max_age_days)
     archive = storage.bucket(BucketType.ARCHIVE)
-    
+
     ingestion_logs = FileIngestion.objects.filter(
         status=FileIngestion.Status.COMPLETED,
         completed_at__lt=cutoff,
-    ).exclude(archive_path='')
-    
+    ).exclude(archive_path="")
+
     deleted, failed = 0, 0
-    
+
     for log in ingestion_logs.iterator():
         try:
             archive.delete(log.archive_path)
-            log.archive_path = ''
-            log.save(update_fields=['archive_path'])
+            log.archive_path = ""
+            log.save(update_fields=["archive_path"])
             deleted += 1
         except Exception as e:
             logger.warning("Failed to delete archive %s: %s", log.archive_path, e)
             failed += 1
-    
+
     logger.info("Archive cleanup: deleted=%d failed=%d", deleted, failed)
     return {"deleted": deleted, "failed": failed}
 
 
-@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", queue="georiva-default")
+@app.task(name="georiva.ingestion.tasks.prune_ingestion_logs", base=EntryTask, queue="georiva-default")
 def prune_ingestion_logs(max_age_days: int = 30):
     from georiva.ingestion.models import FileIngestion
+
     result = FileIngestion.prune_old_records(max_age_days)
     logger.info("Ingestion log pruned: %s", result)
     return result
 
 
+@app.task(name="georiva.ingestion.tasks.close_quiet_run_ingestions", base=EntryTask, queue="georiva-default")
+def close_quiet_run_ingestions(minutes: int = None):
+    """Close model runs that have gone quiet (ADR 0026).
+
+    The safety net under the two evidence-based closers, which fire on arrival.
+    On ``georiva-default`` with the other sweeps, never on ``georiva-ingestion``:
+    nothing a reader can observe waits on a run being marked closed (ADR 0025).
+    """
+    from georiva.ingestion.run_closers import close_quiet_runs
+
+    closed = close_quiet_runs(minutes)
+    if closed:
+        logger.info("Closed %d quiet run ingestion(s)", closed)
+    return closed
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     try:
-        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
-            every=5, period=IntervalSchedule.MINUTES
-        )
-        schedule_1day, _ = IntervalSchedule.objects.get_or_create(
-            every=1, period=IntervalSchedule.DAYS
-        )
-        schedule_7days, _ = IntervalSchedule.objects.get_or_create(
-            every=7, period=IntervalSchedule.DAYS
-        )
-        
+        schedule_5min, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
+        schedule_1day, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.DAYS)
+        schedule_7days, _ = IntervalSchedule.objects.get_or_create(every=7, period=IntervalSchedule.DAYS)
+
         PeriodicTask.objects.update_or_create(
             name="georiva.ingestion.sweep_unprocessed",
             defaults={
                 "task": "georiva.ingestion.tasks.sweep_unprocessed",
                 "interval": schedule_5min,
                 "enabled": True,
-            }
+            },
         )
         PeriodicTask.objects.update_or_create(
             name="georiva.ingestion.cleanup_archives",
@@ -317,7 +347,15 @@ def setup_periodic_tasks(sender, **kwargs):
                 "task": "georiva.ingestion.tasks.cleanup_archives",
                 "interval": schedule_1day,
                 "enabled": True,
-            }
+            },
+        )
+        PeriodicTask.objects.update_or_create(
+            name="georiva.ingestion.close_quiet_run_ingestions",
+            defaults={
+                "task": "georiva.ingestion.tasks.close_quiet_run_ingestions",
+                "interval": schedule_5min,
+                "enabled": True,
+            },
         )
         PeriodicTask.objects.update_or_create(
             name="georiva.ingestion.prune_ingestion_logs",
@@ -325,7 +363,7 @@ def setup_periodic_tasks(sender, **kwargs):
                 "task": "georiva.ingestion.tasks.prune_ingestion_logs",
                 "interval": schedule_7days,
                 "enabled": True,
-            }
+            },
         )
     except Exception as e:
         logger.warning("Could not register periodic tasks: %s", e)

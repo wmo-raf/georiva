@@ -10,20 +10,20 @@ class CollectionVisibilityTests(TestCase):
     are never served but read freely by the derivation engine."""
 
     def setUp(self):
-        self.catalog = Catalog.objects.create(organisation=make_organisation(),
-            name="Models", slug="models", file_format="grib2"
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Models", slug="models", file_format="grib2"
         )
 
     def test_defaults_to_public(self):
-        coll = Collection.objects.create(
-            catalog=self.catalog, name="Surface", slug="surface"
-        )
+        coll = Collection.objects.create(catalog=self.catalog, name="Surface", slug="surface")
         self.assertEqual(coll.visibility, Collection.Visibility.PUBLIC)
         self.assertEqual(coll.visibility, "public")
 
     def test_can_be_marked_internal(self):
         coll = Collection.objects.create(
-            catalog=self.catalog, name="Anomaly", slug="anomaly",
+            catalog=self.catalog,
+            name="Anomaly",
+            slug="anomaly",
             visibility=Collection.Visibility.INTERNAL,
         )
         coll.refresh_from_db()
@@ -39,19 +39,25 @@ class TileConfigVisibilityTests(TestCase):
         # bare `testserver` default would 404 on somebody else's org segment.
         self.organisation = make_organisation()
         dial_org(self.client)
-        self.catalog = Catalog.objects.create(organisation=self.organisation,
-            name="CMIP6", slug="cmip6", file_format="geotiff"
+        self.catalog = Catalog.objects.create(
+            organisation=self.organisation, name="CMIP6", slug="cmip6", file_format="geotiff"
         )
         self.unit = Unit.objects.create(name="Celsius", symbol="C")
 
     def _variable(self, collection_slug, visibility):
         coll = Collection.objects.create(
-            catalog=self.catalog, name=collection_slug, slug=collection_slug,
+            catalog=self.catalog,
+            name=collection_slug,
+            slug=collection_slug,
             visibility=visibility,
         )
         return Variable.objects.create(
-            collection=coll, slug="tas", name="tas",
-            unit=self.unit, value_min=0, value_max=50,
+            collection=coll,
+            slug="tas",
+            name="tas",
+            unit=self.unit,
+            value_min=0,
+            value_max=50,
         )
 
     def _url(self, collection_slug, org_slug=None):

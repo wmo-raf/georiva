@@ -14,11 +14,11 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
     boundary per variable per timestep.  Safe to re-compute with
     bulk_create(update_conflicts=True).
     """
-    
+
     # -------------------------------------------------------------------------
     # Identity
     # -------------------------------------------------------------------------
-    
+
     ORGANISATION_LOOKUP = "variable__collection__catalog__organisation"
 
     item = models.ForeignKey(
@@ -40,11 +40,11 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         related_name="zonal_stats",
         help_text=_("Administrative boundary region."),
     )
-    
+
     # -------------------------------------------------------------------------
     # Statistics
     # -------------------------------------------------------------------------
-    
+
     mean = models.FloatField(null=True, blank=True)
     min = models.FloatField(null=True, blank=True)
     max = models.FloatField(null=True, blank=True)
@@ -55,11 +55,11 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
         blank=True,
         help_text=_("Number of valid (non-NaN) pixels within the boundary."),
     )
-    
+
     # -------------------------------------------------------------------------
     # Meta
     # -------------------------------------------------------------------------
-    
+
     class Meta:
         # TimescaleModel provides the 'time' field (= valid_time).
         # We add ordering and indexes but NOT unique_together because
@@ -85,26 +85,24 @@ class BoundaryZonalStats(TimescaleModel, TimeStampedModel):
                 name="idx_bzs_boundary_variable_item",
             ),
         ]
-    
+
     def __str__(self):
-        return (
-            f"{self.variable.slug} @ {self.boundary} [{self.time}]"
-        )
-    
+        return f"{self.variable.slug} @ {self.boundary} [{self.time}]"
+
     # -------------------------------------------------------------------------
     # Convenience accessors
     # -------------------------------------------------------------------------
-    
+
     @property
     def valid_time(self):
         """Alias for TimescaleModel.time — matches Item.valid_time semantics."""
         return self.time
-    
+
     @property
     def reference_time(self):
         """Forecast reference time from the parent Item."""
         return self.item.reference_time
-    
+
     @property
     def is_forecast(self):
         return self.item.reference_time is not None

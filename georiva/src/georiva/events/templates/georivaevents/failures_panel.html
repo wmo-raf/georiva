@@ -1,0 +1,13 @@
+{% load i18n %}
+<section class="gr-failures" aria-label="{% trans 'Recent failures' %}">
+    <h2 class="gr-failures__title">{% trans "Recent failures" %}</h2>
+    {% if failures %}
+        <ul class="gr-history__list">
+            {% for row in failures %}
+                {% include "georivaevents/_history_row.html" %}
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="help-text">{% blocktrans %}No failures in the last {{ days }} days.{% endblocktrans %}</p>
+    {% endif %}
+</section>

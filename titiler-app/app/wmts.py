@@ -19,13 +19,21 @@ one pasted URL discovers layers and then serves their tiles.
 coordinate and the ``I``/``J`` pixel within it become a lon/lat, and the COG
 behind the same semantic address is point-read for the raw physical value.
 
-Errors answer OGC ExceptionReport XML (OWS 1.1), never framework JSON: the
-clients on this endpoint are legacy KVP speakers that can parse nothing else.
+The same identify is reachable on the RESTful binding (#379), through
+``rest_router`` rather than this endpoint: a client that reads the per-layer
+``ResourceURL`` templates and never speaks KVP was shown an ``InfoFormat`` it
+had no address to ask on. Both bindings resolve their pixel and read their
+point through :func:`_identify`, so the two cannot answer one click two ways.
+
+Errors answer OGC ExceptionReport XML (OWS 1.1), never framework JSON, on both
+routers. The KVP endpoint's clients are legacy speakers that can parse nothing
+else; the REST identify route exists only to serve a ``ResourceURL``, so its
+caller is a WMTS client too, whatever the encoding it fetched with.
 """
+
 import logging
 import math
 import re
-from typing import Optional
 from xml.sax.saxutils import escape, quoteattr
 
 import httpx
@@ -40,6 +48,12 @@ from app import dependencies
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+#: The RESTful identify route (#379), mounted by ``app.main`` under the same
+#: four-segment prefix the tile factory sits on — so the address a client
+#: clicks on is the tile address with the pixel appended, and the auth gate
+#: scopes it by the very segments it already scopes tiles by (ADR 0015).
+rest_router = APIRouter()
 
 OWS_NS = "http://www.opengis.net/ows/1.1"
 
@@ -94,7 +108,7 @@ API_KEY_PARAM = "api_key"
 class WMTSException(Exception):
     """An error owed to the client as an OWS 1.1 ExceptionReport."""
 
-    def __init__(self, status_code: int, code: str, locator: Optional[str], text: str):
+    def __init__(self, status_code: int, code: str, locator: str | None, text: str):
         super().__init__(text)
         self.status_code = status_code
         self.code = code
@@ -108,11 +122,21 @@ def exception_report(exc: WMTSException) -> Response:
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         f'<ExceptionReport xmlns="{OWS_NS}" version="1.1.0">'
-        f'<Exception exceptionCode={quoteattr(exc.code)}{locator}>'
+        f"<Exception exceptionCode={quoteattr(exc.code)}{locator}>"
         f"<ExceptionText>{escape(exc.text)}</ExceptionText>"
         "</Exception></ExceptionReport>"
     )
-    return Response(xml, status_code=exc.status_code, media_type="application/xml")
+    # Never cached. A GetFeatureInfo or GetTile whose COG had not landed yet
+    # leaves this endpoint as an ExceptionReport, and a 404 carrying no cache
+    # headers is one a browser may reuse on its own initiative (RFC 9111's
+    # heuristic freshness) — which would put back, at the client, exactly the
+    # stale failure #400 was about. Nothing else here is worth caching either.
+    return Response(
+        xml,
+        status_code=exc.status_code,
+        media_type="application/xml",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _collect_params(request: Request) -> dict[str, str]:
@@ -130,7 +154,9 @@ def _collect_params(request: Request) -> dict[str, str]:
     repeated = sorted(name for name, values in params.items() if len(values) > 1)
     if repeated:
         raise WMTSException(
-            400, "InvalidParameterValue", repeated[0].upper(),
+            400,
+            "InvalidParameterValue",
+            repeated[0].upper(),
             f"Parameter given more than once: {', '.join(n.upper() for n in repeated)}",
         )
     return {name: values[0] for name, values in params.items()}
@@ -140,26 +166,35 @@ def _require(params: dict[str, str], name: str) -> str:
     value = params.get(name)
     if value is None or value == "":
         raise WMTSException(
-            400, "MissingParameterValue", name.upper(),
+            400,
+            "MissingParameterValue",
+            name.upper(),
             f"Missing required parameter {name.upper()}",
         )
     return value
 
 
-def _check_org_slug(org_slug: str) -> None:
-    """Refuse an organisation segment that could re-shape a URL it is spliced into.
+def _check_slugs(*segments: str) -> None:
+    """Refuse a path segment that could re-shape a URL it is spliced into.
 
-    The segment arrives in this endpoint's own path and leaves in two more —
-    the tile route GetTile dispatches to, and the Django address
-    GetCapabilities is fetched from — so its shape is the same question
-    :func:`_parse_layer` asks of the ``LAYER`` triple, asked once at the door
-    because both branches splice it. Reported as absent rather than invalid:
-    no organisation is spelt this way, and which institutions exist here is
-    not this caller's business.
+    On the KVP endpoint that is the organisation alone: it arrives in that
+    endpoint's own path and leaves in two more — the tile route GetTile
+    dispatches to, and the Django address GetCapabilities is fetched from — so
+    its shape is the same question :func:`_parse_layer` asks of the ``LAYER``
+    triple, asked once at the door because both branches splice it. On the REST
+    identify route (#379) the whole address arrives as path segments and all
+    four are asked, because there the triple never passes through
+    ``_parse_layer`` at all.
+
+    Reported as absent rather than invalid: nothing here is spelt this way, and
+    which institutions and catalogs exist is not this caller's business.
     """
-    if not SLUG_RE.fullmatch(org_slug):
+    if not all(SLUG_RE.fullmatch(segment) for segment in segments):
         raise WMTSException(
-            404, "InvalidParameterValue", None, "No WMTS service at this address",
+            404,
+            "InvalidParameterValue",
+            None,
+            "No WMTS service at this address",
         )
 
 
@@ -177,7 +212,9 @@ def _parse_layer(params: dict[str, str]) -> tuple[str, str, str]:
     # could re-shape the path would let the two read different addresses.
     if len(parts) != 3 or not all(SLUG_RE.fullmatch(part) for part in parts):
         raise WMTSException(
-            400, "InvalidParameterValue", "LAYER",
+            400,
+            "InvalidParameterValue",
+            "LAYER",
             f"Layer identifier must be catalog:collection:variable, got {layer!r}",
         )
     return parts[0], parts[1], parts[2]
@@ -190,10 +227,12 @@ def _parse_tile_coords(params: dict[str, str]) -> tuple[int, int, int]:
     # "WebMercatorQuad:5" — the qualified spelling names the same matrix.
     prefix = f"{TILE_MATRIX_SET}:"
     if matrix.startswith(prefix):
-        matrix = matrix[len(prefix):]
+        matrix = matrix[len(prefix) :]
     if not matrix.isdigit() or not 0 <= int(matrix) <= MAX_ZOOM:
         raise WMTSException(
-            400, "InvalidParameterValue", "TILEMATRIX",
+            400,
+            "InvalidParameterValue",
+            "TILEMATRIX",
             f"TILEMATRIX must be a {TILE_MATRIX_SET} level between 0 and {MAX_ZOOM}",
         )
     zoom = int(matrix)
@@ -203,15 +242,19 @@ def _parse_tile_coords(params: dict[str, str]) -> tuple[int, int, int]:
         value = _require(params, name)
         if not value.isdigit():
             raise WMTSException(
-                400, "InvalidParameterValue", name.upper(),
+                400,
+                "InvalidParameterValue",
+                name.upper(),
                 f"{name.upper()} must be a non-negative integer",
             )
         coords[name] = int(value)
-    limit = 2 ** zoom
+    limit = 2**zoom
     for name, value in coords.items():
         if value >= limit:
             raise WMTSException(
-                400, "TileOutOfRange", name.upper(),
+                400,
+                "TileOutOfRange",
+                name.upper(),
                 f"{name.upper()} {value} outside the grid at TILEMATRIX {zoom} (0..{limit - 1})",
             )
     return zoom, coords["tilerow"], coords["tilecol"]
@@ -227,12 +270,18 @@ def _validate_service_and_version(params: dict[str, str]) -> None:
     service = params.get("service")
     if service is not None and service.lower() != "wmts":
         raise WMTSException(
-            400, "InvalidParameterValue", "SERVICE", f"Service {service!r} not served here — this is WMTS",
+            400,
+            "InvalidParameterValue",
+            "SERVICE",
+            f"Service {service!r} not served here — this is WMTS",
         )
     version = params.get("version")
     if version is not None and version != "1.0.0":
         raise WMTSException(
-            400, "InvalidParameterValue", "VERSION", f"Version {version!r} not supported — only 1.0.0",
+            400,
+            "InvalidParameterValue",
+            "VERSION",
+            f"Version {version!r} not supported — only 1.0.0",
         )
 
 
@@ -248,17 +297,22 @@ def _validate_tile_choices(params: dict[str, str]) -> None:
     tms = _require(params, "tilematrixset")
     if tms != TILE_MATRIX_SET:
         raise WMTSException(
-            400, "InvalidParameterValue", "TILEMATRIXSET",
+            400,
+            "InvalidParameterValue",
+            "TILEMATRIXSET",
             f"TileMatrixSet {tms!r} not served — only {TILE_MATRIX_SET}",
         )
     fmt = params.get("format")
     if fmt is not None and fmt != TILE_FORMAT:
         raise WMTSException(
-            400, "InvalidParameterValue", "FORMAT", f"Format {fmt!r} not served — only {TILE_FORMAT}",
+            400,
+            "InvalidParameterValue",
+            "FORMAT",
+            f"Format {fmt!r} not served — only {TILE_FORMAT}",
         )
 
 
-def _resolve_style(params: dict[str, str]) -> Optional[str]:
+def _resolve_style(params: dict[str, str]) -> str | None:
     """The style a request names, with the two default spellings resolved away.
 
     Read the same way by both operations that take one, so a client cannot be
@@ -283,7 +337,7 @@ def _time_query(params: dict[str, str]) -> dict[str, str]:
     return query
 
 
-def _translate_tile_error(status_code: int, detail: str, style: Optional[str]) -> WMTSException:
+def _translate_tile_error(status_code: int, detail: str, style: str | None) -> WMTSException:
     """Re-spell the semantic routes' refusal as a WMTS exception.
 
     Shared by both operations, which is what keeps an address that will not
@@ -382,7 +436,9 @@ def _validate_info_format(params: dict[str, str]) -> None:
     info_format = params.get("infoformat")
     if info_format and info_format != INFO_FORMAT:
         raise WMTSException(
-            400, "InvalidParameterValue", "INFOFORMAT",
+            400,
+            "InvalidParameterValue",
+            "INFOFORMAT",
             f"InfoFormat {info_format!r} not served — only {INFO_FORMAT}",
         )
 
@@ -403,12 +459,16 @@ def _parse_pixel(params: dict[str, str], zoom: int) -> tuple[int, int]:
         value = _require(params, name)
         if not value.isdigit():
             raise WMTSException(
-                400, "InvalidParameterValue", name.upper(),
+                400,
+                "InvalidParameterValue",
+                name.upper(),
                 f"{name.upper()} must be a non-negative integer",
             )
         if int(value) >= size:
             raise WMTSException(
-                400, "PointIJOutOfRange", name.upper(),
+                400,
+                "PointIJOutOfRange",
+                name.upper(),
                 f"{name.upper()} {value} outside the tile (0..{size - 1})",
             )
         pixel[name] = int(value)
@@ -434,7 +494,7 @@ def _pixel_lonlat(zoom: int, row: int, col: int, i: int, j: int) -> tuple[float,
     return lon, lat
 
 
-async def _tile_config_for(address: tuple[str, str, str, str], style: Optional[str]) -> dict:
+async def _tile_config_for(address: tuple[str, str, str, str], style: str | None) -> dict:
     """The rendering config for this layer, resolved as a tile request resolves it.
 
     Fetched for two reasons, neither of them rendering. It is what makes an
@@ -453,17 +513,24 @@ async def _tile_config_for(address: tuple[str, str, str, str], style: Optional[s
     try:
         return await run_in_threadpool(
             dependencies.SemanticTileConfig,
-            org_slug=org_slug, catalog_slug=catalog, collection_slug=collection,
-            variable_slug=variable, style=style,
+            org_slug=org_slug,
+            catalog_slug=catalog,
+            collection_slug=collection,
+            variable_slug=variable,
+            style=style,
         )
     except HTTPException as exc:
         raise _translate_tile_error(exc.status_code, str(exc.detail or ""), style) from exc
 
 
 async def _read_point(
-        request: Request, address: tuple[str, str, str, str],
-        lon: float, lat: float, query: dict[str, str], style: Optional[str],
-) -> Optional[float]:
+    request: Request,
+    address: tuple[str, str, str, str],
+    lon: float,
+    lat: float,
+    query: dict[str, str],
+    style: str | None,
+) -> float | None:
     """The raw physical value under ``(lon, lat)``, or ``None`` where there is none.
 
     Read through the point route, so the COG address comes from the same
@@ -503,10 +570,18 @@ async def _read_point(
     return value
 
 
-async def _dispatch_get_feature_info(
-        request: Request, org_slug: str, params: dict[str, str],
-) -> Response:
-    """Answer GetFeatureInfo with the value under the clicked pixel (#363).
+async def _identify(
+    request: Request,
+    address: tuple[str, str, str, str],
+    zoom: int,
+    row: int,
+    col: int,
+    i: int,
+    j: int,
+    style: str | None,
+    query: dict[str, str],
+) -> dict:
+    """The identify answer for one pixel, whichever binding asked (#363, #379).
 
     The answer echoes what was asked — layer, time, reftime and the lon/lat
     the tile coordinate and pixel resolved to — beside the value, so a
@@ -518,24 +593,18 @@ async def _dispatch_get_feature_info(
     value. The client asked a well-formed question about a real place and the
     honest answer is "nothing here" — an exception would tell it the layer is
     broken.
+
+    The ``layer`` echoed is the identifier the capabilities document
+    advertises, rebuilt from the address rather than from whatever the client
+    sent, so the REST caller — which spelt the triple as path segments and
+    never sent a ``LAYER`` at all — gets the same receipt as the KVP one.
     """
-    _validate_service_and_version(params)
-    _validate_tile_choices(params)
-    _validate_info_format(params)
-    catalog, collection, variable = _parse_layer(params)
-    zoom, row, col = _parse_tile_coords(params)
-    i, j = _parse_pixel(params, zoom)
-
-    style = _resolve_style(params)
-    query = _time_query(params)
-    address = (org_slug, catalog, collection, variable)
-
     lon, lat = _pixel_lonlat(zoom, row, col, i, j)
     config = await _tile_config_for(address, style)
     value = await _read_point(request, address, lon, lat, query, style)
 
     payload = {
-        "layer": params["layer"],
+        "layer": ":".join(address[1:]),
         "time": query["time"],
         "reftime": query.get("reftime"),
         "longitude": lon,
@@ -547,6 +616,33 @@ async def _dispatch_get_feature_info(
     for name in ("units", "label"):
         if config.get(name):
             payload[name] = config[name]
+    return payload
+
+
+async def _dispatch_get_feature_info(
+    request: Request,
+    org_slug: str,
+    params: dict[str, str],
+) -> Response:
+    """Answer KVP GetFeatureInfo with the value under the clicked pixel (#363)."""
+    _validate_service_and_version(params)
+    _validate_tile_choices(params)
+    _validate_info_format(params)
+    catalog, collection, variable = _parse_layer(params)
+    zoom, row, col = _parse_tile_coords(params)
+    i, j = _parse_pixel(params, zoom)
+
+    payload = await _identify(
+        request,
+        (org_slug, catalog, collection, variable),
+        zoom,
+        row,
+        col,
+        i,
+        j,
+        _resolve_style(params),
+        _time_query(params),
+    )
     return JSONResponse(payload, media_type=INFO_FORMAT)
 
 
@@ -564,23 +660,36 @@ def _translate_capabilities_error(status_code: int) -> WMTSException:
 
     Behind the nginx gateway most of these are settled before this service is
     reached: the ``auth_request`` subrequest asks Django the same questions
-    first, so an unknown organisation is denied there and a broken key comes
-    back as nginx's own bare 401 rather than as a report — a gap on this
-    whole endpoint, GetTile included, and one to close in the gateway rather
-    than here (#372). These branches are what a direct caller gets,
-    and what stays right if the gate's answers and Django's ever part.
+    first, so an unknown organisation is denied there and a broken key is
+    refused there. Those two now answer a report of their own, rendered by the
+    gateway (#372). The 401 it renders is *this* branch's, word for word —
+    ``test_wmts_gateway_exceptions`` renders it from here and asserts the
+    gateway matches, so the wording below cannot change without
+    ``deploy/nginx/nginx.conf`` changing with it. Its 404 is deliberately
+    broader than this one: the gate refuses a collection the caller may not see
+    with the same status it refuses an unknown organisation, and a text as
+    specific as this branch's would narrow an answer that must stay ambiguous
+    (ADR 0014). These branches are what a direct caller gets, and what stays
+    right if the gate's answers and Django's ever part.
     """
     if status_code == 404:
         return WMTSException(
-            404, "InvalidParameterValue", None, "No WMTS service for this organisation",
+            404,
+            "InvalidParameterValue",
+            None,
+            "No WMTS service for this organisation",
         )
     if status_code in (401, 403):
         return WMTSException(
-            status_code, "InvalidParameterValue", API_KEY_PARAM.upper(),
+            status_code,
+            "InvalidParameterValue",
+            API_KEY_PARAM.upper(),
             "The presented credential was refused",
         )
     return WMTSException(
-        502, "NoApplicableCode", None,
+        502,
+        "NoApplicableCode",
+        None,
         f"The capabilities document could not be built (upstream status {status_code})",
     )
 
@@ -633,14 +742,17 @@ async def _proxy_get_capabilities(request: Request, org_slug: str, params: dict[
         async with dependencies.django_client() as client:
             response = await client.get(
                 CAPABILITIES_PATH.format(org_slug=org_slug),
-                params=query, headers=forwarded,
+                params=query,
+                headers=forwarded,
             )
     except httpx.HTTPError as e:
         logger.warning("WMTS capabilities fetch failed for %s: %s", org_slug, e)
         raise WMTSException(
-            503, "NoApplicableCode", None,
+            503,
+            "NoApplicableCode",
+            None,
             "The capabilities document is unavailable — the metadata service could not be reached",
-        )
+        ) from e
 
     if response.status_code != 200:
         raise _translate_capabilities_error(response.status_code)
@@ -671,7 +783,7 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
     collection before it got here (ADR 0015).
     """
     try:
-        _check_org_slug(org_slug)
+        _check_slugs(org_slug)
         params = _collect_params(request)
         operation = _require(params, "request").lower()
         if operation == "gettile":
@@ -682,10 +794,84 @@ async def wmts_kvp(org_slug: str, request: Request) -> Response:
         if operation == "getfeatureinfo":
             return await _dispatch_get_feature_info(request, org_slug, params)
         raise WMTSException(
-            400, "InvalidParameterValue", "REQUEST",
+            400,
+            "InvalidParameterValue",
+            "REQUEST",
             f"Unknown request {params['request']!r}",
         )
     except WMTSException as exc:
         if exc.status_code >= 500:
             logger.warning("WMTS KVP %s: %s", exc.code, exc.text)
+        return exception_report(exc)
+
+
+@rest_router.get("/tiles/{tile_matrix_set}/{tile_matrix}/{tile_col}/{tile_row}/{j}/{i}.json")
+async def wmts_rest_feature_info(
+    request: Request,
+    org_slug: str,
+    catalog_slug: str,
+    collection_slug: str,
+    variable_slug: str,
+    tile_matrix_set: str,
+    tile_matrix: str,
+    tile_col: str,
+    tile_row: str,
+    j: str,
+    i: str,
+) -> Response:
+    """RESTful GetFeatureInfo — the identify a ``ResourceURL`` client can reach (#379).
+
+    The tile address with the pixel appended, because that is what the client
+    is holding: it drew the tile from
+    ``…/tiles/WebMercatorQuad/{TileMatrix}/{TileCol}/{TileRow}.png`` and the
+    click it wants explained happened inside that very tile. Column before row,
+    matching the tile route's own ``z/x/y`` — the capabilities template names
+    its placeholders, so a client substitutes by name and never by position.
+
+    Every value is taken as a string and validated by the same helpers the KVP
+    binding uses, rather than declared as ``int`` for the framework to check.
+    FastAPI would answer a malformed segment with its own 422 JSON, which is
+    the one shape this route promised not to emit — and the two bindings would
+    then disagree about what a bad TILEROW is.
+
+    Dimensions and style arrive in the query, exactly as they do on the tile
+    route this sits beside (``?time=…&reftime=…&style=…``), so the capabilities
+    template is the tile template with a pixel spliced in and the same query
+    behind it.
+    """
+    try:
+        _check_slugs(org_slug, catalog_slug, collection_slug, variable_slug)
+        # Query first, path second: the path is where the gate read this
+        # request's address, so a query parameter of the same name may not
+        # quietly stand in for one of its segments.
+        params = _collect_params(request)
+        params.update(
+            {
+                "tilematrixset": tile_matrix_set,
+                "tilematrix": tile_matrix,
+                "tilecol": tile_col,
+                "tilerow": tile_row,
+                "i": i,
+                "j": j,
+            }
+        )
+        _validate_tile_choices(params)
+        zoom, row, col = _parse_tile_coords(params)
+        pixel_i, pixel_j = _parse_pixel(params, zoom)
+
+        payload = await _identify(
+            request,
+            (org_slug, catalog_slug, collection_slug, variable_slug),
+            zoom,
+            row,
+            col,
+            pixel_i,
+            pixel_j,
+            _resolve_style(params),
+            _time_query(params),
+        )
+        return JSONResponse(payload, media_type=INFO_FORMAT)
+    except WMTSException as exc:
+        if exc.status_code >= 500:
+            logger.warning("WMTS REST %s: %s", exc.code, exc.text)
         return exception_report(exc)

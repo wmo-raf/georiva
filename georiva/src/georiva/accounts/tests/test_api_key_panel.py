@@ -6,6 +6,7 @@ reasoned about by anyone other than its holder. Keys are not organisation data
 superuser has no more claim on them than anyone else — so every lookup here is
 scoped by ``request.user`` rather than by the active organisation.
 """
+
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -16,7 +17,6 @@ from georiva.organisations.tests.factories import PASSWORD, add_member, make_use
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class ApiKeyPanelTests(TestCase):
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -32,7 +32,9 @@ class ApiKeyPanelTests(TestCase):
 
     def test_creating_a_key_shows_the_secret_exactly_once(self):
         response = self.client.post(
-            reverse("api_keys"), {"name": "QGIS laptop"}, follow=True,
+            reverse("api_keys"),
+            {"name": "QGIS laptop"},
+            follow=True,
         )
         self.assertEqual(response.status_code, 200)
         key = ApiKey.objects.get(user=self.owner)

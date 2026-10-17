@@ -46,27 +46,28 @@ def _wizard_chrome(step):
         "step_labels": STEP_LABELS,
     }
 
+
 _FORMAT_EXAMPLES = {
-    "YYYYMMDD":     "20250115.grib2",
-    "DDMMYYYY":     "15012025.grib2",
-    "YYYYMMDDHH":   "2025011506.grib2",
+    "YYYYMMDD": "20250115.grib2",
+    "DDMMYYYY": "15012025.grib2",
+    "YYYYMMDDHH": "2025011506.grib2",
     "YYYYMMDDHHMM": "202501150630.grib2",
-    "DDMMYY":       "150125.grib2",
-    "YYMMDD":       "250115.grib2",
+    "DDMMYY": "150125.grib2",
+    "YYMMDD": "250115.grib2",
 }
 
 _CATALOG_FORMAT_ACCEPT = {
-    "grib2":   ".grib2,.grib,.grb2,.grb",
-    "netcdf":  ".nc,.nc4,.netcdf",
+    "grib2": ".grib2,.grib,.grb2,.grb",
+    "netcdf": ".nc,.nc4,.netcdf",
     "geotiff": ".tif,.tiff",
-    "zarr":    ".zarr",
+    "zarr": ".zarr",
 }
 
 _CATALOG_FORMAT_LABEL = {
-    "grib2":   "GRIB / GRIB2",
-    "netcdf":  "NetCDF",
+    "grib2": "GRIB / GRIB2",
+    "netcdf": "NetCDF",
     "geotiff": "GeoTIFF",
-    "zarr":    "Zarr",
+    "zarr": "Zarr",
 }
 
 
@@ -81,11 +82,7 @@ def _session_catalog(request, session):
         return None
     from georiva.core.models import Catalog
 
-    return (
-        scoped_queryset(request, Catalog.objects.all())
-        .filter(pk=session["catalog_id"])
-        .first()
-    )
+    return scoped_queryset(request, Catalog.objects.all()).filter(pk=session["catalog_id"]).first()
 
 
 def _catalog_format_from_session(request, session):
@@ -123,6 +120,7 @@ def _save_session(request, data):
 # =============================================================================
 # Step 1 — Catalog
 # =============================================================================
+
 
 def upload_wizard_step1(request):
     from georiva.core.models import Catalog
@@ -172,29 +170,36 @@ def upload_wizard_step1(request):
                 messages.error(request, e)
         else:
             session = _session(request)
-            session.update({
-                "catalog_mode": catalog_mode,
-                "catalog_id": int(catalog_id) if catalog_mode == "select" and catalog_id else None,
-                "new_catalog_name": new_catalog_name if catalog_mode == "create" else None,
-                "new_catalog_slug": new_catalog_slug if catalog_mode == "create" else None,
-                "new_catalog_format": new_catalog_format if catalog_mode == "create" else None,
-                "new_catalog_description": new_catalog_description if catalog_mode == "create" else None,
-            })
+            session.update(
+                {
+                    "catalog_mode": catalog_mode,
+                    "catalog_id": int(catalog_id) if catalog_mode == "select" and catalog_id else None,
+                    "new_catalog_name": new_catalog_name if catalog_mode == "create" else None,
+                    "new_catalog_slug": new_catalog_slug if catalog_mode == "create" else None,
+                    "new_catalog_format": new_catalog_format if catalog_mode == "create" else None,
+                    "new_catalog_description": new_catalog_description if catalog_mode == "create" else None,
+                }
+            )
             _save_session(request, session)
             return redirect("upload_wizard_step2")
 
     session = _session(request)
-    return render(request, "georivaingestion/wizard_step1_catalog.html", {
-        "all_catalogs": all_catalogs,
-        "file_format_choices": file_format_choices,
-        "session": session,
-        **_wizard_chrome(1),
-    })
+    return render(
+        request,
+        "georivaingestion/wizard_step1_catalog.html",
+        {
+            "all_catalogs": all_catalogs,
+            "file_format_choices": file_format_choices,
+            "session": session,
+            **_wizard_chrome(1),
+        },
+    )
 
 
 # =============================================================================
 # Step 2 — Config name
 # =============================================================================
+
 
 def upload_wizard_step2(request):
     session = _session(request)
@@ -209,9 +214,7 @@ def upload_wizard_step2(request):
             config_name
             and session.get("catalog_mode") == "select"
             and session.get("catalog_id")
-            and ManualUploadConfig.objects.filter(
-                catalog_id=session["catalog_id"], name=config_name
-            ).exists()
+            and ManualUploadConfig.objects.filter(catalog_id=session["catalog_id"], name=config_name).exists()
         )
         if not config_name:
             messages.error(request, _("Please enter a name for this upload configuration."))
@@ -234,16 +237,21 @@ def upload_wizard_step2(request):
             if catalog is not None:
                 default_config_name = f"{catalog.name} Config"
 
-    return render(request, "georivaingestion/wizard_step2_name.html", {
-        "session": session,
-        "default_config_name": default_config_name,
-        **_wizard_chrome(2),
-    })
+    return render(
+        request,
+        "georivaingestion/wizard_step2_name.html",
+        {
+            "session": session,
+            "default_config_name": default_config_name,
+            **_wizard_chrome(2),
+        },
+    )
 
 
 # =============================================================================
 # AJAX — sample file upload → variables JSON
 # =============================================================================
+
 
 def _nice_bounds(vmin: float, vmax: float) -> tuple[float, float]:
     """Round a data range outward to bounds suitable for styling/encoding ranges."""
@@ -364,6 +372,7 @@ def upload_wizard_upload_sample(request):
 # Step 3 — File, Format & variable selection
 # =============================================================================
 
+
 def upload_wizard_step3(request):
     from georiva.ingestion.models import ManualUploadConfig
 
@@ -413,28 +422,34 @@ def upload_wizard_step3(request):
         if errors:
             for e in errors:
                 messages.error(request, e)
-            return render(request, "georivaingestion/wizard_step3_combined.html", {
-                "session": session,
-                "format_choices": format_choices,
-                "format_examples": _FORMAT_EXAMPLES,
-                "accept_extensions": accept_extensions,
-                "format_label": format_label,
-                "show_filename_format": show_fmt,
-                "prefill_filename": sample_filename,
-                "prefill_variables_json": variables_json_str or "[]",
-                "prefill_selected_json": selected_json_str or "[]",
-                "prefill_format": valid_time_format,
-                "prefill_is_forecast": is_forecast,
-                **_wizard_chrome(3),
-            })
+            return render(
+                request,
+                "georivaingestion/wizard_step3_combined.html",
+                {
+                    "session": session,
+                    "format_choices": format_choices,
+                    "format_examples": _FORMAT_EXAMPLES,
+                    "accept_extensions": accept_extensions,
+                    "format_label": format_label,
+                    "show_filename_format": show_fmt,
+                    "prefill_filename": sample_filename,
+                    "prefill_variables_json": variables_json_str or "[]",
+                    "prefill_selected_json": selected_json_str or "[]",
+                    "prefill_format": valid_time_format,
+                    "prefill_is_forecast": is_forecast,
+                    **_wizard_chrome(3),
+                },
+            )
 
-        session.update({
-            "variables": variables,
-            "selected_variable_names": selected_names,
-            "sample_filename": sample_filename,
-            "valid_time_format": valid_time_format,
-            "is_forecast": is_forecast,
-        })
+        session.update(
+            {
+                "variables": variables,
+                "selected_variable_names": selected_names,
+                "sample_filename": sample_filename,
+                "valid_time_format": valid_time_format,
+                "is_forecast": is_forecast,
+            }
+        )
         _save_session(request, session)
         return redirect("upload_wizard_step4")
 
@@ -445,25 +460,30 @@ def upload_wizard_step3(request):
     prefill_format = session.get("valid_time_format", "")
     prefill_is_forecast = session.get("is_forecast", False)
 
-    return render(request, "georivaingestion/wizard_step3_combined.html", {
-        "session": session,
-        "format_choices": format_choices,
-        "format_examples": _FORMAT_EXAMPLES,
-        "accept_extensions": accept_extensions,
-        "format_label": format_label,
-        "show_filename_format": show_fmt,
-        "prefill_filename": prefill_filename,
-        "prefill_variables_json": prefill_variables_json,
-        "prefill_selected_json": prefill_selected_json,
-        "prefill_format": prefill_format,
-        "prefill_is_forecast": prefill_is_forecast,
-        **_wizard_chrome(3),
-    })
+    return render(
+        request,
+        "georivaingestion/wizard_step3_combined.html",
+        {
+            "session": session,
+            "format_choices": format_choices,
+            "format_examples": _FORMAT_EXAMPLES,
+            "accept_extensions": accept_extensions,
+            "format_label": format_label,
+            "show_filename_format": show_fmt,
+            "prefill_filename": prefill_filename,
+            "prefill_variables_json": prefill_variables_json,
+            "prefill_selected_json": prefill_selected_json,
+            "prefill_format": prefill_format,
+            "prefill_is_forecast": prefill_is_forecast,
+            **_wizard_chrome(3),
+        },
+    )
 
 
 # =============================================================================
 # Step 4 — Collection setup
 # =============================================================================
+
 
 def upload_wizard_step4(request):
     from georiva.core.models import Unit
@@ -481,15 +501,19 @@ def upload_wizard_step4(request):
     units = list(Unit.objects.order_by("name").values("id", "name", "symbol"))
 
     def _render(prefill_collections_json="[]", prefill_assignments_json="[]"):
-        return render(request, "georivaingestion/wizard_step4_collections.html", {
-            "session": session,
-            "selected_variables_json": json.dumps(selected_variables),
-            "collection_base_name": collection_base_name,
-            "units_json": json.dumps(units),
-            "prefill_collections_json": prefill_collections_json,
-            "prefill_assignments_json": prefill_assignments_json,
-            **_wizard_chrome(4),
-        })
+        return render(
+            request,
+            "georivaingestion/wizard_step4_collections.html",
+            {
+                "session": session,
+                "selected_variables_json": json.dumps(selected_variables),
+                "collection_base_name": collection_base_name,
+                "units_json": json.dumps(units),
+                "prefill_collections_json": prefill_collections_json,
+                "prefill_assignments_json": prefill_assignments_json,
+                **_wizard_chrome(4),
+            },
+        )
 
     if request.method == "POST":
         collections_json_str = request.POST.get("collections_json", "").strip()
@@ -521,9 +545,7 @@ def upload_wizard_step4(request):
         assigned_idxs = {a.get("collection_idx") for a in assignments}
         for i in range(len(collections)):
             if i not in assigned_idxs:
-                errors.append(
-                    _("Collection '%s' has no variables assigned to it.") % collections[i].get("name", i + 1)
-                )
+                errors.append(_("Collection '%s' has no variables assigned to it.") % collections[i].get("name", i + 1))
 
         from georiva.core.models import Variable
         from georiva.core.unit_utils import ureg
@@ -531,8 +553,12 @@ def upload_wizard_step4(request):
         for a in assignments:
             var_label = a.get("variable_name", "?")
             vmin, vmax = a.get("value_min"), a.get("value_max")
-            if not isinstance(vmin, (int, float)) or not isinstance(vmax, (int, float)) \
-                    or isinstance(vmin, bool) or isinstance(vmax, bool):
+            if (
+                not isinstance(vmin, (int, float))
+                or not isinstance(vmax, (int, float))
+                or isinstance(vmin, bool)
+                or isinstance(vmax, bool)
+            ):
                 errors.append(_("Variable '%s' needs numeric min and max values.") % var_label)
             else:
                 # The rule lives on the model (ADR 0022); the wizard only
@@ -550,9 +576,7 @@ def upload_wizard_step4(request):
                 try:
                     ureg(unit_create)
                 except Exception:
-                    errors.append(
-                        _("Variable '%s': unit '%s' is not a valid unit symbol.") % (var_label, unit_create)
-                    )
+                    errors.append(_("Variable '%s': unit '%s' is not a valid unit symbol.") % (var_label, unit_create))
 
         # Duplicate source_name check: each variable_name must map to exactly
         # one collection per catalog (unambiguous collection resolution for
@@ -570,8 +594,10 @@ def upload_wizard_step4(request):
                 existing_slug, existing_name = source_name_to_collection[source_name]
                 if existing_slug != coll_slug:
                     errors.append(
-                        _("Variable '%(var)s' is assigned to both '%(c1)s' and '%(c2)s' — "
-                          "each source_name must map to exactly one collection per catalog.")
+                        _(
+                            "Variable '%(var)s' is assigned to both '%(c1)s' and '%(c2)s' — "
+                            "each source_name must map to exactly one collection per catalog."
+                        )
                         % {"var": source_name, "c1": existing_name, "c2": coll_name}
                     )
             else:
@@ -581,15 +607,18 @@ def upload_wizard_step4(request):
         catalog_id = session.get("catalog_id")
         if catalog_id:
             from georiva.ingestion.models import ManualUploadConfigVariable
-            for ev in ManualUploadConfigVariable.objects.filter(
-                config__catalog_id=catalog_id
-            ).select_related("collection"):
+
+            for ev in ManualUploadConfigVariable.objects.filter(config__catalog_id=catalog_id).select_related(
+                "collection"
+            ):
                 if ev.variable_name in source_name_to_collection:
                     new_slug, new_name = source_name_to_collection[ev.variable_name]
                     if ev.collection.slug != new_slug:
                         errors.append(
-                            _("Variable '%(var)s' is already assigned to collection '%(existing)s' "
-                              "in this catalog — cannot also assign it to '%(new)s'.")
+                            _(
+                                "Variable '%(var)s' is already assigned to collection '%(existing)s' "
+                                "in this catalog — cannot also assign it to '%(new)s'."
+                            )
                             % {"var": ev.variable_name, "existing": ev.collection.name, "new": new_name}
                         )
 
@@ -612,8 +641,8 @@ def upload_wizard_step4(request):
 # Step 5 — Review
 # =============================================================================
 
+
 def upload_wizard_step5(request):
-    from georiva.core.models import Catalog
 
     session = _session(request)
     if not session.get("assignments"):
@@ -629,23 +658,30 @@ def upload_wizard_step5(request):
     collections_display = []
     for idx, coll in enumerate(session.get("collections", [])):
         variables = [a for a in session.get("assignments", []) if a.get("collection_idx") == idx]
-        collections_display.append({
-            "name": coll["name"],
-            "slug": coll["slug"],
-            "variables": variables,
-        })
+        collections_display.append(
+            {
+                "name": coll["name"],
+                "slug": coll["slug"],
+                "variables": variables,
+            }
+        )
 
-    return render(request, "georivaingestion/wizard_step5_review.html", {
-        "session": session,
-        "catalog_display": catalog_display,
-        "collections_display": collections_display,
-        **_wizard_chrome(5),
-    })
+    return render(
+        request,
+        "georivaingestion/wizard_step5_review.html",
+        {
+            "session": session,
+            "catalog_display": catalog_display,
+            "collections_display": collections_display,
+            **_wizard_chrome(5),
+        },
+    )
 
 
 # =============================================================================
 # Provision — create DB records
 # =============================================================================
+
 
 def _unit_for_assignment(assignment: dict):
     """Resolve the Unit for an assignment: existing pk or resolve/create from symbol."""
@@ -657,8 +693,7 @@ def _unit_for_assignment(assignment: dict):
     symbol = (assignment.get("unit_create") or "").strip()
     if not symbol:
         raise ValueError(
-            _("Variable '%s' has no unit — please revisit Collection Setup.")
-            % assignment.get("variable_name", "?")
+            _("Variable '%s' has no unit — please revisit Collection Setup.") % assignment.get("variable_name", "?")
         )
     return resolve_unit(symbol)
 
@@ -695,9 +730,7 @@ def upload_wizard_provision(request):
                     # wizard session outlives a switch to another organisation's
                     # host, so the stored id may no longer belong to the org this
                     # request is served for.
-                    catalog = Catalog.objects.get(
-                        pk=session["catalog_id"], organisation=require_active_org(request)
-                    )
+                    catalog = Catalog.objects.get(pk=session["catalog_id"], organisation=require_active_org(request))
                 except Catalog.DoesNotExist:
                     messages.error(request, _("Selected catalog no longer exists."))
                     return redirect("upload_wizard_step1")
@@ -761,8 +794,7 @@ def upload_wizard_provision(request):
     except IntegrityError:
         messages.error(
             request,
-            _("A configuration named '%s' already exists for this catalog.")
-            % session.get("config_name", ""),
+            _("A configuration named '%s' already exists for this catalog.") % session.get("config_name", ""),
         )
         return redirect("upload_wizard_step5")
     except Exception as exc:
@@ -772,8 +804,6 @@ def upload_wizard_provision(request):
     request.session.pop(_WIZARD_SESSION_KEY, None)
     messages.success(
         request,
-        _("Upload configuration '%s' created with %d variable(s).") % (
-            config.name, config.variables.count()
-        ),
+        _("Upload configuration '%s' created with %d variable(s).") % (config.name, config.variables.count()),
     )
     return redirect("manual_upload_config_list")

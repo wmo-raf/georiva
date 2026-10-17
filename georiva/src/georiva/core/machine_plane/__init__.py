@@ -57,5 +57,6 @@ from .addresses import (  # noqa: F401
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,
+    wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )

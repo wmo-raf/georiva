@@ -5,9 +5,13 @@ Per-unit compute runs on the dedicated ``georiva-processing`` queue so a heavy
 backfill cannot starve live ingestion. Recovery is via the backfill sweep
 (a later slice), so retries are bounded.
 """
+
 import logging
+from contextlib import nullcontext
+from functools import partial
 
 from georiva.config.celery import app
+from georiva.events.tasks import ChainedTask, SweepTask
 from georiva.processing.constants import (
     RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
     RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
@@ -23,7 +27,8 @@ def setup_periodic_tasks(sender, **kwargs):
         from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
         schedule_5min, _ = IntervalSchedule.objects.get_or_create(
-            every=5, period=IntervalSchedule.MINUTES,
+            every=5,
+            period=IntervalSchedule.MINUTES,
         )
         PeriodicTask.objects.update_or_create(
             name="georiva.processing.sweep_derivations",
@@ -39,6 +44,7 @@ def setup_periodic_tasks(sender, **kwargs):
 
 @app.task(
     name="georiva.processing.tasks.run_unit_task",
+    base=ChainedTask,
     bind=True,
     max_retries=2,
     acks_late=True,
@@ -50,9 +56,15 @@ def setup_periodic_tasks(sender, **kwargs):
     soft_time_limit=RUN_UNIT_SOFT_TIME_LIMIT_SECONDS,
     time_limit=RUN_UNIT_HARD_TIME_LIMIT_SECONDS,
 )
-def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
-                  unit_index: int = None, unit_total: int = None,
-                  reason: str = "initial"):
+def run_unit_task(
+    self,
+    recipe_type: str,
+    unit: dict,
+    origin: str = None,
+    unit_index: int = None,
+    unit_total: int = None,
+    reason: str = "initial",
+):
     """Run a single ProductionUnit for a recipe (one DerivationRun).
 
     ``unit_index``/``unit_total`` are the batch ordinal stamped at dispatch
@@ -80,38 +92,59 @@ def run_unit_task(self, recipe_type: str, unit: dict, origin: str = None,
     pos = f"{unit_index}/{unit_total}" if unit_index and unit_total else "?"
     logger.info(
         "[task %s] run_unit_task received recipe=%s origin=%s reason=%s (celery_id=%s)",
-        pos, recipe_type, origin, reason, worker_id or "-",
+        pos,
+        recipe_type,
+        origin,
+        reason,
+        worker_id or "-",
     )
     result = run_unit(
-        recipe, unit, worker_id=worker_id, origin=origin,
-        unit_index=unit_index, unit_total=unit_total, reason=reason,
+        recipe,
+        unit,
+        worker_id=worker_id,
+        origin=origin,
+        unit_index=unit_index,
+        unit_total=unit_total,
+        reason=reason,
     )
-    logger.info("[task %s] run_unit_task finished recipe=%s → %s",
-                pos, recipe_type, result.status)
+    logger.info("[task %s] run_unit_task finished recipe=%s → %s", pos, recipe_type, result.status)
 
     # Completion chaining: a produced Published item is itself a derivation
     # input, so stream a downstream trigger to its consumers (internal
     # intermediates → their dependent products).
     if result.status == "completed" and result.item_id:
+        from django.db import transaction
+
         from georiva.core.models import Item
+        from georiva.events.context import caused_by
         from georiva.processing.invocation import (
             dispatch_for_trigger,
             published_item_trigger,
         )
+        from georiva.processing.models import DerivationAttemptFinished
         from georiva.processing.signals import unit_completed
 
         item = Item.objects.filter(pk=result.item_id).select_related("collection").first()
+        event = DerivationAttemptFinished.objects.filter(pk=result.event_id).first()
         if item is not None:
-            dispatch_for_trigger(published_item_trigger(item))
-            # Wake-up for parked dependents (ADR-0020): recipes ignore
-            # published triggers by design (double-fire guard), so units that
-            # went not_ready waiting for this item are revived through the
-            # feed layer's signal receiver instead.
-            unit_completed.send(sender=None, item=item, recipe_type=recipe_type)
+            # Everything this completion sets in motion is caused by the attempt that
+            # completed: downstream units, and the wake-up of parked dependents.
+            with caused_by(event) if event is not None else nullcontext():
+                dispatch_for_trigger(published_item_trigger(item))
+                # Wake-up for parked dependents (ADR-0020): recipes ignore
+                # published triggers by design (double-fire guard), so units that
+                # went not_ready waiting for this item are revived through the
+                # feed layer's signal receiver instead. After commit, and carrying
+                # the event, so a consumer never reads state that is not yet visible.
+                transaction.on_commit(
+                    partial(unit_completed.send, sender=None, item=item, recipe_type=recipe_type, event=event)
+                )
 
 
 @app.task(
     name="georiva.processing.tasks.sweep_derivations",
+    base=SweepTask,
+    sweep_name="derivations",
     queue="georiva-default",
 )
 def sweep_derivations():
@@ -133,19 +166,21 @@ def sweep_derivations():
         sweep_stale_units,
     )
 
-    input_stale = sweep_stale_units()
-    reclaimed = reclaim_stale_running()
-    revived = resurrect_not_ready_units()
+    input_stale = sweep_stale_units(sweep="derivations")
+    reclaimed = reclaim_stale_running(sweep="derivations")
+    revived = resurrect_not_ready_units(sweep="derivations")
     logger.info(
-        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING "
-        "reclaimed, %d not-ready revived",
-        input_stale, reclaimed, revived,
+        "sweep_derivations: %d input-stale re-dispatched, %d stale-RUNNING reclaimed, %d not-ready revived",
+        input_stale,
+        reclaimed,
+        revived,
     )
     return {"input_stale": input_stale, "reclaimed": reclaimed, "revived": revived}
 
 
 @app.task(
     name="georiva.processing.tasks.run_recipe_task",
+    base=ChainedTask,
     queue="georiva-default",
 )
 def run_recipe_task(recipe_type: str, selector: dict = None):

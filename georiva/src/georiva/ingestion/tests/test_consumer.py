@@ -44,8 +44,7 @@ class ConsumerDirectFileIngestionTests(TestCase):
             patch("georiva.ingestion.consumer.validate_path") as mock_vp,
             patch("georiva.ingestion.consumer._resolve_origin", return_value=BucketType.SOURCES),
             patch("georiva.ingestion.consumer.process_incoming_file") as mock_task,
-            patch("georiva.ingestion.consumer._required_time_error",
-                  return_value="Could not extract valid time"),
+            patch("georiva.ingestion.consumer._required_time_error", return_value="Could not extract valid time"),
         ):
             mock_vp.return_value = {
                 "org": "test-org",
@@ -91,6 +90,4 @@ class SweepDirectFileIngestionTests(TestCase):
 
             sweep_unprocessed(sync=True)
 
-        self.assertTrue(
-            FileIngestion.objects.filter(file_path=file_path, bucket=BT.SOURCES).exists()
-        )
+        self.assertTrue(FileIngestion.objects.filter(file_path=file_path, bucket=BT.SOURCES).exists())

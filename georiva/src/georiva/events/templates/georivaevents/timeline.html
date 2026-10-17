@@ -1,0 +1,84 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Timeline" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gr-timeline {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .gr-timeline th,
+        .gr-timeline td {
+            text-align: left;
+            padding: 0.6em 0.8em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            vertical-align: top;
+        }
+
+        .gr-timeline th {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-timeline__row--failed td,
+        .gr-timeline__row--refused td {
+            background: color-mix(in srgb, var(--w-color-critical-200) 8%, transparent);
+        }
+
+        .gr-timeline__meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-timeline__elsewhere {
+            margin-top: 1em;
+            padding: 0.6em 0.8em;
+            border: 1px dashed var(--w-color-border-furniture);
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <p class="help-text">{% blocktrans %}Everything one arrival set in motion, oldest first.{% endblocktrans %}</p>
+    <table class="gr-timeline">
+        <thead>
+        <tr>
+            <th>{% trans "When" %}</th>
+            <th>{% trans "Event" %}</th>
+            <th>{% trans "Actor" %}</th>
+            <th>{% trans "Caused by" %}</th>
+            <th></th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for row in rows %}
+            <tr class="gr-timeline__row--{{ row.outcome_class }}">
+                <td class="gr-timeline__meta">{{ row.occurred_at|date:"Y-m-d H:i:s" }}</td>
+                <td>
+                    <strong>{{ row.label }}</strong>
+                    {% if row.summary %}<div>{{ row.summary }}</div>{% endif %}
+                    {% if row.unreadable %}<div class="gr-timeline__meta">{% trans "Details are unavailable on this installation." %}</div>{% endif %}
+                </td>
+                <td class="gr-timeline__meta">{{ row.actor }}</td>
+                <td class="gr-timeline__meta">
+                    {% if row.cause %}{{ row.cause }}{% elif row.cause_hidden %}{% trans "an earlier event outside this view" %}{% else %}—{% endif %}
+                </td>
+                <td>
+                    {% if row.subject_url %}<a href="{{ row.subject_url }}">{% trans "Open" %}</a>{% endif %}
+                    {% for label, url in row.links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if continues_elsewhere %}
+        <p class="gr-timeline__elsewhere">{% trans "This chain continues elsewhere." %}</p>
+    {% endif %}
+{% endblock %}

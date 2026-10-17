@@ -9,6 +9,7 @@ point. They are separate code paths over one vocabulary, and a surface that
 listed rows by one rule and admitted them by another would be the bug this
 module exists to prevent.
 """
+
 from contextlib import contextmanager
 
 from django.core.exceptions import ImproperlyConfigured
@@ -127,7 +128,6 @@ class VocabularyTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class DispatcherTests(TestCase):
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -164,9 +164,7 @@ class DispatcherTests(TestCase):
         self.assertEqual({row.pk for row in rows}, expected_pks)
         for row in queryset:
             with self.subTest(row=repr(row)):
-                self.assertEqual(
-                    belongs_to_active_org(request, row), row.pk in expected_pks
-                )
+                self.assertEqual(belongs_to_active_org(request, row), row.pk in expected_pks)
 
     def start_workflow(self, page):
         """Put ``page`` into moderation and hand back its workflow state."""
@@ -197,9 +195,7 @@ class DispatcherTests(TestCase):
     def test_page_log_entries_follow_their_page(self):
         mine = log(instance=self.kenya_page, action="wagtail.edit", user=self.user)
         theirs = log(instance=self.uganda_page, action="wagtail.edit", user=self.user)
-        self.assert_scopes_to(
-            PageLogEntry.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine]
-        )
+        self.assert_scopes_to(PageLogEntry.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine])
 
     def test_a_log_entry_whose_page_has_gone_is_nobodys(self):
         """Not hypothetical: that foreign key has no database constraint.
@@ -213,32 +209,22 @@ class DispatcherTests(TestCase):
         PageLogEntry.objects.filter(pk=entry.pk).update(page_id=999999)
         orphan = PageLogEntry.objects.get(pk=entry.pk)
         self.assertFalse(belongs_to_active_org(self.request(), orphan))
-        self.assertEqual(
-            list(scope_rows(self.request(), PageLogEntry.objects.filter(pk=entry.pk))), []
-        )
+        self.assertEqual(list(scope_rows(self.request(), PageLogEntry.objects.filter(pk=entry.pk))), [])
 
     def test_a_page_child_follows_its_page(self):
         """A declaration on one of our own models, not on one of Wagtail's."""
         from georiva.pages.home.models import FeaturedCatalog
 
-        mine = FeaturedCatalog.objects.create(
-            page=self.kenya_page, catalog=self.kenya_catalog, sort_order=0
-        )
-        theirs = FeaturedCatalog.objects.create(
-            page=self.uganda_page, catalog=self.uganda_catalog, sort_order=0
-        )
-        self.assert_scopes_to(
-            FeaturedCatalog.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine]
-        )
+        mine = FeaturedCatalog.objects.create(page=self.kenya_page, catalog=self.kenya_catalog, sort_order=0)
+        theirs = FeaturedCatalog.objects.create(page=self.uganda_page, catalog=self.uganda_catalog, sort_order=0)
+        self.assert_scopes_to(FeaturedCatalog.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine])
 
     # -- via_content_object ------------------------------------------------
 
     def test_workflow_states_follow_the_object_under_moderation(self):
         mine = self.start_workflow(self.kenya_page)
         theirs = self.start_workflow(self.uganda_page)
-        self.assert_scopes_to(
-            WorkflowState.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine]
-        )
+        self.assert_scopes_to(WorkflowState.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine])
 
     def test_task_states_follow_their_workflow_state(self):
         """Two hops: ``via_related`` onto a ``via_content_object`` onto a page."""
@@ -253,9 +239,7 @@ class DispatcherTests(TestCase):
         """The recursion's other leg: the subject is a snippet, not a page."""
         mine = log(instance=self.kenya_catalog, action="wagtail.create", user=self.user)
         theirs = log(instance=self.uganda_catalog, action="wagtail.create", user=self.user)
-        self.assert_scopes_to(
-            ModelLogEntry.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine]
-        )
+        self.assert_scopes_to(ModelLogEntry.objects.filter(pk__in=[mine.pk, theirs.pk]), [mine])
 
     def test_a_generic_subject_that_belongs_everywhere_is_admitted(self):
         """Shared reference data under moderation is nobody's and everybody's.
@@ -274,12 +258,8 @@ class DispatcherTests(TestCase):
         """A dangling id names a subject no organisation can be shown to own."""
         entry = log(instance=self.kenya_catalog, action="wagtail.create", user=self.user)
         ModelLogEntry.objects.filter(pk=entry.pk).update(object_id="999999")
-        self.assertEqual(
-            list(scope_rows(self.request(), ModelLogEntry.objects.filter(pk=entry.pk))), []
-        )
-        self.assertFalse(
-            belongs_to_active_org(self.request(), ModelLogEntry.objects.get(pk=entry.pk))
-        )
+        self.assertEqual(list(scope_rows(self.request(), ModelLogEntry.objects.filter(pk=entry.pk))), [])
+        self.assertFalse(belongs_to_active_org(self.request(), ModelLogEntry.objects.get(pk=entry.pk)))
 
     def test_a_generic_subject_that_belongs_everywhere_agrees_when_its_row_has_gone(self):
         """The two halves must not part company over a dangling shared id.
@@ -313,8 +293,7 @@ class DispatcherTests(TestCase):
 
         feed = DataFeed.objects.create(name="Kenya feed", catalog=self.kenya_catalog)
         queryset = DataFeed.objects.filter(pk=feed.pk)
-        with declaring(DataFeed, via_related("catalog")), \
-                declaring(Catalog, SHARED_REFERENCE_DATA):
+        with declaring(DataFeed, via_related("catalog")), declaring(Catalog, SHARED_REFERENCE_DATA):
             self.assertEqual(list(scope_rows(self.request(), queryset)), [feed])
             self.assertTrue(belongs_to_active_org(self.request(), feed))
 
@@ -337,9 +316,7 @@ class DispatcherTests(TestCase):
         from georiva.core.models import Topic
 
         Topic.objects.create(name="Rainfall", slug="rainfall")
-        self.assertEqual(
-            list(scope_rows(self.request(), Topic.objects.all())), list(Topic.objects.all())
-        )
+        self.assertEqual(list(scope_rows(self.request(), Topic.objects.all())), list(Topic.objects.all()))
 
     # -- refusals ----------------------------------------------------------
 
@@ -367,9 +344,7 @@ class DispatcherTests(TestCase):
             with self.assertRaises(ImproperlyConfigured):
                 list(scope_rows(self.request(), ModelLogEntry.objects.filter(pk=entry.pk)))
             with self.assertRaises(ImproperlyConfigured):
-                belongs_to_active_org(
-                    self.request(), ModelLogEntry.objects.get(pk=entry.pk)
-                )
+                belongs_to_active_org(self.request(), ModelLogEntry.objects.get(pk=entry.pk))
 
     def test_a_declaration_naming_a_relation_that_is_not_one_is_refused(self):
         """A typo in a declaration fails loudly rather than filtering nothing."""
@@ -383,8 +358,7 @@ class DispatcherTests(TestCase):
         """Two models delegating to each other would otherwise recurse forever."""
         from georiva.core.models import Catalog, Collection
 
-        with declaring(Catalog, via_related("collections")), \
-                declaring(Collection, via_related("catalog")):
+        with declaring(Catalog, via_related("collections")), declaring(Collection, via_related("catalog")):
             with self.assertRaises(ImproperlyConfigured):
                 list(scope_rows(self.request(), Catalog.objects.all()))
 

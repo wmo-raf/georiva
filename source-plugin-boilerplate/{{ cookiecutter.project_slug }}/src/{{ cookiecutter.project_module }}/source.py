@@ -51,7 +51,11 @@ class {{ cookiecutter.project_module|replace('_', ' ')|title|replace(' ', '') }}
             variables: Optional[list[str]] = None,
             **kwargs,
     ) -> Iterator[FileRequest]:
-        """Yield one FileRequest per file to download in the [start, end] window."""
+        """Yield one FileRequest per file to download in the [start, end] window.
+
+        When called for a collection, `kwargs["collection"]` is the Collection being
+        served — useful when one source backs several collections.
+        """
         variables = variables or self.requested_variables
 
         # TODO: build the real list of files for the window. Example:

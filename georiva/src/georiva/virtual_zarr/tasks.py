@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pandas as pd
 from django.db.models import Prefetch
@@ -12,12 +13,14 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
 from georiva.core.models import Asset, Item
+from georiva.events.tasks import EntryTask, ReadSideTask
 from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
 from georiva.virtual_zarr.compat import (
     assert_compatible,
     spec_from_virtual_variable,
     spec_from_zarr_array,
 )
+
 from .models import VirtualZarrBuildLog, VirtualZarrManifest
 
 if TYPE_CHECKING:
@@ -42,10 +45,12 @@ class BuildReport:
     Mutable and filled in as _run_build progresses, so a failing build still
     reports whatever it learned before dying (skip count, classified mode).
     """
+
     mode: str = ""
     items_written: int = 0
     items_skipped: int = 0
     snapshot_id: str = ""
+
 
 # Retention for design decision 4: expire snapshots older than this (the
 # latest is always kept) and garbage-collect unreachable icechunk objects.
@@ -54,12 +59,17 @@ SNAPSHOT_RETENTION = timedelta(days=7)
 
 @app.task(
     name="georiva.virtual_zarr.tasks.build_virtual_zarr_manifest",
+    base=ReadSideTask,
     bind=True,
     max_retries=0,  # failures go to FAILED status; sweep retries
     acks_late=True,
-    queue="georiva-ingestion",
+    # Deferrable bookkeeping: nothing a reader can observe waits on a manifest,
+    # and the sweep re-dispatches anything dropped.  Keeping it off
+    # georiva-ingestion keeps one large fetch's fan-out out of the way of the
+    # next file to be extracted (#398).  Always dispatch via ``dispatch_build``.
+    queue="georiva-processing",
 )
-def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
+def build_virtual_zarr_manifest(self, manifest_id: int, claim: str = "") -> None:
     """
     Build or update the Icechunk repo for one Variable.
 
@@ -90,8 +100,21 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
         logger.error("build_virtual_zarr_manifest: manifest %d not found", manifest_id)
         return
 
+    # Stand down if this copy's claim was recycled while it waited: a queue
+    # wait longer than LOCK_TIMEOUT lets reset_stale_locks free the row and a
+    # later sweep dispatch a replacement, and two writers on one Icechunk repo
+    # conflict.  Blank claim means a task queued before claims existed.
+    if claim and manifest.locked_by != claim:
+        logger.info(
+            "build_virtual_zarr_manifest: manifest %d reclaimed (%s now holds it, not %s) — standing down",
+            manifest_id,
+            manifest.locked_by or "nobody",
+            claim,
+        )
+        return
+
     worker_id = f"celery-{self.request.id or 'unknown'}"
-    manifest.mark_building(worker_id)
+    manifest.refresh_build_lock(worker_id)
 
     col = manifest.variable.collection
     logger.info(
@@ -106,9 +129,7 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
     try:
         _run_build(manifest, report)
     except Exception as exc:
-        logger.exception(
-            "build_virtual_zarr_manifest: failed for manifest %d", manifest_id
-        )
+        logger.exception("build_virtual_zarr_manifest: failed for manifest %d", manifest_id)
         manifest.mark_failed(str(exc))
         VirtualZarrBuildLog.record(
             manifest,
@@ -133,13 +154,15 @@ def build_virtual_zarr_manifest(self, manifest_id: int) -> None:
         # Only a real commit changes the repo prefix; skip the listing on
         # up-to-date and no-data cycles.
         if report.mode not in (
-                BuildMode.UP_TO_DATE.value, BuildMode.NO_DATA.value,
+            BuildMode.UP_TO_DATE.value,
+            BuildMode.NO_DATA.value,
         ):
             manifest.refresh_repo_stats()
 
 
 def _collect_rows(
-        manifest: VirtualZarrManifest, config: MinioStoreConfig,
+    manifest: VirtualZarrManifest,
+    config: MinioStoreConfig,
 ) -> tuple[list[SourceRow], int]:
     """
     COG asset rows for this variable, one per Item, ordered by item time,
@@ -157,13 +180,7 @@ def _collect_rows(
         to_attr="cog_assets",
     )
 
-    items_qs = (
-        Item.objects
-        .filter(collection=collection)
-        .prefetch_related(cog_prefetch)
-        .only("time")
-        .order_by("time")
-    )
+    items_qs = Item.objects.filter(collection=collection).prefetch_related(cog_prefetch).only("time").order_by("time")
 
     rows = []
     skipped = 0
@@ -173,31 +190,32 @@ def _collect_rows(
             skipped += 1
             continue
         asset = item.cog_assets[0]
-        rows.append(SourceRow(
-            time=item.time,
-            url=config.url_for(asset.href),
-            modified=asset.modified,
-        ))
+        rows.append(
+            SourceRow(
+                time=item.time,
+                url=config.url_for(asset.href),
+                modified=asset.modified,
+            )
+        )
 
     if skipped:
         logger.warning(
-            "build_virtual_zarr_manifest: %d item(s) skipped (no COG asset) "
-            "for %s/%s",
-            skipped, collection.slug, variable.slug,
+            "build_virtual_zarr_manifest: %d item(s) skipped (no COG asset) for %s/%s",
+            skipped,
+            collection.slug,
+            variable.slug,
         )
 
     return rows, skipped
 
 
 def _to_url_df(rows) -> pd.DataFrame:
-    return pd.DataFrame(
-        [{"date": pd.Timestamp(r.time), "url": r.url} for r in rows]
-    )
+    return pd.DataFrame([{"date": pd.Timestamp(r.time), "url": r.url} for r in rows])
 
 
 def _run_build(
-        manifest: VirtualZarrManifest,
-        report: BuildReport | None = None,
+    manifest: VirtualZarrManifest,
+    report: BuildReport | None = None,
 ) -> BuildReport:
     """
     Core build logic: classify against the repo's committed state, then
@@ -237,9 +255,9 @@ def _run_build(
         # NO_DATA so the sweep stops re-dispatching it.  The COG save signal
         # flips it back to STALE when data arrives.
         logger.info(
-            "build_virtual_zarr_manifest: no COG assets for %s/%s — "
-            "marking NO_DATA",
-            collection.slug, variable.slug,
+            "build_virtual_zarr_manifest: no COG assets for %s/%s — marking NO_DATA",
+            collection.slug,
+            variable.slug,
         )
         manifest.mark_no_data()
         report.mode = BuildMode.NO_DATA.value
@@ -266,7 +284,8 @@ def _run_build(
     if plan.mode == BuildMode.UP_TO_DATE:
         logger.info(
             "build_virtual_zarr_manifest: %s/%s already up to date",
-            collection.slug, variable.slug,
+            collection.slug,
+            variable.slug,
         )
         manifest.mark_ready(
             repo_path=repo_path,
@@ -288,13 +307,12 @@ def _run_build(
     )
 
     if plan.mode == BuildMode.APPEND:
-        snapshot_id = _run_append(
-            repo, builder, plan, variable.slug, build_start, metadata
-        )
+        snapshot_id = _run_append(repo, builder, plan, variable.slug, build_start, metadata)
     else:
         vds = builder.build(_to_url_df(plan.rows), variable_name=variable.slug)
         snapshot_id = write_rebuild(
-            repo, vds,
+            repo,
+            vds,
             last_updated_at=build_start,
             metadata=metadata,
             message=f"rebuild: {item_count} item(s)",
@@ -311,7 +329,11 @@ def _run_build(
 
     logger.info(
         "build_virtual_zarr_manifest: READY (%s) — %d items, %s → %s, snapshot %s",
-        plan.mode.value, item_count, time_start.date(), time_end.date(), snapshot_id,
+        plan.mode.value,
+        item_count,
+        time_start.date(),
+        time_end.date(),
+        snapshot_id,
     )
 
     report.items_written = len(plan.rows)
@@ -335,9 +357,7 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
 
     def guard(vds, url):
         raw_var = list(vds.data_vars)[0]
-        assert_compatible(
-            existing_spec, spec_from_virtual_variable(vds, raw_var), source=url
-        )
+        assert_compatible(existing_spec, spec_from_virtual_variable(vds, raw_var), source=url)
 
     vds = builder.build(
         _to_url_df(plan.rows),
@@ -358,7 +378,8 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
             )
 
     return write_append(
-        repo, vds,
+        repo,
+        vds,
         last_updated_at=build_start,
         metadata=metadata,
         message=f"append: {len(plan.rows)} item(s)",
@@ -369,8 +390,35 @@ def _run_append(repo, builder, plan, variable_name, build_start, metadata) -> st
 # Sweep task
 # =============================================================================
 
+
+def dispatch_build(manifest_id: int, claimed_by: str = "dispatch", force: bool = False) -> bool:
+    """
+    Claim a manifest and queue its build; return whether it was queued.
+
+    The only way a build should reach Celery.  Claiming first is what stops a
+    manifest waiting in the queue from being dispatched again by the next
+    sweep — see ``VirtualZarrManifest.claim_for_build``.  The claim is unique
+    per dispatch and travels with the task, so the one case claiming alone does
+    not cover — a queue wait long enough for ``reset_stale_locks`` to recycle
+    the lock and a later sweep to dispatch a second copy — resolves in favour
+    of the newer copy rather than running both.
+
+    A claim we then fail to dispatch leaves the row BUILDING until
+    ``reset_stale_locks`` recovers it, which is the same path a worker crash
+    takes.  ``force`` is the operator's rebuild of a manifest that does not
+    need one.
+    """
+    claim = f"{claimed_by}-{uuid4().hex[:8]}"
+    if not VirtualZarrManifest.claim_for_build(manifest_id, claim, force=force):
+        return False
+
+    build_virtual_zarr_manifest.delay(manifest_id, claim)
+    return True
+
+
 @app.task(
     name="georiva.virtual_zarr.tasks.sweep_virtual_zarr_pending",
+    base=EntryTask,
     queue="georiva-default",
 )
 def sweep_virtual_zarr_pending() -> None:
@@ -379,32 +427,27 @@ def sweep_virtual_zarr_pending() -> None:
 
     Runs every 5 minutes:
       1. Reset stale BUILDING locks (crash recovery) → PENDING
-      2. Dispatch build_virtual_zarr_manifest for every buildable manifest
+      2. Claim and dispatch every buildable manifest
     """
     reset_count = VirtualZarrManifest.reset_stale_locks()
     if reset_count:
         logger.info("sweep_virtual_zarr_pending: reset %d stale lock(s)", reset_count)
 
     buildable = list(VirtualZarrManifest.get_buildable().values_list("pk", flat=True))
+    dispatched = sum(dispatch_build(manifest_id, claimed_by="sweep") for manifest_id in buildable)
 
-    for manifest_id in buildable:
-        build_virtual_zarr_manifest.apply_async(
-            args=[manifest_id],
-            queue="georiva-ingestion",
-        )
-
-    if buildable:
-        logger.info(
-            "sweep_virtual_zarr_pending: dispatched %d build task(s)", len(buildable)
-        )
+    if dispatched:
+        logger.info("sweep_virtual_zarr_pending: dispatched %d build task(s)", dispatched)
 
 
 # =============================================================================
 # Retention task (design decision 4)
 # =============================================================================
 
+
 @app.task(
     name="georiva.virtual_zarr.tasks.gc_virtual_zarr_repos",
+    base=EntryTask,
     bind=True,
     acks_late=True,
     queue="georiva-default",
@@ -422,7 +465,9 @@ def gc_virtual_zarr_repos(self) -> None:
     cutoff = timezone.now() - SNAPSHOT_RETENTION
 
     manifests = VirtualZarrManifest.objects.exclude(repo_path="").select_related(
-        "variable", "variable__collection", "variable__collection__catalog",
+        "variable",
+        "variable__collection",
+        "variable__collection__catalog",
     )
 
     for manifest in manifests:
@@ -438,12 +483,15 @@ def gc_virtual_zarr_repos(self) -> None:
             summary = repo.garbage_collect(delete_object_older_than=cutoff)
             logger.info(
                 "gc_virtual_zarr_repos: %s — expired %d snapshot(s), gc: %s",
-                repo_path, len(expired), summary,
+                repo_path,
+                len(expired),
+                summary,
             )
         except Exception as exc:
             logger.warning(
                 "gc_virtual_zarr_repos: retention failed for %s: %s",
-                repo_path, exc,
+                repo_path,
+                exc,
             )
             VirtualZarrBuildLog.record(
                 manifest,
@@ -465,18 +513,14 @@ def gc_virtual_zarr_repos(self) -> None:
 
     pruned = VirtualZarrBuildLog.prune_expired()
     if pruned:
-        logger.info(
-            "gc_virtual_zarr_repos: pruned %d expired build-log row(s)", pruned
-        )
+        logger.info("gc_virtual_zarr_repos: pruned %d expired build-log row(s)", pruned)
 
 
 @app.on_after_finalize.connect
 def setup_virtual_zarr_periodic_tasks(sender, **kwargs) -> None:
     """Register the 5-minute sweep and the daily retention pass."""
     try:
-        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
-            every=5, period=IntervalSchedule.MINUTES
-        )
+        schedule_5min, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
         PeriodicTask.objects.update_or_create(
             name="georiva.virtual_zarr.sweep_virtual_zarr_pending",
             defaults={
@@ -485,9 +529,7 @@ def setup_virtual_zarr_periodic_tasks(sender, **kwargs) -> None:
                 "enabled": True,
             },
         )
-        schedule_daily, _ = IntervalSchedule.objects.get_or_create(
-            every=1, period=IntervalSchedule.DAYS
-        )
+        schedule_daily, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.DAYS)
         PeriodicTask.objects.update_or_create(
             name="georiva.virtual_zarr.gc_virtual_zarr_repos",
             defaults={
@@ -497,6 +539,4 @@ def setup_virtual_zarr_periodic_tasks(sender, **kwargs) -> None:
             },
         )
     except Exception as exc:
-        logger.warning(
-            "Could not register virtual Zarr periodic tasks: %s", exc
-        )
+        logger.warning("Could not register virtual Zarr periodic tasks: %s", exc)

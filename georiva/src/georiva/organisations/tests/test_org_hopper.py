@@ -5,6 +5,7 @@ host's, so the tests that matter most here are the ones about the list's edges: 
 member sees the institutions they hold a membership row in and nobody else's, and
 the instance admin sees all of them.
 """
+
 from django.contrib.auth.models import Group, Permission
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse

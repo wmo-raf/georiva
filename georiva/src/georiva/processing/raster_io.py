@@ -6,6 +6,7 @@ always north-up — a south-up raster (positive row pitch, ``transform.e > 0``)
 is flipped so row 0 is north, the orientation every downstream consumer
 assumes (parity with ``formats/geotiff.py`` at ingestion time).
 """
+
 import numpy as np
 
 

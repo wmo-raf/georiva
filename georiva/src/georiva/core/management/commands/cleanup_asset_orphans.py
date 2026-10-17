@@ -21,11 +21,12 @@ Catalog slugs are unique per organisation, so ``--catalog`` alone may match
 catalogs in several organisations. Each is scanned under its own ``{org}/``
 prefix; pass ``--org`` to narrow to one.
 """
+
 from django.core.management.base import BaseCommand, CommandError
 
-from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
 from georiva.core.models import Asset, Collection
 from georiva.core.storage import storage
+from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
 
 
 class Command(BaseCommand):
@@ -36,23 +37,29 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--org", metavar="SLUG",
+            "--org",
+            metavar="SLUG",
             help="Scope to one organisation (by slug).",
         )
         parser.add_argument(
-            "--catalog", metavar="SLUG",
+            "--catalog",
+            metavar="SLUG",
             help="Scope to one catalog (by slug). Not unique across organisations.",
         )
         parser.add_argument(
-            "--collection", metavar="SLUG",
+            "--collection",
+            metavar="SLUG",
             help="Scope to one collection slug (within --catalog).",
         )
         parser.add_argument(
-            "--all", action="store_true", dest="all_catalogs",
+            "--all",
+            action="store_true",
+            dest="all_catalogs",
             help="Sweep every catalog. Required to run without --catalog.",
         )
         parser.add_argument(
-            "--apply", action="store_true",
+            "--apply",
+            action="store_true",
             help="Actually delete. Without it, orphans are only listed.",
         )
 
@@ -82,24 +89,13 @@ class Command(BaseCommand):
         total_bytes = 0
         for coll in collections:
             prefix = f"{coll.catalog.storage_prefix}/{coll.slug}"
-            objects = [
-                f["path"]
-                for f in storage.assets.list_files(prefix, recursive=True)
-            ]
-            live = set(
-                Asset.objects
-                .filter(href__startswith=f"{prefix}/")
-                .values_list("href", flat=True)
-            )
+            objects = [f["path"] for f in storage.assets.list_files(prefix, recursive=True)]
+            live = set(Asset.objects.filter(href__startswith=f"{prefix}/").values_list("href", flat=True))
             orphans = select_orphan_objects(objects, live, DELETABLE_EXTENSIONS)
             if not orphans:
                 continue
 
-            self.stdout.write(
-                f"{prefix}: "
-                f"{len(objects)} objects, {len(live)} live, "
-                f"{len(orphans)} orphan(s)"
-            )
+            self.stdout.write(f"{prefix}: {len(objects)} objects, {len(live)} live, {len(orphans)} orphan(s)")
             for path in orphans:
                 size = _safe_size(path)
                 total_bytes += size

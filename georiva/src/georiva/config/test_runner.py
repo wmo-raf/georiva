@@ -13,6 +13,7 @@ their own organisations on top.
 The runner also builds the test-only ``DataFeed`` subclass table (see
 ``setup_databases``).
 """
+
 from django.db import connection
 from django.test.runner import DiscoverRunner
 
@@ -20,12 +21,13 @@ TEST_BASE_DOMAIN = "testserver"
 
 
 class GeoRivaTestRunner(DiscoverRunner):
-
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
         from django.conf import settings
 
         settings.GEORIVA_BASE_DOMAIN = TEST_BASE_DOMAIN
+        # A dispatch site that loses the chain fails CI rather than production.
+        settings.GEORIVA_TASK_CONTEXT_MODE = "strict"
 
     def setup_databases(self, **kwargs):
         """Create the test-only ``DataFeed`` subclass table before any test runs.
@@ -42,10 +44,24 @@ class GeoRivaTestRunner(DiscoverRunner):
         taken inside ``super().setup_databases()``, before this runs, so they do
         not inherit the table — the idempotent creation in ``PolymorphicHealthTests``
         stays as the fallback for those.
+
+        ``old_config`` is empty when Django built no test database, which happens
+        for any run whose tests are all ``SimpleTestCase``. Creating the table
+        then would issue DDL against whatever the connection actually points at
+        — the real database, unmigrated — so the guard is not defensive tidiness.
+        Narrow label runs became routine when CI started sharding by label.
         """
         old_config = super().setup_databases(**kwargs)
-        self._create_stub_feed_table()
+        if old_config:
+            self._create_stub_feed_table()
+            self._create_plugin_event_table()
         return old_config
+
+    def _create_plugin_event_table(self):
+        """The plugin-shaped event type the events suite declares (events/tests/plugin_event.py)."""
+        from georiva.events.tests.plugin_event import create_table
+
+        create_table()
 
     def _create_stub_feed_table(self):
         from georiva.sources.tests.test_health_states import StubPluginFeed

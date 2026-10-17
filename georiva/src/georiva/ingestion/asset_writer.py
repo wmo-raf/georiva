@@ -30,22 +30,22 @@ class AssetWriter:
       - Compression predictor is derived from data dtype
       - nodata default is derived from data dtype
     """
-    
+
     def __init__(self, bucket: Bucket):
         self.bucket = bucket
         self.logger = logging.getLogger("georiva.writer")
-    
+
     # =========================================================================
     # Public Interface
     # =========================================================================
-    
+
     def write_cog(
-            self,
-            data: np.ndarray,
-            output_path: str,
-            bounds: tuple,
-            crs: str = "EPSG:4326",
-            nodata: float = None,
+        self,
+        data: np.ndarray,
+        output_path: str,
+        bounds: tuple,
+        crs: str = "EPSG:4326",
+        nodata: float = None,
     ) -> str:
         """
         Write a 2D numpy array to storage as a Cloud-Optimized GeoTIFF.
@@ -74,49 +74,51 @@ class AssetWriter:
         """
         height, width = data.shape
         dtype = data.dtype
-        
+
         transform = from_bounds(*bounds, width, height)
         blocksize = self._blocksize(width, height)
         overview_levels = self._overview_levels(width, height, blocksize)
         _nodata = nodata if nodata is not None else self._default_nodata(dtype)
         _predictor = self._predictor(dtype)
-        
+
         # Convert to plain dict before mutating
         cog_profile = dict(cog_profiles.get("deflate"))
-        cog_profile.update({
-            "blockxsize": blocksize,
-            "blockysize": blocksize,
-            "predictor": _predictor,
-        })
-        
+        cog_profile.update(
+            {
+                "blockxsize": blocksize,
+                "blockysize": blocksize,
+                "predictor": _predictor,
+            }
+        )
+
         raw_profile = {
-            'driver': 'GTiff',
-            'dtype': np.dtype(dtype).name,  # rasterio expects string e.g. 'float32'
-            'width': width,
-            'height': height,
-            'count': 1,
-            'crs': crs,
-            'transform': transform,
-            'nodata': _nodata,
+            "driver": "GTiff",
+            "dtype": np.dtype(dtype).name,  # rasterio expects string e.g. 'float32'
+            "width": width,
+            "height": height,
+            "count": 1,
+            "crs": crs,
+            "transform": transform,
+            "nodata": _nodata,
         }
-        
+
         tmp_path = None
         cog_path = None
-        
+
         try:
             with tempfile.NamedTemporaryFile(
-                    suffix='.tif',
-                    delete=False,
-                    dir=settings.GEORIVA_TEMP_DIR,
+                suffix=".tif",
+                delete=False,
+                dir=settings.GEORIVA_TEMP_DIR,
             ) as tmp:
                 tmp_path = tmp.name
-            cog_path = tmp_path.replace('.tif', '_cog.tif')
-            
+            cog_path = tmp_path.replace(".tif", "_cog.tif")
+
             # Pass 1 — write raw data as a plain GeoTIFF
             # No overviews here — cog_translate handles that in pass 2.
-            with rasterio.open(tmp_path, 'w', **raw_profile) as dst:
+            with rasterio.open(tmp_path, "w", **raw_profile) as dst:
                 dst.write(data.astype(dtype), 1)
-            
+
             # Pass 2 — build overviews and rewrite in true COG byte order.
             # overview_resampling="average" is appropriate for continuous
             # fields (precipitation, temperature). Use "nearest" for
@@ -131,10 +133,10 @@ class AssetWriter:
                 forward_band_tags=True,  # preserve band-level CF metadata
                 quiet=True,  # suppress progress bar in production
             )
-            
-            with open(cog_path, 'rb') as f:
+
+            with open(cog_path, "rb") as f:
                 return self.bucket.save(output_path, f)
-        
+
         finally:
             # Always clean up temp files — even if an exception is raised.
             # These can be 64MB+ for global datasets so leaking them matters.
@@ -142,11 +144,11 @@ class AssetWriter:
                 Path(tmp_path).unlink(missing_ok=True)
             if cog_path:
                 Path(cog_path).unlink(missing_ok=True)
-    
+
     # =========================================================================
     # Private Helpers
     # =========================================================================
-    
+
     def _blocksize(self, width: int, height: int) -> int:
         """
         Derive internal tile block size from raster dimensions.
@@ -166,7 +168,7 @@ class AssetWriter:
             return 256
         else:
             return 512
-    
+
     def _overview_levels(self, width: int, height: int, blocksize: int) -> int:
         """
         Compute the number of overview levels to build.
@@ -191,7 +193,7 @@ class AssetWriter:
             levels += 1
             level *= 2
         return max(levels, 1)
-    
+
     def _predictor(self, dtype: np.dtype) -> int:
         """
         Derive the optimal deflate compression predictor for a given dtype.
@@ -215,7 +217,7 @@ class AssetWriter:
         elif np.issubdtype(dtype, np.integer):
             return 2
         return 1
-    
+
     def _default_nodata(self, dtype: np.dtype):
         """
         Return a sensible default nodata value for a given dtype.

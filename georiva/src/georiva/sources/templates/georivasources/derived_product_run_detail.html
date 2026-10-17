@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n wagtailadmin_tags %}
+{% load i18n wagtailadmin_tags events_tags %}
 
 {% block titletag %}{% blocktrans with label=product.display_label %}Run — {{ label }}{% endblocktrans %}{% endblock %}
 
@@ -157,4 +157,7 @@
     </table>
 
     <p><a href="{{ runs_url }}">← {% trans "Back to runs" %}</a></p>
+
+    {% history_panel history %}
+
 {% endblock %}

@@ -12,14 +12,24 @@ implementation of the spherical-Mercator formulae written below, not against
 the library the shim uses: an assertion that calls the code under test to work
 out what to expect only proves it is consistent with itself.
 """
+
 import json
 import math
 
 import pytest
 
 from tests.conftest import (
-    CATALOG, COG_SIZE, COG_VALUES, COLLECTION, KVP_BASE, ORG, TILE_CONFIG,
-    VARIABLE, WORLD_EXTENT, exception_of, overriding,
+    CATALOG,
+    COG_SIZE,
+    COG_VALUES,
+    COLLECTION,
+    KVP_BASE,
+    ORG,
+    TILE_CONFIG,
+    VARIABLE,
+    WORLD_EXTENT,
+    exception_of,
+    overriding,
 )
 
 TIME = "2026-03-23T12:00:00Z"
@@ -50,7 +60,7 @@ def gfi(**overrides):
 
 def lonlat_of(zoom, col, row, i, j):
     """Where pixel ``(i, j)`` of tile ``(col, row, zoom)`` is, from first principles."""
-    resolution = 2 * WORLD_EXTENT / (TILE_SIZE * 2 ** zoom)
+    resolution = 2 * WORLD_EXTENT / (TILE_SIZE * 2**zoom)
     x = -WORLD_EXTENT + (col * TILE_SIZE + i + 0.5) * resolution
     y = WORLD_EXTENT - (row * TILE_SIZE + j + 0.5) * resolution
     lon = math.degrees(x / EARTH_RADIUS)
@@ -62,7 +72,7 @@ def address_of(lon, lat, zoom):
     """The tile and pixel a place falls in at ``zoom`` — the inverse of the above."""
     x = math.radians(lon) * EARTH_RADIUS
     y = math.log(math.tan(math.pi / 4 + math.radians(lat) / 2)) * EARTH_RADIUS
-    across = TILE_SIZE * 2 ** zoom
+    across = TILE_SIZE * 2**zoom
     col, i = divmod(int((x + WORLD_EXTENT) / (2 * WORLD_EXTENT) * across), TILE_SIZE)
     row, j = divmod(int((WORLD_EXTENT - y) / (2 * WORLD_EXTENT) * across), TILE_SIZE)
     return col, row, i, j
@@ -76,7 +86,7 @@ def seeded_value(zoom, col, row, i, j):
     pixels — no projection maths, and so no chance of agreeing with the code
     under test by sharing its mistake.
     """
-    across = TILE_SIZE * 2 ** zoom
+    across = TILE_SIZE * 2**zoom
     cell_col = int((col * TILE_SIZE + i + 0.5) * COG_SIZE / across)
     cell_row = int((row * TILE_SIZE + j + 0.5) * COG_SIZE / across)
     return COG_VALUES[cell_row][cell_col]
@@ -99,11 +109,11 @@ class TestValueRead:
 
         assert response.status_code == 200
         assert response.json()["value"] == pytest.approx(
-            seeded_value(0, 0, 0, 128, 128), rel=1e-6,
+            seeded_value(0, 0, 0, 128, 128),
+            rel=1e-6,
         )
 
-    def test_the_value_is_physical_not_the_number_the_pixel_was_painted_with(
-            self, client, fake_redis, seed_cog):
+    def test_the_value_is_physical_not_the_number_the_pixel_was_painted_with(self, client, fake_redis, seed_cog):
         """The rendering config rescales 0–50 onto 0–255 for a tile; identify
         reads past all of that, or a forecaster would be told the temperature
         is 129 degrees."""
@@ -128,7 +138,8 @@ class TestValueRead:
 
         assert here != pytest.approx(next_cell, rel=1e-6)
         assert next_cell == pytest.approx(
-            seeded_value(0, 0, 0, 128 + step, 128), rel=1e-6,
+            seeded_value(0, 0, 0, 128 + step, 128),
+            rel=1e-6,
         )
 
     def test_the_answer_echoes_the_request_it_belongs_to(self, client, fake_redis, seed_cog):
@@ -157,8 +168,7 @@ class TestValueRead:
 
         assert response.headers["content-type"].startswith("application/json")
 
-    def test_units_are_carried_only_when_the_tile_config_already_holds_them(
-            self, client, fake_redis, seed_cog):
+    def test_units_are_carried_only_when_the_tile_config_already_holds_them(self, client, fake_redis, seed_cog):
         """No new metadata plumbing (#363): the answer says what the
         per-request rendering payload says, and stays silent otherwise."""
         seed_default(fake_redis, seed_cog)
@@ -177,21 +187,26 @@ class TestCoordinateMath:
     @pytest.mark.parametrize(
         "zoom,col,row,i,j",
         [
-            (0, 0, 0, 0, 0),        # the north-west corner of the world
-            (0, 0, 0, 255, 255),    # and its south-east one
-            (0, 0, 0, 128, 128),    # the middle, where the meridians cross
-            (1, 1, 0, 0, 0),        # the first pixel east of Greenwich
-            (3, 7, 7, 255, 255),    # the last pixel of the deepest corner tile
+            (0, 0, 0, 0, 0),  # the north-west corner of the world
+            (0, 0, 0, 255, 255),  # and its south-east one
+            (0, 0, 0, 128, 128),  # the middle, where the meridians cross
+            (1, 1, 0, 0, 0),  # the first pixel east of Greenwich
+            (3, 7, 7, 255, 255),  # the last pixel of the deepest corner tile
             (12, 2400, 2100, 17, 200),
         ],
     )
     def test_the_pixel_lands_where_the_mercator_formulae_put_it(
-            self, client, fake_redis, seed_cog, zoom, col, row, i, j):
+        self, client, fake_redis, seed_cog, zoom, col, row, i, j
+    ):
         seed_default(fake_redis, seed_cog)
 
         body = identify(
-            client, TILEMATRIX=str(zoom), TILECOL=str(col), TILEROW=str(row),
-            I=str(i), J=str(j),
+            client,
+            TILEMATRIX=str(zoom),
+            TILECOL=str(col),
+            TILEROW=str(row),
+            I=str(i),
+            J=str(j),
         ).json()
 
         lon, lat = lonlat_of(zoom, col, row, i, j)
@@ -214,8 +229,7 @@ class TestCoordinateMath:
         assert -85.0511 < east["latitude"] < -84.9
 
     @pytest.mark.parametrize("zoom", [0, 3, 6, 12])
-    def test_a_place_reads_the_same_value_at_every_zoom(
-            self, client, fake_redis, seed_cog, zoom):
+    def test_a_place_reads_the_same_value_at_every_zoom(self, client, fake_redis, seed_cog, zoom):
         """The same spot, addressed through four different tile matrices —
         the conversion has to agree with itself across the pyramid or an
         identify would answer differently as the user zooms."""
@@ -226,14 +240,18 @@ class TestCoordinateMath:
         col, row, i, j = address_of(lon, lat, zoom)
 
         body = identify(
-            client, TILEMATRIX=str(zoom), TILECOL=str(col), TILEROW=str(row),
-            I=str(i), J=str(j),
+            client,
+            TILEMATRIX=str(zoom),
+            TILECOL=str(col),
+            TILEROW=str(row),
+            I=str(i),
+            J=str(j),
         ).json()
 
         assert body["value"] == pytest.approx(seeded_value(6, 42, 33, 128, 128), rel=1e-6)
         # Each matrix can only answer to its own resolution, so the place
         # comes back within a pixel of itself — coarse at level 0, fine at 12.
-        pixel = 360 / (TILE_SIZE * 2 ** zoom)
+        pixel = 360 / (TILE_SIZE * 2**zoom)
         assert body["longitude"] == pytest.approx(lon, abs=pixel)
         assert body["latitude"] == pytest.approx(lat, abs=pixel)
 
@@ -270,15 +288,16 @@ class TestNothingUnderTheCursor:
 
         assert northern["value"] is None
         assert southern["value"] == pytest.approx(
-            seeded_value(0, 0, 0, 128, 192), rel=1e-6,
+            seeded_value(0, 0, 0, 128, 192),
+            rel=1e-6,
         )
 
-    def test_a_click_outside_the_grids_footprint_answers_the_same_way(
-            self, client, fake_redis, seed_cog):
+    def test_a_click_outside_the_grids_footprint_answers_the_same_way(self, client, fake_redis, seed_cog):
         # A COG covering only the eastern tropics: the level-0 centre pixel
         # sits well outside it.
         seed_default(
-            fake_redis, seed_cog,
+            fake_redis,
+            seed_cog,
             bounds=(3_000_000.0, -1_000_000.0, 4_000_000.0, 1_000_000.0),
         )
 
@@ -289,8 +308,7 @@ class TestNothingUnderTheCursor:
         assert body["value"] is None
         assert body["longitude"] == pytest.approx(lonlat_of(0, 0, 0, 128, 128)[0])
 
-    def test_a_click_inside_that_footprint_still_reads_a_value(
-            self, client, fake_redis, seed_cog):
+    def test_a_click_inside_that_footprint_still_reads_a_value(self, client, fake_redis, seed_cog):
         """The empty answer must belong to the click, not to the small file."""
         bounds = (3_000_000.0, -1_000_000.0, 4_000_000.0, 1_000_000.0)
         seed_default(fake_redis, seed_cog, bounds=bounds)
@@ -298,8 +316,12 @@ class TestNothingUnderTheCursor:
         col, row, i, j = address_of(lon, 0.0, 6)
 
         body = identify(
-            client, TILEMATRIX="6", TILECOL=str(col), TILEROW=str(row),
-            I=str(i), J=str(j),
+            client,
+            TILEMATRIX="6",
+            TILECOL=str(col),
+            TILEROW=str(row),
+            I=str(i),
+            J=str(j),
         ).json()
 
         assert body["value"] is not None
@@ -321,8 +343,7 @@ class TestInfoFormat:
         assert exc.get("exceptionCode") == "InvalidParameterValue"
         assert exc.get("locator") == "INFOFORMAT"
 
-    def test_an_omitted_info_format_means_the_only_one_there_is(
-            self, client, fake_redis, seed_cog):
+    def test_an_omitted_info_format_means_the_only_one_there_is(self, client, fake_redis, seed_cog):
         seed_default(fake_redis, seed_cog)
 
         assert identify(client, INFOFORMAT=None).status_code == 200
@@ -330,8 +351,7 @@ class TestInfoFormat:
 
 class TestPixelParameters:
     @pytest.mark.parametrize("name", ["I", "J"])
-    def test_a_missing_pixel_coordinate_names_itself_in_the_locator(
-            self, client, fake_redis, seed_cog, name):
+    def test_a_missing_pixel_coordinate_names_itself_in_the_locator(self, client, fake_redis, seed_cog, name):
         seed_default(fake_redis, seed_cog)
 
         response = identify(client, **{name: None})
@@ -342,8 +362,7 @@ class TestPixelParameters:
         assert exc.get("locator") == name
 
     @pytest.mark.parametrize("name", ["I", "J"])
-    def test_a_pixel_outside_the_tile_answers_point_ij_out_of_range(
-            self, client, fake_redis, seed_cog, name):
+    def test_a_pixel_outside_the_tile_answers_point_ij_out_of_range(self, client, fake_redis, seed_cog, name):
         seed_default(fake_redis, seed_cog)
 
         response = identify(client, **{name: "256"})
@@ -415,8 +434,7 @@ class TestRefusalsSharedWithGetTile:
         assert response.status_code == 400
         assert exception_of(response).get("locator") == "TILEMATRIXSET"
 
-    def test_a_tile_outside_the_matrix_answers_tile_out_of_range(
-            self, client, fake_redis, seed_cog):
+    def test_a_tile_outside_the_matrix_answers_tile_out_of_range(self, client, fake_redis, seed_cog):
         seed_default(fake_redis, seed_cog)
 
         response = identify(client, TILEMATRIX="1", TILECOL="2")

@@ -14,6 +14,7 @@ recipe execution, so the module is importable from both the feed layer
 (ADR-0005). The DB-backed resolution of declared inputs into catalog items lives
 in ``processing``; this module is graph math only.
 """
+
 from __future__ import annotations
 
 
@@ -140,9 +141,7 @@ def validate_chain(defs, collection_keys=None) -> None:
     for defn in defs:
         for dep in defn.depends_on:
             if dep not in seen:
-                raise ChainError(
-                    f"product '{defn.key}' depends on unknown product '{dep}'"
-                )
+                raise ChainError(f"product '{defn.key}' depends on unknown product '{dep}'")
 
     producers: dict[str, str] = {}
     for defn in defs:
@@ -165,9 +164,7 @@ def validate_chain(defs, collection_keys=None) -> None:
         colour[node] = GREY
         for nxt in graph.get(node, ()):
             if colour[nxt] == GREY:
-                raise ChainCycleError(
-                    f"derived-product dependency cycle through '{nxt}'"
-                )
+                raise ChainCycleError(f"derived-product dependency cycle through '{nxt}'")
             if colour[nxt] == WHITE:
                 visit(nxt)
         colour[node] = BLACK

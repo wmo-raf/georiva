@@ -9,6 +9,15 @@ GEORIVA_GUNICORN_NUM_OF_WORKERS=${GEORIVA_GUNICORN_NUM_OF_WORKERS:-}
 GEORIVA_CELERY_BEAT_DEBUG_LEVEL=${GEORIVA_CELERY_BEAT_DEBUG_LEVEL:-INFO}
 GEORIVA_CELERY_WORKER_LOG_LEVEL=${GEORIVA_CELERY_WORKER_LOG_LEVEL:-INFO}
 
+# The one name every worker command reads for its pool size, prod and dev alike.
+# It is deliberately queue-agnostic: compose maps the operator-facing per-queue
+# setting (GEORIVA_CELERY_{DEFAULT,INGESTION,PROCESSING}_WORKER_CONCURRENCY) onto
+# it per service, so the entrypoint never has to know which queue it is serving,
+# and the per-queue defaults stay in the one file that does. Reading a per-queue
+# name in here reads a variable that does not reach the container — the bug of
+# issue #399. Empty means unset: no --concurrency, celery's own default.
+GEORIVA_CELERY_WORKER_CONCURRENCY=${GEORIVA_CELERY_WORKER_CONCURRENCY:-}
+
 GEORIVA_LOG_LEVEL=${GEORIVA_LOG_LEVEL:-INFO}
 
 GEORIVA_PORT="${GEORIVA_PORT:-8000}"
@@ -32,9 +41,12 @@ gunicorn              : Start GeoRiva django using a prod ready gunicorn server:
                            * Binds to 0.0.0.0
 celery-default-worker   : Start the default celery worker (scheduled tasks, pruning, sweeps
 celery-ingestion-worker : Start the ingestion celery worker (heavy GRIB/raster processing)
+celery-processing-worker: Start the processing celery worker (derivation units, zonal stats)
 celery-default-worker-dev       : Start the default celery worker with auto-reload on code changes
                           (requires the dev build target).
 celery-ingestion-worker-dev     : Start the ingestion celery worker with auto-reload on code changes
+                          (requires the dev build target).
+celery-processing-worker-dev    : Start the processing celery worker with auto-reload on code changes
                           (requires the dev build target).
 celery-beat             : Start the celery beat service used to schedule periodic jobs
 
@@ -69,15 +81,52 @@ run_setup_commands_if_configured(){
   /georiva/app/src/georiva/manage.py create_martin_function
 }
 
+# The pool-size flag, or nothing when the operator set no size — in which case
+# celery picks its own default. Both worker commands below, prod and dev, get
+# the flag from here, so the two cannot end up reading different names again.
+# The size itself is never decided here: compose owns the per-queue defaults.
+celery_concurrency_flag() {
+    if [[ -n "$GEORIVA_CELERY_WORKER_CONCURRENCY" ]]; then
+        echo "--concurrency=$GEORIVA_CELERY_WORKER_CONCURRENCY"
+    fi
+}
+
+# Args: queue, worker node name, then any extra celery args.
 start_celery_worker() {
+    local queue="$1" node_name="$2"
+    shift 2
+
     startup_plugin_setup
 
-    EXTRA_CELERY_ARGS=()
+    local concurrency_flag
+    concurrency_flag="$(celery_concurrency_flag)"
 
-    if [[ -n "$GEORIVA_CELERY_WORKER_CONCURRENCY" ]]; then
-        EXTRA_CELERY_ARGS+=(--concurrency "$GEORIVA_CELERY_WORKER_CONCURRENCY")
-    fi
-    exec celery -A georiva worker "${EXTRA_CELERY_ARGS[@]}" -l "${GEORIVA_CELERY_WORKER_LOG_LEVEL}" "$@"
+    exec celery -A georiva worker \
+        -Q "$queue" \
+        -n "$node_name" \
+        ${concurrency_flag:+"$concurrency_flag"} \
+        -l "${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
+        "$@"
+}
+
+# The dev counterpart: the same worker wrapped in watchfiles, so a code change
+# restarts it. watchfiles takes the command as one string rather than an argv,
+# which is why this builds its own line instead of delegating above — and why
+# it takes no extra celery args.
+#
+# Args: queue, worker node name.
+start_celery_worker_dev() {
+    local queue="$1" node_name="$2"
+
+    startup_plugin_setup
+
+    local concurrency_flag
+    concurrency_flag="$(celery_concurrency_flag)"
+
+    exec watchfiles \
+        --filter python \
+        "celery -A georiva worker -Q ${queue} -n ${node_name} -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} ${concurrency_flag}" \
+        /georiva/app/src/
 }
 
 # Lets devs attach to this container running the passed command, press ctrl-c and only
@@ -160,39 +209,22 @@ shell)
     exec python /georiva/app/src/georiva/manage.py shell
     ;;
 celery-default-worker)
-    start_celery_worker -Q georiva-default -n default-worker@%h "${@:2}"
+    start_celery_worker georiva-default default-worker@%h "${@:2}"
     ;;
 celery-ingestion-worker)
-    start_celery_worker -Q georiva-ingestion -n ingestion-worker@%h "${@:2}"
+    start_celery_worker georiva-ingestion ingestion-worker@%h "${@:2}"
     ;;
 celery-processing-worker)
-    start_celery_worker -Q georiva-processing -n processing-worker@%h "${@:2}"
+    start_celery_worker georiva-processing processing-worker@%h "${@:2}"
     ;;
 celery-default-worker-dev)
-    startup_plugin_setup
-    exec watchfiles \
-        --filter python \
-        "celery -A georiva worker -Q georiva-default -n default-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
-        /georiva/app/src/
+    start_celery_worker_dev georiva-default default-worker@%h
     ;;
 celery-ingestion-worker-dev)
-    startup_plugin_setup
-    # GRIB/raster ingestion is very memory-heavy — default stays conservative (1),
-    # overridable via the same env var the prod compose maps (see docker-compose).
-    exec watchfiles \
-        --filter python \
-        "celery -A georiva worker -Q georiva-ingestion -n ingestion-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=${GEORIVA_CELERY_INGESTION_WORKER_CONCURRENCY:-1}" \
-        /georiva/app/src/
+    start_celery_worker_dev georiva-ingestion ingestion-worker@%h
     ;;
 celery-processing-worker-dev)
-    startup_plugin_setup
-    # Derivation units do a 2-pass COG encode (CPU+memory heavy). Default to 4 —
-    # enough to keep a backfill moving without oversubscribing a typical dev box
-    # (was a hardcoded 1). Override with GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY.
-    exec watchfiles \
-        --filter python \
-        "celery -A georiva worker -Q georiva-processing -n processing-worker@%h -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} --concurrency=${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-4}" \
-        /georiva/app/src/
+    start_celery_worker_dev georiva-processing processing-worker@%h
     ;;
 celery-beat)
     exec celery -A georiva beat -l "${GEORIVA_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"

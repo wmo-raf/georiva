@@ -13,7 +13,6 @@ HOST = {"host": "kenya.georiva.test"}
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class OrganisationAdminAccessTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
 
@@ -75,9 +74,7 @@ class OrganisationAdminAccessTests(TestCase):
         request = response.wsgi_request
 
         top_level = admin_menu.menu_items_for_request(request)
-        self.assertNotIn(
-            reverse("organisation_membership:index"), [item.url for item in top_level]
-        )
+        self.assertNotIn(reverse("organisation_membership:index"), [item.url for item in top_level])
 
         group = next(item for item in top_level if item.label == "Organisations")
         self.assertIsInstance(group, SubmenuMenuItem)
@@ -139,9 +136,7 @@ class OrganisationMembersButtonTests(TestCase):
         self.client.login(username="root", password=PASSWORD)
 
     def test_the_edit_page_links_to_this_organisations_members(self):
-        response = self.client.get(
-            reverse("organisation:edit", args=[self.kenya.pk]), headers=HOST
-        )
+        response = self.client.get(reverse("organisation:edit", args=[self.kenya.pk]), headers=HOST)
         # In the header proper, not folded away into the "…" dropdown.
         self.assertIn(
             f"{reverse('organisation_membership:index')}?organisation={self.kenya.pk}",
@@ -161,7 +156,6 @@ class OrganisationMembersButtonTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class OrganisationDeletionTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         make_user("root", superuser=True)
@@ -175,7 +169,6 @@ class OrganisationDeletionTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class OrganisationAdminProvisioningTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         make_user("root", superuser=True)

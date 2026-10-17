@@ -7,6 +7,7 @@ the periodic sweep (all parked runs) and the completion wake-up (scoped by
 origin). It is readiness-gated — a unit whose inputs still don't resolve stays
 parked instead of churning the queue.
 """
+
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -35,11 +36,7 @@ class _WaitingRecipe(BaseRecipe):
 
     def resolve_inputs(self, unit):
         items = [object()] if type(self).input_present else []
-        return {
-            "baseline": ResolvedInput(
-                "baseline", required=True, items=items, assets=[_Asset("v1")]
-            )
-        }
+        return {"baseline": ResolvedInput("baseline", required=True, items=items, assets=[_Asset("v1")])}
 
     def outputs(self, unit):
         return OutputItem(collection=None, time=None)
@@ -64,9 +61,12 @@ class _RegistryMixin:
 
 def _parked(unit, *, recipe_type=_WaitingRecipe.type, origin=""):
     return DerivationRun.objects.create(
-        recipe_type=recipe_type, recipe_version="1",
-        unit_key=unit, unit_hash=unit_hash(unit),
-        status=DerivationRun.Status.NOT_READY, origin=origin,
+        recipe_type=recipe_type,
+        recipe_version="1",
+        unit_key=unit,
+        unit_hash=unit_hash(unit),
+        status=DerivationRun.Status.NOT_READY,
+        origin=origin,
     )
 
 
@@ -139,12 +139,16 @@ class ResurrectNotReadyTests(_RegistryMixin, TestCase):
 
     def test_terminal_and_running_runs_are_never_touched(self):
         for status in (
-            DerivationRun.Status.COMPLETED, DerivationRun.Status.FAILED,
-            DerivationRun.Status.RUNNING, DerivationRun.Status.PENDING,
+            DerivationRun.Status.COMPLETED,
+            DerivationRun.Status.FAILED,
+            DerivationRun.Status.RUNNING,
+            DerivationRun.Status.PENDING,
         ):
             DerivationRun.objects.create(
-                recipe_type=_WaitingRecipe.type, recipe_version="1",
-                unit_key={"s": str(status)}, unit_hash=unit_hash({"s": str(status)}),
+                recipe_type=_WaitingRecipe.type,
+                recipe_version="1",
+                unit_key={"s": str(status)},
+                unit_hash=unit_hash({"s": str(status)}),
                 status=status,
             )
         _WaitingRecipe.input_present = True

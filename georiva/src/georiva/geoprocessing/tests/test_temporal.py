@@ -21,12 +21,8 @@ def _series(values, start="2020-01-01", freq="MS"):
 def _spatial_series(monthly_scalars, ny=2, nx=3, start="2020-01-01", freq="MS"):
     """(time, y, x) cube; every pixel at time t equals monthly_scalars[t]."""
     time = pd.date_range(start, periods=len(monthly_scalars), freq=freq)
-    data = np.broadcast_to(
-        np.asarray(monthly_scalars, dtype=float)[:, None, None], (len(time), ny, nx)
-    )
-    return xr.DataArray(
-        data, coords={"time": time}, dims=["time", "y", "x"]
-    )
+    data = np.broadcast_to(np.asarray(monthly_scalars, dtype=float)[:, None, None], (len(time), ny, nx))
+    return xr.DataArray(data, coords={"time": time}, dims=["time", "y", "x"])
 
 
 class TemporalAggregateTests(unittest.TestCase):
@@ -42,7 +38,7 @@ class TemporalAggregateTests(unittest.TestCase):
         da = _series([float(i) for i in range(24)])  # 24 months
         yearly = temporal_aggregate(da, freq="YS", how="mean")
         self.assertEqual(yearly.sizes["time"], 2)
-        self.assertAlmostEqual(float(yearly.isel(time=0)), 5.5)   # mean 0..11
+        self.assertAlmostEqual(float(yearly.isel(time=0)), 5.5)  # mean 0..11
         self.assertAlmostEqual(float(yearly.isel(time=1)), 17.5)  # mean 12..23
 
     def test_unknown_how_raises(self):
@@ -66,8 +62,8 @@ class AnomalyTests(unittest.TestCase):
 
     def test_seasonal_anomaly_against_baseline_window(self):
         # JJA value period averages 13; JJA baseline period averages 10.
-        value_window = _spatial_series([13.0] * 12)              # one year
-        baseline_window = _spatial_series([10.0] * 24)           # two-year baseline
+        value_window = _spatial_series([13.0] * 12)  # one year
+        baseline_window = _spatial_series([10.0] * 24)  # two-year baseline
         value = climatology(value_window, season="JJA")
         baseline = climatology(baseline_window, season="JJA")
 
@@ -100,12 +96,8 @@ class SelectSeasonTests(unittest.TestCase):
     def test_selects_by_month_on_360_day_calendar(self):
         # CMIP6-style 360-day calendar: months come from the file's time axis,
         # not a Gregorian assumption.
-        time = xr.date_range(
-            "2020-01-01", periods=24, freq="MS", calendar="360_day", use_cftime=True
-        )
-        da = xr.DataArray(
-            np.arange(24, dtype=float), coords={"time": time}, dims=["time"]
-        )
+        time = xr.date_range("2020-01-01", periods=24, freq="MS", calendar="360_day", use_cftime=True)
+        da = xr.DataArray(np.arange(24, dtype=float), coords={"time": time}, dims=["time"])
         djf = select_season(da, "DJF")
         months = sorted(set(int(m) for m in djf["time"].dt.month.values))
         self.assertEqual(months, [1, 2, 12])
@@ -130,9 +122,7 @@ class TrendTests(unittest.TestCase):
     def test_linear_increase_gives_slope_per_year(self):
         # One value per year, rising 2.0/year over 2000..2003.
         time = pd.date_range("2000-01-01", periods=4, freq="YS")
-        da = xr.DataArray(
-            [0.0, 2.0, 4.0, 6.0], coords={"time": time}, dims=["time"]
-        )
+        da = xr.DataArray([0.0, 2.0, 4.0, 6.0], coords={"time": time}, dims=["time"])
         self.assertAlmostEqual(float(trend(da)), 2.0)
 
     def test_flat_series_has_zero_slope(self):
@@ -164,9 +154,7 @@ class TrendTests(unittest.TestCase):
         for t in range(36):
             year_idx, month = t // 12, t % 12 + 1
             values.append(10.0 + 2 * year_idx if month in (6, 7, 8) else 99999.0)
-        time = xr.date_range(
-            "2000-01-01", periods=36, freq="MS", calendar="360_day", use_cftime=True
-        )
+        time = xr.date_range("2000-01-01", periods=36, freq="MS", calendar="360_day", use_cftime=True)
         da = xr.DataArray(values, coords={"time": time}, dims=["time"])
         self.assertAlmostEqual(float(trend(da, season="JJA")), 2.0)
 

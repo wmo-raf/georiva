@@ -1,8 +1,8 @@
 # GeoRiva
 
 Geospatial Raster Ingestion, Visualization & Analysis platform. Ingests gridded raster data (GRIB, NetCDF, GeoTIFF) from
-plugins or MinIO drop zones, processes into cloud-optimized formats (COG, encoded PNG), indexes as STAC-compliant
-catalogs, and serves via STAC API, EDR API, and Titiler tile server.
+plugins or MinIO drop zones, processes into cloud-optimized COGs, indexes as STAC-compliant catalogs, and serves via
+STAC API, EDR API, WMTS, and the Titiler/Martin tile servers.
 
 Target domain: spatio-temporal environmental data, such as weather, climate, and ocean models, for African National
 Meteorological Services.
@@ -12,13 +12,13 @@ Meteorological Services.
 - **Framework**: Django 5.x + Wagtail 7.x (CMS/admin)
 - **Database**: PostgreSQL 18 + TimescaleDB + PostGIS (TimescaleDB HA image), fronted by PgBouncer
 - **Object Storage**: MinIO (S3-compatible), multi-bucket (incoming, sources, archive, assets, zarr)
-- **Task Queue**: Celery + Redis (two queues: `georiva-default`, `georiva-ingestion`)
-- **Event Bus**: MinIO bucket notifications → Redis list → `minio-consumer` (no MQTT/Mosquitto)
+- **Task Queue**: Celery + Redis (three queues: `georiva-default`, `georiva-ingestion`, `georiva-processing`)
+- **Event Bus**: MinIO bucket notifications → Redis list → `minio-consumer` / `staging-consumer` (no MQTT/Mosquitto)
 - **Tile Servers**: Titiler (raster, FastAPI, `titiler-app/`); Martin (vector/MVT from PostGIS)
 - **Data Libraries**: xarray, rasterio, cfgrib, dask, geopandas; virtualizarr + virtual-tiff (kerchunk)
 - **API**: Django REST Framework + drf-spectacular (OpenAPI)
 - **Frontend**: STAC Browser (Radiant Earth), Vue.js for dashboards
-- **Container**: Docker Compose (13 services), Nginx reverse proxy (`georiva-web-proxy`)
+- **Container**: Docker Compose (15 services), Nginx reverse proxy + tile auth gateway (`georiva-web-proxy`)
 - **Package Manager**: uv — core is a standalone project (`georiva/pyproject.toml` + `georiva/uv.lock`); repo-root
   `pyproject.toml` is a dev workspace overlay that ties in plugins
 - **Python**: 3.12+
@@ -46,8 +46,7 @@ georiva/src/georiva/          # Main Django application
 │   ├── tasks.py              # Celery tasks (process_incoming_file, sweep_unprocessed)
 │   ├── models.py             # IngestionLog (distributed locking, state machine)
 │   ├── extractor.py          # Data extraction
-│   ├── encoder.py            # PNG encoding
-│   ├── asset_writer.py       # COG/PNG/JSON asset writers
+│   ├── asset_writer.py       # COG asset writer (encoded textures on-demand, ADR 0021)
 │   └── clipper.py            # Boundary clipping
 ├── formats/                  # Format handler plugins (GRIB, NetCDF, GeoTIFF)
 │   ├── base.py               # BaseFormatPlugin ABC
@@ -55,11 +54,26 @@ georiva/src/georiva/          # Main Django application
 ├── sources/                  # Data source plugin framework
 │   ├── source.py             # DataSource protocol + BaseDataSource ABC
 │   ├── loader.py             # Loader orchestrates fetch → store
-│   └── registry.py           # LoaderProfileViewSetRegistry
+│   ├── registry.py           # LoaderProfileViewSetRegistry
+│   ├── product_service.py    # Provision DerivedProducts, pin bindings (ADR 0010)
+│   └── derivation_invocation.py  # Product-driven dispatch: arriving input → recipe run
+├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)
+├── processing/               # Derivation engine — the write-side counterpart of the Loader (ADR 0005)
+│   ├── engine.py             # Generic run loop: enumerate → resolve → readiness → compute → register
+│   ├── recipe.py             # BaseRecipe ABC (input selectors, units, transform, outputs)
+│   ├── registry.py           # RecipeRegistry (decorator-based registration)
+│   └── recipes/              # climatology.py, promotion.py
+├── geoprocessing/            # Pure compute library — no Django, no storage, no request layer
+│                             #   algebra.py, calendar.py, regrid.py, temporal.py, zonal.py
+├── organisations/            # Multi-tenancy (ADR 0011–0018)
+│   ├── ownership.py          # scope_rows / belongs_to_active_org — the tenancy choke point
+│   ├── access.py             # may_see_private, require_active_org
+│   └── pages.py              # Closes Wagtail's own pk-taking page views (ADR 0016)
 ├── stac/                     # STAC API (views, serializers, URLs)
 ├── edr/                      # EDR API — metadata plane only (data queries not yet implemented)
 ├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry)
-├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk) manifests over COG assets
+├── wmts/                     # WMTS capabilities (per-org); GetTile lives in titiler-app/app/wmts.py
+├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk / Icechunk) manifests over COG assets
 ├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)
 ├── accounts/                 # Per-user identity: API keys (grv_…) + DRF auth + account panel
 ├── pages/                    # Wagtail CMS pages (home, datasets)
@@ -120,13 +134,15 @@ Defined in `api/urls.py`:
 
 - `/api/stac/` — STAC API (collections, items, search, queryables)
 - `/api/edr/` — Environmental Data Retrieval API (metadata plane only so far)
+- `/api/wmts/<org>/WMTSCapabilities.xml` — WMTS capabilities; `GetTile` is the KVP shim in `titiler-app`
+  at `/titiler/<org>/wmts?REQUEST=GetTile` (gated by nginx like every other tile route)
 - `/api/jobs/` — Async job status (task_ferry)
 - `/api/analysis/` — Analysis API (e.g. `timeseries/point`, `timeseries/area`)
 - `/api/tile-config/<org>/<catalog>/<collection>/<variable>/` — Tile/render config (machine plane; see ADR 0013)
 - `/api/datasets/` — Dataset pages API
 - `/admin/` — Wagtail CMS admin (mounted in `config/urls.py`)
 
-> MinIO events arrive via a Redis list consumed by `minio-consumer`, **not** an HTTP webhook
+> Bucket notifications arrive via a Redis list consumed by `minio-consumer`, **not** an HTTP webhook
 > endpoint. Vector tiles for zonal stats are served by Martin at `/martin/boundary_stats/{z}/{x}/{y}`,
 > which requires `org`, `catalog`, `collection` and `variable` query params. Titiler raster tiles live
 > under `/titiler/<org>/<catalog>/<collection>/<variable>/…`. Build every such URL through
@@ -138,7 +154,12 @@ Defined in `api/urls.py`:
 - **Plugins**: Register via decorator (`@FormatRegistry.register`) or programmatic `registry.register()`
 - **Singletons**: `storage`, `format_registry`, `loader_profile_viewset_registry` — import from their modules
 - **Celery tasks**: Late imports inside task body to avoid circular imports; `bind=True` + `acks_late=True`
-- **Celery queues**: Heavy processing on `georiva-ingestion`, lightweight on `georiva-default`
+- **Celery queues**: split by what waits on the task, not by weight (ADR 0025). `georiva-ingestion` carries fetch
+  and extraction *and nothing else* — it runs one pool process, so anything on it delays every file behind it;
+  the admitted set is closed and asserted in `ingestion/tests/test_queue_routing.py`. Deferrable derived work
+  (derivation units, zonal stats, virtual-Zarr manifests) goes to `georiva-processing`; sweeps, cleanup and
+  scheduling to `georiva-default`. Declare the queue on the task and dispatch with `delay(...)` — never
+  `apply_async(queue=...)`, which silently overrides the declaration
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`
 - **Wagtail hooks**: Each app owns its admin integration via `wagtail_hooks.py`
@@ -157,7 +178,11 @@ Defined in `api/urls.py`:
   yourself. Wagtail pages are org-owned through the Site → root-page link; the dispatcher scopes them, and
   Wagtail's own pk-taking page views are closed by `organisations/pages.py` (ADR 0016)
 - **Storage paths**: Org-first, time-partitioned: `{org}/{catalog}/{collection}/{variable}/{year}/{month}/{day}/`
-  — the first segment of every key on every bucket is the owning organisation's slug
+  — the first segment of every key on every bucket is the owning organisation's slug. One exception, on the
+  `publications` bucket only: `PublicationSink.instance_wide(root)` roots a publication at `{root}/` for a foreign
+  reader built to serve several organisations from one process. Such a root must be unspellable as an organisation
+  slug (`_forti`, not `forti`), so it can never shadow a tenant's prefix — but it is not a tenancy boundary, and
+  whatever answers requests from it owns that check (ADR 0027)
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
   `requirements.txt`). Add via `make uv-add pkg="..."`; `uv sync --all-packages` builds the local dev env
 - **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no
@@ -188,6 +213,11 @@ Check these when working on related areas:
 
 **IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that
 branch for the reminder of the session
+
+**IMPORTANT**: Run `make format` before committing Python changes — it sorts imports, applies ruff's safe fixes and
+formats. CI runs `make lint` (the same checks, reporting only) and fails the PR on any difference. Rules live in
+`ruff.toml` at the repo root and cover core and `titiler-app/` together; migrations and
+`source-plugin-boilerplate/` are excluded.
 
 ## Agent skills
 

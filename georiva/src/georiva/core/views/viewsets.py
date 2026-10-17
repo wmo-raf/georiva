@@ -7,14 +7,15 @@ from wagtail.admin.views import generic
 from wagtail.admin.viewsets.chooser import ChooserViewSet
 from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
-from wagtail.snippets.views.snippets import SnippetViewSet, IndexView
+from wagtail.snippets.views.snippets import IndexView, SnippetViewSet
 
-from georiva.core.models import Item, Catalog, Collection, ColorRamp, Asset
+from georiva.core.models import Asset, Catalog, Collection, ColorRamp, Item
 from georiva.core.models.catalog import Topic
-from .admin import CatalogIndexView
 from georiva.organisations.access import may_change_org_object, require_active_org
 from georiva.organisations.permissions import SuperuserOnlyPermissionPolicy
 from georiva.organisations.scoping import OrgScopedChooserViewSetMixin, OrgScopedViewSetMixin
+
+from .admin import CatalogIndexView
 
 
 class BoundaryChooserViewSet(ChooserViewSet):
@@ -143,7 +144,7 @@ class CollectionViewSet(OrgScopedViewSetMixin, ModelViewSet):
 class ItemIndexView(IndexView):
     def get_list_more_buttons(self, instance):
         buttons = super().get_list_more_buttons(instance)
-        
+
         label = _("View")
         url = reverse("item_preview", args=[instance.id])
         icon_name = "view"
@@ -157,7 +158,7 @@ class ItemIndexView(IndexView):
                     attrs=attrs,
                 )
             )
-        
+
         return buttons
 
 
@@ -202,9 +203,7 @@ class GlobalTierCreateView(generic.CreateView):
         panel = super().get_panel()
         if not self._may_choose_tier() or panel is None:
             return panel
-        return ObjectList(
-            list(panel.children) + [FieldPanel("organisation")]
-        ).bind_to_model(self.model)
+        return ObjectList(list(panel.children) + [FieldPanel("organisation")]).bind_to_model(self.model)
 
     def save_instance(self):
         if not self._may_choose_tier():
@@ -240,8 +239,13 @@ class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
 
     model = ColorRamp
     icon = "palette"
-    add_to_admin_menu = True
-    menu_order = 600
+    # Under Settings, not the main menu: the ramp catalog is a reference library
+    # visited a handful of times in an instance's life, and the day-to-day route
+    # to it is the "Manage color ramps" link on the styling surface. Unlike
+    # Topics it is not superuser-only — org members author their own tier — so
+    # it sits with the entries every member sees, just after Boundaries (120).
+    add_to_settings_menu = True
+    menu_order = 130
     exclude_form_fields = ["created_at", "updated_at"]
     add_view_class = GlobalTierCreateView
     index_view_class = GlobalTierIndexView

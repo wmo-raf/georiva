@@ -5,6 +5,7 @@ The read-side query module and the run-list page — the acquisition analogue of
 the derived-product run tracking (derivation_tracking). Static pages: no SSE,
 no polling. The run list is collection-agnostic (ADR-0003).
 """
+
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -13,9 +14,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Catalog
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.acquisition_tracking import feed_fetch_runs
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
-from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -28,9 +29,7 @@ def _feed(name="Rain Feed", slug="chirps"):
 def _run(feed, status=FetchRun.Status.COMPLETED, *, started_ago=0, **fields):
     run = FetchRun.objects.create(data_feed=feed, status=status, **fields)
     # started_at is auto_now_add; set it explicitly so ordering is deterministic.
-    FetchRun.objects.filter(pk=run.pk).update(
-        started_at=timezone.now() - timedelta(minutes=started_ago)
-    )
+    FetchRun.objects.filter(pk=run.pk).update(started_at=timezone.now() - timedelta(minutes=started_ago))
     run.refresh_from_db()
     return run
 
@@ -88,8 +87,8 @@ class FetchRunListViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "failed")
-        self.assertContains(response, "7")   # requested
-        self.assertContains(response, "4")   # fetched
+        self.assertContains(response, "7")  # requested
+        self.assertContains(response, "4")  # fetched
         self.assertContains(response, "source unreachable: connection timed out")
 
     def test_status_filter_querystring_narrows_the_list(self):
@@ -107,9 +106,7 @@ class FetchRunListViewTests(TestCase):
     def test_breadcrumbs_chain_back_through_the_feed(self):
         response = self.client.get(self._url())
 
-        self.assertContains(
-            response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
-        )
+        self.assertContains(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
         self.assertContains(response, reverse("data_feed_list"))
 
     def test_each_run_row_links_to_its_detail_page(self):
@@ -201,12 +198,8 @@ class FetchRunDetailViewTests(TestCase):
     def test_breadcrumbs_chain_back_through_the_run_list(self):
         response = self.client.get(self._url())
 
-        self.assertContains(
-            response, reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk})
-        )
-        self.assertContains(
-            response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk})
-        )
+        self.assertContains(response, reverse("data_feed_fetch_runs", kwargs={"feed_pk": self.feed.pk}))
+        self.assertContains(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
 
     def test_run_of_another_feed_is_not_reachable(self):
         other_feed = _feed(name="Other", slug="other")
@@ -238,6 +231,7 @@ class DataFeedDetailAcquisitionCardTests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         from georiva.sources.tests.support import ensure_base_datafeed_viewset
+
         ensure_base_datafeed_viewset()
 
     def setUp(self):
@@ -253,15 +247,16 @@ class DataFeedDetailAcquisitionCardTests(TestCase):
         _run(self.feed, started_ago=60)
         _run(self.feed, started_ago=30)
         last = _run(
-            self.feed, FetchRun.Status.FAILED, started_ago=1,
-            files_requested=90210, files_failed=48151,
+            self.feed,
+            FetchRun.Status.FAILED,
+            started_ago=1,
+            files_requested=90210,
+            files_failed=48151,
         )
 
         response = self.client.get(self._detail_url())
 
-        self.assertEqual(
-            response.context["acquisition_summary"]["total_runs"], 3
-        )
+        self.assertEqual(response.context["acquisition_summary"]["total_runs"], 3)
         self.assertContains(response, "90210")  # last run requested
         self.assertContains(response, "48151")  # last run failed
         self.assertContains(response, "Failed")  # status badge
@@ -327,7 +322,9 @@ class RunLivenessTests(TestCase):
     def _three_quick_files(self, duration_seconds=40):
         for i, ago in enumerate([25, 24, 23]):
             self._stored_file(
-                f"c/f{i}.tif", started_ago=ago, duration_seconds=duration_seconds,
+                f"c/f{i}.tif",
+                started_ago=ago,
+                duration_seconds=duration_seconds,
             )
 
     def test_stuck_when_silence_dwarfs_the_median(self):
@@ -409,7 +406,10 @@ class RunLivenessTests(TestCase):
         # fetches: not enough real samples for a verdict.
         for i, ago in enumerate([25, 24, 23]):
             self._stored_file(
-                f"c/copy{i}.tif", started_ago=ago, duration_seconds=0, bytes=0,
+                f"c/copy{i}.tif",
+                started_ago=ago,
+                duration_seconds=0,
+                bytes=0,
             )
         self._stored_file("c/real1.tif", started_ago=22, duration_seconds=40)
         self._stored_file("c/real2.tif", started_ago=21, duration_seconds=40)

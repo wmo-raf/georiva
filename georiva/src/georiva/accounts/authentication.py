@@ -11,6 +11,7 @@ happens to be signed in as somebody else — a script's credential is the explic
 one, and silently preferring a stale cookie would be surprising in exactly the
 wrong direction.
 """
+
 from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 

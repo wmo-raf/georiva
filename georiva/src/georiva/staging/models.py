@@ -35,9 +35,9 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
     ORGANISATION_LOOKUP = "catalog__organisation"
 
     catalog = models.ForeignKey(
-        'georivacore.Catalog',
+        "georivacore.Catalog",
         on_delete=models.CASCADE,
-        related_name='staging_collections',
+        related_name="staging_collections",
     )
 
     # The published-tier core Collection this staging collection corresponds to
@@ -47,19 +47,19 @@ class StagingCollection(AbstractCollection, TimeStampedModel, ClusterableModel):
     # provisioned yet still registers; SET_NULL keeps staging data if the core
     # Collection is later deleted.
     collection = models.ForeignKey(
-        'georivacore.Collection',
+        "georivacore.Collection",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        related_name='staging_collections',
+        related_name="staging_collections",
     )
 
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ['catalog', 'slug']
-        ordering = ['catalog', 'name']
-    
+        unique_together = ["catalog", "slug"]
+        ordering = ["catalog", "name"]
+
     def __str__(self):
         return f"{self.catalog.slug}/{self.slug} (staging)"
 
@@ -85,9 +85,9 @@ class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
     collection = models.ForeignKey(
         StagingCollection,
         on_delete=models.CASCADE,
-        related_name='items',
+        related_name="items",
     )
-    
+
     # Flexible STAC temporal extent (all nullable).
     datetime = models.DateTimeField(
         null=True,
@@ -113,14 +113,14 @@ class StagingItem(AbstractSpatialItem, TimeStampedModel, ClusterableModel):
         db_index=True,
         help_text=_("Model run time, for forecast inputs"),
     )
-    
+
     class Meta:
-        ordering = ['collection', '-start_datetime', '-datetime']
+        ordering = ["collection", "-start_datetime", "-datetime"]
         indexes = [
-            models.Index(fields=['collection', 'start_datetime']),
-            models.Index(fields=['collection', 'datetime']),
+            models.Index(fields=["collection", "start_datetime"]),
+            models.Index(fields=["collection", "datetime"]),
         ]
-    
+
     def __str__(self):
         when = self.datetime or self.start_datetime
         return f"{self.collection.slug} @ {when} (staging)"
@@ -134,30 +134,30 @@ class StagingAsset(AbstractAsset, TimeStampedModel, Orderable):
     a raw multi-variable file (e.g. a NetCDF holding several variables) does
     not map to a single Variable.
     """
-    
+
     ORGANISATION_LOOKUP = "item__collection__catalog__organisation"
 
     item = ParentalKey(
         StagingItem,
         on_delete=models.CASCADE,
-        related_name='assets',
+        related_name="assets",
         db_constraint=False,
     )
-    
+
     variable = models.ForeignKey(
-        'georivacore.Variable',
+        "georivacore.Variable",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='staging_assets',
+        related_name="staging_assets",
     )
-    
+
     class Meta:
-        ordering = ['sort_order']
+        ordering = ["sort_order"]
         indexes = [
-            models.Index(fields=['item']),
+            models.Index(fields=["item"]),
         ]
-    
+
     def __str__(self):
         return f"{self.item} / {self.format or 'raw'}"
 
@@ -175,63 +175,63 @@ class DerivationLink(models.Model):
     stays staging → core, keeping core dependency-free. Written by the engine.
     See docs/adr/0004-staging-tier-and-abstract-stac-models.md.
     """
-    
+
     ORGANISATION_LOOKUP = "derived_item__collection__catalog__organisation"
 
     # FKs to Item use db_constraint=False because Item is a TimescaleDB
     # hypertable with no simple unique PK to reference (same as Asset.item).
     derived_item = models.ForeignKey(
-        'georivacore.Item',
+        "georivacore.Item",
         on_delete=models.CASCADE,
-        related_name='derivation_links',
+        related_name="derivation_links",
         db_constraint=False,
         help_text=_("The Published item this lineage edge describes"),
     )
-    
+
     source_staging_item = models.ForeignKey(
         StagingItem,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        related_name='derived_into',
+        related_name="derived_into",
     )
     source_published_item = models.ForeignKey(
-        'georivacore.Item',
+        "georivacore.Item",
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        related_name='derived_into',
+        related_name="derived_into",
         db_constraint=False,
     )
-    
+
     recipe_id = models.CharField(max_length=100)
     recipe_version = models.CharField(max_length=50)
     input_hash = models.CharField(max_length=64)
-    
+
     created = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         indexes = [
-            models.Index(fields=['derived_item']),
-            models.Index(fields=['source_staging_item']),
-            models.Index(fields=['source_published_item']),
+            models.Index(fields=["derived_item"]),
+            models.Index(fields=["source_staging_item"]),
+            models.Index(fields=["source_published_item"]),
         ]
         constraints = [
             models.CheckConstraint(
-                name='derivationlink_exactly_one_source',
+                name="derivationlink_exactly_one_source",
                 condition=(
-                        models.Q(
-                            source_staging_item__isnull=False,
-                            source_published_item__isnull=True,
-                        )
-                        | models.Q(
-                    source_staging_item__isnull=True,
-                    source_published_item__isnull=False,
-                )
+                    models.Q(
+                        source_staging_item__isnull=False,
+                        source_published_item__isnull=True,
+                    )
+                    | models.Q(
+                        source_staging_item__isnull=True,
+                        source_published_item__isnull=False,
+                    )
                 ),
             ),
         ]
-    
+
     def __str__(self):
         src = self.source_staging_item or self.source_published_item
         return f"{self.derived_item} ⟵ {src} ({self.recipe_id}@{self.recipe_version})"

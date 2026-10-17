@@ -22,14 +22,18 @@ from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 def _make_feed(slug="test"):
     catalog = Catalog.objects.create(
         organisation=make_organisation(),
-        name=f"Test {slug}", slug=slug, file_format="grib2",
+        name=f"Test {slug}",
+        slug=slug,
+        file_format="grib2",
     )
     return DataFeed.objects.create(name=f"Test Feed {slug}", catalog=catalog)
 
 
 def _make_run(feed, *, hours_ago=None, status="running", resumed_from=None):
     run = FetchRun.objects.create(
-        data_feed=feed, status=status, resumed_from=resumed_from,
+        data_feed=feed,
+        status=status,
+        resumed_from=resumed_from,
     )
     if hours_ago is not None:
         # started_at is auto_now_add — backdate via queryset update.
@@ -46,7 +50,8 @@ def _make_loader_job(feed, *, state, hours_ago=None, user=None):
         state=state,
         data_feed=feed,
         content_type=ContentType.objects.get_for_model(
-            LoaderJob, for_concrete_model=False,
+            LoaderJob,
+            for_concrete_model=False,
         ),
     )
     if hours_ago is not None:
@@ -107,7 +112,8 @@ class SweepStaleFetchRunsTests(TestCase):
         _make_run(self.feed, hours_ago=7)
         newer_report = timezone.now() - timedelta(hours=2)
         DataFeed.objects.filter(pk=self.feed.pk).update(
-            last_run_at=newer_report, last_run_status="success",
+            last_run_at=newer_report,
+            last_run_status="success",
         )
 
         sweep_stale_fetch_runs()
@@ -129,10 +135,15 @@ class SweepStaleFetchRunsTests(TestCase):
     def test_resume_cap_stops_a_crash_loop(self, _executor):
         original = _make_run(self.feed, hours_ago=30, status="interrupted")
         first_resume = _make_run(
-            self.feed, hours_ago=20, status="interrupted", resumed_from=original,
+            self.feed,
+            hours_ago=20,
+            status="interrupted",
+            resumed_from=original,
         )
         second_resume = _make_run(
-            self.feed, hours_ago=7, resumed_from=first_resume,
+            self.feed,
+            hours_ago=7,
+            resumed_from=first_resume,
         )
         self.assertEqual(second_resume.resume_generation(), MAX_AUTO_RESUMES)
 
@@ -254,7 +265,9 @@ class RecoverRunViewTests(TestCase):
 
     def setUp(self):
         user = get_user_model().objects.create_superuser(
-            "admin_rec", "r@test.com", "pw",
+            "admin_rec",
+            "r@test.com",
+            "pw",
         )
         dial_org(self.client)
         self.client.force_login(user)
@@ -287,7 +300,10 @@ class RecoverRunViewTests(TestCase):
         run = _make_run(self.feed, hours_ago=1)
         for i in range(3):
             self._stamp_stored(
-                run, f"c/f{i}.tif", minutes_ago=55 - i, duration_seconds=40,
+                run,
+                f"c/f{i}.tif",
+                minutes_ago=55 - i,
+                duration_seconds=40,
             )
         stuck = FetchedFile.objects.create(fetch_run=run, file_path="c/stuck.tif")
         FetchedFile.objects.filter(pk=stuck.pk).update(
@@ -305,7 +321,10 @@ class RecoverRunViewTests(TestCase):
         run = _make_run(self.feed, hours_ago=1)
         for i in range(3):
             self._stamp_stored(
-                run, f"c/f{i}.tif", minutes_ago=3 - i, duration_seconds=40,
+                run,
+                f"c/f{i}.tif",
+                minutes_ago=3 - i,
+                duration_seconds=40,
             )
 
         response = self.client.get(self._recover_url(run))
@@ -318,10 +337,12 @@ class RecoverRunViewTests(TestCase):
         finished = _make_run(self.feed, status="completed")
 
         self.assertContains(
-            self.client.get(self._detail_url(running)), "Recover stale run",
+            self.client.get(self._detail_url(running)),
+            "Recover stale run",
         )
         self.assertNotContains(
-            self.client.get(self._detail_url(finished)), "Recover stale run",
+            self.client.get(self._detail_url(finished)),
+            "Recover stale run",
         )
 
     def test_get_renders_confirmation_with_the_duplicate_warning(self, _executor):
@@ -372,7 +393,10 @@ class RecoverRunViewTests(TestCase):
     def test_post_warns_when_the_auto_resume_cap_is_reached(self, _executor):
         original = _make_run(self.feed, hours_ago=30, status="interrupted")
         first = _make_run(
-            self.feed, hours_ago=20, status="interrupted", resumed_from=original,
+            self.feed,
+            hours_ago=20,
+            status="interrupted",
+            resumed_from=original,
         )
         run = _make_run(self.feed, hours_ago=1, resumed_from=first)
 

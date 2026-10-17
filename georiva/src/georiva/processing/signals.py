@@ -9,6 +9,7 @@ never imports DerivedProduct; the feed layer depends on the engine's signal.
 
 Kwargs sent: ``item`` (the produced core Item), ``recipe_type``.
 """
+
 import django.dispatch
 
 unit_completed = django.dispatch.Signal()

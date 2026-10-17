@@ -11,7 +11,6 @@ PROBE_URL = "/admin/login/"
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class HostResolutionTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         self.icpac = provision_organisation(name="ICPAC", slug="icpac")
@@ -46,7 +45,6 @@ class HostResolutionTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class ActiveRoleTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         self.icpac = provision_organisation(name="ICPAC", slug="icpac")
@@ -104,7 +102,6 @@ class ActiveRoleTests(TestCase):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class SingleLoginAcrossOrgHostsTests(TestCase):
-
     @override_settings(SESSION_COOKIE_DOMAIN=".georiva.test")
     def test_session_cookie_is_issued_for_the_parent_domain(self):
         provision_organisation(name="Kenya Met", slug="kenya")

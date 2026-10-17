@@ -8,6 +8,7 @@ tree, so a dashboard test built on one would pass without any of this code.
 The assertions are on page titles in the rendered response — what the operator
 sees — never on panel markup, which is Wagtail's to restyle.
 """
+
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, TestCase, override_settings
@@ -26,7 +27,6 @@ from .test_page_trees import add_child_page
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class DashboardScopingTests(TestCase):
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -133,9 +133,11 @@ class DashboardScopingTests(TestCase):
         rebuilt the list would drop the panels other GeoRiva modules registered,
         and their absence fails it too.
         """
+        from georiva.events.panels import FailuresPanel
         from georiva.ingestion.wagtail_hooks import IngestionActivityPanel
 
-        allowed = set(dashboard.SCOPED_DASHBOARD_PANELS.values()) | {IngestionActivityPanel}
+        # The failures panel scopes itself through the dispatcher (events/failures.py).
+        allowed = set(dashboard.SCOPED_DASHBOARD_PANELS.values()) | {IngestionActivityPanel, FailuresPanel}
         panels = self.dashboard().context["panels"]
         self.assertEqual({type(panel) for panel in panels}, allowed)
 

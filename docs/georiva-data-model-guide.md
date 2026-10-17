@@ -9,14 +9,28 @@
 
 ## The Hierarchy
 
-GeoRiva organizes geospatial data in a three-level hierarchy:
+GeoRiva organizes geospatial data in a four-level hierarchy, rooted at the institution that owns it:
 
 ```
-Catalog
-└── Collection
-    └── Variable
-        └── VariableSource(s)
+Organisation
+└── Catalog
+    └── Collection
+        └── Variable
+            └── VariableSource(s)
 ```
+
+**Organisation** is the institution the data belongs to. GeoRiva is multi-tenant: one deployment can host a regional
+centre and several national services, each answering on its own hostname and each seeing its own data. The
+organisation is not something you pick per dataset — it is resolved from the host you are working on, and it is the
+first segment of every storage key GeoRiva writes:
+
+```
+{org}/{catalog}/{collection}/{variable}/{YYYY}/{MM}/{DD}/
+```
+
+A fresh install has no organisation. Run `bootstrap_central_org` before configuring anything, and
+`create_organisation <slug> --name "…"` for each additional institution. See
+[Architecture §8](architecture/README.md#8-multi-tenancy--access-control).
 
 **Catalog** represents a data provider or product family. It defines how data is ingested: the file format, the loader
 plugin, the boundary for clipping, and whether to archive source files. Think of it as "where does this data come from?"
@@ -33,6 +47,38 @@ want to show on the map?"
 `u_component`, or `v_component`. A passthrough variable has exactly one `primary` source; a derived vector variable has
 one `u_component` and one `v_component`. Each Source block carries a `source_name` (the exact name in the file) plus
 optional `vertical_dimension` / `vertical_value` for level selection.
+
+### Two tiers: Staging and Published
+
+The hierarchy above describes the **Published** tier — product-grained data that GeoRiva serves. There is a second,
+parallel tier for data that arrives but is not yet servable.
+
+| Tier          | Grain                                | Served? | Typical case                                              |
+|---------------|--------------------------------------|---------|-----------------------------------------------------------|
+| **Staging**   | one Item per raw file, as it arrived | No      | a long multi-year series that a derived product will slice |
+| **Published** | one Item per timestep                | Yes     | everything users see on a map                              |
+
+You do not choose the tier. It is computed: a collection's files land in Staging **only** if some enabled derived
+product of that feed declares a staging-tier input on it. Configure no derived products and everything goes straight to
+Published. The rule is *no derivation, no staging* — see
+[Derived Products](plugins/derived-products.md) and [Architecture §6](architecture/README.md#6-staging--derivation).
+
+The practical consequence for this guide: **everything below is about Published collections.** If you are structuring
+raw inputs that exist only to feed a derivation, the same file-alignment principle applies, but the collection will
+carry `StagingItem`s rather than the per-timestep `Item`s described here.
+
+### Visibility
+
+Every Published Collection carries a `visibility`:
+
+| Visibility | Who may see it                                              |
+|------------|--------------------------------------------------------------|
+| `public`   | anyone                                                       |
+| `private`  | members of the organisation owning the host                  |
+| `internal` | nobody — read by the derivation engine, never served         |
+
+`internal` is how intermediate products are held: a climatological baseline that exists only to feed an anomaly is
+product-shaped (so it belongs in Published) but should never appear in a catalog listing or on a tile.
 
 ---
 

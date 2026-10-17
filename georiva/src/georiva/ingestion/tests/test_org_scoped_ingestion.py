@@ -6,6 +6,7 @@ organisation — or whose catalog belongs to a *different* one — produces a lo
 a default organisation, because the cost of guessing wrong is one institution's
 national data filed under another's prefix.
 """
+
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -23,17 +24,17 @@ def _event(bucket_name, key):
 
 
 class ProcessFileOrgResolutionTests(TestCase):
-
     def setUp(self):
         self.kenya = make_organisation("kenya")
         self.uganda = make_organisation("uganda")
         self.catalog = Catalog.objects.create(
-            organisation=self.kenya, name="CHIRPS", slug="chirps",
-            file_format="geotiff", clip_mode="none",
+            organisation=self.kenya,
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
+            clip_mode="none",
         )
-        Collection.objects.create(
-            catalog=self.catalog, name="Rainfall", slug="rainfall", is_active=True
-        )
+        Collection.objects.create(catalog=self.catalog, name="Rainfall", slug="rainfall", is_active=True)
 
     def _process(self, file_path):
         """Run process_file with the storage boundary mocked, returning the
@@ -72,9 +73,7 @@ class ProcessFileOrgResolutionTests(TestCase):
         # It gets past resolution — the next failure is about the file's
         # content, not about who owns it.
         self.assertNotIn("Unknown organisation 'kenya'.", result.errors)
-        self.assertFalse(
-            any("does not belong to organisation" in e for e in result.errors)
-        )
+        self.assertFalse(any("does not belong to organisation" in e for e in result.errors))
 
 
 class ConsumerOrgResolutionTests(TestCase):
@@ -83,9 +82,7 @@ class ConsumerOrgResolutionTests(TestCase):
     def setUp(self):
         self.kenya = make_organisation("kenya")
         make_organisation("uganda")
-        Catalog.objects.create(
-            organisation=self.kenya, name="CHIRPS", slug="chirps", file_format="grib2"
-        )
+        Catalog.objects.create(organisation=self.kenya, name="CHIRPS", slug="chirps", file_format="grib2")
 
     def _handle(self, key):
         from georiva.ingestion.consumer import _handle_event
@@ -139,8 +136,11 @@ class SweepOrgResolutionTests(TestCase):
     def setUp(self):
         make_organisation("kenya")
         Catalog.objects.create(
-            organisation=make_organisation("uganda"), name="CHIRPS", slug="chirps",
-            file_format="geotiff", clip_mode="none",
+            organisation=make_organisation("uganda"),
+            name="CHIRPS",
+            slug="chirps",
+            file_format="geotiff",
+            clip_mode="none",
         )
 
     def test_a_swept_file_of_another_org_is_refused_by_the_same_resolver(self):
@@ -152,11 +152,7 @@ class SweepOrgResolutionTests(TestCase):
 
         with patch("georiva.ingestion.tasks.process_incoming_file") as task:
             task.delay = MagicMock()
-            ingest_unprocessed([
-                UnprocessedFile(
-                    bucket=BucketType.SOURCES, file_path=key, reason="untracked"
-                )
-            ])
+            ingest_unprocessed([UnprocessedFile(bucket=BucketType.SOURCES, file_path=key, reason="untracked")])
 
         # The sweep registers and dispatches; the refusal happens where every
         # other path's does — inside the job that runs IngestionService.
@@ -166,9 +162,7 @@ class SweepOrgResolutionTests(TestCase):
 
         job = FileIngestionJob.objects.create(
             user=None,
-            content_type=ContentType.objects.get_for_model(
-                FileIngestionJob, for_concrete_model=False
-            ),
+            content_type=ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False),
             file_path=key,
             bucket=BucketType.SOURCES,
         )
@@ -192,7 +186,9 @@ class ServerSideOrgSegmentTests(TestCase):
 
     def setUp(self):
         self.catalog = Catalog.objects.create(
-            organisation=make_organisation("kenya"), name="CHIRPS", slug="chirps",
+            organisation=make_organisation("kenya"),
+            name="CHIRPS",
+            slug="chirps",
             file_format="grib2",
         )
         self.collection = Collection.objects.create(
@@ -206,8 +202,11 @@ class ServerSideOrgSegmentTests(TestCase):
         config.catalog = self.catalog
 
         path = _build_incoming_path(
-            config, variable=None, filename="rain.grib2",
-            reference_time=None, valid_time=None,
+            config,
+            variable=None,
+            filename="rain.grib2",
+            reference_time=None,
+            valid_time=None,
         )
         self.assertEqual(path, "kenya/chirps/rain.grib2")
 
@@ -221,9 +220,7 @@ class ServerSideOrgSegmentTests(TestCase):
         request.filename = "rain.grib2"
         request.reference_time = None
 
-        self.assertEqual(
-            loader._get_storage_path(request), "kenya/chirps/rainfall/rain.grib2"
-        )
+        self.assertEqual(loader._get_storage_path(request), "kenya/chirps/rainfall/rain.grib2")
 
 
 class UploadWizardCatalogScopingTests(TestCase):
@@ -240,13 +237,13 @@ class UploadWizardCatalogScopingTests(TestCase):
 
     def setUp(self):
         dial_org(self.client)
-        self.client.force_login(
-            get_user_model().objects.create_superuser("orgadmin", "o@x.com", "pw")
-        )
+        self.client.force_login(get_user_model().objects.create_superuser("orgadmin", "o@x.com", "pw"))
         self.client.defaults["HTTP_HOST"] = org_host("kenya")
         make_organisation("kenya")
         self.other_orgs_catalog = Catalog.objects.create(
-            organisation=make_organisation("uganda"), name="Rain", slug="rain",
+            organisation=make_organisation("uganda"),
+            name="Rain",
+            slug="rain",
             file_format="grib2",
         )
 
@@ -255,10 +252,13 @@ class UploadWizardCatalogScopingTests(TestCase):
         self.assertNotIn(self.other_orgs_catalog, response.context["all_catalogs"])
 
     def test_selecting_another_orgs_catalog_is_refused(self):
-        response = self.client.post(self.STEP1_URL, {
-            "catalog_mode": "select",
-            "catalog_id": self.other_orgs_catalog.pk,
-        })
+        response = self.client.post(
+            self.STEP1_URL,
+            {
+                "catalog_mode": "select",
+                "catalog_id": self.other_orgs_catalog.pk,
+            },
+        )
 
         # Re-rendered with an error rather than advancing, and nothing stored.
         self.assertEqual(response.status_code, 200)
@@ -267,14 +267,19 @@ class UploadWizardCatalogScopingTests(TestCase):
     def test_the_same_slug_in_our_own_org_is_still_selectable(self):
         """Per-org slugs mean 'rain' is free here even though another org has it."""
         ours = Catalog.objects.create(
-            organisation=make_organisation("kenya"), name="Rain", slug="rain",
+            organisation=make_organisation("kenya"),
+            name="Rain",
+            slug="rain",
             file_format="grib2",
         )
 
-        response = self.client.post(self.STEP1_URL, {
-            "catalog_mode": "select",
-            "catalog_id": ours.pk,
-        })
+        response = self.client.post(
+            self.STEP1_URL,
+            {
+                "catalog_mode": "select",
+                "catalog_id": ours.pk,
+            },
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.client.session[self.SESSION_KEY]["catalog_id"], ours.pk)

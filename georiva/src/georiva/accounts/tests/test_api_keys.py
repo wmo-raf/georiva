@@ -10,6 +10,7 @@ once — in the response to the request that created it — and what the databas
 keeps is a hash, so a dump of the table hands an attacker nothing they can
 present.
 """
+
 from datetime import timedelta
 
 from django.test import TestCase, override_settings
@@ -67,7 +68,8 @@ class ApiKeyModelTests(TestCase):
 
     def test_an_expired_key_resolves_to_nothing(self):
         _, secret = ApiKey.objects.mint(
-            user=self.user, name="short-lived",
+            user=self.user,
+            name="short-lived",
             expires_at=timezone.now() - timedelta(seconds=1),
         )
 
@@ -75,7 +77,8 @@ class ApiKeyModelTests(TestCase):
 
     def test_a_key_expiring_in_the_future_still_resolves(self):
         key, secret = ApiKey.objects.mint(
-            user=self.user, name="this season",
+            user=self.user,
+            name="this season",
             expires_at=timezone.now() + timedelta(days=30),
         )
 
@@ -145,17 +148,25 @@ class ApiKeyAuthenticationTests(TestCase):
         cls.uganda = provision_organisation(name="Uganda Met", slug="uganda")
 
         catalog = Catalog.objects.create(
-            organisation=cls.kenya, name="Kenya Forecast", slug="forecast",
+            organisation=cls.kenya,
+            name="Kenya Forecast",
+            slug="forecast",
             file_format=Catalog.FileFormat.GEOTIFF,
         )
         collection = Collection.objects.create(
-            catalog=catalog, name="Restricted", slug=PRIVATE_SLUG,
+            catalog=catalog,
+            name="Restricted",
+            slug=PRIVATE_SLUG,
             visibility=Collection.Visibility.PRIVATE,
         )
         unit, _ = Unit.objects.get_or_create(name="Celsius", symbol="C")
         variable = Variable.objects.create(
-            collection=collection, name="Restricted", slug=PRIVATE_SLUG,
-            unit=unit, value_min=0, value_max=50,
+            collection=collection,
+            name="Restricted",
+            slug=PRIVATE_SLUG,
+            unit=unit,
+            value_min=0,
+            value_max=50,
         )
         item = Item.objects.create(collection=collection, time="2026-03-01T12:00:00Z")
         Asset.objects.create(item=item, variable=variable, href="restricted.tif")
@@ -180,7 +191,8 @@ class ApiKeyAuthenticationTests(TestCase):
 
     def test_a_members_key_in_the_authorization_header_is_served(self):
         response = self.client.get(
-            self.url, HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+            self.url,
+            HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
         )
         self.assertEqual(response.status_code, 200)
 
@@ -191,7 +203,8 @@ class ApiKeyAuthenticationTests(TestCase):
     def test_a_key_belonging_to_another_organisations_member_is_not_found(self):
         """The key authenticates; the membership check is what turns it away."""
         response = self.client.get(
-            self.url, HTTP_AUTHORIZATION=f"Bearer {self.outsider_key}",
+            self.url,
+            HTTP_AUTHORIZATION=f"Bearer {self.outsider_key}",
         )
         self.assertEqual(response.status_code, 404)
 
@@ -199,7 +212,8 @@ class ApiKeyAuthenticationTests(TestCase):
         ApiKey.objects.get(user=self.member).revoke()
 
         response = self.client.get(
-            self.url, HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+            self.url,
+            HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
         )
         self.assertEqual(response.status_code, 401)
 
@@ -211,7 +225,8 @@ class ApiKeyAuthenticationTests(TestCase):
         told so rather than to debug a phantom 404.
         """
         response = self.client.get(
-            self.url, HTTP_AUTHORIZATION=f"Bearer {KEY_PREFIX}nonsense",
+            self.url,
+            HTTP_AUTHORIZATION=f"Bearer {KEY_PREFIX}nonsense",
         )
         self.assertEqual(response.status_code, 401)
 
@@ -224,13 +239,15 @@ class ApiKeyAuthenticationTests(TestCase):
         """Keys carry no org of their own — the host decides which one is in play."""
         self.client.defaults["HTTP_HOST"] = "uganda.georiva.test"
         response = self.client.get(
-            self.url, HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+            self.url,
+            HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
         )
         self.assertEqual(response.status_code, 404)
 
     def test_a_key_does_not_open_the_admin(self):
         """Admin is session territory; a key is a data credential (#273)."""
         response = self.client.get(
-            "/admin/", HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
+            "/admin/",
+            HTTP_AUTHORIZATION=f"Bearer {self.member_key}",
         )
         self.assertNotEqual(response.status_code, 200)

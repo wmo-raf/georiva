@@ -4,6 +4,7 @@ These tests drive `access.py` through real models rather than stubs — the whol
 value of the module is that the declared route from a row to its organisation is
 the one the ORM actually walks.
 """
+
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.http import Http404
 from django.test import RequestFactory, TestCase, override_settings
@@ -29,7 +30,6 @@ def make_catalog(organisation, slug="rainfall", **fields):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class AccessHelperTests(TestCase):
-
     def setUp(self):
         self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
         self.uganda = provision_organisation(name="Uganda Met", slug="uganda")
@@ -57,9 +57,7 @@ class AccessHelperTests(TestCase):
             access.organisation_lookup(Topic)
 
     def test_organisation_of_walks_the_declared_route(self):
-        collection = Collection.objects.create(
-            catalog=self.kenya_catalog, name="Daily", slug="daily"
-        )
+        collection = Collection.objects.create(catalog=self.kenya_catalog, name="Daily", slug="daily")
         self.assertEqual(access.organisation_of(collection), self.kenya)
 
     def test_organisation_of_is_none_when_the_route_is_broken(self):
@@ -103,9 +101,7 @@ class AccessHelperTests(TestCase):
 
     def test_get_org_object_or_404_accepts_a_queryset(self):
         request = self._request(self.kenya)
-        found = access.get_org_object_or_404(
-            request, Catalog.objects.filter(is_active=True), pk=self.kenya_catalog.pk
-        )
+        found = access.get_org_object_or_404(request, Catalog.objects.filter(is_active=True), pk=self.kenya_catalog.pk)
         self.assertEqual(found, self.kenya_catalog)
 
     def test_require_org_object_rejects_a_foreign_row(self):
@@ -115,9 +111,7 @@ class AccessHelperTests(TestCase):
 
     def test_require_org_object_returns_an_owned_row(self):
         request = self._request(self.kenya)
-        self.assertEqual(
-            access.require_org_object(request, self.kenya_catalog), self.kenya_catalog
-        )
+        self.assertEqual(access.require_org_object(request, self.kenya_catalog), self.kenya_catalog)
 
     # -- role gates --------------------------------------------------------
 
@@ -129,20 +123,14 @@ class AccessHelperTests(TestCase):
     def test_require_org_member_accepts_a_member(self):
         user = make_user("amina")
         add_member(user, self.kenya)
-        request = self._request(
-            self.kenya, user=user, role=OrganisationMembership.Role.MEMBER
-        )
+        request = self._request(self.kenya, user=user, role=OrganisationMembership.Role.MEMBER)
         self.assertIsNone(access.require_org_member(request))
 
     def test_require_org_admin_rejects_a_plain_member(self):
-        request = self._request(
-            self.kenya, user=make_user("amina"), role=OrganisationMembership.Role.MEMBER
-        )
+        request = self._request(self.kenya, user=make_user("amina"), role=OrganisationMembership.Role.MEMBER)
         with self.assertRaises(PermissionDenied):
             access.require_org_admin(request)
 
     def test_require_org_admin_accepts_an_org_admin(self):
-        request = self._request(
-            self.kenya, user=make_user("amina"), role=OrganisationMembership.Role.ADMIN
-        )
+        request = self._request(self.kenya, user=make_user("amina"), role=OrganisationMembership.Role.ADMIN)
         self.assertIsNone(access.require_org_admin(request))

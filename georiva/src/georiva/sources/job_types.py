@@ -21,6 +21,7 @@ class LoaderJobType(JobType):
     @property
     def model_class(self):
         from georiva.ingestion.models import LoaderJob
+
         return LoaderJob
 
     def prepare_values(self, values: dict, user) -> dict:
@@ -42,6 +43,7 @@ class LoaderJobType(JobType):
           - rest for file fetches (one tick per file)
         """
         from georiva.core.models import Collection
+
         from .loader import Loader
         from .models import DataFeed
 
@@ -50,7 +52,7 @@ class LoaderJobType(JobType):
         try:
             data_feed = DataFeed.objects.get(pk=job.data_feed_id)
         except DataFeed.DoesNotExist:
-            raise ValueError(f"DataFeed {job.data_feed_id} not found.")
+            raise ValueError(f"DataFeed {job.data_feed_id} not found.") from None
 
         job.data_feed = data_feed
         job.save(update_fields=["data_feed"])
@@ -59,12 +61,9 @@ class LoaderJobType(JobType):
             try:
                 collections = [Collection.objects.get(pk=job.collection_id)]
             except Collection.DoesNotExist:
-                raise ValueError(f"Collection {job.collection_id} not found.")
+                raise ValueError(f"Collection {job.collection_id} not found.") from None
         else:
-            collections = [
-                link.collection
-                for link in data_feed.collection_links.select_related('collection__catalog')
-            ]
+            collections = [link.collection for link in data_feed.collection_links.select_related("collection__catalog")]
 
         if not collections:
             progress.increment(95, state="No collections linked to this feed")
@@ -89,7 +88,9 @@ class LoaderJobType(JobType):
 
             logger.info(
                 "LoaderJob %d (%s): %d files to fetch",
-                job.id, col_label, len(requests),
+                job.id,
+                col_label,
+                len(requests),
             )
 
             if not requests:
@@ -122,19 +123,26 @@ class LoaderJobType(JobType):
 
             logger.info(
                 "LoaderJob %d (%s): %s",
-                job.id, col_label, result.summary(),
+                job.id,
+                col_label,
+                result.summary(),
             )
 
             if result.files_failed > 0 and result.files_fetched == 0:
                 logger.error(
                     "LoaderJob %d (%s): all fetches failed — %s",
-                    job.id, col_label, "; ".join(result.errors[:3]),
+                    job.id,
+                    col_label,
+                    "; ".join(result.errors[:3]),
                 )
 
     def on_error(self, job, exc: Exception) -> None:
         logger.exception(
             "LoaderJob %d failed (data_feed=%s, collection=%s): %s",
-            job.id, job.data_feed_id, job.collection_id, exc,
+            job.id,
+            job.data_feed_id,
+            job.collection_id,
+            exc,
         )
 
     def before_delete(self, job) -> None:

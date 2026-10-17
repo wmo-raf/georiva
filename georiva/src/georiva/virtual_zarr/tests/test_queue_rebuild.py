@@ -29,19 +29,23 @@ from georiva.virtual_zarr.models import VirtualZarrManifest
 
 def build_collection(organisation, *, slug):
     catalog = Catalog.objects.create(
-        organisation=organisation, name=slug, slug=slug,
+        organisation=organisation,
+        name=slug,
+        slug=slug,
         file_format=Catalog.FileFormat.GEOTIFF,
     )
     return Collection.objects.create(catalog=catalog, name=slug, slug=slug)
 
 
 def add_variable(collection, *, slug):
-    unit, _ = Unit.objects.get_or_create(
-        name="Millimetre", defaults={"symbol": "mm"}
-    )
+    unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
     return Variable.objects.create(
-        collection=collection, name=slug, slug=slug,
-        unit=unit, value_min=0, value_max=1,
+        collection=collection,
+        name=slug,
+        slug=slug,
+        unit=unit,
+        value_min=0,
+        value_max=1,
     )
 
 
@@ -66,7 +70,9 @@ class QueueRebuildActionTests(TestCase):
 
     def _manifest(self, variable, *, status, locked_at=None):
         return VirtualZarrManifest.objects.create(
-            variable=variable, status=status, locked_at=locked_at,
+            variable=variable,
+            status=status,
+            locked_at=locked_at,
         )
 
     def _post(self, variable, **extra):
@@ -80,7 +86,8 @@ class QueueRebuildActionTests(TestCase):
     def test_ready_manifest_is_queued_and_becomes_buildable(self):
         variable = self._variable()
         manifest = self._manifest(
-            variable, status=VirtualZarrManifest.Status.READY,
+            variable,
+            status=VirtualZarrManifest.Status.READY,
         )
 
         response = self._post(variable)
@@ -92,9 +99,9 @@ class QueueRebuildActionTests(TestCase):
 
     def test_failed_and_stale_and_no_data_manifests_are_queued(self):
         for status in (
-                VirtualZarrManifest.Status.FAILED,
-                VirtualZarrManifest.Status.STALE,
-                VirtualZarrManifest.Status.NO_DATA,
+            VirtualZarrManifest.Status.FAILED,
+            VirtualZarrManifest.Status.STALE,
+            VirtualZarrManifest.Status.NO_DATA,
         ):
             with self.subTest(status=status):
                 variable = self._variable(slug=f"var-{status}")
@@ -103,14 +110,13 @@ class QueueRebuildActionTests(TestCase):
                 self._post(variable)
 
                 manifest.refresh_from_db()
-                self.assertEqual(
-                    manifest.status, VirtualZarrManifest.Status.PENDING
-                )
+                self.assertEqual(manifest.status, VirtualZarrManifest.Status.PENDING)
 
     def test_pending_manifest_stays_pending(self):
         variable = self._variable()
         manifest = self._manifest(
-            variable, status=VirtualZarrManifest.Status.PENDING,
+            variable,
+            status=VirtualZarrManifest.Status.PENDING,
         )
 
         response = self._post(variable, follow=True)
@@ -140,11 +146,7 @@ class QueueRebuildActionTests(TestCase):
         manifest = self._manifest(
             variable,
             status=VirtualZarrManifest.Status.BUILDING,
-            locked_at=(
-                timezone.now()
-                - VirtualZarrManifest.LOCK_TIMEOUT
-                - timedelta(minutes=1)
-            ),
+            locked_at=(timezone.now() - VirtualZarrManifest.LOCK_TIMEOUT - timedelta(minutes=1)),
         )
 
         self._post(variable)
@@ -168,12 +170,11 @@ class QueueRebuildActionTests(TestCase):
     def test_get_is_not_allowed(self):
         variable = self._variable()
         manifest = self._manifest(
-            variable, status=VirtualZarrManifest.Status.READY,
+            variable,
+            status=VirtualZarrManifest.Status.READY,
         )
 
-        response = self.client.get(
-            reverse("variable_virtual_zarr_queue_rebuild", args=[variable.pk])
-        )
+        response = self.client.get(reverse("variable_virtual_zarr_queue_rebuild", args=[variable.pk]))
 
         self.assertEqual(response.status_code, 405)
         manifest.refresh_from_db()
@@ -182,16 +183,15 @@ class QueueRebuildActionTests(TestCase):
     def test_unpermissioned_member_is_denied(self):
         variable = self._variable()
         manifest = self._manifest(
-            variable, status=VirtualZarrManifest.Status.READY,
+            variable,
+            status=VirtualZarrManifest.Status.READY,
         )
         plain = make_user("wanjiru")
         add_member(plain, self.kenya)
         # Admin access only — no VirtualZarrManifest change permission.
         from django.contrib.auth.models import Permission
 
-        plain.user_permissions.add(
-            Permission.objects.get(codename="access_admin")
-        )
+        plain.user_permissions.add(Permission.objects.get(codename="access_admin"))
         self.client.login(username="wanjiru", password=PASSWORD)
 
         response = self._post(variable)
@@ -211,11 +211,10 @@ class QueueRebuildActionTests(TestCase):
         self.assertIn("login", response.headers["Location"])
 
     def test_cross_org_request_fails_closed(self):
-        variable = self._variable(
-            slug="uganda-var", collection=self.uganda_collection
-        )
+        variable = self._variable(slug="uganda-var", collection=self.uganda_collection)
         manifest = self._manifest(
-            variable, status=VirtualZarrManifest.Status.READY,
+            variable,
+            status=VirtualZarrManifest.Status.READY,
         )
 
         response = self._post(variable)
@@ -239,9 +238,7 @@ class QueueRebuildActionTests(TestCase):
         variable = self._variable()
         self._manifest(variable, status=VirtualZarrManifest.Status.READY)
 
-        response = self._post(
-            variable, data={"next": "https://evil.example/phish"}
-        )
+        response = self._post(variable, data={"next": "https://evil.example/phish"})
 
         self.assertEqual(
             response.headers["Location"],
@@ -254,9 +251,7 @@ class QueueRebuildActionTests(TestCase):
         variable = self._variable()
         self._manifest(variable, status=VirtualZarrManifest.Status.STALE)
 
-        response = self.client.get(
-            reverse("collection_virtual_zarr", args=[self.collection.pk])
-        )
+        response = self.client.get(reverse("collection_virtual_zarr", args=[self.collection.pk]))
 
         self.assertContains(
             response,
@@ -271,9 +266,7 @@ class QueueRebuildActionTests(TestCase):
             repo_path="",
         )
 
-        response = self.client.get(
-            reverse("variable_virtual_zarr", args=[variable.pk])
-        )
+        response = self.client.get(reverse("variable_virtual_zarr", args=[variable.pk]))
 
         self.assertContains(
             response,
@@ -287,14 +280,10 @@ class QueueRebuildActionTests(TestCase):
         add_member(plain, self.kenya)
         from django.contrib.auth.models import Permission
 
-        plain.user_permissions.add(
-            Permission.objects.get(codename="access_admin")
-        )
+        plain.user_permissions.add(Permission.objects.get(codename="access_admin"))
         self.client.login(username="wanjiru", password=PASSWORD)
 
-        response = self.client.get(
-            reverse("collection_virtual_zarr", args=[self.collection.pk])
-        )
+        response = self.client.get(reverse("collection_virtual_zarr", args=[self.collection.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(

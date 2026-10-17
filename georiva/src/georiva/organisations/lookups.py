@@ -42,12 +42,14 @@ NOT_ORM_SCOPABLE = "not-orm-scopable"
 #: Every unparameterised declaration that is a decision rather than an ORM path.
 #: The two parameterised kinds below are decisions too; ask :func:`is_orm_path`
 #: rather than testing membership here.
-SENTINELS = frozenset({
-    SHARED_REFERENCE_DATA,
-    ORGANISATION_SELF,
-    PAGE_TREE,
-    NOT_ORM_SCOPABLE,
-})
+SENTINELS = frozenset(
+    {
+        SHARED_REFERENCE_DATA,
+        ORGANISATION_SELF,
+        PAGE_TREE,
+        NOT_ORM_SCOPABLE,
+    }
+)
 
 #: The parameterised kinds. Each names a *kind* of declaration rather than a
 #: whole one — the declaration is this string, a colon and the arguments, which
@@ -103,16 +105,14 @@ def via_content_object(content_type_field, object_id_field):
 def related_path(declared):
     """The path in a :func:`via_related` declaration, or ``None``."""
     if isinstance(declared, str) and declared.startswith(VIA_RELATED_PREFIX):
-        return declared[len(VIA_RELATED_PREFIX):]
+        return declared[len(VIA_RELATED_PREFIX) :]
     return None
 
 
 def content_object_fields(declared):
     """The ``(content_type_field, object_id_field)`` pair, or ``None``."""
     if isinstance(declared, str) and declared.startswith(VIA_CONTENT_OBJECT_PREFIX):
-        content_type_field, _, object_id_field = declared[
-            len(VIA_CONTENT_OBJECT_PREFIX):
-        ].partition(":")
+        content_type_field, _, object_id_field = declared[len(VIA_CONTENT_OBJECT_PREFIX) :].partition(":")
         return content_type_field, object_id_field
     return None
 
@@ -168,7 +168,6 @@ GLOBAL_TIER_ATTR = "ORGANISATION_GLOBAL_TIER"
 #: Catalog. They are shared by construction, so the declaration requirement
 #: applies to our own models only.
 OWN_MODULE_PREFIX = "georiva."
-
 
 
 def has_global_tier(model):

@@ -1,7 +1,7 @@
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 
 import httpx
 import redis
@@ -28,10 +28,14 @@ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 # Django fallback
 # ---------------------------------------------------------------------------
 
+
 def _fetch_config_from_django(
-        org: str, catalog: str, collection: str, variable: str,
-        style: Optional[str] = None,
-) -> tuple[Optional[int], Optional[dict]]:
+    org: str,
+    catalog: str,
+    collection: str,
+    variable: str,
+    style: str | None = None,
+) -> tuple[int | None, dict | None]:
     """Fetch rendering config from Django internal API on Redis miss.
 
     The org segment is forwarded, not resolved: this service is dialled on an
@@ -50,13 +54,22 @@ def _fetch_config_from_django(
             return resp.status_code, resp.json()
         logger.warning(
             "Django tile-config returned %d for %s/%s/%s/%s (style=%s)",
-            resp.status_code, org, catalog, collection, variable, style,
+            resp.status_code,
+            org,
+            catalog,
+            collection,
+            variable,
+            style,
         )
         return resp.status_code, None
     except Exception as e:
         logger.warning(
             "Django tile-config fallback failed for %s/%s/%s/%s: %s",
-            org, catalog, collection, variable, e,
+            org,
+            catalog,
+            collection,
+            variable,
+            e,
         )
     return None, None
 
@@ -76,7 +89,8 @@ def django_client() -> httpx.AsyncClient:
     timestamps and is deliberately uncapped (#354).
     """
     return httpx.AsyncClient(
-        base_url=DJANGO_BASE_URL, timeout=httpx.Timeout(30.0, connect=5.0),
+        base_url=DJANGO_BASE_URL,
+        timeout=httpx.Timeout(30.0, connect=5.0),
     )
 
 
@@ -84,13 +98,14 @@ def django_client() -> httpx.AsyncClient:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def build_cog_url(
-        org: str,
-        catalog: str,
-        collection: str,
-        variable: str,
-        time_dt: datetime,
-        reftime_dt: Optional[datetime],
+    org: str,
+    catalog: str,
+    collection: str,
+    variable: str,
+    time_dt: datetime,
+    reftime_dt: datetime | None,
 ) -> str:
     """
     Construct the MinIO COG URL from path components.
@@ -118,7 +133,7 @@ def build_cog_url(
 
     if not PATH_RE.match(dataset_path):
         raise HTTPException(status_code=400, detail=f"Invalid constructed path: {dataset_path}")
-    
+
     return f"{MINIO_HOST}/{MINIO_BUCKET_NAME}/{dataset_path}"
 
 
@@ -126,27 +141,28 @@ def parse_iso_datetime(value: str, param_name: str) -> datetime:
     """Parse ISO 8601 UTC datetime string, raising 400 on failure."""
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt.astimezone(timezone.utc)
+        return dt.astimezone(UTC)
     except (ValueError, AttributeError):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid {param_name} — expected ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)",
-        )
+        ) from None
 
 
 # ---------------------------------------------------------------------------
 # FastAPI dependencies
 # ---------------------------------------------------------------------------
 
+
 def SemanticTileConfig(
-        org_slug: Annotated[str, Path(...)],
-        catalog_slug: Annotated[str, Path(...)],
-        collection_slug: Annotated[str, Path(...)],
-        variable_slug: Annotated[str, Path(...)],
-        style: Optional[str] = Query(
-            None,
-            description="Named style to render with; omission means the variable's default style",
-        ),
+    org_slug: Annotated[str, Path(...)],
+    catalog_slug: Annotated[str, Path(...)],
+    collection_slug: Annotated[str, Path(...)],
+    variable_slug: Annotated[str, Path(...)],
+    style: str | None = Query(
+        None,
+        description="Named style to render with; omission means the variable's default style",
+    ),
 ) -> dict:
     """Resolve rendering config for a variable.
 
@@ -175,7 +191,11 @@ def SemanticTileConfig(
         return json.loads(raw)
 
     status, config = _fetch_config_from_django(
-        org_slug, catalog_slug, collection_slug, variable_slug, style,
+        org_slug,
+        catalog_slug,
+        collection_slug,
+        variable_slug,
+        style,
     )
     if config is not None:
         logger.debug("Django fallback hit: %s (style=%s)", address, style)
@@ -194,12 +214,12 @@ def SemanticTileConfig(
 
 
 def SemanticPathParams(
-        org_slug: Annotated[str, Path(...)],
-        catalog_slug: Annotated[str, Path(...)],
-        collection_slug: Annotated[str, Path(...)],
-        variable_slug: Annotated[str, Path(...)],
-        time: str = Query(..., description="Valid time in ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)"),
-        reftime: Optional[str] = Query(None, description="Forecast reference time in ISO 8601 UTC"),
+    org_slug: Annotated[str, Path(...)],
+    catalog_slug: Annotated[str, Path(...)],
+    collection_slug: Annotated[str, Path(...)],
+    variable_slug: Annotated[str, Path(...)],
+    time: str = Query(..., description="Valid time in ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)"),
+    reftime: str | None = Query(None, description="Forecast reference time in ISO 8601 UTC"),
 ) -> str:
     """Resolve the COG URL from semantic path params and time query params."""
     time_dt = parse_iso_datetime(time, "time")
@@ -210,8 +230,8 @@ def SemanticPathParams(
 
 
 def SemanticColorMap(
-        tile_config: dict = Depends(SemanticTileConfig),
-) -> Optional[ColorMapType]:
+    tile_config: dict = Depends(SemanticTileConfig),
+) -> ColorMapType | None:
     """Return the 256-entry colormap from Redis config, or grayscale fallback."""
     raw = tile_config.get("colormap")
     if raw:
@@ -221,17 +241,17 @@ def SemanticColorMap(
 
 class RescaleAlgorithm(BaseAlgorithm):
     """Rescale raw float COG data to 0-255 before colormap lookup."""
-    
+
     vmin: float
     vmax: float
-    
+
     def __call__(self, img: ImageData) -> ImageData:
         img.rescale(in_range=[(self.vmin, self.vmax)], out_range=[(0, 255)])
         return img
 
 
 def SemanticRescale(
-        tile_config: dict = Depends(SemanticTileConfig),
-) -> Optional[BaseAlgorithm]:
+    tile_config: dict = Depends(SemanticTileConfig),
+) -> BaseAlgorithm | None:
     """Return a rescale algorithm using vmin/vmax from the tile config."""
     return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"])

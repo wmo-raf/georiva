@@ -12,12 +12,12 @@ User = get_user_model()
 
 CONFIG_LIST_URL = "/admin/manual-uploads/"
 
-STEP1_URL         = "/admin/manual-uploads/wizard/step1/"
-STEP2_URL         = "/admin/manual-uploads/wizard/step2/"
-STEP3_URL         = "/admin/manual-uploads/wizard/step3/"
-STEP4_URL         = "/admin/manual-uploads/wizard/step4/"
-STEP5_URL         = "/admin/manual-uploads/wizard/step5/"
-PROVISION_URL     = "/admin/manual-uploads/wizard/provision/"
+STEP1_URL = "/admin/manual-uploads/wizard/step1/"
+STEP2_URL = "/admin/manual-uploads/wizard/step2/"
+STEP3_URL = "/admin/manual-uploads/wizard/step3/"
+STEP4_URL = "/admin/manual-uploads/wizard/step4/"
+STEP5_URL = "/admin/manual-uploads/wizard/step5/"
+PROVISION_URL = "/admin/manual-uploads/wizard/provision/"
 UPLOAD_SAMPLE_URL = "/admin/manual-uploads/wizard/upload-sample/"
 
 SESSION_KEY = "georiva_upload_wizard"
@@ -39,14 +39,14 @@ def _seed_session(client, data):
 
 def _assignment(**overrides):
     base = {
-        "variable_name":  "2t",
-        "long_name":      "2m temperature",
-        "units":          "K",
-        "unit_id":        None,
-        "unit_create":    "K",
-        "unit_display":   'Create unit "K"',
-        "value_min":      -40.0,
-        "value_max":      50.0,
+        "variable_name": "2t",
+        "long_name": "2m temperature",
+        "units": "K",
+        "unit_id": None,
+        "unit_create": "K",
+        "unit_display": 'Create unit "K"',
+        "value_min": -40.0,
+        "value_max": 50.0,
         "collection_idx": 0,
     }
     base.update(overrides)
@@ -55,24 +55,25 @@ def _assignment(**overrides):
 
 def _full_session():
     return {
-        "catalog_mode":            "create",
-        "new_catalog_name":        "Weather Models",
-        "new_catalog_slug":        "weather-models",
-        "new_catalog_format":      "grib2",
-        "config_name":             "Surface variables",
-        "variables":               [{"name": "2t", "long_name": "2m temperature", "units": "K"}],
+        "catalog_mode": "create",
+        "new_catalog_name": "Weather Models",
+        "new_catalog_slug": "weather-models",
+        "new_catalog_format": "grib2",
+        "config_name": "Surface variables",
+        "variables": [{"name": "2t", "long_name": "2m temperature", "units": "K"}],
         "selected_variable_names": ["2t"],
-        "sample_filename":         "20250115.grib2",
-        "valid_time_format":       "CONTENT",
-        "is_forecast":             False,
-        "collections":             [{"name": "Weather Models Collection 1", "slug": "weather-models-collection-1"}],
-        "assignments":             [_assignment()],
+        "sample_filename": "20250115.grib2",
+        "valid_time_format": "CONTENT",
+        "is_forecast": False,
+        "collections": [{"name": "Weather Models Collection 1", "slug": "weather-models-collection-1"}],
+        "assignments": [_assignment()],
     }
 
 
 # =============================================================================
 # Step 1 — Catalog
 # =============================================================================
+
 
 class Step1CatalogTests(TestCase):
     def setUp(self):
@@ -88,36 +89,51 @@ class Step1CatalogTests(TestCase):
         self.assertEqual(self.client.get(STEP1_URL).status_code, 200)
 
     def test_step1_valid_post_redirects_to_step2(self):
-        response = self.client.post(STEP1_URL, {
-            "catalog_mode": "create",
-            "new_catalog_name": "Weather Models",
-            "new_catalog_slug": "weather-models",
-            "new_catalog_format": "grib2",
-        })
+        response = self.client.post(
+            STEP1_URL,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "Weather Models",
+                "new_catalog_slug": "weather-models",
+                "new_catalog_format": "grib2",
+            },
+        )
         self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
         self.assertEqual(self.client.session[SESSION_KEY]["new_catalog_name"], "Weather Models")
 
     def test_step1_description_saved_to_session(self):
-        self.client.post(STEP1_URL, {
-            "catalog_mode": "create",
-            "new_catalog_name": "WM",
-            "new_catalog_slug": "wm",
-            "new_catalog_format": "grib2",
-            "new_catalog_description": "A weather model catalog",
-        })
+        self.client.post(
+            STEP1_URL,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "WM",
+                "new_catalog_slug": "wm",
+                "new_catalog_format": "grib2",
+                "new_catalog_description": "A weather model catalog",
+            },
+        )
         self.assertEqual(self.client.session[SESSION_KEY]["new_catalog_description"], "A weather model catalog")
 
     def test_step1_invalid_post_rerenders(self):
-        response = self.client.post(STEP1_URL, {
-            "catalog_mode": "create", "new_catalog_name": "", "new_catalog_format": "",
-        })
+        response = self.client.post(
+            STEP1_URL,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "",
+                "new_catalog_format": "",
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step1_select_existing_catalog(self):
         catalog = _make_catalog("existing")
-        response = self.client.post(STEP1_URL, {
-            "catalog_mode": "select", "catalog_id": str(catalog.pk),
-        })
+        response = self.client.post(
+            STEP1_URL,
+            {
+                "catalog_mode": "select",
+                "catalog_id": str(catalog.pk),
+            },
+        )
         self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
         self.assertEqual(self.client.session[SESSION_KEY]["catalog_id"], catalog.pk)
 
@@ -126,15 +142,21 @@ class Step1CatalogTests(TestCase):
 # Step 2 — Config name
 # =============================================================================
 
+
 class Step2ConfigNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin2", "b@c.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        _seed_session(self.client, {
-            "catalog_mode": "create", "new_catalog_name": "WM",
-            "new_catalog_slug": "wm", "new_catalog_format": "grib2",
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "WM",
+                "new_catalog_slug": "wm",
+                "new_catalog_format": "grib2",
+            },
+        )
 
     def test_step2_renders(self):
         self.assertEqual(self.client.get(STEP2_URL).status_code, 200)
@@ -159,7 +181,9 @@ class Step2ConfigNameTests(TestCase):
     def test_step2_duplicate_name_for_selected_catalog_rerenders(self):
         catalog = _make_catalog("dup-cat")
         ManualUploadConfig.objects.create(
-            catalog=catalog, name="Surface variables", valid_time_format="CONTENT",
+            catalog=catalog,
+            name="Surface variables",
+            valid_time_format="CONTENT",
         )
         _seed_session(self.client, {"catalog_mode": "select", "catalog_id": catalog.pk})
         response = self.client.post(STEP2_URL, {"config_name": "Surface variables"})
@@ -170,6 +194,7 @@ class Step2ConfigNameTests(TestCase):
 # =============================================================================
 # Upload sample AJAX endpoint
 # =============================================================================
+
 
 class UploadSampleAjaxTests(TestCase):
     def setUp(self):
@@ -198,6 +223,7 @@ class UploadSampleAjaxTests(TestCase):
 
     def _post_sample(self, mock_plugin):
         from io import BytesIO
+
         sample = BytesIO(b"fake")
         sample.name = "20250115.grib2"
         with patch("georiva.ingestion.upload_wizard_views.format_registry") as mock_reg:
@@ -252,6 +278,7 @@ class UploadSampleAjaxTests(TestCase):
 
     def test_returns_error_for_unsupported_format(self):
         from io import BytesIO
+
         sample = BytesIO(b"fake")
         sample.name = "data.csv"
         with patch("georiva.ingestion.upload_wizard_views.format_registry") as mock_reg:
@@ -264,16 +291,22 @@ class UploadSampleAjaxTests(TestCase):
 # Step 3 — File & variable selection
 # =============================================================================
 
+
 class Step3CombinedTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin3", "c@d.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        _seed_session(self.client, {
-            "catalog_mode": "create", "new_catalog_name": "WM",
-            "new_catalog_slug": "wm", "new_catalog_format": "grib2",
-            "config_name": "Surface variables",
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "WM",
+                "new_catalog_slug": "wm",
+                "new_catalog_format": "grib2",
+                "config_name": "Surface variables",
+            },
+        )
 
     def test_step3_renders(self):
         self.assertEqual(self.client.get(STEP3_URL).status_code, 200)
@@ -284,11 +317,14 @@ class Step3CombinedTests(TestCase):
 
     def test_step3_valid_post_saves_all_fields_and_redirects(self):
         variables = [{"name": "2t", "long_name": "2m temp", "units": "K"}]
-        response = self.client.post(STEP3_URL, {
-            "sample_filename": "20250115.grib2",
-            "variables_json": json.dumps(variables),
-            "selected_variables_json": json.dumps(["2t"]),
-        })
+        response = self.client.post(
+            STEP3_URL,
+            {
+                "sample_filename": "20250115.grib2",
+                "variables_json": json.dumps(variables),
+                "selected_variables_json": json.dumps(["2t"]),
+            },
+        )
         self.assertRedirects(response, STEP4_URL, fetch_redirect_response=False)
         session = self.client.session[SESSION_KEY]
         self.assertEqual(session["valid_time_format"], "CONTENT")
@@ -298,43 +334,60 @@ class Step3CombinedTests(TestCase):
 
     def test_step3_is_forecast_stored_as_true_when_checked(self):
         variables = [{"name": "2t", "long_name": "", "units": ""}]
-        self.client.post(STEP3_URL, {
-            "sample_filename": "20250115.grib2",
-            "variables_json": json.dumps(variables),
-            "selected_variables_json": json.dumps(["2t"]),
-            "is_forecast": "1",
-        })
+        self.client.post(
+            STEP3_URL,
+            {
+                "sample_filename": "20250115.grib2",
+                "variables_json": json.dumps(variables),
+                "selected_variables_json": json.dumps(["2t"]),
+                "is_forecast": "1",
+            },
+        )
         self.assertTrue(self.client.session[SESSION_KEY]["is_forecast"])
 
     def test_step3_missing_file_rerenders_with_error(self):
-        response = self.client.post(STEP3_URL, {
-            "variables_json": "[]",
-            "selected_variables_json": "[]",
-        })
+        response = self.client.post(
+            STEP3_URL,
+            {
+                "variables_json": "[]",
+                "selected_variables_json": "[]",
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step3_no_selection_rerenders_with_error(self):
         variables = [{"name": "2t", "long_name": "", "units": ""}]
-        response = self.client.post(STEP3_URL, {
-            "sample_filename": "20250115.grib2",
-            "variables_json": json.dumps(variables),
-            "selected_variables_json": json.dumps([]),
-        })
+        response = self.client.post(
+            STEP3_URL,
+            {
+                "sample_filename": "20250115.grib2",
+                "variables_json": json.dumps(variables),
+                "selected_variables_json": json.dumps([]),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step3_missing_format_rerenders_with_error_for_geotiff(self):
-        _seed_session(self.client, {
-            "catalog_mode": "create", "new_catalog_name": "Imagery",
-            "new_catalog_slug": "imagery", "new_catalog_format": "geotiff",
-            "config_name": "Surface variables",
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "Imagery",
+                "new_catalog_slug": "imagery",
+                "new_catalog_format": "geotiff",
+                "config_name": "Surface variables",
+            },
+        )
         variables = [{"name": "band_1", "long_name": "", "units": ""}]
-        response = self.client.post(STEP3_URL, {
-            "sample_filename": "20250115.tif",
-            "variables_json": json.dumps(variables),
-            "selected_variables_json": json.dumps(["band_1"]),
-            "valid_time_format": "",
-        })
+        response = self.client.post(
+            STEP3_URL,
+            {
+                "sample_filename": "20250115.tif",
+                "variables_json": json.dumps(variables),
+                "selected_variables_json": json.dumps(["band_1"]),
+                "valid_time_format": "",
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step3_show_filename_format_false_for_grib(self):
@@ -343,11 +396,16 @@ class Step3CombinedTests(TestCase):
         self.assertContains(response, "Time will be read from the file content")
 
     def test_step3_show_filename_format_true_for_geotiff(self):
-        _seed_session(self.client, {
-            "catalog_mode": "create", "new_catalog_name": "Imagery",
-            "new_catalog_slug": "imagery", "new_catalog_format": "geotiff",
-            "config_name": "Bands",
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "Imagery",
+                "new_catalog_slug": "imagery",
+                "new_catalog_format": "geotiff",
+                "config_name": "Bands",
+            },
+        )
         response = self.client.get(STEP3_URL)
         self.assertTrue(response.context["show_filename_format"])
         self.assertContains(response, "Valid time format")
@@ -357,21 +415,27 @@ class Step3CombinedTests(TestCase):
 # Step 4 — Collection setup
 # =============================================================================
 
+
 class Step4CollectionsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4", "d@e.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        _seed_session(self.client, {
-            "catalog_mode": "create", "new_catalog_name": "WM",
-            "new_catalog_slug": "wm", "new_catalog_format": "grib2",
-            "config_name": "Surface variables",
-            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
-            "selected_variable_names": ["2t"],
-            "sample_filename": "20250115.grib2",
-            "valid_time_format": "CONTENT",
-            "is_forecast": False,
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "WM",
+                "new_catalog_slug": "wm",
+                "new_catalog_format": "grib2",
+                "config_name": "Surface variables",
+                "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+                "selected_variable_names": ["2t"],
+                "sample_filename": "20250115.grib2",
+                "valid_time_format": "CONTENT",
+                "is_forecast": False,
+            },
+        )
 
     def test_step4_renders(self):
         self.assertEqual(self.client.get(STEP4_URL).status_code, 200)
@@ -383,10 +447,13 @@ class Step4CollectionsTests(TestCase):
     def test_step4_valid_post_saves_and_redirects(self):
         collections = [{"name": "WM Collection 1", "slug": "wm-collection-1"}]
         assignments = [_assignment()]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
         session = self.client.session[SESSION_KEY]
         self.assertEqual(session["collections"][0]["name"], "WM Collection 1")
@@ -398,19 +465,25 @@ class Step4CollectionsTests(TestCase):
         unit = Unit.objects.get(symbol="K")
         collections = [{"name": "WM Collection 1", "slug": "wm-collection-1"}]
         assignments = [_assignment(unit_id=unit.pk, unit_create="")]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
 
     def test_step4_empty_collection_name_rerenders(self):
         collections = [{"name": "", "slug": ""}]
         assignments = [_assignment()]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step4_collection_with_no_variables_rerenders(self):
@@ -420,46 +493,61 @@ class Step4CollectionsTests(TestCase):
             {"name": "Col B", "slug": "col-b"},
         ]
         assignments = [_assignment()]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step4_missing_unit_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(unit_id=None, unit_create="")]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step4_invalid_create_unit_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(unit_create="not_a_real_unit_xyz")]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step4_missing_value_range_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(value_min=None, value_max=None)]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_step4_min_not_below_max_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(value_min=50.0, value_max=50.0)]
-        response = self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json":  json.dumps(assignments),
-        })
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
         self.assertEqual(response.status_code, 200)
 
 
@@ -467,29 +555,36 @@ class Step4CollectionsTests(TestCase):
 # Step 4 — duplicate source_name validation
 # =============================================================================
 
+
 class Step4DuplicateSourceNameTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin4dup", "dup@test.com", "pw")
         dial_org(self.client)
         self.client.force_login(self.user)
-        _seed_session(self.client, {
-            "catalog_mode": "create",
-            "new_catalog_name": "WM",
-            "new_catalog_slug": "wm",
-            "new_catalog_format": "grib2",
-            "config_name": "Surface variables",
-            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
-            "selected_variable_names": ["2t"],
-            "sample_filename": "20250115.grib2",
-            "valid_time_format": "CONTENT",
-            "is_forecast": False,
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "WM",
+                "new_catalog_slug": "wm",
+                "new_catalog_format": "grib2",
+                "config_name": "Surface variables",
+                "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+                "selected_variable_names": ["2t"],
+                "sample_filename": "20250115.grib2",
+                "valid_time_format": "CONTENT",
+                "is_forecast": False,
+            },
+        )
 
     def _post(self, collections, assignments):
-        return self.client.post(STEP4_URL, {
-            "collections_json": json.dumps(collections),
-            "assignments_json": json.dumps(assignments),
-        })
+        return self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
 
     def test_same_source_name_in_two_collections_rerenders_with_error(self):
         collections = [
@@ -520,23 +615,31 @@ class Step4DuplicateSourceNameTests(TestCase):
         catalog = _make_catalog(slug="existing-cat")
         existing_col = _make_collection(catalog, slug="existing-col")
         existing_config = ManualUploadConfig.objects.create(
-            catalog=catalog, name="Existing config",
-            is_forecast=False, valid_time_format="CONTENT",
+            catalog=catalog,
+            name="Existing config",
+            is_forecast=False,
+            valid_time_format="CONTENT",
         )
         ManualUploadConfigVariable.objects.create(
-            config=existing_config, collection=existing_col,
-            variable_name="2t", long_name="2m temperature", units="K",
+            config=existing_config,
+            collection=existing_col,
+            variable_name="2t",
+            long_name="2m temperature",
+            units="K",
         )
-        _seed_session(self.client, {
-            "catalog_mode": "existing",
-            "catalog_id": catalog.pk,
-            "config_name": "New config",
-            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
-            "selected_variable_names": ["2t"],
-            "sample_filename": "20250115.grib2",
-            "valid_time_format": "CONTENT",
-            "is_forecast": False,
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "existing",
+                "catalog_id": catalog.pk,
+                "config_name": "New config",
+                "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+                "selected_variable_names": ["2t"],
+                "sample_filename": "20250115.grib2",
+                "valid_time_format": "CONTENT",
+                "is_forecast": False,
+            },
+        )
         collections = [{"name": "New Col", "slug": "new-col"}]
         assignments = [_assignment(variable_name="2t", collection_idx=0)]
         response = self._post(collections, assignments)
@@ -547,23 +650,31 @@ class Step4DuplicateSourceNameTests(TestCase):
         catalog = _make_catalog(slug="reuse-cat")
         existing_col = _make_collection(catalog, slug="reuse-col")
         existing_config = ManualUploadConfig.objects.create(
-            catalog=catalog, name="Existing config",
-            is_forecast=False, valid_time_format="CONTENT",
+            catalog=catalog,
+            name="Existing config",
+            is_forecast=False,
+            valid_time_format="CONTENT",
         )
         ManualUploadConfigVariable.objects.create(
-            config=existing_config, collection=existing_col,
-            variable_name="2t", long_name="2m temperature", units="K",
+            config=existing_config,
+            collection=existing_col,
+            variable_name="2t",
+            long_name="2m temperature",
+            units="K",
         )
-        _seed_session(self.client, {
-            "catalog_mode": "existing",
-            "catalog_id": catalog.pk,
-            "config_name": "New config 2",
-            "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
-            "selected_variable_names": ["2t"],
-            "sample_filename": "20250115.grib2",
-            "valid_time_format": "CONTENT",
-            "is_forecast": False,
-        })
+        _seed_session(
+            self.client,
+            {
+                "catalog_mode": "existing",
+                "catalog_id": catalog.pk,
+                "config_name": "New config 2",
+                "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
+                "selected_variable_names": ["2t"],
+                "sample_filename": "20250115.grib2",
+                "valid_time_format": "CONTENT",
+                "is_forecast": False,
+            },
+        )
         # Assigning the same variable to the same collection slug — should pass.
         collections = [{"name": "Reuse Col", "slug": "reuse-col"}]
         assignments = [_assignment(variable_name="2t", collection_idx=0)]
@@ -574,6 +685,7 @@ class Step4DuplicateSourceNameTests(TestCase):
 # =============================================================================
 # Step 5 — Review
 # =============================================================================
+
 
 class Step5ReviewTests(TestCase):
     def setUp(self):
@@ -597,6 +709,7 @@ class Step5ReviewTests(TestCase):
 # =============================================================================
 # Provision
 # =============================================================================
+
 
 class ProvisionTests(TestCase):
     def setUp(self):
@@ -652,9 +765,7 @@ class ProvisionTests(TestCase):
 
     def test_provision_get_redirects_to_step5(self):
         _seed_session(self.client, _full_session())
-        self.assertRedirects(
-            self.client.get(PROVISION_URL), STEP5_URL, fetch_redirect_response=False
-        )
+        self.assertRedirects(self.client.get(PROVISION_URL), STEP5_URL, fetch_redirect_response=False)
 
     def test_provision_redirects_to_config_list(self):
         _seed_session(self.client, _full_session())
@@ -698,13 +809,19 @@ class ProvisionTests(TestCase):
     def test_provision_does_not_clobber_existing_variable(self):
         catalog = _make_catalog("weather-models")
         collection = Collection.objects.create(
-            catalog=catalog, name="Tuned", slug="weather-models-collection-1",
+            catalog=catalog,
+            name="Tuned",
+            slug="weather-models-collection-1",
         )
         unit = Unit.objects.get(symbol="°C")
         existing = Variable.objects.create(
-            collection=collection, slug="2t", name="Hand-tuned temperature",
+            collection=collection,
+            slug="2t",
+            name="Hand-tuned temperature",
             transform_type=Variable.TransformType.PASSTHROUGH,
-            unit=unit, value_min=-10.0, value_max=10.0,
+            unit=unit,
+            value_min=-10.0,
+            value_max=10.0,
             sources=[("primary", {"source_name": "2t"})],
         )
         session = _full_session()
@@ -721,7 +838,9 @@ class ProvisionTests(TestCase):
     def test_provision_duplicate_config_name_errors_without_partial_state(self):
         catalog = _make_catalog("existing-cat")
         ManualUploadConfig.objects.create(
-            catalog=catalog, name="Surface variables", valid_time_format="CONTENT",
+            catalog=catalog,
+            name="Surface variables",
+            valid_time_format="CONTENT",
         )
         session = _full_session()
         session["catalog_mode"] = "select"
@@ -758,16 +877,22 @@ class Step1SlugScopingTests(TestCase):
         self.kenya = make_organisation("kenya")
 
     def _post(self, **headers):
-        return self.client.post(STEP1_URL, {
-            "catalog_mode": "create",
-            "new_catalog_name": "Forecast",
-            "new_catalog_slug": "forecast",
-            "new_catalog_format": "grib2",
-        }, **headers)
+        return self.client.post(
+            STEP1_URL,
+            {
+                "catalog_mode": "create",
+                "new_catalog_name": "Forecast",
+                "new_catalog_slug": "forecast",
+                "new_catalog_format": "grib2",
+            },
+            **headers,
+        )
 
     def test_a_slug_taken_by_another_org_does_not_block_this_one(self):
         Catalog.objects.create(
-            organisation=self.kenya, name="Forecast", slug="forecast",
+            organisation=self.kenya,
+            name="Forecast",
+            slug="forecast",
             file_format="grib2",
         )
 
@@ -781,7 +906,9 @@ class Step1SlugScopingTests(TestCase):
         self.assertRedirects(response, STEP2_URL, fetch_redirect_response=False)
 
         Catalog.objects.create(
-            organisation=self.kenya, name="Forecast", slug="forecast",
+            organisation=self.kenya,
+            name="Forecast",
+            slug="forecast",
             file_format="grib2",
         )
 
@@ -803,6 +930,7 @@ class CatalogOwnershipTests(TestCase):
         self.client.force_login(self.user)
         self.client.defaults["HTTP_HOST"] = org_host()
         from georiva.sources.models import DataFeed
+
         self.claimed = _make_catalog(slug="chirps")
         self.unclaimed = _make_catalog(slug="local-models")
         DataFeed.objects.create(name="CHIRPS", catalog=self.claimed)
@@ -813,10 +941,13 @@ class CatalogOwnershipTests(TestCase):
         self.assertNotIn("chirps", html)
 
     def test_step1_select_post_rejects_feed_claimed_catalog(self):
-        response = self.client.post(STEP1_URL, {
-            "catalog_mode": "select",
-            "catalog_id": str(self.claimed.pk),
-        })
+        response = self.client.post(
+            STEP1_URL,
+            {
+                "catalog_mode": "select",
+                "catalog_id": str(self.claimed.pk),
+            },
+        )
         self.assertEqual(response.status_code, 200)  # re-rendered with error
         self.assertNotIn(SESSION_KEY, self.client.session)
 
@@ -849,6 +980,7 @@ class DataManagerWizardAccessTests(TestCase):
 
     def setUp(self):
         from django.contrib.auth.models import Group
+
         self.user = User.objects.create_user("dm2", "dm2@x.com", "pw")
         self.user.groups.add(Group.objects.get(name="Data Managers"))
         join_org(self.user)

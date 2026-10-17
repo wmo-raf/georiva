@@ -1,0 +1,21 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Trace" %}{% endblock %}
+
+{% block main_content %}
+    {% if entries %}
+        <p class="help-text">
+            {% blocktrans %}This source file was ingested more than once. Each ingestion is listed, newest first; which one produced this item is not guessed.{% endblocktrans %}
+        </p>
+        <ul class="gr-history__list">
+            {% for row in entries %}
+                {% include "georivaevents/_history_row.html" %}
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="help-text">
+            {% blocktrans %}No history is recorded for this item. It was produced before history began, so there is nothing to trace.{% endblocktrans %}
+        </p>
+    {% endif %}
+{% endblock %}

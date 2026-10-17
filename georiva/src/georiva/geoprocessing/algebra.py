@@ -5,6 +5,7 @@ Operates on numpy arrays or xarray DataArrays. Inputs are assumed to be
 already aligned (same grid); alignment is the caller's job (see ``regrid``).
 NaN is the nodata sentinel and propagates through operations.
 """
+
 from __future__ import annotations
 
 import numpy as np

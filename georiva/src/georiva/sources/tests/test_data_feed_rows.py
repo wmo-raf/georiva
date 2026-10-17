@@ -6,19 +6,20 @@ rail, so an operator scanning one edge sees the broken feed. These tests
 assert what a user actually sees -- chip labels, failure reasons, counts --
 rather than CSS classes or DOM shape, which we expect to restyle.
 """
+
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.test.utils import CaptureQueriesContext
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from georiva.core.models import Catalog, Collection
+from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.health import Health
 from georiva.sources.models import DataFeed
-from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
@@ -92,9 +93,7 @@ class IdentityLineTests(RowRenderBase):
         from georiva.sources.models import DataFeedCollectionLink
 
         for col in Collection.objects.all():
-            DataFeedCollectionLink.objects.create(
-                data_feed=feed, collection=col, definition_key=col.slug
-            )
+            DataFeedCollectionLink.objects.create(data_feed=feed, collection=col, definition_key=col.slug)
 
         response = self.client.get(self.url)
         self.assertContains(response, "chirps-daily")  # catalog slug or name
@@ -205,14 +204,10 @@ class QueryBudgetTests(RowRenderBase):
     def _make_page(self, count):
         for n in range(count):
             feed = _make_feed(f"Feed {n:03d}", last_run_status="success", last_run_at=_ago(minutes=5))
-            col = Collection.objects.create(
-                catalog=feed.catalog, name=f"Col {n}", slug=f"col-{n}"
-            )
+            col = Collection.objects.create(catalog=feed.catalog, name=f"Col {n}", slug=f"col-{n}")
             from georiva.sources.models import DataFeedCollectionLink
 
-            DataFeedCollectionLink.objects.create(
-                data_feed=feed, collection=col, definition_key=col.slug
-            )
+            DataFeedCollectionLink.objects.create(data_feed=feed, collection=col, definition_key=col.slug)
 
     def test_a_page_of_feeds_costs_the_same_as_a_few(self):
         """The real guard: cost must not scale with rows on the page."""
@@ -251,18 +246,12 @@ class ChipCountAccuracyTests(RowRenderBase):
 
         feed = _make_feed("Busy Feed", last_run_status="failed", last_run_at=_ago(minutes=5))
         for n in range(2):
-            col = Collection.objects.create(
-                catalog=feed.catalog, name=f"Col {n}", slug=f"col-{n}"
-            )
+            col = Collection.objects.create(catalog=feed.catalog, name=f"Col {n}", slug=f"col-{n}")
             from georiva.sources.models import DataFeedCollectionLink
 
-            DataFeedCollectionLink.objects.create(
-                data_feed=feed, collection=col, definition_key=col.slug
-            )
+            DataFeedCollectionLink.objects.create(data_feed=feed, collection=col, definition_key=col.slug)
         for n in range(3):
-            DerivedProduct.objects.create(
-                data_feed=feed, definition_key=f"prod-{n}", recipe_type="promotion"
-            )
+            DerivedProduct.objects.create(data_feed=feed, definition_key=f"prod-{n}", recipe_type="promotion")
 
         response = self.client.get(self.url)
         counts = {c["state"]: c["count"] for c in response.context["health_chips"]}
@@ -287,24 +276,18 @@ class ControlsSurviveEmptyResultsTests(RowRenderBase):
         _make_feed("Fine", last_run_status="success", last_run_at=_ago(minutes=5))
 
     def test_chips_still_render_when_the_filter_matches_nothing(self):
-        response = self.client.get(
-            self.url, {"health": Health.FAILED.rank, "q": "matches-nothing"}
-        )
+        response = self.client.get(self.url, {"health": Health.FAILED.rank, "q": "matches-nothing"})
         self.assertEqual(len(response.context["object_list"]), 0)
         self.assertContains(response, "Failed")  # a chip label, not chrome
 
     def test_all_chip_is_reachable_when_the_filter_matches_nothing(self):
-        response = self.client.get(
-            self.url, {"health": Health.FAILED.rank, "q": "matches-nothing"}
-        )
+        response = self.client.get(self.url, {"health": Health.FAILED.rank, "q": "matches-nothing"})
         # The escape hatch: a URL with no health param must be offered.
         self.assertNotIn("health=", response.context["all_chip_url"])
         self.assertContains(response, response.context["all_chip_url"])
 
     def test_sort_selector_still_renders_when_empty(self):
-        response = self.client.get(
-            self.url, {"health": Health.FAILED.rank, "q": "matches-nothing"}
-        )
+        response = self.client.get(self.url, {"health": Health.FAILED.rank, "q": "matches-nothing"})
         self.assertContains(response, 'name="sort"')
 
     def test_active_chip_is_shown_even_at_zero_count(self):
@@ -346,8 +329,15 @@ class HumanizeMinutesTests(TestCase):
     def test_intervals_read_the_way_operators_say_them(self):
         from georiva.sources.views import _humanize_minutes
 
-        cases = [(5, "5 min"), (59, "59 min"), (60, "1 hour"), (90, "90 min"),
-                 (360, "6 hours"), (1440, "1 day"), (43200, "30 days")]
+        cases = [
+            (5, "5 min"),
+            (59, "59 min"),
+            (60, "1 hour"),
+            (90, "90 min"),
+            (360, "6 hours"),
+            (1440, "1 day"),
+            (43200, "30 days"),
+        ]
         for minutes, expected in cases:
             with self.subTest(minutes=minutes):
                 self.assertEqual(_humanize_minutes(minutes), expected)

@@ -6,6 +6,7 @@ feed's records are found by the catalog path prefix (file_path is always
 {org}/{catalog}/{collection}/{filename}), which also surfaces failed Ingestions
 that never got associated with any Collection.
 """
+
 from __future__ import annotations
 
 #: Sentinel filter value selecting records with an empty collections M2M —
@@ -20,12 +21,7 @@ def feed_ingestion_status_counts(feed) -> dict:
 
     from georiva.ingestion.models import FileIngestion
 
-    counted = dict(
-        feed_file_ingestions(feed)
-        .order_by()
-        .values_list("status")
-        .annotate(n=Count("id"))
-    )
+    counted = dict(feed_file_ingestions(feed).order_by().values_list("status").annotate(n=Count("id")))
     return {value: counted.get(value, 0) for value, _ in FileIngestion.Status.choices}
 
 
@@ -38,9 +34,7 @@ def feed_file_ingestions(feed, *, status=None, collection=None):
     """
     from georiva.ingestion.models import FileIngestion
 
-    records = FileIngestion.objects.filter(
-        file_path__startswith=f"{feed.catalog.storage_prefix}/"
-    )
+    records = FileIngestion.objects.filter(file_path__startswith=f"{feed.catalog.storage_prefix}/")
     if status:
         records = records.filter(status=status)
     if collection == NO_COLLECTION:

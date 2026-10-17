@@ -2,14 +2,16 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from georiva.core.models import Catalog
-from georiva.ingestion.models import UploadSession, UploadedFile
+from georiva.ingestion.models import UploadedFile, UploadSession
 from georiva.organisations.testing import make_organisation
 
 User = get_user_model()
 
 
 def _catalog():
-    return Catalog.objects.create(organisation=make_organisation(), name="Upload Test", slug="upload-test", file_format="grib2")
+    return Catalog.objects.create(
+        organisation=make_organisation(), name="Upload Test", slug="upload-test", file_format="grib2"
+    )
 
 
 def _session(catalog=None, status="active"):

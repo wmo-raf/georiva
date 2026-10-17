@@ -1,8 +1,8 @@
 from django.test import TestCase
 
 from georiva.core.models import Catalog
-from georiva.sources.models import DataFeed, FetchRun, FetchedFile
 from georiva.organisations.testing import make_organisation
+from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
 
 def _make_feed():

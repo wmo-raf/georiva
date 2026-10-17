@@ -4,6 +4,7 @@ RecipeRegistry — decorator registry for derivation recipes.
 Mirrors the format/source plugin registries: families register by ``type`` and
 the engine looks them up by name. Adding a family never edits the engine.
 """
+
 import logging
 
 logger = logging.getLogger(__name__)

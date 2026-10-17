@@ -12,6 +12,7 @@ Climatology recipe family computes ``value``/``anomaly``/``relative anomaly``
 per season by composing :func:`climatology` and :func:`anomaly`, and the
 ``trend`` quantity via :func:`trend`.
 """
+
 from __future__ import annotations
 
 _HOW = {
@@ -120,5 +121,6 @@ def anomaly(da, baseline, relative: bool = False, how: str = "mean", time_dim: s
     diff = da - base
     if relative:
         from .algebra import safe_divide
+
         return safe_divide(diff, base)
     return diff

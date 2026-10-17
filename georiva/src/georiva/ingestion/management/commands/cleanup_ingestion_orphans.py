@@ -33,14 +33,10 @@ class Command(BaseCommand):
         # Orphan: a FileIngestion whose "{bucket}:{file_path}" key matches no
         # Item.source_file. Collect live keys first (management command — not
         # a hot path, so a Python set is acceptable).
-        live_source_files = set(
-            Item.objects.values_list("source_file", flat=True).exclude(source_file="")
-        )
+        live_source_files = set(Item.objects.values_list("source_file", flat=True).exclude(source_file=""))
 
-        orphan_logs = (
-            FileIngestion.objects
-            .annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path")))
-            .exclude(_sf__in=live_source_files)
+        orphan_logs = FileIngestion.objects.annotate(_sf=Concat(F("bucket"), Value(":"), F("file_path"))).exclude(
+            _sf__in=live_source_files
         )
 
         if collection_slug:

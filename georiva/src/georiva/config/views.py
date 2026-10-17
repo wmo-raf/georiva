@@ -18,6 +18,7 @@ that has to render when the thing that broke might be the template engine, the
 database or a Wagtail hook. Django's own ``server_error`` already renders exactly
 that template with an empty context, so there is no handler for it here.
 """
+
 from django.conf import settings
 from django.http import HttpResponse
 from django.shortcuts import render

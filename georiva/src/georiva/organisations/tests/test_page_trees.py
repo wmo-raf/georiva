@@ -7,6 +7,7 @@ institution's tree, so a test built on one would pass without any of this code.
 What is under test is the tenancy layer over that — on Kenya's host, Kenya's
 pages, whoever you are elsewhere.
 """
+
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -26,7 +27,6 @@ def add_child_page(parent, title, slug):
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class PageTreeScopingTests(TestCase):
-
     @classmethod
     def setUpTestData(cls):
         cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
@@ -128,15 +128,11 @@ class PageTreeScopingTests(TestCase):
 
     def test_a_bulk_action_on_another_organisations_page_is_not_found(self):
         """Bulk actions name their pages in the query string, not the path."""
-        url = reverse(
-            "wagtail_bulk_action", args=["wagtailcore", "page", "delete"]
-        ) + f"?id={self.uganda_page.pk}"
+        url = reverse("wagtail_bulk_action", args=["wagtailcore", "page", "delete"]) + f"?id={self.uganda_page.pk}"
         self.assertEqual(self.client.get(url).status_code, 404)
 
     def test_a_bulk_action_on_this_organisations_page_still_works(self):
-        url = reverse(
-            "wagtail_bulk_action", args=["wagtailcore", "page", "delete"]
-        ) + f"?id={self.kenya_page.pk}"
+        url = reverse("wagtail_bulk_action", args=["wagtailcore", "page", "delete"]) + f"?id={self.kenya_page.pk}"
         self.assertEqual(self.client.get(url).status_code, 200)
 
     # -- search and choosers -----------------------------------------------

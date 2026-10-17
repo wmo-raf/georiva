@@ -29,6 +29,8 @@ from wagtail.snippets.models import register_snippet
 from georiva.sources.collection_definitions import CollectionDefinition, parse_collection_defs
 from georiva.sources.models import DataFeed
 
+from .events import {{ cookiecutter.project_module|replace('_', ' ')|title|replace(' ', '') }}Ran  # noqa: F401  (registers the example Domain event — see events.py)
+
 # ---------------------------------------------------------------------------
 # Collections this plugin can create — the canonical spec for the plugin.
 # One entry per collection; each lists the variables it exposes.

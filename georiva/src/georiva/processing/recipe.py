@@ -11,14 +11,16 @@ recipe owns; the engine treats it only as an identity/idempotency key.
 
 See docs/adr/0005-generic-derivation-engine.md.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 # A ProductionUnit is any JSON-serialisable mapping of coordinates. The engine
 # never interprets it; it only serialises + hashes it for the lock/idempotency.
@@ -33,11 +35,9 @@ def unit_hash(unit: ProductionUnit) -> str:
     return hashlib.sha256(unit_to_canonical_json(unit).encode()).hexdigest()
 
 
-def compute_input_hash(resolved: "dict[str, ResolvedInput]", recipe_version: str) -> str:
+def compute_input_hash(resolved: dict[str, ResolvedInput], recipe_version: str) -> str:
     """input_hash = sha256(sorted(input checksums) + recipe_version)."""
-    checksums = sorted(
-        c for ri in resolved.values() for c in ri.checksums if c
-    )
+    checksums = sorted(c for ri in resolved.values() for c in ri.checksums if c)
     payload = "|".join(checksums) + "|" + recipe_version
     return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -45,10 +45,11 @@ def compute_input_hash(resolved: "dict[str, ResolvedInput]", recipe_version: str
 @dataclass
 class ResolvedInput:
     """The catalog items + their data assets resolved for one named selector."""
+
     name: str
     required: bool
-    items: list = field(default_factory=list)   # StagingItem | core.Item
-    assets: list = field(default_factory=list)   # their data/source assets
+    items: list = field(default_factory=list)  # StagingItem | core.Item
+    assets: list = field(default_factory=list)  # their data/source assets
 
     @property
     def present(self) -> bool:
@@ -59,7 +60,7 @@ class ResolvedInput:
         return [getattr(a, "checksum", "") for a in self.assets]
 
 
-def resolve_declared_inputs(inputs, *, unit=None) -> "dict[str, ResolvedInput]":
+def resolve_declared_inputs(inputs, *, unit=None) -> dict[str, ResolvedInput]:
     """
     Resolve a product's declared inputs into ``ResolvedInput``s by querying the
     catalog — the StagingItem tier for ``tier="staging"`` inputs, the Published
@@ -97,9 +98,7 @@ def resolve_declared_inputs(inputs, *, unit=None) -> "dict[str, ResolvedInput]":
             qs = model.objects.filter(collection__slug=ref.collection)
         items = list(qs.prefetch_related("assets"))
         assets = [a for it in items for a in it.assets.all()]
-        resolved[ref.role] = ResolvedInput(
-            ref.role, required=ref.required, items=items, assets=assets
-        )
+        resolved[ref.role] = ResolvedInput(ref.role, required=ref.required, items=items, assets=assets)
     return resolved
 
 
@@ -127,7 +126,8 @@ def binding_output_collection_id(selector, role):
 @dataclass
 class OutputItem:
     """The Published Item a unit maps to. The recipe owns this mapping."""
-    collection: Any                       # core.Collection (recipe resolves/creates)
+
+    collection: Any  # core.Collection (recipe resolves/creates)
     time: datetime
     reference_time: datetime | None = None
     bounds: list | None = None
@@ -153,11 +153,12 @@ class OutputAsset:
     ``format="png"`` is legacy: visual textures are derived on demand by
     Titiler (ADR 0021), so an explicit png OutputAsset is skipped by the engine.
     """
-    variable: Any                         # core.Variable
+
+    variable: Any  # core.Variable
     roles: list = field(default_factory=lambda: ["data"])
     format: str = "cog"
     array: Any = None
-    passthrough: tuple | None = None      # (bucket_type, source_href)
+    passthrough: tuple | None = None  # (bucket_type, source_href)
     bounds: list | None = None
     crs: str = "EPSG:4326"
     width: int | None = None
@@ -190,7 +191,7 @@ class BaseRecipe(ABC):
         """
         return []
 
-    def resolve_inputs(self, unit: ProductionUnit) -> "dict[str, ResolvedInput]":
+    def resolve_inputs(self, unit: ProductionUnit) -> dict[str, ResolvedInput]:
         """
         Resolve the named input selectors for one unit. The default consumes the
         recipe's ``declared_inputs`` (no hardcoded slugs); recipes whose
@@ -199,7 +200,7 @@ class BaseRecipe(ABC):
         """
         return resolve_declared_inputs(self.declared_inputs(unit), unit=unit)
 
-    def readiness(self, unit: ProductionUnit, resolved: "dict[str, ResolvedInput]") -> bool:
+    def readiness(self, unit: ProductionUnit, resolved: dict[str, ResolvedInput]) -> bool:
         """Default: every required input resolved to at least one item."""
         return all(ri.present for ri in resolved.values() if ri.required)
 
@@ -208,9 +209,7 @@ class BaseRecipe(ABC):
         """Map a unit onto the Published Item it produces."""
 
     @abstractmethod
-    def transform(
-        self, unit: ProductionUnit, resolved: "dict[str, ResolvedInput]"
-    ) -> list[OutputAsset]:
+    def transform(self, unit: ProductionUnit, resolved: dict[str, ResolvedInput]) -> list[OutputAsset]:
         """Pure compute: resolved inputs → output assets for this unit."""
 
     # ---- candidate generation (event-driven; overridable) -------------------
