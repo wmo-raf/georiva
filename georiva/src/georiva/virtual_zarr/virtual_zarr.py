@@ -334,10 +334,20 @@ class VirtualZarrBuilder:
         if attrs.get("model_transformation") is not None:
             raise ValueError("COG has a rotated/sheared model_transformation; north-up grids only")
 
+        if len(tiepoint) != 6:
+            raise ValueError(f"expected one GeoTIFF tiepoint, found {len(tiepoint) / 6:g}")
+
         scale_x, scale_y = scale[0], scale[1]
-        raster_i, raster_j, _, geo_x, geo_y, _ = tiepoint[:6]
+        raster_i, raster_j, _, geo_x, geo_y, _ = tiepoint
         origin_x = geo_x - raster_i * scale_x
         origin_y = geo_y + raster_j * scale_y
+
+        # PixelIsPoint (raster_type 2): the tiepoint names a pixel centre, not
+        # its corner.  GDAL shifts it half a pixel to the corner, as the old
+        # rasterio read did; do the same so coordinates do not move.
+        if attrs.get("raster_type") == 2:
+            origin_x -= scale_x / 2
+            origin_y += scale_y / 2
 
         lons = origin_x + scale_x * (np.arange(ds.sizes["x"]) + 0.5)
         lats = origin_y - scale_y * (np.arange(ds.sizes["y"]) + 0.5)

@@ -21,7 +21,7 @@ from virtualizarr import open_virtual_dataset
 from georiva.virtual_zarr.virtual_zarr import VirtualZarrBuilder
 
 
-def _write_geotiff(path, transform, *, height=8, width=12):
+def _write_geotiff(path, transform, *, height=8, width=12, point=False):
     with rasterio.open(
         path,
         "w",
@@ -36,7 +36,9 @@ def _write_geotiff(path, transform, *, height=8, width=12):
         blockxsize=16,
         blockysize=16,
     ) as dst:
-        dst.write(np.random.rand(height, width).astype("float32"), 1)
+        dst.write(np.zeros((height, width), dtype="float32"), 1)
+        if point:
+            dst.update_tags(AREA_OR_POINT="Point")
 
 
 def _virtual_stack(path, times=2):
@@ -67,8 +69,25 @@ class AssignGeoCoordsTests(SimpleTestCase):
         np.testing.assert_allclose(out["lon"].values, lons)
         np.testing.assert_allclose(out["lat"].values, lats)
         self.assertEqual(out["lat"].dims, ("lat",))
-        self.assertIn("lat", out.dims)
-        self.assertIn("lon", out.dims)
+        self.assertEqual(out["lon"].dims, ("lon",))
+
+    def test_a_pixel_is_point_grid_gets_the_same_shift_gdal_applies(self):
+        _write_geotiff(self.path, from_origin(30.0, 10.0, 0.25, 0.5), point=True)
+
+        out = self.assign(_virtual_stack(self.path))
+
+        with rasterio.open(self.path) as src:
+            lons = src.transform.c + src.transform.a * (np.arange(src.width) + 0.5)
+            lats = src.transform.f + src.transform.e * (np.arange(src.height) + 0.5)
+        np.testing.assert_allclose(out["lon"].values, lons)
+        np.testing.assert_allclose(out["lat"].values, lats)
+
+    def test_more_than_one_tiepoint_fails_loudly(self):
+        _write_geotiff(self.path, from_origin(30.0, 10.0, 0.25, 0.25))
+        ds = _virtual_stack(self.path)
+        ds["0"].attrs["model_tiepoint"] = list(ds["0"].attrs["model_tiepoint"]) * 2
+        with self.assertRaisesRegex(ValueError, "tiepoint"):
+            self.assign(ds)
 
     def test_a_dataset_without_georeferencing_fails_loudly(self):
         ds = xr.Dataset({"0": (("time", "y", "x"), np.zeros((1, 2, 2)))})
