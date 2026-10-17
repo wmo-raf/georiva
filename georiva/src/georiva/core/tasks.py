@@ -2,11 +2,12 @@ import logging
 
 from celery import shared_task
 from django.utils import timezone as dj_timezone
-from django_celery_beat.models import IntervalSchedule, PeriodicTask
+from django_celery_beat.models import IntervalSchedule
 
 from georiva.config.celery import app
 from georiva.core.models import Collection, Item
 from georiva.events.tasks import EntryTask
+from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -59,18 +60,13 @@ def prune_forecast_items():
 
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
-    try:
-        schedule, _ = IntervalSchedule.objects.get_or_create(
-            every=60,
-            period=IntervalSchedule.MINUTES,
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.core.tasks.prune_forecast_items",
-            defaults={
-                "task": "georiva.core.tasks.prune_forecast_items",
-                "interval": schedule,
-                "enabled": True,
-            },
-        )
-    except Exception as e:
-        logger.warning("Could not register prune_forecast_items periodic task: %s", e)
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                "georiva.core.tasks.prune_forecast_items",
+                "georiva.core.tasks.prune_forecast_items",
+                60,
+                IntervalSchedule.MINUTES,
+            )
+        ]
+    )

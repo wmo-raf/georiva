@@ -9,11 +9,12 @@ from uuid import uuid4
 import pandas as pd
 from django.db.models import Prefetch
 from django.utils import timezone
-from django_celery_beat.models import IntervalSchedule, PeriodicTask
+from django_celery_beat.models import IntervalSchedule
 
 from georiva.config.celery import app
 from georiva.core.models import Asset, Item
 from georiva.events.tasks import EntryTask, ReadSideTask
+from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
 from georiva.virtual_zarr.compat import (
     assert_compatible,
@@ -519,24 +520,19 @@ def gc_virtual_zarr_repos(self) -> None:
 @app.on_after_finalize.connect
 def setup_virtual_zarr_periodic_tasks(sender, **kwargs) -> None:
     """Register the 5-minute sweep and the daily retention pass."""
-    try:
-        schedule_5min, _ = IntervalSchedule.objects.get_or_create(every=5, period=IntervalSchedule.MINUTES)
-        PeriodicTask.objects.update_or_create(
-            name="georiva.virtual_zarr.sweep_virtual_zarr_pending",
-            defaults={
-                "task": "georiva.virtual_zarr.tasks.sweep_virtual_zarr_pending",
-                "interval": schedule_5min,
-                "enabled": True,
-            },
-        )
-        schedule_daily, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.DAYS)
-        PeriodicTask.objects.update_or_create(
-            name="georiva.virtual_zarr.gc_virtual_zarr_repos",
-            defaults={
-                "task": "georiva.virtual_zarr.tasks.gc_virtual_zarr_repos",
-                "interval": schedule_daily,
-                "enabled": True,
-            },
-        )
-    except Exception as exc:
-        logger.warning("Could not register virtual Zarr periodic tasks: %s", exc)
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                "georiva.virtual_zarr.sweep_virtual_zarr_pending",
+                "georiva.virtual_zarr.tasks.sweep_virtual_zarr_pending",
+                5,
+                IntervalSchedule.MINUTES,
+            ),
+            PeriodicSpec(
+                "georiva.virtual_zarr.gc_virtual_zarr_repos",
+                "georiva.virtual_zarr.tasks.gc_virtual_zarr_repos",
+                1,
+                IntervalSchedule.DAYS,
+            ),
+        ]
+    )

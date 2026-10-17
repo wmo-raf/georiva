@@ -7,6 +7,7 @@ from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from georiva.config.celery import app
 from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
+from georiva.utils.periodic import PeriodicSpec, interval_schedule, register_periodic_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -77,41 +78,35 @@ def retry_fetched_file(self, fetched_file_id):
 @app.on_after_finalize.connect
 def setup_scheduled_product_beat(sender, **kwargs):
     """Register the periodic scheduled-product beat (mirror of the derivation sweep)."""
-    try:
-        schedule_5min, _ = IntervalSchedule.objects.get_or_create(
-            every=5,
-            period=IntervalSchedule.MINUTES,
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.sources.sweep_scheduled_products",
-            defaults={
-                "task": "georiva.sources.tasks.sweep_scheduled_products",
-                "interval": schedule_5min,
-                "enabled": True,
-            },
-        )
-    except Exception as e:  # DB may be unavailable at import/finalize time
-        logger.debug("Skipped scheduled-product beat setup: %s", e)
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                "georiva.sources.sweep_scheduled_products",
+                "georiva.sources.tasks.sweep_scheduled_products",
+                5,
+                IntervalSchedule.MINUTES,
+            )
+        ],
+        # DB may be unavailable at import/finalize time
+        log=logger.debug,
+    )
 
 
 @app.on_after_finalize.connect
 def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
     """Register the crash-recovery sweep (mirror of the scheduled-product beat)."""
-    try:
-        schedule_30min, _ = IntervalSchedule.objects.get_or_create(
-            every=30,
-            period=IntervalSchedule.MINUTES,
-        )
-        PeriodicTask.objects.update_or_create(
-            name="georiva.sources.sweep_stale_fetch_runs",
-            defaults={
-                "task": "georiva.sources.tasks.sweep_stale_fetch_runs",
-                "interval": schedule_30min,
-                "enabled": True,
-            },
-        )
-    except Exception as e:  # DB may be unavailable at import/finalize time
-        logger.debug("Skipped stale-fetch-run sweep beat setup: %s", e)
+    register_periodic_tasks(
+        [
+            PeriodicSpec(
+                "georiva.sources.sweep_stale_fetch_runs",
+                "georiva.sources.tasks.sweep_stale_fetch_runs",
+                30,
+                IntervalSchedule.MINUTES,
+            )
+        ],
+        # DB may be unavailable at import/finalize time
+        log=logger.debug,
+    )
 
 
 @shared_task(
@@ -181,13 +176,7 @@ def create_or_update_data_feed_periodic_task(data_feed):
         min_override = data_feed_collections.aggregate(m=Min("interval_minutes"))["m"]
         min_interval = min(x for x in [data_feed.interval_minutes, min_override] if x is not None)
 
-        schedule = IntervalSchedule.objects.filter(every=min_interval, period=IntervalSchedule.MINUTES).first()
-        if schedule is None:
-            schedule = IntervalSchedule.objects.create(
-                every=min_interval,
-                period=IntervalSchedule.MINUTES,
-            )
-        options["interval"] = schedule
+        options["interval"] = interval_schedule(min_interval, IntervalSchedule.MINUTES)
 
         if data_feed.is_active:
             options["enabled"] = True
