@@ -12,6 +12,7 @@ from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from wagtail.admin.menu import SubmenuMenuItem, admin_menu, settings_menu
+from wagtail.models import GroupPagePermission, Page
 
 from georiva.core.wagtail_hooks import boundary_settings_url
 from georiva.organisations.models import OrganisationMembership
@@ -74,3 +75,51 @@ class BoundariesMenuPlacementTests(TestCase):
 
         self.assertNotIn("Boundaries", [item.label for item in items])
         self.assertNotIn(boundary_settings_url(), [item.url for item in items])
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class BoundaryLoaderUrlGateTests(TestCase):
+    """The menu hides the loader from non-superusers; the URLs must too.
+
+    ``adminboundarymanager`` gates both views on "holds any page permission",
+    which every editor does, and a load rewrites the instance-wide
+    ``AdminBoundary`` table (ADR 0011: shared reference data is written by the
+    instance admin alone).
+    """
+
+    URL_NAMES = ["adminboundarymanager_load_boundary", "adminboundarymanager_preview_boundary"]
+
+    def setUp(self):
+        self.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+
+    def _login(self, username, **kwargs):
+        user = make_user(username, **kwargs)
+        group = Group.objects.create(name=f"{username} access")
+        group.permissions.add(Permission.objects.get(codename="access_admin"))
+        # What makes an editor an editor: a page permission on some subtree.
+        GroupPagePermission.objects.create(
+            group=group,
+            page=Page.get_first_root_node(),
+            permission=Permission.objects.get(content_type__app_label="wagtailcore", codename="change_page"),
+        )
+        user.groups.add(group)
+        self.client.login(username=username, password=PASSWORD)
+        return user
+
+    def test_an_editor_cannot_reach_either_view(self):
+        user = self._login("amina")
+        add_member(user, self.kenya, role=OrganisationMembership.Role.MEMBER)
+
+        for name in self.URL_NAMES:
+            for method in (self.client.get, self.client.post):
+                with self.subTest(view=name, method=method.__name__):
+                    response = method(reverse(name), headers=HOST)
+                    self.assertIn(response.status_code, (302, 403))
+
+    def test_the_superuser_still_reaches_both_views(self):
+        self._login("root", superuser=True)
+
+        for name in self.URL_NAMES:
+            with self.subTest(view=name):
+                response = self.client.get(reverse(name), headers=HOST)
+                self.assertEqual(response.status_code, 200)
