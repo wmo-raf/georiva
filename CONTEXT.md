@@ -197,6 +197,17 @@ _Avoid_: ingest (for this phase)
 Processing a file already in MinIO into STAC items and assets. The IngestionService is responsible for this phase.
 _Avoid_: processing, import, fetch (for this phase)
 
+### Forecast time
+
+**Run hour**:
+The initialisation hour of a forecast model cycle (00/06/12/18Z). A feed selects which run hours to fetch.
+_Avoid_: cycle (in code), run_time (for the hour alone)
+
+**Step**:
+Forecast lead time in hours from the run hour; a step's valid time = run time + step. Step spacing may be
+non-uniform across the forecast range (e.g. ECMWF IFS: 3-hourly to 144h, 6-hourly beyond).
+_Avoid_: forecast_hour (in new code), timestep (for lead time)
+
 ### Pipeline records
 
 **FetchRun**:
