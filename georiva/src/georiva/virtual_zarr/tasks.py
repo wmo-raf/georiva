@@ -166,8 +166,9 @@ def _collect_rows(
     config: MinioStoreConfig,
 ) -> tuple[list[SourceRow], int]:
     """
-    COG asset rows for this variable, one per Item, ordered by item time,
-    plus the count of Items skipped for having no COG asset.
+    COG asset rows for this variable, one per Item, ordered by item time
+    (newest run only for a forecast collection), plus the count of Items
+    skipped for having no COG asset.
     """
     variable = manifest.variable
     collection = variable.collection
@@ -181,7 +182,36 @@ def _collect_rows(
         to_attr="cog_assets",
     )
 
-    items_qs = Item.objects.filter(collection=collection).prefetch_related(cog_prefetch).only("time").order_by("time")
+    # A forecast item is (reference_time, time) and consecutive runs overlap, so
+    # keying on valid time alone gives an axis that is neither append-only nor
+    # unique. The virtual Zarr of a forecast collection is the newest run only:
+    # a new run changes the in-range rows, which classify() answers with REBUILD.
+    items_qs = Item.objects.filter(collection=collection)
+    # Keyed on the data, not on Collection.is_forecast: that flag is set by hand
+    # and an unflagged forecast collection hits the same append-only failure.
+    # Newest run that has a COG for *this* variable, so a run still
+    # ingesting elsewhere cannot park the variable as NO_DATA.
+    latest_ref = (
+        items_qs.filter(
+            reference_time__isnull=False,
+            assets__variable=variable,
+            assets__format=Asset.Format.COG,
+        )
+        .order_by("-reference_time")
+        .values_list("reference_time", flat=True)
+        .first()
+    )
+    if latest_ref is not None:
+        unkeyed = items_qs.filter(reference_time__isnull=True).count()
+        if unkeyed:
+            logger.warning(
+                "build_virtual_zarr_manifest: %d item(s) without a reference_time left out of %s/%s",
+                unkeyed,
+                collection.slug,
+                variable.slug,
+            )
+        items_qs = items_qs.filter(reference_time=latest_ref)
+    items_qs = items_qs.prefetch_related(cog_prefetch).only("time").order_by("time")
 
     rows = []
     skipped = 0
