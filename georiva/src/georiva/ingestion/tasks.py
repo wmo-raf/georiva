@@ -113,7 +113,8 @@ def sweep_unprocessed(sync: bool = False):
 
     Three phases:
     1. Reset stale locks (workers that crashed mid-processing)
-    2. Scan incoming/sources buckets for untracked files
+    2. Scan incoming/sources buckets for untracked files and for pending
+       files whose dispatched task was lost (pending past PENDING_TIMEOUT)
     3. Retry failed files that haven't exceeded max retries
     """
 
@@ -132,6 +133,7 @@ def sweep_unprocessed(sync: bool = False):
     # -----------------------------------------------------------------
 
     new_files = 0
+    redispatched = 0
 
     raw_dispatch = process_incoming_file.delay if not sync else process_incoming_file.run
 
@@ -178,11 +180,25 @@ def sweep_unprocessed(sync: bool = False):
                 why="unprocessed_file_found",
             )
             new_files += 1
-        # 'pending' records already await a dispatched task — the sweep
-        # leaves them alone (unchanged behavior).
+        elif unprocessed.reason == "pending" and FileIngestion.is_stale_pending(
+            unprocessed.bucket, unprocessed.file_path
+        ):
+            # The dispatched task was lost (worker killed, broker flushed);
+            # the file lock keeps a late duplicate from double-processing.
+            logger.warning("Re-dispatching stale pending file: %s/%s", unprocessed.bucket, unprocessed.file_path)
+            dispatch(
+                file_path=unprocessed.file_path,
+                origin_bucket=unprocessed.bucket,
+                reference_time=reference_time_iso,
+                why="stale_pending_redispatched",
+            )
+            redispatched += 1
+        # Recent 'pending' records still await their dispatched task — left alone.
 
     if new_files:
         logger.info("Queued %d untracked files", new_files)
+    if redispatched:
+        logger.info("Re-dispatched %d stale pending files", redispatched)
 
     # -----------------------------------------------------------------
     # Phase 3: Retry failed files
@@ -222,9 +238,10 @@ def sweep_unprocessed(sync: bool = False):
         )
 
     logger.info(
-        "Sweep complete: %d stale reset, %d new files, %d retries, %d permanently failed",
+        "Sweep complete: %d stale reset, %d new files, %d pending re-dispatched, %d retries, %d permanently failed",
         stale_count,
         new_files,
+        redispatched,
         retry_count,
         permanently_failed,
     )
