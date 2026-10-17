@@ -48,10 +48,17 @@ reading order. If you're new, start at the top and work down.
    Domain signal, and why a plugin that adopts events moves its tasks onto the task base classes. Decision recorded in
    [ADR-0030](adr/0030-domain-events-beside-run-rows.md).
 
+## Operating & validation
+
+11. **[WMTS legacy-client validation runbook](wmts-legacy-client-validation.md)** — the step-by-step session for
+    checking the org-wide WMTS service against QGIS and a real legacy KVP client: the two paste-able URLs, API-key
+    setup for private layers, dimension defaults, exception rendering, and the two known risks (JSON-only InfoFormat,
+    capabilities-document size). Run when the WMTS surface changes or before an NMHS rollout.
+
 ## Contributing
 
-11. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
-   conventions.
+12. **[Contributing Guide](contributing.md)** — dev environment, running the stack and tests, branching model, and code
+    conventions.
 
 ## Architecture Decision Records
 
