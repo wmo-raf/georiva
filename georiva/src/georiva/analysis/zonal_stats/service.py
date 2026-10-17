@@ -183,6 +183,34 @@ def get_boundaries_for_collection(collection) -> dict[int, list[AdminBoundary]]:
 
 
 # ---------------------------------------------------------------------------
+# Retention — one rule, read by the pruner and the recovery sweep
+# ---------------------------------------------------------------------------
+
+
+def retained_items_q(collection, now, latest_reference_time, prefix: str = "item__"):
+    """
+    The ``Q`` over an Item's time fields matching what the collection's forecast
+    retention keeps; ``None`` when it keeps everything.
+
+    ``sweep_stale_boundary_stats`` deletes what this excludes and
+    ``sweep_missing_boundary_stats`` recomputes only what this keeps, so the two
+    cannot fight over a row.  ``latest_reference_time`` is the caller's notion of
+    "the latest run" (the pruner's: runs with stats; the sweep's: runs with items).
+    """
+    from django.db.models import Q
+
+    if not collection.is_forecast:
+        return None
+
+    kept = Q()
+    if not collection.retain_past_forecasts:
+        kept &= Q(**{f"{prefix}time__gte": now})
+    if collection.retain_latest_run_only and latest_reference_time:
+        kept &= Q(**{f"{prefix}reference_time": latest_reference_time})
+    return kept or None
+
+
+# ---------------------------------------------------------------------------
 # Availability — what a viewer can actually be shown
 # ---------------------------------------------------------------------------
 

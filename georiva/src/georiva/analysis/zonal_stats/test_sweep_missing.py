@@ -10,6 +10,7 @@ from unittest import mock
 
 from adminboundarymanager.models import AdminBoundary
 from django.contrib.gis.geos import MultiPolygon, Polygon
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -42,6 +43,10 @@ class SweepMissingBoundaryStatsTests(TestCase):
             item=cls.item, variable=cls.tree["variable"], href="x.tif", format=Asset.Format.COG
         )
         cls.age(cls.asset, minutes=60)
+
+    def setUp(self):
+        # The class shares one asset, and a claim outlives the test's transaction.
+        cache.delete(f"zonal-stats-redispatch:{self.asset.pk}")
 
     @staticmethod
     def age(asset, *, minutes):
@@ -122,3 +127,67 @@ class SweepMissingBoundaryStatsTests(TestCase):
     def test_one_failed_enqueue_does_not_stop_the_pass(self):
         with mock.patch(DELAY, side_effect=RuntimeError("broker down")):
             tasks.sweep_missing_boundary_stats()  # must not raise
+
+    def test_a_backed_up_queue_is_not_handed_the_same_asset_every_pass(self):
+        self.assertEqual(self.sweep(), [self.asset.pk])
+        self.assertEqual(self.sweep(), [])
+
+    def test_a_run_that_died_between_levels_is_recovered(self):
+        AdminBoundary.objects.create(
+            name_0="Testland",
+            gid_0="TST",
+            level=2,
+            geom=MultiPolygon(Polygon.from_bbox((-5, -5, 5, 5))),
+        )
+        self.collection.boundary_stats_levels = [1, 2]
+        self.collection.save()
+        self.give_stats()  # level 1 written, level 2 never was
+        self.assertEqual(self.sweep(), [self.asset.pk])
+
+
+class ComputeRetryTests(TestCase):
+    """Only failures a retry can cure are retried; the sweep covers the rest."""
+
+    @classmethod
+    def setUpTestData(cls):
+        AdminBoundary.objects.create(
+            name_0="Testland",
+            gid_0="TST",
+            level=1,
+            geom=MultiPolygon(Polygon.from_bbox((-10, -10, 10, 10))),
+        )
+        tree = make_org_tree(make_organisation("kenya"))
+        tree["collection"].boundary_stats_levels = [1]
+        tree["collection"].save()
+        Asset.objects.filter(pk=tree["asset"].pk).update(format=Asset.Format.COG)
+        cls.asset = tree["asset"]
+
+    def run_task(self, failure):
+        from celery.exceptions import Retry
+
+        service = "georiva.analysis.zonal_stats.service.compute_stats_from_cog_bytes"
+        with (
+            mock.patch("georiva.core.storage.storage.assets.read_bytes", return_value=b""),
+            mock.patch(service, side_effect=failure),
+            mock.patch.object(tasks.compute_boundary_zonal_stats, "retry", side_effect=Retry()) as retry,
+        ):
+            try:
+                tasks.compute_boundary_zonal_stats(self.asset.pk)
+            except Retry:
+                return retry.called, None
+            except Exception as exc:
+                return retry.called, exc
+        return retry.called, None
+
+    def test_a_transient_failure_is_retried(self):
+        from django.db import OperationalError
+
+        retried, _ = self.run_task(OperationalError("connection dropped"))
+        self.assertTrue(retried)
+
+    def test_an_unreadable_cog_is_not_retried(self):
+        from rasterio.errors import RasterioIOError
+
+        retried, raised = self.run_task(RasterioIOError("not a tiff"))
+        self.assertFalse(retried)
+        self.assertIsInstance(raised, RasterioIOError)
