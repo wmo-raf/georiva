@@ -144,6 +144,7 @@ class CoreConfig(AppConfig):
 
         from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
 
+        from . import checks  # noqa: F401  (registers the system checks)
         from .models import Collection, Variable
         from .models.visualization import VariableStyle
 

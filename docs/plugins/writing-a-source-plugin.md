@@ -47,7 +47,12 @@ The Django app label is derived from the package under `src/`, **not** from the
 checkout folder name — so a plugin can be cloned into any directory.
 
 `georiva_plugin_info.json` is installer metadata (name, version, author, and
-`requires_env` listing environment variables the plugin needs).
+`requires_env` listing environment variables the plugin needs, by name only).
+Each entry is `{"name": "...", "required": true|false, "description": "..."}`.
+`manage.py check` (which also runs on web boot via `migrate`) warns `Plugin
+'<app>' requires <NAME>, but it is not set` for every unset `required` entry and
+for malformed entries; optional ones never warn. Set `GEORIVA_STRICT_PLUGIN_ENV=true`
+to make a missing required variable an error.
 
 ### 2. The `DataFeed` subclass — `models.py`
 
