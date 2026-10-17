@@ -1,3 +1,5 @@
+from functools import wraps
+
 from adminboundarymanager.models import AdminBoundarySettings
 from adminboundarymanager.views import load_boundary, preview_boundary
 from django.contrib.auth.decorators import user_passes_test
@@ -6,6 +8,7 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from wagtail import hooks
 from wagtail.admin.menu import Menu, MenuItem, SubmenuMenuItem
+from wagtail.models import Site
 from wagtail.snippets.models import register_snippet
 
 from .menus import publications_menu
@@ -84,6 +87,29 @@ def register_viewset():
     ]
 
 
+def instance_boundary_site():
+    """The one site whose ``AdminBoundarySettings`` governs boundary loads."""
+    return Site.objects.get(is_default_site=True)
+
+
+def on_instance_boundary_settings(view):
+    """Make ``AdminBoundarySettings.for_request`` resolve to the instance site.
+
+    The package reads ``data_source`` and the country list from the settings row
+    of the request's site, i.e. the host's organisation, but writes the single
+    instance-wide ``AdminBoundary`` table. Wagtail caches the request's site on
+    the request, so pinning it before the view runs pins every settings read in
+    it without copying the view.
+    """
+
+    @wraps(view)
+    def pinned(request, *args, **kwargs):
+        request._wagtail_site = instance_boundary_site()
+        return view(request, *args, **kwargs)
+
+    return pinned
+
+
 # The package gates its two views on "holds any page permission", which every
 # editor does, yet a load rewrites the instance-wide AdminBoundary table
 # (SHARED_REFERENCE_DATA, written by the instance admin alone, ADR 0011). The
@@ -94,22 +120,26 @@ def register_viewset():
 def urlconf_boundary_loader_superuser_only():
     superuser_only = user_passes_test(lambda user: user.is_superuser)
     return [
-        path("load-boundary/", superuser_only(load_boundary), name="adminboundarymanager_load_boundary"),
+        path(
+            "load-boundary/",
+            superuser_only(on_instance_boundary_settings(load_boundary)),
+            name="adminboundarymanager_load_boundary",
+        ),
         path("preview-boundary/", superuser_only(preview_boundary), name="adminboundarymanager_preview_boundary"),
     ]
 
 
-def boundary_settings_url():
-    """Where Wagtail edits ``AdminBoundarySettings``.
+def boundary_settings_url(site=None):
+    """Where Wagtail edits ``AdminBoundarySettings`` (for ``site``, if given).
 
     Derived from the model's own meta rather than spelled out, so it stays
     correct if the app or model is ever renamed — and so it matches, character
     for character, the URL ``adminboundarymanager`` builds for the same page.
     """
-    return reverse(
-        "wagtailsettings:edit",
-        args=[AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name],
-    )
+    args = [AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name]
+    if site is not None:
+        args.append(site.pk)
+    return reverse("wagtailsettings:edit", args=args)
 
 
 class SuperuserMenuItem(MenuItem):
@@ -125,6 +155,18 @@ class SuperuserMenuItem(MenuItem):
         return bool(request.user.is_superuser)
 
 
+class InstanceBoundarySettingsMenuItem(SuperuserMenuItem):
+    """Links to the instance site's settings, the row the loader actually reads."""
+
+    @property
+    def url(self):
+        return boundary_settings_url(instance_boundary_site())
+
+    @url.setter
+    def url(self, value):
+        pass
+
+
 # Boundaries are configuration, not data anybody browses: a Settings submenu,
 # not a top-level sidebar group. The two pages come from adminboundarymanager,
 # whose own ViewSetGroup existed only to draw the menu we are replacing — we no
@@ -138,12 +180,9 @@ def register_boundaries_menu_item():
                 SuperuserMenuItem(
                     _("Load Data"), reverse_lazy("adminboundarymanager_preview_boundary"), icon_name="upload", order=10
                 ),
-                SuperuserMenuItem(
+                InstanceBoundarySettingsMenuItem(
                     _("Settings"),
-                    reverse_lazy(
-                        "wagtailsettings:edit",
-                        args=[AdminBoundarySettings._meta.app_label, AdminBoundarySettings._meta.model_name],
-                    ),
+                    "#",
                     icon_name="cogs",
                     order=20,
                 ),
