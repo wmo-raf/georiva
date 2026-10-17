@@ -562,12 +562,12 @@ GEORIVA_PROCESSING_LOG_LEVEL = env.str("GEORIVA_PROCESSING_LOG_LEVEL", "INFO")
 # "text" (default) or "json". JSON makes the Correlation id a queryable field.
 GEORIVA_LOG_FORMAT = env.str("GEORIVA_LOG_FORMAT", "text")
 
-# How a chained task treats missing propagated context (ADR 0030): "warn" logs an
-# error, counts it and continues as ``system:unpropagated``; "strict" raises.
-# Production starts on warn — tasks already queued at deploy time carry no
-# headers — and flips to strict once the unpropagated metric has read zero for a
-# full release. Tests run strict.
-GEORIVA_TASK_CONTEXT_MODE = env.str("GEORIVA_TASK_CONTEXT_MODE", "warn")
+# How a chained task treats missing propagated context (ADR 0030): "strict" raises;
+# "warn" logs an error, counts it and continues as ``system:unpropagated``.
+# Strict is the default — the unpropagated metric read zero for a full release.
+# Drain the queues before upgrading: tasks queued by an older release carry no
+# headers. Set "warn" to restore the lenient behaviour.
+GEORIVA_TASK_CONTEXT_MODE = env.str("GEORIVA_TASK_CONTEXT_MODE", "strict")
 
 LOGGING = {
     "version": 1,
