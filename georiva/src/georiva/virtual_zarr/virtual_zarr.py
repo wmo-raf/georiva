@@ -21,7 +21,6 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-import rasterio
 import xarray as xr
 from async_tiff.store import S3Store as AsyncS3Store
 from obspec_utils.registry import ObjectStoreRegistry
@@ -269,8 +268,7 @@ class VirtualZarrBuilder:
         logger.info("Scanning %d COG headers…", len(url_df))
         combined = self._build_virtual_dataset(url_df, per_cog_check)
 
-        logger.info("Reading geotransform from sample COG…")
-        combined = self._assign_geo_coords(combined, url_df.iloc[0]["url"])
+        combined = self._assign_geo_coords(combined)
 
         raw_var = list(combined.data_vars)[0]
         if raw_var != variable_name:
@@ -312,19 +310,47 @@ class VirtualZarrBuilder:
             virtual_datasets.append(vds)
         return xr.concat(virtual_datasets, dim="time")
 
-    def _assign_geo_coords(self, ds: xr.Dataset, sample_url: str) -> xr.Dataset:
+    @staticmethod
+    def _assign_geo_coords(ds: xr.Dataset) -> xr.Dataset:
         """
-        Read the affine geotransform from one COG and attach lat/lon coords.
+        Attach lat/lon coords from the GeoTIFF tags the parser already carries.
 
-        Uses a single HTTP request to read the IFD — no pixel data is fetched.
+        virtual-tiff leaves ``model_pixel_scale`` and ``model_tiepoint`` on the
+        variable, so no second read of a sample COG is needed.  Deliberately
+        not a GDAL read: ``/vsicurl/`` remembers a failed lookup for the life
+        of the worker process, which a single 503 would turn into a permanently
+        FAILED manifest (#406).
+
         Pixel-centre convention: offset by +0.5 pixel from the edge origin.
+        Only north-up grids are described by these tags; a
+        ``model_transformation`` (rotation/shear) raises rather than yielding
+        wrong coordinates.
         """
-        with rasterio.open(sample_url) as src:
-            transform = src.transform
-            height, width = src.height, src.width
+        attrs = ds[list(ds.data_vars)[0]].attrs
+        scale = attrs.get("model_pixel_scale")
+        tiepoint = attrs.get("model_tiepoint")
+        if scale is None or tiepoint is None:
+            raise ValueError("COG carries no GeoTIFF georeferencing (model_pixel_scale / model_tiepoint)")
+        if attrs.get("model_transformation") is not None:
+            raise ValueError("COG has a rotated/sheared model_transformation; north-up grids only")
 
-        lons = transform.c + transform.a * (np.arange(width) + 0.5)
-        lats = transform.f + transform.e * (np.arange(height) + 0.5)
+        if len(tiepoint) != 6:
+            raise ValueError(f"expected one GeoTIFF tiepoint, found {len(tiepoint) / 6:g}")
+
+        scale_x, scale_y = scale[0], scale[1]
+        raster_i, raster_j, _, geo_x, geo_y, _ = tiepoint
+        origin_x = geo_x - raster_i * scale_x
+        origin_y = geo_y + raster_j * scale_y
+
+        # PixelIsPoint (raster_type 2): the tiepoint names a pixel centre, not
+        # its corner.  GDAL shifts it half a pixel to the corner, as the old
+        # rasterio read did; do the same so coordinates do not move.
+        if attrs.get("raster_type") == 2:
+            origin_x -= scale_x / 2
+            origin_y += scale_y / 2
+
+        lons = origin_x + scale_x * (np.arange(ds.sizes["x"]) + 0.5)
+        lats = origin_y - scale_y * (np.arange(ds.sizes["y"]) + 0.5)
 
         return ds.assign_coords(lat=("y", lats), lon=("x", lons)).swap_dims({"y": "lat", "x": "lon"})
 
