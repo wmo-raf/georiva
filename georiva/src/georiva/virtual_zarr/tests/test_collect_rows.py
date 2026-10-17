@@ -72,6 +72,22 @@ class CollectRowsTests(TestCase):
 
         self.assertEqual(times, [T0, T0 + timedelta(hours=6)])
 
+    def test_unflagged_collection_with_reference_times_uses_newest_run(self):
+        self._item(0, 0)
+        self._item(6, 6)
+
+        self.assertEqual([r.time for r in self._collect()], [T0 + timedelta(hours=6)])
+
+    def test_items_without_reference_time_are_logged_and_left_out(self):
+        self._item(0)
+        self._item(6, 6)
+
+        with self.assertLogs("georiva.virtual_zarr.tasks", level="WARNING") as logs:
+            times = [r.time for r in self._collect()]
+
+        self.assertEqual(times, [T0 + timedelta(hours=6)])
+        self.assertIn("without a reference_time", logs.output[0])
+
     def test_observational_collection_keeps_every_item(self):
         self._item(0)
         self._item(6)
