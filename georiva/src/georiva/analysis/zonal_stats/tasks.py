@@ -240,7 +240,8 @@ def sweep_missing_boundary_stats() -> None:
                 if latest_ref:
                     assets = assets.filter(item__reference_time=latest_ref)
 
-        for asset_id in assets.order_by("-item__time", "pk").values_list("pk", flat=True)[: MISSING_STATS_BATCH - dispatched]:
+        room = MISSING_STATS_BATCH - dispatched
+        for asset_id in assets.order_by("-item__time", "pk").values_list("pk", flat=True)[:room]:
             try:
                 compute_boundary_zonal_stats.delay(asset_id)
                 dispatched += 1

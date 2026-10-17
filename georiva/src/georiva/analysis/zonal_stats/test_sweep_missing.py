@@ -71,7 +71,9 @@ class SweepMissingBoundaryStatsTests(TestCase):
     def test_history_beyond_the_window_is_not_scanned(self):
         self.item.delete()
         old = Item.objects.create(collection=self.collection, time=timezone.now() - timedelta(days=30))
-        old_asset = Asset.objects.create(item=old, variable=self.tree["variable"], href="o.tif", format=Asset.Format.COG)
+        old_asset = Asset.objects.create(
+            item=old, variable=self.tree["variable"], href="o.tif", format=Asset.Format.COG
+        )
         self.age(old_asset, minutes=60)
         self.assertEqual(self.sweep(), [])
 
