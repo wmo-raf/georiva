@@ -47,11 +47,8 @@ without them — so delaying them delays nothing a reader can observe.
 
 Their recovery stories differ, and neither is a reason to keep them on the
 critical path. A dropped manifest build is re-dispatched by the virtual-Zarr
-sweep on its next pass. A dropped zonal-stats task is not: `sweep_stale_boundary_stats`
-prunes rows, it does not re-issue work, so recovery there is the
-`compute_boundary_stats` backfill command an operator runs (#402). That gap is
-orthogonal to queue routing — it was equally true on `georiva-ingestion` — but
-it should not be mistaken for an automatic safety net.
+sweep on its next pass. A dropped zonal-stats task is re-issued by `sweep_missing_boundary_stats`, which
+re-dispatches COG assets in a recent window that have no `BoundaryZonalStats` rows (#402).
 
 ## Decision
 
@@ -150,9 +147,7 @@ headroom is small and it trades an availability delay for OOM risk.
   against that clock, so a backlog deeper than 30 minutes can still produce a
   second dispatch — the per-dispatch claim is what keeps that from becoming a
   second *build*.
-- Zonal-stats recovery remains manual (`compute_boundary_stats`); there is no
-  sweep that re-issues a dropped `compute_boundary_zonal_stats`. Unchanged by
-  this ADR — pre-existing, and equally true on `georiva-ingestion` — but it is
-  why the deferrability argument above rests on what a reader can observe
-  rather than on an automatic safety net. Tracked as #402.
+- Zonal-stats recovery is `sweep_missing_boundary_stats` (#402): absence of rows is the
+  signal, bounded by a recency window and the pruner's retention rules. Older gaps
+  still need the `compute_boundary_stats` backfill.
 - No new queue, no new worker, no new container.

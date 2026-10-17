@@ -44,8 +44,8 @@ TIME_CRITICAL = {
 #: Bookkeeping derived from an ingested COG. Nothing a reader can observe waits
 #: on it — tiles, STAC and EDR all answer without it — so it is deferrable.
 #: (Recovery differs: a dropped manifest build is re-dispatched by the
-#: virtual-Zarr sweep; a dropped zonal-stats task needs the
-#: ``compute_boundary_stats`` backfill — #402. Orthogonal to routing.)
+#: virtual-Zarr sweep; a dropped zonal-stats task is re-issued
+#: by ``sweep_missing_boundary_stats`` — #402. Orthogonal to routing.)
 DEFERRABLE_FOLLOWUPS = {
     "georiva.analysis.zonal_stats.tasks.compute_boundary_zonal_stats",
     "georiva.virtual_zarr.tasks.build_virtual_zarr_manifest",
