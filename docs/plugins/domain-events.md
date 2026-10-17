@@ -121,9 +121,12 @@ def publish(self, run_id): ...
 | `SweepTask`    | A recovery sweep (`sweep_name="…"`). Starts a `sweep:<name>` chain.                      |
 | `ReadSideTask` | Artefact tasks. Inherit a context when present, never require one, write no events.      |
 
-Every base resets the context when the task ends, however it ends. With `GEORIVA_TASK_CONTEXT_MODE=warn` (the production
-default) a chained task with no headers logs an error, counts it and continues as `system:unpropagated`; with `strict`
-(tests) it raises.
+Every base resets the context when the task ends, however it ends. With `GEORIVA_TASK_CONTEXT_MODE=strict` (the default) a
+chained task with no headers raises; with `warn` it logs an error, counts it and continues as `system:unpropagated`.
+`ReadSideTask` stays exempt in both modes.
+
+**Upgrading:** drain the Celery queues before deploying the strict default. Tasks queued by an older release carry no
+headers and would fail. If you cannot drain, set `GEORIVA_TASK_CONTEXT_MODE=warn` for the upgrade, then remove it.
 
 ## 6. Test it
 
