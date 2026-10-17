@@ -233,9 +233,7 @@ def sweep_missing_boundary_stats() -> None:
                 assets = assets.filter(item__time__gte=now)
             if collection.retain_latest_run_only:
                 latest_ref = (
-                    collection.items.order_by("-reference_time")
-                    .values_list("reference_time", flat=True)
-                    .first()
+                    collection.items.order_by("-reference_time").values_list("reference_time", flat=True).first()
                 )
                 if latest_ref:
                     assets = assets.filter(item__reference_time=latest_ref)
