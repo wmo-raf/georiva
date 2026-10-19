@@ -142,7 +142,7 @@ need to declare dev plugins in `plugins.toml`; every subdirectory of `dev-plugin
 **Step 3** — start the stack with the override:
 
 ```bash
-make dev-up OV=1
+just up    # picks up docker-compose.override.yml automatically when it exists
 # or: docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 ```
 
@@ -154,8 +154,8 @@ adds them to `INSTALLED_APPS`, so edits to plugin source are reflected immediate
 **Step 4** — run migrations for your plugin's models:
 
 ```bash
-make dev-makemigrations   # create migration files for new models
-make dev-migrate          # apply them
+just makemigrations   # create migration files for new models
+just migrate          # apply them
 ```
 
 > **Local (non-Docker) tooling:** a plugin checked out under `dev-plugins/` is also a member of the

@@ -52,7 +52,7 @@ There is no plugin-only Docker image to build.
 
 1. **Get the core dev stack running.** Clone
    [GeoRiva](https://github.com/wmo-raf/georiva) and build/run it per its README
-   (`make dev-build`).
+   (`just build`).
 
 2. **Clone this plugin into the core repo's `dev-plugins/` folder.** The dev stack
    bind-mounts that whole folder and installs every plugin inside it, so there is
@@ -78,9 +78,9 @@ There is no plugin-only Docker image to build.
 3. **Start the stack with the override and run your migrations:**
 
    ```bash
-   make dev-up OV=1
-   make dev-makemigrations          # generates this plugin's migrations
-   make dev-migrate
+   just up                          # picks up docker-compose.override.yml automatically
+   just makemigrations              # generates this plugin's migrations
+   just migrate
    ```
 
 4. In the GeoRiva admin, open **Automated Sources → Set up wizard** and choose

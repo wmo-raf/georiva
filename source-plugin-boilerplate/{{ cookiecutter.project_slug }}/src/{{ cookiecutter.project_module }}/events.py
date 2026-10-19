@@ -59,7 +59,7 @@ def on_run_closed(sender, run, event=None, **kwargs):
 #         from .events import on_run_closed
 #         run_ingestion_closed.connect(on_run_closed, dispatch_uid="{{ cookiecutter.project_module }}.on_run_closed")
 #
-# Migration: after `make dev-makemigrations` generates the CreateModel, add the
+# Migration: after `just makemigrations` generates the CreateModel, add the
 # database-level append-only protection to the operations list:
 #
 #     from georiva.events.operations import AppendOnlyTable

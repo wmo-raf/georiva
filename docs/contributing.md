@@ -20,22 +20,25 @@ good starting point if you're looking for areas where input is especially valuab
 - Docker and Docker Compose (v2+)
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/) (core declares `requires-python = ">=3.12"`; the app runs
   inside Docker, and uv manages dependencies + the local dev virtualenv)
+- [just](https://just.systems/man/en/packages.html) 1.58+, the task runner for dev recipes (`brew install just`,
+  `cargo install just`, or your distro's package; `uv tool install rust-just` also works). Optional, since every recipe
+  is a thin wrapper you can run by hand, but the docs use it throughout
 - Node.js 20+ (for frontend tooling, if applicable)
 - Git
 
 ### Running the Stack
 
-The whole stack runs in Docker, driven by the `Makefile`. For development (hot-reload, source mounted):
+The whole stack runs in Docker, driven by [just](https://just.systems) recipes (`just` lists them all). For development (hot-reload, source mounted):
 
 ```bash
-make dev-build       # build dev images
-make dev-up          # start the stack with auto-reload
-make dev-logs        # tail all service logs
-make dev-app-logs    # tail just the Django app
-make dev-down        # stop
+just build           # build dev images
+just up              # start the stack with auto-reload (`just up -d` to detach)
+just logs            # tail all service logs
+just logs app        # tail just the Django app
+just down            # stop
 ```
 
-Equivalently, without the Makefile:
+Equivalently, without just:
 
 ```bash
 cp .env.sample .env  # then edit required values
@@ -51,16 +54,16 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/). The core package
 dependencies live in `georiva/pyproject.toml` (`[project.dependencies]`) and are pinned in `georiva/uv.lock` (both
 committed — there is no `requirements.txt`). The Docker image installs from that lockfile.
 
-Add or remove core dependencies with the Make targets — they edit `georiva/pyproject.toml` + `georiva/uv.lock`, then
+Add or remove core dependencies with the `just` recipes — they edit `georiva/pyproject.toml` + `georiva/uv.lock`, then
 refresh the local venv:
 
 ```bash
-make uv-add pkg="some-package>=1.2"    # add a runtime dependency
-make uv-add-dev pkg=pytest             # add a dev-only dependency
-make uv-remove pkg=some-package        # remove one
+just uv-add "some-package>=1.2"    # add a runtime dependency
+just uv-add-dev pytest             # add a dev-only dependency
+just uv-remove some-package        # remove one
 ```
 
-Commit `georiva/pyproject.toml` and `georiva/uv.lock` together, then rebuild the image (`make dev-build`) so the
+Commit `georiva/pyproject.toml` and `georiva/uv.lock` together, then rebuild the image (`just build`) so the
 container picks up the change.
 
 For local (non-Docker) work — IDE autocomplete, type-checking, running tests outside Docker — `uv sync --all-packages`
@@ -72,9 +75,9 @@ See the [Plugin Installation Guide](plugins/installation.md#local-development) f
 `georiva` inside the container is an alias for `python manage.py`. Useful commands:
 
 ```bash
-make dev-shell                                   # shell into the app container
-make dev-migrate                                 # apply migrations
-make dev-makemigrations                          # create migrations
+just shell                                       # shell into the app container
+just migrate                                     # apply migrations
+just makemigrations                              # create migrations
 docker compose exec georiva python manage.py createsuperuser
 docker compose exec georiva python manage.py setup_minio       # buckets, policies, Redis notifications
 ```
@@ -84,7 +87,7 @@ docker compose exec georiva python manage.py setup_minio       # buckets, polici
 Tests run inside the app container with Django's test runner:
 
 ```bash
-make dev-shell
+just shell
 georiva test            # or: python manage.py test
 ```
 

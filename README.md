@@ -135,6 +135,11 @@ The dev setup uses a compose override that mounts your source code for hot reloa
     - **Celery worker** with auto-reload
     - **Source code mounted** from `./georiva` into the container
 
+   Or, with [just](https://just.systems) installed (optional; see
+   [docs/contributing.md](docs/contributing.md#prerequisites)), `just up -d` runs the same command, adds
+   `docker-compose.override.yml` when present, and `just` lists the other dev recipes (`logs`, `shell`, `migrate`,
+   `test`, ...).
+
    Optionally, create a shortcut in your shell:
 
    ```bash
@@ -160,7 +165,7 @@ The dev setup uses a compose override that mounts your source code for hot reloa
 
 **Managing dependencies:** GeoRiva uses [uv](https://docs.astral.sh/uv/). Core dependencies live in
 `georiva/pyproject.toml` and are locked in `georiva/uv.lock` (there is no `requirements.txt`). Add packages with
-`make uv-add pkg="<package>"`, then rebuild. For local IDE/test tooling outside Docker, run `uv sync --all-packages`
+`just uv-add "<package>"`, then rebuild. For local IDE/test tooling outside Docker, run `uv sync --all-packages`
 at the repo root. See [docs/contributing.md](docs/contributing.md#managing-python-dependencies-uv) for details.
 
 ### Installing Plugins
@@ -177,7 +182,7 @@ docker compose build georiva
 `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` is not set to `"true"`.
 
 **Local development** — clone plugin repos into `dev-plugins/` and run with the dev override
-(`make dev-up OV=1`); each subdirectory is auto-discovered and editable-installed. See the
+(`just up`, which picks up `docker-compose.override.yml` automatically); each subdirectory is auto-discovered and editable-installed. See the
 [Plugin Installation Guide](docs/plugins/installation.md#local-development).
 
 ## Project Structure
