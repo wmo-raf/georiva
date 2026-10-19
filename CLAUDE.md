@@ -89,24 +89,26 @@ georiva/src/georiva/          # Main Django application
 
 ## Build & Run
 
-All commands via Makefile. The app runs entirely in Docker.
+Dev tasks are `just` recipes (run `just` to list them). The app runs entirely in Docker. Production uses plain
+`docker compose`.
 
 ```bash
 # Development
-make dev-build                     # Build dev images
-make dev-up                        # Start with hot-reload
-make dev-down                      # Stop
-make dev-logs                      # All service logs
-make dev-app-logs                  # Django app logs
-make dev-worker-ingestion-logs     # Ingestion worker logs
-make dev-shell                     # Shell into app container
-make dev-migrate                   # Run migrations
-make dev-makemigrations            # Create migrations
+just build                         # Build dev images
+just up                            # Start with hot-reload (`just up -d` to detach)
+just down                          # Stop
+just logs                          # All service logs
+just logs app                      # One service (app, default, ingestion, processing, beat, titiler, or any compose name)
+just shell                         # Shell into app container (`just shell ingestion` for another)
+just migrate                       # Run migrations
+just makemigrations                # Create migrations
+just test georiva.ingestion.tests  # Django tests in the container (extra args pass through)
+just titiler-test                  # Titiler tests, on the host
 
-# Production
-make build && make up              # Build and start
-make logs                          # All logs
-make shell                         # Shell into container
+# Production (plain compose, no just)
+docker compose build && docker compose up -d
+docker compose logs -f
+docker compose exec georiva bash
 ```
 
 **Inside container**: `georiva` is the management command (alias for `python manage.py`).
@@ -184,7 +186,7 @@ Defined in `api/urls.py`:
   slug (`_forti`, not `forti`), so it can never shadow a tenant's prefix — but it is not a tenancy boundary, and
   whatever answers requests from it owns that check (ADR 0027)
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
-  `requirements.txt`). Add via `make uv-add pkg="..."`; `uv sync --all-packages` builds the local dev env
+  `requirements.txt`). Add via `just uv-add "..."`; `uv sync --all-packages` builds the local dev env
 - **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no
   `setup.py`/`requirements/`). For dev, cloned into `dev-plugins/` (gitignored); discovery derives the Django app
   name from the package under `src/`, not the folder name
@@ -214,8 +216,8 @@ Check these when working on related areas:
 **IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that
 branch for the reminder of the session
 
-**IMPORTANT**: Run `make format` before committing Python changes — it sorts imports, applies ruff's safe fixes and
-formats. CI runs `make lint` (the same checks, reporting only) and fails the PR on any difference. Rules live in
+**IMPORTANT**: Run `just format` before committing Python changes — it sorts imports, applies ruff's safe fixes and
+formats. CI runs `just lint` (the same checks, reporting only) and fails the PR on any difference. Rules live in
 `ruff.toml` at the repo root and cover core and `titiler-app/` together; migrations and
 `source-plugin-boilerplate/` are excluded.
 

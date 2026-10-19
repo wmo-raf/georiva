@@ -48,7 +48,7 @@ jobs:
     services:
       # The app's own database image. Tests connect to it directly rather than
       # through PgBouncer, which cannot CREATE DATABASE — the same reason
-      # `make dev-test` overrides DATABASE_URL locally.
+      # `just test` overrides DATABASE_URL locally.
       postgres:
         image: timescale/timescaledb-ha:pg18
         env:
@@ -197,8 +197,12 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      - uses: extractions/setup-just@v2
+        with:
+          just-version: "1.58.0"
+
       - name: Run Titiler test suite
-        run: make titiler-test
+        run: just titiler-test
 
   lint:
     name: Lint
@@ -217,8 +221,12 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      # `make lint` and not a bare ruff invocation, so that what CI checks and
-      # what `make format` fixes can never drift apart: both read the pinned
-      # version from one place in the Makefile.
+      - uses: extractions/setup-just@v2
+        with:
+          just-version: "1.58.0"
+
+      # `just lint` and not a bare ruff invocation, so that what CI checks and
+      # what `just format` fixes can never drift apart: both read the pinned
+      # version from one place in the justfile.
       - name: Check lint and formatting
-        run: make lint
+        run: just lint
