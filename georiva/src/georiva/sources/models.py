@@ -842,7 +842,9 @@ class FetchedFile(models.Model):
     """Per-file record within a FetchRun."""
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
+        # Planned, not yet reached. "Waiting", not "Queued": queued is the
+        # loader's remote-provider state.
+        PENDING = "pending", "Waiting"
         FETCHING = "fetching", "Fetching"
         STORED = "stored", "Stored"
         SKIPPED = "skipped", "Skipped"
@@ -871,6 +873,11 @@ class FetchedFile(models.Model):
 
     class Meta:
         ordering = ["id"]
+        constraints = [
+            # One row per file per run: the plan is created up front and every
+            # later step walks that row (#474). The same path across runs is history.
+            models.UniqueConstraint(fields=["fetch_run", "file_path"], name="unique_fetched_file_per_run"),
+        ]
 
     def mark_fetching(self):
         from django.utils import timezone

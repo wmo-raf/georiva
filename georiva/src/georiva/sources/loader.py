@@ -188,6 +188,22 @@ class Loader:
             return None
         return payload if isinstance(payload, dict) else None
 
+    def _create_plan_rows(self, fetch_run, requests):
+        """One PENDING FetchedFile per request, in request order, in one insert.
+        Returned in the same order as `requests`."""
+        from georiva.sources.models import FetchedFile
+
+        return FetchedFile.objects.bulk_create(
+            [
+                FetchedFile(
+                    fetch_run=fetch_run,
+                    file_path=self._get_storage_path(request),
+                    request_payload=self._request_payload(request),
+                )
+                for request in requests
+            ]
+        )
+
     def check_new_files(self) -> list[CandidateFile]:
         """
         Read-only dry run (PRD #217): ask the source what it would fetch for
@@ -243,6 +259,7 @@ class Loader:
 
         result = LoaderRunResult()
         fetch_run = None
+        stop_reason = None
 
         if self.data_feed:
             fetch_run = FetchRun.objects.create(
@@ -288,18 +305,22 @@ class Loader:
                 result.finish()
                 return result
 
+            # Persist the whole plan before anything is fetched: one PENDING row
+            # per request, in request order, so the run page can show what is
+            # left and a run that stops still says which requests it meant (#474).
+            rows = self._create_plan_rows(fetch_run, requests) if fetch_run else [None] * len(requests)
+
             # Filter already-fetched files; copy from another collection if available
-            requests_to_fetch = []
-            for request in requests:
+            to_fetch = []
+            considered = 0
+            for request, ff in zip(requests, rows, strict=True):
+                considered += 1
                 storage_path = self._get_storage_path(request)
 
                 if skip_existing and self._already_exists(request):
                     result.files_skipped += 1
                     self.logger.debug(f"Skipping (exists): {request.filename}")
-                    if fetch_run:
-                        ff = FetchedFile.objects.create(
-                            fetch_run=fetch_run, file_path=storage_path, request_payload=self._request_payload(request)
-                        )
+                    if ff:
                         ff.mark_skipped(reason="already exists")
                     continue
 
@@ -307,17 +328,11 @@ class Loader:
                     existing_path = self._find_existing_catalog_path(request)
                     if existing_path:
                         dest_path = storage_path
-                        # The record goes in *before* the object does: the copy raises a
-                        # Bucket notification, and the consumer finds this file's chain by
+                        # The record is FETCHING *before* the object lands: the copy raises
+                        # a Bucket notification, and the consumer finds this file's chain by
                         # looking up its FetchedFile. A record written afterwards can lose
                         # that race and leave the ingestion without its fetch.
-                        ff = None
-                        if fetch_run:
-                            ff = FetchedFile.objects.create(
-                                fetch_run=fetch_run,
-                                file_path=dest_path,
-                                request_payload=self._request_payload(request),
-                            )
+                        if ff:
                             ff.mark_fetching()
                         try:
                             self._tier_bucket.copy(existing_path, dest_path)
@@ -328,30 +343,31 @@ class Loader:
                                 ff.mark_stored(bytes_transferred=0)
                         except Exception as e:
                             self.logger.warning(f"Copy failed, will re-download: {e}")
-                            if ff:
-                                ff.delete()  # the re-download below records its own
-                            requests_to_fetch.append(request)
+                            # The re-download below walks this same row again.
+                            to_fetch.append((request, ff))
                         continue
 
-                requests_to_fetch.append(request)
+                to_fetch.append((request, ff))
 
-                if max_files and len(requests_to_fetch) >= max_files:
+                if max_files and len(to_fetch) >= max_files:
                     self.logger.info(f"Reached max_files limit ({max_files})")
                     break
 
-            self.logger.info(f"{len(requests_to_fetch)} to fetch, {result.files_skipped} skipped")
+            if fetch_run and considered < len(requests):
+                # max_files cut the plan short: drop the rows the run will never
+                # reach, so requested = fetched + skipped + failed still holds.
+                FetchedFile.objects.filter(pk__in=[ff.pk for ff in rows[considered:]]).delete()
+                result.files_requested = considered
+                fetch_run.files_requested = considered
+                fetch_run.save(update_fields=["files_requested"])
+
+            self.logger.info(f"{len(to_fetch)} to fetch, {result.files_skipped} skipped")
 
             # Fetch files
-            for i, request in enumerate(requests_to_fetch, 1):
-                self.logger.info(f"[{i}/{len(requests_to_fetch)}] Fetching {request.filename}")
+            for i, (request, ff) in enumerate(to_fetch, 1):
+                self.logger.info(f"[{i}/{len(to_fetch)}] Fetching {request.filename}")
 
-                ff = None
-                if fetch_run:
-                    ff = FetchedFile.objects.create(
-                        fetch_run=fetch_run,
-                        file_path=self._get_storage_path(request),
-                        request_payload=self._request_payload(request),
-                    )
+                if ff:
                     ff.mark_fetching()
 
                 fetch_result = self._fetch_and_store(request)
@@ -383,6 +399,7 @@ class Loader:
         except Exception as e:
             self.logger.exception(f"Loader run failed: {e}")
             result.add_error(str(e))
+            stop_reason = f"{type(e).__name__}: {e}"
 
         finally:
             # Cleanup
@@ -395,6 +412,17 @@ class Loader:
             result.finish()
 
             if fetch_run:
+                # No row stays Waiting or Fetching once its run has ended: a request
+                # the run never reached, or was in the middle of when it stopped, is
+                # a failure, and retryable like any other.
+                reason = stop_reason or "the run ended"
+                for status, error in (
+                    (FetchedFile.Status.PENDING, f"not attempted: the run stopped ({reason})"),
+                    (FetchedFile.Status.FETCHING, f"interrupted: the run stopped while fetching ({reason})"),
+                ):
+                    result.files_failed += fetch_run.fetched_files.filter(status=status).update(
+                        status=FetchedFile.Status.FAILED, error=error, completed_at=timezone.now()
+                    )
                 fetch_run.mark_completed(
                     files_fetched=result.files_fetched,
                     files_skipped=result.files_skipped,
