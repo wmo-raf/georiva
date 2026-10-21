@@ -155,7 +155,6 @@ class HTTPFetchStrategy(BaseFetchStrategy):
                 for chunk in response.iter_content(chunk_size=self.chunk_size):
                     if self.clock() > deadline:
                         response.close()
-                        f.close()
                         local_path.unlink(missing_ok=True)
                         return result.fail(self.file_timeout_error(), FailureScope.TRANSIENT)
                     if chunk:

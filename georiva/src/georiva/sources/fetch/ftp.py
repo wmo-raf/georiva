@@ -172,15 +172,18 @@ class FTPFetchStrategy(BaseFetchStrategy):
         start_time = time.time()
         deadline = self.clock() + self.max_file_seconds
 
-        def write(data: bytes) -> None:
+        def check_deadline() -> None:
             if self.clock() > deadline:
                 raise _FileTimeout()
+
+        def write(data: bytes) -> None:
+            check_deadline()
             local_file.write(data)
 
         try:
             with local_file:
                 if self.protocol == "sftp":
-                    self._sftp.getfo(remote_path, local_file, callback=lambda done, total: write(b""))
+                    self._sftp.getfo(remote_path, local_file, callback=lambda done, total: check_deadline())
                 else:
                     self._connection.retrbinary(f"RETR {remote_path}", write)
 
