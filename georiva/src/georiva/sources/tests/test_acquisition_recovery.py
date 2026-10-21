@@ -7,16 +7,17 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from georiva.core.models import Catalog
+from georiva.core.models import Catalog, Collection
 from georiva.ingestion.models import LoaderJob
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.acquisition_recovery import (
     INTERRUPTED_FILE_ERROR,
-    MAX_AUTO_RESUMES,
+    dispatch_due_retries,
     sweep_stale_fetch_runs,
 )
 from georiva.sources.acquisition_tracking import with_live_counters
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
+from georiva.sources.retry_policy import max_retries
 
 
 def _make_feed(slug="test"):
@@ -122,56 +123,89 @@ class SweepStaleFetchRunsTests(TestCase):
         self.assertEqual(self.feed.last_run_at, newer_report)
         self.assertEqual(self.feed.last_run_status, "success")
 
-    def test_resume_enqueued_with_lineage(self, _executor):
+    def _interrupt_and_come_due(self, run):
+        """Sweep a stale run, then let its backoff pass."""
+        sweep_stale_fetch_runs()
+        FetchRun.objects.filter(pk=run.pk).update(retry_due_at=timezone.now() - timedelta(minutes=1))
+
+    def test_interrupted_run_is_due_for_a_retry_after_the_first_backoff(self, _executor):
         run = _make_run(self.feed, hours_ago=7)
 
         result = sweep_stale_fetch_runs()
 
-        self.assertEqual(result["resumed"], 1)
-        resume_job = LoaderJob.objects.get(resume_of_run=run)
-        self.assertEqual(resume_job.data_feed, self.feed)
-        self.assertIsNone(resume_job.user)
-
-    def test_resume_cap_stops_a_crash_loop(self, _executor):
-        original = _make_run(self.feed, hours_ago=30, status="interrupted")
-        first_resume = _make_run(
-            self.feed,
-            hours_ago=20,
-            status="interrupted",
-            resumed_from=original,
-        )
-        second_resume = _make_run(
-            self.feed,
-            hours_ago=7,
-            resumed_from=first_resume,
-        )
-        self.assertEqual(second_resume.resume_generation(), MAX_AUTO_RESUMES)
-
-        result = sweep_stale_fetch_runs()
-
-        second_resume.refresh_from_db()
-        self.assertEqual(second_resume.status, FetchRun.Status.INTERRUPTED)
+        run.refresh_from_db()
         self.assertEqual(result["resumed"], 0)
+        self.assertEqual(run.retry_due_at, run.finished_at + timedelta(minutes=5))
         self.assertFalse(LoaderJob.objects.exists())
 
-    def test_no_resume_when_a_newer_run_exists(self, _executor):
+    def test_due_retry_is_dispatched_once_with_lineage_and_scope(self, _executor):
+        run = _make_run(self.feed, hours_ago=7)
+        self._interrupt_and_come_due(run)
+
+        first = sweep_stale_fetch_runs()
+        second = sweep_stale_fetch_runs()
+
+        job = LoaderJob.objects.get(resume_of_run=run)
+        self.assertEqual((first["resumed"], second["resumed"]), (1, 0))
+        self.assertEqual(job.data_feed, self.feed)
+        self.assertIsNone(job.user)
+
+    def test_dispatch_is_scoped_to_the_runs_collection(self, _executor):
+        run = _make_run(self.feed, hours_ago=7)
+        collection = Collection.objects.create(catalog=self.feed.catalog, name="C", slug="c")
+        FetchRun.objects.filter(pk=run.pk).update(collection=collection)
+        self._interrupt_and_come_due(run)
+
+        sweep_stale_fetch_runs()
+
+        self.assertEqual(LoaderJob.objects.get(resume_of_run=run).collection_id, collection.pk)
+
+    def test_a_run_that_already_has_a_retry_is_not_dispatched_again(self, _executor):
+        run = _make_run(self.feed, hours_ago=7)
+        self._interrupt_and_come_due(run)
+        _make_run(self.feed, hours_ago=0, resumed_from=run)
+
+        self.assertEqual(dispatch_due_retries(), 0)
+        self.assertFalse(LoaderJob.objects.exists())
+
+    def test_not_due_yet_is_not_dispatched(self, _executor):
         _make_run(self.feed, hours_ago=7)
+        sweep_stale_fetch_runs()
+
+        self.assertEqual(dispatch_due_retries(), 0)
+
+    def test_a_newer_regular_run_does_not_stop_the_retry(self, _executor):
+        run = _make_run(self.feed, hours_ago=7)
+        self._interrupt_and_come_due(run)
         _make_run(self.feed, hours_ago=1, status="completed")
 
         result = sweep_stale_fetch_runs()
 
-        self.assertEqual(result["swept"], 1)
-        self.assertEqual(result["resumed"], 0)
-        self.assertFalse(LoaderJob.objects.exists())
+        self.assertEqual(result["resumed"], 1)
+        self.assertTrue(LoaderJob.objects.filter(resume_of_run=run).exists())
 
-    def test_no_resume_when_a_loader_job_is_already_queued(self, _executor):
-        _make_run(self.feed, hours_ago=7)
+    def test_a_loader_job_for_the_feed_does_not_stop_the_retry(self, _executor):
+        run = _make_run(self.feed, hours_ago=7)
+        self._interrupt_and_come_due(run)
         _make_loader_job(self.feed, state="pending")
+
+        self.assertEqual(sweep_stale_fetch_runs()["resumed"], 1)
+
+    def test_a_lineage_at_the_cap_is_parked_not_scheduled(self, _executor):
+        run = None
+        for hours in (50, 40, 30, 20):
+            run = _make_run(self.feed, hours_ago=hours, status="interrupted", resumed_from=run)
+        last = _make_run(self.feed, hours_ago=7, resumed_from=run)
+        self.assertEqual(last.resume_generation(), max_retries())
 
         result = sweep_stale_fetch_runs()
 
+        last.refresh_from_db()
+        self.assertEqual(last.status, FetchRun.Status.INTERRUPTED)
+        self.assertIsNone(last.retry_due_at)
+        self.assertTrue(last.parked)
         self.assertEqual(result["resumed"], 0)
-        self.assertFalse(LoaderJob.objects.filter(resume_of_run__isnull=False).exists())
+        self.assertFalse(LoaderJob.objects.exists())
 
     def test_zombie_started_jobs_are_reaped(self, _executor):
         zombie = _make_loader_job(self.feed, state="started", hours_ago=8)
@@ -208,23 +242,24 @@ class SweepStaleFetchRunsTests(TestCase):
         self.assertIn("operator", target.error_message)
         self.assertEqual(bystander.status, FetchRun.Status.RUNNING)
 
-    def test_no_resume_marks_interrupted_without_enqueuing(self, _executor):
+    def test_no_resume_marks_interrupted_without_scheduling_a_retry(self, _executor):
         run = _make_run(self.feed, hours_ago=7)
 
         result = sweep_stale_fetch_runs(resume=False)
 
         run.refresh_from_db()
         self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
+        self.assertIsNone(run.retry_due_at)
         self.assertEqual(result["resumed"], 0)
         self.assertFalse(LoaderJob.objects.exists())
 
-    def test_reaped_zombie_does_not_block_its_own_resume(self, _executor):
+    def test_reaped_zombie_does_not_block_its_own_retry(self, _executor):
         run = _make_run(self.feed, hours_ago=7)
         _make_loader_job(self.feed, state="started", hours_ago=8)
+        self._interrupt_and_come_due(run)
 
         result = sweep_stale_fetch_runs()
 
-        self.assertEqual(result["jobs_reaped"], 1)
         self.assertEqual(result["resumed"], 1)
         self.assertTrue(LoaderJob.objects.filter(resume_of_run=run).exists())
 
@@ -379,26 +414,22 @@ class RecoverRunViewTests(TestCase):
         self.assertTrue(LoaderJob.objects.filter(resume_of_run=run).exists())
         self.assertContains(response, "resume queued")
 
-    def test_post_warns_when_recovery_is_already_under_way(self, _executor):
+    def test_post_warns_when_the_run_is_already_being_retried(self, _executor):
         run = _make_run(self.feed, hours_ago=2)
-        _make_run(self.feed, hours_ago=1, status="completed")
+        _make_loader_job(self.feed, state="pending", user=None)
+        LoaderJob.objects.update(resume_of_run=run)
 
         response = self.client.post(self._recover_url(run), follow=True)
 
         run.refresh_from_db()
         self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
-        self.assertFalse(LoaderJob.objects.exists())
         self.assertContains(response, "already under way")
 
-    def test_post_warns_when_the_auto_resume_cap_is_reached(self, _executor):
-        original = _make_run(self.feed, hours_ago=30, status="interrupted")
-        first = _make_run(
-            self.feed,
-            hours_ago=20,
-            status="interrupted",
-            resumed_from=original,
-        )
-        run = _make_run(self.feed, hours_ago=1, resumed_from=first)
+    def test_post_warns_when_the_retry_cap_is_reached(self, _executor):
+        run = None
+        for hours in (50, 40, 30, 20):
+            run = _make_run(self.feed, hours_ago=hours, status="interrupted", resumed_from=run)
+        run = _make_run(self.feed, hours_ago=1, resumed_from=run)
 
         response = self.client.post(self._recover_url(run), follow=True)
 

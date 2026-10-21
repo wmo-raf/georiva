@@ -37,9 +37,9 @@ def sweep_scheduled_products():
 )
 def sweep_stale_fetch_runs():
     """
-    Crash-recovery sweep: mark FetchRuns stuck in RUNNING past the staleness
-    threshold as INTERRUPTED, reap wedged LoaderJobs, and auto-resume (capped).
-    See acquisition_recovery for the full policy.
+    Recovery sweep: mark FetchRuns stuck in RUNNING past the staleness threshold
+    as INTERRUPTED, reap wedged LoaderJobs, and dispatch every run whose retry is
+    due. See acquisition_recovery for the full policy.
     """
     from georiva.sources.acquisition_recovery import sweep_stale_fetch_runs
 
@@ -94,13 +94,13 @@ def setup_scheduled_product_beat(sender, **kwargs):
 
 @app.on_after_finalize.connect
 def setup_stale_fetch_run_sweep_beat(sender, **kwargs):
-    """Register the crash-recovery sweep (mirror of the scheduled-product beat)."""
+    """Register the recovery sweep (mirror of the scheduled-product beat)."""
     register_periodic_tasks(
         [
             PeriodicSpec(
                 "georiva.sources.sweep_stale_fetch_runs",
                 "georiva.sources.tasks.sweep_stale_fetch_runs",
-                30,
+                5,
                 IntervalSchedule.MINUTES,
             )
         ],

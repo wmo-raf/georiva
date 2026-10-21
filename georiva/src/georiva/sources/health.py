@@ -10,15 +10,19 @@ Declaration order is evaluation order. `rank` is the sort key — the two differ
 deliberately (INACTIVE evaluates first but sorts last).
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 
 from django.db.models import (
     Case,
     DurationField,
+    Exists,
     ExpressionWrapper,
     F,
     IntegerField,
+    OuterRef,
     Q,
     Value,
     When,
@@ -36,6 +40,22 @@ from polymorphic.query import PolymorphicQuerySet
 STALE_MULTIPLIER = 2
 STALE_FLOOR_MINUTES = 30
 STALE_CEILING_MINUTES = 48 * 60
+
+#: How long a parked run (one whose retries are used up) keeps its feed flagged as having gaps.
+GAPS_WINDOW = timedelta(hours=48)
+
+
+def _has_run(**conditions):
+    """A condition that is true when the feed has a FetchRun matching `conditions`.
+
+    Deferred to a callable: FetchRun is defined after this module is imported."""
+
+    def condition():
+        from georiva.sources.models import FetchRun
+
+        return Q(Exists(FetchRun.objects.filter(data_feed=OuterRef("pk"), **conditions)))
+
+    return condition
 
 
 def _seconds_since_last_run():
@@ -64,7 +84,10 @@ class _State:
     label: str
     color: str  # maps to a --w-color-* status token; see template_conventions.md
     icon: str  # must be a registered Wagtail icon name
-    condition: Q | None  # None marks the default (fallthrough) state
+    condition: "Q | Callable[[], Q] | None"  # None marks the default (fallthrough) state
+
+    def resolve(self) -> Q | None:
+        return self.condition() if callable(self.condition) else self.condition
 
 
 class Health(Enum):
@@ -76,7 +99,23 @@ class Health(Enum):
     """
 
     INACTIVE = _State(90, _("Inactive"), "grey", "no-view", Q(is_active=False))
+    # Ahead of FAILED: a failed run that is about to be retried is being dealt with.
+    RETRYING = _State(
+        45,
+        _("Retrying"),
+        "info",
+        "history",
+        _has_run(retry_due_at__isnull=False, resumes__isnull=True),
+    )
     FAILED = _State(10, _("Failed"), "critical", "cross", Q(last_run_status="failed"))
+    # A later success does not hide a run that stayed failed: its data is missing.
+    GAPS = _State(
+        15,
+        _("Gaps"),
+        "warning",
+        "warning",
+        _has_run(parked=True, finished_at__gte=Now() - GAPS_WINDOW),
+    )
     PARTIAL = _State(20, _("Partial"), "warning", "warning", Q(last_run_status="partial"))
     NEW = _State(80, _("Never run"), "grey", "time", Q(last_run_at__isnull=True))
     # RUNNING precedes STALE: a feed that is already overdue when a run starts
@@ -119,7 +158,7 @@ class Health(Enum):
     def as_case(cls):
         """Build the health_rank Case/When by iterating the ladder."""
         whens = [
-            When(state.value.condition, then=Value(state.rank)) for state in cls if state.value.condition is not None
+            When(state.value.resolve(), then=Value(state.rank)) for state in cls if state.value.condition is not None
         ]
         default = next(state for state in cls if state.value.condition is None)
         return Case(*whens, default=Value(default.rank), output_field=IntegerField())

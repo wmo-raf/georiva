@@ -1985,6 +1985,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     """
     from georiva.events.history import build_history
     from georiva.sources.acquisition_tracking import (
+        retry_display,
         run_duration_seconds,
         run_liveness_display,
         with_live_counters,
@@ -2051,6 +2052,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
         "files": files,
         "runs_url": runs_url,
         "liveness": liveness,
+        "retry": retry_display(run),
         "history": build_history(request, [(FetchRunFinished, {"fetch_run": run})]),
     }
     return render(request, "georivasources/data_feed_fetch_run_detail.html", context)
@@ -2109,7 +2111,7 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
                 request,
                 _(
                     "Run marked as interrupted — resume not queued: "
-                    "the auto-resume cap was reached. Use “Fetch now” on the "
+                    "the retry cap was reached. Use “Fetch now” on the "
                     "feed to retry manually."
                 ),
             )

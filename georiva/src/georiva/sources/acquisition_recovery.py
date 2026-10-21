@@ -1,20 +1,22 @@
 """
-Stale fetch-run recovery — the crash-recovery sweep.
+Fetch-run recovery sweep — crash recovery and the retry of failed runs.
 
 A hard worker death (power loss, OOM kill, forced restart) skips Loader.run()'s
 finally block, stranding the FetchRun in RUNNING and its in-flight FetchedFile
 in FETCHING forever, and can leave the wrapping task-ferry LoaderJob wedged in
-'started' — where it counts against the per-user concurrency quota. This module
-is the deliberate recovery mechanism, mirroring ingestion's sweep_unprocessed
-idiom: declare runs dead on age, mark them INTERRUPTED, and auto-resume by
-enqueuing a fresh full loader run (skip_existing dedupes what already landed).
+'started' — where it counts against the per-user concurrency quota. This sweep
+declares such runs dead on age and marks them INTERRUPTED.
 
-Auto-resume is capped at MAX_AUTO_RESUMES per original run — lineage is walked
-via FetchRun.resumed_from — so a deterministic crash (a poison file that OOMs
-the worker every time) parks after two attempts instead of looping forever.
+Interrupted runs and runs that ended with failures share one way to carry on:
+the finished run is given a `retry_due_at` (see retry_policy), and this sweep
+dispatches every run whose time has passed as a system LoaderJob scoped to the
+run's collection. The retry is a new FetchRun linked by `resumed_from` that
+fetches the earlier run's failed requests (Loader plan_from_earlier_run). The
+lineage cap lives in retry_policy: a deterministic crash (a poison file that
+OOMs the worker every time) parks instead of looping forever.
 
 The broker visibility_timeout is raised above the staleness threshold (see
-settings.base) so acks-late redelivery never races this sweep; the resume
+settings.base) so acks-late redelivery never races this sweep; the dispatch
 guard below makes the sweep idempotent against any concurrent recovery anyway.
 """
 
@@ -28,10 +30,9 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-MAX_AUTO_RESUMES = 2
 INTERRUPTED_FILE_ERROR = "interrupted — worker stopped mid-fetch"
 
-# Reason codes returned by _maybe_resume / recover_run.
+# Reason codes returned by dispatch_retry / recover_run.
 RESUME_QUEUED = "queued"
 RESUME_CAP_REACHED = "cap_reached"
 RESUME_ALREADY_UNDER_WAY = "already_under_way"
@@ -54,26 +55,29 @@ def sweep_stale_fetch_runs(
     run_ids: list[int] | None = None,
     resume: bool = True,
 ) -> dict:
-    """Sweep FetchRuns stuck in RUNNING past the staleness threshold.
+    """Interrupt FetchRuns stuck in RUNNING past the staleness threshold, then
+    dispatch every run whose retry is due.
 
-    For each: fail its dangling file records, freeze truthful counters, mark
-    the run INTERRUPTED, backfill the feed's last-run stats, and enqueue an
-    auto-resume (subject to the cap and the concurrent-recovery guard). Also
-    reaps LoaderJobs wedged in 'started' so they stop eating the quota.
+    For each stale run: fail its dangling file records, freeze truthful
+    counters, mark the run INTERRUPTED (which schedules its retry), and backfill
+    the feed's last-run stats. Also reaps LoaderJobs wedged in 'started' so they
+    stop eating the quota.
 
     Operator overrides (management command):
       stale_hours — replace the settings threshold for this invocation
                     (0 declares every running run dead — a hard sweep).
       run_ids     — sweep exactly these runs, ignoring age entirely; the
-                    operator is asserting the runs are dead.
-      resume      — False marks runs INTERRUPTED without enqueuing resumes.
+                    operator is asserting the runs are dead. Nothing else is
+                    dispatched.
+      resume      — False marks runs INTERRUPTED without scheduling retries,
+                    and dispatches none.
     """
     from georiva.sources.models import FetchRun
 
     hours = stale_after_hours() if stale_hours is None else stale_hours
     cutoff = timezone.now() - timedelta(hours=hours)
 
-    # Reap zombie jobs first so a wedged LoaderJob can't veto its own resume.
+    # Reap zombie jobs first so a wedged LoaderJob can't veto its own retry.
     jobs_reaped = _reap_stale_loader_jobs(cutoff)
 
     stale_runs = (
@@ -86,16 +90,18 @@ def sweep_stale_fetch_runs(
         stale_runs = stale_runs.filter(started_at__lt=cutoff)
         reason = f"Interrupted — worker stopped mid-run; still unfinished after {hours}h."
 
-    swept = resumed = 0
+    swept = 0
     for run in stale_runs:
         _sweep_run(run, reason)
+        if not resume:
+            FetchRun.objects.filter(pk=run.pk).update(retry_due_at=None)
         swept += 1
-        if resume and _maybe_resume(run) == RESUME_QUEUED:
-            resumed += 1
 
-    if swept or jobs_reaped:
+    resumed = dispatch_due_retries() if resume and run_ids is None else 0
+
+    if swept or resumed or jobs_reaped:
         logger.info(
-            "Stale-run sweep: %d run(s) interrupted, %d resume(s) enqueued, %d zombie job(s) reaped",
+            "Recovery sweep: %d run(s) interrupted, %d retry(ies) dispatched, %d zombie job(s) reaped",
             swept,
             resumed,
             jobs_reaped,
@@ -142,74 +148,62 @@ def _backfill_feed_stats(run) -> None:
 
 def recover_run(run) -> str:
     """Operator recovery of a single running FetchRun (the admin's Recover
-    button): sweep it as interrupted, then attempt the auto-resume. Returns
-    the resume reason code so the caller can tell the operator whether a new
-    fetch actually started."""
+    button): sweep it as interrupted, then dispatch its retry now rather than
+    at its backoff time. Returns the reason code so the caller can tell the
+    operator whether a new fetch actually started."""
     _sweep_run(run, OPERATOR_SWEEP_REASON)
-    return _maybe_resume(run)
+    run.refresh_from_db()
+    if run.parked:
+        return RESUME_CAP_REACHED
+    return dispatch_retry(run)
 
 
-def _maybe_resume(run) -> str:
-    """Enqueue a fresh full loader run for the interrupted run's feed.
+def dispatch_due_retries(now=None) -> int:
+    """Dispatch the retry of every run whose `retry_due_at` has passed. Returns
+    how many were enqueued."""
+    from georiva.sources.models import FetchRun
 
-    Returns a reason code: RESUME_QUEUED on success, or why it was skipped —
-    the lineage cap, recovery already under way (a newer FetchRun for the
-    feed or a pending/started LoaderJob), or a failed enqueue.
+    due = (
+        FetchRun.objects.filter(retry_due_at__lte=now or timezone.now(), resumes__isnull=True)
+        .select_related("data_feed")
+        .order_by("retry_due_at")
+    )
+    return sum(dispatch_retry(run) == RESUME_QUEUED for run in due)
+
+
+def dispatch_retry(run) -> str:
+    """Enqueue a system LoaderJob that retries `run`, scoped to its collection.
+
+    Returns RESUME_QUEUED on success, or why it was skipped: the run already has
+    a retry (a run, or a job not yet started), or the enqueue failed. Whether a
+    newer run exists for the feed is deliberately not asked — the schedule and a
+    retry are independent (#480).
     """
     from task_ferry.handler import JobHandler
     from task_ferry.models import JOB_STATES_PENDING_OR_RUNNING
 
     from georiva.ingestion.models import LoaderJob
-    from georiva.sources.models import FetchRun
 
-    generation = run.resume_generation()
-    if generation >= MAX_AUTO_RESUMES:
-        logger.warning(
-            "FetchRun %d: auto-resume cap (%d) reached — leaving for a human",
-            run.pk,
-            MAX_AUTO_RESUMES,
-        )
-        return RESUME_CAP_REACHED
-
-    feed = run.data_feed
-    if FetchRun.objects.filter(
-        data_feed=feed,
-        started_at__gt=run.started_at,
-    ).exists():
-        logger.info(
-            "FetchRun %d: newer run exists for feed %s — not resuming",
-            run.pk,
-            feed.pk,
-        )
-        return RESUME_ALREADY_UNDER_WAY
-    if LoaderJob.objects.filter(
-        data_feed=feed,
-        state__in=JOB_STATES_PENDING_OR_RUNNING,
-    ).exists():
-        logger.info(
-            "FetchRun %d: a loader job is already pending/running for feed %s — not resuming",
-            run.pk,
-            feed.pk,
-        )
+    if (
+        run.resumes.exists()
+        or LoaderJob.objects.filter(resume_of_run=run, state__in=JOB_STATES_PENDING_OR_RUNNING).exists()
+    ):
+        logger.info("FetchRun %d: already retried or being retried — not dispatching", run.pk)
         return RESUME_ALREADY_UNDER_WAY
 
     try:
         JobHandler.create_and_start(
             None,  # system job: exempt from the per-user max_count quota
             "data_source_load",
-            data_feed_id=feed.pk,
+            data_feed_id=run.data_feed_id,
+            collection_id=run.collection_id,
             resume_of_run_id=run.pk,
         )
     except Exception:
-        logger.exception("FetchRun %d: failed to enqueue auto-resume", run.pk)
+        logger.exception("FetchRun %d: failed to enqueue its retry", run.pk)
         return RESUME_ENQUEUE_FAILED
 
-    logger.info(
-        "FetchRun %d: auto-resume enqueued (attempt %d of %d)",
-        run.pk,
-        generation + 1,
-        MAX_AUTO_RESUMES,
-    )
+    logger.info("FetchRun %d: retry %d dispatched", run.pk, run.retry_number)
     return RESUME_QUEUED
 
 
