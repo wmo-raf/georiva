@@ -45,15 +45,16 @@ def retry_fetch(fetched_file):
     # Reset the stale outcome so the record walks the state machine again.
     fetched_file.error = ""
     fetched_file.skip_reason = ""
+    fetched_file.failure_scope = None
     fetched_file.completed_at = None
-    fetched_file.save(update_fields=["error", "skip_reason", "completed_at"])
+    fetched_file.save(update_fields=["error", "skip_reason", "failure_scope", "completed_at"])
     fetched_file.mark_fetching()
 
     result = loader.fetch_one(request)
     if result.success:
         fetched_file.mark_stored(bytes_transferred=result.bytes_transferred or 0)
     else:
-        fetched_file.mark_failed(error=result.error or "fetch failed")
+        fetched_file.mark_failed(error=result.error or "fetch failed", scope=result.failure_scope)
 
     run.recompute_counters()
     return fetched_file

@@ -14,7 +14,7 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection
 from georiva.organisations.testing import make_organisation
-from georiva.sources.fetch.base import FetchResult, FileRequest
+from georiva.sources.fetch.base import FailureScope, FetchResult, FileRequest
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
@@ -369,3 +369,95 @@ class LoaderFetchPlanTests(TestCase):
 
     def test_pending_reads_as_waiting(self):
         self.assertEqual(FetchedFile(status=FetchedFile.Status.PENDING).get_status_display(), "Waiting")
+
+
+class LoaderFailureScopeTests(TestCase):
+    """Each failed row records its failure scope (#477): the strategy's when it
+    gave one, the loader's own for what happens after the download."""
+
+    def setUp(self):
+        self.feed, self.collection = _make_feed_and_collection()
+        self.request = FileRequest(identifier="a", filename="a.grib")
+
+    def _loader(self, requests=None):
+        loader = Loader(data_source=MagicMock(), collection=self.collection, data_feed=self.feed)
+        loader.data_source.name = "test"
+        loader.data_source.generate_requests_for_collection.return_value = requests or [self.request]
+        loader.data_source.post_process_fetched_file.side_effect = lambda req, path: (path, None)
+        return loader
+
+    def _run(self, loader, *, download=b"x" * 4096, fetch=None, bucket_error=None):
+        """Run through the real `_fetch_and_store`: the strategy writes `download`
+        (or answers with `fetch`), and storage takes it unless `bucket_error`."""
+
+        def strategy_fetch(request, local_path):
+            if fetch:
+                return fetch(request)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(download)
+            return FetchResult(request=request, local_path=local_path, success=True, status="complete")
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(loader, "_already_exists", return_value=False))
+            stack.enter_context(patch.object(loader, "_find_existing_catalog_path", return_value=None))
+            stack.enter_context(patch.object(loader.fetch_strategy, "connect"))
+            stack.enter_context(patch.object(loader.fetch_strategy, "disconnect"))
+            stack.enter_context(patch.object(loader.fetch_strategy, "fetch", side_effect=strategy_fetch))
+            bucket = stack.enter_context(patch.object(Loader, "_tier_bucket", new_callable=PropertyMock))
+            bucket.return_value.save.side_effect = bucket_error
+            return loader.run()
+
+    def _scopes(self):
+        return [ff.failure_scope for ff in FetchRun.objects.get().fetched_files.order_by("id")]
+
+    def test_a_stored_row_has_no_scope(self):
+        self._run(self._loader())
+
+        self.assertEqual(self._scopes(), [None])
+
+    def test_the_strategys_scope_is_recorded(self):
+        def fetch(request):
+            return FetchResult(request=request).fail("HTTP 404 (Not Found)", FailureScope.FILE)
+
+        self._run(self._loader(), fetch=fetch)
+
+        self.assertEqual(self._scopes(), ["file"])
+
+    def test_a_failure_no_strategy_classified_is_transient(self):
+        self._run(self._loader(), fetch=lambda request: _failed_fetch_result(request, error="plugin said no"))
+
+        self.assertEqual(self._scopes(), ["transient"])
+
+    def test_a_strategy_that_raises_is_transient(self):
+        def fetch(request):
+            raise ValueError("plugin bug")
+
+        self._run(self._loader(), fetch=fetch)
+
+        self.assertEqual(self._scopes(), ["transient"])
+
+    def test_a_download_that_fails_validation_is_this_files_problem(self):
+        self._run(self._loader(), download=b"tiny")
+
+        self.assertEqual(self._scopes(), ["file"])
+
+    def test_storage_refusing_the_file_is_the_sources(self):
+        self._run(self._loader(), bucket_error=OSError("bucket unreachable"))
+
+        self.assertEqual(self._scopes(), ["source"])
+
+    def test_rows_the_run_stopped_before_or_during_carry_their_scope(self):
+        requests = [FileRequest(identifier=n, filename=n) for n in ("a.grib", "b.grib", "c.grib")]
+        calls = []
+
+        def fetch(request):
+            calls.append(request)
+            if len(calls) == 2:
+                raise RuntimeError("storage gone")
+            return _success_fetch_result(request)
+
+        loader = self._loader(requests)
+        with patch.object(loader, "_fetch_and_store", side_effect=fetch):
+            self._run(loader)
+
+        self.assertEqual(self._scopes(), [None, "transient", "not_attempted"])

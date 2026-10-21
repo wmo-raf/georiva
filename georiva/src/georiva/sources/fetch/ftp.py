@@ -4,10 +4,13 @@ GeoRiva HTTP Fetch Strategy
 For direct HTTP/HTTPS downloads
 """
 
+import errno
+import ftplib
+import socket
 import time
 from pathlib import Path
 
-from .base import BaseFetchStrategy, FetchMode, FetchResult, FileRequest
+from .base import BaseFetchStrategy, FailureScope, FetchMode, FetchResult, FileRequest
 
 
 class FTPFetchStrategy(BaseFetchStrategy):
@@ -138,25 +141,29 @@ class FTPFetchStrategy(BaseFetchStrategy):
             self._connection = None
 
     def fetch(self, request: FileRequest, local_path: Path) -> FetchResult:
-        """Download file via FTP/SFTP."""
+        """Download file via FTP/SFTP. A failed result carries its failure scope (#477)."""
         result = FetchResult(request=request, local_path=local_path)
 
         remote_path = request.params.get("remote_path")
         if not remote_path:
-            result.success = False
-            result.error = "Missing remote_path in params"
-            return result
+            return result.fail("Missing remote_path in params", FailureScope.FILE)
 
-        local_path.parent.mkdir(parents=True, exist_ok=True)
+        # Open the local file on its own first, so a failure here is plainly ours.
+        try:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_file = open(local_path, "wb")
+        except OSError as e:
+            self.logger.error(f"Cannot write {local_path}: {e}")
+            return result.fail(f"IO error writing file: {e}", FailureScope.SOURCE)
 
         start_time = time.time()
 
         try:
-            if self.protocol == "sftp":
-                self._sftp.get(remote_path, str(local_path))
-            else:
-                with open(local_path, "wb") as f:
-                    self._connection.retrbinary(f"RETR {remote_path}", f.write)
+            with local_file:
+                if self.protocol == "sftp":
+                    self._sftp.getfo(remote_path, local_file)
+                else:
+                    self._connection.retrbinary(f"RETR {remote_path}", local_file.write)
 
             result.success = True
             result.status = "complete"
@@ -165,8 +172,25 @@ class FTPFetchStrategy(BaseFetchStrategy):
 
         except Exception as e:
             self.logger.error(f"FTP download failed: {e}")
-            result.success = False
-            result.error = str(e)
-            result.status = "failed"
+            result.fail(str(e), _classify_error(e))
 
         return result
+
+
+# Login refused, or an account needed: the server will not serve us at all.
+_FTP_REFUSED_REPLIES = ("530", "332")
+# Our side cannot take the bytes: every file after this one would fail too.
+_LOCAL_STORAGE_ERRNOS = {errno.ENOSPC, errno.EDQUOT, errno.EROFS}
+
+
+def _classify_error(exc: BaseException) -> FailureScope:
+    """The failure scope of an exception raised while transferring one file."""
+    if isinstance(exc, ftplib.error_perm):
+        return FailureScope.SOURCE if str(exc)[:3] in _FTP_REFUSED_REPLIES else FailureScope.FILE
+    if isinstance(exc, (socket.gaierror, ConnectionRefusedError)):
+        return FailureScope.SOURCE
+    if isinstance(exc, OSError) and exc.errno in _LOCAL_STORAGE_ERRNOS:
+        return FailureScope.SOURCE
+    # Timeouts, dropped connections, 4xx replies (error_temp) and anything else
+    # unrecognised: ambiguous.
+    return FailureScope.TRANSIENT

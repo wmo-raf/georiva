@@ -104,13 +104,17 @@ def sweep_stale_fetch_runs(
 
 
 def _sweep_run(run, reason) -> None:
+    from georiva.sources.fetch.base import FailureScope
     from georiva.sources.models import FetchedFile
 
     dangling = run.fetched_files.filter(
         status__in=[FetchedFile.Status.PENDING, FetchedFile.Status.FETCHING],
     )
     for fetched_file in dangling:
-        fetched_file.mark_failed(error=INTERRUPTED_FILE_ERROR)
+        # A row still Waiting was never reached; one Fetching was cut off mid-way.
+        reached = fetched_file.status == FetchedFile.Status.FETCHING
+        scope = FailureScope.TRANSIENT if reached else FailureScope.NOT_ATTEMPTED
+        fetched_file.mark_failed(error=INTERRUPTED_FILE_ERROR, scope=scope)
 
     run.recompute_counters()
     run.mark_interrupted(error=reason)

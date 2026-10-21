@@ -17,7 +17,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from georiva.core.storage import storage
-from georiva.sources.fetch.base import FetchResult
+from georiva.sources.fetch.base import FailureScope, FetchResult
 
 
 @dataclass
@@ -421,7 +421,7 @@ class Loader:
                     if fetch_result.error:
                         result.add_error(f"{request.filename}: {fetch_result.error}")
                     if ff:
-                        ff.mark_failed(error=fetch_result.error or "")
+                        ff.mark_failed(error=fetch_result.error or "", scope=fetch_result.failure_scope)
                 in_flight = None
 
         except Exception as e:
@@ -445,11 +445,15 @@ class Loader:
                 # middle of, is a failure, and retryable like any other.
                 reason = stop_reason or "the run ended"
                 if in_flight:
-                    in_flight.mark_failed(error=f"interrupted: the run stopped while fetching ({reason})")
+                    in_flight.mark_failed(
+                        error=f"interrupted: the run stopped while fetching ({reason})",
+                        scope=FailureScope.TRANSIENT,
+                    )
                     result.files_failed += 1
                 result.files_failed += fetch_run.fetched_files.filter(status=FetchedFile.Status.PENDING).update(
                     status=FetchedFile.Status.FAILED,
                     error=f"not attempted: the run stopped ({reason})",
+                    failure_scope=FailureScope.NOT_ATTEMPTED,
                     completed_at=timezone.now(),
                 )
                 fetch_run.mark_completed(
@@ -550,9 +554,7 @@ class Loader:
 
             # Validate downloaded file
             if not self._validate_file(temp_path, request):
-                fetch_result.success = False
-                fetch_result.error = "File validation failed"
-                return fetch_result
+                return fetch_result.fail("File validation failed", FailureScope.FILE)
 
             # post process file
             processed_path, new_filename = self.data_source.post_process_fetched_file(request, temp_path)
@@ -561,8 +563,13 @@ class Loader:
 
             storage_path = self._get_storage_path(request)
 
-            # Store in permanent location
-            self._store_file(processed_path, storage_path)
+            # Store in permanent location. Our side refusing the file fails every
+            # file after it too, so it is the source's scope, not this file's.
+            try:
+                self._store_file(processed_path, storage_path)
+            except Exception as e:
+                self.logger.exception(f"Failed to store {storage_path}")
+                return fetch_result.fail(f"Storage write failed: {e}", FailureScope.SOURCE)
 
             self.logger.debug(f"Stored: {storage_path}")
 

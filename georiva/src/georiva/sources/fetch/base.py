@@ -71,6 +71,29 @@ class FetchMode(str, Enum):
     STREAM = "stream"  # Real-time streaming (MQTT, WebSocket)
 
 
+class FailureScope(str, Enum):
+    """What a failed fetch means for the rest of its run (#473, #477).
+
+    FILE          definitive, and about this file only (a 404, a bad download).
+    TRANSIENT     ambiguous: a timeout, a dropped transfer, a 5xx that outlasted
+                  the HTTP retries. The default for a failure nobody classified.
+    SOURCE        the source as a whole cannot serve us right now: it does not
+                  resolve, refuses us, tells us to back off, or our side cannot
+                  accept the file.
+    NOT_ATTEMPTED on FetchedFile rows only: the run stopped before reaching it.
+                  A strategy never returns it.
+    """
+
+    FILE = "file"
+    TRANSIENT = "transient"
+    SOURCE = "source"
+    NOT_ATTEMPTED = "not_attempted"
+
+    @property
+    def label(self) -> str:
+        return self.value.replace("_", " ").capitalize()
+
+
 @dataclass
 class FetchResult:
     """Result of fetching a single file."""
@@ -86,9 +109,23 @@ class FetchResult:
     job_id: str | None = None
     status: str = "pending"  # pending, queued, downloading, complete, failed
 
+    # Why a failed fetch failed, in terms of the run (#477); None on success, and
+    # on a failure a strategy did not classify (read as TRANSIENT).
+    failure_scope: FailureScope | None = None
+    # Seconds the source asked us to wait (`Retry-After`), when it said.
+    retry_after: float | None = None
+
     @property
     def failed(self) -> bool:
         return not self.success
+
+    def fail(self, error: str, scope: FailureScope) -> "FetchResult":
+        """Record this fetch as failed, and why."""
+        self.success = False
+        self.error = error
+        self.status = "failed"
+        self.failure_scope = scope
+        return self
 
 
 class BaseFetchStrategy(ABC):
