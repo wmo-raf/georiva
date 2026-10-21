@@ -195,6 +195,22 @@ class FetchRunDetailViewTests(TestCase):
         self.assertContains(response, "Skipped")
         self.assertContains(response, "Failed")
 
+    def test_an_aborted_run_shows_it_stopped_early_and_why(self):
+        run = _run(
+            self.feed,
+            FetchRun.Status.FAILED,
+            error_message="Stopped: source unavailable — NameResolutionError for data.ecmwf.int",
+        )
+
+        response = self.client.get(self._url(run))
+
+        self.assertContains(response, "Stopped early: source unavailable — NameResolutionError for data.ecmwf.int")
+
+    def test_a_completed_run_does_not_say_it_stopped_early(self):
+        response = self.client.get(self._url())
+
+        self.assertNotContains(response, "Stopped early")
+
     def test_breadcrumbs_chain_back_through_the_run_list(self):
         response = self.client.get(self._url())
 

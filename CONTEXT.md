@@ -216,7 +216,11 @@ files are fetched — to enable real-time monitoring. One `FetchRun` per `(feed 
 loops the feed's collections and `Loader.run()` creates a `FetchRun` for each. It carries no collection FK, so the
 collection is recovered from `FetchedFile.file_path`'s third segment.
 Status: `running → completed / failed / cancelled / interrupted` (`interrupted`: crash recovery found the worker gone
-mid-run). Success vs partial outcome is derived from `FetchedFile` children, not stored on the run itself.
+mid-run). `completed` means the run walked its whole plan, however many files failed; `failed` means it **stopped
+early** — on a `source` failure, on `GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD` consecutive `transient` ones, or on an
+exception — with `error_message` `Stopped: <reason>` (ADR 0031). When a run stops because the source cannot serve it,
+the feed's other due collections that tick get a run that is `failed` at once, "not attempted", with no plan. Success
+vs partial outcome is derived from `FetchedFile` children, not stored on the run itself.
 _Avoid_: DataArrival, LoaderRun, DataFeedRun
 
 **FetchedFile**:

@@ -138,6 +138,12 @@
             max-width: 32em;
         }
 
+        .gaqd-stopped {
+            margin-top: 0.4em;
+            font-size: 0.9em;
+            color: var(--w-color-critical-200);
+        }
+
         .gaqd-run-error {
             font-family: monospace;
             font-size: 0.85em;
@@ -237,7 +243,14 @@
         <tbody>
         <tr>
             <th>{% trans "Status" %}</th>
-            <td><span class="gaqd-badge gaqd-badge--{{ run.status }}">{{ run.get_status_display }}</span></td>
+            <td>
+                <span class="gaqd-badge gaqd-badge--{{ run.status }}">{{ run.get_status_display }}</span>
+                {% if run.stopped_early %}
+                    <div class="gaqd-stopped">
+                        {% blocktrans with reason=run.stopped_early %}Stopped early: {{ reason }}{% endblocktrans %}
+                    </div>
+                {% endif %}
+            </td>
         </tr>
         <tr>
             <th>{% trans "Started" %}</th>

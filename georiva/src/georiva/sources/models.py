@@ -682,6 +682,9 @@ class FetchRun(models.Model):
 
     ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
 
+    #: Leads `error_message` of a run the Loader stopped before the end of its plan.
+    STOPPED_PREFIX = "Stopped: "
+
     data_feed = models.ForeignKey(
         DataFeed,
         on_delete=models.CASCADE,
@@ -787,8 +790,16 @@ class FetchRun(models.Model):
             bytes_transferred=bytes_transferred,
         )
 
-    def mark_failed(self, error=""):
-        self._finish(self.Status.FAILED, error_message=error)
+    def mark_failed(self, error="", **counters):
+        """Fail the run; `counters` as for mark_completed, for a run that got part way."""
+        self._finish(self.Status.FAILED, error_message=error, **counters)
+
+    @property
+    def stopped_early(self):
+        """Why the run stopped before walking its plan, for a FAILED run, or None (#478)."""
+        if self.status != self.Status.FAILED:
+            return None
+        return self.error_message.removeprefix(self.STOPPED_PREFIX) or None
 
     def mark_cancelled(self):
         self._finish(self.Status.CANCELLED)
