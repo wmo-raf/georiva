@@ -406,3 +406,21 @@ class RecoverRunViewTests(TestCase):
         self.assertEqual(run.status, FetchRun.Status.INTERRUPTED)
         self.assertFalse(LoaderJob.objects.exists())
         self.assertContains(response, "cap")
+
+
+@patch("task_ferry.handler.get_executor")
+class SweepFailureScopeTests(TestCase):
+    """Crash recovery fails a dead run's dangling rows with a scope (#477)."""
+
+    def test_a_waiting_row_was_not_attempted_and_a_fetching_one_is_transient(self, _executor):
+        run = _make_run(_make_feed(), hours_ago=7)
+        waiting = FetchedFile.objects.create(fetch_run=run, file_path="c/a.tif")
+        fetching = FetchedFile.objects.create(fetch_run=run, file_path="c/b.tif")
+        fetching.mark_fetching()
+
+        sweep_stale_fetch_runs()
+
+        waiting.refresh_from_db()
+        fetching.refresh_from_db()
+        self.assertEqual((waiting.status, waiting.failure_scope), ("failed", "not_attempted"))
+        self.assertEqual((fetching.status, fetching.failure_scope), ("failed", "transient"))

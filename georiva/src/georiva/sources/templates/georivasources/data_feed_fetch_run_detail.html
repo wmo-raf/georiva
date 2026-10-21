@@ -98,6 +98,26 @@
             border-color: var(--w-color-border-furniture);
         }
 
+        /* Failure scope (#477): what a failed row means for the rest of the run. */
+        .gaqd-badge--scope-source {
+            background: transparent;
+            color: var(--w-color-critical-200);
+            border-color: var(--w-color-critical-200);
+        }
+
+        .gaqd-badge--scope-transient {
+            background: transparent;
+            color: var(--w-color-warning-100);
+            border-color: color-mix(in srgb, var(--w-color-warning-100) 40%, transparent);
+        }
+
+        .gaqd-badge--scope-file,
+        .gaqd-badge--scope-not_attempted {
+            background: transparent;
+            color: var(--w-color-grey-400);
+            border-color: var(--w-color-border-furniture);
+        }
+
         .gaqd-mono {
             font-family: monospace;
             font-size: 0.85em;
@@ -289,6 +309,10 @@
                         </td>
                         <td>
                             <span class="gaqd-badge gaqd-badge--{{ row.file.status }}">{{ row.file.get_status_display }}</span>
+                            {% if row.file.failure_scope %}
+                                <span class="gaqd-badge gaqd-badge--scope-{{ row.file.failure_scope }}"
+                                      title="{% trans 'Failure scope' %}">{{ row.file.get_failure_scope_display }}</span>
+                            {% endif %}
                         </td>
                         <td><span class="gaqd-mono">{{ row.file.file_path }}</span></td>
                         <td class="gaqd-meta">{{ row.file.started_at|default:"—" }}</td>

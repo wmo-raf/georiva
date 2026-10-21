@@ -8,13 +8,15 @@ For direct HTTP/HTTPS downloads from:
 """
 
 import time
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter
+from urllib3.exceptions import NewConnectionError
 from urllib3.util.retry import Retry
 
-from .base import BaseFetchStrategy, FetchMode, FetchResult, FileRequest
+from .base import BaseFetchStrategy, FailureScope, FetchMode, FetchResult, FileRequest
 
 
 class HTTPFetchStrategy(BaseFetchStrategy):
@@ -73,6 +75,9 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             backoff_factor=self.backoff_factor,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET"],
+            # Hand back the last response once retries run out, rather than a
+            # RetryError: its status and Retry-After classify the failure.
+            raise_on_status=False,
         )
 
         adapter = HTTPAdapter(
@@ -108,23 +113,21 @@ class HTTPFetchStrategy(BaseFetchStrategy):
         """
         Download file via HTTP.
 
-        Expects request.params['url'] to contain the download URL.
+        Expects request.params['url'] to contain the download URL. A failed
+        result carries its failure scope (#477).
         """
         result = FetchResult(request=request, local_path=local_path)
 
         url = request.params.get("url")
         if not url:
-            result.success = False
-            result.error = "No URL in request params"
-            result.status = "failed"
-            return result
-
-        # Ensure parent directory exists
-        local_path.parent.mkdir(parents=True, exist_ok=True)
+            return result.fail("No URL in request params", FailureScope.FILE)
 
         start_time = time.time()
 
         try:
+            # Ensure parent directory exists
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+
             # Make request with streaming
             response = self._session.get(
                 url,
@@ -133,19 +136,10 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             )
 
             # Handle HTTP errors
-            if response.status_code == 404:
-                result.success = False
-                result.error = f"File not found (404): {url}"
-                result.status = "not_found"
-                return result
-
-            if response.status_code == 403:
-                result.success = False
-                result.error = f"Access forbidden (403): {url}"
-                result.status = "failed"
-                return result
-
-            response.raise_for_status()
+            if response.status_code >= 400:
+                scope, retry_after = _classify_status(response)
+                result.retry_after = retry_after
+                return result.fail(f"HTTP {response.status_code} ({response.reason}): {url}", scope)
 
             # Get expected size
             content_length = response.headers.get("content-length")
@@ -172,13 +166,12 @@ class HTTPFetchStrategy(BaseFetchStrategy):
 
             # Verify size
             if expected_size and bytes_downloaded != expected_size:
-                result.success = False
-                result.error = f"Size mismatch: expected {expected_size}, got {bytes_downloaded}"
-                result.status = "failed"
                 # Clean up partial file
                 if local_path.exists():
                     local_path.unlink()
-                return result
+                return result.fail(
+                    f"Size mismatch: expected {expected_size}, got {bytes_downloaded}", FailureScope.FILE
+                )
 
             # Success
             result.success = True
@@ -193,27 +186,37 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             )
 
         except requests.exceptions.Timeout as e:
-            result.success = False
-            result.error = f"Request timeout: {e}"
-            result.status = "failed"
+            # Read or connect timeout: the source may be slow, or briefly gone.
+            result.fail(f"Request timeout: {e}", FailureScope.TRANSIENT)
             self.logger.error(f"Timeout downloading {url}: {e}")
 
+        except requests.exceptions.SSLError as e:
+            result.fail(f"SSL error: {e}", FailureScope.SOURCE)
+            self.logger.error(f"SSL error for {url}: {e}")
+
         except requests.exceptions.ConnectionError as e:
-            result.success = False
-            result.error = f"Connection error: {e}"
-            result.status = "failed"
+            # Never connected (no such host, refused) is the source; a connection
+            # that dropped once open is ambiguous.
+            scope = FailureScope.SOURCE if _never_connected(e) else FailureScope.TRANSIENT
+            result.fail(f"Connection error: {e}", scope)
             self.logger.error(f"Connection error for {url}: {e}")
 
+        except requests.exceptions.ChunkedEncodingError as e:
+            result.fail(f"Transfer interrupted: {e}", FailureScope.TRANSIENT)
+            self.logger.error(f"Transfer interrupted for {url}: {e}")
+
+        except requests.exceptions.RetryError as e:
+            result.fail(str(e), FailureScope.TRANSIENT)
+            self.logger.error(f"Retries exhausted for {url}: {e}")
+
         except requests.exceptions.RequestException as e:
-            result.success = False
-            result.error = str(e)
-            result.status = "failed"
+            # A malformed URL and the like: about this request, not the source.
+            result.fail(str(e), FailureScope.FILE)
             self.logger.error(f"Request failed for {url}: {e}")
 
         except OSError as e:
-            result.success = False
-            result.error = f"IO error writing file: {e}"
-            result.status = "failed"
+            # Our side cannot accept the file: every file after it would fail too.
+            result.fail(f"IO error writing file: {e}", FailureScope.SOURCE)
             self.logger.error(f"IO error: {e}")
 
         return result
@@ -244,6 +247,55 @@ class HTTPFetchStrategy(BaseFetchStrategy):
                 "exists": False,
                 "error": str(e),
             }
+
+
+def _classify_status(response) -> tuple[FailureScope, float | None]:
+    """The failure scope of an HTTP error response, and its Retry-After if any.
+
+    401/403 and 429 are the source refusing us; so is a 503 that says when to
+    come back. Any other 5xx has already outlasted the session's retries, and is
+    ambiguous, as is a 408 (the server timed out waiting for us). Any other 4xx is
+    about this request.
+    """
+    status = response.status_code
+    retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+    if status in (401, 403, 429) or (status == 503 and retry_after is not None):
+        return FailureScope.SOURCE, retry_after
+    if status >= 500 or status == 408:
+        return FailureScope.TRANSIENT, retry_after
+    return FailureScope.FILE, retry_after
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    """`Retry-After` as seconds from now: it is either seconds or an HTTP date."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, when.timestamp() - time.time())
+
+
+def _never_connected(exc: BaseException) -> bool:
+    """Whether a requests ConnectionError means no connection was ever made:
+    the host does not resolve, or it refused us. urllib3 reports both as a
+    NewConnectionError, wrapped in a MaxRetryError's `reason`."""
+    seen = set()
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, NewConnectionError):
+            return True
+        stack.extend(arg for arg in getattr(current, "args", ()) if isinstance(arg, BaseException))
+        stack.extend([getattr(current, "reason", None), current.__cause__, current.__context__])
+    return False
 
 
 class AuthenticatedHTTPFetchStrategy(HTTPFetchStrategy):

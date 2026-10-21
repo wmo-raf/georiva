@@ -215,8 +215,8 @@ The record of one collection's share of an automated DataFeed execution. Created
 files are fetched — to enable real-time monitoring. One `FetchRun` per `(feed execution, collection)`: `LoaderJobType`
 loops the feed's collections and `Loader.run()` creates a `FetchRun` for each. It carries no collection FK, so the
 collection is recovered from `FetchedFile.file_path`'s third segment.
-Status: `running → completed / failed / cancelled`. Success vs partial outcome is derived from `FetchedFile` children,
-not stored on the run itself.
+Status: `running → completed / failed / cancelled / interrupted` (`interrupted`: crash recovery found the worker gone
+mid-run). Success vs partial outcome is derived from `FetchedFile` children, not stored on the run itself.
 _Avoid_: DataArrival, LoaderRun, DataFeedRun
 
 **FetchedFile**:
@@ -225,9 +225,19 @@ Per-file acquisition record within a `FetchRun`. The run's whole plan is created
 Status: `pending (shown as "Waiting") → fetching → stored / skipped / failed`. Skipped files (already exist in storage)
 are their planned row marked `skipped`. No row outlives its run as `pending`, nor as `fetching` under a run that
 stopped: those become `failed` ("not attempted" / "interrupted") and are retryable. (A `queued` fetch result still
-leaves its row `fetching`; that path is unreachable today.) Linked to `FileIngestion` via `file_path` — there
-is no FK.
+leaves its row `fetching`; that path is unreachable today.) A `failed` row carries its **Failure scope**. Linked to
+`FileIngestion` via `file_path` — there is no FK.
 _Avoid_: FetchResult (that is a transient in-memory dataclass, not a model)
+
+**Failure scope**:
+What a failed fetch means for the rest of its run. `file`: definitive, and about this file only (a 404, a size
+mismatch, a download that fails validation). `transient`: ambiguous (a timeout, a connection dropped mid-transfer, a
+5xx that outlasted the HTTP retries); also any failure nobody classified. `source`: the source as a whole cannot serve
+us (the host does not resolve, refuses the connection, answers 401/403/429 or a 503 with `Retry-After`), or our side
+cannot accept the file (a storage write or local disk error). `not attempted`: on `FetchedFile` rows only, the run
+stopped before reaching it. Set by the fetch strategy on a failed `FetchResult` (with `retry_after` when the source sent
+`Retry-After`), by the Loader for what fails after the download, and persisted as `FetchedFile.failure_scope`.
+_Avoid_: error type, failure kind, severity
 
 **UploadSession**:
 The record of a manual multi-file upload by an operator. Owned by `catalog` + `user`. Status:

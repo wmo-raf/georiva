@@ -16,6 +16,7 @@ from wagtail.admin.panels import FieldPanel
 from georiva.events.models import DomainEvent
 from georiva.events.recording import record
 
+from .fetch.base import FailureScope
 from .health import DataFeedManager
 from .source import BaseDataSource
 
@@ -867,6 +868,13 @@ class FetchedFile(models.Model):
     )
     skip_reason = models.CharField(max_length=255, blank=True)
     error = models.TextField(blank=True)
+    # What the failure means for the rest of the run (#477); null unless failed.
+    failure_scope = models.CharField(
+        max_length=20,
+        choices=[(scope.value, scope.label) for scope in FailureScope],
+        null=True,
+        blank=True,
+    )
     bytes_transferred = models.BigIntegerField(default=0)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -899,13 +907,15 @@ class FetchedFile(models.Model):
         self.skip_reason = reason
         self.save(update_fields=["status", "skip_reason"])
 
-    def mark_failed(self, error=""):
+    def mark_failed(self, error="", scope=None):
+        """A failure nobody classified is TRANSIENT (#477)."""
         from django.utils import timezone
 
         self.status = self.Status.FAILED
         self.error = error
+        self.failure_scope = scope or FailureScope.TRANSIENT
         self.completed_at = timezone.now()
-        self.save(update_fields=["status", "error", "completed_at"])
+        self.save(update_fields=["status", "error", "failure_scope", "completed_at"])
 
 
 # ---------------------------------------------------------------------------

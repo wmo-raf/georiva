@@ -17,7 +17,7 @@ from django.urls import reverse
 from georiva.core.models import Catalog, Collection
 from georiva.events.testing import event_context
 from georiva.organisations.testing import dial_org, make_organisation
-from georiva.sources.fetch.base import FetchResult, FileRequest
+from georiva.sources.fetch.base import FailureScope, FetchResult, FileRequest
 from georiva.sources.loader import Loader
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
@@ -170,6 +170,23 @@ class RetryFetchTests(TestCase):
         self.assertEqual(self.run.files_failed, 1)
         self.assertEqual(self.run.files_fetched, 0)
 
+    def test_a_failed_retry_records_the_new_scope(self):
+        request = FileRequest(identifier="x", filename="failed.tif")
+        self._retry(FetchResult(request=request).fail("HTTP 403 (Forbidden)", FailureScope.SOURCE))
+
+        self.ff.refresh_from_db()
+        self.assertEqual(self.ff.failure_scope, "source")
+
+    def test_a_successful_retry_clears_the_old_scope(self):
+        self.ff.failure_scope = FailureScope.TRANSIENT
+        self.ff.save(update_fields=["failure_scope"])
+        request = FileRequest(identifier="x", filename="failed.tif")
+
+        self._retry(FetchResult(request=request, success=True, status="success", bytes_transferred=55))
+
+        self.ff.refresh_from_db()
+        self.assertIsNone(self.ff.failure_scope)
+
     def test_record_without_a_stored_request_refuses_retry_untouched(self):
         from georiva.sources.acquisition_retry import RetryNotPossible, retry_fetch
 
@@ -291,6 +308,17 @@ class RunDetailRetryUITests(TestCase):
 
         self.assertContains(response, "Waiting")
         self.assertNotContains(response, 'name="retry_file_id"')
+
+    def test_a_failed_row_shows_its_scope(self):
+        for name, scope in (("f.tif", "file"), ("t.tif", "transient"), ("s.tif", "source"), ("n.tif", "not_attempted")):
+            ff = self._file(name)
+            ff.failure_scope = scope
+            ff.save(update_fields=["failure_scope"])
+
+        response = self.client.get(self._url())
+
+        for label in ("File", "Transient", "Source", "Not attempted"):
+            self.assertContains(response, f">{label}</span>")
 
     def test_a_row_the_run_never_reached_is_retryable(self):
         not_attempted = self._file("never.tif")
