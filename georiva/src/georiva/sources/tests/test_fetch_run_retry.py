@@ -86,6 +86,36 @@ class RetryScheduleTests(TestCase):
         self.assertEqual(long_hint.retry_due_at - long_hint.finished_at, timedelta(hours=1))
         self.assertEqual(short_hint.retry_due_at - short_hint.finished_at, timedelta(minutes=5))
 
+    def test_parking_a_run_withdraws_its_retry(self):
+        run = _run(self.feed)
+        run.mark_failed(error="x")
+
+        run.park()
+
+        run.refresh_from_db()
+        self.assertIsNone(run.retry_due_at)
+        self.assertTrue(run.parked)
+
+    def test_a_retry_job_that_dies_before_it_has_a_run_parks_the_run_it_retries(self):
+        from georiva.sources.job_types import LoaderJobType
+
+        run = _run(self.feed)
+        run.mark_failed(error="x")
+
+        LoaderJobType().on_error(MagicMock(resume_of_run=run), RuntimeError("boom"))
+
+        run.refresh_from_db()
+        self.assertTrue(run.parked)
+        self.assertIsNone(run.retry_due_at)
+
+    def test_the_retry_after_of_the_fetch_that_aborts_the_run_is_the_floor(self):
+        # The abort is raised by the failed fetch that carries the hint, so the
+        # run-level hint is the same one the per-file path collects.
+        run = _run(self.feed)
+        run.mark_failed(error="Stopped: source unavailable", retry_after=3600)
+
+        self.assertEqual(run.retry_due_at - run.finished_at, timedelta(hours=1))
+
     def test_retrying_the_failed_files_by_hand_clears_a_gap(self):
         run = _run(self.feed, parked=True)
         row = FetchedFile.objects.create(fetch_run=run, file_path="a")

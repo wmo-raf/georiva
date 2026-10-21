@@ -823,6 +823,12 @@ class FetchRun(models.Model):
         else:
             self.retry_due_at = self.finished_at + delay
 
+    def park(self):
+        """Stop retrying this run: no retry is due, and its feed shows a gap."""
+        self.retry_due_at = None
+        self.parked = True
+        type(self).objects.filter(pk=self.pk).update(retry_due_at=None, parked=True)
+
     @property
     def retry_number(self):
         """Which retry the next one would be: 1 for a first run's retry."""
@@ -832,10 +838,6 @@ class FetchRun(models.Model):
     def retried_as(self):
         """The run that retried this one, if any."""
         return self.resumes.order_by("pk").first()
-
-    @property
-    def retry_pending(self):
-        return self.retry_due_at is not None and self.retried_as is None
 
     def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0, retry_after=None):
         self._finish(

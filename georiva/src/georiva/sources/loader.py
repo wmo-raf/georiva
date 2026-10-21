@@ -158,6 +158,15 @@ def plan_from_earlier_run(earlier, collection):
         return None
 
 
+def plan_requests(data_source, collection, earlier=None):
+    """The requests a run fetches: the earlier run's failed ones when this is its
+    retry, else whatever the source generates now (#480)."""
+    planned = plan_from_earlier_run(earlier, collection)
+    if planned is None:
+        planned = data_source.generate_requests_for_collection(collection)
+    return planned
+
+
 class Loader:
     """
     Orchestrates data loading by combining DataSource and FetchStrategy.
@@ -389,9 +398,7 @@ class Loader:
             try:
                 self.fetch_strategy.connect()
                 self.logger.debug("Fetch strategy connected")
-                generated = plan_from_earlier_run(self.resumed_from, self.collection)
-                if generated is None:
-                    generated = self.data_source.generate_requests_for_collection(self.collection)
+                generated = plan_requests(self.data_source, self.collection, self.resumed_from)
             except Exception as e:
                 self.logger.exception(f"Could not plan the run: {e}")
                 raise _RunStopped(f"{type(e).__name__}: {e}") from e

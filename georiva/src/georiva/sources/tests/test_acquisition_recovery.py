@@ -412,7 +412,7 @@ class RecoverRunViewTests(TestCase):
         self.assertIn("operator", run.error_message)
         self.assertEqual(dangling.status, FetchedFile.Status.FAILED)
         self.assertTrue(LoaderJob.objects.filter(resume_of_run=run).exists())
-        self.assertContains(response, "resume queued")
+        self.assertContains(response, "retry queued")
 
     def test_post_warns_when_the_run_is_already_being_retried(self, _executor):
         run = _make_run(self.feed, hours_ago=2)
@@ -455,3 +455,18 @@ class SweepFailureScopeTests(TestCase):
         fetching.refresh_from_db()
         self.assertEqual((waiting.status, waiting.failure_scope), ("failed", "not_attempted"))
         self.assertEqual((fetching.status, fetching.failure_scope), ("failed", "transient"))
+
+
+class SweepScheduleTests(TestCase):
+    def test_the_recovery_sweep_is_registered_every_five_minutes(self):
+        from django_celery_beat.models import IntervalSchedule
+
+        from georiva.sources.tasks import setup_stale_fetch_run_sweep_beat
+
+        with patch("georiva.sources.tasks.register_periodic_tasks") as register:
+            setup_stale_fetch_run_sweep_beat(sender=None)
+
+        (specs,) = register.call_args.args
+        (spec,) = specs
+        self.assertEqual(spec.task, "georiva.sources.tasks.sweep_stale_fetch_runs")
+        self.assertEqual((spec.every, spec.period), (5, IntervalSchedule.MINUTES))

@@ -2063,15 +2063,15 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
     Operator recovery confirmation page for a FetchRun stuck in RUNNING.
 
     GET renders the run's facts plus the duplicate-run warning; POST performs
-    the targeted sweep (interrupt + auto-resume) via recover_run() and
+    the targeted sweep (interrupt + retry) via recover_run() and
     redirects to the run detail with a message saying whether a new fetch
     actually started. Only reachable for runs still in RUNNING — anything
     else is already terminal and redirects straight back.
     """
     from georiva.sources.acquisition_recovery import (
-        RESUME_ALREADY_UNDER_WAY,
-        RESUME_CAP_REACHED,
-        RESUME_QUEUED,
+        RETRY_ALREADY_UNDER_WAY,
+        RETRY_CAP_REACHED,
+        RETRY_QUEUED,
         recover_run,
     )
     from georiva.sources.acquisition_tracking import (
@@ -2096,21 +2096,21 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
 
     if request.method == "POST":
         outcome = recover_run(run)
-        if outcome == RESUME_QUEUED:
+        if outcome == RETRY_QUEUED:
             messages.success(
                 request,
-                _("Run marked as interrupted — resume queued."),
+                _("Run marked as interrupted — retry queued."),
             )
-        elif outcome == RESUME_ALREADY_UNDER_WAY:
+        elif outcome == RETRY_ALREADY_UNDER_WAY:
             messages.warning(
                 request,
-                _("Run marked as interrupted — resume not queued: recovery is already under way."),
+                _("Run marked as interrupted — retry not queued: recovery is already under way."),
             )
-        elif outcome == RESUME_CAP_REACHED:
+        elif outcome == RETRY_CAP_REACHED:
             messages.warning(
                 request,
                 _(
-                    "Run marked as interrupted — resume not queued: "
+                    "Run marked as interrupted — retry not queued: "
                     "the retry cap was reached. Use “Fetch now” on the "
                     "feed to retry manually."
                 ),
@@ -2118,7 +2118,7 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
         else:
             messages.error(
                 request,
-                _("Run marked as interrupted, but queuing the resume failed — check the logs."),
+                _("Run marked as interrupted, but queuing the retry failed — check the logs."),
             )
         return redirect(detail_url)
 

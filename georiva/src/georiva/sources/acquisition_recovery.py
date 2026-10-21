@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 INTERRUPTED_FILE_ERROR = "interrupted — worker stopped mid-fetch"
 
 # Reason codes returned by dispatch_retry / recover_run.
-RESUME_QUEUED = "queued"
-RESUME_CAP_REACHED = "cap_reached"
-RESUME_ALREADY_UNDER_WAY = "already_under_way"
-RESUME_ENQUEUE_FAILED = "enqueue_failed"
+RETRY_QUEUED = "queued"
+RETRY_CAP_REACHED = "cap_reached"
+RETRY_ALREADY_UNDER_WAY = "already_under_way"
+RETRY_ENQUEUE_FAILED = "enqueue_failed"
 
 OPERATOR_SWEEP_REASON = "Interrupted — declared dead by an operator (targeted sweep)."
 
@@ -154,7 +154,7 @@ def recover_run(run) -> str:
     _sweep_run(run, OPERATOR_SWEEP_REASON)
     run.refresh_from_db()
     if run.parked:
-        return RESUME_CAP_REACHED
+        return RETRY_CAP_REACHED
     return dispatch_retry(run)
 
 
@@ -168,13 +168,13 @@ def dispatch_due_retries(now=None) -> int:
         .select_related("data_feed")
         .order_by("retry_due_at")
     )
-    return sum(dispatch_retry(run) == RESUME_QUEUED for run in due)
+    return sum(dispatch_retry(run) == RETRY_QUEUED for run in due)
 
 
 def dispatch_retry(run) -> str:
     """Enqueue a system LoaderJob that retries `run`, scoped to its collection.
 
-    Returns RESUME_QUEUED on success, or why it was skipped: the run already has
+    Returns RETRY_QUEUED on success, or why it was skipped: the run already has
     a retry (a run, or a job not yet started), or the enqueue failed. Whether a
     newer run exists for the feed is deliberately not asked — the schedule and a
     retry are independent (#480).
@@ -189,7 +189,7 @@ def dispatch_retry(run) -> str:
         or LoaderJob.objects.filter(resume_of_run=run, state__in=JOB_STATES_PENDING_OR_RUNNING).exists()
     ):
         logger.info("FetchRun %d: already retried or being retried — not dispatching", run.pk)
-        return RESUME_ALREADY_UNDER_WAY
+        return RETRY_ALREADY_UNDER_WAY
 
     try:
         JobHandler.create_and_start(
@@ -201,10 +201,10 @@ def dispatch_retry(run) -> str:
         )
     except Exception:
         logger.exception("FetchRun %d: failed to enqueue its retry", run.pk)
-        return RESUME_ENQUEUE_FAILED
+        return RETRY_ENQUEUE_FAILED
 
     logger.info("FetchRun %d: retry %d dispatched", run.pk, run.retry_number)
-    return RESUME_QUEUED
+    return RETRY_QUEUED
 
 
 def _reap_stale_loader_jobs(cutoff) -> int:

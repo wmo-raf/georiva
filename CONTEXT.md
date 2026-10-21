@@ -252,6 +252,8 @@ system job for that run's collection. The retry is a new run whose plan is the e
 reference time and not whatever the source now calls latest; with no plan, or a row lacking its `request_payload`, it asks
 the source again. Capped at `GEORIVA_FETCH_RUN_MAX_RETRIES` (4), shared with crash recovery. Independent of the regular
 schedule: neither holds back the other, and `skip_existing` settles any overlap.
+Storage names predate the term: the link is the `resumed_from` field (reverse `resumes`) and a retry job carries
+`resume_of_run`. They mean retry; renaming them would be a migration for no behaviour.
 _Avoid_: auto-resume, resume
 
 **Parked run**:

@@ -16,7 +16,7 @@ BACKOFF_MINUTES = (5, 15, 45, 120)
 
 
 def max_retries() -> int:
-    return getattr(settings, "GEORIVA_FETCH_RUN_MAX_RETRIES", len(BACKOFF_MINUTES))
+    return settings.GEORIVA_FETCH_RUN_MAX_RETRIES
 
 
 def retry_delay(depth: int, retry_after: float | None = None) -> timedelta | None:
