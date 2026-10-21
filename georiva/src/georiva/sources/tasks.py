@@ -141,6 +141,9 @@ def run_data_feed_loader(self, data_feed_id):
     links = DataFeedCollectionLink.objects.filter(data_feed=data_feed).select_related("collection", "data_feed")
 
     results = []
+    # Once one collection's run finds the source unavailable, the rest of this
+    # tick does not ask it again: each remaining due collection's run ends at once.
+    source_down = None
     for link in links:
         real_link = link.get_real_instance()
         if not real_link.is_due():
@@ -149,7 +152,12 @@ def run_data_feed_loader(self, data_feed_id):
 
         collection = real_link.collection
         loader = data_feed.get_loader(collection)
-        result = loader.run()
+        if source_down:
+            result = loader.record_not_attempted(f"not attempted: {source_down}")
+        else:
+            result = loader.run()
+            if result.source_unavailable:
+                source_down = f"source unavailable — aborted in {collection.name}"
         results.append(result.to_dict())
 
     return results

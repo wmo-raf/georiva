@@ -53,6 +53,12 @@ class LoaderRunResult:
     # Context
     run_time: datetime | None = None  # For forecasts: which model run
 
+    # Why the run stopped before walking its plan, if it did (#478)
+    stop_reason: str | None = None
+    # Set when it stopped because the source cannot serve us: the feed's other
+    # collections are then not attempted in the same tick.
+    source_unavailable: str | None = None
+
     @property
     def success(self) -> bool:
         return self.files_failed == 0 and self.files_fetched > 0
@@ -63,6 +69,8 @@ class LoaderRunResult:
 
     @property
     def status(self) -> str:
+        if self.stop_reason:
+            return "failed"
         if self.files_queued > 0:
             return "queued"
         if self.files_fetched == 0 and self.files_failed == 0:
@@ -110,8 +118,18 @@ class LoaderRunResult:
             "duration_seconds": self.duration_seconds,
             "errors": self.errors,
             "run_time": self.run_time.isoformat() if self.run_time else None,
+            "stop_reason": self.stop_reason,
             "summary": self.summary(),
         }
+
+
+class _RunStopped(Exception):
+    """Raised inside a run when the source cannot serve it: the run ends early,
+    FAILED, for `reason` (#478)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 class Loader:
@@ -188,6 +206,21 @@ class Loader:
             return None
         return payload if isinstance(payload, dict) else None
 
+    @staticmethod
+    def _check_stop(fetch_result, consecutive_transient: int, threshold: int) -> int:
+        """The consecutive-TRANSIENT count after this failed fetch, or raise
+        _RunStopped when the source has shown it cannot serve the run: on a
+        SOURCE failure, or at `threshold` TRANSIENT failures in a row (#478)."""
+        scope = fetch_result.failure_scope or FailureScope.TRANSIENT
+        if scope == FailureScope.SOURCE:
+            raise _RunStopped(f"source unavailable — {fetch_result.error}")
+        if scope != FailureScope.TRANSIENT:
+            return 0
+        consecutive_transient += 1
+        if consecutive_transient >= threshold:
+            raise _RunStopped(f"{consecutive_transient} consecutive transient failures — {fetch_result.error}")
+        return consecutive_transient
+
     def _one_request_per_path(self, requests) -> list:
         """The source's requests with any that would store to an already-planned
         path dropped. Two requests for one path would overwrite each other in
@@ -252,6 +285,27 @@ class Loader:
                 self.logger.debug("Fetch strategy disconnect failed", exc_info=True)
             self._cleanup_temp()
 
+    def record_not_attempted(self, reason: str) -> LoaderRunResult:
+        """
+        End this collection's run before it starts: a FetchRun FAILED at once
+        with `reason`, and no plan rows. Nothing is asked of the source, not even
+        the plan, which may itself call it — the feed short-circuit after a
+        sibling collection's run found the source unavailable (#478).
+        """
+        from georiva.sources.models import FetchRun
+
+        result = LoaderRunResult(stop_reason=reason)
+        result.add_error(reason)
+        result.finish()
+        if self.data_feed:
+            fetch_run = FetchRun.objects.create(
+                data_feed=self.data_feed, status="running", resumed_from=self.resumed_from
+            )
+            fetch_run.mark_failed(error=reason)
+            self.data_feed._update_run_stats(result, self.collection)
+        self.logger.info(f"Not attempted: {reason}")
+        return result
+
     def run(
         self,
         *,
@@ -279,6 +333,8 @@ class Loader:
         # under it. Tracked rather than swept by status: a queued result also
         # leaves its row FETCHING, and that is not a failure.
         in_flight = None
+        consecutive_transient = 0
+        breaker_threshold = settings.GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD
 
         if self.data_feed:
             fetch_run = FetchRun.objects.create(
@@ -290,12 +346,17 @@ class Loader:
         try:
             self.logger.info(f"Starting loader run for {self.collection.name}")
 
-            # Connect fetch strategy
-            self.fetch_strategy.connect()
-            self.logger.debug("Fetch strategy connected")
-
-            # Generate requests from data source
-            requests = self._one_request_per_path(self.data_source.generate_requests_for_collection(self.collection))
+            # Connect and generate requests from the data source. Either failing
+            # means the source cannot serve this run (a plugin's run detection
+            # failing on DNS, say), not that there was nothing to fetch.
+            try:
+                self.fetch_strategy.connect()
+                self.logger.debug("Fetch strategy connected")
+                generated = self.data_source.generate_requests_for_collection(self.collection)
+            except Exception as e:
+                self.logger.exception(f"Could not plan the run: {e}")
+                raise _RunStopped(f"{type(e).__name__}: {e}") from e
+            requests = self._one_request_per_path(generated)
             result.files_requested = len(requests)
 
             # Persist the request count up front — the finish-time summary never
@@ -413,6 +474,7 @@ class Loader:
                             self.on_file_fetched(request, fetch_result)
                         except Exception as e:
                             self.logger.warning(f"on_file_fetched callback error: {e}")
+                    consecutive_transient = 0
 
                 elif fetch_result.status == "queued":
                     result.files_queued += 1
@@ -422,7 +484,15 @@ class Loader:
                         result.add_error(f"{request.filename}: {fetch_result.error}")
                     if ff:
                         ff.mark_failed(error=fetch_result.error or "", scope=fetch_result.failure_scope)
+                    # Settled before the check: a stop must not fail this row twice.
+                    in_flight = None
+                    consecutive_transient = self._check_stop(fetch_result, consecutive_transient, breaker_threshold)
                 in_flight = None
+
+        except _RunStopped as stop:
+            self.logger.warning(f"Loader run stopped: {stop.reason}")
+            result.add_error(stop.reason)
+            stop_reason = result.source_unavailable = stop.reason
 
         except Exception as e:
             self.logger.exception(f"Loader run failed: {e}")
@@ -437,6 +507,7 @@ class Loader:
                 self.logger.warning(f"Error disconnecting: {e}")
 
             self._cleanup_temp()
+            result.stop_reason = stop_reason
             result.finish()
 
             if fetch_run:
@@ -456,12 +527,18 @@ class Loader:
                     failure_scope=FailureScope.NOT_ATTEMPTED,
                     completed_at=timezone.now(),
                 )
-                fetch_run.mark_completed(
-                    files_fetched=result.files_fetched,
-                    files_skipped=result.files_skipped,
-                    files_failed=result.files_failed,
-                    bytes_transferred=result.bytes_transferred,
-                )
+                counters = {
+                    "files_fetched": result.files_fetched,
+                    "files_skipped": result.files_skipped,
+                    "files_failed": result.files_failed,
+                    "bytes_transferred": result.bytes_transferred,
+                }
+                # A run that walked its whole plan completed, however many files
+                # failed; one that stopped before the end failed (#478).
+                if stop_reason:
+                    fetch_run.mark_failed(error=f"{FetchRun.STOPPED_PREFIX}{stop_reason}", **counters)
+                else:
+                    fetch_run.mark_completed(**counters)
 
             if self.data_feed:
                 self.data_feed._update_run_stats(result, self.collection)

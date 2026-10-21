@@ -542,6 +542,11 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # duplicate run racing the live one.
 GEORIVA_FETCH_RUN_STALE_AFTER_HOURS = env.int("GEORIVA_FETCH_RUN_STALE_AFTER_HOURS", 6)
 
+# A fetch run stops after this many consecutive transient failures (timeouts,
+# dropped connections, 5xx): the source is down, and every remaining file would
+# fail the same way. Any success or file-scoped failure resets the count (#478).
+GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD = env.int("GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD", 3)
+
 # With acks_late, Redis redelivers an unacked message after visibility_timeout
 # (default 1h) — which would duplicate-execute any legitimate task running
 # longer than that, and race the stale-run sweep after a crash. Keep it above
