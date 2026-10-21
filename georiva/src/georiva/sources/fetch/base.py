@@ -1,4 +1,5 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -128,6 +129,11 @@ class FetchResult:
         return self
 
 
+# A single file may take at most this long, wall-clock (#479). The read timeout
+# only bounds silence on the socket, so a source that trickles never trips it.
+DEFAULT_MAX_FILE_SECONDS = 900
+
+
 class BaseFetchStrategy(ABC):
     """
     Abstract base class for fetch strategies.
@@ -148,6 +154,12 @@ class BaseFetchStrategy(ABC):
 
         self.config = config or {}
         self.logger = logging.getLogger(f"georiva.fetch.{self.type}")
+        self.max_file_seconds = self.config.get("max_file_seconds", DEFAULT_MAX_FILE_SECONDS)
+        # Monotonic seconds; a seam so tests can drive the deadline without waiting.
+        self.clock = time.monotonic
+
+    def file_timeout_error(self) -> str:
+        return f"download exceeded its time limit ({self.max_file_seconds:g}s)"
 
     @property
     @abstractmethod

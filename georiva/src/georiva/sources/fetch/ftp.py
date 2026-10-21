@@ -13,6 +13,10 @@ from pathlib import Path
 from .base import BaseFetchStrategy, FailureScope, FetchMode, FetchResult, FileRequest
 
 
+class _FileTimeout(Exception):
+    """Raised from the transfer callback when a file outlasts max_file_seconds."""
+
+
 class FTPFetchStrategy(BaseFetchStrategy):
     """
     Fetch strategy for FTP/SFTP/FTPS.
@@ -36,6 +40,7 @@ class FTPFetchStrategy(BaseFetchStrategy):
             private_key: SSH private key (for SFTP)
             passive_mode: Use passive mode (default: True)
             timeout: Connection timeout (default: 30)
+            max_file_seconds: Wall-clock limit for one file (default: 900)
         """
         super().__init__(config)
 
@@ -140,6 +145,14 @@ class FTPFetchStrategy(BaseFetchStrategy):
                 self._connection.close()
             self._connection = None
 
+    def _reset_connection(self) -> None:
+        """Reconnect after an aborted transfer; a failure to do so surfaces on the next fetch."""
+        try:
+            self.disconnect()
+            self.connect()
+        except Exception as e:
+            self.logger.warning(f"Reconnect after aborted transfer failed: {e}")
+
     def fetch(self, request: FileRequest, local_path: Path) -> FetchResult:
         """Download file via FTP/SFTP. A failed result carries its failure scope (#477)."""
         result = FetchResult(request=request, local_path=local_path)
@@ -157,18 +170,34 @@ class FTPFetchStrategy(BaseFetchStrategy):
             return result.fail(f"IO error writing file: {e}", FailureScope.SOURCE)
 
         start_time = time.time()
+        deadline = self.clock() + self.max_file_seconds
+
+        def check_deadline() -> None:
+            if self.clock() > deadline:
+                raise _FileTimeout()
+
+        def write(data: bytes) -> None:
+            check_deadline()
+            local_file.write(data)
 
         try:
             with local_file:
                 if self.protocol == "sftp":
-                    self._sftp.getfo(remote_path, local_file)
+                    self._sftp.getfo(remote_path, local_file, callback=lambda done, total: check_deadline())
                 else:
-                    self._connection.retrbinary(f"RETR {remote_path}", local_file.write)
+                    self._connection.retrbinary(f"RETR {remote_path}", write)
 
             result.success = True
             result.status = "complete"
             result.bytes_transferred = local_path.stat().st_size
             result.duration_seconds = time.time() - start_time
+
+        except _FileTimeout:
+            local_path.unlink(missing_ok=True)
+            self.logger.error(f"FTP download of {remote_path} exceeded {self.max_file_seconds}s")
+            # The control connection is mid-transfer and unusable for the next file.
+            self._reset_connection()
+            result.fail(self.file_timeout_error(), FailureScope.TRANSIENT)
 
         except Exception as e:
             self.logger.error(f"FTP download failed: {e}")

@@ -123,6 +123,14 @@ class LoaderRunResult:
         }
 
 
+def _format_duration(seconds: float) -> str:
+    """A time limit as people write it: 2h, 15m, 90s."""
+    for unit, size in (("h", 3600), ("m", 60)):
+        if seconds >= size and seconds % size == 0:
+            return f"{int(seconds // size)}{unit}"
+    return f"{seconds:g}s"
+
+
 class _RunStopped(Exception):
     """Raised inside a run when the source cannot serve it: the run ends early,
     FAILED, for `reason` (#478)."""
@@ -153,6 +161,7 @@ class Loader:
         data_feed=None,
         on_file_fetched: Callable | None = None,  # Callback after each file
         resumed_from=None,  # Interrupted FetchRun this run resumes
+        clock: Callable[[], float] = time.monotonic,  # Seam for the run time limit
     ):
         self.data_source = data_source
         self.fetch_strategy = self.data_source.fetch_strategy()
@@ -160,6 +169,7 @@ class Loader:
         self.on_file_fetched = on_file_fetched
         self.data_feed = data_feed
         self.resumed_from = resumed_from
+        self.clock = clock
 
         self.logger = logging.getLogger(f"georiva.loader.{data_source.name.replace(' ', '_').lower()}")
         self._temp_dir: str | None = None
@@ -335,6 +345,8 @@ class Loader:
         in_flight = None
         consecutive_transient = 0
         breaker_threshold = settings.GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD
+        run_max_seconds = settings.GEORIVA_FETCH_RUN_MAX_SECONDS
+        run_started = self.clock()
 
         if self.data_feed:
             fetch_run = FetchRun.objects.create(
@@ -449,6 +461,10 @@ class Loader:
 
             # Fetch files
             for i, (request, ff) in enumerate(to_fetch, 1):
+                # Checked between files only: a file in progress has its own limit.
+                if self.clock() - run_started >= run_max_seconds:
+                    raise _RunStopped(f"run exceeded its time limit ({_format_duration(run_max_seconds)})")
+
                 self.logger.info(f"[{i}/{len(to_fetch)}] Fetching {request.filename}")
 
                 if ff:

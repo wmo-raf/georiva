@@ -546,6 +546,8 @@ GEORIVA_FETCH_RUN_STALE_AFTER_HOURS = env.int("GEORIVA_FETCH_RUN_STALE_AFTER_HOU
 # dropped connections, 5xx): the source is down, and every remaining file would
 # fail the same way. Any success or file-scoped failure resets the count (#478).
 GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD = env.int("GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD", 3)
+# Wall-clock budget for one fetch run; checked before each file starts (#479).
+GEORIVA_FETCH_RUN_MAX_SECONDS = env.int("GEORIVA_FETCH_RUN_MAX_SECONDS", 7200)
 
 # With acks_late, Redis redelivers an unacked message after visibility_timeout
 # (default 1h) — which would duplicate-execute any legitimate task running
