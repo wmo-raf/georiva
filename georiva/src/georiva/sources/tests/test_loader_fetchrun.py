@@ -259,6 +259,36 @@ class LoaderFetchPlanTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].status, "stored")
 
+    def _mark_stored_fails_once(self):
+        real, calls = FetchedFile.mark_stored, []
+
+        def mark_stored(ff, **kwargs):
+            calls.append(ff.pk)
+            if len(calls) == 1:
+                raise RuntimeError("database gone")
+            return real(ff, **kwargs)
+
+        return patch.object(FetchedFile, "mark_stored", autospec=True, side_effect=mark_stored)
+
+    def test_a_fetch_whose_row_cannot_be_stored_is_counted_once(self):
+        requests = self._requests("a.grib", "b.grib")
+
+        with self._mark_stored_fails_once():
+            self._run(self._loader(requests))
+
+        run = FetchRun.objects.get()
+        self.assertEqual(run.files_fetched + run.files_skipped + run.files_failed, run.files_requested)
+
+    def test_a_copy_whose_row_cannot_be_stored_is_counted_once(self):
+        requests = self._requests("shared.grib")
+        loader = self._loader(requests)
+
+        with patch.object(Loader, "_tier_bucket", new_callable=PropertyMock), self._mark_stored_fails_once():
+            self._run(loader, existing_path="sibling/shared.grib")
+
+        run = FetchRun.objects.get()
+        self.assertEqual((run.files_requested, run.files_fetched, run.files_failed), (1, 1, 0))
+
     def test_an_escaping_exception_fails_every_unfinished_row_and_keeps_the_sum(self):
         requests = self._requests("a.grib", "b.grib", "c.grib")
         results = iter([_success_fetch_result(requests[0])])

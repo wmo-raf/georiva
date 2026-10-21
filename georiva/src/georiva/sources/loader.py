@@ -356,11 +356,13 @@ class Loader:
                             in_flight = ff
                         try:
                             self._tier_bucket.copy(existing_path, dest_path)
+                            # Counted only once its row says so: a row that cannot be
+                            # marked goes to the re-download, which counts it there.
+                            if ff:
+                                ff.mark_stored(bytes_transferred=0)
                             result.files_fetched += 1
                             result.stored_paths.append(dest_path)
                             self.logger.info(f"Copied (no re-download): {existing_path} → {dest_path}")
-                            if ff:
-                                ff.mark_stored(bytes_transferred=0)
                         except Exception as e:
                             self.logger.warning(f"Copy failed, will re-download: {e}")
                             # The re-download below walks this same row again.
@@ -396,11 +398,14 @@ class Loader:
                 result.fetch_results.append(fetch_result)
 
                 if fetch_result.success:
+                    # Mark the row first: if that raises, `finally` fails it as
+                    # interrupted, and it must not also be counted as fetched.
+                    if ff:
+                        ff.mark_stored(bytes_transferred=fetch_result.bytes_transferred or 0)
+                    in_flight = None
                     result.files_fetched += 1
                     result.bytes_transferred += fetch_result.bytes_transferred
                     result.stored_paths.append(self._get_storage_path(request))
-                    if ff:
-                        ff.mark_stored(bytes_transferred=fetch_result.bytes_transferred or 0)
 
                     # Callback
                     if self.on_file_fetched:

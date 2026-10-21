@@ -63,20 +63,32 @@ def _adopt_latest(file_path: str, actor: str) -> EventContext | None:
     )
 
 
-def _upload_is_newer(upload, file_path: str) -> bool:
-    """Whether the upload stored this key after the latest fetch did."""
+def _reached_rows(file_path: str):
+    """The FetchedFiles for this key that a run actually reached. A run plans every
+    row up front (#474), so a Waiting row, or one failed because its run stopped
+    before it, says nothing about who stored the key."""
     from georiva.sources.models import FetchedFile
 
-    fetched = FetchedFile.objects.filter(file_path=file_path).order_by("-id").first()
+    return (
+        FetchedFile.objects.filter(file_path=file_path)
+        .exclude(status=FetchedFile.Status.PENDING)
+        .exclude(status=FetchedFile.Status.FAILED, started_at__isnull=True)
+    )
+
+
+def _upload_is_newer(upload, file_path: str) -> bool:
+    """Whether the upload stored this key after the latest fetch did."""
+    fetched = _reached_rows(file_path).order_by("-id").first()
     fetched_at = fetched.completed_at or fetched.started_at if fetched else None
     return fetched_at is None or (upload.started_at is not None and upload.started_at >= fetched_at)
 
 
 def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:
-    from georiva.sources.models import FetchedFile, FetchRunFinished
+    from georiva.sources.models import FetchRunFinished
 
     fetched = (
-        FetchedFile.objects.filter(file_path=file_path, fetch_run__correlation_id__isnull=False)
+        _reached_rows(file_path)
+        .filter(fetch_run__correlation_id__isnull=False)
         .select_related("fetch_run__data_feed__catalog")
         .order_by("-id")
         .first()
