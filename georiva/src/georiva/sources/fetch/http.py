@@ -47,6 +47,7 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             verify_ssl: Verify SSL certificates (default: True)
             headers: Additional HTTP headers (default: {})
             user_agent: Custom User-Agent (default: GeoRiva/1.0)
+            max_file_seconds: Wall-clock limit for one file (default: 900)
         """
         super().__init__(config or {})
 
@@ -123,6 +124,7 @@ class HTTPFetchStrategy(BaseFetchStrategy):
             return result.fail("No URL in request params", FailureScope.FILE)
 
         start_time = time.time()
+        deadline = self.clock() + self.max_file_seconds
 
         try:
             # Ensure parent directory exists
@@ -151,6 +153,11 @@ class HTTPFetchStrategy(BaseFetchStrategy):
 
             with open(local_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=self.chunk_size):
+                    if self.clock() > deadline:
+                        response.close()
+                        f.close()
+                        local_path.unlink(missing_ok=True)
+                        return result.fail(self.file_timeout_error(), FailureScope.TRANSIENT)
                     if chunk:
                         f.write(chunk)
                         bytes_downloaded += len(chunk)
