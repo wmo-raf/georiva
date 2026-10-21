@@ -548,6 +548,9 @@ GEORIVA_FETCH_RUN_STALE_AFTER_HOURS = env.int("GEORIVA_FETCH_RUN_STALE_AFTER_HOU
 GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD = env.int("GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD", 3)
 # Wall-clock budget for one fetch run; checked before each file starts (#479).
 GEORIVA_FETCH_RUN_MAX_SECONDS = env.int("GEORIVA_FETCH_RUN_MAX_SECONDS", 7200)
+# How many times a failed run's lineage is retried (5, 15, 45, 120 minutes apart);
+# the run that fails after that is parked. Crash recovery shares the cap (#480).
+GEORIVA_FETCH_RUN_MAX_RETRIES = env.int("GEORIVA_FETCH_RUN_MAX_RETRIES", 4)
 
 # With acks_late, Redis redelivers an unacked message after visibility_timeout
 # (default 1h) — which would duplicate-execute any legitimate task running

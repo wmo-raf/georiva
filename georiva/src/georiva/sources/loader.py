@@ -17,7 +17,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from georiva.core.storage import storage
-from georiva.sources.fetch.base import FailureScope, FetchResult
+from georiva.sources.fetch.base import FailureScope, FetchResult, FileRequest
 
 
 @dataclass
@@ -140,6 +140,33 @@ class _RunStopped(Exception):
         self.reason = reason
 
 
+def plan_from_earlier_run(earlier, collection):
+    """The requests an earlier run failed, rebuilt from its stored plan, or None
+    when the source must be asked again: the run is not for this collection, has
+    no failed rows (plan generation failed, a short-circuited run), or has one
+    whose request was never stored (#480)."""
+    if earlier is None or collection is None or earlier.collection_id != collection.pk:
+        return None
+    from georiva.sources.models import FetchedFile
+
+    failed = list(earlier.fetched_files.filter(status=FetchedFile.Status.FAILED))
+    if not failed or any(not row.request_payload for row in failed):
+        return None
+    try:
+        return [FileRequest.from_dict(row.request_payload) for row in failed]
+    except Exception:
+        return None
+
+
+def plan_requests(data_source, collection, earlier=None):
+    """The requests a run fetches: the earlier run's failed ones when this is its
+    retry, else whatever the source generates now (#480)."""
+    planned = plan_from_earlier_run(earlier, collection)
+    if planned is None:
+        planned = data_source.generate_requests_for_collection(collection)
+    return planned
+
+
 class Loader:
     """
     Orchestrates data loading by combining DataSource and FetchStrategy.
@@ -160,7 +187,7 @@ class Loader:
         *,
         data_feed=None,
         on_file_fetched: Callable | None = None,  # Callback after each file
-        resumed_from=None,  # Interrupted FetchRun this run resumes
+        resumed_from=None,  # FetchRun this run retries; its failed requests are the plan
         clock: Callable[[], float] = time.monotonic,  # Seam for the run time limit
     ):
         self.data_source = data_source
@@ -309,10 +336,13 @@ class Loader:
         result.finish()
         if self.data_feed:
             fetch_run = FetchRun.objects.create(
-                data_feed=self.data_feed, status="running", resumed_from=self.resumed_from
+                data_feed=self.data_feed,
+                collection=self.collection,
+                status="running",
+                resumed_from=self.resumed_from,
             )
             fetch_run.mark_failed(error=reason)
-            self.data_feed._update_run_stats(result, self.collection)
+            self.data_feed._update_run_stats(result, self.collection, started_at=fetch_run.started_at)
         self.logger.info(f"Not attempted: {reason}")
         return result
 
@@ -347,13 +377,17 @@ class Loader:
         breaker_threshold = settings.GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD
         run_max_seconds = settings.GEORIVA_FETCH_RUN_MAX_SECONDS
         run_started = self.clock()
+        began_at = timezone.now()
+        retry_after = None
 
         if self.data_feed:
             fetch_run = FetchRun.objects.create(
                 data_feed=self.data_feed,
+                collection=self.collection,
                 status="running",
                 resumed_from=self.resumed_from,
             )
+            began_at = fetch_run.started_at
 
         try:
             self.logger.info(f"Starting loader run for {self.collection.name}")
@@ -364,7 +398,7 @@ class Loader:
             try:
                 self.fetch_strategy.connect()
                 self.logger.debug("Fetch strategy connected")
-                generated = self.data_source.generate_requests_for_collection(self.collection)
+                generated = plan_requests(self.data_source, self.collection, self.resumed_from)
             except Exception as e:
                 self.logger.exception(f"Could not plan the run: {e}")
                 raise _RunStopped(f"{type(e).__name__}: {e}") from e
@@ -496,6 +530,8 @@ class Loader:
                     result.files_queued += 1
                 else:
                     result.files_failed += 1
+                    if fetch_result.retry_after:
+                        retry_after = max(retry_after or 0, fetch_result.retry_after)
                     if fetch_result.error:
                         result.add_error(f"{request.filename}: {fetch_result.error}")
                     if ff:
@@ -552,12 +588,14 @@ class Loader:
                 # A run that walked its whole plan completed, however many files
                 # failed; one that stopped before the end failed (#478).
                 if stop_reason:
-                    fetch_run.mark_failed(error=f"{FetchRun.STOPPED_PREFIX}{stop_reason}", **counters)
+                    fetch_run.mark_failed(
+                        error=f"{FetchRun.STOPPED_PREFIX}{stop_reason}", retry_after=retry_after, **counters
+                    )
                 else:
-                    fetch_run.mark_completed(**counters)
+                    fetch_run.mark_completed(retry_after=retry_after, **counters)
 
             if self.data_feed:
-                self.data_feed._update_run_stats(result, self.collection)
+                self.data_feed._update_run_stats(result, self.collection, started_at=began_at)
 
             self.logger.info(result.summary())
 

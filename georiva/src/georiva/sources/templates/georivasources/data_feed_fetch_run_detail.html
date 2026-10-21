@@ -250,6 +250,16 @@
                         {% blocktrans with reason=run.stopped_early %}Stopped early: {{ reason }}{% endblocktrans %}
                     </div>
                 {% endif %}
+                {% if retry.own %}
+                    <div class="gaqd-meta">
+                        {% if retry.own.url %}<a href="{{ retry.own.url }}">{{ retry.own.text }} {{ retry.own.arrow }}</a>{% else %}{{ retry.own.text }}{% endif %}
+                    </div>
+                {% endif %}
+                {% if retry.of %}
+                    <div class="gaqd-meta">
+                        <a href="{{ retry.of.url }}">{{ retry.of.arrow }} {{ retry.of.text }}</a>
+                    </div>
+                {% endif %}
             </td>
         </tr>
         <tr>

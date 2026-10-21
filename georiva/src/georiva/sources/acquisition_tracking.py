@@ -147,3 +147,36 @@ def run_duration_seconds(run):
     if run.started_at and run.finished_at:
         return (run.finished_at - run.started_at).total_seconds()
     return None
+
+
+def retry_display(run):
+    """What the run page says about this run's place in a retry lineage (#480):
+    where its own retry stands, and the run it is itself a retry of."""
+    from django.urls import reverse
+    from django.utils import timezone
+    from django.utils.translation import gettext as _
+
+    from georiva.sources.retry_policy import max_retries
+
+    def run_url(other):
+        return reverse("data_feed_fetch_run_detail", kwargs={"feed_pk": other.data_feed_id, "run_pk": other.pk})
+
+    own = None
+    retried_as = run.retried_as
+    if retried_as is not None:
+        own = {"text": _("Retried as run #%d") % retried_as.pk, "url": run_url(retried_as), "arrow": "→"}
+    elif run.retry_due_at is not None:
+        due = timezone.localtime(run.retry_due_at).strftime("%H:%M")
+        text = _("Retry %(n)d/%(max)d due at %(time)s")
+        own = {"text": text % {"n": run.retry_number, "max": max_retries(), "time": due}}
+    elif run.parked:
+        done = run.resume_generation()
+        own = {"text": _("Retries exhausted (%(n)d/%(max)d)") % {"n": done, "max": max_retries()}}
+
+    earlier = run.resumed_from
+    of = (
+        {"text": _("Retry of run #%d") % earlier.pk, "url": run_url(earlier), "arrow": "←"}
+        if earlier is not None
+        else None
+    )
+    return {"own": own, "of": of} if own or of else None

@@ -3,12 +3,12 @@ from django.core.management.base import BaseCommand, CommandError
 
 class Command(BaseCommand):
     help = (
-        "Crash-recovery sweep: mark FetchRuns stuck in RUNNING past the "
+        "Recovery sweep: mark FetchRuns stuck in RUNNING past the "
         "staleness threshold as INTERRUPTED, reap wedged LoaderJobs, and "
-        "auto-resume interrupted runs (capped). Same policy as the periodic "
-        "beat — run this to recover immediately instead of waiting for it. "
-        "Only sweep early (--older-than-hours / --run) when you know the "
-        "worker is dead: sweeping a live run enqueues a duplicate racing it."
+        "dispatch the retry of every run whose retry is due. Same policy as the "
+        "periodic beat — run this to recover immediately instead of waiting for "
+        "it. Only sweep early (--older-than-hours / --run) when you know the "
+        "worker is dead: a live run swept early is retried alongside itself."
     )
 
     def add_arguments(self, parser):
@@ -34,7 +34,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--no-resume",
             action="store_true",
-            help="Mark runs INTERRUPTED without enqueuing auto-resumes.",
+            help="Mark runs INTERRUPTED without scheduling or dispatching retries.",
         )
 
     def handle(self, *args, **options):
@@ -71,7 +71,7 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f"Sweep complete: {result['swept']} run(s) interrupted, "
-                f"{result['resumed']} resume(s) enqueued, "
+                f"{result['resumed']} retry(ies) dispatched, "
                 f"{result['jobs_reaped']} zombie job(s) reaped."
             )
         )

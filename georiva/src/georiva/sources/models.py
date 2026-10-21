@@ -249,12 +249,15 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     # Run Management
     # =========================================================================
 
-    def _update_run_stats(self, result, collection):
-        """Update feed-level and collection-link scheduling stats after a run."""
+    def _update_run_stats(self, result, collection, started_at=None):
+        """Update feed-level and collection-link scheduling stats after a run.
+
+        The link's `last_run_at` is the run's start, so a slow failing run does
+        not push back its own next scheduled run (#480)."""
         from django.utils import timezone
 
         now = timezone.now()
-        self.collection_links.filter(collection=collection).update(last_run_at=now)
+        self.collection_links.filter(collection=collection).update(last_run_at=started_at or now)
 
         self.last_run_at = now
         self.last_run_status = result.status
@@ -677,7 +680,7 @@ class FetchRun(models.Model):
         CANCELLED = "cancelled", "Cancelled"
         # A worker died mid-run (power loss, OOM, forced restart) and the
         # stale-run sweep declared it dead. Distinct from FAILED because the
-        # source never rejected us — interrupted runs are safe to auto-resume.
+        # source never rejected us — interrupted runs are safe to retry.
         INTERRUPTED = "interrupted", "Interrupted"
 
     ORGANISATION_LOOKUP = "data_feed__catalog__organisation"
@@ -696,7 +699,24 @@ class FetchRun(models.Model):
         blank=True,
         on_delete=models.SET_NULL,
         related_name="resumes",
-        help_text="The interrupted run this run was auto-enqueued to resume. Chain depth bounds the auto-resume cap.",
+        help_text="The run this run retries. Chain depth bounds the retry lineage cap.",
+    )
+    collection = models.ForeignKey(
+        "georivacore.Collection",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="The collection this run fetched; a retry is scoped to it. Null on runs that predate the field.",
+    )
+    retry_due_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the recovery sweep dispatches this run's retry. Null: none due, or the run is parked.",
+    )
+    parked = models.BooleanField(
+        default=False,
+        help_text="Ended with failures but the retry lineage is at its cap, so nothing retries it.",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
     started_at = models.DateTimeField(auto_now_add=True)
@@ -740,7 +760,7 @@ class FetchRun(models.Model):
         Status.INTERRUPTED: "failed",
     }
 
-    def _finish(self, status, **update_fields):
+    def _finish(self, status, *, retry_after=None, **update_fields):
         from django.db import transaction
         from django.utils import timezone
 
@@ -750,7 +770,8 @@ class FetchRun(models.Model):
         self.finished_at = timezone.now()
         for k, v in update_fields.items():
             setattr(self, k, v)
-        fields = ["status", "finished_at"] + list(update_fields.keys())
+        self._schedule_retry(retry_after)
+        fields = ["status", "finished_at", "retry_due_at", "parked"] + list(update_fields.keys())
 
         outcome = self._EVENT_OUTCOMES.get(status)
         if outcome is None:
@@ -781,18 +802,56 @@ class FetchRun(models.Model):
                 error=self.error_message,
             )
 
-    def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0):
+    @property
+    def needs_retry(self):
+        """Ended in a way a retry can mend: failed, interrupted, or completed with failed rows."""
+        if self.status == self.Status.COMPLETED:
+            return self.files_failed > 0
+        return self.status in (self.Status.FAILED, self.Status.INTERRUPTED)
+
+    def _schedule_retry(self, retry_after=None):
+        """Due a retry per the backoff, or park the run once its lineage is at the cap (#480)."""
+        from georiva.sources.retry_policy import retry_delay
+
+        self.retry_due_at = None
+        self.parked = False
+        if not self.needs_retry:
+            return
+        delay = retry_delay(self.resume_generation(), retry_after)
+        if delay is None:
+            self.parked = True
+        else:
+            self.retry_due_at = self.finished_at + delay
+
+    def park(self):
+        """Stop retrying this run: no retry is due, and its feed shows a gap."""
+        self.retry_due_at = None
+        self.parked = True
+        type(self).objects.filter(pk=self.pk).update(retry_due_at=None, parked=True)
+
+    @property
+    def retry_number(self):
+        """Which retry the next one would be: 1 for a first run's retry."""
+        return self.resume_generation() + 1
+
+    @property
+    def retried_as(self):
+        """The run that retried this one, if any."""
+        return self.resumes.order_by("pk").first()
+
+    def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0, retry_after=None):
         self._finish(
             self.Status.COMPLETED,
+            retry_after=retry_after,
             files_fetched=files_fetched,
             files_skipped=files_skipped,
             files_failed=files_failed,
             bytes_transferred=bytes_transferred,
         )
 
-    def mark_failed(self, error="", **counters):
+    def mark_failed(self, error="", retry_after=None, **counters):
         """Fail the run; `counters` as for mark_completed, for a run that got part way."""
-        self._finish(self.Status.FAILED, error_message=error, **counters)
+        self._finish(self.Status.FAILED, error_message=error, retry_after=retry_after, **counters)
 
     @property
     def stopped_early(self):
@@ -808,8 +867,8 @@ class FetchRun(models.Model):
         self._finish(self.Status.INTERRUPTED, error_message=error)
 
     def resume_generation(self):
-        """How many auto-resumes deep this run's lineage is: 0 for an original
-        run, 1 for its resume, and so on. Walked via resumed_from links."""
+        """How many retries deep this run's lineage is: 0 for an original
+        run, 1 for its retry, and so on. Walked via resumed_from links."""
         depth = 0
         run = self
         while run.resumed_from_id is not None:
@@ -840,12 +899,16 @@ class FetchRun(models.Model):
         called after a per-file retry so the run reflects current truth."""
         for field, value in self.derive_counters().items():
             setattr(self, field, value)
+        # A parked run whose files were all re-fetched by hand has no gap left.
+        if self.parked and self.files_failed == 0 and self.fetched_files.exists():
+            self.parked = False
         self.save(
             update_fields=[
                 "files_fetched",
                 "files_skipped",
                 "files_failed",
                 "bytes_transferred",
+                "parked",
             ]
         )
 

@@ -44,7 +44,7 @@ class LoaderJobType(JobType):
         """
         from georiva.core.models import Collection
 
-        from .loader import Loader
+        from .loader import Loader, plan_requests
         from .models import DataFeed
 
         progress.increment(5, state="Loading data feed…")
@@ -81,7 +81,8 @@ class LoaderJobType(JobType):
             progress.increment(0, state=f"{prefix} — planning…")
 
             data_source = data_feed.get_data_source(collection=collection)
-            requests = list(data_source.generate_requests_for_collection(collection))
+            # A retry's plan is its earlier run's failed requests; the source is not asked.
+            requests = list(plan_requests(data_source, collection, job.resume_of_run))
 
             job.files_total += len(requests)
             job.save(update_fields=["files_total"])
@@ -137,6 +138,11 @@ class LoaderJobType(JobType):
                 )
 
     def on_error(self, job, exc: Exception) -> None:
+        # A retry that fails before it has a run would be dispatched again every
+        # sweep; park the run it was meant to retry instead.
+        earlier = job.resume_of_run
+        if earlier is not None and not earlier.resumes.exists():
+            earlier.park()
         logger.exception(
             "LoaderJob %d failed (data_feed=%s, collection=%s): %s",
             job.id,

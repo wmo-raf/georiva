@@ -243,6 +243,24 @@ stopped before reaching it. Set by the fetch strategy on a failed `FetchResult` 
 `Retry-After`), by the Loader for what fails after the download, and persisted as `FetchedFile.failure_scope`.
 _Avoid_: error type, failure kind, severity
 
+**Retry lineage**:
+The chain of `FetchRun`s that carry one run on, each linked to the one it retries by `resumed_from`; a run's depth is
+how many links it is from the first. Any run that ended with failures (`failed`, `completed` with a `failed` row, or
+`interrupted` by crash recovery; never a clean or `cancelled` one) is given `retry_due_at`: 5, 15, 45 and 120 minutes
+after it finished by its depth, with a source's `retry_after` as a floor. One recovery sweep dispatches each due run as a
+system job for that run's collection. The retry is a new run whose plan is the earlier run's `failed` rows, the same
+reference time and not whatever the source now calls latest; with no plan, or a row lacking its `request_payload`, it asks
+the source again. Capped at `GEORIVA_FETCH_RUN_MAX_RETRIES` (4), shared with crash recovery. Independent of the regular
+schedule: neither holds back the other, and `skip_existing` settles any overlap.
+Storage names predate the term: the link is the `resumed_from` field (reverse `resumes`) and a retry job carries
+`resume_of_run`. They mean retry; renaming them would be a migration for no behaviour.
+_Avoid_: auto-resume, resume
+
+**Parked run**:
+A run that ended with failures at the end of its **Retry lineage**: nothing retries it, and its `retry_due_at` is empty.
+Its feed shows the **Gaps** health chip for 48 hours, or until its failed files are re-fetched by hand.
+_Avoid_: abandoned run, dead run
+
 **UploadSession**:
 The record of a manual multi-file upload by an operator. Owned by `catalog` + `user`. Status:
 `active → completed / failed / cancelled`. Transitions to `completed` automatically once all `UploadedFile` children
