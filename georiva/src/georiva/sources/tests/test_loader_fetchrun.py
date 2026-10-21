@@ -279,6 +279,38 @@ class LoaderFetchPlanTests(TestCase):
         self.assertEqual(run.files_requested, 3)
         self.assertEqual(run.files_fetched + run.files_skipped + run.files_failed, run.files_requested)
 
+    def test_a_queued_file_is_counted_as_queued_not_failed(self):
+        requests = self._requests("queued.grib", "next.grib")
+        outcomes = iter([FetchResult(request=requests[0], success=False, status="queued")])
+
+        def fetch(request):
+            result = next(outcomes, None)
+            if result is None:
+                raise RuntimeError("storage gone")
+            return result
+
+        result = self._run(self._loader(requests), fetch=fetch)
+
+        rows = self._rows()
+        self.assertNotEqual(rows[0].status, "failed")
+        self.assertEqual(rows[1].error, "interrupted: the run stopped while fetching (RuntimeError: storage gone)")
+        self.assertEqual((result.files_queued, result.files_failed), (1, 1))
+
+    def test_requests_for_one_path_become_one_planned_row(self):
+        requests = self._requests("same.grib", "other.grib", "same.grib")
+        fetched = []
+
+        def fetch(request):
+            fetched.append(request.filename)
+            return _success_fetch_result(request)
+
+        self._run(self._loader(requests), fetch=fetch)
+
+        self.assertEqual(fetched, ["same.grib", "other.grib"])
+        self.assertEqual([ff.status for ff in self._rows()], ["stored", "stored"])
+        run = FetchRun.objects.get()
+        self.assertEqual((run.status, run.files_requested, run.files_fetched), ("completed", 2, 2))
+
     def test_dry_run_writes_no_rows(self):
         self._run(self._loader(self._requests("a.grib")), dry_run=True)
 

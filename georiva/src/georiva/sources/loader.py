@@ -188,6 +188,21 @@ class Loader:
             return None
         return payload if isinstance(payload, dict) else None
 
+    def _one_request_per_path(self, requests) -> list:
+        """The source's requests with any that would store to an already-planned
+        path dropped. Two requests for one path would overwrite each other in
+        storage anyway, and a run holds one FetchedFile per path (#474); keeping
+        the first turns a source's slip into a warning instead of a failed run."""
+        unique, seen = [], set()
+        for request in requests:
+            path = self._get_storage_path(request)
+            if path in seen:
+                self.logger.warning(f"Dropping duplicate request for {path} ({request.filename})")
+                continue
+            seen.add(path)
+            unique.append(request)
+        return unique
+
     def _create_plan_rows(self, fetch_run, requests):
         """One PENDING FetchedFile per request, in request order, in one insert.
         Returned in the same order as `requests`."""
@@ -260,6 +275,10 @@ class Loader:
         result = LoaderRunResult()
         fetch_run = None
         stop_reason = None
+        # The row being fetched right now; failed in `finally` if the run stops
+        # under it. Tracked rather than swept by status: a queued result also
+        # leaves its row FETCHING, and that is not a failure.
+        in_flight = None
 
         if self.data_feed:
             fetch_run = FetchRun.objects.create(
@@ -276,7 +295,7 @@ class Loader:
             self.logger.debug("Fetch strategy connected")
 
             # Generate requests from data source
-            requests = list(self.data_source.generate_requests_for_collection(self.collection))
+            requests = self._one_request_per_path(self.data_source.generate_requests_for_collection(self.collection))
             result.files_requested = len(requests)
 
             # Persist the request count up front — the finish-time summary never
@@ -334,6 +353,7 @@ class Loader:
                         # that race and leave the ingestion without its fetch.
                         if ff:
                             ff.mark_fetching()
+                            in_flight = ff
                         try:
                             self._tier_bucket.copy(existing_path, dest_path)
                             result.files_fetched += 1
@@ -345,6 +365,7 @@ class Loader:
                             self.logger.warning(f"Copy failed, will re-download: {e}")
                             # The re-download below walks this same row again.
                             to_fetch.append((request, ff))
+                        in_flight = None
                         continue
 
                 to_fetch.append((request, ff))
@@ -369,6 +390,7 @@ class Loader:
 
                 if ff:
                     ff.mark_fetching()
+                    in_flight = ff
 
                 fetch_result = self._fetch_and_store(request)
                 result.fetch_results.append(fetch_result)
@@ -395,6 +417,7 @@ class Loader:
                         result.add_error(f"{request.filename}: {fetch_result.error}")
                     if ff:
                         ff.mark_failed(error=fetch_result.error or "")
+                in_flight = None
 
         except Exception as e:
             self.logger.exception(f"Loader run failed: {e}")
@@ -412,17 +435,18 @@ class Loader:
             result.finish()
 
             if fetch_run:
-                # No row stays Waiting or Fetching once its run has ended: a request
-                # the run never reached, or was in the middle of when it stopped, is
-                # a failure, and retryable like any other.
+                # No row stays Waiting once its run has ended, nor Fetching under a
+                # run that stopped: a request the run never reached, or was in the
+                # middle of, is a failure, and retryable like any other.
                 reason = stop_reason or "the run ended"
-                for status, error in (
-                    (FetchedFile.Status.PENDING, f"not attempted: the run stopped ({reason})"),
-                    (FetchedFile.Status.FETCHING, f"interrupted: the run stopped while fetching ({reason})"),
-                ):
-                    result.files_failed += fetch_run.fetched_files.filter(status=status).update(
-                        status=FetchedFile.Status.FAILED, error=error, completed_at=timezone.now()
-                    )
+                if in_flight:
+                    in_flight.mark_failed(error=f"interrupted: the run stopped while fetching ({reason})")
+                    result.files_failed += 1
+                result.files_failed += fetch_run.fetched_files.filter(status=FetchedFile.Status.PENDING).update(
+                    status=FetchedFile.Status.FAILED,
+                    error=f"not attempted: the run stopped ({reason})",
+                    completed_at=timezone.now(),
+                )
                 fetch_run.mark_completed(
                     files_fetched=result.files_fetched,
                     files_skipped=result.files_skipped,
