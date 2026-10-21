@@ -220,9 +220,13 @@ not stored on the run itself.
 _Avoid_: DataArrival, LoaderRun, DataFeedRun
 
 **FetchedFile**:
-Per-file acquisition record within a `FetchRun`. Created and updated incrementally as the Loader processes each file.
-Status: `pending → fetching → stored / skipped / failed`. Skipped files (already exist in storage) appear as
-`FetchedFile` records with `status=skipped`. Linked to `FileIngestion` via `file_path` — there is no FK.
+Per-file acquisition record within a `FetchRun`. The run's whole plan is created up front, one row per request with its
+`request_payload`, before any file is fetched; the Loader then walks each row. One row per file per run (enforced).
+Status: `pending (shown as "Waiting") → fetching → stored / skipped / failed`. Skipped files (already exist in storage)
+are their planned row marked `skipped`. No row outlives its run as `pending`, nor as `fetching` under a run that
+stopped: those become `failed` ("not attempted" / "interrupted") and are retryable. (A `queued` fetch result still
+leaves its row `fetching`; that path is unreachable today.) Linked to `FileIngestion` via `file_path` — there
+is no FK.
 _Avoid_: FetchResult (that is a transient in-memory dataclass, not a model)
 
 **UploadSession**:

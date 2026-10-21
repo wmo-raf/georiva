@@ -283,6 +283,25 @@ class RunDetailRetryUITests(TestCase):
         self.assertContains(response, f'value="{retryable.pk}"', count=2)
         self.assertContains(response, 'type="checkbox" name="file_ids"', count=1)
 
+    def test_waiting_and_fetching_rows_are_shown_but_never_retryable(self):
+        self._file("next.tif", status=FetchedFile.Status.PENDING)
+        self._file("now.tif", status=FetchedFile.Status.FETCHING)
+
+        response = self.client.get(self._url())
+
+        self.assertContains(response, "Waiting")
+        self.assertNotContains(response, 'name="retry_file_id"')
+
+    def test_a_row_the_run_never_reached_is_retryable(self):
+        not_attempted = self._file("never.tif")
+        not_attempted.error = "not attempted: the run stopped (RuntimeError: boom)"
+        not_attempted.save(update_fields=["error"])
+
+        response = self.client.get(self._url())
+
+        self.assertContains(response, 'name="retry_file_id"', count=1)
+        self.assertContains(response, f'value="{not_attempted.pk}"', count=2)
+
     def test_single_retry_queues_the_task_and_confirms(self):
         retryable = self._file("retryable.tif")
 

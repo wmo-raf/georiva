@@ -152,6 +152,43 @@ class FetchToIngestionChainTests(TestCase):
 
         self.assertEqual(context.correlation_id, second.correlation_id)
 
+    def _planned_in_a_later_run(self, key=KEY, **fields):
+        with event_context(actor="celery", organisation_id=self.kenya.pk):
+            later = FetchRun.objects.create(data_feed=self.feed)
+        return FetchedFile.objects.create(fetch_run=later, file_path=key, **fields)
+
+    def test_a_later_runs_waiting_row_does_not_take_the_chain(self):
+        # The whole plan is written up front (#474): a later run holds a Waiting row
+        # for the key long before it reaches it, and has stored nothing.
+        run = self._fetched()
+        self._planned_in_a_later_run()
+
+        (context,) = _notify(KEY)
+
+        self.assertEqual(context.correlation_id, run.correlation_id)
+
+    def test_a_later_runs_not_attempted_row_does_not_take_the_chain(self):
+        run = self._fetched()
+        self._planned_in_a_later_run(status=FetchedFile.Status.FAILED, error="not attempted: the run stopped (x)")
+
+        (context,) = _notify(KEY)
+
+        self.assertEqual(context.correlation_id, run.correlation_id)
+
+    def test_an_upload_older_than_the_fetch_loses_to_it_despite_a_later_waiting_row(self):
+        from types import SimpleNamespace
+
+        from django.utils import timezone
+
+        from georiva.ingestion.chains import _upload_is_newer
+
+        upload = SimpleNamespace(started_at=timezone.now())
+        run = self._fetched()
+        run.fetched_files.update(started_at=timezone.now(), completed_at=timezone.now())
+        self._planned_in_a_later_run()
+
+        self.assertFalse(_upload_is_newer(upload, KEY))
+
     def test_the_unprocessed_sweep_adopts_the_same_chain(self):
         from georiva.ingestion.tasks import sweep_unprocessed
 
