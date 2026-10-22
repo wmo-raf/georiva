@@ -955,7 +955,7 @@
                                 <line x1="8" y1="2" x2="8" y2="18"></line>
                                 <line x1="16" y1="6" x2="16" y2="22"></line>
                             </svg>
-                            <span id="basemapLabel">OSM</span>
+                            <span id="basemapLabel">Light</span>
                             <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
                                  fill="none"
                                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -963,17 +963,8 @@
                             </svg>
                         </button>
                         <div class="geo-basemap-menu" id="basemapMenu">
-                            <div class="geo-basemap-option active" data-basemap="osm">
-                                OpenStreetMap
-                                <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                                     fill="none"
-                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </div>
-                            <div class="geo-basemap-option" data-basemap="satellite">
-                                Satellite
+                            <div class="geo-basemap-option active" data-basemap="light">
+                                Light
                                 <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
                                      fill="none"
                                      stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -983,15 +974,6 @@
                             </div>
                             <div class="geo-basemap-option" data-basemap="dark">
                                 Dark
-                                <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-                                     fill="none"
-                                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                            </div>
-                            <div class="geo-basemap-option" data-basemap="light">
-                                Light
                                 <svg class="geo-check" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
                                      fill="none"
                                      stroke="currentColor" stroke-width="2" stroke-linecap="round"
@@ -1045,77 +1027,22 @@
     <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
+    <script src="{% static 'js/georiva-basemap.js' %}"></script>
     <script>
         (function async() {
             'use strict';
 
+            const basemapStyleUrl = '{% static "basemap/georiva-basemap.json" %}';
+
             const basemaps = {
-                osm: {
-                    name: 'OSM',
-                    style: {
-                        version: 8,
-                        sources: {
-                            osm: {
-                                type: 'raster',
-                                tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© OpenStreetMap contributors'
-                            }
-                        },
-                        layers: [{id: 'osm', type: 'raster', source: 'osm'}]
-                    }
-                },
-                satellite: {
-                    name: 'Satellite',
-                    style: {
-                        version: 8,
-                        sources: {
-                            satellite: {
-                                type: 'raster',
-                                tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-                                tileSize: 256,
-                                attribution: '© Esri'
-                            }
-                        },
-                        layers: [{id: 'satellite', type: 'raster', source: 'satellite'}]
-                    }
-                },
-                dark: {
-                    name: 'Dark',
-                    style: {
-                        version: 8,
-                        sources: {
-                            carto: {
-                                type: 'raster',
-                                tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© CARTO'
-                            }
-                        },
-                        layers: [{id: 'carto', type: 'raster', source: 'carto'}]
-                    }
-                },
-                light: {
-                    name: 'Light',
-                    style: {
-                        version: 8,
-                        sources: {
-                            carto: {
-                                type: 'raster',
-                                tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
-                                tileSize: 256,
-                                attribution: '© CARTO'
-                            }
-                        },
-                        layers: [{id: 'carto', type: 'raster', source: 'carto'}]
-                    }
-                }
+                light: {name: 'Light'},
+                dark: {name: 'Dark'}
             };
 
             // -----------------------------
             // State
             // -----------------------------
-            let currentBasemap = 'osm';
+            let currentBasemap = 'light';
             let currentAsset = null;
             let currentPalette = null;
             let tooltipControl = null;
@@ -1142,10 +1069,12 @@
 
             document.addEventListener('DOMContentLoaded', initializeMap);
 
-            function initializeMap() {
+            async function initializeMap() {
+                const style = await GeoRivaBasemap.load(basemapStyleUrl, {basemap: currentBasemap});
+
                 map = new maplibregl.Map({
                     container: 'map',
-                    style: basemaps[currentBasemap].style,
+                    style,
                     bounds: defaultBounds,
                     fitBoundsOptions: {padding: 40},
                     attributionControl: true,
@@ -1266,26 +1195,10 @@
                 });
             }
 
+            // The basemap is layer groups in one style, so a switch only flips
+            // visibility: the deck raster stays exactly where it is.
             function changeBasemap(basemapKey) {
-                const style = basemaps[basemapKey].style;
-                const savedAsset = currentAsset;
-
-                // This resets MapLibre style (deck overlay remains as a control)
-                map.setStyle(style);
-
-                // When style reloads, deck overlay remains, but we can re-add layer props safely.
-                map.once('style.load', () => {
-                    // re-apply deck layers
-                    if (deckOverlay && currentRasterLayer) {
-                        deckOverlay.setProps({layers: [currentRasterLayer]});
-                    }
-
-                    // optional: re-fit to current asset bounds
-                    if (savedAsset) {
-                        const b = parseBounds(savedAsset.dataset.assetBounds);
-                        map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, duration: 0});
-                    }
-                });
+                GeoRivaBasemap.apply(map, {basemap: basemapKey});
             }
 
             function setupAssetCards() {
@@ -1399,6 +1312,8 @@
                     // Create the raster layer
                     currentRasterLayer = new WeatherLayers.RasterLayer({
                         id: 'weather-raster',
+                        // Between the basemap and its labels, so labels stay readable.
+                        beforeId: GeoRivaBasemap.anchorId,
                         image,
                         bounds, // [west, south, east, north]
                         imageSmoothing: true,

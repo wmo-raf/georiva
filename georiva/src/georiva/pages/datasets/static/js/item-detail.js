@@ -4,74 +4,11 @@ class ItemDetailMap {
 
     // ── Constants ──────────────────────────────────────────────────────────
 
-    static BASEMAPS = {
-        dark: {
-            name: 'Dark',
-            style: {
-                version: 8,
-                sources: {
-                    carto: {
-                        type: 'raster',
-                        tileSize: 256,
-                        attribution: '© CARTO',
-                        tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png']
-                    }
-                },
-                layers: [{id: 'carto', type: 'raster', source: 'carto'}],
-            },
-        },
-        light: {
-            name: 'Light',
-            style: {
-                version: 8,
-                sources: {
-                    carto: {
-                        type: 'raster',
-                        tileSize: 256,
-                        attribution: '© CARTO',
-                        tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png']
-                    }
-                },
-                layers: [{id: 'carto', type: 'raster', source: 'carto'}],
-            },
-        },
-        satellite: {
-            name: 'Satellite',
-            style: {
-                version: 8,
-                sources: {
-                    satellite: {
-                        type: 'raster',
-                        tileSize: 256,
-                        attribution: '© Esri',
-                        tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}']
-                    }
-                },
-                layers: [{id: 'satellite', type: 'raster', source: 'satellite'}],
-            },
-        },
-        osm: {
-            name: 'OSM',
-            style: {
-                version: 8,
-                sources: {
-                    osm: {
-                        type: 'raster',
-                        tileSize: 256,
-                        attribution: '© OpenStreetMap contributors',
-                        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png']
-                    }
-                },
-                layers: [{id: 'osm', type: 'raster', source: 'osm'}],
-            },
-        },
-    };
-
     static BOUNDARY_SOURCE = 'gr-boundary-source';
     static BOUNDARY_FILL = 'gr-boundary-fill';
     static BOUNDARY_LINE = 'gr-boundary-line';
     static BOUNDARY_HOVER = 'gr-boundary-hover';
-    static LIGHT_BASEMAPS = new Set(['light', 'osm']);
+    static LIGHT_BASEMAPS = new Set(['light']);
 
     // ── Constructor ────────────────────────────────────────────────────────
 
@@ -83,8 +20,11 @@ class ItemDetailMap {
         this.deckOverlay = null;
         this.deckgl = null;
         this.tooltipControl = null;
+        this.labelsVisible = true;
+        this.boundariesVisible = true;
+        this.currentUnits = '';
         this.currentRasterLayer = null;
-        this.currentBasemap = 'dark';
+        this.currentBasemap = 'light';
         this.currentVarSlug = config.activeVarSlug;
         this.layerMode = 'raster';
         // Only levels with rows for the current variable — the server rendered
@@ -117,21 +57,28 @@ class ItemDetailMap {
 
     // ── Map initialisation ─────────────────────────────────────────────────
 
-    _initMap() {
+    async _initMap() {
+        const style = await GeoRivaBasemap.load(this.config.basemapStyleUrl, {
+            basemap: this.currentBasemap,
+            labels: this.labelsVisible,
+            boundaries: this.boundariesVisible,
+        });
+
         this.map = new maplibregl.Map({
             container: 'grMap',
-            style: ItemDetailMap.BASEMAPS[this.currentBasemap].style,
+            style,
             center: [0, 20],
             zoom: 2,
             attributionControl: false,
         });
 
-        this.map.addControl(new maplibregl.NavigationControl({showCompass: false}), 'bottom-right');
-
         this.map.on('mousemove', e => {
             const el = document.getElementById('grMapCoords');
             if (el) el.textContent = `${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)}`;
         });
+
+        this.map.on('zoom', () => this._updateZoomReadout());
+        this._updateZoomReadout();
 
         this.map.on('load', () => this._onMapLoad());
     }
@@ -141,7 +88,7 @@ class ItemDetailMap {
         this.map.addControl(this.deckOverlay);
         this.deckgl = await this._waitForDeck(() => this.deckOverlay._deck);
 
-        this._setupBasemapSelector();
+        this._setupMapControls();
         this._setupOpacitySlider();
         this._setupVariableButtons();
         this._setupLayerSwitcher();
@@ -236,6 +183,7 @@ class ItemDetailMap {
         const units = param?.unit?.symbol || '';
 
         this.currentPalette = {palette, paletteMin, paletteMax};
+        this.currentUnits = units;
         this._clearRasterLayer();
         this._showNoVisual(false);
 
@@ -263,6 +211,7 @@ class ItemDetailMap {
                 opacity,
                 visible: true,
                 pickable: true,
+                beforeId: this._labelAnchorId(),
             });
 
             this.deckOverlay.setProps({layers: [this.currentRasterLayer]});
@@ -328,6 +277,8 @@ class ItemDetailMap {
             promoteId: {boundary_stats: 'boundary_id'},
         });
 
+        const beforeId = this._labelAnchorId();
+
         this.map.addLayer({
             id: BOUNDARY_FILL,
             type: 'fill',
@@ -337,7 +288,7 @@ class ItemDetailMap {
                 'fill-color': colorExpr,
                 'fill-opacity': ['case', ['boolean', ['feature-state', 'hovered'], false], 0.85, 0.65],
             },
-        });
+        }, beforeId);
 
         this.map.addLayer({
             id: BOUNDARY_LINE,
@@ -345,7 +296,7 @@ class ItemDetailMap {
             source: BOUNDARY_SOURCE,
             'source-layer': 'boundary_stats',
             paint: {'line-color': 'rgba(255,255,255,0.4)', 'line-width': 0.75},
-        });
+        }, beforeId);
 
         this.map.addLayer({
             id: BOUNDARY_HOVER,
@@ -356,7 +307,7 @@ class ItemDetailMap {
                 'line-color': 'rgba(255,255,255,0.9)',
                 'line-width': ['case', ['boolean', ['feature-state', 'hovered'], false], 2, 0],
             },
-        });
+        }, beforeId);
 
         this._setupBoundaryTooltip();
     }
@@ -637,42 +588,85 @@ class ItemDetailMap {
         });
     }
 
-    // ── Basemap selector ───────────────────────────────────────────────────
+    // ── Map controls: toolbar, settings panel, readout ─────────────────────
 
-    _setupBasemapSelector() {
-        const btn = document.getElementById('grBasemapBtn');
-        const menu = document.getElementById('grBasemapMenu');
+    _setupMapControls() {
+        const panel = document.getElementById('grMapSettings');
+        const settingsBtn = document.getElementById('grSettingsBtn');
 
-        btn.addEventListener('click', e => {
+        const setPanel = open => {
+            panel.hidden = !open;
+            settingsBtn.setAttribute('aria-expanded', String(open));
+            settingsBtn.classList.toggle('is-active', open);
+        };
+
+        document.getElementById('grZoomIn').addEventListener('click', () => this.map.zoomIn());
+        document.getElementById('grZoomOut').addEventListener('click', () => this.map.zoomOut());
+
+        settingsBtn.addEventListener('click', e => {
             e.stopPropagation();
-            menu.classList.toggle('gr-open');
+            setPanel(panel.hidden);
+        });
+        document.getElementById('grSettingsClose').addEventListener('click', () => setPanel(false));
+        panel.addEventListener('click', e => e.stopPropagation());
+        document.addEventListener('click', () => setPanel(false));
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') setPanel(false);
         });
 
-        document.addEventListener('click', () => menu.classList.remove('gr-open'));
-
-        menu.querySelectorAll('.gr-map-basemap-option').forEach(opt => {
-            opt.addEventListener('click', e => {
-                e.stopPropagation();
-                const bm = opt.dataset.basemap;
-                if (bm === this.currentBasemap) {
-                    menu.classList.remove('gr-open');
-                    return;
-                }
-
-                menu.querySelectorAll('.gr-map-basemap-option').forEach(o => o.classList.remove('gr-bm-active'));
-                opt.classList.add('gr-bm-active');
-                document.getElementById('grBasemapLabel').textContent = ItemDetailMap.BASEMAPS[bm].name;
-                this.currentBasemap = bm;
-                menu.classList.remove('gr-open');
-                this._updateTheme(bm);
-
-                this.map.setStyle(ItemDetailMap.BASEMAPS[bm].style);
-                this.map.once('style.load', async () => {
-                    if (this.currentRasterLayer) this.deckOverlay.setProps({layers: [this.currentRasterLayer]});
-                    if (this.layerMode !== 'raster') await this._loadBoundaryLayer();
-                });
+        // Each switch flips one group of the basemap style and mirrors the state.
+        [
+            ['grLabelsToggle', 'labelsVisible'],
+            ['grBoundariesToggle', 'boundariesVisible'],
+        ].forEach(([id, key]) => {
+            const btn = document.getElementById(id);
+            btn.addEventListener('click', () => {
+                this[key] = !this[key];
+                btn.classList.toggle('is-on', this[key]);
+                btn.setAttribute('aria-checked', String(this[key]));
+                this._applyBasemapGroups();
             });
         });
+
+        const styleBtns = document.querySelectorAll('.gr-map-style-tile');
+        styleBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const bm = btn.dataset.basemap;
+                if (bm === this.currentBasemap) return;
+
+                styleBtns.forEach(b => b.classList.toggle('is-active', b === btn));
+                this._updateTheme(bm);
+                this._switchBasemap(bm);
+            });
+        });
+    }
+
+    _updateZoomReadout() {
+        const el = document.getElementById('grMapZoom');
+        if (el) el.textContent = `zoom: ${this.map.getZoom().toFixed(2)}`;
+    }
+
+    // The basemap, its political boundaries and its labels are layer groups in
+    // one style, so every change here only flips visibility. Nothing is
+    // reloaded, which is why deck's raster and the zonal-stats choropleth stay
+    // where they are.
+    _switchBasemap(bm) {
+        this.currentBasemap = bm;
+        this._applyBasemapGroups();
+    }
+
+    _applyBasemapGroups() {
+        GeoRivaBasemap.apply(this.map, {
+            basemap: this.currentBasemap,
+            labels: this.labelsVisible,
+            boundaries: this.boundariesVisible,
+        });
+    }
+
+    // Data layers insert before this layer, which sits between the basemap and
+    // the boundaries and labels: data above the one, both above the data.
+    _labelAnchorId() {
+        return GeoRivaBasemap.anchorId;
     }
 
     // ── Theme (dark / light basemap) ───────────────────────────────────────

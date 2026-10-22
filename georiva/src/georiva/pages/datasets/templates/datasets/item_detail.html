@@ -156,7 +156,7 @@
                 {% endif %}
 
                 {# ── Map canvas (right) ── #}
-                <div class="gr-map-canvas" id="grMapCanvas">
+                <div class="gr-map-canvas gr-map-canvas--light" id="grMapCanvas">
                     <div id="grMap"></div>
 
                     {# Layer mode switcher — floats inside map, only where aggregates actually exist.
@@ -188,29 +188,6 @@
                             </div>
                         </div>
                     {% endif %}
-
-                    {# Basemap selector #}
-                    <div class="gr-map-basemap-selector">
-                        <button class="gr-map-basemap-btn" id="grBasemapBtn" type="button">
-                            <i class="bi bi-layers-half"></i>
-                            <span id="grBasemapLabel">Dark</span>
-                            <i class="bi bi-chevron-down" style="font-size:0.6rem;opacity:0.6"></i>
-                        </button>
-                        <div class="gr-map-basemap-menu" id="grBasemapMenu">
-                            <div class="gr-map-basemap-option gr-bm-active" data-basemap="dark">
-                                <span>Dark</span><i class="bi bi-check2 gr-bm-check"></i>
-                            </div>
-                            <div class="gr-map-basemap-option" data-basemap="light">
-                                <span>Light</span><i class="bi bi-check2 gr-bm-check"></i>
-                            </div>
-                            <div class="gr-map-basemap-option" data-basemap="satellite">
-                                <span>Satellite</span><i class="bi bi-check2 gr-bm-check"></i>
-                            </div>
-                            <div class="gr-map-basemap-option" data-basemap="osm">
-                                <span>OSM</span><i class="bi bi-check2 gr-bm-check"></i>
-                            </div>
-                        </div>
-                    </div>
 
                     {# Legend #}
                     <div class="gr-map-legend" id="grLegend" style="display:none">
@@ -248,8 +225,66 @@
                         <span id="grMapNoVisualMsg">{% trans "No map preview available for this variable." %}</span>
                     </div>
 
-                    {# Coords #}
-                    <div class="gr-map-coords" id="grMapCoords">—</div>
+                    {# Map controls: settings panel, toolbar and readout, stacked bottom-right #}
+                    <div class="gr-map-controls">
+                        <div class="gr-map-settings" id="grMapSettings" role="dialog"
+                             aria-label="{% trans 'Map settings' %}" hidden>
+                            <div class="gr-map-settings-header">
+                                <span class="gr-map-settings-title">{% trans "Map settings" %}</span>
+                                <button type="button" class="gr-map-settings-close" id="grSettingsClose"
+                                        aria-label="{% trans 'Close' %}">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </div>
+                            <div class="gr-map-settings-switches">
+                                <button type="button" class="gr-map-switch is-on" id="grLabelsToggle"
+                                        role="switch" aria-checked="true">
+                                    <span class="gr-map-switch-label">
+                                        <i class="bi bi-fonts"></i>{% trans "Show labels" %}
+                                    </span>
+                                    <span class="gr-map-switch-track" aria-hidden="true"></span>
+                                </button>
+                                <button type="button" class="gr-map-switch is-on" id="grBoundariesToggle"
+                                        role="switch" aria-checked="true">
+                                    <span class="gr-map-switch-label">
+                                        <i class="bi bi-bounding-box"></i>{% trans "Borders and coastline" %}
+                                    </span>
+                                    <span class="gr-map-switch-track" aria-hidden="true"></span>
+                                </button>
+                            </div>
+                            <div class="gr-map-settings-title">{% trans "Map styles" %}</div>
+                            <div class="gr-map-settings-styles">
+                                <button type="button" class="gr-map-tile gr-map-style-tile is-active"
+                                        data-basemap="light">
+                                    <span class="gr-map-style-swatch gr-map-style-swatch--light"></span>
+                                    <span>{% trans "Light" %}</span>
+                                </button>
+                                <button type="button" class="gr-map-tile gr-map-style-tile" data-basemap="dark">
+                                    <span class="gr-map-style-swatch gr-map-style-swatch--dark"></span>
+                                    <span>{% trans "Dark" %}</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="gr-map-toolbar">
+                            <button type="button" class="gr-map-toolbar-btn" id="grZoomOut"
+                                    aria-label="{% trans 'Zoom out' %}">
+                                <i class="bi bi-dash-lg"></i>
+                            </button>
+                            <button type="button" class="gr-map-toolbar-btn" id="grZoomIn"
+                                    aria-label="{% trans 'Zoom in' %}">
+                                <i class="bi bi-plus-lg"></i>
+                            </button>
+                            <button type="button" class="gr-map-toolbar-btn" id="grSettingsBtn"
+                                    aria-label="{% trans 'Map settings' %}" aria-expanded="false"
+                                    aria-controls="grMapSettings">
+                                <i class="bi bi-gear-fill"></i>
+                            </button>
+                        </div>
+                        <div class="gr-map-readout">
+                            <span id="grMapZoom">zoom: —</span>
+                            <span id="grMapCoords">—</span>
+                        </div>
+                    </div>
                 </div>
 
             </div>
@@ -416,6 +451,7 @@
             "itemTime":             "{{ item.time_iso }}",
             "referenceTime":        "{{ item.reference_time_iso|default:'' }}",
             "edrUrl":               "/api/edr/collections/{{ collection_slug }}/",
+            "basemapStyleUrl":      "{% static 'basemap/georiva-basemap.json' %}",
             {% comment %}
                 The PNG overlay is georeferenced by the item's own bounds — the
                 collection extent is only a fitBounds fallback (derived items
@@ -443,6 +479,7 @@
     <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
+    <script src="{% static 'js/georiva-basemap.js' %}"></script>
     <script src="{% static 'js/item-detail.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
