@@ -436,7 +436,8 @@
 
 .gr-map-legend {
     position: absolute;
-    bottom: 2rem;
+    /* Clears the attribution strip along the bottom edge. */
+    bottom: 2.5rem;
     left: 1rem;
     background: rgba(8, 13, 24, 0.88);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -593,6 +594,25 @@
 
 @keyframes gr-spin {
     to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Attribution — MapLibre's control, bottom-left under the legend, which stops
+   2.5rem above the bottom edge. The light theme keeps MapLibre's own look.
+   ========================================================================== */
+
+.gr-map-canvas:not(.gr-map-canvas--light) .maplibregl-ctrl-attrib {
+    background: rgba(8, 13, 24, 0.75);
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.gr-map-canvas:not(.gr-map-canvas--light) .maplibregl-ctrl-attrib a {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* The info icon is a black SVG on the control's own background. */
+.gr-map-canvas:not(.gr-map-canvas--light) .maplibregl-ctrl-attrib-button {
+    filter: invert(1);
 }
 
 /* ==========================================================================
