@@ -97,11 +97,15 @@ makemigrations:
     {{ dc }} exec georiva georiva makemigrations
 
 # Django tests bypass PgBouncer (it cannot CREATE DATABASE) and connect straight
-# to georiva-db with the credentials from .env.
+# to georiva-db with the credentials from .env. They also get their own Redis
+# database (15): the stack's cache and broker live in 0, and a test run that
+# shared it left `testserver` in Wagtail's cached site root URLs and could hand
+# test-enqueued tasks to the live workers.
 # e.g. `just test georiva.ingestion.tests -v 2`
 test *args:
     {{ dc }} exec \
       -e "DATABASE_URL=timescalegis://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-db:5432/${GEORIVA_DB_NAME}" \
+      -e "REDIS_URL=redis://georiva-redis:6379/15" \
       georiva georiva test --keepdb {{ args }}
 
 # Titiler tests run on the host (the image ships no tests): pytest at the HTTP
