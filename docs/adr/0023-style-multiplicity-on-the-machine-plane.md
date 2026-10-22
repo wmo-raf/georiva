@@ -77,3 +77,11 @@ their URLs cannot be trusted across a palette edit.
   signal, not a feature.
 - Selecting styles in EDR responses and dataset pages is deliberately
   deferred; adding it later is serializer work, not model or plane work.
+- Item thumbnails (`preview.webp`) are rendered on the first request and
+  served from the nginx `tile_content` cache after that. Titiler sends
+  `Cache-Control: public, max-age=31536000, immutable` only when the URL
+  carries `v=`; the token hashes the style stops, the render range *and* the
+  COG asset's `modified` + `checksum`, so a style edit or re-ingested data is
+  a new URL rather than a stale entry. `public` is deliberate: nginx will not
+  store `private`, Titiler cannot tell a private collection (and must not
+  learn to), and `auth_request` still runs on every request, hit or miss.

@@ -18,7 +18,7 @@ from app.dependencies import (
     SemanticRescale,
     SemanticTileConfig,
 )
-from app.middleware import RequestLoggingMiddleware
+from app.middleware import PreviewCacheMiddleware, RequestLoggingMiddleware
 from app.reader import ResilientReader, is_not_found
 from app.wmts import rest_router as wmts_rest_router
 from app.wmts import router as wmts_router
@@ -50,6 +50,7 @@ cog = TilerFactory(
 
 app = FastAPI(title="GeoRiva Tile Server", root_path=TTL_ROOT_PATH)
 
+app.add_middleware(PreviewCacheMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 app.add_middleware(

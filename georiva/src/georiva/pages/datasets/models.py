@@ -278,6 +278,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             # the owning organisation — read from the item rather than from the
             # page context, so the chain is walked once per page, not per card.
             .select_related("collection__catalog__organisation")
+            # The thumbnail's version token reads the item's COG asset.
+            .prefetch_related("assets__variable__styles")
             .order_by("time" if collection.is_forecast else "-time")
         )
 

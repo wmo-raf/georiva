@@ -30,6 +30,7 @@ from georiva.core.machine_plane import (
     MARTIN_PREFIX,
     martin_boundary_stats_url,
     org_slug_of,
+    preview_version_token,
     render_config_token,
     style_version_token,
     titiler_encoded_preview_url,
@@ -48,7 +49,7 @@ from georiva.core.machine_plane.palette_cache import (
     variable_cache_key,
     warm_all,
 )
-from georiva.core.models import Item, Variable
+from georiva.core.models import Asset, Item, Variable
 from georiva.core.testing import ANALYST_STOPS, make_style
 from georiva.organisations.testing import (
     SHARED_TREE_SLUG as SHARED_SLUG,
@@ -680,6 +681,8 @@ class StyleSelectorAddressTests(TestCase):
     def setUpTestData(cls):
         cls.tree = build_tree(make_organisation("kenya"), variable_name="Kenya Forecast")
         cls.variable = cls.tree["variable"]
+        # The version token reads the item's COG, as ingestion leaves it.
+        Asset.objects.filter(item=cls.tree["item"]).update(format=Asset.Format.COG)
         cls.official = make_style(cls.variable, "official")
         cls.analyst = make_style(
             cls.variable,
@@ -688,10 +691,14 @@ class StyleSelectorAddressTests(TestCase):
             stops=ANALYST_STOPS,
         )
 
+    def _token(self, style):
+        asset = Asset.objects.get(item=self.tree["item"])
+        return preview_version_token(self.variable, style, asset)
+
     def test_a_pinned_style_travels_as_a_query_param(self):
         url = titiler_preview_url(self.tree["item"], self.variable, style=self.analyst)
         self.assertIn("style=analyst", url)
-        self.assertIn(f"v={style_version_token(self.variable, self.analyst)}", url)
+        self.assertIn(f"v={self._token(self.analyst)}", url)
 
     def test_omission_names_no_style(self):
         """The default is selected by saying nothing — a URL that named it
@@ -701,7 +708,7 @@ class StyleSelectorAddressTests(TestCase):
 
     def test_a_default_preview_carries_the_default_styles_token(self):
         url = titiler_preview_url(self.tree["item"], self.variable)
-        self.assertIn(f"v={style_version_token(self.variable, self.official)}", url)
+        self.assertIn(f"v={self._token(self.official)}", url)
 
     def test_two_styles_of_one_variable_get_different_tokens(self):
         self.assertNotEqual(
@@ -734,14 +741,38 @@ class StyleSelectorAddressTests(TestCase):
         token exists for."""
         url = titiler_preview_url(self.tree["item"], SHARED_SLUG, style=self.analyst)
         self.assertIn("style=analyst", url)
-        self.assertIn(f"v={style_version_token(self.variable, self.analyst)}", url)
+        self.assertIn(f"v={self._token(self.analyst)}", url)
 
-    def test_a_slug_only_caller_still_gets_the_plain_address(self):
-        """The templatetag holds a slug, not a row; its thumbnails are never
-        cached, so an untokened URL stays honest there."""
+    def test_a_slug_only_caller_is_tokened_from_the_items_own_asset(self):
+        """The templatetag holds a slug, not a row; the variable is read off
+        the item's COG asset, so its thumbnails carry the same token as a
+        caller holding the row."""
         url = titiler_preview_url(self.tree["item"], SHARED_SLUG)
-        self.assertNotIn("v=", url)
+        fresh = Variable.objects.get(pk=self.variable.pk)  # not the class-level, cache-primed row
+        self.assertEqual(url, titiler_preview_url(self.tree["item"], fresh))
+        self.assertIn("v=", url)
         self.assertNotIn("style=", url)
+
+    def test_a_slug_with_no_asset_on_the_item_goes_out_untokened(self):
+        """Nothing to version, so nothing is claimed — Titiler declares no
+        cacheability for an untokened URL."""
+        url = titiler_preview_url(self.tree["item"], "no-such-variable")
+        self.assertNotIn("v=", url)
+
+    def test_rewriting_the_asset_row_changes_the_preview_url(self):
+        """Re-ingested data under the same item and time must not be served
+        from an immutable cache entry made for the old pixels."""
+        before = titiler_preview_url(self.tree["item"], self.variable)
+        self.tree["item"].assets.get().save()  # bumps ``modified``
+        item = Item.objects.get(pk=self.tree["item"].pk)
+        self.assertNotEqual(before, titiler_preview_url(item, self.variable))
+
+    def test_a_new_checksum_alone_changes_the_preview_url(self):
+        before = titiler_preview_url(self.tree["item"], self.variable)
+        # ``update`` leaves ``modified`` alone, isolating the checksum.
+        Asset.objects.filter(item=self.tree["item"]).update(checksum="f" * 64)
+        item = Item.objects.get(pk=self.tree["item"].pk)
+        self.assertNotEqual(before, titiler_preview_url(item, self.variable))
 
     def test_a_style_segmented_cache_key_ends_with_the_style(self):
         self.assertEqual(
