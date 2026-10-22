@@ -842,6 +842,12 @@
 }
 
 /* Light theme overrides */
+.gr-map-canvas--light .gr-map-layer-controls {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
 .gr-map-canvas--light .gr-map-sidebar-divider {
     background: rgba(0, 0, 0, 0.06);
 }
