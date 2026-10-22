@@ -22,13 +22,16 @@
                 <div>
                     <p class="gr-footer-col-title">Platform</p>
                     <ul class="gr-footer-links">
-                        <li><a href="/">Home</a></li>
-                        <li><a href="/#datasets">Datasets</a></li>
-                        {% if s.map_viewer_url %}
-                            <li><a href="{{ s.map_viewer_url }}">Map Viewer</a></li>
-                        {% endif %}
+                        <li>
+                            <a href="/">Home</a>
+                        </li>
+                        <li>
+                            <a href="/#datasets">Datasets</a>
+                        </li>
                         {% if s.stac_browser_url %}
-                            <li><a href="{{ s.stac_browser_url }}">STAC Browser</a></li>
+                            <li>
+                                <a href="{{ s.stac_browser_url }}">STAC Browser</a>
+                            </li>
                         {% endif %}
                     </ul>
                 </div>
@@ -49,16 +52,12 @@
 
             {# Bottom bar #}
             <div class="gr-footer-bottom">
-            <span class="gr-footer-copy">
-                © {% now "Y" %}
-                {% if s.org_name %}{{ s.org_name }}{% else %}{{ s.site_name|default:"GeoRiva" }}{% endif %}
-                &nbsp;·&nbsp;
-                Powered by <a href="https://github.com/wmo-raf/georiva" target="_blank" rel="noopener">GeoRiva</a>
-            </span>
-                <span class="gr-api-status" id="gr-api-status">
-                <span class="gr-status-dot"></span>
-                API Online
-            </span>
+                <span class="gr-footer-copy">
+                    © {% now "Y" %}
+                    {% if s.org_name %}{{ s.org_name }}{% else %}{{ s.site_name|default:"GeoRiva" }}{% endif %}
+                    &nbsp;·&nbsp;
+                    Powered by <a href="https://github.com/wmo-raf/georiva" target="_blank" rel="noopener">GeoRiva</a>
+                </span>
             </div>
         </div>
     </footer>
