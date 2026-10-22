@@ -72,6 +72,11 @@ class ItemDetailMap {
             attributionControl: false,
         });
 
+        // OpenFreeMap, OpenMapTiles and OpenStreetMap ask to be credited. The text
+        // comes from the tile source itself. Bottom-left, under the legend: the
+        // toolbar and readout own the bottom-right.
+        this.map.addControl(new maplibregl.AttributionControl(), 'bottom-left');
+
         this.map.on('mousemove', e => {
             const el = document.getElementById('grMapCoords');
             if (el) el.textContent = `${e.lngLat.lat.toFixed(4)}, ${e.lngLat.lng.toFixed(4)}`;
