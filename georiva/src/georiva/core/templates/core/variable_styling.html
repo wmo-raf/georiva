@@ -628,15 +628,14 @@
                 {% else %}
                     <div class="vs-map" id="vs-map"></div>
                     <p class="vs-map-note" id="vs-map-status"
+                       data-style-failed="{% trans 'The basemap style could not be loaded, so the map cannot be drawn. Everything else on this page still works.' %}"
                        data-no-webgl="{% trans 'This browser has no WebGL, so the map cannot be drawn. Everything else on this page still works.' %}"
                        data-texture-failed="{% trans 'The preview texture could not be loaded. The data may not have finished processing, or you may be signed in to a different organisation than this collection belongs to.' %}">{% trans "Loading the preview…" %}</p>
                     <div class="vs-map-toolbar">
                         <label for="vs-basemap">{% trans "Basemap" %}</label>
                         <select id="vs-basemap">
-                            <option value="osm">{% trans "OSM" %}</option>
                             <option value="light">{% trans "Light" %}</option>
                             <option value="dark">{% trans "Dark" %}</option>
-                            <option value="satellite">{% trans "Satellite" %}</option>
                         </select>
                         <label for="vs-opacity">{% trans "Opacity" %}</label>
                         <input type="range" id="vs-opacity" min="0" max="100" value="100">
@@ -722,6 +721,7 @@
     <script src="{% static 'js/vendor/maplibre-gl.js' %}"></script>
     <script src="{% static 'js/vendor/deck.gl@9.2.6-dist.min.js' %}"></script>
     <script src="{% static 'js/vendor/weatherlayers-deck.umd.min.js' %}"></script>
+    <script src="{% static 'js/georiva-basemap.js' %}"></script>
     <script src="{% static 'js/raster_preview.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
@@ -1131,6 +1131,7 @@
                 }
                 mapPreview = GeoRivaRasterPreview.create({
                     container: 'vs-map',
+                    basemapStyleUrl: '{% static "basemap/georiva-basemap.json" %}',
                     textureUrl: previewConfig.textureUrl,
                     bounds: previewConfig.bounds,
                     imageUnscale: previewConfig.imageUnscale,
@@ -1142,9 +1143,10 @@
                             return;
                         }
                         mapStatus.hidden = false;
-                        mapStatus.textContent = code === 'no-webgl'
-                            ? mapStatus.dataset.noWebgl
-                            : mapStatus.dataset.textureFailed;
+                        mapStatus.textContent = {
+                            'no-webgl': mapStatus.dataset.noWebgl,
+                            'style-failed': mapStatus.dataset.styleFailed
+                        }[code] || mapStatus.dataset.textureFailed;
                     }
                 });
                 document.getElementById('vs-basemap').addEventListener('change', function (event) {
