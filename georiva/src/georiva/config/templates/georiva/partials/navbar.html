@@ -40,11 +40,6 @@
                 <a class="gr-navbar-item" href="{{ datasets_url }}">
                     <i class=" bi bi-layers"></i> Datasets
                 </a>
-                {% if s.map_viewer_url %}
-                    <a class="gr-navbar-item" href="{{ s.map_viewer_url }}">
-                        <i class="bi bi-map"></i> Map Viewer
-                    </a>
-                {% endif %}
                 {% if s.stac_browser_url %}
                     <a class="gr-navbar-item" href="{{ s.stac_browser_url }}">
                         <i class="bi bi-collection"></i> STAC Browser

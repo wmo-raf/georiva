@@ -1,5 +1,6 @@
-{% load wagtailsettings_tags i18n %}
+{% load wagtailsettings_tags i18n georiva_tags %}
 {% get_settings %}
+{% datasets_index_url as datasets_url %}
 
 {% with s=settings.home.GeoRivaSettings %}
     <section class="gr-section">
@@ -11,14 +12,14 @@
             </div>
 
             <div class="gr-entry-grid">
-                {% if s.map_viewer_url %}
-                    <a href="{{ s.map_viewer_url }}" class="gr-entry-card gr-animate gr-animate-1">
-                        <div class="gr-entry-icon"><i class="bi bi-map-fill"></i></div>
+                {% if datasets_url %}
+                    <a href="{{ datasets_url }}" class="gr-entry-card gr-animate gr-animate-1">
+                        <div class="gr-entry-icon"><i class="bi bi-layers-fill"></i></div>
                         <div class="gr-entry-title">
-                            {% trans "Map Viewer" %}
+                            {% trans "Datasets" %}
                         </div>
                         <div class="gr-entry-desc">
-                            {% trans "Visualize datasets on an interactive map with time controls and layer switching." %}}
+                            {% trans "Step through catalogs, filter collections by topic and time, and preview items on a map." %}
                         </div>
                     </a>
                 {% endif %}
@@ -30,7 +31,7 @@
                             {% trans "STAC Browser" %}
                         </div>
                         <div class="gr-entry-desc">
-                            {% trans "Browse the full catalog tree, preview assets, and download data files." %}
+                            {% trans "Navigate the raw STAC catalog, inspect metadata, and download asset files directly." %}
                         </div>
                     </a>
                 {% endif %}
@@ -41,7 +42,7 @@
                         STAC API
                     </div>
                     <div class="gr-entry-desc">
-                        {% trans "Machine-readable access to all datasets via a standards-compliant REST API." %}
+                        {% trans "Query catalogs, collections, and items programmatically through a standards-compliant REST API." %}
                     </div>
                 </a>
             </div>
