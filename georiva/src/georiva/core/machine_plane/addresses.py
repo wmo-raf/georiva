@@ -188,29 +188,35 @@ def titiler_preview_url(item, variable, style=None) -> str:
     would survive a default flip still pointing at the old default.
 
     ``variable`` is the ``Variable`` row where the caller holds one, and the
-    URL then carries the per-style version token that makes a colorized
-    response honestly cacheable — an edited style or range is a different
-    URL. A bare slug is accepted for callers holding nothing more (the page
-    templatetag); those thumbnails are never cached, so an untokened URL
-    stays honest there.
+    URL then carries the version token that makes a colorized response
+    honestly cacheable — an edited style or range, or re-ingested data, is a
+    different URL. A bare slug is accepted for callers holding nothing more
+    (the page templatetag): the variable is then read off the item's own COG
+    asset for that slug. Only an item with no such asset goes out untokened,
+    and Titiler declares nothing cacheable for an untokened URL.
     """
     collection = item.collection
     params = {"time": item.time_iso}
     if item.reference_time:
         params["reftime"] = item.reference_time_iso
+    asset = None
     if isinstance(variable, str):
         # A pinned style knows its own variable, so even a slug-only caller
         # gets the token then — a styled-but-untokened URL would undo the
         # honesty the token exists for.
-        variable_slug, variable = variable, style.variable if style else None
+        variable_slug = variable
+        asset = _cog_asset(item, slug=variable_slug)
+        variable = style.variable if style else (asset.variable if asset else None)
     else:
         variable_slug = variable.slug
+        asset = _cog_asset(item, variable_id=variable.pk)
     if style is not None:
         params["style"] = style.slug
     if variable is not None:
-        params["v"] = style_version_token(
+        params["v"] = preview_version_token(
             variable,
             style if style is not None else variable.default_style,
+            asset,
         )
     root = titiler_variable_root(
         org_slug_of(collection),
@@ -220,6 +226,41 @@ def titiler_preview_url(item, variable, style=None) -> str:
     )
 
     return f"{root}/preview.webp?{urlencode(params)}"
+
+
+def _cog_asset(item, *, slug=None, variable_id=None):
+    """The item's COG asset for one variable, or ``None``.
+
+    Filtered in Python over ``item.assets.all()`` so a caller that prefetched
+    ``assets__variable`` pays no query per item."""
+    for asset in item.assets.all():
+        if not asset.is_cog:
+            continue
+        if variable_id is not None and asset.variable_id == variable_id:
+            return asset
+        if slug is not None and asset.variable.slug == slug:
+            return asset
+    return None
+
+
+def data_version_token(asset) -> str:
+    """A short hash of the stored bytes a preview was drawn from.
+
+    ``modified`` moves whenever the asset row is rewritten (re-ingest, a
+    corrected forecast run) and ``checksum`` — when the ingest path supplied
+    one — pins the content itself. Together they keep an ``immutable``
+    thumbnail from outliving the data under its URL."""
+    basis = f"{asset.modified.isoformat() if asset.modified else ''}:{asset.checksum}"
+    return hashlib.sha1(basis.encode()).hexdigest()[:8]
+
+
+def preview_version_token(variable, style=None, asset=None) -> str:
+    """The ``v=`` of a colorized preview: style token, plus the data version
+    when the asset is known."""
+    token = style_version_token(variable, style)
+    if asset is None:
+        return token
+    return hashlib.sha1(f"{token}:{data_version_token(asset)}".encode()).hexdigest()[:8]
 
 
 def render_config_token(variable) -> str:
