@@ -22,6 +22,13 @@ Published. A published `Item` is a TimescaleDB hypertable (one row per timestep)
 A Published `Collection` carries a `visibility` (`public | private | internal`) — see **Visibility tier**.
 _Avoid_: Processed tier, Analysis-ready (as a tier name — those are MinIO buckets, not tiers)
 
+**Orphan object**:
+An object in the assets bucket that no live `Asset.href` names. Published asset objects follow their rows out once
+the delete commits (ADR 0032), so orphans come only from what that misses: a deletion chunk that ran out of retries, a key
+spared by the guard's 60s margin, an href rewritten in place by re-derivation, or objects left behind before ADR 0032.
+`cleanup_asset_orphans` sweeps them by hand. Raw staging inputs are never orphan objects: they keep their files by design.
+_Avoid_: orphaned (for an object — that is a `DerivedProduct` whose definition is gone), stale asset
+
 **Intermediate product**:
 A derived product that is itself an input to a further Derivation (e.g. an anomaly feeding the Combined Drought
 Indicator). Lives in **Published** as a normal `core.Item`/`Collection` with `visibility=internal` — **not** in
