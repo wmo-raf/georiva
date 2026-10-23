@@ -9,7 +9,11 @@ Safe by default:
   * a scope is required — ``--catalog`` (optionally with ``--collection``) or the
     explicit ``--all``, so an accidental bare run can't sweep the whole bucket;
   * only known asset object types are ever removed — legacy ``.json`` metadata
-    sidecars (pre-ADR-0024) and any other non-asset files are left untouched.
+    sidecars (pre-ADR-0024) and any other non-asset files are left untouched;
+  * an object modified within ``DELETION_MARGIN`` of the scan is left alone, the
+    same guard on-commit deletion applies (ADR 0032): the live hrefs are read
+    before the listing, so an object written in between would otherwise look
+    orphaned for the moment before its row lands.
 
 Examples::
 
@@ -23,10 +27,16 @@ prefix; pass ``--org`` to narrow to one.
 """
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
 from georiva.core.models import Asset, Collection
 from georiva.core.storage import storage
-from georiva.core.storage.asset_cleanup import DELETABLE_EXTENSIONS, select_orphan_objects
+from georiva.core.storage.asset_cleanup import (
+    DELETABLE_EXTENSIONS,
+    DELETE,
+    deletion_verdict,
+    select_orphan_objects,
+)
 
 
 class Command(BaseCommand):
@@ -89,9 +99,19 @@ class Command(BaseCommand):
         total_bytes = 0
         for coll in collections:
             prefix = f"{coll.catalog.storage_prefix}/{coll.slug}"
-            objects = [f["path"] for f in storage.assets.list_files(prefix, recursive=True)]
+            # The cutoff is when the live set was read: an object written after
+            # it may belong to a row that set does not hold yet.
+            scanned_at = timezone.now()
             live = set(Asset.objects.filter(href__startswith=f"{prefix}/").values_list("href", flat=True))
-            orphans = select_orphan_objects(objects, live, DELETABLE_EXTENSIONS)
+            listing = storage.assets.list_files(prefix, recursive=True)
+            modified = {f["path"]: f.get("modified") for f in listing}
+            objects = list(modified)
+            orphans = [
+                path
+                for path in select_orphan_objects(objects, live, DELETABLE_EXTENSIONS)
+                # An object whose time could not be read is not provably old.
+                if modified[path] is not None and deletion_verdict(path, live, modified[path], scanned_at) == DELETE
+            ]
             if not orphans:
                 continue
 

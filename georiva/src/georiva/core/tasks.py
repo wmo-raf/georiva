@@ -6,7 +6,7 @@ from django_celery_beat.models import IntervalSchedule
 
 from georiva.config.celery import app
 from georiva.core.models import Collection, Item
-from georiva.events.tasks import EntryTask
+from georiva.events.tasks import EntryTask, ReadSideTask
 from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,49 @@ def prune_forecast_items():
 
     logger.info("prune_forecast_items: removed %d items", total_deleted)
     return f"Pruned {total_deleted} past forecast items"
+
+
+@app.task(
+    name="georiva.core.tasks.delete_asset_objects",
+    base=ReadSideTask,
+    bind=True,
+    acks_late=True,
+    max_retries=3,
+    # Nothing a reader observes waits on freeing storage: the rows are already
+    # gone. Idempotent — deleting a missing key is a success, and the guards
+    # re-run on every attempt — so a retry never deletes what came back.
+    queue="georiva-default",
+)
+def delete_asset_objects(self, hrefs: list[str], deleted_at: str) -> dict:
+    """Delete the assets-bucket objects of Asset rows whose delete committed at
+    ``deleted_at`` (ADR 0032). One chunk of ``asset_deletion.CHUNK_SIZE`` keys."""
+    from datetime import datetime
+
+    from georiva.core.storage.asset_deletion import delete_objects
+
+    try:
+        summary = delete_objects(hrefs, datetime.fromisoformat(deleted_at))
+        if hrefs and summary["failed"] == len(hrefs):
+            raise RuntimeError(f"every one of {len(hrefs)} deletions failed; storage looks unreachable")
+    except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            logger.error(
+                "delete_asset_objects: gave up on %d object(s) after %d retries (%s); "
+                "run cleanup_asset_orphans to reclaim them",
+                len(hrefs),
+                self.max_retries,
+                exc,
+            )
+            raise
+        raise self.retry(exc=exc, countdown=30 * 2**self.request.retries) from exc
+
+    if summary["failed"]:
+        logger.error(
+            "delete_asset_objects: %d object(s) could not be deleted; run cleanup_asset_orphans to reclaim them",
+            summary["failed"],
+        )
+    logger.info("delete_asset_objects: %s", summary)
+    return summary
 
 
 @app.on_after_finalize.connect

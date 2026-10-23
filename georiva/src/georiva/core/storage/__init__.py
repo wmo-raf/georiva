@@ -12,7 +12,10 @@ holds both directions of that grammar and the conventions that fill it in:
                      data under another's prefix
 ``filename``         the ``GR--{YYYYMMDDTHHMM}--`` naming convention for the
                      objects that land in those buckets
-``asset_cleanup``    pure selection of objects no live ``Asset.href`` names
+``asset_cleanup``    pure selection of objects no live ``Asset.href`` names, and
+                     the guard every deletion of one passes
+``asset_deletion``   an ``Asset`` row's object follows it out once the delete
+                     commits (ADR 0032)
 
 ``core.machine_plane`` mirrors this grammar for service addresses rather than
 object keys, so a Titiler tile URL and the COG key behind it differ only by
@@ -20,7 +23,7 @@ prefix.
 
 The re-exports below are the surface the old top-level ``core/storage.py``
 offered, kept so its callers — the singleton has 27 of them — did not have to
-move with it. The other three modules are imported by their own paths.
+move with it. The other modules are imported by their own paths.
 """
 
 from .manager import (  # noqa: F401

@@ -56,6 +56,20 @@ def on_variable_delete(sender, instance, **kwargs):
     prune_variable(instance)
 
 
+def on_item_delete(sender, instance, **kwargs):
+    """Keep ``Collection.item_count`` honest: ingestion counts items in, so a
+    delete counts them out. By ``collection_id``, never the related object —
+    during a collection cascade the row may already be gone, and an update of a
+    missing row is a no-op. Clamped at zero, so a count that drifted before this
+    receiver existed cannot fail the delete; ``recount_items`` repairs those."""
+    from django.db.models import F
+    from django.db.models.functions import Greatest
+
+    from .models import Collection
+
+    Collection.objects.filter(pk=instance.collection_id).update(item_count=Greatest(F("item_count") - 1, 0))
+
+
 def _put_keep(bucket, path):
     try:
         bucket.save(path, b"")
@@ -145,7 +159,7 @@ class CoreConfig(AppConfig):
         from georiva.sources.tasks import update_collection_data_feed_periodic_task, update_link_data_feed_periodic_task
 
         from . import checks  # noqa: F401  (registers the system checks)
-        from .models import Collection, Variable
+        from .models import Asset, Collection, Item, Variable
         from .models.visualization import VariableStyle
 
         post_save.connect(update_collection_data_feed_periodic_task, sender=Collection)
@@ -169,3 +183,10 @@ class CoreConfig(AppConfig):
         post_delete.connect(on_variable_delete, sender=Variable)
         post_save.connect(on_style_change, sender=VariableStyle)
         post_delete.connect(on_style_delete, sender=VariableStyle)
+
+        # A published asset's object follows its row out once the delete
+        # commits (ADR 0032); the collection's item count follows its items.
+        from .storage.asset_deletion import on_asset_deleted
+
+        post_delete.connect(on_asset_deleted, sender=Asset)
+        post_delete.connect(on_item_delete, sender=Item)
