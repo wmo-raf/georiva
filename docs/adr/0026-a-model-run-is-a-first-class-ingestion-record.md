@@ -1,5 +1,8 @@
 # A model run is a first-class ingestion record
 
+> **Amended by [ADR 0034](0034-push-feeds-replace-manual-upload.md)** — a push feed closes a run as `declared_set`
+> once its `files_per_run` deliveries have ingested.
+
 ## Status
 
 accepted
