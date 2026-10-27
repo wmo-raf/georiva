@@ -735,7 +735,7 @@ def data_feed_delete(request, pk):
     if request.method == "POST":
         feed_name = feed.name
         feed.delete()  # cascades: Catalog → Collections → Variables → Items → Assets
-        messages.success(request, _("Data feed '%s' and all its data have been deleted.") % feed_name)
+        messages.success(request, _("Pull feed '%s' and all its data have been deleted.") % feed_name)
         return redirect("data_feed_list")
 
     collections = []
@@ -1272,7 +1272,14 @@ def wizard_step1_catalog(request, model_name):
         # for another org's catalog as for a claimed one — the operator has no
         # business learning which other institutions exist.
         if catalog_mode == "select" and catalog_id and not unclaimed_catalogs.filter(pk=catalog_id).exists():
-            errors.append(_("Please choose a catalog."))
+            push_feed = getattr(Catalog.objects.filter(pk=catalog_id, organisation=org).first(), "push_feed", None)
+            if push_feed:
+                errors.append(
+                    _("This catalog already has a push feed, \u201c%(name)s\u201d. A catalog has at most one feed.")
+                    % {"name": push_feed.name}
+                )
+            else:
+                errors.append(_("Please choose a catalog."))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
@@ -1346,7 +1353,7 @@ def wizard_step2_feed(request, model_name):
 
         errors = []
         if not new_feed_name:
-            errors.append(_("Please enter a name for the Pull feed."))
+            errors.append(_("Please enter a name for the pull feed."))
 
         global_config = {}
         if extra_form is not None:

@@ -404,8 +404,7 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             )
 
     def save(self, *args, **kwargs):
-        if self._state.adding:
-            self.refuse_push_fed_catalog()
+        self.refuse_push_fed_catalog()
         super().save(*args, **kwargs)
 
         from georiva.sources.tasks import update_collection_data_feed_periodic_task

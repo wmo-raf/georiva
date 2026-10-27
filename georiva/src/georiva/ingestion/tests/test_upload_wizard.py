@@ -910,7 +910,7 @@ class ProvisionTests(TestCase):
         _seed_session(self.client, session)
         response = self.client.post(PROVISION_URL)
 
-        self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
+        self.assertRedirects(response, STEP1_URL, fetch_redirect_response=False)
         self.assertEqual(PushFeed.objects.count(), 1)
         self.assertFalse(Collection.objects.filter(slug="weather-models-collection-1").exists())
         self.assertFalse(Variable.objects.exists())
@@ -1030,6 +1030,18 @@ class CatalogOwnershipTests(TestCase):
         self.assertFalse(PushFeed.objects.exists())
         self.assertFalse(Variable.objects.exists())
         self.assertFalse(self.claimed.collections.exists())
+
+    def test_provision_rejects_a_catalog_that_already_has_a_push_feed(self):
+        PushFeed.objects.create(catalog=self.unclaimed, name="WRF", valid_time_format="YYYYMMDD")
+        session = _full_session()
+        session["catalog_mode"] = "select"
+        session["catalog_id"] = self.unclaimed.pk
+        _seed_session(self.client, session)
+
+        response = self.client.post(PROVISION_URL)
+
+        self.assertRedirects(response, STEP1_URL, fetch_redirect_response=False)
+        self.assertEqual(PushFeed.objects.count(), 1)
 
     def test_provision_still_works_against_unclaimed_catalog(self):
         session = _full_session()

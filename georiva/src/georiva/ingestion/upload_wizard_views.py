@@ -810,7 +810,7 @@ def upload_wizard_provision(request):
             # claimed the Catalog since) or the POST crafted. In create mode the
             # get_or_create above may also have fetched an existing claimed
             # Catalog by slug rather than creating one.
-            if getattr(catalog, "data_feed", None) is not None:
+            if getattr(catalog, "data_feed", None) is not None or getattr(catalog, "push_feed", None) is not None:
                 messages.error(request, _claimed_catalog_message(catalog))
                 return redirect("upload_wizard_step1")
 

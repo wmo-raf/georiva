@@ -50,3 +50,12 @@ class OneFeedPerCatalogTests(TestCase):
 
     def test_a_pull_feed_without_a_catalog_is_not_blocked(self):
         DataFeed.objects.create(name="Orphan")
+
+    def test_repointing_an_existing_feed_at_a_claimed_catalog_is_refused(self):
+        claimed = _catalog("claimed")
+        PushFeed.objects.create(catalog=claimed, name="WRF push", valid_time_format="YYYYMMDD")
+        feed = DataFeed.objects.create(name="CHIRPS", catalog=_catalog("other"))
+
+        feed.catalog = claimed
+        with self.assertRaises(ValidationError):
+            feed.save()

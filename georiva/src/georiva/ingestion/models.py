@@ -1045,8 +1045,7 @@ class PushFeed(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        if self._state.adding:
-            self.refuse_pull_fed_catalog()
+        self.refuse_pull_fed_catalog()
         super().save(*args, **kwargs)
 
     def strptime_pattern(self) -> str | None:
