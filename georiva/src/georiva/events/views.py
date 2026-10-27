@@ -17,6 +17,7 @@ from .history import HistoryRow, row_for
 from .registry import event_types, installed_tables
 
 LIMIT = 200
+PAGE_SIZE = 50
 
 
 def unattributed_events(request):
@@ -122,5 +123,45 @@ def timeline(request, correlation_id):
             ],
             "header_title": _("Timeline %(id)s") % {"id": str(correlation_id)[:8]},
             "header_icon": "history",
+        },
+    )
+
+
+def failures(request):
+    """Every failed and refused event in the window, newest first (ADR 0033).
+
+    Behind the dashboard's failures panel, under the same ADR 0030 exception and
+    reached only from it: no menu entry. ``?type=&group=`` narrows it to one
+    failure group, the panel line that linked here.
+    """
+    from urllib.parse import urlencode
+
+    from django.core.paginator import Paginator
+
+    from .failures import failure_index, rows_for, window_days
+
+    index = failure_index(request)
+    event_type, group_key = request.GET.get("type"), request.GET.get("group", "")
+    if event_type:
+        index = index.filter(event_type=event_type, failure_group_key=group_key)
+    page = Paginator(index.order_by("-occurred_at", "event_id"), PAGE_SIZE).get_page(request.GET.get("page"))
+    rows = rows_for(list(page.object_list))
+    group_label = rows[0].event.failure_group().label if event_type and rows else None
+
+    return render(
+        request,
+        "georivaevents/failures.html",
+        {
+            "rows": rows,
+            "page": page,
+            "days": window_days(),
+            "group_label": group_label,
+            "filter_query": urlencode({"type": event_type, "group": group_key}) if event_type else "",
+            "breadcrumbs_items": [
+                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+                {"url": None, "label": _("Failures")},
+            ],
+            "header_title": _("Failures"),
+            "header_icon": "warning",
         },
     )

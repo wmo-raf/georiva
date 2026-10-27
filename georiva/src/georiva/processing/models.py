@@ -317,14 +317,33 @@ class DerivationAttemptFinished(DomainEvent):
             models.Index(fields=["origin", "-occurred_at"], name="idx_derivatt_origin"),
         ]
 
-    def subject_url(self):
-        """The product's run list, when this attempt came from a product that still exists."""
+    def _product_pk(self) -> int | None:
         prefix = "derived_product:"
         if not self.origin.startswith(prefix) or not self.origin[len(prefix) :].isdigit():
             return None
+        return int(self.origin[len(prefix) :])
+
+    def subject_url(self):
+        """The product's run list, when this attempt came from a product that still exists."""
+        pk = self._product_pk()
+        if pk is None:
+            return None
         from django.urls import reverse
 
-        return reverse("derived_product_runs", args=[int(self.origin[len(prefix) :])])
+        return reverse("derived_product_runs", args=[pk])
+
+    def failure_group_key(self):
+        return self.origin or f"recipe:{self.recipe_type}"
+
+    def failure_group(self):
+        from django.apps import apps
+
+        from georiva.events.models import FailureGroup
+
+        pk = self._product_pk()
+        product = apps.get_model("georivasources", "DerivedProduct").objects.filter(pk=pk).first() if pk else None
+        label = product.display_label if product else self.recipe_type
+        return FailureGroup(key=self.failure_group_key(), label=label, url=self.subject_url() if product else None)
 
     def extra_links(self):
         """The lineage of inputs that went into the product — which did not trigger the attempt."""

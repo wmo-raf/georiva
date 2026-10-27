@@ -1,0 +1,23 @@
+{% load i18n events_tags %}
+{% comment %}
+    One failure group as a single line on the dashboard (ADR 0033): what is failing,
+    how often, when last, and the newest event's summary. Rendered from a
+    georiva.events.failures.FailureGroupRow; the events themselves are on the Failures page.
+{% endcomment %}
+<li class="gr-failures__row">
+    {% if group.url %}
+        <a class="gr-failures__label" href="{{ group.url }}">{{ group.label }}</a>
+    {% else %}
+        <span class="gr-failures__label">{{ group.label }}</span>
+    {% endif %}
+    {% if group.label != group.latest.type_label %}<span class="gr-failures__type">{{ group.latest.type_label }}</span>{% endif %}
+    <a class="gr-failures__count" href="{{ group.list_url }}">
+        {% if group.failed %}{% blocktrans count n=group.failed %}{{ n }} failed{% plural %}{{ n }} failed{% endblocktrans %}{% endif %}{% if group.failed and group.refused %} · {% endif %}{% if group.refused %}{% blocktrans count n=group.refused %}{{ n }} refused{% plural %}{{ n }} refused{% endblocktrans %}{% endif %}
+    </a>
+    <span class="gr-failures__when">{% trans "last" %} {{ group.latest.occurred_at|recent_time }}</span>
+    {% if group.latest.timeline_url %}
+        <a class="gr-failures__summary" href="{{ group.latest.timeline_url }}" title="{{ group.latest.summary }}">{{ group.latest.summary }}</a>
+    {% else %}
+        <span class="gr-failures__summary" title="{{ group.latest.summary }}">{{ group.latest.summary }}</span>
+    {% endif %}
+</li>

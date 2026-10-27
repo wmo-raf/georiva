@@ -36,5 +36,6 @@ def record(model, **fields):
             occurred_at=event.occurred_at,
             organisation_id=event.organisation_id,
             outcome_class=event.outcome_class,
+            failure_group_key=event.failure_group_key(),
         )
     return event

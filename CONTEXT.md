@@ -471,6 +471,25 @@ the repo tip. Rendered over `variable_detail` in the same coverage service; a va
 yet degrades to empty history rather than an error.
 _Avoid_: variable page, manifest detail
 
+**Failures panel**:
+The Wagtail admin home panel, above the Collection Health Panel, listing the active organisation's failed and refused
+Domain events of the last `GEORIVA_FAILURES_PANEL_DAYS` — one line per **Failure group**, newest first, at most ten
+(ADR 0030, ADR 0033). The one deliberate org-wide listing; its "View all failures" link leads to the Failures page.
+_Avoid_: recent failures list, error feed
+
+**Failure group**:
+What a failed or refused Domain event rolls up under on the Failures panel: its event type plus the thing an operator
+would fix — a Data Feed (`feed:<id>`), a Collection (`collection:<catalog>/<collection>`), a Derived Product
+(`derived_product:<id>`), or, by default, the event type alone. Declared per event type by `failure_group_key()` and
+stored as `EventIndex.failure_group_key` when the event is recorded. A group stays on the panel for the whole window:
+a later success does not clear it. Not to be confused with **Failure scope**, which classifies one failed fetch.
+_Avoid_: incident, failure category, error group
+
+**Failures page**:
+The admin page behind the Failures panel listing the failed and refused events themselves, paginated, optionally
+narrowed to one Failure group. Reached from the panel only — no sidebar entry.
+_Avoid_: failure log, monitoring page
+
 Acquisition monitoring (`FetchRun` / `FetchedFile`) is per-feed: each Data Feed's dashboard carries summary stat
 cards with linked fetch-run and ingestion listing pages. The former org-wide live "Acquisition Feed" page was
 retired (ADR-0019); "is anything failing to fetch" is answered by the health chips on the Data Feeds list.

@@ -883,6 +883,37 @@ class FileIngestionFinished(DomainEvent):
 
         return reverse("file_ingestion_detail", args=[self.file_ingestion_id])
 
+    def _collection_slug(self) -> str:
+        """``catalog/collection`` — the first touched, else read off the key ``{org}/{catalog}/{collection}/…``."""
+        if self.collections_touched:
+            return sorted(self.collections_touched)[0]
+        parts = self.file_path.split("/")
+        return "/".join(parts[1:3]) if len(parts) >= 4 else ""
+
+    def failure_group_key(self):
+        slug = self._collection_slug()
+        return f"collection:{slug}" if slug else ""
+
+    def failure_group(self):
+        from django.urls import reverse
+
+        from georiva.core.models import Collection
+        from georiva.events.models import FailureGroup
+
+        slug = self._collection_slug()
+        if not slug:
+            return super().failure_group()
+        catalog_slug, collection_slug = slug.split("/", 1)
+        pk = (
+            Collection.objects.filter(
+                catalog__organisation_id=self.organisation_id, catalog__slug=catalog_slug, slug=collection_slug
+            )
+            .values_list("pk", flat=True)
+            .first()
+        )
+        url = reverse("collection_items_list", args=[pk]) if pk else None
+        return FailureGroup(key=self.failure_group_key(), label=slug, url=url)
+
     def summary(self):
         if self.outcome == self.Outcome.COMPLETED:
             return f"{self.file_path}: {self.items_created} items, {self.assets_created} assets"

@@ -1,5 +1,8 @@
 # Domain events beside run rows
 
+> **Amended by [ADR 0033](0033-dashboard-failures-roll-up-by-failure-group.md)** — the failures panel shows one line
+> per failure group.
+
 ## Status
 
 accepted — see wmo-raf/georiva#418

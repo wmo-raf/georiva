@@ -12,10 +12,12 @@ def history_panel_css():
 
 @hooks.register("register_admin_urls")
 def register_event_urls():
-    from .views import timeline, unattributed_events
+    from .views import failures, timeline, unattributed_events
 
     # No menu entry for the Timeline: it is reached by link, from a History row.
+    # Nor for Failures: it is reached from the dashboard's failures panel (ADR 0033).
     return [
+        path("events/failures/", failures, name="events_failures"),
         path("events/unattributed/", unattributed_events, name="events_unattributed"),
         path("events/timeline/<uuid:correlation_id>/", timeline, name="events_timeline"),
     ]
