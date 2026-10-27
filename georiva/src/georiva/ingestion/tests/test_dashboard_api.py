@@ -605,12 +605,13 @@ class CollectionIngestionJobsAPITests(TestCase):
 
 
 def _make_upload_session(catalog, user=None, file_path=None, collection=None):
-    """Create an UploadSession with one UploadedFile, optionally linked via FileIngestion."""
-    from georiva.ingestion.models import UploadedFile, UploadSession
+    """Create an UploadSession with one Delivery, optionally linked via FileIngestion."""
+    from georiva.ingestion.models import Delivery, PushFeed, UploadSession
 
-    session = UploadSession.objects.create(catalog=catalog, user=user)
+    feed = PushFeed.objects.create(catalog=catalog, name=catalog.name, valid_time_format="YYYYMMDD")
+    session = UploadSession.objects.create(push_feed=feed, user=user)
     fp = file_path or f"{catalog.slug}/file.grib2"
-    UploadedFile.objects.create(session=session, original_filename="file.grib2", file_path=fp)
+    Delivery.receive(push_feed=feed, filename="file.grib2", file_path=fp, session=session, sent_by=user)
     if collection is not None:
         fi = FileIngestion.objects.create(bucket=BucketType.SOURCES, file_path=fp)
         fi.collections.add(collection)

@@ -133,7 +133,7 @@ def build_org_tree(organisation, *, name):
     product = DerivedProduct.objects.create(data_feed=feed, definition_key=SHARED_SLUG, recipe_type="promotion")
     run = FetchRun.objects.create(data_feed=feed)
     push_feed = PushFeed.objects.create(catalog=catalog, name=name, valid_time_format=PushFeed.ValidTimeFormat.YYYYMMDD)
-    session = UploadSession.objects.create(catalog=catalog)
+    session = UploadSession.objects.create(push_feed=push_feed)
     file_ingestion = FileIngestion.objects.create(bucket="sources", file_path=f"{organisation.slug}/x/y/z.tif")
     model_run = RunIngestion.objects.create(collection=collection, reference_time="2026-01-01T00:00:00Z")
     with event_context(organisation_id=organisation.pk):

@@ -270,18 +270,22 @@ def collection_upload_sessions_api(request, collection_id):
     Used by the CollectionDrawer Acquisition tab for manual Collections.
     """
     from georiva.core.models import Collection
-    from georiva.ingestion.models import FileIngestion, UploadedFile, UploadSession
+    from georiva.ingestion.models import Delivery, FileIngestion, UploadSession
 
     get_org_object_or_404(request, Collection, pk=collection_id)
 
     fi_paths = FileIngestion.objects.filter(collections=collection_id).values_list("file_path", flat=True)
 
-    session_ids = UploadedFile.objects.filter(file_path__in=fi_paths).values_list("session_id", flat=True).distinct()
+    session_ids = (
+        Delivery.objects.filter(file_path__in=fi_paths, session__isnull=False)
+        .values_list("session_id", flat=True)
+        .distinct()
+    )
 
     sessions = (
         UploadSession.objects.filter(pk__in=session_ids)
         .select_related("user")
-        .prefetch_related("uploaded_files")
+        .prefetch_related("deliveries")
         .order_by("-started_at")[:100]
     )
 
@@ -291,7 +295,7 @@ def collection_upload_sessions_api(request, collection_id):
         if session.completed_at and session.started_at:
             duration = (session.completed_at - session.started_at).total_seconds()
 
-        files = list(session.uploaded_files.all())
+        files = list(session.deliveries.all())
         result.append(
             {
                 "id": session.pk,
@@ -300,8 +304,8 @@ def collection_upload_sessions_api(request, collection_id):
                 "completed_at": session.completed_at.isoformat() if session.completed_at else None,
                 "duration_seconds": duration,
                 "files_count": len(files),
-                "files_stored": sum(1 for f in files if f.status == "stored"),
-                "files_failed": sum(1 for f in files if f.status == "failed"),
+                "files_stored": sum(1 for f in files if f.status == "accepted"),
+                "files_failed": 0,
                 "uploaded_by": session.user.username if session.user else None,
             }
         )
@@ -313,7 +317,7 @@ def upload_session_status_api(request, session_id):
     """Returns {id, status, files} for a single UploadSession."""
     from georiva.ingestion.models import UploadSession
 
-    session = get_org_object_or_404(request, UploadSession.objects.prefetch_related("uploaded_files"), pk=session_id)
+    session = get_org_object_or_404(request, UploadSession.objects.prefetch_related("deliveries"), pk=session_id)
 
     return JsonResponse(
         {
@@ -321,12 +325,11 @@ def upload_session_status_api(request, session_id):
             "status": session.status,
             "files": [
                 {
-                    "id": uf.pk,
-                    "status": uf.status,
-                    "file_path": uf.file_path,
-                    "error": uf.error,
+                    "id": d.pk,
+                    "status": d.status,
+                    "file_path": d.file_path,
                 }
-                for uf in session.uploaded_files.all()
+                for d in session.deliveries.all()
             ],
         }
     )

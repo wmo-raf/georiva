@@ -974,133 +974,6 @@ class RunIngestionReopened(DomainEvent):
 
 
 # ---------------------------------------------------------------------------
-# Acquisition tracking models
-# ---------------------------------------------------------------------------
-
-
-class UploadSession(models.Model):
-    """Tracks a batch of files uploaded by a person on a push feed page."""
-
-    class Status(models.TextChoices):
-        ACTIVE = "active", "Active"
-        COMPLETED = "completed", "Completed"
-        FAILED = "failed", "Failed"
-        CANCELLED = "cancelled", "Cancelled"
-
-    ORGANISATION_LOOKUP = "catalog__organisation"
-
-    catalog = models.ForeignKey(
-        "georivacore.Catalog",
-        on_delete=models.CASCADE,
-        related_name="upload_sessions",
-    )
-    user = models.ForeignKey(
-        "auth.User",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="upload_sessions",
-    )
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
-    started_at = models.DateTimeField(auto_now_add=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        app_label = "georivaingestion"
-        ordering = ["-started_at"]
-
-    def _finish(self, status):
-        from django.utils import timezone
-
-        self.status = status
-        self.completed_at = timezone.now()
-        self.save(update_fields=["status", "completed_at"])
-
-    def mark_failed(self):
-        self._finish(self.Status.FAILED)
-
-    def mark_cancelled(self):
-        self._finish(self.Status.CANCELLED)
-
-    def _check_auto_complete(self):
-        """Auto-complete when all files have reached a terminal state."""
-        if self.status != self.Status.ACTIVE:
-            return
-        terminal = {UploadedFile.Status.STORED, UploadedFile.Status.FAILED}
-        files = list(self.uploaded_files.values_list("status", flat=True))
-        if files and all(s in terminal for s in files):
-            self._finish(self.Status.COMPLETED)
-
-
-class UploadedFile(models.Model):
-    """Per-file record within an UploadSession."""
-
-    class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        UPLOADING = "uploading", "Uploading"
-        STORED = "stored", "Stored"
-        FAILED = "failed", "Failed"
-
-    ORGANISATION_LOOKUP = "session__catalog__organisation"
-
-    session = models.ForeignKey(
-        UploadSession,
-        on_delete=models.CASCADE,
-        related_name="uploaded_files",
-    )
-    original_filename = models.CharField(max_length=500)
-    file_path = models.CharField(max_length=500, blank=True)
-    correlation_id = models.UUIDField(
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text="The chain this upload started; the Bucket-notification consumer adopts it by key (ADR 0030).",
-    )
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    error = models.TextField(blank=True)
-    bytes = models.BigIntegerField(default=0)
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        app_label = "georivaingestion"
-        ordering = ["id"]
-
-    def save(self, *args, **kwargs):
-        if self._state.adding and self.correlation_id is None:
-            from georiva.events.context import starting_correlation
-
-            self.correlation_id = starting_correlation()
-        super().save(*args, **kwargs)
-
-    def mark_uploading(self):
-        from django.utils import timezone
-
-        self.status = self.Status.UPLOADING
-        self.started_at = timezone.now()
-        self.save(update_fields=["status", "started_at"])
-
-    def mark_stored(self, file_path="", bytes=0):
-        from django.utils import timezone
-
-        self.status = self.Status.STORED
-        self.file_path = file_path
-        self.bytes = bytes
-        self.completed_at = timezone.now()
-        self.save(update_fields=["status", "file_path", "bytes", "completed_at"])
-        self.session._check_auto_complete()
-
-    def mark_failed(self, error=""):
-        from django.utils import timezone
-
-        self.status = self.Status.FAILED
-        self.error = error
-        self.completed_at = timezone.now()
-        self.save(update_fields=["status", "error", "completed_at"])
-        self.session._check_auto_complete()
-
-
-# ---------------------------------------------------------------------------
 # Push feeds (ADR 0034)
 # ---------------------------------------------------------------------------
 
@@ -1158,6 +1031,188 @@ class PushFeed(models.Model):
         from georiva.core.models import Variable
 
         return Variable.objects.filter(collection__catalog=self.catalog_id, is_active=True)
+
+
+class UploadSession(models.Model):
+    """A person's batch of deliveries on a push feed's page (ADR 0034)."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
+
+    push_feed = models.ForeignKey(
+        "georivaingestion.PushFeed",
+        on_delete=models.CASCADE,
+        related_name="upload_sessions",
+    )
+    user = models.ForeignKey(
+        "auth.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="upload_sessions",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "georivaingestion"
+        ordering = ["-started_at"]
+
+    def _finish(self, status):
+        from django.utils import timezone
+
+        self.status = status
+        self.completed_at = timezone.now()
+        self.save(update_fields=["status", "completed_at"])
+
+    def mark_failed(self):
+        self._finish(self.Status.FAILED)
+
+    def mark_cancelled(self):
+        self._finish(self.Status.CANCELLED)
+
+    def _check_auto_complete(self):
+        """Auto-complete when all deliveries have reached a terminal state."""
+        if self.status != self.Status.ACTIVE:
+            return
+        terminal = {Delivery.Status.ACCEPTED}
+        deliveries = list(self.deliveries.values_list("status", flat=True))
+        if deliveries and all(s in terminal for s in deliveries):
+            self._finish(self.Status.COMPLETED)
+
+
+class Delivery(models.Model):
+    """One file arriving into a push feed (ADR 0034).
+
+    Today only a person's upload on the feed's page makes one. It starts its own
+    Correlation; an accepted delivery hands off to ingestion, and the outcome
+    stays on the ``FileIngestion`` for its key rather than being copied here.
+    """
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        ACCEPTED = "accepted", "Accepted"
+
+    ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
+
+    push_feed = models.ForeignKey(PushFeed, on_delete=models.CASCADE, related_name="deliveries")
+    session = models.ForeignKey(
+        UploadSession,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="deliveries",
+    )
+    sent_by = models.ForeignKey(
+        "auth.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deliveries",
+    )
+    original_filename = models.CharField(max_length=500)
+    file_path = models.CharField(max_length=500, blank=True)
+    correlation_id = models.UUIDField(
+        db_index=True,
+        help_text="The chain this delivery started; the Bucket-notification consumer adopts it by key (ADR 0030).",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
+    bytes = models.BigIntegerField(default=0)
+    received_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "georivaingestion"
+        ordering = ["-received_at", "-id"]
+        verbose_name_plural = "deliveries"
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and self.correlation_id is None:
+            import uuid
+
+            self.correlation_id = uuid.uuid4()
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def receive(cls, *, push_feed, filename, file_path, session=None, sent_by=None, correlation_id=None):
+        """Record a delivery as received, with its ``DeliveryReceived`` event."""
+        from georiva.events.context import new_context, use_context
+
+        delivery = cls.objects.create(
+            push_feed=push_feed,
+            session=session,
+            sent_by=sent_by,
+            original_filename=filename,
+            file_path=file_path,
+            correlation_id=correlation_id,
+        )
+        context = new_context(
+            actor=f"user:{sent_by.pk}" if sent_by else "system:upload",
+            organisation_id=push_feed.catalog.organisation_id,
+            correlation_id=delivery.correlation_id,
+        )
+        with use_context(context):
+            record(
+                DeliveryReceived,
+                delivery=delivery,
+                push_feed=push_feed,
+                feed_name=push_feed.name,
+                catalog_slug=push_feed.catalog.slug,
+                filename=filename,
+                file_path=file_path,
+                sender=sent_by.get_username() if sent_by else "",
+            )
+        return delivery
+
+    def mark_accepted(self, file_path="", bytes=0):
+        from django.utils import timezone
+
+        self.status = self.Status.ACCEPTED
+        self.file_path = file_path or self.file_path
+        self.bytes = bytes
+        self.accepted_at = timezone.now()
+        self.save(update_fields=["status", "file_path", "bytes", "accepted_at"])
+        if self.session_id:
+            self.session._check_auto_complete()
+
+    def timeline_url(self):
+        from django.urls import reverse
+
+        return reverse("events_timeline", args=[self.correlation_id])
+
+
+class DeliveryReceived(DomainEvent):
+    """A file arrived into a push feed; the first event of its chain (ADR 0034)."""
+
+    label = "Delivery received"
+
+    delivery = models.ForeignKey(Delivery, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    filename = models.CharField(max_length=500)
+    file_path = models.CharField(max_length=500)
+    sender = models.CharField(max_length=150, blank=True, help_text="Username of the person; blank when unknown.")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["delivery", "-occurred_at"], name="idx_delivrecv_delivery")]
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def summary(self):
+        by = f" from {self.sender}" if self.sender else ""
+        return f"{self.filename} received by {self.feed_name}{by}"
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ from django.utils import timezone as dj_timezone
 
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.domain_signals import run_ingestion_closed, run_ingestion_reopened
-from georiva.ingestion.models import FileIngestion, RunIngestion, UploadedFile, UploadSession
+from georiva.ingestion.models import Delivery, FileIngestion, PushFeed, RunIngestion, UploadSession
 from georiva.organisations.testing import make_organisation
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
@@ -293,19 +293,24 @@ class UploadBatchCloserTests(TestCase):
 
     def setUp(self):
         self.collection = _collection()
-        self.session = UploadSession.objects.create(catalog=self.collection.catalog)
-
-    def _upload(self, step, status=UploadedFile.Status.STORED):
-        return UploadedFile.objects.create(
-            session=self.session,
-            original_filename=f"step{step}.grib2",
-            file_path=_key(self.collection, step),
-            status=status,
+        self.feed = PushFeed.objects.create(
+            catalog=self.collection.catalog, name="Models", valid_time_format="YYYYMMDD"
         )
+        self.session = UploadSession.objects.create(push_feed=self.feed)
+
+    def _upload(self, step, status=Delivery.Status.ACCEPTED, session=None):
+        delivery = Delivery.receive(
+            push_feed=self.feed,
+            filename=f"step{step}.grib2",
+            file_path=_key(self.collection, step),
+            session=session or self.session,
+        )
+        Delivery.objects.filter(pk=delivery.pk).update(status=status)
+        return delivery
 
     def test_an_active_session_holds_the_run_open(self):
         self._upload(0)
-        self._upload(6, status=UploadedFile.Status.PENDING)
+        self._upload(6, status=Delivery.Status.RECEIVED)
         _complete_file(self.collection, 0)
 
         self.assertEqual(RunIngestion.objects.get().status, RunIngestion.Status.OPEN)
@@ -333,13 +338,8 @@ class UploadBatchCloserTests(TestCase):
         _complete_file(self.collection, 0)
         self.assertEqual(RunIngestion.objects.get().status, RunIngestion.Status.CLOSED)
 
-        later = UploadSession.objects.create(catalog=self.collection.catalog, status=UploadSession.Status.COMPLETED)
-        UploadedFile.objects.create(
-            session=later,
-            original_filename="step6.grib2",
-            file_path=_key(self.collection, 6),
-            status=UploadedFile.Status.STORED,
-        )
+        later = UploadSession.objects.create(push_feed=self.feed, status=UploadSession.Status.COMPLETED)
+        self._upload(6, session=later)
         _complete_file(self.collection, 6)
 
         run = RunIngestion.objects.get()
