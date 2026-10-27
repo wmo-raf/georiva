@@ -1,5 +1,8 @@
 # Acquisition Model — FetchRun, FetchedFile, UploadSession, UploadedFile
 
+> **Amended by [ADR 0034](0034-push-feeds-replace-manual-upload.md)** — Manual Upload becomes a push feed;
+> `UploadedFile` gives way to `Delivery`, and `UploadSession` stays as a person's batch of deliveries.
+
 ## Context
 
 `DataArrival` was introduced to anchor pipeline visibility — it represented "data arrived for this catalog" and
