@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.template.defaultfilters import filesizeformat
 from django.urls import reverse
 from django.utils.text import slugify
 from django.utils.translation import gettext as _
@@ -20,6 +21,11 @@ from georiva.organisations.access import scoped_queryset
 logger = logging.getLogger(__name__)
 
 _WIZARD_SESSION_KEY = "georiva_upload_wizard"
+
+# The sample only names variables and seeds their ranges. Anything bigger is
+# refused before it is sent: the dev server holds a whole request body in memory.
+SAMPLE_MAX_BYTES = 500 * 1024 * 1024
+SCAN_MAX_POINTS = 1_000_000
 
 STEP_LABELS = [
     _("Catalog"),
@@ -268,15 +274,28 @@ def _nice_bounds(vmin: float, vmax: float) -> tuple[float, float]:
     return round(nmin, 6), round(nmax, 6)
 
 
+def _thinned(data, max_points: int):
+    """Every n-th value along each dimension, so at most ``max_points`` are read.
+
+    The range only seeds editable styling bounds, so a strided sample is enough;
+    reading the whole array is what can exhaust the web process.
+    """
+    if data.size <= max_points or not data.ndim:
+        return data
+    step = math.ceil((data.size / max_points) ** (1 / data.ndim))
+    return data.isel({dim: slice(None, None, step) for dim in data.dims})
+
+
 def _scan_value_range(plugin, file_path: str, raw_var: dict) -> dict:
-    """Compute a variable's data min/max from the sample file. Never raises."""
+    """Estimate a variable's data min/max from the sample file. Never raises."""
     kwargs = {}
     if raw_var.get("key") is not None:
         kwargs["key"] = raw_var["key"]
     try:
         with plugin.open_variable(file_path, raw_var.get("name", ""), **kwargs) as info:
-            vmin = float(info.data.min())
-            vmax = float(info.data.max())
+            sample = _thinned(info.data, SCAN_MAX_POINTS).compute()
+            vmin = float(sample.min())
+            vmax = float(sample.max())
         if math.isnan(vmin) or math.isnan(vmax):
             return {"value_min": None, "value_max": None}
         vmin, vmax = _nice_bounds(vmin, vmax)
@@ -320,6 +339,13 @@ def _resolve_unit(units_str: str) -> dict:
     return {"unit_id": None, "can_create": True}
 
 
+def _sample_too_big() -> str:
+    return _(
+        "The sample file is larger than %(size)s. Upload a smaller file with the same variables, "
+        "such as a single time step, and drop the full files into the bucket."
+    ) % {"size": filesizeformat(SAMPLE_MAX_BYTES)}
+
+
 def upload_wizard_upload_sample(request):
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
@@ -327,6 +353,8 @@ def upload_wizard_upload_sample(request):
     uploaded = request.FILES.get("sample_file")
     if not uploaded:
         return JsonResponse({"error": str(_("No file uploaded."))})
+    if uploaded.size > SAMPLE_MAX_BYTES:
+        return JsonResponse({"error": _sample_too_big()})
 
     ext = Path(uploaded.name).suffix.lower()
     tmp_path = None
@@ -437,6 +465,8 @@ def upload_wizard_step3(request):
                     "prefill_selected_json": selected_json_str or "[]",
                     "prefill_format": valid_time_format,
                     "prefill_is_forecast": is_forecast,
+                    "sample_max_bytes": SAMPLE_MAX_BYTES,
+                    "sample_too_big": _sample_too_big(),
                     **_wizard_chrome(3),
                 },
             )
@@ -475,6 +505,8 @@ def upload_wizard_step3(request):
             "prefill_selected_json": prefill_selected_json,
             "prefill_format": prefill_format,
             "prefill_is_forecast": prefill_is_forecast,
+            "sample_max_bytes": SAMPLE_MAX_BYTES,
+            "sample_too_big": _sample_too_big(),
             **_wizard_chrome(3),
         },
     )
