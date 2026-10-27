@@ -53,8 +53,8 @@ def styling_summary(variable):
     """The read-only summary a demoted surface shows (issue #323): the default
     style, its swatch, and the link here — the one place styling is tuned.
 
-    Shared by the collection form's inline variables panel and the
-    manual-upload variable forms, so every demoted surface shows the same
+    Shared by the collection form's inline variables panel and
+    the push feed pages, so every demoted surface shows the same
     thing the same way.
     """
     default = variable.default_style

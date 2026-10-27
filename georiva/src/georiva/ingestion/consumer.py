@@ -41,31 +41,28 @@ def _required_time_error(catalog, key: str) -> str | None:
     valid time must be parseable from its filename. Returns a descriptive
     error string when extraction fails, None when the file is fine.
 
-    Only enforced when the catalog has ManualUploadConfigs to supply a
-    valid_time_format — catalogs fed purely by DataFeeds are unaffected.
+    Only enforced when the catalog has a push feed to supply a
+    valid_time_format — catalogs fed by a DataFeed are unaffected.
     """
     from georiva.formats.registry import format_registry
-    from georiva.ingestion.models import ManualUploadConfig
+    from georiva.ingestion.models import PushFeed
     from georiva.ingestion.time_extraction import extract_times
 
     plugin = format_registry.get(catalog.file_format)
     if plugin is None or not plugin.time_from_filename:
         return None  # time is read from file content during ingestion
 
-    formats = list(
-        ManualUploadConfig.objects.filter(catalog=catalog).values_list("valid_time_format", flat=True).distinct()
-    )
-    if not formats:
+    feed = PushFeed.objects.filter(catalog=catalog).first()
+    if feed is None:
         return None
 
     filename = Path(key).name
-    for fmt in formats:
-        if extract_times(filename, fmt).get("valid_time"):
-            return None
+    if extract_times(filename, feed.valid_time_format).get("valid_time"):
+        return None
 
     return (
         f"Could not extract a valid time from filename '{filename}'. "
-        f"Expected the filename stem to match one of: {', '.join(formats)} "
+        f"Expected the filename stem to match: {feed.valid_time_format} "
         f"(optionally with a GR--YYYYMMDDTHHMM-- reference time prefix)."
     )
 

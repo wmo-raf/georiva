@@ -289,7 +289,7 @@ class DeclaredSetCloserTests(TestCase):
 
 
 class UploadBatchCloserTests(TestCase):
-    """The manual-upload route — closes on a batch, which is not the run."""
+    """The person-upload route — closes on a batch, which is not the run."""
 
     def setUp(self):
         self.collection = _collection()

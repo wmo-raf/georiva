@@ -195,7 +195,7 @@ class ServerSideOrgSegmentTests(TestCase):
             catalog=self.catalog, name="Rainfall", slug="rainfall", is_active=True
         )
 
-    def test_manual_upload_path_starts_with_the_catalogs_org(self):
+    def test_push_feed_upload_path_starts_with_the_catalogs_org(self):
         from georiva.ingestion.upload_views import _build_incoming_path
 
         config = MagicMock()
@@ -232,7 +232,7 @@ class UploadWizardCatalogScopingTests(TestCase):
     derivation would faithfully misfile it.
     """
 
-    STEP1_URL = "/admin/manual-uploads/wizard/step1/"
+    STEP1_URL = "/admin/push-feeds/wizard/step1/"
     SESSION_KEY = "georiva_upload_wizard"
 
     def setUp(self):
