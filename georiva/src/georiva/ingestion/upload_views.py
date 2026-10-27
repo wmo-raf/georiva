@@ -86,9 +86,11 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
     return f"{catalog_prefix}/{final_name}"
 
 
-def push_feed_page(request, pk):
+def push_feed_page(request, pk, issued=None):
     from georiva.core.storage import BucketType
+    from georiva.ingestion.machine_senders import endpoint_is_plain_http
     from georiva.ingestion.models import FileIngestion, PushFeed
+    from georiva.ingestion.push_feed_views import can_manage_senders
     from georiva.ingestion.upload_wizard_views import (
         _CATALOG_FORMAT_ACCEPT,
         _CATALOG_FORMAT_LABEL,
@@ -135,6 +137,10 @@ def push_feed_page(request, pk):
             # {% wagtail_config as config %}, which shadows a 'config' context var
             # by the time extra_js renders.
             "feed": config,
+            "senders": list(config.senders.all()),
+            "can_manage_senders": can_manage_senders(request.user),
+            "plain_http": endpoint_is_plain_http(),
+            "issued": issued,
             "deliveries": deliveries,
             "variables": variables,
             "is_geotiff": is_geotiff,

@@ -14,7 +14,7 @@ and reaches nobody's stream. That is deliberate: an unattributable event is not
 one to broadcast to everybody.
 """
 
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
 
 from georiva.core.storage.path_resolution import org_slug_from_key
@@ -66,3 +66,15 @@ def _file_ingestion_job_state_changed(sender, instance, created, update_fields, 
             "state": instance.state,
         }
     )
+
+
+@receiver(pre_delete, sender="georivaingestion.PushFeed")
+def _push_feed_pre_delete(sender, instance, **kwargs):
+    """Deleting a push feed, however it is reached, revokes its machine senders (ADR 0034).
+
+    A failure at MinIO stops the delete, so a sender is never left holding live
+    credentials for a feed that no longer exists.
+    """
+    from georiva.ingestion.machine_senders import revoke_all
+
+    revoke_all(instance)

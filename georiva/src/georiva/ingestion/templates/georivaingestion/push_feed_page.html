@@ -168,6 +168,55 @@
     <div class="mup-log-summary" id="log-summary"></div>
 </div>
 
+<h2 class="mup-deliveries-title">{% trans "Machine senders" %}</h2>
+{% if plain_http %}
+<div class="help-block help-warning">{% trans "The sender endpoint is plain HTTP, so credentials travel unencrypted. Put TLS in front of it before using this outside a trusted network." %}</div>
+{% endif %}
+
+{% if issued %}
+<div class="help-block help-info">
+    <p><strong>{% if issued.rotated %}{% blocktrans with label=issued.sender.label %}New secret for {{ label }}{% endblocktrans %}{% else %}{% blocktrans with label=issued.sender.label %}Sender {{ label }} added{% endblocktrans %}{% endif %}</strong></p>
+    <p>{% trans "Copy this now. The secret is not stored and will not be shown again." %}</p>
+    <p>{% trans "Secret:" %} <code>{{ issued.secret }}</code></p>
+    <pre>{{ issued.rclone }}</pre>
+</div>
+{% endif %}
+
+{% if senders %}
+<table class="listing">
+    <thead><tr><th>{% trans "Label" %}</th><th>{% trans "Access key" %}</th><th>{% trans "Added" %}</th>{% if can_manage_senders %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for s in senders %}
+        <tr>
+            <td>{{ s.label }}</td>
+            <td><code>{{ s.access_key }}</code></td>
+            <td>{{ s.created_at|date:"Y-m-d H:i" }}</td>
+            {% if can_manage_senders %}
+            <td>
+                <form method="post" action="{% url 'push_sender_rotate' feed.pk s.pk %}" style="display:inline">{% csrf_token %}
+                    <button type="submit" class="button button-small button-secondary">{% trans "Rotate" %}</button>
+                </form>
+                <form method="post" action="{% url 'push_sender_revoke' feed.pk s.pk %}" style="display:inline">{% csrf_token %}
+                    <button type="submit" class="button button-small button-secondary no">{% trans "Revoke" %}</button>
+                </form>
+            </td>
+            {% endif %}
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="help-block">{% trans "No machine senders yet." %}</p>
+{% endif %}
+
+{% if can_manage_senders %}
+<form method="post" action="{% url 'push_sender_add' feed.pk %}" style="margin-top:1em;display:flex;gap:1em;align-items:center">
+    {% csrf_token %}
+    <input type="text" name="label" class="w-field__input" maxlength="100" required placeholder="{% trans 'Sender label' %}" style="max-width:20em">
+    <button type="submit" class="button">{% trans "Add sender" %}</button>
+</form>
+{% endif %}
+
 <h2 class="mup-deliveries-title">{% trans "Recent deliveries" %}</h2>
 {% if deliveries %}
 <table class="listing mup-deliveries">
