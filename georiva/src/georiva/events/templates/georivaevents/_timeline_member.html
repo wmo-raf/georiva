@@ -1,0 +1,8 @@
+{% load i18n events_tags %}
+{# One member of a group or repeat: when, what, and the way into its own branch. #}
+<time title="{{ member.occurred_at|date:'Y-m-d H:i:s' }}">+{{ member.offset|elapsed }}</time>
+<span class="gr-rail__member-summary" title="{% if member.row %}{{ member.row.summary }}{% else %}{{ member.event_type }}{% endif %}">
+    {% if member.row %}{{ member.row.summary }}{% else %}{{ member.event_type }}{% endif %}
+</span>
+{% if member.row.subject_url %}<a href="{{ member.row.subject_url }}">{% trans "Open" %}</a>{% endif %}
+{% if group and member.id in group.focusable %}<a href="?from={{ member.id }}">{% trans "Focus →" %}</a>{% endif %}

@@ -1,0 +1,24 @@
+{% load i18n events_tags %}
+{% comment %}
+    Bursts that repeat the shape of the burst drawn just above them
+    (georiva.events.timeline.Repeat). Nothing in one failed, so there is
+    nothing to pull out; opening it lists every event it stands for.
+{% endcomment %}
+<div class="gr-rail__card gr-rail__repeat">
+    <details{% if repeat.open %} open{% endif %}>
+        <summary>
+            <strong>{% blocktrans count n=repeat.count %}The same again once more{% plural %}The same again {{ n }} times{% endblocktrans %}</strong>
+            <span class="gr-rail__counts">{% blocktrans with every=repeat.every|elapsed %}about every {{ every }}{% endblocktrans %}</span>
+            <span class="gr-rail__span">+{{ repeat.start|elapsed }} → +{{ repeat.end|elapsed }}</span>
+            <span class="gr-rail__summary">{{ repeat.shape|join:" → " }}</span>
+        </summary>
+        <ol class="gr-rail__members">
+            {% for member in repeat.members %}
+                <li class="gr-rail__member gr-rail__member--ok{% if member.id == repeat.target %} gr-rail__member--target{% endif %}"
+                    id="event-{{ member.id }}">
+                    {% include "georivaevents/_timeline_member.html" %}
+                </li>
+            {% endfor %}
+        </ol>
+    </details>
+</div>

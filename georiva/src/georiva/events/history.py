@@ -29,6 +29,7 @@ class HistoryRow:
     correlation_id: object = None
     timeline_url: str | None = None
     subject_url: str | None = None
+    links: list = field(default_factory=list)
 
 
 @dataclass
@@ -65,6 +66,7 @@ def row_for(event) -> HistoryRow:
         items=event.snapshot_items(),
         outcome_class=event.outcome_class,
         correlation_id=event.correlation_id,
-        timeline_url=timeline_url(event.correlation_id),
+        timeline_url=timeline_url(event.correlation_id, event.pk),
         subject_url=event.subject_url(),
+        links=event.extra_links(),
     )

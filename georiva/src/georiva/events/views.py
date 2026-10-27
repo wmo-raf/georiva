@@ -8,6 +8,8 @@ administrator still has to be able to find and fix misrouted files, and this
 page is where: superusers only, and unscoped on purpose.
 """
 
+import uuid
+
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import render
 from django.urls import reverse
@@ -49,14 +51,24 @@ def unattributed_events(request):
     )
 
 
+def _uuid_param(request, name):
+    try:
+        return uuid.UUID(request.GET[name])
+    except (KeyError, ValueError):
+        return None
+
+
 def timeline(request, correlation_id):
     """One whole chain, oldest first (ADR 0030): everything that shares a Correlation.
 
     Reads the index table and fetches details per type from the registry, so it
     works whichever plugins are installed — a type whose table is absent is
-    skipped. Scoped through the tenancy dispatcher: a viewer sees their own
-    organisation's events, and learns only that the chain continues elsewhere
-    when rows exist beyond their scope.
+    drawn without details. Scoped through the tenancy dispatcher: a viewer sees
+    their own organisation's events, and learns only that the chain continues
+    elsewhere when rows exist beyond their scope.
+
+    ``?from=<event>`` draws one branch of the chain; ``?event=<event>`` marks
+    one event and opens the group folding it.
     """
     from django.http import Http404
 
@@ -64,6 +76,7 @@ def timeline(request, correlation_id):
 
     from .models import EventIndex
     from .registry import model_for
+    from .timeline import Entry, build_layout
 
     everything = EventIndex.objects.filter(correlation_id=correlation_id)
     visible = list(scope_rows(request, everything).order_by("occurred_at", "event_id"))
@@ -86,35 +99,33 @@ def timeline(request, correlation_id):
         for event in model._default_manager.filter(pk__in=ids):
             events[event.pk] = event
 
-    rows = []
+    entries = []
     for index_row in visible:
+        # Indexed, but its type may not be installed here or its table gone:
+        # then it is drawn from the index alone, and its own cause is unknown.
         event = events.get(index_row.event_id)
-        if event is None:
-            # Indexed, but its type is not installed here or its table is gone.
-            rows.append(
-                {"label": index_row.event_type, "summary": "", "occurred_at": index_row.occurred_at, "unreadable": True}
+        entries.append(
+            Entry(
+                id=index_row.event_id,
+                event_type=index_row.event_type,
+                occurred_at=index_row.occurred_at,
+                outcome_class=index_row.outcome_class,
+                caused_by_id=event.caused_by_id if event else None,
+                row=row_for(event) if event else None,
             )
-            continue
-        cause = events.get(event.caused_by_id) if event.caused_by_id else None
-        rows.append(
-            {
-                "label": event.label,
-                "summary": event.summary(),
-                "occurred_at": event.occurred_at,
-                "actor": event.actor,
-                "outcome_class": event.outcome_class,
-                "cause": f"{cause.label}: {cause.summary()}" if cause else None,
-                "cause_hidden": bool(event.caused_by_id) and cause is None,
-                "subject_url": event.subject_url(),
-                "links": event.extra_links(),
-            }
         )
+
+    focus = _uuid_param(request, "from")
+    layout = build_layout(entries, target=_uuid_param(request, "event"), focus=focus)
+    if layout is None:
+        raise Http404(_("No such event in this chain."))
 
     return render(
         request,
         "georivaevents/timeline.html",
         {
-            "rows": rows,
+            "layout": layout,
+            "focus": layout.rows[0].entry if focus else None,
             "continues_elsewhere": continues_elsewhere,
             "correlation_id": correlation_id,
             "breadcrumbs_items": [

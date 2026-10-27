@@ -91,7 +91,8 @@ class PluginTimelineAndSignalTests(PluginContractBase):
 
         response = self.client.get(reverse("events_timeline", args=[ctx.correlation_id]))
 
-        self.assertEqual([row["label"] for row in response.context["rows"]], ["Plugin thing happened"])
+        labels = [row.entry.row.type_label for row in response.context["layout"].rows]
+        self.assertEqual(labels, ["Plugin thing happened"])
         self.assertContains(response, "thing: from a plugin")
 
     def test_the_timeline_renders_when_a_registered_types_table_is_absent(self):
