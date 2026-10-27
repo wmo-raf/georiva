@@ -21,6 +21,7 @@ import os
 from datetime import timedelta
 from functools import partial
 
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone as dj_timezone
 from wagtail.snippets.models import register_snippet
@@ -978,7 +979,7 @@ class RunIngestionReopened(DomainEvent):
 
 
 class UploadSession(models.Model):
-    """Tracks a batch of files uploaded through the manual upload UI."""
+    """Tracks a batch of files uploaded by a person on a push feed page."""
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -1100,12 +1101,15 @@ class UploadedFile(models.Model):
 
 
 # ---------------------------------------------------------------------------
-# Manual upload configuration models
+# Push feeds (ADR 0034)
 # ---------------------------------------------------------------------------
 
 
-class ManualUploadConfig(models.Model):
-    """Operator-created configuration enabling manual file uploads for a Catalog."""
+class PushFeed(models.Model):
+    """A catalog's single route in for files that are sent to GeoRiva.
+
+    It describes one file shape. Routing stays on each Variable's ``sources``.
+    """
 
     class ValidTimeFormat(models.TextChoices):
         YYYYMMDD = "YYYYMMDD", "YYYYMMDD"
@@ -1118,23 +1122,30 @@ class ManualUploadConfig(models.Model):
 
     ORGANISATION_LOOKUP = "catalog__organisation"
 
-    catalog = models.ForeignKey(
+    catalog = models.OneToOneField(
         "georivacore.Catalog",
         on_delete=models.CASCADE,
-        related_name="manual_upload_configs",
+        related_name="push_feed",
     )
     name = models.CharField(max_length=255)
     is_forecast = models.BooleanField(default=False)
     valid_time_format = models.CharField(max_length=20, choices=ValidTimeFormat.choices)
+    files_per_run = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="How many files make up one model run.",
+    )
+    expected_interval = models.DurationField(
+        null=True,
+        blank=True,
+        help_text="How often a file is expected. Leave empty when there is no schedule to check.",
+    )
 
     class Meta:
         app_label = "georivaingestion"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["catalog", "name"],
-                name="unique_manual_upload_config_name_per_catalog",
-            ),
-        ]
+
+    def __str__(self):
+        return self.name
 
     def strptime_pattern(self) -> str | None:
         """Return the Python strptime pattern, or None for content-based formats."""
@@ -1142,29 +1153,11 @@ class ManualUploadConfig(models.Model):
 
         return _FORMAT_PATTERNS.get(self.valid_time_format)
 
+    def variables(self):
+        """The active Variables of the feed's catalog: what an uploaded file is read for."""
+        from georiva.core.models import Variable
 
-class ManualUploadConfigVariable(models.Model):
-    """Links a ManualUploadConfig to a Collection for one variable."""
-
-    ORGANISATION_LOOKUP = "config__catalog__organisation"
-
-    config = models.ForeignKey(
-        ManualUploadConfig,
-        on_delete=models.CASCADE,
-        related_name="variables",
-    )
-    collection = models.ForeignKey(
-        "georivacore.Collection",
-        on_delete=models.CASCADE,
-        related_name="manual_upload_variables",
-    )
-    variable_name = models.CharField(max_length=255)
-    long_name = models.CharField(max_length=255, blank=True, default="")
-    units = models.CharField(max_length=50, blank=True, default="")
-
-    class Meta:
-        app_label = "georivaingestion"
-        unique_together = [("config", "variable_name")]
+        return Variable.objects.filter(collection__catalog=self.catalog_id, is_active=True)
 
 
 # ---------------------------------------------------------------------------

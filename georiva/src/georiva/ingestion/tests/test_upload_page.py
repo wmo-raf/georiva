@@ -4,12 +4,11 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
-from georiva.core.models import Catalog, Collection
+from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import (
     FileIngestion,
     FileIngestionJob,
-    ManualUploadConfig,
-    ManualUploadConfigVariable,
+    PushFeed,
     UploadedFile,
     UploadSession,
 )
@@ -17,11 +16,15 @@ from georiva.organisations.testing import dial_org, make_organisation
 
 User = get_user_model()
 
-PAGE_URL = "/admin/manual-uploads/{}/upload/"
-EXTRACT_URL = "/admin/manual-uploads/{}/upload/extract-times/"
-SUBMIT_URL = "/admin/manual-uploads/{}/upload/submit/"
+PAGE_URL = "/admin/push-feeds/{}/"
+EXTRACT_URL = "/admin/push-feeds/{}/extract-times/"
+SUBMIT_URL = "/admin/push-feeds/{}/submit/"
 
 INCOMING_BUCKET_NAME = "georiva-incoming"
+
+
+def _unit():
+    return Unit.objects.get_or_create(name="Kelvin", symbol="K")[0]
 
 
 def _geotiff_setup():
@@ -30,19 +33,13 @@ def _geotiff_setup():
         organisation=make_organisation(), name="Imagery", slug="imagery", file_format="geotiff"
     )
     collection = Collection.objects.create(catalog=catalog, name="NDVI", slug="ndvi")
-    config = ManualUploadConfig.objects.create(
+    config = PushFeed.objects.create(
         catalog=catalog,
         name="NDVI uploads",
         is_forecast=False,
         valid_time_format="YYYYMMDD",
     )
-    variable = ManualUploadConfigVariable.objects.create(
-        config=config,
-        collection=collection,
-        variable_name="band_1",
-        long_name="NDVI",
-        units="",
-    )
+    variable = Variable.objects.create(collection=collection, name="NDVI", slug="band_1", unit=_unit())
     return catalog, collection, config, variable
 
 
@@ -52,19 +49,13 @@ def _grib_setup():
         organisation=make_organisation(), name="Models", slug="models", file_format="grib2"
     )
     collection = Collection.objects.create(catalog=catalog, name="Surface", slug="surface")
-    config = ManualUploadConfig.objects.create(
+    config = PushFeed.objects.create(
         catalog=catalog,
         name="Surface uploads",
         is_forecast=True,
         valid_time_format="CONTENT",
     )
-    variable = ManualUploadConfigVariable.objects.create(
-        config=config,
-        collection=collection,
-        variable_name="2t",
-        long_name="2m temperature",
-        units="K",
-    )
+    variable = Variable.objects.create(collection=collection, name="2m temperature", slug="2t", unit=_unit())
     return catalog, collection, config, variable
 
 
@@ -320,7 +311,7 @@ class UploadSubmitTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_variable_from_other_config_rejected(self, mock_incoming, mock_task):
+    def test_variable_from_other_feed_rejected(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, _ = _geotiff_setup()
         _, _, _, other_variable = _grib_setup()

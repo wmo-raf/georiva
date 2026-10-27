@@ -1,10 +1,10 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% trans "Delete configuration" %} — {{ config.name }}{% endblock %}
+{% block titletag %}{% trans "Delete push feed" %} — {{ feed.name }}{% endblock %}
 
 {% block main_content %}
-<p>{% blocktrans with name=config.name %}Are you sure you want to delete <strong>{{ name }}</strong> and all its variables? This cannot be undone.{% endblocktrans %}</p>
+<p>{% blocktrans with name=feed.name %}Are you sure you want to delete <strong>{{ name }}</strong>. Its catalog, collections and variables stay? This cannot be undone.{% endblocktrans %}</p>
 <form method="post" action="">
     {% csrf_token %}
     <div style="display:flex;gap:1em;margin-top:1.5em;">
@@ -12,7 +12,7 @@
             <span class="icon-wrapper"><svg class="icon icon-bin" aria-hidden="true"><use href="#icon-bin"></use></svg></span>
             {% trans "Yes, delete" %}
         </button>
-        <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Cancel" %}</a>
+        <a href="{% url 'push_feed_list' %}" class="button button-secondary">{% trans "Cancel" %}</a>
     </div>
 </form>
 {% endblock %}

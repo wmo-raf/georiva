@@ -58,7 +58,7 @@ def register_data_menu():
             items=[
                 MenuItem(_("Add Data"), reverse_lazy("add_data"), icon_name="plus", order=10),
                 MenuItem(_("Automated Sources"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
-                MenuItem(_("Manual Uploads"), reverse_lazy("manual_upload_config_list"), icon_name="upload", order=40),
+                MenuItem(_("Push feeds"), reverse_lazy("push_feed_list"), icon_name="upload", order=40),
             ]
         ),
         icon_name="folder-open-inverse",

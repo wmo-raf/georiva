@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
 from django.contrib import messages
@@ -29,8 +30,8 @@ SCAN_MAX_POINTS = 1_000_000
 
 STEP_LABELS = [
     _("Catalog"),
-    _("Config Name"),
-    _("File & Variables"),
+    _("Feed Settings"),
+    _("Sample File"),
     _("Collection Setup"),
     _("Review"),
 ]
@@ -43,10 +44,10 @@ def _wizard_chrome(step):
     return {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
+            {"url": reverse("push_feed_list"), "label": _("Push feeds")},
             {"url": None, "label": _("Setup Wizard — %s") % STEP_LABELS[step - 1]},
         ],
-        "header_title": _("Manual Upload Setup Wizard — %s") % STEP_LABELS[step - 1],
+        "header_title": _("New Push Feed — %s") % STEP_LABELS[step - 1],
         "header_icon": "upload",
         "step": step,
         "step_labels": STEP_LABELS,
@@ -162,7 +163,7 @@ def upload_wizard_step1(request):
                 # either way: this operator has no business learning which.
                 errors.append(_("Please choose a catalog."))
             elif not all_catalogs.filter(pk=catalog_id).exists():
-                errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
+                errors.append(_("This catalog is managed by an automated source and cannot be a push feed."))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
@@ -213,42 +214,64 @@ def upload_wizard_step2(request):
         return redirect("upload_wizard_step1")
 
     if request.method == "POST":
-        from georiva.ingestion.models import ManualUploadConfig
+        from georiva.ingestion.models import PushFeed
 
-        config_name = request.POST.get("config_name", "").strip()
-        duplicate = (
-            config_name
-            and session.get("catalog_mode") == "select"
+        feed_name = request.POST.get("feed_name", "").strip()
+        errors = []
+        if not feed_name:
+            errors.append(_("Please enter a name for this push feed."))
+        if (
+            session.get("catalog_mode") == "select"
             and session.get("catalog_id")
-            and ManualUploadConfig.objects.filter(catalog_id=session["catalog_id"], name=config_name).exists()
-        )
-        if not config_name:
-            messages.error(request, _("Please enter a name for this upload configuration."))
-        elif duplicate:
-            messages.error(
-                request,
-                _("A configuration named '%s' already exists for this catalog.") % config_name,
+            and PushFeed.objects.filter(catalog_id=session["catalog_id"]).exists()
+        ):
+            errors.append(
+                _("This catalog already has a push feed. A product that arrives in two shapes is two catalogs.")
             )
+
+        try:
+            files_per_run = int(request.POST.get("files_per_run") or 1)
+            if files_per_run < 1:
+                raise ValueError
+        except ValueError:
+            files_per_run = 1
+            errors.append(_("Files per run must be a whole number, 1 or more."))
+
+        expected_hours = None
+        raw_hours = request.POST.get("expected_interval_hours", "").strip()
+        if raw_hours:
+            try:
+                expected_hours = float(raw_hours)
+                if not math.isfinite(expected_hours) or expected_hours <= 0:
+                    raise ValueError
+            except ValueError:
+                errors.append(_("Expected interval must be a number of hours greater than 0."))
+
+        if errors:
+            for e in errors:
+                messages.error(request, e)
         else:
-            session["config_name"] = config_name
+            session["feed_name"] = feed_name
+            session["files_per_run"] = files_per_run
+            session["expected_interval_hours"] = expected_hours
             _save_session(request, session)
             return redirect("upload_wizard_step3")
 
-    default_config_name = session.get("config_name", "")
-    if not default_config_name:
+    default_feed_name = session.get("feed_name", "")
+    if not default_feed_name:
         if session.get("catalog_mode") == "create" and session.get("new_catalog_name"):
-            default_config_name = f"{session['new_catalog_name']} Config"
+            default_feed_name = f"{session['new_catalog_name']} push feed"
         elif session.get("catalog_id"):
             catalog = _session_catalog(request, session)
             if catalog is not None:
-                default_config_name = f"{catalog.name} Config"
+                default_feed_name = f"{catalog.name} push feed"
 
     return render(
         request,
         "georivaingestion/wizard_step2_name.html",
         {
             "session": session,
-            "default_config_name": default_config_name,
+            "default_feed_name": default_feed_name,
             **_wizard_chrome(2),
         },
     )
@@ -402,13 +425,13 @@ def upload_wizard_upload_sample(request):
 
 
 def upload_wizard_step3(request):
-    from georiva.ingestion.models import ManualUploadConfig
+    from georiva.ingestion.models import PushFeed
 
     session = _session(request)
-    if not session.get("config_name"):
+    if not session.get("feed_name"):
         return redirect("upload_wizard_step2")
 
-    format_choices = ManualUploadConfig.ValidTimeFormat.choices
+    format_choices = PushFeed.ValidTimeFormat.choices
     catalog_format = _catalog_format_from_session(request, session)
     accept_extensions = _CATALOG_FORMAT_ACCEPT.get(catalog_format, ",".join(_CATALOG_FORMAT_ACCEPT.values()))
     format_label = _CATALOG_FORMAT_LABEL.get(catalog_format, "NetCDF, GRIB2, or GeoTIFF")
@@ -635,23 +658,20 @@ def upload_wizard_step4(request):
             else:
                 source_name_to_collection[source_name] = (coll_slug, coll_name)
 
-        # Also check against existing ManualUploadConfigs for the same catalog.
+        # Also check against the Variables the catalog already has.
         catalog_id = session.get("catalog_id")
         if catalog_id:
-            from georiva.ingestion.models import ManualUploadConfigVariable
+            from georiva.core.models import Variable
 
-            for ev in ManualUploadConfigVariable.objects.filter(config__catalog_id=catalog_id).select_related(
-                "collection"
-            ):
-                if ev.variable_name in source_name_to_collection:
-                    new_slug, new_name = source_name_to_collection[ev.variable_name]
-                    if ev.collection.slug != new_slug:
+            for ev in Variable.objects.filter(collection__catalog_id=catalog_id).select_related("collection"):
+                for source_name, (new_slug, new_name) in source_name_to_collection.items():
+                    if slugify(source_name) == ev.slug and ev.collection.slug != new_slug:
                         errors.append(
                             _(
                                 "Variable '%(var)s' is already assigned to collection '%(existing)s' "
                                 "in this catalog — cannot also assign it to '%(new)s'."
                             )
-                            % {"var": ev.variable_name, "existing": ev.collection.name, "new": new_name}
+                            % {"var": source_name, "existing": ev.collection.name, "new": new_name}
                         )
 
         if errors:
@@ -733,7 +753,7 @@ def _unit_for_assignment(assignment: dict):
 def upload_wizard_provision(request):
     from georiva.core.models import Catalog, Collection, Variable
     from georiva.core.provisioning import passthrough_sources
-    from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+    from georiva.ingestion.models import PushFeed
     from georiva.organisations.access import require_active_org
 
     if request.method != "POST":
@@ -775,7 +795,7 @@ def upload_wizard_provision(request):
             if getattr(catalog, "data_feed", None) is not None:
                 messages.error(
                     request,
-                    _("This catalog is managed by an automated source and cannot receive manual uploads."),
+                    _("This catalog is managed by an automated source and cannot be a push feed."),
                 )
                 return redirect("upload_wizard_step1")
 
@@ -788,25 +808,20 @@ def upload_wizard_provision(request):
                 )
                 created_collections[idx] = collection
 
-            config = ManualUploadConfig.objects.create(
+            hours = session.get("expected_interval_hours")
+            feed = PushFeed.objects.create(
                 catalog=catalog,
-                name=session["config_name"],
+                name=session["feed_name"],
                 is_forecast=session.get("is_forecast", False),
                 valid_time_format=session["valid_time_format"],
+                files_per_run=session.get("files_per_run") or 1,
+                expected_interval=timedelta(hours=hours) if hours else None,
             )
 
             for assignment in session.get("assignments", []):
                 collection = created_collections[assignment["collection_idx"]]
                 variable_name = assignment["variable_name"]
                 unit = _unit_for_assignment(assignment)
-
-                ManualUploadConfigVariable.objects.create(
-                    config=config,
-                    collection=collection,
-                    variable_name=variable_name,
-                    long_name=assignment.get("long_name", ""),
-                    units=assignment.get("units", "")[:50],
-                )
 
                 # get_or_create: re-provisioning into an existing collection must
                 # not clobber hand-tuned Variables (styling, transform, ranges).
@@ -826,7 +841,7 @@ def upload_wizard_provision(request):
     except IntegrityError:
         messages.error(
             request,
-            _("A configuration named '%s' already exists for this catalog.") % session.get("config_name", ""),
+            _("This catalog already has a push feed."),
         )
         return redirect("upload_wizard_step5")
     except Exception as exc:
@@ -836,6 +851,6 @@ def upload_wizard_provision(request):
     request.session.pop(_WIZARD_SESSION_KEY, None)
     messages.success(
         request,
-        _("Upload configuration '%s' created with %d variable(s).") % (config.name, config.variables.count()),
+        _("Push feed '%s' created with %d variable(s).") % (feed.name, feed.variables().count()),
     )
-    return redirect("manual_upload_config_list")
+    return redirect("push_feed_list")

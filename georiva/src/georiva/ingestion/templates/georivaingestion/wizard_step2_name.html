@@ -1,15 +1,27 @@
 {% extends "georivaingestion/wizard_base.html" %}
 {% load i18n %}
-{% block titletag %}{% trans "Upload Wizard — Config Name" %}{% endblock %}
+{% block titletag %}{% trans "New Push Feed — Feed Settings" %}{% endblock %}
 {% block wizard_content %}
 <form method="post" action="">
     {% csrf_token %}
     <div class="w-field__wrapper uwiz-field--lg">
-        <label class="w-field__label" for="config_name">{% trans "Configuration name" %} <sup>*</sup></label>
-        <input type="text" name="config_name" id="config_name" class="w-field__input"
-               value="{{ session.config_name|default:default_config_name }}"
-               placeholder="{% trans 'e.g. Surface variables' %}" required>
-        <p class="w-field__help-text">{% trans "A label to identify this upload configuration, e.g. 'Surface variables' or 'Pressure levels'." %}</p>
+        <label class="w-field__label" for="feed_name">{% trans "Push feed name" %} <sup>*</sup></label>
+        <input type="text" name="feed_name" id="feed_name" class="w-field__input"
+               value="{{ session.feed_name|default:default_feed_name }}"
+               placeholder="{% trans 'e.g. WRF forecast' %}" required>
+        <p class="w-field__help-text">{% trans "A label to identify this push feed." %}</p>
+    </div>
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label" for="files_per_run">{% trans "Files per run" %}</label>
+        <input type="number" min="1" step="1" name="files_per_run" id="files_per_run" class="w-field__input"
+               value="{{ session.files_per_run|default:1 }}">
+        <p class="w-field__help-text">{% trans "How many files make up one model run." %}</p>
+    </div>
+    <div class="w-field__wrapper uwiz-field--lg">
+        <label class="w-field__label" for="expected_interval_hours">{% trans "Expected interval (hours)" %}</label>
+        <input type="number" min="0" step="any" name="expected_interval_hours" id="expected_interval_hours" class="w-field__input"
+               value="{{ session.expected_interval_hours|default_if_none:'' }}">
+        <p class="w-field__help-text">{% trans "How often a file is expected. Leave empty when there is no schedule." %}</p>
     </div>
     <div class="uwiz-actions">
         <button type="submit" class="button bicolor button--icon">

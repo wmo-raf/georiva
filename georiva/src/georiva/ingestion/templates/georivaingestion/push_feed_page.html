@@ -1,7 +1,7 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% trans "Upload" %} — {{ upload_config.name }}{% endblock %}
+{% block titletag %}{% trans "Upload" %} — {{ feed.name }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -97,15 +97,15 @@
 
 {% block main_content %}
 <div class="mup-meta">
-    <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ upload_config.catalog.name }}
+    <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ feed.catalog.name }}
     &nbsp;·&nbsp;
     <span class="mup-meta-label">{% trans "Format:" %}</span> {{ format_label }}
     &nbsp;·&nbsp;
     <span class="mup-meta-label">{% trans "Type:" %}</span>
-    {% if upload_config.is_forecast %}{% trans "Forecast" %}{% else %}{% trans "Observation" %}{% endif %}
-    {% if upload_config.valid_time_format != "CONTENT" %}
+    {% if feed.is_forecast %}{% trans "Forecast" %}{% else %}{% trans "Observation" %}{% endif %}
+    {% if feed.valid_time_format != "CONTENT" %}
     &nbsp;·&nbsp;
-    <span class="mup-meta-label">{% trans "Filename format:" %}</span> <code>{{ upload_config.valid_time_format }}</code>
+    <span class="mup-meta-label">{% trans "Filename format:" %}</span> <code>{{ feed.valid_time_format }}</code>
     {% endif %}
 </div>
 
@@ -130,8 +130,8 @@
         <input type="datetime-local" id="shared-time-input" class="w-field__input"
                {% if time_required %}required{% endif %}>
         <div class="mup-help">
-            {% if upload_config.valid_time_format != "CONTENT" %}
-            {% trans "Pre-filled from the filename when it matches the" %} <code>{{ upload_config.valid_time_format }}</code> {% trans "format." %}
+            {% if feed.valid_time_format != "CONTENT" %}
+            {% trans "Pre-filled from the filename when it matches the" %} <code>{{ feed.valid_time_format }}</code> {% trans "format." %}
             {% else %}
             {% trans "Pre-filled from the filename when it carries a" %} <code>GR--YYYYMMDDTHHMM--</code> {% trans "prefix." %}
             {% endif %}
@@ -155,7 +155,7 @@
             <span class="icon-wrapper"><svg class="icon icon-upload" aria-hidden="true"><use href="#icon-upload"></use></svg></span>
             {% trans "Upload & ingest" %}
         </button>
-        <a href="{% url 'manual_upload_config_list' %}" class="button button-secondary">{% trans "Back" %}</a>
+        <a href="{% url 'push_feed_list' %}" class="button button-secondary">{% trans "Back" %}</a>
     </div>
 </form>
 
@@ -174,8 +174,8 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 
-    const EXTRACT_URL  = '{% url "manual_upload_extract_times" upload_config.pk %}';
-    const SUBMIT_URL   = '{% url "manual_upload_submit" upload_config.pk %}';
+    const EXTRACT_URL  = '{% url "push_feed_extract_times" feed.pk %}';
+    const SUBMIT_URL   = '{% url "push_feed_submit" feed.pk %}';
     const STATUS_URL   = '{% url "upload_session_status_api" 999999999 %}';
     const SSE_URL      = '/admin/api/ingestion/events/';
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
@@ -183,7 +183,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const TERMINAL     = ['completed', 'failed', 'cancelled'];
     const IS_GEOTIFF   = {{ is_geotiff|yesno:"true,false" }};
     const TIME_LABEL   = '{{ time_label|escapejs }}';
-    const VARIABLES    = [{% for var in variables %}{"id": {{ var.pk }}, "label": "{{ var.long_name|default:var.variable_name|escapejs }} ({{ var.collection.name|escapejs }})"}{% if not forloop.last %},{% endif %}{% endfor %}];
+    const VARIABLES    = [{% for var in variables %}{"id": {{ var.pk }}, "label": "{{ var.name|escapejs }} ({{ var.collection.name|escapejs }})"}{% if not forloop.last %},{% endif %}{% endfor %}];
 
     const form         = document.getElementById('upload-form');
     const fileInput    = document.getElementById('file-input');

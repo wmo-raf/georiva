@@ -7,21 +7,21 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
-from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+from georiva.ingestion.models import PushFeed
 from georiva.ingestion.upload_wizard_views import SAMPLE_MAX_BYTES, _thinned
 from georiva.organisations.testing import dial_org, join_org, make_organisation, org_host
 
 User = get_user_model()
 
-CONFIG_LIST_URL = "/admin/manual-uploads/"
+FEED_LIST_URL = "/admin/push-feeds/"
 
-STEP1_URL = "/admin/manual-uploads/wizard/step1/"
-STEP2_URL = "/admin/manual-uploads/wizard/step2/"
-STEP3_URL = "/admin/manual-uploads/wizard/step3/"
-STEP4_URL = "/admin/manual-uploads/wizard/step4/"
-STEP5_URL = "/admin/manual-uploads/wizard/step5/"
-PROVISION_URL = "/admin/manual-uploads/wizard/provision/"
-UPLOAD_SAMPLE_URL = "/admin/manual-uploads/wizard/upload-sample/"
+STEP1_URL = "/admin/push-feeds/wizard/step1/"
+STEP2_URL = "/admin/push-feeds/wizard/step2/"
+STEP3_URL = "/admin/push-feeds/wizard/step3/"
+STEP4_URL = "/admin/push-feeds/wizard/step4/"
+STEP5_URL = "/admin/push-feeds/wizard/step5/"
+PROVISION_URL = "/admin/push-feeds/wizard/provision/"
+UPLOAD_SAMPLE_URL = "/admin/push-feeds/wizard/upload-sample/"
 
 SESSION_KEY = "georiva_upload_wizard"
 
@@ -62,7 +62,7 @@ def _full_session():
         "new_catalog_name": "Weather Models",
         "new_catalog_slug": "weather-models",
         "new_catalog_format": "grib2",
-        "config_name": "Surface variables",
+        "feed_name": "Surface variables",
         "variables": [{"name": "2t", "long_name": "2m temperature", "units": "K"}],
         "selected_variable_names": ["2t"],
         "sample_filename": "20250115.grib2",
@@ -164,34 +164,58 @@ class Step2ConfigNameTests(TestCase):
     def test_step2_renders(self):
         self.assertEqual(self.client.get(STEP2_URL).status_code, 200)
 
-    def test_step2_default_config_name_derived_from_catalog(self):
+    def test_step2_default_feed_name_derived_from_catalog(self):
         response = self.client.get(STEP2_URL)
-        self.assertContains(response, "WM Config")
+        self.assertContains(response, "WM push feed")
 
     def test_step2_valid_post_stores_name_and_redirects(self):
-        response = self.client.post(STEP2_URL, {"config_name": "Surface variables"})
+        response = self.client.post(STEP2_URL, {"feed_name": "Surface variables"})
         self.assertRedirects(response, STEP3_URL, fetch_redirect_response=False)
-        self.assertEqual(self.client.session[SESSION_KEY]["config_name"], "Surface variables")
+        self.assertEqual(self.client.session[SESSION_KEY]["feed_name"], "Surface variables")
+
+    def test_step2_stores_files_per_run_and_expected_interval(self):
+        self.client.post(
+            STEP2_URL,
+            {"feed_name": "WRF", "files_per_run": "4", "expected_interval_hours": "6"},
+        )
+        stored = self.client.session[SESSION_KEY]
+        self.assertEqual(stored["files_per_run"], 4)
+        self.assertEqual(stored["expected_interval_hours"], 6.0)
+
+    def test_step2_interval_may_be_left_empty(self):
+        self.client.post(STEP2_URL, {"feed_name": "WRF", "files_per_run": "1", "expected_interval_hours": ""})
+        self.assertIsNone(self.client.session[SESSION_KEY]["expected_interval_hours"])
+
+    def test_step2_rejects_zero_files_per_run_and_non_positive_interval(self):
+        for data in (
+            {"feed_name": "WRF", "files_per_run": "0"},
+            {"feed_name": "WRF", "expected_interval_hours": "0"},
+            {"feed_name": "WRF", "expected_interval_hours": "nan"},
+        ):
+            with self.subTest(data=data):
+                response = self.client.post(STEP2_URL, data)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn("feed_name", self.client.session[SESSION_KEY])
 
     def test_step2_empty_name_rerenders(self):
-        response = self.client.post(STEP2_URL, {"config_name": ""})
+        response = self.client.post(STEP2_URL, {"feed_name": ""})
         self.assertEqual(response.status_code, 200)
 
     def test_step2_without_step1_session_redirects_to_step1(self):
         _seed_session(self.client, {})
         self.assertRedirects(self.client.get(STEP2_URL), STEP1_URL, fetch_redirect_response=False)
 
-    def test_step2_duplicate_name_for_selected_catalog_rerenders(self):
+    def test_step2_catalog_that_already_has_a_push_feed_rerenders(self):
         catalog = _make_catalog("dup-cat")
-        ManualUploadConfig.objects.create(
+        PushFeed.objects.create(
             catalog=catalog,
             name="Surface variables",
             valid_time_format="CONTENT",
         )
         _seed_session(self.client, {"catalog_mode": "select", "catalog_id": catalog.pk})
-        response = self.client.post(STEP2_URL, {"config_name": "Surface variables"})
+        response = self.client.post(STEP2_URL, {"feed_name": "Surface variables"})
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("config_name", self.client.session[SESSION_KEY])
+        self.assertNotIn("feed_name", self.client.session[SESSION_KEY])
 
 
 # =============================================================================
@@ -336,7 +360,7 @@ class Step3CombinedTests(TestCase):
                 "new_catalog_name": "WM",
                 "new_catalog_slug": "wm",
                 "new_catalog_format": "grib2",
-                "config_name": "Surface variables",
+                "feed_name": "Surface variables",
             },
         )
 
@@ -348,7 +372,7 @@ class Step3CombinedTests(TestCase):
         self.assertContains(response, f"const MAX_BYTES    = {SAMPLE_MAX_BYTES};")
         self.assertContains(response, "file.size > MAX_BYTES")
 
-    def test_step3_without_config_name_redirects_to_step2(self):
+    def test_step3_without_feed_name_redirects_to_step2(self):
         _seed_session(self.client, {"catalog_mode": "create"})
         self.assertRedirects(self.client.get(STEP3_URL), STEP2_URL, fetch_redirect_response=False)
 
@@ -412,7 +436,7 @@ class Step3CombinedTests(TestCase):
                 "new_catalog_name": "Imagery",
                 "new_catalog_slug": "imagery",
                 "new_catalog_format": "geotiff",
-                "config_name": "Surface variables",
+                "feed_name": "Surface variables",
             },
         )
         variables = [{"name": "band_1", "long_name": "", "units": ""}]
@@ -440,7 +464,7 @@ class Step3CombinedTests(TestCase):
                 "new_catalog_name": "Imagery",
                 "new_catalog_slug": "imagery",
                 "new_catalog_format": "geotiff",
-                "config_name": "Bands",
+                "feed_name": "Bands",
             },
         )
         response = self.client.get(STEP3_URL)
@@ -465,7 +489,7 @@ class Step4CollectionsTests(TestCase):
                 "new_catalog_name": "WM",
                 "new_catalog_slug": "wm",
                 "new_catalog_format": "grib2",
-                "config_name": "Surface variables",
+                "feed_name": "Surface variables",
                 "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
                 "selected_variable_names": ["2t"],
                 "sample_filename": "20250115.grib2",
@@ -478,7 +502,7 @@ class Step4CollectionsTests(TestCase):
         self.assertEqual(self.client.get(STEP4_URL).status_code, 200)
 
     def test_step4_without_selected_variables_redirects_to_step3(self):
-        _seed_session(self.client, {"catalog_mode": "create", "config_name": "X"})
+        _seed_session(self.client, {"catalog_mode": "create", "feed_name": "X"})
         self.assertRedirects(self.client.get(STEP4_URL), STEP3_URL, fetch_redirect_response=False)
 
     def test_step4_valid_post_saves_and_redirects(self):
@@ -605,7 +629,7 @@ class Step4DuplicateSourceNameTests(TestCase):
                 "new_catalog_name": "WM",
                 "new_catalog_slug": "wm",
                 "new_catalog_format": "grib2",
-                "config_name": "Surface variables",
+                "feed_name": "Surface variables",
                 "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
                 "selected_variable_names": ["2t"],
                 "sample_filename": "20250115.grib2",
@@ -648,28 +672,21 @@ class Step4DuplicateSourceNameTests(TestCase):
         response = self._post(collections, assignments)
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
 
-    def test_conflict_with_existing_config_in_different_collection_rerenders(self):
+    def test_conflict_with_existing_variable_in_different_collection_rerenders(self):
         catalog = _make_catalog(slug="existing-cat")
         existing_col = _make_collection(catalog, slug="existing-col")
-        existing_config = ManualUploadConfig.objects.create(
-            catalog=catalog,
-            name="Existing config",
-            is_forecast=False,
-            valid_time_format="CONTENT",
-        )
-        ManualUploadConfigVariable.objects.create(
-            config=existing_config,
+        Variable.objects.create(
             collection=existing_col,
-            variable_name="2t",
-            long_name="2m temperature",
-            units="K",
+            slug="2t",
+            name="2m temperature",
+            unit=Unit.objects.get(symbol="K"),
         )
         _seed_session(
             self.client,
             {
                 "catalog_mode": "existing",
                 "catalog_id": catalog.pk,
-                "config_name": "New config",
+                "feed_name": "New config",
                 "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
                 "selected_variable_names": ["2t"],
                 "sample_filename": "20250115.grib2",
@@ -686,25 +703,18 @@ class Step4DuplicateSourceNameTests(TestCase):
     def test_same_source_name_same_existing_collection_is_allowed(self):
         catalog = _make_catalog(slug="reuse-cat")
         existing_col = _make_collection(catalog, slug="reuse-col")
-        existing_config = ManualUploadConfig.objects.create(
-            catalog=catalog,
-            name="Existing config",
-            is_forecast=False,
-            valid_time_format="CONTENT",
-        )
-        ManualUploadConfigVariable.objects.create(
-            config=existing_config,
+        Variable.objects.create(
             collection=existing_col,
-            variable_name="2t",
-            long_name="2m temperature",
-            units="K",
+            slug="2t",
+            name="2m temperature",
+            unit=Unit.objects.get(symbol="K"),
         )
         _seed_session(
             self.client,
             {
                 "catalog_mode": "existing",
                 "catalog_id": catalog.pk,
-                "config_name": "New config 2",
+                "feed_name": "New config 2",
                 "variables": [{"name": "2t", "long_name": "2m temp", "units": "K"}],
                 "selected_variable_names": ["2t"],
                 "sample_filename": "20250115.grib2",
@@ -739,7 +749,7 @@ class Step5ReviewTests(TestCase):
         self.assertContains(response, "2t")
 
     def test_step5_without_assignments_redirects_to_step4(self):
-        _seed_session(self.client, {"catalog_mode": "create", "config_name": "X"})
+        _seed_session(self.client, {"catalog_mode": "create", "feed_name": "X"})
         self.assertRedirects(self.client.get(STEP5_URL), STEP4_URL, fetch_redirect_response=False)
 
 
@@ -756,22 +766,37 @@ class ProvisionTests(TestCase):
         make_organisation()
         self.client.defaults["HTTP_HOST"] = org_host()
 
-    def test_provision_creates_collection_config_and_variables(self):
+    def test_provision_creates_collection_push_feed_and_variables(self):
         _seed_session(self.client, _full_session())
         self.client.post(PROVISION_URL)
 
         collection = Collection.objects.get(slug="weather-models-collection-1")
         self.assertEqual(collection.name, "Weather Models Collection 1")
 
-        config = ManualUploadConfig.objects.get()
-        self.assertEqual(config.name, "Surface variables")
-        self.assertEqual(config.valid_time_format, "CONTENT")
-        self.assertFalse(config.is_forecast)
+        feed = PushFeed.objects.get()
+        self.assertEqual(feed.name, "Surface variables")
+        self.assertEqual(feed.valid_time_format, "CONTENT")
+        self.assertFalse(feed.is_forecast)
+        self.assertEqual(feed.files_per_run, 1)
+        self.assertIsNone(feed.expected_interval)
 
-        var = ManualUploadConfigVariable.objects.get()
-        self.assertEqual(var.variable_name, "2t")
+        var = Variable.objects.get()
+        self.assertEqual(var.slug, "2t")
         self.assertEqual(var.collection, collection)
-        self.assertEqual(var.long_name, "2m temperature")
+        self.assertEqual(var.name, "2m temperature")
+
+    def test_provision_stores_files_per_run_and_expected_interval(self):
+        from datetime import timedelta
+
+        session = _full_session()
+        session["files_per_run"] = 3
+        session["expected_interval_hours"] = 6.0
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        feed = PushFeed.objects.get()
+        self.assertEqual(feed.files_per_run, 3)
+        self.assertEqual(feed.expected_interval, timedelta(hours=6))
 
     def test_provision_creates_catalog_when_mode_is_create(self):
         _seed_session(self.client, _full_session())
@@ -785,7 +810,7 @@ class ProvisionTests(TestCase):
         session["catalog_id"] = catalog.pk
         _seed_session(self.client, session)
         self.client.post(PROVISION_URL)
-        self.assertEqual(ManualUploadConfig.objects.get().catalog, catalog)
+        self.assertEqual(PushFeed.objects.get().catalog, catalog)
         self.assertEqual(Collection.objects.get().catalog, catalog)
 
     def test_provision_description_set_on_new_catalog(self):
@@ -807,7 +832,7 @@ class ProvisionTests(TestCase):
     def test_provision_redirects_to_config_list(self):
         _seed_session(self.client, _full_session())
         response = self.client.post(PROVISION_URL)
-        self.assertRedirects(response, CONFIG_LIST_URL, fetch_redirect_response=False)
+        self.assertRedirects(response, FEED_LIST_URL, fetch_redirect_response=False)
 
     def test_provision_creates_core_variable(self):
         _seed_session(self.client, _full_session())
@@ -872,9 +897,9 @@ class ProvisionTests(TestCase):
         self.assertEqual(existing.value_min, -10.0)
         self.assertEqual(Variable.objects.filter(slug="2t").count(), 1)
 
-    def test_provision_duplicate_config_name_errors_without_partial_state(self):
+    def test_provision_catalog_that_already_has_a_push_feed_errors_without_partial_state(self):
         catalog = _make_catalog("existing-cat")
-        ManualUploadConfig.objects.create(
+        PushFeed.objects.create(
             catalog=catalog,
             name="Surface variables",
             valid_time_format="CONTENT",
@@ -886,7 +911,7 @@ class ProvisionTests(TestCase):
         response = self.client.post(PROVISION_URL)
 
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
-        self.assertEqual(ManualUploadConfig.objects.count(), 1)
+        self.assertEqual(PushFeed.objects.count(), 1)
         self.assertFalse(Collection.objects.filter(slug="weather-models-collection-1").exists())
         self.assertFalse(Variable.objects.exists())
 
@@ -898,7 +923,7 @@ class ProvisionTests(TestCase):
 
         self.assertRedirects(response, STEP5_URL, fetch_redirect_response=False)
         self.assertFalse(Catalog.objects.filter(slug="weather-models").exists())
-        self.assertFalse(ManualUploadConfig.objects.exists())
+        self.assertFalse(PushFeed.objects.exists())
         self.assertFalse(Variable.objects.exists())
 
 
@@ -997,7 +1022,7 @@ class CatalogOwnershipTests(TestCase):
         response = self.client.post(PROVISION_URL)
 
         self.assertRedirects(response, STEP1_URL, fetch_redirect_response=False)
-        self.assertFalse(ManualUploadConfig.objects.exists())
+        self.assertFalse(PushFeed.objects.exists())
         self.assertFalse(Variable.objects.exists())
         self.assertFalse(self.claimed.collections.exists())
 
@@ -1009,7 +1034,7 @@ class CatalogOwnershipTests(TestCase):
 
         self.client.post(PROVISION_URL)
 
-        self.assertTrue(ManualUploadConfig.objects.filter(catalog=self.unclaimed).exists())
+        self.assertTrue(PushFeed.objects.filter(catalog=self.unclaimed).exists())
 
 
 class DataManagerWizardAccessTests(TestCase):
@@ -1028,7 +1053,7 @@ class DataManagerWizardAccessTests(TestCase):
         _seed_session(self.client, _full_session())
         self.client.post(PROVISION_URL)
         self.assertTrue(Catalog.objects.filter(slug="weather-models").exists())
-        self.assertTrue(ManualUploadConfig.objects.exists())
+        self.assertTrue(PushFeed.objects.exists())
 
     def test_data_manager_can_reach_wizard_step1(self):
         self.assertEqual(self.client.get(STEP1_URL).status_code, 200)

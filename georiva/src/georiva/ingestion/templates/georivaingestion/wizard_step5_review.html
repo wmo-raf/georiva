@@ -1,6 +1,6 @@
 {% extends "georivaingestion/wizard_base.html" %}
 {% load i18n %}
-{% block titletag %}{% trans "Upload Wizard — Review" %}{% endblock %}
+{% block titletag %}{% trans "New Push Feed — Review" %}{% endblock %}
 
 {% block extra_css %}
 {{ block.super }}
@@ -19,7 +19,9 @@
 <table class="listing uwiz-review-table">
     <tbody>
         <tr><th>{% trans "Catalog" %}</th><td>{{ catalog_display }}</td></tr>
-        <tr><th>{% trans "Config name" %}</th><td>{{ session.config_name }}</td></tr>
+        <tr><th>{% trans "Push feed name" %}</th><td>{{ session.feed_name }}</td></tr>
+        <tr><th>{% trans "Files per run" %}</th><td>{{ session.files_per_run|default:1 }}</td></tr>
+        {% if session.expected_interval_hours %}<tr><th>{% trans "Expected interval" %}</th><td>{{ session.expected_interval_hours }} {% trans "hours" %}</td></tr>{% endif %}
         <tr><th>{% trans "Forecast data" %}</th><td>{% if session.is_forecast %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td></tr>
         {% if session.valid_time_format != "CONTENT" %}
         <tr><th>{% trans "Filename format" %}</th><td><code>{{ session.valid_time_format }}</code></td></tr>
@@ -57,7 +59,7 @@
     <div class="uwiz-actions">
         <button type="submit" class="button bicolor button--icon">
             <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
-            {% trans "Create configuration" %}
+            {% trans "Create push feed" %}
         </button>
         <a href="{% url 'upload_wizard_step4' %}" class="button button-secondary">{% trans "Back" %}</a>
     </div>

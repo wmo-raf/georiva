@@ -66,48 +66,25 @@ def register_ingestion_dashboard_urls():
     ]
 
 
-# "Manual Uploads" is reached via the "Data" menu group registered in
+# "Push feeds" is reached via the "Data" menu group registered in
 # core/wagtail_hooks.py, not a top-level menu item.
 
 
 @hooks.register("register_admin_urls")
-def register_manual_upload_config_urls():
-    from .manual_upload_views import (
-        manual_upload_config_delete,
-        manual_upload_config_edit,
-        manual_upload_config_list,
-        manual_upload_variable_add,
-        manual_upload_variable_edit,
-        manual_upload_variable_remove,
-    )
+def register_push_feed_urls():
+    from .push_feed_views import push_feed_delete, push_feed_list
     from .upload_views import (
-        manual_upload_extract_times,
-        manual_upload_page,
-        manual_upload_submit,
+        push_feed_extract_times,
+        push_feed_page,
+        push_feed_submit,
     )
 
     return [
-        path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
-        path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
-        path("manual-uploads/<int:pk>/variables/add/", manual_upload_variable_add, name="manual_upload_variable_add"),
-        path(
-            "manual-uploads/<int:pk>/variables/<int:var_pk>/edit/",
-            manual_upload_variable_edit,
-            name="manual_upload_variable_edit",
-        ),
-        path(
-            "manual-uploads/<int:pk>/variables/<int:var_pk>/remove/",
-            manual_upload_variable_remove,
-            name="manual_upload_variable_remove",
-        ),
-        path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
-        path("manual-uploads/<int:pk>/upload/", manual_upload_page, name="manual_upload_page"),
-        path(
-            "manual-uploads/<int:pk>/upload/extract-times/",
-            manual_upload_extract_times,
-            name="manual_upload_extract_times",
-        ),
-        path("manual-uploads/<int:pk>/upload/submit/", manual_upload_submit, name="manual_upload_submit"),
+        path("push-feeds/", push_feed_list, name="push_feed_list"),
+        path("push-feeds/<int:pk>/delete/", push_feed_delete, name="push_feed_delete"),
+        path("push-feeds/<int:pk>/", push_feed_page, name="push_feed_page"),
+        path("push-feeds/<int:pk>/extract-times/", push_feed_extract_times, name="push_feed_extract_times"),
+        path("push-feeds/<int:pk>/submit/", push_feed_submit, name="push_feed_submit"),
     ]
 
 
@@ -124,13 +101,13 @@ def register_upload_wizard_urls():
     )
 
     return [
-        path("manual-uploads/wizard/step1/", upload_wizard_step1, name="upload_wizard_step1"),
-        path("manual-uploads/wizard/step2/", upload_wizard_step2, name="upload_wizard_step2"),
-        path("manual-uploads/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
-        path("manual-uploads/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
-        path("manual-uploads/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
-        path("manual-uploads/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
-        path("manual-uploads/wizard/upload-sample/", upload_wizard_upload_sample, name="upload_wizard_upload_sample"),
+        path("push-feeds/wizard/step1/", upload_wizard_step1, name="upload_wizard_step1"),
+        path("push-feeds/wizard/step2/", upload_wizard_step2, name="upload_wizard_step2"),
+        path("push-feeds/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
+        path("push-feeds/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
+        path("push-feeds/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
+        path("push-feeds/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
+        path("push-feeds/wizard/upload-sample/", upload_wizard_upload_sample, name="upload_wizard_upload_sample"),
     ]
 
 
