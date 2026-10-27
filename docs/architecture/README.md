@@ -759,7 +759,9 @@ no FTP or SFTP. The web proxy has a second server block for it, matched on any n
 request signatures verify, and streams bodies without buffering to disk, so multi-GB multipart uploads work.
 
 - Point DNS for `s3.<your domain>` at the proxy and set `MINIO_PUBLIC_ENDPOINT` to that name. The feed page builds its
-  `rclone` config from it.
+  `rclone` config from it. If the proxy listens on a port other than 80/443 (`GEORIVA_WEB_PROXY_PORT`), include it
+  (`s3.localhost:8080`); the port is part of the signed `Host`, and the proxy passes it through unchanged. The
+  `localhost:9000` default bypasses the proxy and is not a sender endpoint.
 - Authorisation stays with MinIO: each sender's credentials may only `PutObject` under its own feed's prefix in
   `incoming`. nginx adds no tenancy logic.
 - Until TLS fronts the proxy the endpoint is plain HTTP and credentials travel in the clear. Once TLS is in place move
