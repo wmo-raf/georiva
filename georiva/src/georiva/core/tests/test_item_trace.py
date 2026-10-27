@@ -9,6 +9,7 @@ from django.urls import reverse
 from georiva.core.models import Catalog, Collection, Item
 from georiva.events.recording import record
 from georiva.events.testing import event_context
+from georiva.events.timeline import timeline_url
 from georiva.ingestion.models import FileIngestionFinished
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
@@ -54,9 +55,8 @@ class ItemTraceTests(TestCase):
 
         response = self._trace(item)
 
-        self.assertRedirects(
-            response, reverse("events_timeline", args=[event.correlation_id]), fetch_redirect_response=False
-        )
+        # It lands on the ingestion itself, not the top of the chain.
+        self.assertRedirects(response, timeline_url(event.correlation_id, event.pk), fetch_redirect_response=False)
 
     def test_a_derived_item_leads_to_the_attempt_that_produced_it(self):
         item = _item(self.kenya)
@@ -74,9 +74,7 @@ class ItemTraceTests(TestCase):
 
         response = self._trace(item)
 
-        self.assertRedirects(
-            response, reverse("events_timeline", args=[attempt.correlation_id]), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, timeline_url(attempt.correlation_id, attempt.pk), fetch_redirect_response=False)
 
     def test_a_reingested_item_lists_every_ingestion_newest_first(self):
         item = _item(self.kenya, source_file="sources:kenya/rain/rain/a.tif")
@@ -91,7 +89,7 @@ class ItemTraceTests(TestCase):
         urls = [entry.timeline_url for entry in response.context["entries"]]
         self.assertEqual(
             urls,
-            [reverse("events_timeline", args=[e.correlation_id]) for e in (second, first)],
+            [timeline_url(e.correlation_id, e.pk) for e in (second, first)],
         )
 
     def test_an_item_from_before_history_began_shows_a_clear_state(self):

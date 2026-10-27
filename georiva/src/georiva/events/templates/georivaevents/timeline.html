@@ -1,39 +1,35 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n %}
+{% load i18n events_tags %}
 
 {% block titletag %}{% trans "Timeline" %}{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
     <style>
-        .gr-timeline {
-            width: 100%;
-            border-collapse: collapse;
+        .gr-timeline__strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3em 1.2em;
+            align-items: baseline;
+            margin-bottom: 1.5em;
+            padding: 0.7em 1em;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 8px;
+            font-size: 0.9em;
         }
 
-        .gr-timeline th,
-        .gr-timeline td {
-            text-align: left;
-            padding: 0.6em 0.8em;
-            border-bottom: 1px solid var(--w-color-border-furniture);
-            vertical-align: top;
+        .gr-timeline__strip time,
+        .gr-timeline__duration {
+            font-family: monospace;
         }
 
-        .gr-timeline th {
-            font-size: 0.75em;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: var(--w-color-grey-400);
+        .gr-timeline__focus {
+            flex-basis: 100%;
         }
 
-        .gr-timeline__row--failed td,
-        .gr-timeline__row--refused td {
-            background: color-mix(in srgb, var(--w-color-critical-200) 8%, transparent);
-        }
-
-        .gr-timeline__meta {
-            font-size: 0.8em;
-            color: var(--w-color-grey-400);
+        .gr-timeline__failed {
+            color: var(--w-color-critical-200);
+            font-weight: 600;
         }
 
         .gr-timeline__elsewhere {
@@ -42,42 +38,445 @@
             border: 1px dashed var(--w-color-border-furniture);
             color: var(--w-color-grey-400);
         }
+
+        /* The rail: one row per event, group or quiet spell; lanes are fixed-width cells. */
+        .gr-rail {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .gr-rail__row {
+            display: flex;
+            align-items: stretch;
+            scroll-margin-top: 6em;
+        }
+
+        .gr-rail__time {
+            flex: none;
+            width: 9em;
+            padding: 11px 0.8em 0 0;
+            text-align: right;
+            white-space: nowrap;
+            font-family: monospace;
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__lanes {
+            display: flex;
+            flex: none;
+        }
+
+        .gr-rail__cell {
+            position: relative;
+            flex: none;
+            width: 22px;
+        }
+
+        /*
+         * The spine: a thin line down the first lane from the first dot to the last,
+         * so independent events still read as one stretch of time. Causal lines are
+         * drawn heavier on top of it.
+         */
+        .gr-rail__cell:first-child::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 10.5px;
+            width: 1px;
+            background: var(--w-color-grey-200);
+        }
+
+        .gr-rail__row:first-child .gr-rail__cell:first-child::before {
+            top: 18px;
+        }
+
+        .gr-rail__row:last-child .gr-rail__cell:first-child::before {
+            bottom: auto;
+            height: 18px;
+        }
+
+        .gr-rail__row--gap .gr-rail__cell:first-child::before {
+            width: 0;
+            background: none;
+            border-left: 1px dashed var(--w-color-grey-400);
+        }
+
+        .gr-rail__n,
+        .gr-rail__s,
+        .gr-rail__e,
+        .gr-rail__w {
+            position: absolute;
+            background: var(--w-color-grey-400);
+        }
+
+        .gr-rail__n,
+        .gr-rail__s {
+            left: 10px;
+            width: 2px;
+        }
+
+        .gr-rail__n {
+            top: 0;
+            height: 18px;
+        }
+
+        .gr-rail__s {
+            top: 18px;
+            bottom: 0;
+        }
+
+        .gr-rail__e,
+        .gr-rail__w {
+            top: 17px;
+            height: 2px;
+        }
+
+        .gr-rail__e {
+            left: 11px;
+            right: 0;
+        }
+
+        .gr-rail__w {
+            left: 0;
+            right: 11px;
+        }
+
+        .gr-rail__n.gr-rail__seg--dashed,
+        .gr-rail__s.gr-rail__seg--dashed {
+            width: 0;
+            background: none;
+            border-left: 2px dashed var(--w-color-grey-400);
+        }
+
+        .gr-rail__dot {
+            position: absolute;
+            top: 12px;
+            left: 5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--w-color-positive-100);
+            box-shadow: 0 0 0 3px var(--w-color-surface-page);
+        }
+
+        .gr-rail__dot--failed {
+            background: var(--w-color-critical-200);
+        }
+
+        .gr-rail__dot--refused {
+            background: var(--w-color-warning-100);
+        }
+
+        .gr-rail__dot--unreadable {
+            background: var(--w-color-surface-page);
+            border: 2px solid var(--w-color-grey-400);
+        }
+
+        .gr-rail__dot--group {
+            border-radius: 2px;
+            transform: rotate(45deg);
+        }
+
+        .gr-rail__dot--repeat {
+            top: 9px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            background: var(--w-color-surface-page);
+            border: 2px solid var(--w-color-grey-400);
+            color: var(--w-color-grey-600);
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 14px;
+            text-align: center;
+        }
+
+        .gr-rail__repeat {
+            border: 1px dashed var(--w-color-grey-200);
+        }
+
+        .gr-rail__body {
+            flex: 1;
+            min-width: 0;
+            padding: 4px 0 6px 6px;
+        }
+
+        .gr-rail__card {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 0 0.8em;
+            padding: 4px 10px 6px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+        }
+
+        .gr-rail__card > details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .gr-rail__card > .gr-rail__meta {
+            flex-basis: 100%;
+        }
+
+        .gr-rail__card--failed {
+            border-color: color-mix(in srgb, var(--w-color-critical-200) 40%, transparent);
+            background: color-mix(in srgb, var(--w-color-critical-200) 6%, transparent);
+        }
+
+        .gr-rail__card--refused {
+            border-color: color-mix(in srgb, var(--w-color-warning-100) 50%, transparent);
+            background: color-mix(in srgb, var(--w-color-warning-100) 8%, transparent);
+        }
+
+        .gr-rail__row--target > .gr-rail__body > .gr-rail__card {
+            outline: 2px solid var(--w-color-info-100);
+            outline-offset: 2px;
+        }
+
+        .gr-rail__card summary {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.2em 0.8em;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .gr-rail__card summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .gr-rail__card summary::before {
+            content: "▸";
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__card details[open] > summary::before {
+            content: "▾";
+        }
+
+        .gr-rail__actor {
+            margin-left: auto;
+            padding: 0 0.4em;
+            border-radius: 3px;
+            background: var(--w-color-grey-50);
+            font-family: monospace;
+            font-size: 0.75em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__summary {
+            flex-basis: 100%;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__meta {
+            font-size: 0.8em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__links {
+            display: flex;
+            flex: none;
+            gap: 0.8em;
+            padding-top: 2px;
+            font-size: 0.85em;
+        }
+
+        .gr-rail__counts,
+        .gr-rail__span {
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__span {
+            font-family: monospace;
+        }
+
+        .gr-rail__counts-failed {
+            color: var(--w-color-critical-200);
+            font-weight: 600;
+        }
+
+        .gr-rail__track {
+            position: relative;
+            align-self: center;
+            width: 10em;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--w-color-grey-100);
+        }
+
+        .gr-rail__bar {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            min-width: 3px;
+            border-radius: 3px;
+            background: var(--w-color-grey-400);
+        }
+
+        .gr-rail__members {
+            list-style: none;
+            max-height: 24em;
+            overflow-y: auto;
+            margin: 0.5em 0 0.2em 0.3em;
+            padding: 0 0 0 0.8em;
+            border-left: 2px dotted var(--w-color-grey-200);
+        }
+
+        .gr-rail__members--pulled {
+            max-height: none;
+            border-left-color: var(--w-color-critical-200);
+        }
+
+        .gr-rail__member {
+            display: flex;
+            align-items: baseline;
+            gap: 0.8em;
+            padding: 0.15em 0.3em;
+            font-size: 0.85em;
+            scroll-margin-top: 6em;
+        }
+
+        .gr-rail__member::before {
+            content: "";
+            flex: none;
+            align-self: center;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--w-color-positive-100);
+        }
+
+        .gr-rail__member--failed::before {
+            background: var(--w-color-critical-200);
+        }
+
+        .gr-rail__member--refused::before {
+            background: var(--w-color-warning-100);
+        }
+
+        .gr-rail__member--target {
+            outline: 2px solid var(--w-color-info-100);
+            border-radius: 3px;
+        }
+
+        .gr-rail__member time {
+            flex: none;
+            min-width: 6em;
+            font-family: monospace;
+            color: var(--w-color-grey-400);
+        }
+
+        .gr-rail__member-summary {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .gr-rail__gap {
+            display: block;
+            padding: 10px 0;
+            font-size: 0.8em;
+            font-style: italic;
+            color: var(--w-color-grey-400);
+        }
+
+        {% for row in layout.rows %}{% if row.group %}
+        #{{ row.group.anchor }} .gr-rail__bar {
+            left: {{ row.group.bar_left|stringformat:".1f" }}%;
+            width: {{ row.group.bar_width|stringformat:".1f" }}%;
+        }
+        {% endif %}{% endfor %}
     </style>
 {% endblock %}
 
 {% block main_content %}
     <p class="help-text">{% blocktrans %}Everything one arrival set in motion, oldest first.{% endblocktrans %}</p>
-    <table class="gr-timeline">
-        <thead>
-        <tr>
-            <th>{% trans "When" %}</th>
-            <th>{% trans "Event" %}</th>
-            <th>{% trans "Actor" %}</th>
-            <th>{% trans "Caused by" %}</th>
-            <th></th>
-        </tr>
-        </thead>
-        <tbody>
-        {% for row in rows %}
-            <tr class="gr-timeline__row--{{ row.outcome_class }}">
-                <td class="gr-timeline__meta">{{ row.occurred_at|date:"Y-m-d H:i:s" }}</td>
-                <td>
-                    <strong>{{ row.label }}</strong>
-                    {% if row.summary %}<div>{{ row.summary }}</div>{% endif %}
-                    {% if row.unreadable %}<div class="gr-timeline__meta">{% trans "Details are unavailable on this installation." %}</div>{% endif %}
-                </td>
-                <td class="gr-timeline__meta">{{ row.actor }}</td>
-                <td class="gr-timeline__meta">
-                    {% if row.cause %}{{ row.cause }}{% elif row.cause_hidden %}{% trans "an earlier event outside this view" %}{% else %}—{% endif %}
-                </td>
-                <td>
-                    {% if row.subject_url %}<a href="{{ row.subject_url }}">{% trans "Open" %}</a>{% endif %}
-                    {% for label, url in row.links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
-                </td>
-            </tr>
+
+    <div class="gr-timeline__strip">
+        {% if focus %}
+            <span class="gr-timeline__focus">
+                {% if focus.row %}
+                    {% blocktrans with label=focus.row.type_label %}Showing what <strong>{{ label }}</strong> set in motion.{% endblocktrans %}
+                {% else %}
+                    {% trans "Showing one branch of this chain." %}
+                {% endif %}
+                <a href="{% url 'events_timeline' correlation_id %}">{% trans "Show the whole chain" %}</a>
+            </span>
+        {% endif %}
+        <span>{% trans "Started" %} <time>{{ layout.started|date:"Y-m-d H:i:s" }}</time></span>
+        <span>{% trans "ran" %} <span class="gr-timeline__duration">{{ layout.duration|elapsed }}</span></span>
+        <span>
+            {% blocktrans count n=layout.size %}{{ n }} event{% plural %}{{ n }} events{% endblocktrans %}:
+            {% blocktrans with n=layout.counts.ok %}{{ n }} ok{% endblocktrans %}
+            {% if layout.counts.failed %}·
+                <a class="gr-timeline__failed" href="#event-{{ layout.first_failure }}">{% blocktrans with n=layout.counts.failed %}{{ n }} failed{% endblocktrans %}</a>
+            {% endif %}
+            {% if layout.counts.refused %}·
+                <a class="gr-timeline__failed" href="#event-{{ layout.first_failure }}">{% blocktrans with n=layout.counts.refused %}{{ n }} refused{% endblocktrans %}</a>
+            {% endif %}
+        </span>
+    </div>
+
+    <ol class="gr-rail">
+        {% for row in layout.rows %}
+            <li class="gr-rail__row{% if row.gap %} gr-rail__row--gap{% endif %}{% if row.target %} gr-rail__row--target{% endif %}"
+                {% if row.entry %}id="event-{{ row.entry.id }}"{% elif row.group %}id="{{ row.group.anchor }}"{% elif row.repeat %}id="{{ row.repeat.anchor }}"{% endif %}>
+                <div class="gr-rail__time">
+                    {% if forloop.first %}
+                        <time title="{{ layout.started|date:'Y-m-d H:i:s' }}">{{ layout.started|date:"Y-m-d" }}<br>{{ layout.started|date:"H:i:s" }}</time>
+                    {% elif row.group or row.repeat %}
+                        <time>+{{ row.offset|elapsed }}</time>
+                    {% elif row.entry %}
+                        <time title="{{ row.entry.occurred_at|date:'Y-m-d H:i:s' }}">+{{ row.offset|elapsed }}</time>
+                    {% endif %}
+                </div>
+                <div class="gr-rail__lanes">
+                    {% for cell in row.cells %}
+                        <span class="gr-rail__cell">
+                            {% if cell.n %}<span class="gr-rail__n{% if cell.dashed or cell.dashed_n %} gr-rail__seg--dashed{% endif %}"></span>{% endif %}
+                            {% if cell.s %}<span class="gr-rail__s{% if cell.dashed %} gr-rail__seg--dashed{% endif %}"></span>{% endif %}
+                            {% if cell.e %}<span class="gr-rail__e"></span>{% endif %}
+                            {% if cell.w %}<span class="gr-rail__w"></span>{% endif %}
+                            {% if cell.dot %}
+                                {% if row.group %}
+                                    <span class="gr-rail__dot gr-rail__dot--group gr-rail__dot--{{ row.group.outcome_class }}"></span>
+                                {% elif row.repeat %}
+                                    <span class="gr-rail__dot gr-rail__dot--repeat">⟳</span>
+                                {% elif row.entry.row %}
+                                    <span class="gr-rail__dot gr-rail__dot--{{ cell.dot }}"></span>
+                                {% else %}
+                                    <span class="gr-rail__dot gr-rail__dot--unreadable"></span>
+                                {% endif %}
+                            {% endif %}
+                        </span>
+                    {% endfor %}
+                </div>
+                <div class="gr-rail__body">
+                    {% if row.gap %}
+                        <span class="gr-rail__gap">{% blocktrans with gap=row.gap|elapsed %}⋯ {{ gap }} later ⋯{% endblocktrans %}</span>
+                    {% elif row.group %}
+                        {% include "georivaevents/_timeline_group.html" with group=row.group %}
+                    {% elif row.repeat %}
+                        {% include "georivaevents/_timeline_repeat.html" with repeat=row.repeat %}
+                    {% else %}
+                        {% include "georivaevents/_timeline_event.html" with entry=row.entry stub=row.stub %}
+                    {% endif %}
+                </div>
+            </li>
         {% endfor %}
-        </tbody>
-    </table>
+    </ol>
+
     {% if continues_elsewhere %}
         <p class="gr-timeline__elsewhere">{% trans "This chain continues elsewhere." %}</p>
     {% endif %}

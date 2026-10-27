@@ -1,0 +1,38 @@
+{% load i18n events_tags %}
+{% comment %}
+    Siblings of one type folded into one node (georiva.events.timeline.Group).
+    Failed and refused members are listed again outside the fold, so a closed
+    group never hides one; only those copies carry the member's anchor.
+{% endcomment %}
+<div class="gr-rail__card gr-rail__card--{{ group.outcome_class }}">
+    <details{% if group.open %} open{% endif %}>
+        <summary>
+            <strong>{{ group.members|length }} × {{ group.label }}</strong>
+            <span class="gr-rail__counts">
+                {% blocktrans with n=group.counts.ok %}{{ n }} ok{% endblocktrans %}
+                {% if group.counts.failed %}· <span class="gr-rail__counts-failed">{% blocktrans with n=group.counts.failed %}{{ n }} failed{% endblocktrans %}</span>{% endif %}
+                {% if group.counts.refused %}· <span class="gr-rail__counts-failed">{% blocktrans with n=group.counts.refused %}{{ n }} refused{% endblocktrans %}</span>{% endif %}
+            </span>
+            <span class="gr-rail__span">+{{ group.start|elapsed }} → +{{ group.end|elapsed }}</span>
+            <span class="gr-rail__track"><span class="gr-rail__bar"></span></span>
+        </summary>
+        <ol class="gr-rail__members">
+            {% for member in group.members %}
+                <li class="gr-rail__member gr-rail__member--{{ member.outcome_class }}{% if member.id == group.target %} gr-rail__member--target{% endif %}"
+                    {% if member.outcome_class == "ok" %}id="event-{{ member.id }}"{% endif %}>
+                    {% include "georivaevents/_timeline_member.html" %}
+                </li>
+            {% endfor %}
+        </ol>
+    </details>
+    {% if group.pulled_out %}
+        <ol class="gr-rail__members gr-rail__members--pulled">
+            {% for member in group.pulled_out %}
+                <li class="gr-rail__member gr-rail__member--{{ member.outcome_class }}{% if member.id == group.target %} gr-rail__member--target{% endif %}"
+                    id="event-{{ member.id }}">
+                    {% include "georivaevents/_timeline_member.html" %}
+                </li>
+            {% endfor %}
+        </ol>
+    {% endif %}
+</div>

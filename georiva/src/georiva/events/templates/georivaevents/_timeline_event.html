@@ -1,0 +1,39 @@
+{% load i18n %}
+{% comment %}
+    One event on the Timeline rail. ``entry`` is a georiva.events.timeline.Entry;
+    its ``row`` is the HistoryRow every list of events renders from, or None
+    when the event's type is not installed here. Facts start closed even on a
+    failure: its summary already carries the error, and a chain of repeated
+    failures would otherwise push everything else off the screen.
+{% endcomment %}
+<div class="gr-rail__card gr-rail__card--{{ entry.outcome_class }}">
+    {% if stub %}<div class="gr-rail__meta">{% trans "↑ caused by an event outside this view" %}</div>{% endif %}
+    {% if entry.row %}
+        <details>
+            <summary>
+                <strong>{{ entry.row.type_label }}</strong>
+                <span class="gr-rail__actor">{{ entry.row.actor }}</span>
+                {% if entry.row.summary and entry.row.summary != entry.row.type_label %}
+                    <span class="gr-rail__summary">{{ entry.row.summary }}</span>
+                {% endif %}
+            </summary>
+            {% if entry.row.items %}
+                <dl class="gr-history__facts">
+                    {% for label, value in entry.row.items %}
+                        <dt>{{ label }}</dt>
+                        <dd>{{ value }}</dd>
+                    {% endfor %}
+                </dl>
+            {% endif %}
+        </details>
+        {% if entry.row.subject_url or entry.row.links %}
+            <div class="gr-rail__links">
+                {% if entry.row.subject_url %}<a href="{{ entry.row.subject_url }}">{% trans "Open" %}</a>{% endif %}
+                {% for label, url in entry.row.links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
+            </div>
+        {% endif %}
+    {% else %}
+        <strong>{{ entry.event_type }}</strong>
+        <div class="gr-rail__meta">{% trans "Details are unavailable on this installation." %}</div>
+    {% endif %}
+</div>

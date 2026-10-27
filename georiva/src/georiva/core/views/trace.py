@@ -50,7 +50,7 @@ def item_trace(request, item_id):
     found = _candidates(request, item)
 
     if len(found) == 1:
-        return redirect(timeline_url(found[0].correlation_id))
+        return redirect(timeline_url(found[0].correlation_id, found[0].pk))
     # No match falls through to the page below: a clear "no history" state, not a 404.
     entries = [row_for(event) for event in found]
     return render(

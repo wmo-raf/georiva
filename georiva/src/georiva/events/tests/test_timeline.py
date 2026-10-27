@@ -11,6 +11,7 @@ from django.utils import timezone
 from georiva.core.models import Catalog, Collection
 from georiva.events.models import EventIndex
 from georiva.events.testing import event_context
+from georiva.events.timeline import timeline_url
 from georiva.ingestion.models import RunIngestion, RunIngestionClosed
 from georiva.organisations.models import OrganisationMembership
 from georiva.organisations.provisioning import provision_organisation
@@ -58,16 +59,17 @@ class TimelineTests(TestCase):
     def _get(self, correlation):
         return self.client.get(reverse("events_timeline", args=[correlation]))
 
-    def test_it_lists_the_chain_oldest_first_with_actor_and_links(self):
+    def test_it_draws_the_chain_oldest_first_with_actor_and_links(self):
         response = self._get(self.chain)
 
         self.assertEqual(response.status_code, 200)
-        rows = response.context["rows"]
-        self.assertEqual([row["label"] for row in rows], ["Run closed", "Derivation attempt"])
-        self.assertEqual(rows[0]["actor"], "system:bucket")
-        self.assertEqual(rows[0]["subject_url"], reverse("run_ingestion_detail", args=[self.kenya_run.pk]))
+        rows = [row.entry.row for row in response.context["layout"].rows]
+        self.assertEqual([row.type_label for row in rows], ["Run closed", "Derivation attempt"])
+        self.assertEqual(rows[0].actor, "system:bucket")
+        self.assertEqual(rows[0].subject_url, reverse("run_ingestion_detail", args=[self.kenya_run.pk]))
         # A failed attempt produced nothing, so there is no lineage to offer.
-        self.assertEqual(rows[1]["links"], [])
+        self.assertEqual(rows[1].links, [])
+        self.assertContains(response, "1 failed")
 
     def test_a_derivation_attempt_that_produced_an_item_links_to_its_inputs(self):
         from georiva.events.recording import record
@@ -97,7 +99,7 @@ class TimelineTests(TestCase):
         self.assertTrue(response.context["continues_elsewhere"])
         self.assertContains(response, "continues elsewhere")
         self.assertNotContains(response, "uganda")
-        self.assertEqual(len(response.context["rows"]), 2)
+        self.assertEqual(response.context["layout"].size, 2)
 
     def test_a_chain_entirely_outside_the_viewers_scope_is_not_found(self):
         self.assertEqual(self._get(self.uganda_only).status_code, 404)
@@ -111,9 +113,9 @@ class TimelineTests(TestCase):
         response = self._get(self.chain)
 
         self.assertEqual(response.status_code, 200)
-        closed = response.context["rows"][0]
-        self.assertIsNone(closed["subject_url"])
-        self.assertIn("Closed at revision 0", closed["summary"])
+        closed = response.context["layout"].rows[0].entry.row
+        self.assertIsNone(closed.subject_url)
+        self.assertIn("Closed at revision 0", closed.summary)
 
     def test_an_indexed_event_whose_type_is_not_installed_still_renders(self):
         EventIndex.objects.create(
@@ -129,9 +131,12 @@ class TimelineTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "unavailable on this installation")
 
-    def test_history_rows_link_to_the_timeline(self):
+    def test_history_rows_link_to_their_own_event_on_the_timeline(self):
+        closed = RunIngestionClosed.objects.get(organisation=self.kenya, correlation_id=self.chain)
+
         response = self.client.get(reverse("run_ingestion_detail", args=[self.kenya_run.pk]))
-        self.assertContains(response, reverse("events_timeline", args=[self.chain]))
+
+        self.assertContains(response, timeline_url(self.chain, closed.pk))
 
     def test_it_has_no_menu_entry(self):
         from wagtail.admin.menu import admin_menu
@@ -145,11 +150,69 @@ class TimelineTests(TestCase):
         with event_context(organisation_id=self.kenya.pk, correlation_id=self.chain, caused_by=other.pk):
             _run(self.kenya, "third").close(RunIngestion.Closer.MANUAL)
 
-        rows = self._get(self.chain).context["rows"]
+        response = self._get(self.chain)
 
-        caused = [row for row in rows if row.get("cause_hidden")]
-        self.assertEqual(len(caused), 1)
-        self.assertIsNone(caused[0]["cause"])
+        self.assertEqual(len([row for row in response.context["layout"].rows if row.stub]), 1)
+        self.assertContains(response, "caused by an event outside this view")
+
+    def test_events_hang_from_their_cause(self):
+        closed = RunIngestionClosed.objects.get(organisation=self.kenya, correlation_id=self.chain)
+        with event_context(organisation_id=self.kenya.pk, correlation_id=self.chain, caused_by=closed.pk):
+            _run(self.kenya, "third").close(RunIngestion.Closer.MANUAL)
+
+        rows = self._get(self.chain).context["layout"].rows
+
+        effect = rows[-1]
+        self.assertEqual(effect.entry.caused_by_id, closed.pk)
+        self.assertFalse(effect.stub)
+
+    def test_a_target_event_is_marked(self):
+        from georiva.processing.models import DerivationAttemptFinished
+
+        attempt = DerivationAttemptFinished.objects.get(correlation_id=self.chain)
+
+        response = self.client.get(reverse("events_timeline", args=[self.chain]), {"event": str(attempt.pk)})
+
+        targets = [row.entry.id for row in response.context["layout"].rows if row.target]
+        self.assertEqual(targets, [attempt.pk])
+
+    def test_focus_draws_only_what_one_event_set_in_motion(self):
+        closed = RunIngestionClosed.objects.get(organisation=self.kenya, correlation_id=self.chain)
+
+        response = self.client.get(reverse("events_timeline", args=[self.chain]), {"from": str(closed.pk)})
+
+        self.assertEqual([row.entry.id for row in response.context["layout"].rows], [closed.pk])
+        self.assertContains(response, "Show the whole chain")
+
+    def test_focus_on_an_event_outside_the_chain_is_not_found(self):
+        response = self.client.get(reverse("events_timeline", args=[self.chain]), {"from": str(uuid.uuid4())})
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_a_malformed_parameter_is_ignored(self):
+        response = self.client.get(reverse("events_timeline", args=[self.chain]), {"from": "nope", "event": "x"})
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_fetch_that_brought_many_files_folds_them(self):
+        from georiva.events.recording import record
+        from georiva.ingestion.models import FileIngestionFinished
+
+        chain = uuid.uuid4()
+        with event_context(organisation_id=self.kenya.pk, correlation_id=chain):
+            for step in range(5):
+                record(
+                    FileIngestionFinished,
+                    bucket="incoming",
+                    file_path=f"kenya/forecast/f{step:03d}.grib2",
+                    outcome=FileIngestionFinished.Outcome.COMPLETED,
+                )
+
+        response = self._get(chain)
+
+        group = response.context["layout"].rows[0].group
+        self.assertEqual(len(group.members), 5)
+        self.assertContains(response, "5 × ")
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
