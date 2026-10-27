@@ -1016,6 +1016,7 @@ class PushFeed(models.Model):
 
     class Meta:
         app_label = "georivaingestion"
+        permissions = [("manage_push_senders", "Can add, rotate and revoke a push feed's machine senders")]
 
     def __str__(self):
         return self.name
@@ -1215,6 +1216,73 @@ class DeliveryReceived(DomainEvent):
     def summary(self):
         by = f" from {self.sender}" if self.sender else ""
         return f"{self.filename} received by {self.feed_name}{by}"
+
+
+class PushSender(models.Model):
+    """A machine sender of a push feed: one MinIO user GeoRiva created for it (ADR 0034).
+
+    Only the access key is kept; it is what a Bucket notification's
+    ``principalId`` is matched against. The secret is shown once, when it is
+    issued, and is never written down here.
+    """
+
+    ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
+
+    push_feed = models.ForeignKey(PushFeed, on_delete=models.CASCADE, related_name="senders")
+    label = models.CharField(max_length=100, help_text="Who or what sends, e.g. the system's name.")
+    access_key = models.CharField(max_length=100, unique=True)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "georivaingestion"
+        ordering = ["label", "id"]
+
+    def __str__(self):
+        return f"{self.label} ({self.access_key})"
+
+
+class _PushSenderEvent(DomainEvent):
+    """The shared snapshot of an event about a machine sender."""
+
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    sender_label = models.CharField(max_length=100)
+    access_key = models.CharField(max_length=100)
+
+    class Meta:
+        abstract = True
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def summary(self):
+        return f"Sender {self.sender_label} {self.verb} on {self.feed_name}"
+
+
+class PushSenderAdded(_PushSenderEvent):
+    """A machine sender was added to a push feed."""
+
+    label = "Sender added"
+    verb = "added"
+
+
+class PushSenderRotated(_PushSenderEvent):
+    """A machine sender's secret was replaced; the old one stopped working."""
+
+    label = "Sender rotated"
+    verb = "rotated"
+
+
+class PushSenderRevoked(_PushSenderEvent):
+    """A machine sender was removed; its credentials stopped working."""
+
+    label = "Sender revoked"
+    verb = "revoked"
 
 
 # ---------------------------------------------------------------------------

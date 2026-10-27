@@ -768,6 +768,10 @@ request signatures verify, and streams bodies without buffering to disk, so mult
   the `s3.*` server block to `listen 443 ssl` and set `MINIO_PUBLIC_ENDPOINT_USE_SSL=true`; senders must then use
   `https://`.
 
+Senders are added, rotated and revoked on the push feed's page by users holding `manage_push_senders`. Each is a MinIO
+user created through the admin API with a `PutObject`-only policy on `incoming/<org>/<catalog>/*`; GeoRiva keeps the
+access key and shows the secret once, with a ready-to-paste `rclone` config. Deleting the feed revokes its senders.
+
 Check it with `rclone copy file.nc sender:incoming/<org>/<catalog>/` using an `s3` remote whose `endpoint` is the
 proxy and `provider = Minio`.
 

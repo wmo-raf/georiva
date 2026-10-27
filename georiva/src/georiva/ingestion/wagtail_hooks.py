@@ -72,7 +72,13 @@ def register_ingestion_dashboard_urls():
 
 @hooks.register("register_admin_urls")
 def register_push_feed_urls():
-    from .push_feed_views import push_feed_delete, push_feed_list
+    from .push_feed_views import (
+        push_feed_delete,
+        push_feed_list,
+        push_sender_add,
+        push_sender_revoke,
+        push_sender_rotate,
+    )
     from .upload_views import (
         push_feed_extract_times,
         push_feed_page,
@@ -85,6 +91,9 @@ def register_push_feed_urls():
         path("push-feeds/<int:pk>/", push_feed_page, name="push_feed_page"),
         path("push-feeds/<int:pk>/extract-times/", push_feed_extract_times, name="push_feed_extract_times"),
         path("push-feeds/<int:pk>/submit/", push_feed_submit, name="push_feed_submit"),
+        path("push-feeds/<int:pk>/senders/add/", push_sender_add, name="push_sender_add"),
+        path("push-feeds/<int:pk>/senders/<int:sender_pk>/rotate/", push_sender_rotate, name="push_sender_rotate"),
+        path("push-feeds/<int:pk>/senders/<int:sender_pk>/revoke/", push_sender_revoke, name="push_sender_revoke"),
     ]
 
 
@@ -114,3 +123,13 @@ def register_upload_wizard_urls():
 @hooks.register("construct_homepage_panels")
 def add_ingestion_activity_panel(request, panels):
     panels.append(IngestionActivityPanel())
+
+
+@hooks.register("register_permissions")
+def register_push_sender_permission():
+    from django.contrib.auth.models import Permission
+
+    return Permission.objects.filter(
+        content_type__app_label="georivaingestion",
+        codename="manage_push_senders",
+    )
