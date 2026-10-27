@@ -1170,7 +1170,9 @@ class Delivery(models.Model):
             )
         return delivery
 
-    def mark_accepted(self, file_path="", bytes=0):
+    def mark_accepted(self, file_path="", bytes=0, *, check_session=True):
+        """Accept the delivery. A caller still adding to the batch passes ``check_session=False``
+        and checks once at the end, so the session cannot complete on a partial batch."""
         from django.utils import timezone
 
         self.status = self.Status.ACCEPTED
@@ -1178,7 +1180,7 @@ class Delivery(models.Model):
         self.bytes = bytes
         self.accepted_at = timezone.now()
         self.save(update_fields=["status", "file_path", "bytes", "accepted_at"])
-        if self.session_id:
+        if check_session and self.session_id:
             self.session._check_auto_complete()
 
     def timeline_url(self):

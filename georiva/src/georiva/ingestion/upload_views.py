@@ -270,7 +270,7 @@ def push_feed_submit(request, pk):
             result_files.append({"id": None, "status": "failed", "error": str(exc), "job_id": None})
             continue
 
-        delivery.mark_accepted(file_path=saved_path, bytes=uploaded.size or 0)
+        delivery.mark_accepted(file_path=saved_path, bytes=uploaded.size or 0, check_session=False)
 
         # Register before enqueueing — idempotent with the bucket event that will also fire.
         _fi, created = FileIngestion.register(
@@ -297,7 +297,11 @@ def push_feed_submit(request, pk):
 
         result_files.append({"id": delivery.pk, "status": "accepted", "job_id": job.pk})
 
-    if not session.deliveries.exists():
+    # Checked once the batch is whole: completing on the first accept would close
+    # the session before the later files had a delivery at all.
+    if session.deliveries.exists():
+        session._check_auto_complete()
+    else:
         session.mark_failed()
 
     return JsonResponse({"upload_session_id": session.pk, "files": result_files})

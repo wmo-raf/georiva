@@ -485,6 +485,31 @@ class UploadSubmitMultiFileTests(TestCase):
             self.assertContains(page, d.original_filename)
             self.assertContains(page, d.timeline_url())
 
+    def test_session_stays_active_until_the_whole_batch_has_been_stored(self, mock_incoming, mock_task):
+        bucket = _mock_incoming_bucket()
+        original = bucket.save.side_effect
+        seen = []
+
+        def save(path, upload):
+            seen.append(UploadSession.objects.get().status)
+            return original(path, upload) if callable(original) else path
+
+        bucket.save.side_effect = save
+        mock_incoming.return_value = bucket
+        _, _, config, variable = _geotiff_setup()
+
+        self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [SimpleUploadedFile("20250115.tif", b"a"), SimpleUploadedFile("20250116.tif", b"b")],
+            },
+        )
+
+        self.assertEqual(seen, ["active", "active"])
+        self.assertEqual(UploadSession.objects.get().status, "completed")
+
     def test_two_grib_files_create_one_session_two_deliveries(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, _ = _grib_setup()
