@@ -58,7 +58,7 @@
         color: var(--w-color-text-label);
     }
     .mup-row-status--uploading { background: var(--w-color-info-100); color: var(--w-color-white); }
-    .mup-row-status--stored    { background: var(--w-color-positive-100); color: var(--w-color-white); }
+    .mup-row-status--accepted   { background: var(--w-color-positive-100); color: var(--w-color-white); }
     .mup-row-status--failed    { background: var(--w-color-critical-200); color: var(--w-color-white); }
 
     /* Progress log */
@@ -167,6 +167,36 @@
     <ul class="mup-log-steps" id="log-steps"></ul>
     <div class="mup-log-summary" id="log-summary"></div>
 </div>
+
+<h2 class="mup-deliveries-title">{% trans "Recent deliveries" %}</h2>
+{% if deliveries %}
+<table class="listing mup-deliveries">
+    <thead>
+        <tr>
+            <th>{% trans "Received" %}</th>
+            <th>{% trans "Sender" %}</th>
+            <th>{% trans "File" %}</th>
+            <th>{% trans "Status" %}</th>
+            <th>{% trans "Ingestion" %}</th>
+            <th>{% trans "Timeline" %}</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for d in deliveries %}
+        <tr>
+            <td>{{ d.received_at|date:"Y-m-d H:i" }}</td>
+            <td>{{ d.sent_by.get_username|default:"—" }}</td>
+            <td><code>{{ d.original_filename }}</code></td>
+            <td>{{ d.get_status_display }}</td>
+            <td>{% if d.file_ingestion %}<a href="{% url 'file_ingestion_detail' d.file_ingestion.pk %}">{{ d.file_ingestion.get_status_display }}</a>{% else %}—{% endif %}</td>
+            <td><a href="{{ d.timeline_url }}">{% trans "Timeline" %}</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="help-block">{% trans "Nothing has been delivered to this feed yet." %}</p>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

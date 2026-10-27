@@ -7,7 +7,7 @@ their ingestion progress:
 1. GET  push_feed_page          — render the upload form
 2. POST push_feed_extract_times — pre-fill the time field from a filename
 3. POST push_feed_submit        — validate, write to MinIO incoming,
-                                      create UploadSession, enqueue ingestion
+                                      create UploadSession + Deliveries, enqueue ingestion
 4. Client polls GET /api/arrivals/{id}/status/ until a terminal status.
 """
 
@@ -24,6 +24,8 @@ from georiva.core.storage.filename import build_filename, parse_filename
 from georiva.organisations.access import get_org_object_or_404
 
 logger = logging.getLogger(__name__)
+
+RECENT_DELIVERIES = 25
 
 
 def _parse_datetime_local(value: str):
@@ -85,7 +87,8 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
 
 
 def push_feed_page(request, pk):
-    from georiva.ingestion.models import PushFeed
+    from georiva.core.storage import BucketType
+    from georiva.ingestion.models import FileIngestion, PushFeed
     from georiva.ingestion.upload_wizard_views import (
         _CATALOG_FORMAT_ACCEPT,
         _CATALOG_FORMAT_LABEL,
@@ -106,6 +109,16 @@ def push_feed_page(request, pk):
                 seen.add(v.collection_id)
                 affected_collections.append(v.collection)
 
+    deliveries = list(config.deliveries.select_related("sent_by")[:RECENT_DELIVERIES])
+    ingestions = {
+        fi.file_path: fi
+        for fi in FileIngestion.objects.filter(
+            bucket=BucketType.INCOMING, file_path__in=[d.file_path for d in deliveries if d.file_path]
+        )
+    }
+    for delivery in deliveries:
+        delivery.file_ingestion = ingestions.get(delivery.file_path)
+
     return render(
         request,
         "georivaingestion/push_feed_page.html",
@@ -122,6 +135,7 @@ def push_feed_page(request, pk):
             # {% wagtail_config as config %}, which shadows a 'config' context var
             # by the time extra_js renders.
             "feed": config,
+            "deliveries": deliveries,
             "variables": variables,
             "is_geotiff": is_geotiff,
             "affected_collections": affected_collections,
@@ -165,11 +179,12 @@ def push_feed_submit(request, pk):
     from django.contrib.contenttypes.models import ContentType
 
     from georiva.core.storage import BucketType, storage
+    from georiva.events.middleware import inbound_correlation_id
     from georiva.ingestion.models import (
+        Delivery,
         FileIngestion,
         FileIngestionJob,
         PushFeed,
-        UploadedFile,
         UploadSession,
     )
     from georiva.ingestion.tasks import process_incoming_file
@@ -219,7 +234,7 @@ def push_feed_submit(request, pk):
             )
 
     session = UploadSession.objects.create(
-        catalog=config.catalog,
+        push_feed=config,
         user=request.user if request.user.is_authenticated else None,
     )
 
@@ -234,21 +249,28 @@ def push_feed_submit(request, pk):
 
         file_path = _build_incoming_path(config, variable, uploaded.name, reference_time, valid_time)
 
-        # The key is recorded *before* the object is stored. Storing raises a Bucket
-        # notification, and the consumer finds this upload's chain by looking up its
+        # The delivery is recorded *before* the object is stored. Storing raises a Bucket
+        # notification, and the consumer finds this delivery's chain by looking up its
         # key; a path written only afterwards loses that race and orphans the chain.
-        uf = UploadedFile.objects.create(session=session, original_filename=uploaded.name, file_path=file_path)
-        uf.mark_uploading()
+        delivery = Delivery.receive(
+            push_feed=config,
+            filename=uploaded.name,
+            file_path=file_path,
+            session=session,
+            sent_by=request.user if request.user.is_authenticated else None,
+            correlation_id=inbound_correlation_id(request),
+        )
 
         try:
             saved_path = storage.incoming.save(file_path, uploaded)
         except Exception as exc:
+            # Nothing arrived: a delivery is a file that reached the feed.
             logger.error("Push feed upload MinIO write failed for %s: %s", file_path, exc)
-            uf.mark_failed(error=str(exc)[:2000])
-            result_files.append({"id": uf.pk, "status": "failed", "error": str(exc), "job_id": None})
+            delivery.delete()
+            result_files.append({"id": None, "status": "failed", "error": str(exc), "job_id": None})
             continue
 
-        uf.mark_stored(file_path=saved_path, bytes=uploaded.size or 0)
+        delivery.mark_accepted(file_path=saved_path, bytes=uploaded.size or 0, check_session=False)
 
         # Register before enqueueing — idempotent with the bucket event that will also fire.
         _fi, created = FileIngestion.register(
@@ -273,6 +295,13 @@ def push_feed_submit(request, pk):
             job_id=job.pk,
         )
 
-        result_files.append({"id": uf.pk, "status": "stored", "job_id": job.pk})
+        result_files.append({"id": delivery.pk, "status": "accepted", "job_id": job.pk})
+
+    # Checked once the batch is whole: completing on the first accept would close
+    # the session before the later files had a delivery at all.
+    if session.deliveries.exists():
+        session._check_auto_complete()
+    else:
+        session.mark_failed()
 
     return JsonResponse({"upload_session_id": session.pk, "files": result_files})

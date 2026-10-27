@@ -182,7 +182,7 @@ class FetchToIngestionChainTests(TestCase):
 
         from georiva.ingestion.chains import _upload_is_newer
 
-        upload = SimpleNamespace(started_at=timezone.now())
+        upload = SimpleNamespace(received_at=timezone.now())
         run = self._fetched()
         run.fetched_files.update(started_at=timezone.now(), completed_at=timezone.now())
         self._planned_in_a_later_run()

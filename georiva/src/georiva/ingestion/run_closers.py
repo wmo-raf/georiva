@@ -143,7 +143,7 @@ def close_if_upload_batches_complete(run) -> bool:
     actually matter are: the session is closed to new files, and every file it
     stored has finished ingesting.
 
-    ``UploadedFile`` carries no ``reference_time`` of its own — unlike
+    ``Delivery`` carries no ``reference_time`` of its own — unlike
     ``FetchedFile``, whose ``request_payload`` persists one — so the link runs
     through the ``FileIngestion`` rows the uploaded keys produced, which is also
     the only place the collection was resolved.
@@ -153,7 +153,7 @@ def close_if_upload_batches_complete(run) -> bool:
     twice and means "run complete" neither time — so this closes, and tomorrow's
     arrival reopens at a higher revision.
     """
-    from georiva.ingestion.models import FileIngestion, RunIngestion, UploadedFile, UploadSession
+    from georiva.ingestion.models import Delivery, FileIngestion, RunIngestion, UploadSession
 
     if not run.is_open:
         return False
@@ -162,7 +162,9 @@ def close_if_upload_batches_complete(run) -> bool:
     if not arrived:
         return False
 
-    session_ids = set(UploadedFile.objects.filter(file_path__in=arrived).values_list("session_id", flat=True))
+    session_ids = set(
+        Delivery.objects.filter(file_path__in=arrived, session__isnull=False).values_list("session_id", flat=True)
+    )
     if not session_ids:
         return False
 
@@ -171,9 +173,9 @@ def close_if_upload_batches_complete(run) -> bool:
         return False
 
     stored = set(
-        UploadedFile.objects.filter(
+        Delivery.objects.filter(
             session_id__in=session_ids,
-            status=UploadedFile.Status.STORED,
+            status=Delivery.Status.ACCEPTED,
         ).values_list("file_path", flat=True)
     )
     ingested = set(

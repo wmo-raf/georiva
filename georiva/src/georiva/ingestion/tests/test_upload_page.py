@@ -6,10 +6,11 @@ from django.test import TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import (
+    Delivery,
+    DeliveryReceived,
     FileIngestion,
     FileIngestionJob,
     PushFeed,
-    UploadedFile,
     UploadSession,
 )
 from georiva.organisations.testing import dial_org, make_organisation
@@ -172,7 +173,7 @@ class UploadSubmitTests(TestCase):
         dial_org(self.client)
         self.client.force_login(self.user)
 
-    def test_geotiff_submit_creates_upload_session_and_uploaded_file(self, mock_incoming, mock_task):
+    def test_geotiff_submit_creates_upload_session_and_delivery(self, mock_incoming, mock_task):
         bucket = _mock_incoming_bucket()
         mock_incoming.return_value = bucket
         catalog, collection, config, variable = _geotiff_setup()
@@ -193,11 +194,12 @@ class UploadSubmitTests(TestCase):
         self.assertNotIn("data_arrival_id", data)
 
         session = UploadSession.objects.get(pk=data["upload_session_id"])
-        self.assertEqual(session.catalog, catalog)
+        self.assertEqual(session.push_feed, config)
         self.assertEqual(session.status, "completed")
 
-        uf = UploadedFile.objects.get(pk=data["files"][0]["id"])
-        self.assertEqual(uf.status, "stored")
+        uf = Delivery.objects.get(pk=data["files"][0]["id"])
+        self.assertEqual(uf.status, "accepted")
+        self.assertEqual(uf.session, session)
         self.assertEqual(uf.file_path, "test-org/imagery/ndvi/band_1/2025/01/15/20250115.tif")
 
     def test_submit_no_data_arrival_created(self, mock_incoming, mock_task):
@@ -245,7 +247,7 @@ class UploadSubmitTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
+        uf = Delivery.objects.get(pk=response.json()["files"][0]["id"])
         self.assertEqual(uf.file_path, "test-org/imagery/ndvi/band_1/2025/03/02/scene.tif")
 
     def test_grib_forecast_path_gets_gr_prefix(self, mock_incoming, mock_task):
@@ -261,7 +263,7 @@ class UploadSubmitTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
+        uf = Delivery.objects.get(pk=response.json()["files"][0]["id"])
         self.assertEqual(uf.file_path, "test-org/models/GR--20250115T0600--gfs.grib2")
 
         mock_task.delay.assert_called_once()
@@ -279,7 +281,7 @@ class UploadSubmitTests(TestCase):
             },
         )
 
-        uf = UploadedFile.objects.get(pk=response.json()["files"][0]["id"])
+        uf = Delivery.objects.get(pk=response.json()["files"][0]["id"])
         self.assertEqual(uf.file_path, "test-org/models/GR--20250115T0600--gfs.grib2")
 
     def test_forecast_without_time_returns_400(self, mock_incoming, mock_task):
@@ -356,7 +358,7 @@ class UploadSubmitTests(TestCase):
         self.assertEqual(spent.error, "")
         mock_task.delay.assert_called_once()
 
-    def test_minio_failure_marks_uploaded_file_failed(self, mock_incoming, mock_task):
+    def test_minio_failure_leaves_no_delivery_and_fails_the_session(self, mock_incoming, mock_task):
         bucket = MagicMock()
         bucket.save.side_effect = RuntimeError("minio down")
         mock_incoming.return_value = bucket
@@ -376,10 +378,8 @@ class UploadSubmitTests(TestCase):
         self.assertIn("upload_session_id", data)
         self.assertEqual(data["files"][0]["status"], "failed")
         session = UploadSession.objects.get(pk=data["upload_session_id"])
-        self.assertEqual(session.status, "completed")
-        uf = UploadedFile.objects.get(session=session)
-        self.assertEqual(uf.status, "failed")
-        self.assertIn("minio down", uf.error)
+        self.assertEqual(session.status, "failed")
+        self.assertFalse(Delivery.objects.exists())
         mock_task.delay.assert_not_called()
 
     def test_submit_response_includes_job_id_in_files(self, mock_incoming, mock_task):
@@ -430,7 +430,7 @@ class UploadSubmitMultiFileTests(TestCase):
         dial_org(self.client)
         self.client.force_login(self.user)
 
-    def test_two_geotiff_files_create_one_session_two_uploaded_files(self, mock_incoming, mock_task):
+    def test_two_geotiff_files_create_one_session_two_deliveries(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, variable = _geotiff_setup()
 
@@ -448,11 +448,69 @@ class UploadSubmitMultiFileTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(UploadSession.objects.count(), 1)
-        self.assertEqual(UploadedFile.objects.count(), 2)
+        self.assertEqual(Delivery.objects.count(), 2)
         data = response.json()
         self.assertEqual(len(data["files"]), 2)
 
-    def test_two_grib_files_create_one_session_two_uploaded_files(self, mock_incoming, mock_task):
+    def test_two_files_make_one_session_with_two_accepted_deliveries_each_on_its_own_chain(
+        self, mock_incoming, mock_task
+    ):
+        mock_incoming.return_value = _mock_incoming_bucket()
+        _, _, config, variable = _geotiff_setup()
+
+        response = self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [
+                    SimpleUploadedFile("20250115.tif", b"a"),
+                    SimpleUploadedFile("20250116.tif", b"b"),
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(UploadSession.objects.count(), 1)
+        deliveries = list(Delivery.objects.all())
+        self.assertEqual(len(deliveries), 2)
+        self.assertEqual({d.status for d in deliveries}, {"accepted"})
+        self.assertEqual({d.sent_by for d in deliveries}, {self.user})
+        self.assertEqual(len({d.correlation_id for d in deliveries}), 2)
+        for d in deliveries:
+            self.assertEqual(DeliveryReceived.objects.get(delivery=d).correlation_id, d.correlation_id)
+
+        page = self.client.get(PAGE_URL.format(config.pk))
+        for d in deliveries:
+            self.assertContains(page, d.original_filename)
+            self.assertContains(page, d.timeline_url())
+
+    def test_session_stays_active_until_the_whole_batch_has_been_stored(self, mock_incoming, mock_task):
+        bucket = _mock_incoming_bucket()
+        original = bucket.save.side_effect
+        seen = []
+
+        def save(path, upload):
+            seen.append(UploadSession.objects.get().status)
+            return original(path, upload) if callable(original) else path
+
+        bucket.save.side_effect = save
+        mock_incoming.return_value = bucket
+        _, _, config, variable = _geotiff_setup()
+
+        self.client.post(
+            SUBMIT_URL.format(config.pk),
+            {
+                "variable_ids": [variable.pk, variable.pk],
+                "times": ["", ""],
+                "files": [SimpleUploadedFile("20250115.tif", b"a"), SimpleUploadedFile("20250116.tif", b"b")],
+            },
+        )
+
+        self.assertEqual(seen, ["active", "active"])
+        self.assertEqual(UploadSession.objects.get().status, "completed")
+
+    def test_two_grib_files_create_one_session_two_deliveries(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
         _, _, config, _ = _grib_setup()
 
@@ -469,7 +527,7 @@ class UploadSubmitMultiFileTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(UploadSession.objects.count(), 1)
-        self.assertEqual(UploadedFile.objects.count(), 2)
+        self.assertEqual(Delivery.objects.count(), 2)
 
     def test_first_file_minio_failure_does_not_block_second(self, mock_incoming, mock_task):
         bucket = MagicMock()
@@ -500,9 +558,9 @@ class UploadSubmitMultiFileTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["files"][0]["status"], "failed")
-        self.assertEqual(data["files"][1]["status"], "stored")
-        self.assertEqual(UploadedFile.objects.filter(status="stored").count(), 1)
-        self.assertEqual(UploadedFile.objects.filter(status="failed").count(), 1)
+        self.assertEqual(data["files"][1]["status"], "accepted")
+        self.assertEqual(Delivery.objects.filter(status="accepted").count(), 1)
+        self.assertEqual(Delivery.objects.count(), 1)
 
     def test_session_completes_when_all_files_stored(self, mock_incoming, mock_task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -686,7 +744,9 @@ class UploadSessionStatusEndpointTests(TestCase):
 
     def _make_session(self, status=UploadSession.Status.ACTIVE):
         catalog = Catalog.objects.create(organisation=make_organisation(), name="S", slug="s", file_format="geotiff")
-        session = UploadSession.objects.create(catalog=catalog)
+        session = UploadSession.objects.create(
+            push_feed=PushFeed.objects.create(catalog=catalog, name="S", valid_time_format="YYYYMMDD")
+        )
         if status != UploadSession.Status.ACTIVE:
             from django.utils import timezone
 
@@ -697,12 +757,13 @@ class UploadSessionStatusEndpointTests(TestCase):
 
     def test_known_session_returns_id_status_and_files(self):
         session = self._make_session()
-        uf = UploadedFile.objects.create(
-            session=session,
-            original_filename="rain.tif",
-            status=UploadedFile.Status.STORED,
-            file_path="imagery/rain.tif",
+        uf = Delivery.receive(
+            push_feed=session.push_feed, filename="rain.tif", file_path="imagery/rain.tif", session=session
         )
+        uf.mark_accepted(file_path="imagery/rain.tif")
+        session.refresh_from_db()
+        session.status = UploadSession.Status.ACTIVE
+        session.save(update_fields=["status"])
 
         response = self.client.get(UPLOAD_SESSION_STATUS_URL.format(session.pk))
 
@@ -712,7 +773,7 @@ class UploadSessionStatusEndpointTests(TestCase):
         self.assertEqual(data["status"], UploadSession.Status.ACTIVE)
         self.assertEqual(len(data["files"]), 1)
         self.assertEqual(data["files"][0]["id"], uf.pk)
-        self.assertEqual(data["files"][0]["status"], UploadedFile.Status.STORED)
+        self.assertEqual(data["files"][0]["status"], Delivery.Status.ACCEPTED)
 
     def test_unknown_session_returns_404(self):
         response = self.client.get(UPLOAD_SESSION_STATUS_URL.format(99999))
@@ -727,14 +788,3 @@ class UploadSessionStatusEndpointTests(TestCase):
         session = self._make_session(status=UploadSession.Status.FAILED)
         response = self.client.get(UPLOAD_SESSION_STATUS_URL.format(session.pk))
         self.assertEqual(response.json()["status"], UploadSession.Status.FAILED)
-
-    def test_file_error_included_in_response(self):
-        session = self._make_session()
-        UploadedFile.objects.create(
-            session=session,
-            original_filename="bad.tif",
-            status=UploadedFile.Status.FAILED,
-            error="storage timeout",
-        )
-        data = self.client.get(UPLOAD_SESSION_STATUS_URL.format(session.pk)).json()
-        self.assertEqual(data["files"][0]["error"], "storage timeout")
