@@ -45,7 +45,7 @@ def _wizard_chrome(step):
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse("push_feed_list"), "label": _("Push feeds")},
-            {"url": None, "label": _("Setup Wizard — %s") % STEP_LABELS[step - 1]},
+            {"url": None, "label": _("New push feed — %s") % STEP_LABELS[step - 1]},
         ],
         "header_title": _("New Push Feed — %s") % STEP_LABELS[step - 1],
         "header_icon": "upload",

@@ -189,9 +189,10 @@ def push_feed_submit(request, pk):
 
     # For GeoTIFF, validate that each file has a corresponding variable.
     if is_geotiff:
+        feed_variable_ids = {str(pk) for pk in config.variables().values_list("pk", flat=True)}
         for i, _uploaded in enumerate(uploaded_files):
             vid = variable_ids[i] if i < len(variable_ids) else None
-            if not vid or not config.variables().filter(pk=vid).exists():
+            if not vid or vid not in feed_variable_ids:
                 return JsonResponse({"error": str(_("Please choose a variable for each file."))}, status=400)
 
     # Pre-validate time requirements before creating the session.

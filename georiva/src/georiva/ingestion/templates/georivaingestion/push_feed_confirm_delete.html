@@ -4,7 +4,7 @@
 {% block titletag %}{% trans "Delete push feed" %} — {{ feed.name }}{% endblock %}
 
 {% block main_content %}
-<p>{% blocktrans with name=feed.name %}Are you sure you want to delete <strong>{{ name }}</strong>. Its catalog, collections and variables stay? This cannot be undone.{% endblocktrans %}</p>
+<p>{% blocktrans with name=feed.name %}Are you sure you want to delete <strong>{{ name }}</strong>? Its catalog, collections and variables stay. This cannot be undone.{% endblocktrans %}</p>
 <form method="post" action="">
     {% csrf_token %}
     <div style="display:flex;gap:1em;margin-top:1.5em;">
