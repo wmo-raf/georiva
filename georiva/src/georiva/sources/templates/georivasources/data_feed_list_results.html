@@ -52,11 +52,11 @@ to click back to All. before_results renders either way.
 
 {% block no_results_message %}
     {% if is_searching %}
-        <p>{% blocktrans with query=search_form.q.value %}No data feeds match &ldquo;{{ query }}&rdquo;.{% endblocktrans %}</p>
+        <p>{% blocktrans with query=search_form.q.value %}No pull feeds match &ldquo;{{ query }}&rdquo;.{% endblocktrans %}</p>
     {% elif is_filtering or active_health is not None %}
-        <p>{% trans "No data feeds in this state." %}</p>
+        <p>{% trans "No pull feeds in this state." %}</p>
     {% else %}
-        <p>{% trans "No data feeds yet." %}</p>
+        <p>{% trans "No pull feeds yet." %}</p>
     {% endif %}
 {% endblock %}
 

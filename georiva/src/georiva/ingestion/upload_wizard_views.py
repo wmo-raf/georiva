@@ -92,6 +92,22 @@ def _session_catalog(request, session):
     return scoped_queryset(request, Catalog.objects.all()).filter(pk=session["catalog_id"]).first()
 
 
+def _claimed_catalog_message(catalog):
+    """Why a catalog cannot take a push feed: it already has a feed, and the message names it (ADR 0034)."""
+    pull_feed = getattr(catalog, "data_feed", None)
+    if pull_feed is not None:
+        return _("This catalog already has a pull feed, \u201c%(name)s\u201d. A catalog has at most one feed.") % {
+            "name": pull_feed.name
+        }
+    push_feed = getattr(catalog, "push_feed", None)
+    if push_feed is not None:
+        return _(
+            "This catalog already has a push feed, \u201c%(name)s\u201d. A product that arrives in two "
+            "shapes is two catalogs."
+        ) % {"name": push_feed.name}
+    return _("Please choose a catalog.")
+
+
 def _catalog_format_from_session(request, session):
     """Return the file_format string for the catalog chosen in step 1."""
     if session.get("catalog_mode") == "create":
@@ -143,7 +159,9 @@ def upload_wizard_step1(request):
     # chosen catalog, so offering another tenant's catalog here would file every
     # subsequent upload under *their* `{org}/` prefix — server-side misfiling of
     # national data, which is precisely what org-scoped storage exists to stop.
-    all_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True).order_by("name")
+    all_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True, push_feed__isnull=True).order_by(
+        "name"
+    )
     file_format_choices = Catalog.FileFormat.choices
 
     if request.method == "POST":
@@ -163,7 +181,7 @@ def upload_wizard_step1(request):
                 # either way: this operator has no business learning which.
                 errors.append(_("Please choose a catalog."))
             elif not all_catalogs.filter(pk=catalog_id).exists():
-                errors.append(_("This catalog is managed by an automated source and cannot be a push feed."))
+                errors.append(_claimed_catalog_message(Catalog.objects.get(pk=catalog_id)))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
@@ -792,11 +810,8 @@ def upload_wizard_provision(request):
             # claimed the Catalog since) or the POST crafted. In create mode the
             # get_or_create above may also have fetched an existing claimed
             # Catalog by slug rather than creating one.
-            if getattr(catalog, "data_feed", None) is not None:
-                messages.error(
-                    request,
-                    _("This catalog is managed by an automated source and cannot be a push feed."),
-                )
+            if getattr(catalog, "data_feed", None) is not None or getattr(catalog, "push_feed", None) is not None:
+                messages.error(request, _claimed_catalog_message(catalog))
                 return redirect("upload_wizard_step1")
 
             created_collections = {}

@@ -1,6 +1,7 @@
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.urls import reverse
@@ -118,8 +119,8 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     base_form_class = DataFeedForm
 
     class Meta:
-        verbose_name = _("Data Feed")
-        verbose_name_plural = _("Data Feeds")
+        verbose_name = _("Pull feed")
+        verbose_name_plural = _("Pull feeds")
         ordering = ["name"]
 
     def __str__(self):
@@ -381,7 +382,29 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
             Catalog.objects.filter(pk=catalog_id).delete()
         return result
 
+    def clean(self):
+        super().clean()
+        self.refuse_push_fed_catalog()
+
+    def refuse_push_fed_catalog(self):
+        """A catalog has one route in (ADR 0034): not a pull feed beside a push feed."""
+        if not self.catalog_id:
+            return
+        from georiva.ingestion.models import PushFeed
+
+        push_feed = PushFeed.objects.filter(catalog_id=self.catalog_id).first()
+        if push_feed:
+            raise ValidationError(
+                {
+                    "catalog": _(
+                        "This catalog already has a push feed, \u201c%(name)s\u201d. A catalog has at most one feed."
+                    )
+                    % {"name": push_feed.name}
+                }
+            )
+
     def save(self, *args, **kwargs):
+        self.refuse_push_fed_catalog()
         super().save(*args, **kwargs)
 
         from georiva.sources.tasks import update_collection_data_feed_periodic_task

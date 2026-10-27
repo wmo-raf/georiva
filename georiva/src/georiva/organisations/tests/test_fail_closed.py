@@ -132,7 +132,16 @@ def build_org_tree(organisation, *, name):
     link = DataFeedCollectionLink.objects.create(data_feed=feed, collection=collection, definition_key=SHARED_SLUG)
     product = DerivedProduct.objects.create(data_feed=feed, definition_key=SHARED_SLUG, recipe_type="promotion")
     run = FetchRun.objects.create(data_feed=feed)
-    push_feed = PushFeed.objects.create(catalog=catalog, name=name, valid_time_format=PushFeed.ValidTimeFormat.YYYYMMDD)
+    # A catalog has one feed, so the push feed fronts a catalog of its own.
+    push_catalog = Catalog.objects.create(
+        organisation=organisation,
+        name=name,
+        slug=f"{SHARED_SLUG}-push",
+        file_format=Catalog.FileFormat.GEOTIFF,
+    )
+    push_feed = PushFeed.objects.create(
+        catalog=push_catalog, name=name, valid_time_format=PushFeed.ValidTimeFormat.YYYYMMDD
+    )
     session = UploadSession.objects.create(push_feed=push_feed)
     file_ingestion = FileIngestion.objects.create(bucket="sources", file_path=f"{organisation.slug}/x/y/z.tif")
     model_run = RunIngestion.objects.create(collection=collection, reference_time="2026-01-01T00:00:00Z")

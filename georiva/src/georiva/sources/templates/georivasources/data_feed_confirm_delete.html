@@ -1,7 +1,7 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% trans "Delete Data Feed" %} — {{ feed.name }}{% endblock %}
+{% block titletag %}{% trans "Delete pull feed" %} — {{ feed.name }}{% endblock %}
 
 {% block extra_css %}
     <style>
@@ -103,7 +103,7 @@
         <p class="dfd-warning-title">{% trans "This action will permanently delete:" %}</p>
         <ul class="dfd-warning-list">
             <li>
-                {% trans "The data feed" %} <strong>{{ feed.name }}</strong>
+                {% trans "The pull feed" %} <strong>{{ feed.name }}</strong>
                 {% trans "and its fetch/run history" %}
             </li>
             {% if catalog %}
@@ -163,7 +163,7 @@
         {% csrf_token %}
         <div class="dfd-actions">
             <button type="submit" class="button no">
-                {% trans "Yes, delete data feed" %}
+                {% trans "Yes, delete pull feed" %}
             </button>
             <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">
                 {% trans "Cancel" %}
