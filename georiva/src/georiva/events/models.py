@@ -13,6 +13,7 @@ the guard cannot replace: raw SQL and ``QuerySet._raw_delete`` bypass Python.
 """
 
 import uuid
+from dataclasses import dataclass
 
 from django.db import models
 from django.utils import timezone
@@ -26,6 +27,19 @@ class OutcomeClass(models.TextChoices):
     OK = "ok", "OK"
     FAILED = "failed", "Failed"
     REFUSED = "refused", "Refused"
+
+
+@dataclass(frozen=True)
+class FailureGroup:
+    """What a failed or refused event rolls up under on the dashboard (ADR 0033).
+
+    ``key`` is stored on the index row; ``label`` and ``url`` are read from the
+    group's newest event when the panel renders, so a rename shows at once.
+    """
+
+    key: str
+    label: str
+    url: str | None = None
 
 
 class AppendOnlyQuerySet(models.QuerySet):
@@ -115,6 +129,19 @@ class DomainEvent(AppendOnlyModel):
         """``(label, url)`` pairs beyond the subject, such as a Derivation attempt's inputs."""
         return []
 
+    def failure_group_key(self) -> str:
+        """What a failure of this event rolls up under on the dashboard (ADR 0033).
+
+        A stable identifier — the thing an operator would fix, such as a feed or
+        a collection — read from the event's own columns: ``record()`` calls it
+        on every write, so it must not query. Blank, the default, groups by type.
+        """
+        return ""
+
+    def failure_group(self) -> FailureGroup:
+        """The key with a label and a link, for the dashboard line; may query."""
+        return FailureGroup(key=self.failure_group_key(), label=self.label)
+
     def snapshot_items(self) -> list[tuple[str, object]]:
         """``(label, value)`` pairs for the expandable row: every snapshot column."""
         base = {"id", "organisation", "occurred_at", "correlation_id", "caused_by_id", "actor"}
@@ -151,6 +178,12 @@ class EventIndex(AppendOnlyModel):
         related_name="+",
     )
     outcome_class = models.CharField(max_length=10, choices=OutcomeClass.choices, default=OutcomeClass.OK)
+    failure_group_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="The event's ``failure_group_key()``: what the failures panel groups on (ADR 0033).",
+    )
 
     class Meta:
         ordering = ["occurred_at"]

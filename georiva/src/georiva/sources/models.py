@@ -1031,6 +1031,18 @@ class FetchRunFinished(DomainEvent):
 
         return reverse("data_feed_fetch_run_detail", kwargs={"feed_pk": self.data_feed_id, "run_pk": self.fetch_run_id})
 
+    def failure_group_key(self):
+        # The name stands in once the feed is gone, so its last failures still group together.
+        return f"feed:{self.data_feed_id}" if self.data_feed_id else f"feed-name:{self.feed_name}"
+
+    def failure_group(self):
+        from django.urls import reverse
+
+        from georiva.events.models import FailureGroup
+
+        url = reverse("data_feed_detail", args=[self.data_feed_id]) if self.data_feed_id else None
+        return FailureGroup(key=self.failure_group_key(), label=self.feed_name, url=url)
+
     @property
     def outcome_class(self):
         return "ok" if self.outcome == self.Outcome.COMPLETED else "failed"

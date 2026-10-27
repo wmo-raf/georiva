@@ -60,3 +60,120 @@
     margin: 0;
     word-break: break-all;
 }
+
+/* The dashboard's failures panel: a card, one line per failure group (ADR 0033). */
+.gr-failures {
+    margin-bottom: 2.5em;
+    border: 1px solid var(--w-color-border-furniture);
+    border-radius: 8px;
+    background: var(--w-color-surface-page);
+    overflow: hidden;
+}
+
+.gr-failures__header {
+    display: flex;
+    align-items: baseline;
+    gap: 1em;
+    padding: 0.9em 1.5em;
+    background: var(--w-color-surface-header);
+    border-bottom: 1px solid var(--w-color-border-furniture);
+}
+
+.gr-failures__title {
+    margin: 0;
+    font-size: 1.1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.gr-failures__badge {
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1;
+    padding: 0.25em 0.6em;
+    border-radius: 999px;
+    color: var(--w-color-white);
+    background: var(--w-color-critical-200);
+}
+
+.gr-failures__window {
+    font-size: 0.8em;
+    color: var(--w-color-text-meta);
+}
+
+.gr-failures__all {
+    margin-left: auto;
+    font-size: 0.85em;
+}
+
+.gr-failures__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.gr-failures__row {
+    display: flex;
+    align-items: baseline;
+    gap: 1em;
+    padding: 0.55em 1.5em;
+    border-bottom: 1px solid var(--w-color-border-furniture);
+    white-space: nowrap;
+}
+
+.gr-failures__row:last-child {
+    border-bottom: 0;
+}
+
+.gr-failures__row::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--w-color-critical-200);
+    align-self: center;
+}
+
+.gr-failures__label {
+    font-weight: 600;
+}
+
+.gr-failures__type,
+.gr-failures__when {
+    font-size: 0.8em;
+    color: var(--w-color-text-meta);
+}
+
+.gr-failures__when {
+    font-family: monospace;
+}
+
+.gr-failures__count {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--w-color-critical-200);
+}
+
+.gr-failures__summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.85em;
+    color: var(--w-color-text-meta);
+}
+
+.gr-failures__more {
+    display: block;
+    padding: 0.6em 1.5em;
+    font-size: 0.85em;
+    border-top: 1px solid var(--w-color-border-furniture);
+}
+
+.gr-failures__empty {
+    margin: 0;
+    padding: 1em 1.5em;
+    color: var(--w-color-text-meta);
+}

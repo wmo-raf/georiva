@@ -1,13 +1,23 @@
 {% load i18n %}
 <section class="gr-failures" aria-label="{% trans 'Recent failures' %}">
-    <h2 class="gr-failures__title">{% trans "Recent failures" %}</h2>
-    {% if failures %}
-        <ul class="gr-history__list">
-            {% for row in failures %}
-                {% include "georivaevents/_history_row.html" %}
+    <div class="gr-failures__header">
+        <h2 class="gr-failures__title">
+            {% trans "Recent failures" %}
+            {% if failures.groups %}<span class="gr-failures__badge">{{ failures.groups|length|add:failures.more }}</span>{% endif %}
+        </h2>
+        <span class="gr-failures__window">{% blocktrans %}Last {{ days }} days{% endblocktrans %}</span>
+        {% if failures.groups %}<a class="gr-failures__all" href="{{ failures_url }}">{% trans "View all failures" %} →</a>{% endif %}
+    </div>
+    {% if failures.groups %}
+        <ul class="gr-failures__list">
+            {% for group in failures.groups %}
+                {% include "georivaevents/_failure_group_row.html" %}
             {% endfor %}
         </ul>
+        {% if failures.more %}
+            <a class="gr-failures__more" href="{{ failures_url }}">{% blocktrans count n=failures.more %}and {{ n }} more{% plural %}and {{ n }} more{% endblocktrans %} →</a>
+        {% endif %}
     {% else %}
-        <p class="help-text">{% blocktrans %}No failures in the last {{ days }} days.{% endblocktrans %}</p>
+        <p class="gr-failures__empty">{% blocktrans %}No failures in the last {{ days }} days.{% endblocktrans %}</p>
     {% endif %}
 </section>

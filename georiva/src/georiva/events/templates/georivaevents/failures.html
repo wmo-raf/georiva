@@ -1,0 +1,52 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n %}
+
+{% block titletag %}{% trans "Failures" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .gr-failures-page__filter {
+            margin-bottom: 1em;
+        }
+
+        .gr-failures-page__pagination {
+            margin-top: 1.2em;
+            font-size: 0.85em;
+            color: var(--w-color-grey-400);
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <p class="help-text">
+        {% blocktrans %}Failed and refused events of this organisation in the last {{ days }} days, newest first.{% endblocktrans %}
+    </p>
+    {% if filter_query %}
+        <p class="gr-failures-page__filter">
+            {% if group_label %}<strong>{{ group_label }}</strong>{% endif %}
+            {% if rows %}· {{ rows.0.type_label }}{% endif %}
+            · <a href="{% url 'events_failures' %}">{% trans "Clear filter" %}</a>
+        </p>
+    {% endif %}
+    {% if rows %}
+        <ul class="gr-history__list">
+            {% for row in rows %}
+                {% include "georivaevents/_history_row.html" %}
+            {% endfor %}
+        </ul>
+        {% if page.paginator.num_pages > 1 %}
+            <div class="gr-failures-page__pagination">
+                {% if page.has_previous %}
+                    <a href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page.previous_page_number }}">{% trans "Previous" %}</a>
+                {% endif %}
+                {% blocktrans with n=page.number total=page.paginator.num_pages %}Page {{ n }} of {{ total }}{% endblocktrans %}
+                {% if page.has_next %}
+                    <a href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page.next_page_number }}">{% trans "Next" %}</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% else %}
+        <p class="help-text">{% blocktrans %}No failures in the last {{ days }} days.{% endblocktrans %}</p>
+    {% endif %}
+{% endblock %}
