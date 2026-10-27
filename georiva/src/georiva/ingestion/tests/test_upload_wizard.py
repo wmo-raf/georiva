@@ -1,11 +1,14 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import xarray as xr
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+from georiva.ingestion.upload_wizard_views import SAMPLE_MAX_BYTES, _thinned
 from georiva.organisations.testing import dial_org, join_org, make_organisation, org_host
 
 User = get_user_model()
@@ -216,8 +219,7 @@ class UploadSampleAjaxTests(TestCase):
             {"name": "2t", "long_name": "2m temp", "units": units},
         ]
         mock_info = MagicMock()
-        mock_info.data.min.return_value = vmin
-        mock_info.data.max.return_value = vmax
+        mock_info.data = xr.DataArray(np.array([[vmin, vmax]]), dims=("y", "x"))
         mock_plugin.open_variable.return_value.__enter__.return_value = mock_info
         return mock_plugin
 
@@ -286,6 +288,36 @@ class UploadSampleAjaxTests(TestCase):
             response = self.client.post(UPLOAD_SAMPLE_URL, {"sample_file": sample})
         self.assertIn("error", response.json())
 
+    def test_refuses_a_sample_over_the_size_limit_without_opening_it(self):
+        mock_plugin = self._mock_plugin()
+        with patch("georiva.ingestion.upload_wizard_views.SAMPLE_MAX_BYTES", 3):
+            data = self._post_sample(mock_plugin).json()
+        self.assertIn("larger than", data["error"])
+        mock_plugin.list_variables.assert_not_called()
+
+    def test_value_range_is_scanned_from_a_thinned_sample(self):
+        mock_plugin = self._mock_plugin()
+        mock_plugin.open_variable.return_value.__enter__.return_value.data = xr.DataArray(
+            np.arange(100.0).reshape(10, 10), dims=("y", "x")
+        )
+        with patch("georiva.ingestion.upload_wizard_views.SCAN_MAX_POINTS", 25):
+            var = self._post_sample(mock_plugin).json()["variables"][0]
+        # Every second row and column: 0 … 88, so 99 is never read.
+        self.assertEqual((var["value_min"], var["value_max"]), (0.0, 90.0))
+
+
+class ThinnedTests(SimpleTestCase):
+    def test_leaves_a_small_array_whole(self):
+        data = xr.DataArray(np.zeros((4, 5)), dims=("y", "x"))
+        self.assertIs(_thinned(data, max_points=20), data)
+
+    def test_strides_every_dimension_to_fit_the_budget(self):
+        data = xr.DataArray(np.zeros((40, 180, 360)), dims=("level", "y", "x"))
+        thinned = _thinned(data, max_points=10_000)
+        self.assertLessEqual(thinned.size, 10_000)
+        self.assertEqual(thinned.dims, data.dims)
+        self.assertTrue(all(n > 1 for n in thinned.shape))
+
 
 # =============================================================================
 # Step 3 — File & variable selection
@@ -310,6 +342,11 @@ class Step3CombinedTests(TestCase):
 
     def test_step3_renders(self):
         self.assertEqual(self.client.get(STEP3_URL).status_code, 200)
+
+    def test_step3_refuses_oversized_samples_before_sending_them(self):
+        response = self.client.get(STEP3_URL)
+        self.assertContains(response, f"const MAX_BYTES    = {SAMPLE_MAX_BYTES};")
+        self.assertContains(response, "file.size > MAX_BYTES")
 
     def test_step3_without_config_name_redirects_to_step2(self):
         _seed_session(self.client, {"catalog_mode": "create"})

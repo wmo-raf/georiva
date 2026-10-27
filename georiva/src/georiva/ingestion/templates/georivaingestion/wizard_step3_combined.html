@@ -215,6 +215,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
     const ACCEPT_EXTS  = '{{ accept_extensions|escapejs }}'.split(',').map(function (e) { return e.trim().toLowerCase(); });
     const FORMAT_LABEL = '{{ format_label|escapejs }}';
+    const MAX_BYTES    = {{ sample_max_bytes }};
+    const TOO_BIG      = '{{ sample_too_big|escapejs }}';
 
     const GR_RE = /^GR--(\d{8}T\d{4})--(.+)$/i;
     const FMT_PATTERNS = {
@@ -380,6 +382,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const ext = fileExtension(file.name);
         if (ACCEPT_EXTS.length && !ACCEPT_EXTS.includes(ext)) {
             dzErrorMsg.textContent = '{% trans "Wrong file type." %} ' + FORMAT_LABEL + ' {% trans "files only" %} (' + ACCEPT_EXTS.join(', ') + ')';
+            dzShow('error');
+            return;
+        }
+        if (file.size > MAX_BYTES) {
+            dzErrorMsg.textContent = TOO_BIG;
             dzShow('error');
             return;
         }
