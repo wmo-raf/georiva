@@ -751,6 +751,24 @@ database lookup.
 | Cache / Broker (`...-redis`)              | Redis                                 | Celery broker, application cache, and Bucket-notification bus                     |
 | Object Storage (`...-minio`)              | MinIO                                 | S3-compatible storage for all binary assets                               |
 
+### 9.1.1 Sender endpoint for push feeds
+
+Machine senders upload over the S3 API only ([ADR-0034](../adr/0034-push-feeds-replace-manual-upload.md)); there is
+no FTP or SFTP. The web proxy has a second server block for it, matched on any name starting `s3.` (for example
+`s3.example.org`, or `s3.localhost` in development). It proxies straight to MinIO with the `Host` header preserved, so
+request signatures verify, and streams bodies without buffering to disk, so multi-GB multipart uploads work.
+
+- Point DNS for `s3.<your domain>` at the proxy and set `MINIO_PUBLIC_ENDPOINT` to that name. The feed page builds its
+  `rclone` config from it.
+- Authorisation stays with MinIO: each sender's credentials may only `PutObject` under its own feed's prefix in
+  `incoming`. nginx adds no tenancy logic.
+- Until TLS fronts the proxy the endpoint is plain HTTP and credentials travel in the clear. Once TLS is in place move
+  the `s3.*` server block to `listen 443 ssl` and set `MINIO_PUBLIC_ENDPOINT_USE_SSL=true`; senders must then use
+  `https://`.
+
+Check it with `rclone copy file.nc sender:incoming/<org>/<catalog>/` using an `s3` remote whose `endpoint` is the
+proxy and `provider = Minio`.
+
 ### 9.2 Key Infrastructure Decisions
 
 - **MinIO over cloud S3:** MinIO provides S3 API compatibility while keeping the entire stack self-contained for
