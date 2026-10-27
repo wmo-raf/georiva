@@ -49,7 +49,7 @@ def urlconf_georivacore():
 # The "Data" menu group: creation (Add Data) first, then the acquisition
 # surfaces. Catalogs sits above this group as a top-level entry (the Catalog
 # viewset's add_to_admin_menu, order 390); derived products are reached from
-# each Data Feed's dashboard, not from a menu item.
+# each pull feed's dashboard, not from a menu item.
 @hooks.register("register_admin_menu_item")
 def register_data_menu():
     return SubmenuMenuItem(
@@ -57,7 +57,7 @@ def register_data_menu():
         Menu(
             items=[
                 MenuItem(_("Add Data"), reverse_lazy("add_data"), icon_name="plus", order=10),
-                MenuItem(_("Automated Sources"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
+                MenuItem(_("Pull feeds"), reverse_lazy("data_feed_list"), icon_name="file-import", order=30),
                 MenuItem(_("Push feeds"), reverse_lazy("push_feed_list"), icon_name="upload", order=40),
             ]
         ),

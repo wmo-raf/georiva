@@ -36,9 +36,9 @@ class DataFeedChooserViewSet(OrgScopedChooserViewSetMixin, ChooserViewSet):
     model = DataFeed
 
     icon = "file-import"
-    choose_one_text = "Choose a Data Feed"
-    choose_another_text = "Choose another Data Feed"
-    edit_item_text = "Edit this Data Feed"
+    choose_one_text = "Choose a pull feed"
+    choose_another_text = "Choose another pull feed"
+    edit_item_text = "Edit this pull feed"
 
 
 admin_viewsets = [

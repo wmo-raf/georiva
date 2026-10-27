@@ -301,7 +301,7 @@ class ControlsSurviveEmptyResultsTests(RowRenderBase):
 class EmptyStateTests(RowRenderBase):
     def test_no_feeds_at_all_says_so(self):
         response = self.client.get(self.url)
-        self.assertContains(response, "No data feeds")
+        self.assertContains(response, "No pull feeds")
 
     def test_no_search_matches_names_the_query(self):
         _make_feed("CHIRPS Daily", last_run_status="success", last_run_at=_ago(minutes=5))

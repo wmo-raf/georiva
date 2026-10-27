@@ -100,7 +100,7 @@ class DataFeedIndexView(OrgScopedViewMixin, IndexView):
 
     model = DataFeed
     paginate_by = 20
-    page_title = gettext_lazy("Data Feeds")
+    page_title = gettext_lazy("Pull feeds")
     header_icon = "file-import"
     search_fields = ["name"]
     index_url_name = "data_feed_list"
@@ -264,7 +264,7 @@ class DataFeedIndexView(OrgScopedViewMixin, IndexView):
             return reverse("data_feed_detail", kwargs={"pk": instance.pk})
 
         return [
-            DataFeedButtonsColumn("name", label=_("Data Feed"), get_url=get_url),
+            DataFeedButtonsColumn("name", label=_("Pull feed"), get_url=get_url),
             BooleanColumn("is_active", label=_("Active")),
         ]
 
@@ -272,7 +272,7 @@ class DataFeedIndexView(OrgScopedViewMixin, IndexView):
     def header_buttons(self):
         return [
             HeaderButton(
-                label=_("Add Data Feed"),
+                label=_("Add pull feed"),
                 url=reverse("data_feed_add_select"),
                 icon_name="plus",
             ),
@@ -281,7 +281,7 @@ class DataFeedIndexView(OrgScopedViewMixin, IndexView):
     def get_breadcrumbs_items(self):
         return [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-            {"url": None, "label": _("Data Feeds")},
+            {"url": None, "label": _("Pull feeds")},
         ]
 
 
@@ -355,7 +355,7 @@ def data_feed_detail(request, pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": None, "label": feed.name},
         ],
         "feed": feed,
@@ -428,7 +428,7 @@ def feed_product_toggle(request, feed_pk, product_pk):
         confirm_ctx={
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": detail_url, "label": product.data_feed.name},
                 {"url": None, "label": _("Disable")},
             ],
@@ -545,7 +545,7 @@ def feed_product_edit(request, feed_pk, product_pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": product.data_feed.name},
                 {"url": None, "label": product.display_label},
             ],
@@ -601,7 +601,7 @@ def feed_product_enable_new(request, feed_pk, definition_key):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
                 {"url": None, "label": _("Enable %s") % definition.label},
             ],
@@ -641,7 +641,7 @@ def feed_product_delete_orphan(request, feed_pk, product_pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": product.data_feed.name},
                 {"url": None, "label": _("Delete")},
             ],
@@ -696,7 +696,7 @@ def data_feed_edit(request, pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": pk}), "label": feed.name},
                 {"url": None, "label": _("Edit")},
             ],
@@ -757,7 +757,7 @@ def data_feed_delete(request, pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": pk}), "label": feed.name},
                 {"url": None, "label": _("Delete")},
             ],
@@ -838,7 +838,7 @@ def definition_collection_add(request, feed_pk, definition_key):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
                 {"url": None, "label": _("Add Collection")},
             ],
@@ -887,7 +887,7 @@ def definition_collection_edit(request, feed_pk, link_pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
                 {"url": None, "label": _("Edit Collection Config")},
             ],
@@ -924,7 +924,7 @@ def definition_collection_remove_confirm(request, feed_pk, link_pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
                 {"url": None, "label": _("Remove Collection")},
             ],
@@ -992,7 +992,7 @@ def definition_collection_vars_edit(request, feed_pk, link_pk):
         {
             "breadcrumbs_items": [
                 {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+                {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
                 {"url": reverse("data_feed_detail", kwargs={"pk": feed_pk}), "label": feed.name},
                 {"url": None, "label": _("Manage Variables")},
             ],
@@ -1031,10 +1031,10 @@ def data_feed_add_select(request):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
-            {"url": None, "label": _("Add Data Feed")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
+            {"url": None, "label": _("Add pull feed")},
         ],
-        "header_title": _("Add Data Feed"),
+        "header_title": _("Add pull feed"),
         "header_icon": "file-import",
         "items": items,
     }
@@ -1064,7 +1064,7 @@ def _get_model_or_redirect(request, model_name):
 def _wizard_breadcrumbs(model_name, verbose_name, current_label):
     return [
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+        {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
         {"url": reverse("setup_wizard_select"), "label": _("Setup Wizard")},
         {"url": reverse("wizard_step1_catalog", kwargs={"model_name": model_name}), "label": verbose_name},
         {"url": None, "label": current_label},
@@ -1217,7 +1217,7 @@ def setup_wizard_select(request):
     source_types = [{"model_name": cls.__name__, "verbose_name": cls._meta.verbose_name} for cls in capable]
     breadcrumbs = [
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+        {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
         {"url": None, "label": _("Setup Wizard")},
     ]
     return render(
@@ -1246,11 +1246,13 @@ def wizard_step1_catalog(request, model_name):
 
     verbose_name = model_cls._meta.verbose_name
     org = require_active_org(request)
-    # Only show catalogs that don't already have a DataFeed linked, and only this
+    # Only show catalogs that don't already have a feed, pull or push (ADR 0034), and only this
     # organisation's: the feed derives its storage prefix from the catalog's org,
     # so offering another tenant's catalog would send every fetched file into
     # *their* `{org}/` prefix.
-    unclaimed_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True).order_by("name")
+    unclaimed_catalogs = Catalog.objects.filter(
+        organisation=org, data_feed__isnull=True, push_feed__isnull=True
+    ).order_by("name")
     catalog_defaults = model_cls.get_catalog_defaults()
     file_format_choices = Catalog.FileFormat.choices
 
@@ -1301,7 +1303,7 @@ def wizard_step1_catalog(request, model_name):
 
     breadcrumbs = [
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+        {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
         {"url": reverse("setup_wizard_select"), "label": _("Setup Wizard")},
         {"url": None, "label": verbose_name},
         {"url": None, "label": _("Step 1 of 3 — Catalog")},
@@ -1344,7 +1346,7 @@ def wizard_step2_feed(request, model_name):
 
         errors = []
         if not new_feed_name:
-            errors.append(_("Please enter a name for the Data Feed."))
+            errors.append(_("Please enter a name for the Pull feed."))
 
         global_config = {}
         if extra_form is not None:
@@ -1795,7 +1797,7 @@ def derived_product_runs(request, product_pk):
         # Rendered by the slim header via wagtailadmin/generic/base.html.
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}), "label": product.data_feed.name},
             {"url": None, "label": product.display_label},
         ],
@@ -1861,7 +1863,7 @@ def data_feed_fetch_runs(request, feed_pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
             {"url": None, "label": _("Acquisition Activity")},
         ],
@@ -1957,7 +1959,7 @@ def data_feed_ingestions(request, feed_pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
             {"url": None, "label": _("Ingestion Activity")},
         ],
@@ -2039,7 +2041,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
             {"url": runs_url, "label": _("Acquisition Activity")},
             {"url": None, "label": _("Run")},
@@ -2126,7 +2128,7 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
             {"url": detail_url, "label": _("Run")},
             {"url": None, "label": _("Recover")},
@@ -2175,7 +2177,7 @@ def derived_product_run_detail(request, product_pk, run_pk):
         # Rendered by the slim header via wagtailadmin/generic/base.html.
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": product.data_feed_id}), "label": product.data_feed.name},
             {"url": runs_url, "label": product.display_label},
             {"url": None, "label": _("Run")},
@@ -2212,7 +2214,7 @@ def derived_product_chain(request, feed_pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
             {"url": None, "label": _("Chain")},
         ],
@@ -2239,7 +2241,7 @@ def item_lineage(request, item_pk):
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("data_feed_list"), "label": _("Data Feeds")},
+            {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": None, "label": _("Lineage")},
         ],
         "header_title": _("Item lineage — %s") % item,

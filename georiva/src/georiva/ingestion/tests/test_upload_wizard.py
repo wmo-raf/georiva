@@ -1013,6 +1013,11 @@ class CatalogOwnershipTests(TestCase):
         self.assertEqual(response.status_code, 200)  # re-rendered with error
         self.assertNotIn(SESSION_KEY, self.client.session)
 
+    def test_step1_refusal_names_the_pull_feed(self):
+        response = self.client.post(STEP1_URL, {"catalog_mode": "select", "catalog_id": str(self.claimed.pk)})
+        self.assertContains(response, "already has a pull feed")
+        self.assertContains(response, "CHIRPS")
+
     def test_provision_rejects_feed_claimed_catalog(self):
         session = _full_session()
         session["catalog_mode"] = "select"

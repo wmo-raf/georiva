@@ -21,9 +21,11 @@ import os
 from datetime import timedelta
 from functools import partial
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.utils import timezone as dj_timezone
+from django.utils.translation import gettext_lazy as _
 from wagtail.snippets.models import register_snippet
 
 from georiva.events.context import ensure_context, update_context
@@ -1020,6 +1022,32 @@ class PushFeed(models.Model):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        self.refuse_pull_fed_catalog()
+
+    def refuse_pull_fed_catalog(self):
+        """A catalog has one route in (ADR 0034): not a push feed beside a pull feed."""
+        if not self.catalog_id:
+            return
+        from georiva.sources.models import DataFeed
+
+        pull_feed = DataFeed.objects.filter(catalog_id=self.catalog_id).first()
+        if pull_feed:
+            raise ValidationError(
+                {
+                    "catalog": _(
+                        "This catalog already has a pull feed, \u201c%(name)s\u201d. A catalog has at most one feed."
+                    )
+                    % {"name": pull_feed.name}
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            self.refuse_pull_fed_catalog()
+        super().save(*args, **kwargs)
 
     def strptime_pattern(self) -> str | None:
         """Return the Python strptime pattern, or None for content-based formats."""

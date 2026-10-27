@@ -33,7 +33,7 @@ class DataMenuTests(TestCase):
             sub_labels,
             [
                 "Add Data",
-                "Automated Sources",
+                "Pull feeds",
                 "Push feeds",
             ],
         )
@@ -51,7 +51,7 @@ class DataMenuTests(TestCase):
         from wagtail.admin.menu import admin_menu
 
         labels = [str(i.label) for i in admin_menu.menu_items_for_request(self._request())]
-        for old in ("Automated Sources", "Push feeds", "Derived Products"):
+        for old in ("Pull feeds", "Push feeds", "Derived Products"):
             self.assertNotIn(old, labels)
 
 
