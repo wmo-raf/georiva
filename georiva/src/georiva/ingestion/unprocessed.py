@@ -31,6 +31,27 @@ class UnprocessedFile:
     reference_time: datetime | None = None
 
 
+def admit_untracked(unprocessed_file: UnprocessedFile) -> bool:
+    """Whether an untracked file may be ingested (ADR 0034).
+
+    A file found in ``incoming`` is attributed to its push feed, or quarantined as a
+    notification's would be. A failure here skips that one file, so a bad move cannot
+    stop the rest of the scan; the file stays in ``incoming`` for the next one.
+    """
+    import logging
+
+    from georiva.core.storage import BucketType
+    from georiva.ingestion.consumer import admit_found_in_incoming
+
+    if unprocessed_file.bucket != BucketType.INCOMING:
+        return True
+    try:
+        return admit_found_in_incoming(unprocessed_file.file_path)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not admit %s found in incoming", unprocessed_file.file_path)
+        return False
+
+
 def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
     """Queue Ingestion for a find_unprocessed() result: register untracked
     files, reset reingest candidates, and dispatch one processing task per

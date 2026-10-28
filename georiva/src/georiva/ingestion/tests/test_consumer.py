@@ -431,3 +431,11 @@ class SweepFoundIncomingTests(TestCase):
         self._sweep(key)
 
         self.assertEqual(Delivery.objects.filter(file_path=key).count(), 1)
+
+    def test_a_failing_quarantine_does_not_stop_the_sweep(self):
+        Catalog.objects.create(organisation=self.catalog.organisation, name="Pull", slug="pull", file_format="netcdf")
+        self.quarantine_storage.move_between.side_effect = RuntimeError("minio down")
+
+        self._sweep("test-org/pull/a.nc")  # must not raise
+
+        self.assertFalse(FileIngestion.objects.filter(file_path="test-org/pull/a.nc").exists())
