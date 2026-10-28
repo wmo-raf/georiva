@@ -26,7 +26,7 @@ class AddDataFrontDoorTests(TestCase):
     def test_front_door_speaks_data_manager_language(self):
         html = self.client.get(reverse("add_data")).content.decode()
         self.assertIn("automatically", html.lower())
-        self.assertIn("Sent to GeoRiva", html)
+        self.assertIn("sent to GeoRiva", html)
 
     def test_front_door_requires_admin_access(self):
         self.client.logout()
