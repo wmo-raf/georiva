@@ -76,6 +76,7 @@ def register_push_feed_urls():
         delivery_retry,
         push_feed_delete,
         push_feed_list,
+        push_feed_list_results,
         push_sender_add,
         push_sender_revoke,
         push_sender_rotate,
@@ -88,6 +89,8 @@ def register_push_feed_urls():
 
     return [
         path("push-feeds/", push_feed_list, name="push_feed_list"),
+        # Results-only fragment the search box swaps in via AJAX.
+        path("push-feeds/results/", push_feed_list_results, name="push_feed_list_results"),
         path("push-feeds/<int:pk>/delete/", push_feed_delete, name="push_feed_delete"),
         path("push-feeds/<int:pk>/", push_feed_page, name="push_feed_page"),
         path("push-feeds/<int:pk>/extract-times/", push_feed_extract_times, name="push_feed_extract_times"),

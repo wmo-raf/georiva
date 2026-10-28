@@ -1,45 +1,148 @@
 import logging
+from collections import Counter
 
 from django.contrib import messages
+from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.utils.functional import cached_property
+from django.utils.timesince import timesince
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
+from wagtail.admin.ui.tables import TitleColumn
+from wagtail.admin.views.generic import IndexView
+from wagtail.admin.widgets import HeaderButton
 
-from georiva.organisations.access import (
-    get_org_object_or_404,
-    scoped_queryset,
-)
+from georiva.ingestion.models import PushFeed
+from georiva.ingestion.push_health import PushHealth, annotate_push_feeds, push_health
+from georiva.organisations.access import get_org_object_or_404
+from georiva.organisations.scoping import OrgScopedViewMixin
+from georiva.sources.views import _humanize_minutes
 
 logger = logging.getLogger(__name__)
 
 
-def push_feed_list(request):
-    from georiva.ingestion.models import PushFeed
+class PushFeedIndexView(OrgScopedViewMixin, IndexView):
+    """Push-feed listing: the pull index's status rows, on Wagtail's generic IndexView.
 
-    feeds = list(
-        PushFeed.with_last_delivery(scoped_queryset(request, PushFeed.objects.all()))
-        .select_related("catalog")
-        .order_by("catalog__name", "name")
-    )
-    for feed in feeds:
-        feed.overdue = feed.overdue_text()
+    Health is resolved in Python (see ``push_health``), so the health filter and the
+    health-first ordering are expressed over primary keys rather than a SQL annotation.
+    """
 
-    return render(
-        request,
-        "georivaingestion/push_feed_list.html",
-        {
-            # Rendered by the slim header via wagtailadmin/generic/base.html.
-            "breadcrumbs_items": [
-                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-                {"url": None, "label": _("Push feeds")},
-            ],
-            "header_title": _("Push feeds"),
-            "header_icon": "upload",
-            "add_url": reverse("upload_wizard_step1"),
-            "feeds": feeds,
-        },
-    )
+    model = PushFeed
+    paginate_by = 20
+    page_title = gettext_lazy("Push feeds")
+    header_icon = "upload"
+    search_fields = ["name", "catalog__name"]
+    index_url_name = "push_feed_list"
+    index_results_url_name = "push_feed_list_results"
+    template_name = "georivaingestion/push_feed_list.html"
+    results_template_name = "georivaingestion/push_feed_list_results.html"
+
+    def get_base_queryset(self):
+        return annotate_push_feeds(PushFeed.objects.select_related("catalog"))
+
+    @cached_property
+    def _health_by_pk(self):
+        """Every feed this organisation has, whatever the search or filter, with its state."""
+        now = timezone.now()
+        feeds = self.scope(annotate_push_feeds(PushFeed.objects.all(), now))
+        return {feed.pk: push_health(feed, now) for feed in feeds}
+
+    @cached_property
+    def active_health(self):
+        """The requested health rank, or None. Unknown values are ignored rather than 404ing."""
+        try:
+            rank = int(self.request.GET.get("health"))
+        except (TypeError, ValueError):
+            return None
+        return rank if rank in {state.rank for state in PushHealth} else None
+
+    def filter_queryset(self, queryset):
+        queryset = super().filter_queryset(queryset)
+        if self.active_health is not None:
+            pks = [pk for pk, state in self._health_by_pk.items() if state.rank == self.active_health]
+            queryset = queryset.filter(pk__in=pks)
+        return queryset
+
+    def order_queryset(self, queryset):
+        # Health first, so a feed needing attention lands on page 1; pk ends it because
+        # names are not unique and an unstable order repeats rows across pages.
+        ranks = [When(pk=pk, then=Value(state.rank)) for pk, state in self._health_by_pk.items()]
+        health_rank = (
+            Case(*ranks, default=Value(PushHealth.OK.rank), output_field=IntegerField())
+            if ranks
+            else Value(PushHealth.OK.rank)
+        )
+        return queryset.annotate(health_rank=health_rank).order_by("health_rank", "name", "pk")
+
+    def _listing_url(self, health=None):
+        """A listing URL preserving search, with pagination reset."""
+        params = self.request.GET.copy()
+        params.pop(self.page_kwarg, None)
+        if health is None:
+            params.pop("health", None)
+        else:
+            params["health"] = health
+        encoded = params.urlencode()
+        return f"?{encoded}" if encoded else "?"
+
+    def _health_chips(self):
+        """Per-state counts over every feed, so a clicked chip never hides the others."""
+        counts = Counter(state.rank for state in self._health_by_pk.values())
+        return [
+            {"state": state, "count": counts[state.rank], "url": self._listing_url(health=state.rank)}
+            for state in sorted(PushHealth, key=lambda s: s.rank)
+            if counts[state.rank] or state.rank == self.active_health
+        ]
+
+    def _build_row(self, feed, now):
+        health = self._health_by_pk.get(feed.pk) or push_health(feed, now)
+        last = feed.last_delivery_at()
+        interval = feed.expected_interval
+        return {
+            "feed": feed,
+            "health": health,
+            "detail_url": reverse("push_feed_page", args=[feed.pk]),
+            "delete_url": reverse("push_feed_delete", args=[feed.pk]),
+            "interval_label": _humanize_minutes(int(interval.total_seconds() // 60)) if interval else "",
+            # timesince returns "1 week, 5 days"; on a scan surface the leading unit is the signal.
+            "last_delivery_label": timesince(last, now).split(",")[0] if last else "",
+            "recent_rejections": feed.recent_rejections,
+            "accepted_bytes": feed.accepted_bytes or 0,
+        }
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        now = timezone.now()
+        context["feed_rows"] = [self._build_row(f, now) for f in context["object_list"]]
+        chips = self._health_chips()
+        context["health_chips"] = chips
+        context["total_count"] = sum(chip["count"] for chip in chips)
+        context["all_chip_url"] = self._listing_url(health=None)
+        context["active_health"] = self.active_health
+        context["add_url"] = reverse("upload_wizard_step1")
+        return context
+
+    @cached_property
+    def columns(self):
+        return [TitleColumn("name", label=_("Push feed"), get_url=lambda f: reverse("push_feed_page", args=[f.pk]))]
+
+    @cached_property
+    def header_buttons(self):
+        return [HeaderButton(label=_("New push feed"), url=reverse("upload_wizard_step1"), icon_name="plus")]
+
+    def get_breadcrumbs_items(self):
+        return [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": None, "label": _("Push feeds")},
+        ]
+
+
+push_feed_list = PushFeedIndexView.as_view()
+push_feed_list_results = PushFeedIndexView.as_view(results_only=True)
 
 
 def push_feed_delete(request, pk):

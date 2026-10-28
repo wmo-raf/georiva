@@ -1,57 +1,13 @@
-{% extends "wagtailadmin/generic/base.html" %}
-{% load i18n wagtailadmin_tags %}
+{% extends "wagtailadmin/generic/index.html" %}
+{% load i18n static %}
 
-{% block titletag %}{% trans "Push feeds" %}{% endblock %}
+{% comment %}
+Outer shell: page chrome plus the row stylesheet shared with the pull-feed
+index. The rows live in push_feed_list_results.html, which the search box
+re-renders on its own.
+{% endcomment %}
 
 {% block extra_css %}
-<style>
-    .mul-actions { display: flex; justify-content: flex-end; margin-bottom: 1em; }
-</style>
-{% endblock %}
-
-{% block main_content %}
-<div class="mul-actions">
-    <a href="{{ add_url }}" class="button bicolor button--icon">
-        <span class="icon-wrapper">
-            <svg class="icon icon-plus icon" aria-hidden="true">
-                <use href="#icon-plus"></use>
-            </svg>
-        </span>
-        {% trans "New push feed" %}
-    </a>
-</div>
-
-{% if feeds %}
-<table class="listing">
-    <thead>
-        <tr>
-            <th>{% trans "Push feed" %}</th>
-            <th>{% trans "Catalog" %}</th>
-            <th>{% trans "Forecast" %}</th>
-            <th>{% trans "Filename format" %}</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for feed in feeds %}
-        <tr>
-            <td><a href="{% url 'push_feed_page' feed.pk %}">{{ feed.name }}</a>
-                {% if feed.overdue %}<span style="background: var(--w-color-critical-200); color: var(--w-color-white); padding: 0.1em 0.6em; border-radius: 1em; font-size: 0.85em;">{{ feed.overdue }}</span>{% endif %}</td>
-            <td>{{ feed.catalog.name }}</td>
-            <td>{% if feed.is_forecast %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td>
-            <td><code>{{ feed.valid_time_format }}</code></td>
-            <td>
-                <a href="{% url 'push_feed_page' feed.pk %}" class="button button-small">{% trans "Upload" %}</a>
-                <a href="{% url 'push_feed_delete' feed.pk %}" class="button button-small no">{% trans "Delete" %}</a>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p class="help-block help-info">
-    {% trans "No push feeds yet." %}
-    <a href="{% url 'upload_wizard_step1' %}">{% trans "Create your first push feed." %}</a>
-</p>
-{% endif %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'core/css/feed_rows.css' %}">
 {% endblock %}

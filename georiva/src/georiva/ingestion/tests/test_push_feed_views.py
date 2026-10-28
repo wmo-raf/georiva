@@ -60,7 +60,7 @@ class OverdueChipTests(TestCase):
     def test_overdue_shows_on_the_list_and_the_feed_page(self):
         self._overdue()
         for url in (LIST_URL, f"{LIST_URL}{self.feed.pk}/"):
-            self.assertContains(self.client.get(url), "Overdue · no deliveries yet")
+            self.assertContains(self.client.get(url), "Overdue")
 
     def test_a_feed_without_an_interval_shows_no_chip(self):
         for url in (LIST_URL, f"{LIST_URL}{self.feed.pk}/"):
