@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib import messages
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect, render
@@ -8,6 +10,8 @@ from georiva.organisations.access import (
     get_org_object_or_404,
     scoped_queryset,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def push_feed_list(request):
@@ -151,3 +155,30 @@ def _get_sender(request, pk, sender_pk):
         pk=sender_pk,
         push_feed_id=pk,
     )
+
+
+def delivery_retry(request, pk, delivery_pk):
+    """Send a rejected delivery's file back to ``incoming``; it is checked again there."""
+    from georiva.ingestion.models import Delivery
+    from georiva.ingestion.quarantine import retry
+
+    delivery = get_org_object_or_404(
+        request,
+        Delivery.objects.select_related("push_feed__catalog__organisation", "push_sender"),
+        pk=delivery_pk,
+        push_feed_id=pk,
+    )
+    if request.method != "POST":
+        return redirect("push_feed_page", pk=pk)
+    if delivery.status != Delivery.Status.REJECTED:
+        messages.error(request, _("Only a rejected delivery can be retried."))
+        return redirect("push_feed_page", pk=pk)
+
+    try:
+        retry(delivery, request.user)
+    except Exception:
+        logger.exception("Retry of delivery %s failed", delivery.pk)
+        messages.error(request, _("The file could not be moved back. It may have expired from quarantine."))
+    else:
+        messages.success(request, _("'%s' sent back for ingestion.") % delivery.original_filename)
+    return redirect("push_feed_page", pk=pk)

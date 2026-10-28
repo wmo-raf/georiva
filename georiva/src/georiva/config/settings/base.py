@@ -338,6 +338,11 @@ GEORIVA_BUCKETS = {
     "publications": {
         "name": "georiva-publications",
     },
+    # Deliveries refused out of incoming (ADR 0034). Private and notification-free:
+    # the Sweep and the consumer must never see a file that was turned away.
+    "quarantine": {
+        "name": "georiva-quarantine",
+    },
 }
 
 GEORIVA_ASSETS_BUCKET = GEORIVA_BUCKETS.get("assets", {}).get("name")

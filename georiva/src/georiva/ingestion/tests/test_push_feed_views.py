@@ -90,3 +90,40 @@ class PushFeedDeleteTests(TestCase):
     def test_delete_unknown_pk_returns_404(self):
         response = self.client.post(DELETE_URL.format(99999))
         self.assertEqual(response.status_code, 404)
+
+
+class DeliveryRetryViewTests(TestCase):
+    def setUp(self):
+        from georiva.ingestion.models import Delivery
+
+        self.user = User.objects.create_superuser("admin5", "g@h.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        self.feed = _make_feed(_make_catalog())
+        self.delivery = Delivery.receive(push_feed=self.feed, filename="x.nc", file_path="test-org/cat/x.nc")
+        self.delivery.mark_rejected("not written by a sender of this feed")
+        self.url = f"/admin/push-feeds/{self.feed.pk}/deliveries/{self.delivery.pk}/retry/"
+
+    def test_the_feed_page_offers_retry_on_a_rejected_delivery(self):
+        response = self.client.get(f"/admin/push-feeds/{self.feed.pk}/")
+        self.assertContains(response, self.url)
+        self.assertContains(response, "not written by a sender of this feed")
+
+    def test_retry_moves_the_file_back_and_records_a_new_delivery(self):
+        from unittest.mock import patch
+
+        from georiva.ingestion.models import Delivery
+
+        with patch("georiva.ingestion.quarantine.storage") as storage:
+            response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 302)
+        storage.move_between.assert_called_once_with(storage.quarantine, storage.incoming, "test-org/cat/x.nc")
+        self.assertEqual(Delivery.objects.filter(status=Delivery.Status.RECEIVED).count(), 1)
+
+    def test_get_does_not_retry(self):
+        from unittest.mock import patch
+
+        with patch("georiva.ingestion.quarantine.storage") as storage:
+            self.client.get(self.url)
+        storage.move_between.assert_not_called()

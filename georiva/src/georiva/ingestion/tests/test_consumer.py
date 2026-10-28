@@ -106,6 +106,9 @@ class MachineDeliveryAttributionTests(TestCase):
         other_feed = PushFeed.objects.create(catalog=other, name="Other", valid_time_format="CONTENT")
         self.stranger = PushSender.objects.create(push_feed=other_feed, label="stranger", access_key="AKOTHER")
         self.key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        patcher = patch("georiva.ingestion.quarantine.storage")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _arrive(self, principal, key=None):
         ev = _make_event("georiva-incoming", key or self.key)
@@ -147,18 +150,17 @@ class MachineDeliveryAttributionTests(TestCase):
         from georiva.ingestion.models import Delivery
 
         self._arrive("AKOTHER")
-        self.assertFalse(Delivery.objects.exists())
-
-    def test_unknown_writer_is_not_recorded(self):
-        from georiva.ingestion.models import Delivery
-
-        self._arrive("minioadmin")
-        self.assertFalse(Delivery.objects.exists())
+        delivery = Delivery.objects.get()
+        self.assertEqual(delivery.status, Delivery.Status.REJECTED)
+        self.assertIsNone(delivery.push_sender)
 
     def test_a_persons_upload_is_not_recorded_twice(self):
+        from django.contrib.auth.models import User
+
         from georiva.ingestion.models import Delivery
 
-        Delivery.receive(push_feed=self.feed, filename="x.nc", file_path=self.key)
+        person = User.objects.create(username="amina")
+        Delivery.receive(push_feed=self.feed, filename="x.nc", file_path=self.key, sent_by=person)
         self._arrive("minioadmin")
         self.assertEqual(Delivery.objects.count(), 1)
 
@@ -168,3 +170,182 @@ class MachineDeliveryAttributionTests(TestCase):
         self._arrive("AKALPHA")
         self._arrive("AKALPHA")
         self.assertEqual(Delivery.objects.count(), 1)
+
+
+class QuarantineTests(TestCase):
+    """A rejected file leaves ``incoming`` for quarantine, with a Delivery and a refused event (ADR 0034)."""
+
+    def setUp(self):
+        from georiva.ingestion.models import PushFeed, PushSender
+
+        self.org = make_organisation("test-org")
+        self.catalog = Catalog.objects.create(organisation=self.org, name="WRF", slug="wrf", file_format="netcdf")
+        self.feed = PushFeed.objects.create(catalog=self.catalog, name="WRF", valid_time_format="CONTENT")
+        self.sender = PushSender.objects.create(push_feed=self.feed, label="alpha", access_key="AKALPHA")
+        patcher = patch("georiva.ingestion.quarantine.storage")
+        self.storage = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _arrive(self, key, principal="AKALPHA"):
+        ev = _make_event("georiva-incoming", key)
+        ev["userIdentity"] = {"principalId": principal}
+        with (
+            patch("georiva.ingestion.consumer._resolve_origin", return_value=BucketType.INCOMING),
+            patch("georiva.ingestion.consumer.process_incoming_file") as task,
+        ):
+            _handle_event(ev)
+        return task
+
+    def _assert_quarantined(self, key):
+        self.storage.move_between.assert_called_once_with(self.storage.incoming, self.storage.quarantine, key)
+
+    def test_root_writing_into_a_feeds_area_is_quarantined_and_shown_on_the_feed(self):
+        from georiva.ingestion.models import Delivery, DeliveryRejected
+
+        key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        task = self._arrive(key, principal="minioadmin")
+
+        task.delay.assert_not_called()
+        self._assert_quarantined(key)
+        self.assertFalse(FileIngestion.objects.exists())
+        delivery = Delivery.objects.get()
+        self.assertEqual(delivery.status, Delivery.Status.REJECTED)
+        self.assertEqual(delivery.reason, "not written by a sender of this feed")
+        event = DeliveryRejected.objects.get()
+        self.assertEqual(event.organisation_id, self.org.pk)
+        self.assertEqual(event.failure_group_key(), f"push-feed:{self.feed.pk}")
+        self.assertEqual(event.outcome_class, "refused")
+        self.assertEqual(event.correlation_id, delivery.correlation_id)
+
+    def test_a_pull_fed_catalog_is_quarantined_without_a_delivery(self):
+        from georiva.ingestion.models import Delivery, DeliveryRejected
+        from georiva.sources.models import DataFeed
+
+        pull = Catalog.objects.create(organisation=self.org, name="Pull", slug="pull", file_format="netcdf")
+        DataFeed.objects.create(catalog=pull, name="Pull")
+        key = "test-org/pull/x.nc"
+        self._arrive(key)
+
+        self._assert_quarantined(key)
+        self.assertFalse(Delivery.objects.exists())
+        event = DeliveryRejected.objects.get()
+        self.assertEqual(event.organisation_id, self.org.pk)
+        self.assertEqual(event.failure_group_key(), "catalog:test-org/pull")
+        self.assertIn("pull feed", event.reason)
+
+    def test_a_catalog_with_no_feed_is_quarantined(self):
+        from georiva.ingestion.models import DeliveryRejected
+
+        Catalog.objects.create(organisation=self.org, name="Bare", slug="bare", file_format="netcdf")
+        self._arrive("test-org/bare/x.nc")
+        self.assertIn("no push feed", DeliveryRejected.objects.get().reason)
+
+    def test_an_unknown_organisation_is_unattributed(self):
+        from georiva.ingestion.models import DeliveryRejected
+
+        key = "nobody/wrf/x.nc"
+        self._arrive(key)
+
+        self._assert_quarantined(key)
+        event = DeliveryRejected.objects.get()
+        self.assertIsNone(event.organisation_id)
+        self.assertIn("Unknown organisation", event.reason)
+
+    def test_a_key_that_does_not_parse_is_quarantined(self):
+        from georiva.ingestion.models import DeliveryRejected
+
+        self._arrive("test-org/loose.nc")
+        self._assert_quarantined("test-org/loose.nc")
+        self.assertIn("Path check failed", DeliveryRejected.objects.get().reason)
+
+    def test_a_machine_delivery_whose_time_cannot_be_extracted_is_quarantined(self):
+        from georiva.ingestion.models import Delivery
+
+        with patch("georiva.ingestion.consumer._required_time_error", return_value="Could not extract a time"):
+            task = self._arrive("test-org/wrf/x.nc")
+
+        task.delay.assert_not_called()
+        delivery = Delivery.objects.get()
+        self.assertEqual(delivery.status, Delivery.Status.REJECTED)
+        self.assertEqual(delivery.push_sender, self.sender)
+        self.assertEqual(delivery.reason, "Could not extract a time")
+
+    def test_a_valid_delivery_is_not_quarantined(self):
+        task = self._arrive("test-org/wrf/GR--20260101T0000--wrf.nc")
+        task.delay.assert_called_once()
+        self.storage.move_between.assert_not_called()
+
+    def test_retry_moves_the_file_back_and_it_is_checked_again(self):
+        from django.contrib.auth.models import User
+
+        from georiva.ingestion.models import Delivery
+        from georiva.ingestion.quarantine import retry
+
+        key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        self._arrive(key, principal="minioadmin")
+        rejected = Delivery.objects.get()
+        self.storage.reset_mock()
+
+        fresh = retry(rejected, User.objects.create(username="ops"))
+
+        self.storage.move_between.assert_called_once_with(self.storage.quarantine, self.storage.incoming, key)
+        self.assertEqual(fresh.status, Delivery.Status.RECEIVED)
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Delivery.Status.REJECTED)
+
+        # The move back raises a notification written by GeoRiva's own credentials.
+        self.storage.reset_mock()
+        task = self._arrive(key, principal="minioadmin")
+        task.delay.assert_called_once()
+        self.storage.move_between.assert_not_called()
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, Delivery.Status.ACCEPTED)
+
+    def test_a_stale_received_delivery_does_not_admit_another_writer(self):
+        from datetime import timedelta
+
+        from django.contrib.auth.models import User
+        from django.utils import timezone
+
+        from georiva.ingestion.models import Delivery
+
+        key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        old = Delivery.receive(
+            push_feed=self.feed, filename="x.nc", file_path=key, sent_by=User.objects.create(username="amina")
+        )
+        Delivery.objects.filter(pk=old.pk).update(received_at=timezone.now() - timedelta(hours=1))
+
+        task = self._arrive(key, principal="minioadmin")
+
+        task.delay.assert_not_called()
+        self._assert_quarantined(key)
+
+    def test_a_file_cannot_be_retried_twice(self):
+        from django.contrib.auth.models import User
+
+        from georiva.ingestion.models import Delivery
+        from georiva.ingestion.quarantine import retry
+
+        self._arrive("test-org/wrf/GR--20260101T0000--wrf.nc", principal="minioadmin")
+        rejected = Delivery.objects.get()
+        user = User.objects.create(username="ops")
+        retry(rejected, user)
+        with self.assertRaises(ValueError):
+            retry(rejected, user)
+
+    def test_only_a_rejected_delivery_can_be_retried(self):
+        from georiva.ingestion.models import Delivery
+        from georiva.ingestion.quarantine import retry
+
+        delivery = Delivery.receive(push_feed=self.feed, filename="x.nc", file_path="test-org/wrf/x.nc")
+        with self.assertRaises(ValueError):
+            retry(delivery, None)
+
+    def test_quarantine_is_never_swept_or_notified(self):
+        from georiva.core.management.commands.setup_minio import BUCKET_CONFIGS
+        from georiva.ingestion.consumer import _get_ingest_buckets
+
+        self.assertEqual(BUCKET_CONFIGS["quarantine"]["expiry_days"], 30)
+        self.assertFalse(BUCKET_CONFIGS["quarantine"]["notify_on_create"])
+        self.assertFalse(BUCKET_CONFIGS["quarantine"]["public_read"])
+        self.assertNotIn("georiva-quarantine", _get_ingest_buckets())
