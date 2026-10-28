@@ -145,7 +145,7 @@ def sweep_unprocessed(sync: bool = False):
             write_sweep_intervention("unprocessed", why, log.pk if log else None, origin_bucket, file_path)
             raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
-    from georiva.ingestion.unprocessed import find_unprocessed
+    from georiva.ingestion.unprocessed import admit_untracked, find_unprocessed
 
     for unprocessed in find_unprocessed():
         reference_time_iso = unprocessed.reference_time.isoformat() if unprocessed.reference_time else None
@@ -164,6 +164,8 @@ def sweep_unprocessed(sync: bool = False):
                 why="reingest_required",
             )
         elif unprocessed.reason == "untracked":
+            if not admit_untracked(unprocessed):
+                continue
             logger.info(
                 "Found untracked file: %s/%s",
                 unprocessed.bucket,
