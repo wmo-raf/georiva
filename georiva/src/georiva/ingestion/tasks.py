@@ -344,6 +344,19 @@ def close_quiet_run_ingestions(minutes: int = None):
     return closed
 
 
+@app.task(
+    name="georiva.ingestion.tasks.record_overdue_push_feeds",
+    base=SweepTask,
+    sweep_name="push_feed_overdue",
+    queue="georiva-default",
+)
+def record_overdue_push_feeds():
+    """Record one ``PushFeedOverdue`` per push feed whose overdue spell has just begun (ADR 0034)."""
+    from georiva.ingestion.overdue import record_overdue_feeds
+
+    return record_overdue_feeds()
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     register_periodic_tasks(
@@ -359,6 +372,12 @@ def setup_periodic_tasks(sender, **kwargs):
                 "georiva.ingestion.tasks.cleanup_archives",
                 1,
                 IntervalSchedule.DAYS,
+            ),
+            PeriodicSpec(
+                "georiva.ingestion.record_overdue_push_feeds",
+                "georiva.ingestion.tasks.record_overdue_push_feeds",
+                15,
+                IntervalSchedule.MINUTES,
             ),
             PeriodicSpec(
                 "georiva.ingestion.close_quiet_run_ingestions",

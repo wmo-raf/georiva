@@ -96,6 +96,7 @@
 {% endblock %}
 
 {% block main_content %}
+{% if overdue %}<p><span class="w-status w-status--critical">{{ overdue }}</span></p>{% endif %}
 <div class="mup-meta">
     <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ feed.catalog.name }}
     &nbsp;·&nbsp;

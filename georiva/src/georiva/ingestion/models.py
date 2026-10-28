@@ -24,7 +24,9 @@ from functools import partial
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models import Max, Q
 from django.utils import timezone as dj_timezone
+from django.utils.timesince import timesince
 from django.utils.translation import gettext_lazy as _
 from wagtail.snippets.models import register_snippet
 
@@ -1015,6 +1017,12 @@ class PushFeed(models.Model):
         blank=True,
         help_text="How often a file is expected. Leave empty when there is no schedule to check.",
     )
+    expected_since = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="When the expected interval was set: the clock a feed with no delivery yet is measured from.",
+    )
 
     class Meta:
         app_label = "georivaingestion"
@@ -1046,7 +1054,54 @@ class PushFeed(models.Model):
 
     def save(self, *args, **kwargs):
         self.refuse_pull_fed_catalog()
+        self._restart_overdue_clock()
         super().save(*args, **kwargs)
+
+    def _restart_overdue_clock(self):
+        """Stamp ``expected_since`` when the interval is set or changed, and clear it when removed."""
+        if self.expected_interval is None:
+            self.expected_since = None
+            return
+        previous = None
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values_list("expected_interval", flat=True).first()
+        if self.expected_since is None or previous != self.expected_interval:
+            self.expected_since = dj_timezone.now()
+
+    def last_delivery_at(self):
+        """When the newest accepted delivery was accepted, or ``None``.
+
+        Reads the ``last_accepted`` annotation when a list query supplied one.
+        """
+        if hasattr(self, "last_accepted"):
+            return self.last_accepted
+        return self.deliveries.filter(status=Delivery.Status.ACCEPTED).aggregate(m=Max("accepted_at"))["m"]
+
+    def overdue_reference(self):
+        """The instant the interval is counted from: the last accepted delivery, else when the interval was set."""
+        return self.last_delivery_at() or self.expected_since
+
+    def is_overdue(self, now=None) -> bool:
+        """Derived on read (ADR 0034): the reference is older than the expected interval."""
+        reference = self.overdue_reference()
+        if self.expected_interval is None or reference is None:
+            return False
+        return (now or dj_timezone.now()) - reference > self.expected_interval
+
+    def overdue_text(self, now=None) -> str | None:
+        """The chip's words, or ``None`` when the feed is not overdue."""
+        now = now or dj_timezone.now()
+        if not self.is_overdue(now):
+            return None
+        last = self.last_delivery_at()
+        if last is None:
+            return _("Overdue · no deliveries yet")
+        return _("Overdue · last delivery %(ago)s ago") % {"ago": timesince(last, now)}
+
+    @classmethod
+    def with_last_delivery(cls, queryset):
+        """Annotate ``last_accepted`` so a list reads each feed's last delivery in one query."""
+        return queryset.annotate(last_accepted=Max("deliveries__accepted_at", filter=Q(deliveries__status="accepted")))
 
     def strptime_pattern(self) -> str | None:
         """Return the Python strptime pattern, or None for content-based formats."""
@@ -1243,6 +1298,49 @@ class DeliveryReceived(DomainEvent):
     def summary(self):
         by = f" from {self.sender}" if self.sender else ""
         return f"{self.filename} received by {self.feed_name}{by}"
+
+
+class PushFeedOverdue(DomainEvent):
+    """A push feed first went overdue: nothing accepted within its expected interval (ADR 0034).
+
+    Recorded once per overdue spell by the beat task; an accepted delivery ends the spell.
+    """
+
+    label = "Push feed overdue"
+
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    expected_interval = models.DurationField()
+    last_delivery_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["push_feed", "-occurred_at"], name="idx_pushoverdue_feed")]
+
+    @property
+    def outcome_class(self):
+        return "failed"
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def failure_group_key(self):
+        # The name stands in once the feed is gone, so its last failures still group together.
+        return f"push-feed:{self.push_feed_id}" if self.push_feed_id else f"push-feed-name:{self.feed_name}"
+
+    def failure_group(self):
+        from georiva.events.models import FailureGroup
+
+        return FailureGroup(key=self.failure_group_key(), label=self.feed_name, url=self.subject_url())
+
+    def summary(self):
+        if self.last_delivery_at is None:
+            return f"{self.feed_name}: no delivery yet, one expected every {self.expected_interval}"
+        return f"{self.feed_name}: no delivery since {self.last_delivery_at:%Y-%m-%d %H:%M}"
 
 
 class PushSender(models.Model):

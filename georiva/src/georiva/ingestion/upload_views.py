@@ -96,7 +96,9 @@ def push_feed_page(request, pk, issued=None):
         _CATALOG_FORMAT_LABEL,
     )
 
-    config = get_org_object_or_404(request, PushFeed.objects.select_related("catalog__organisation"), pk=pk)
+    config = get_org_object_or_404(
+        request, PushFeed.with_last_delivery(PushFeed.objects.select_related("catalog__organisation")), pk=pk
+    )
     variables = config.variables().select_related("collection").order_by("collection__name", "name")
     file_format = config.catalog.file_format
     is_geotiff = file_format == "geotiff"
@@ -137,6 +139,7 @@ def push_feed_page(request, pk, issued=None):
             # {% wagtail_config as config %}, which shadows a 'config' context var
             # by the time extra_js renders.
             "feed": config,
+            "overdue": config.overdue_text(),
             "senders": list(config.senders.all()),
             "can_manage_senders": can_manage_senders(request.user),
             "plain_http": endpoint_is_plain_http(),

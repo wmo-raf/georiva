@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 
 from georiva.core.models import Catalog
 from georiva.ingestion.models import PushFeed
@@ -40,6 +41,30 @@ class PushFeedListTests(TestCase):
     def test_list_links_to_the_new_push_feed_wizard(self):
         response = self.client.get(LIST_URL)
         self.assertContains(response, "/admin/push-feeds/wizard/step1/")
+
+
+class OverdueChipTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin4", "e@f.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        self.feed = _make_feed(_make_catalog())
+
+    def _overdue(self):
+        from datetime import timedelta
+
+        self.feed.expected_interval = timedelta(hours=6)
+        self.feed.save()
+        PushFeed.objects.filter(pk=self.feed.pk).update(expected_since=timezone.now() - timedelta(hours=9))
+
+    def test_overdue_shows_on_the_list_and_the_feed_page(self):
+        self._overdue()
+        for url in (LIST_URL, f"{LIST_URL}{self.feed.pk}/"):
+            self.assertContains(self.client.get(url), "Overdue · no deliveries yet")
+
+    def test_a_feed_without_an_interval_shows_no_chip(self):
+        for url in (LIST_URL, f"{LIST_URL}{self.feed.pk}/"):
+            self.assertNotContains(self.client.get(url), "Overdue")
 
 
 class PushFeedDeleteTests(TestCase):
