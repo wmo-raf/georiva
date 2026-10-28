@@ -17,6 +17,7 @@ from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 from georiva.formats.registry import format_registry
+from georiva.ingestion.unit_range import units_convertible
 from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
@@ -620,7 +621,7 @@ def upload_wizard_step4(request):
             if i not in assigned_idxs:
                 errors.append(_("Collection '%s' has no variables assigned to it.") % collections[i].get("name", i + 1))
 
-        from georiva.core.models import Variable
+        from georiva.core.models import Unit, Variable
         from georiva.core.unit_utils import ureg
 
         for a in assignments:
@@ -643,6 +644,7 @@ def upload_wizard_step4(request):
 
             unit_id = a.get("unit_id")
             unit_create = (a.get("unit_create") or "").strip()
+            output_symbol = unit_create
             if not unit_id and not unit_create:
                 errors.append(_("Variable '%s' needs a unit.") % var_label)
             elif unit_create:
@@ -650,6 +652,17 @@ def upload_wizard_step4(request):
                     ureg(unit_create)
                 except Exception:
                     errors.append(_("Variable '%s': unit '%s' is not a valid unit symbol.") % (var_label, unit_create))
+            else:
+                output = Unit.objects.filter(pk=unit_id).first()
+                output_symbol = output.symbol if output else ""
+
+            # The extractor converts incoming → output, so the pair must be convertible.
+            incoming_symbol = _incoming_symbol(a)
+            if incoming_symbol and output_symbol and not units_convertible(incoming_symbol, output_symbol):
+                errors.append(
+                    _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
+                    % {"var": var_label, "a": incoming_symbol, "b": output_symbol}
+                )
 
         # Duplicate source_name check: each variable_name must map to exactly
         # one collection per catalog (unambiguous collection resolution for
@@ -753,6 +766,26 @@ def upload_wizard_step5(request):
 # =============================================================================
 
 
+def _incoming_symbol(assignment: dict) -> str:
+    """The symbol of the unit the file's values arrive in: the scan's, or the one the person picked."""
+    from georiva.core.models import Unit
+
+    symbol = (assignment.get("source_symbol") or "").strip()
+    if symbol:
+        return symbol
+    unit_id = assignment.get("source_unit_id")
+    unit = Unit.objects.filter(pk=unit_id).first() if unit_id else None
+    return unit.symbol if unit else ""
+
+
+def _source_unit_for_assignment(assignment: dict):
+    """The Unit the file's values arrive in, or None when the file did not say."""
+    from georiva.core.provisioning import resolve_unit
+
+    symbol = _incoming_symbol(assignment)
+    return resolve_unit(symbol) if symbol else None
+
+
 def _unit_for_assignment(assignment: dict):
     """Resolve the Unit for an assignment: existing pk or resolve/create from symbol."""
     from georiva.core.models import Unit
@@ -845,7 +878,9 @@ def upload_wizard_provision(request):
                     slug=slugify(variable_name),
                     defaults={
                         "name": assignment.get("long_name") or variable_name,
+                        "source_long_name": (assignment.get("source_long_name") or "").strip(),
                         "transform_type": Variable.TransformType.PASSTHROUGH,
+                        "source_unit": _source_unit_for_assignment(assignment),
                         "unit": unit,
                         "value_min": assignment["value_min"],
                         "value_max": assignment["value_max"],

@@ -42,7 +42,7 @@
                             {% if a.long_name %} — {{ a.long_name }}{% endif %}
                             <span class="uwiz-review-muted">
                                 ({{ a.value_min }} – {{ a.value_max }}
-                                {% if a.unit_display %}{{ a.unit_display }}{% elif a.units %}{{ a.units }}{% endif %})
+                                {% if a.source_symbol %}{{ a.source_symbol }} → {% endif %}{% if a.unit_display %}{{ a.unit_display }}{% elif a.units %}{{ a.units }}{% endif %})
                             </span>
                         </li>
                         {% endfor %}

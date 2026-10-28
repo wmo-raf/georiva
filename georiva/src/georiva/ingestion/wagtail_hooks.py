@@ -75,12 +75,14 @@ def register_push_feed_urls():
     from .push_feed_views import (
         delivery_retry,
         push_feed_delete,
+        push_feed_edit,
         push_feed_list,
         push_feed_list_results,
         push_sender_add,
         push_sender_revoke,
         push_sender_rotate,
     )
+    from .unit_range import convert_range_view
     from .upload_views import (
         push_feed_extract_times,
         push_feed_page,
@@ -89,6 +91,8 @@ def register_push_feed_urls():
 
     return [
         path("push-feeds/", push_feed_list, name="push_feed_list"),
+        path("push-feeds/convert-range/", convert_range_view, name="push_feed_convert_range"),
+        path("push-feeds/<int:pk>/edit/", push_feed_edit, name="push_feed_edit"),
         # Results-only fragment the search box swaps in via AJAX.
         path("push-feeds/results/", push_feed_list_results, name="push_feed_list_results"),
         path("push-feeds/<int:pk>/delete/", push_feed_delete, name="push_feed_delete"),
