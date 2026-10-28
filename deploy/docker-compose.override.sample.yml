@@ -1,0 +1,67 @@
+# Site customisations for this server.
+#
+#   cp docker-compose.override.sample.yml docker-compose.override.yml
+#
+# then uncomment what you need. docker compose merges docker-compose.override.yml
+# over docker-compose.yml automatically, and the override is gitignored, so
+# ./deploy.sh upgrades never touch it. Keep it to site concerns — anything every
+# server needs belongs in docker-compose.yml.
+#
+# Merge rules worth knowing: maps (environment, deploy) merge key by key; lists
+# like `ports` are appended to, not replaced.
+
+# --- Join an existing Docker network ----------------------------------------
+# E.g. to sit beside a host-wide reverse proxy that terminates TLS and reaches
+# georiva-web-proxy by name. Create the network first:
+#   docker network create <name>
+#
+# networks:
+#   default:
+#     external: true
+#     name: <name>
+
+services:
+  # --- Ports -----------------------------------------------------------------
+  # Only the web proxy is published (GEORIVA_WEB_PROXY_PORT in .env). Publish
+  # anything else on loopback only, for an SSH tunnel or a tool on this host —
+  # never on all interfaces.
+  #
+  # georiva-db:
+  #   ports:
+  #     - "127.0.0.1:5432:5432"
+  #
+  # georiva-minio:
+  #   ports:
+  #     - "127.0.0.1:9001:9001"   # MinIO web console
+
+  # --- Resource limits -------------------------------------------------------
+  # Cap the heavy services so one runaway backfill cannot starve the host.
+  # Size to the machine; `docker stats` shows what each service really uses.
+  #
+  # georiva-celery-processing-worker:
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: "4"
+  #         memory: 8g
+  #
+  # georiva-celery-ingestion-worker:
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 6g
+  #
+  # georiva-db:
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 4g
+
+  # --- Extra environment ----------------------------------------------------
+  # Values a service needs that .env does not carry, e.g. an outbound HTTP proxy
+  # for the workers that fetch from upstream sources.
+  #
+  # georiva-celery-ingestion-worker:
+  #   environment:
+  #     HTTPS_PROXY: http://proxy.example.org:3128
+  #     NO_PROXY: localhost,georiva-minio,georiva-redis,georiva-pgbouncer,georiva

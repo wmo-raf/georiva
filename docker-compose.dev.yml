@@ -1,10 +1,20 @@
+# Dev overlay on docker-compose.yml (`just up` applies it).
+#
+# The root .env.sample carries prod-safe values; the dev ones live here. Each is
+# `${VAR:-dev default}`, so whatever a developer sets in .env still wins and the
+# default only fills a blank.
+x-dev-env: &dev-env
+  DEBUG: "True"
+  GEORIVA_BASE_DOMAIN: ${GEORIVA_BASE_DOMAIN:-localhost}
+  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+
 services:
   georiva:
     build:
       target: dev
     command: django-dev-no-attach
     environment:
-      DEBUG: "True"
+      <<: *dev-env
       MIGRATE_ON_STARTUP: "true"
       COLLECT_STATICFILES_ON_STARTUP: "true"
     volumes:
@@ -17,7 +27,9 @@ services:
       target: dev
     command: celery-default-worker-dev
     environment:
-      DEBUG: "True"
+      <<: *dev-env
+      # A smaller pool than production's 4; set GEORIVA_CELERY_DEFAULT_WORKER_CONCURRENCY in .env to change it.
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_DEFAULT_WORKER_CONCURRENCY:-2}
     volumes:
       - ./georiva:/georiva/app
 
@@ -26,7 +38,7 @@ services:
       target: dev
     command: celery-ingestion-worker-dev
     environment:
-      DEBUG: "True"
+      <<: *dev-env
     volumes:
       - ./georiva:/georiva/app
 
@@ -35,7 +47,9 @@ services:
       target: dev
     command: celery-processing-worker-dev
     environment:
-      DEBUG: "True"
+      <<: *dev-env
+      # A smaller pool than production's 4; set GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY in .env to change it.
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-2}
     volumes:
       - ./georiva:/georiva/app
 
@@ -43,7 +57,7 @@ services:
     build:
       target: dev
     environment:
-      DEBUG: "True"
+      <<: *dev-env
     volumes:
       - ./georiva:/georiva/app
 
@@ -56,7 +70,7 @@ services:
     build:
       target: dev
     environment:
-      DEBUG: "True"
+      <<: *dev-env
     volumes:
       - ./georiva:/georiva/app
 
@@ -64,7 +78,7 @@ services:
     build:
       target: dev
     environment:
-      DEBUG: "True"
+      <<: *dev-env
     volumes:
       - ./georiva:/georiva/app
 

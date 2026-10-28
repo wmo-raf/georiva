@@ -6,11 +6,15 @@ name: CI
 # `push: main` is not redundant with `pull_request`. A GHA cache written on a PR
 # branch is visible only to that PR; only entries written on the default branch
 # are readable from every other branch. Main's runs are what keep PR builds warm.
+#
+# Pushes to main and release tags (v*) also publish the images servers run —
+# see the publish job at the bottom, which waits for every check above it.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 # Cancel superseded PR runs when a fixup is pushed, but never cancel a run on
@@ -230,3 +234,95 @@ jobs:
       # version from one place in the justfile.
       - name: Check lint and formatting
         run: just lint
+
+  compose-drift:
+    name: Deploy compose matches root compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # deploy/docker-compose.yml is the image-only copy of the root file that
+    # servers run. Both are rendered by compose and diffed, less the
+    # differences deploy/ is meant to have; the script lists those.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy/docker-compose.yml against docker-compose.yml
+        run: .github/scripts/check-compose-drift.sh
+
+  publish:
+    name: Publish ${{ matrix.image.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    # Only a push to main or a release tag, and only once every check is green:
+    # an image that failed its tests is never published. PRs never reach this.
+    needs: [django, titiler, lint, compose-drift]
+    if: github.event_name == 'push'
+
+    # The one job that may write packages. GITHUB_TOKEN is minted per job and
+    # dies with it; nothing is stored in the repo's secrets.
+    permissions:
+      contents: read
+      packages: write
+
+    # All three are published from one run under one tag, so a server's
+    # GEORIVA_TAG names a set that was built and tested together.
+    strategy:
+      matrix:
+        image:
+          - name: georiva
+            context: .
+            target: prod
+            build-args: ""
+          - name: georiva-titiler-app
+            context: ./titiler-app
+            target: ""
+            build-args: ""
+          # The same args docker-compose.yml builds it with.
+          - name: georiva-stac-browser
+            context: ./deploy/stac-browser
+            target: ""
+            build-args: |
+              pathPrefix=/stac-browser/
+              STAC_BROWSER_VERSION=v5.0.0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # main + sha-<short> from main; the git tag verbatim (v0.5.0) from a
+      # release, so deploy.sh can hand one name to both git and compose. No
+      # `latest`: a server pins an exact version.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/wmo-raf/${{ matrix.image.name }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=tag
+
+      # No UID/GID build args: published images run as the Dockerfiles'
+      # default 9999, which deploy/README.md has servers chown their data
+      # directories to. That makes these layers differ from the test jobs'
+      # (built as the runner's uid), hence a cache scope per image.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          target: ${{ matrix.image.target }}
+          build-args: ${{ matrix.image.build-args }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=publish-${{ matrix.image.name }}
+          cache-to: type=gha,scope=publish-${{ matrix.image.name }},mode=max,ignore-error=true
