@@ -17,7 +17,7 @@ from django.utils import timezone as dj_timezone
 
 from georiva.core.models import Catalog, Collection
 from georiva.ingestion.domain_signals import run_ingestion_closed, run_ingestion_reopened
-from georiva.ingestion.models import Delivery, FileIngestion, PushFeed, RunIngestion, UploadSession
+from georiva.ingestion.models import Delivery, FileIngestion, PushFeed, PushSender, RunIngestion, UploadSession
 from georiva.organisations.testing import make_organisation
 from georiva.sources.models import DataFeed, FetchedFile, FetchRun
 
@@ -356,9 +356,15 @@ class PushFeedFilesPerRunCloserTests(TestCase):
             catalog=self.collection.catalog, name="Models", valid_time_format="YYYYMMDD", is_forecast=True
         )
 
-    def _deliver(self, step, status=Delivery.Status.ACCEPTED):
+    def _sender(self):
+        return PushSender.objects.get_or_create(push_feed=self.feed, label="kmd", defaults={"access_key": "kmd-key"})[0]
+
+    def _deliver(self, step, status=Delivery.Status.ACCEPTED, sender=True):
         delivery = Delivery.receive(
-            push_feed=self.feed, filename=f"step{step}.grib2", file_path=_key(self.collection, step)
+            push_feed=self.feed,
+            filename=f"step{step}.grib2",
+            file_path=_key(self.collection, step),
+            push_sender=self._sender() if sender else None,
         )
         Delivery.objects.filter(pk=delivery.pk).update(status=status)
 
@@ -426,6 +432,12 @@ class PushFeedFilesPerRunCloserTests(TestCase):
         run = RunIngestion.objects.get()
         self.assertEqual(run.revision, 1)
         self.assertEqual(run.status, RunIngestion.Status.CLOSED)
+
+    def test_a_sessionless_person_upload_does_not_count(self):
+        self._deliver(0, sender=False)
+        _complete_file(self.collection, 0)
+
+        self.assertEqual(RunIngestion.objects.get().status, RunIngestion.Status.OPEN)
 
     def test_a_persons_batch_still_closes_as_upload_session(self):
         session = UploadSession.objects.create(push_feed=self.feed, status=UploadSession.Status.COMPLETED)

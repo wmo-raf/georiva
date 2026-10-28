@@ -136,11 +136,11 @@ def close_if_files_per_run_reached(run) -> bool:
     """Close ``run`` iff its catalog's push feed has had ``files_per_run`` machine
     deliveries for this reference time finish ingesting.
 
-    The feed declares how many files make up a run, so this is the push-side
-    counterpart of the DataFeed's declared set. Only deliveries without an upload
-    session count: a person's batch proves the batch, not the run, and keeps
-    closing as ``upload_session``. Short of the count, the quiet period still
-    closes the run.
+    A machine delivery is one attributed to a ``PushSender``. The feed declares how
+    many files make up a run, so this is the push-side counterpart of the DataFeed's
+    declared set. A person's upload never counts: a batch proves the batch, not the
+    run, and keeps closing as ``upload_session``. Short of the count, the quiet
+    period still closes the run.
     """
     from georiva.ingestion.models import Delivery, PushFeed, RunIngestion
 
@@ -156,7 +156,7 @@ def close_if_files_per_run_reached(run) -> bool:
         Delivery.objects.filter(
             push_feed=feed,
             file_path__in=arrived,
-            session__isnull=True,
+            push_sender__isnull=False,
             status=Delivery.Status.ACCEPTED,
         )
         .values("file_path")
@@ -165,6 +165,10 @@ def close_if_files_per_run_reached(run) -> bool:
     )
     if delivered < feed.files_per_run:
         return False
+
+    if run.expected_file_count != feed.files_per_run:
+        run.expected_file_count = feed.files_per_run
+        run.save(update_fields=["expected_file_count", "updated_at"])
 
     return run.close(RunIngestion.Closer.DECLARED_SET)
 
