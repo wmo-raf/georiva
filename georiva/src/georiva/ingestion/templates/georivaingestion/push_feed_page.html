@@ -235,7 +235,7 @@
     {% for d in deliveries %}
         <tr>
             <td>{{ d.received_at|date:"Y-m-d H:i" }}</td>
-            <td>{{ d.sender_name|default:"—" }}</td>
+            <td>{% if d.found_by_sweep %}{% trans "found by sweep" %}{% else %}{{ d.sender_name|default:"—" }}{% endif %}</td>
             <td><code>{{ d.original_filename }}</code></td>
             <td>{{ d.get_status_display }}{% if d.reason %}<br><small>{{ d.reason }}</small>{% endif %}</td>
             <td>{% if d.file_ingestion %}<a href="{% url 'file_ingestion_detail' d.file_ingestion.pk %}">{{ d.file_ingestion.get_status_display }}</a>{% else %}—{% endif %}</td>

@@ -172,6 +172,47 @@ def _admit_incoming(ev: dict, key: str) -> bool:
     return True
 
 
+def admit_found_in_incoming(key: str) -> bool:
+    """Decide whether a file the Sweep found in ``incoming`` may be ingested (ADR 0034).
+
+    The same attribution as a notification, with no principal: a key inside a push feed's
+    area is safe to attribute by prefix, since only that feed's senders and GeoRiva can
+    write there, and becomes an accepted Delivery found by sweep. Anything else is
+    quarantined. A file a delivery already covers is not recorded again.
+    """
+    from georiva.ingestion.models import Delivery
+    from georiva.ingestion.quarantine import quarantine
+
+    try:
+        meta = validate_path(key)
+    except ValueError as e:
+        quarantine(key, f"Path check failed: {e}")
+        return False
+
+    feed, reason = _no_feed_reason(meta["org"], meta["catalog"])
+    if feed is None:
+        quarantine(key, reason)
+        return False
+
+    time_error = _required_time_error(feed.catalog, key)
+    if time_error:
+        quarantine(key, time_error, feed=feed)
+        return False
+
+    if (
+        _waiting_person_delivery(key) is not None
+        or Delivery.objects.filter(
+            file_path=key, status__in=[Delivery.Status.RECEIVED, Delivery.Status.ACCEPTED]
+        ).exists()
+    ):
+        return True
+
+    with transaction.atomic():
+        delivery = Delivery.receive(push_feed=feed, filename=Path(key).name, file_path=key, found_by_sweep=True)
+        delivery.mark_accepted(file_path=key)
+    return True
+
+
 def _should_stop(stop_event) -> bool:
     return stop_event is not None and stop_event.is_set()
 

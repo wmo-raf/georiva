@@ -349,3 +349,85 @@ class QuarantineTests(TestCase):
         self.assertFalse(BUCKET_CONFIGS["quarantine"]["notify_on_create"])
         self.assertFalse(BUCKET_CONFIGS["quarantine"]["public_read"])
         self.assertNotIn("georiva-quarantine", _get_ingest_buckets())
+
+
+class SweepFoundIncomingTests(TestCase):
+    """A file the Sweep finds in ``incoming`` is attributed like a notification, minus the principal (ADR 0034)."""
+
+    def setUp(self):
+        from georiva.ingestion.models import PushFeed
+
+        org = make_organisation("test-org")
+        self.catalog = Catalog.objects.create(organisation=org, name="WRF", slug="wrf", file_format="netcdf")
+        self.feed = PushFeed.objects.create(catalog=self.catalog, name="WRF", valid_time_format="CONTENT")
+        patcher = patch("georiva.ingestion.quarantine.storage")
+        self.quarantine_storage = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sweep(self, key):
+        from georiva.ingestion.tasks import sweep_unprocessed
+
+        incoming = MagicMock()
+        incoming.list_files.return_value = [{"path": key}]
+        sources = MagicMock()
+        sources.list_files.return_value = []
+        meta = {"org": key.split("/")[0], "catalog": key.split("/")[1], "reference_time": None}
+        with (
+            patch("georiva.ingestion.unprocessed.storage") as mock_storage,
+            patch("georiva.ingestion.unprocessed.validate_path", return_value=meta),
+            patch("georiva.ingestion.consumer.validate_path", return_value=meta),
+            patch("georiva.ingestion.tasks.process_incoming_file") as task,
+        ):
+            mock_storage.bucket.side_effect = lambda b: incoming if b == BucketType.INCOMING else sources
+            task.run = MagicMock()
+            sweep_unprocessed(sync=True)
+        return task
+
+    def test_a_file_in_a_push_feeds_area_becomes_a_found_by_sweep_delivery_and_is_ingested(self):
+        from georiva.ingestion.models import Delivery
+
+        key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        task = self._sweep(key)
+
+        delivery = Delivery.objects.get(file_path=key)
+        self.assertEqual(delivery.status, Delivery.Status.ACCEPTED)
+        self.assertTrue(delivery.found_by_sweep)
+        self.assertEqual(delivery.push_feed, self.feed)
+        self.assertIsNone(delivery.push_sender)
+        task.run.assert_called_once()
+        self.assertTrue(FileIngestion.objects.filter(file_path=key, bucket=BucketType.INCOMING).exists())
+
+    def test_a_file_under_a_key_with_no_push_feed_is_quarantined(self):
+        from georiva.ingestion.models import Delivery, DeliveryRejected
+
+        Catalog.objects.create(organisation=self.catalog.organisation, name="Pull", slug="pull", file_format="netcdf")
+        key = "test-org/pull/a.nc"
+        task = self._sweep(key)
+
+        self.quarantine_storage.move_between.assert_called_once()
+        task.run.assert_not_called()
+        self.assertFalse(FileIngestion.objects.filter(file_path=key).exists())
+        self.assertFalse(Delivery.objects.exists())
+        self.assertEqual(DeliveryRejected.objects.count(), 1)
+
+    def test_rerunning_the_sweep_creates_no_duplicate_delivery(self):
+        from georiva.ingestion.models import Delivery
+
+        key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        self._sweep(key)
+        self._sweep(key)
+
+        self.assertEqual(Delivery.objects.filter(file_path=key).count(), 1)
+
+    def test_a_persons_waiting_upload_is_not_recorded_again(self):
+        from django.contrib.auth.models import User
+
+        from georiva.ingestion.models import Delivery
+
+        key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+        Delivery.receive(
+            push_feed=self.feed, filename="wrf.nc", file_path=key, sent_by=User.objects.create(username="amina")
+        )
+        self._sweep(key)
+
+        self.assertEqual(Delivery.objects.filter(file_path=key).count(), 1)
