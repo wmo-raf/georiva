@@ -189,12 +189,12 @@ django-dev)
     run_setup_commands_if_configured
     echo "Running Development Server on 0.0.0.0:${GEORIVA_PORT}"
     echo "Press CTRL-p CTRL-q to close this session without stopping the container."
-    attachable_exec python /georiva/app/src/georiva/manage.py runserver "0.0.0.0:${GEORIVA_PORT}"
+    attachable_exec uvicorn georiva.config.asgi_dev:application --host 0.0.0.0 --port "${GEORIVA_PORT}" --reload --reload-dir /georiva/app/src
     ;;
 django-dev-no-attach)
     run_setup_commands_if_configured
     echo "Running Development Server on 0.0.0.0:${GEORIVA_PORT}"
-    python /georiva/app/src/georiva/manage.py runserver "0.0.0.0:${GEORIVA_PORT}"
+    uvicorn georiva.config.asgi_dev:application --host 0.0.0.0 --port "${GEORIVA_PORT}" --reload --reload-dir /georiva/app/src
     ;;
 gunicorn)
     run_server asgi "${@:2}"
