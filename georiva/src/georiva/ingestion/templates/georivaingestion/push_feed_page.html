@@ -264,6 +264,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const EXTRACT_URL  = '{% url "push_feed_extract_times" feed.pk %}';
     const SUBMIT_URL   = '{% url "push_feed_submit" feed.pk %}';
+    const PREPARE_URL  = '{% url "push_feed_prepare" feed.pk %}';
+    const COMPLETE_URL = '{% url "push_feed_complete" feed.pk %}';
     const STATUS_URL   = '{% url "upload_session_status_api" 999999999 %}';
     const SSE_URL      = '/admin/api/ingestion/events/';
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
@@ -343,10 +345,10 @@ document.addEventListener('DOMContentLoaded', function () {
         return row;
     }
 
-    function setRowStatus(row, status) {
+    function setRowStatus(row, status, label) {
         const el = row.querySelector('[data-status-el]');
         if (!el) return;
-        el.textContent = status;
+        el.textContent = label || status;
         el.className = 'mup-row-status mup-row-status--' + status;
     }
 
@@ -480,6 +482,123 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ── Submit ─────────────────────────────────────────────────────────────
+    // The per-file fields the server reads alongside the files themselves.
+    function fileFields() {
+        const variableIds = [];
+        const times = [];
+        if (IS_GEOTIFF) {
+            fileRows.forEach(function (row) {
+                variableIds.push(row._variableSel ? row._variableSel.value : '');
+                times.push(row._timeInput ? row._timeInput.value : '');
+            });
+        } else {
+            fileRows.forEach(function () {
+                times.push(sharedTime ? sharedTime.value : '');
+            });
+        }
+        return { variableIds: variableIds, times: times };
+    }
+
+    function resetRows() {
+        submitBtn.disabled = false;
+        fileRows.forEach(function (row) { setRowStatus(row, 'pending'); });
+    }
+
+    // Send one file straight to storage on its presigned URL, reporting percent done.
+    function putFile(file, url, onProgress) {
+        return new Promise(function (resolve, reject) {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url);
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) onProgress(Math.round(100 * e.loaded / e.total));
+            };
+            xhr.onload = function () {
+                if (xhr.status >= 200 && xhr.status < 300) resolve();
+                else reject(new Error('HTTP ' + xhr.status));
+            };
+            xhr.onerror = function () { reject(new Error('network')); };
+            xhr.send(file);
+        });
+    }
+
+    // The files go in the request and the server writes them to storage.
+    function submitDirect(files) {
+        const fields = fileFields();
+        const fd = new FormData();
+        fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
+        files.forEach(function (file) { fd.append('files', file); });
+        fields.variableIds.forEach(function (v) { fd.append('variable_ids', v); });
+        fields.times.forEach(function (t) { fd.append('times', t); });
+
+        return fetch(SUBMIT_URL, { method: 'POST', body: fd })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (res) {
+                if (!res.ok || res.data.error) {
+                    showError(res.data.error || '{% trans "Upload failed." %}');
+                    resetRows();
+                    return;
+                }
+
+                const jobIds = [];
+                (res.data.files || []).forEach(function (f, i) {
+                    if (fileRows[i]) setRowStatus(fileRows[i], f.status);
+                    if (f.job_id) jobIds.push(f.job_id);
+                });
+
+                form.style.display = 'none';
+                mountIngestionProgress(jobIds);
+                poll(res.data.upload_session_id);
+            });
+    }
+
+    // Each file goes from the browser to storage on its own presigned URL, then the server
+    // is told it is there and starts its ingestion. One at a time, to share the connection.
+    function uploadPresigned(files, prepared) {
+        const jobIds = [];
+        const failed = [];
+
+        function sendFrom(i) {
+            if (i >= files.length) return Promise.resolve();
+            const row = fileRows[i];
+            const target = prepared.files[i];
+
+            return putFile(files[i], target.upload_url, function (pct) {
+                setRowStatus(row, 'uploading', pct + '%');
+            })
+                .then(function () {
+                    setRowStatus(row, 'uploading', '{% trans "starting" %}');
+                    const fd = new FormData();
+                    fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
+                    fd.append('delivery_id', target.delivery_id);
+                    return fetch(COMPLETE_URL, { method: 'POST', body: fd });
+                })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (res) {
+                    if (!res.ok || res.data.error) throw new Error(res.data.error || 'complete failed');
+                    setRowStatus(row, res.data.status);
+                    if (res.data.job_id) jobIds.push(res.data.job_id);
+                })
+                .catch(function () {
+                    setRowStatus(row, 'failed');
+                    failed.push(files[i].name);
+                })
+                .then(function () { return sendFrom(i + 1); });
+        }
+
+        return sendFrom(0).then(function () {
+            if (failed.length) {
+                showError('{% trans "These files were not uploaded:" %} ' + failed.join(', '));
+            }
+            if (failed.length === files.length) {
+                resetRows();
+                return;
+            }
+            form.style.display = 'none';
+            mountIngestionProgress(jobIds);
+            poll(prepared.upload_session_id);
+        });
+    }
+
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         clearError();
@@ -491,53 +610,34 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
+        const fields = fileFields();
         const fd = new FormData();
         fd.append('csrfmiddlewaretoken', CSRF_TOKEN);
-
-        files.forEach(function (file, i) {
-            fd.append('files', file);
+        files.forEach(function (file) {
+            fd.append('filenames', file.name);
+            fd.append('sizes', file.size);
         });
-
-        if (IS_GEOTIFF) {
-            fileRows.forEach(function (row) {
-                fd.append('variable_ids', row._variableSel ? row._variableSel.value : '');
-                fd.append('times', row._timeInput ? row._timeInput.value : '');
-            });
-        } else {
-            files.forEach(function () {
-                fd.append('times', sharedTime ? sharedTime.value : '');
-            });
-        }
+        fields.variableIds.forEach(function (v) { fd.append('variable_ids', v); });
+        fields.times.forEach(function (t) { fd.append('times', t); });
 
         submitBtn.disabled = true;
         fileRows.forEach(function (row) { setRowStatus(row, 'uploading'); });
 
-        fetch(SUBMIT_URL, { method: 'POST', body: fd })
+        fetch(PREPARE_URL, { method: 'POST', body: fd })
             .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
             .then(function (res) {
                 if (!res.ok || res.data.error) {
                     showError(res.data.error || '{% trans "Upload failed." %}');
-                    submitBtn.disabled = false;
-                    fileRows.forEach(function (row) { setRowStatus(row, 'pending'); });
+                    resetRows();
                     return;
                 }
-
-                const resultFiles = res.data.files || [];
-                const jobIds = [];
-
-                resultFiles.forEach(function (f, i) {
-                    if (fileRows[i]) setRowStatus(fileRows[i], f.status);
-                    if (f.job_id) jobIds.push(f.job_id);
-                });
-
-                form.style.display = 'none';
-                mountIngestionProgress(jobIds);
-                poll(res.data.upload_session_id);
+                // A backend with nothing to sign for takes the files in the request instead.
+                if (res.data.mode === 'direct') return submitDirect(files);
+                return uploadPresigned(files, res.data);
             })
             .catch(function () {
                 showError('{% trans "Upload failed — network error." %}');
-                submitBtn.disabled = false;
-                fileRows.forEach(function (row) { setRowStatus(row, 'pending'); });
+                resetRows();
             });
     });
 

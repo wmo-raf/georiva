@@ -22,7 +22,9 @@ from georiva.ingestion.tasks import process_incoming_file
 logger = logging.getLogger(__name__)
 
 # How long a Delivery GeoRiva recorded for its own write stays the explanation for that key.
-WAITING_WINDOW = timedelta(minutes=10)
+# A person's upload is recorded when the page asks to send it, before the browser has
+# sent a byte, so this has to outlast the upload itself, not just the write.
+WAITING_WINDOW = timedelta(hours=6)
 
 REDIS_KEY = getattr(settings, "MINIO_REDIS_KEY", "georiva:minio:events")
 
@@ -89,7 +91,7 @@ def _waiting_person_delivery(key: str):
     if delivery is None or delivery.status == Delivery.Status.REJECTED:
         return None
     if delivery.status == Delivery.Status.RECEIVED:
-        # Recorded just before the write, so a stale row covers nobody.
+        # Recorded before the write, so a row older than the window covers nobody.
         return delivery if timezone.now() - delivery.received_at < WAITING_WINDOW else None
     in_flight = FileIngestion.objects.filter(
         bucket=BucketType.INCOMING,
@@ -97,6 +99,19 @@ def _waiting_person_delivery(key: str):
         status__in=[FileIngestion.Status.PENDING, FileIngestion.Status.PROCESSING],
     ).exists()
     return delivery if in_flight else None
+
+
+def _awaits_completion(key: str) -> bool:
+    """True when a person's browser is sending ``key`` straight to storage and will start its ingestion.
+
+    Such an upload is told apart by the delivery recorded for it before the first byte moved,
+    since its write carries GeoRiva's own credentials like any other. Starting the ingestion
+    from here as well would race the browser's, and the page would follow the run that lost.
+    """
+    from georiva.ingestion.models import Delivery
+
+    latest = Delivery.objects.filter(file_path=key, sent_by__isnull=False).order_by("-id").first()
+    return latest is not None and latest.awaits_completion
 
 
 def _no_feed_reason(org_slug: str, catalog_slug: str):
@@ -285,6 +300,11 @@ def _handle_event(ev: dict):
             logger.warning("Time extraction failed for %s: %s", key, time_error)
             # Refused inside a known organisation: attributed to it.
             FileIngestion.mark_failed(origin_bucket, key, time_error, outcome=FileIngestionFinished.Outcome.REFUSED)
+            return
+
+        # Registered above, so the Sweep still revives it if the browser never reports back.
+        if origin_bucket == BucketType.INCOMING and _awaits_completion(key):
+            logger.debug("Awaiting the uploader's completion: %s/%s", origin_bucket, key)
             return
 
         if not created:

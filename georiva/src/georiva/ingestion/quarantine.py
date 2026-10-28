@@ -43,6 +43,13 @@ def quarantine(key: str, reason: str, *, feed=None, sender=None, size: int = 0) 
             _record_rejection(key, reason, feed=feed, delivery=delivery, sender=sender)
 
 
+def reject_unarrived(delivery: Delivery, reason: str) -> None:
+    """Reject a delivery whose file never reached ``incoming``: there is nothing to move."""
+    with transaction.atomic():
+        delivery.mark_rejected(reason)
+        _record_rejection(delivery.file_path, reason, feed=delivery.push_feed, delivery=delivery, sender=None)
+
+
 def _waiting_delivery(key: str):
     return Delivery.objects.filter(file_path=key, status=Delivery.Status.RECEIVED).order_by("-id").first()
 
