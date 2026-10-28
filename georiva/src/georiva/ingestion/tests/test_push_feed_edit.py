@@ -125,6 +125,15 @@ class PushFeedEditTests(TestCase):
         self.variable.refresh_from_db()
         self.assertEqual((self.variable.name, self.variable.source_long_name), ("Air temp", "2 metre temperature"))
 
+    def test_a_variable_with_no_incoming_unit_cannot_be_saved_until_it_has_one(self):
+        Variable.objects.filter(pk=self.variable.pk).update(source_unit=None)
+        self.assertEqual(self._post([self._row()]).status_code, 200)
+
+        response = self._post([self._row(incoming_unit_id=self.kelvin.pk)])
+        self.assertEqual(response.status_code, 302)
+        self.variable.refresh_from_db()
+        self.assertEqual(self.variable.source_unit, self.kelvin)
+
     def test_an_unconvertible_output_unit_is_refused(self):
         response = self._post([self._row(unit_id=self.metre.pk)])
         self.assertEqual(response.status_code, 200)

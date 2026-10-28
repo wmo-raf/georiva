@@ -268,7 +268,10 @@ def _apply_variable_edits(feed, posted):
         source = variable.source_unit
         if source is None and row.get("incoming_unit_id"):
             source = Unit.objects.filter(pk=row["incoming_unit_id"]).first()
-        if source is not None and not units_convertible(source.symbol, unit.symbol):
+        if source is None:
+            errors.append(_("Variable '%s' needs its incoming unit: set the unit the files carry.") % label)
+            continue
+        if not units_convertible(source.symbol, unit.symbol):
             errors.append(
                 _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
                 % {"var": label, "a": source.symbol, "b": unit.symbol}

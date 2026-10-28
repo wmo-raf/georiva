@@ -658,7 +658,9 @@ def upload_wizard_step4(request):
 
             # The extractor converts incoming → output, so the pair must be convertible.
             incoming_symbol = _incoming_symbol(a)
-            if incoming_symbol and output_symbol and not units_convertible(incoming_symbol, output_symbol):
+            if not incoming_symbol:
+                errors.append(_("Variable '%s' needs its incoming unit: set the unit the file carries.") % var_label)
+            elif output_symbol and not units_convertible(incoming_symbol, output_symbol):
                 errors.append(
                     _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
                     % {"var": var_label, "a": incoming_symbol, "b": output_symbol}
@@ -770,7 +772,7 @@ def _incoming_symbol(assignment: dict) -> str:
     """The symbol of the unit the file's values arrive in: the scan's, or the one the person picked."""
     from georiva.core.models import Unit
 
-    symbol = (assignment.get("source_symbol") or "").strip()
+    symbol = (assignment.get("source_symbol") or assignment.get("units") or "").strip()
     if symbol:
         return symbol
     unit_id = assignment.get("source_unit_id")

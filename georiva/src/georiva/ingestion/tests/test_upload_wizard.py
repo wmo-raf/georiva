@@ -575,6 +575,19 @@ class Step4CollectionsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_step4_missing_incoming_unit_rerenders(self):
+        collections = [{"name": "Col A", "slug": "col-a"}]
+        assignments = [_assignment(units="", source_symbol="", source_unit_id=None)]
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "needs its incoming unit")
+
     def test_step4_invalid_create_unit_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(unit_create="not_a_real_unit_xyz")]

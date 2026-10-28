@@ -24,6 +24,7 @@ window.GrVariableCards = (function () {
         reset: '{% trans "Reset" %}',
         notSet: '{% trans "not set" %}',
         set: '{% trans "Set" %}',
+        needIncoming: '{% trans "Set the incoming unit for" %}',
         needUnit: '{% trans "Choose an output unit for" %}',
         needRange: '{% trans "Enter a value range for" %}',
         minMax: '{% trans "min must be less than max." %}',
@@ -240,6 +241,7 @@ window.GrVariableCards = (function () {
             const confirmBox = tr.querySelector('.gr-vc-confirm-box');
             const needsConfirm = !tr.querySelector('.gr-vc-confirm').hidden;
 
+            if (!error && !tr.dataset.incomingSymbol && !inChosen) error = T.needIncoming + ' ' + name + '.';
             if (!error && !outEl.value) error = T.needUnit + ' ' + name + '.';
             if (!error && (vmin === null || vmax === null || isNaN(vmin) || isNaN(vmax))) {
                 error = T.needRange + ' ' + name + '.';
