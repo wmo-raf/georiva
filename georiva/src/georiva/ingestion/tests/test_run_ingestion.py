@@ -347,6 +347,109 @@ class UploadBatchCloserTests(TestCase):
         self.assertEqual(run.revision, 1)
 
 
+class PushFeedFilesPerRunCloserTests(TestCase):
+    """The machine-delivery route — closes once ``files_per_run`` deliveries ingested."""
+
+    def setUp(self):
+        self.collection = _collection()
+        self.feed = PushFeed.objects.create(
+            catalog=self.collection.catalog, name="Models", valid_time_format="YYYYMMDD", is_forecast=True
+        )
+
+    def _deliver(self, step, status=Delivery.Status.ACCEPTED):
+        delivery = Delivery.receive(
+            push_feed=self.feed, filename=f"step{step}.grib2", file_path=_key(self.collection, step)
+        )
+        Delivery.objects.filter(pk=delivery.pk).update(status=status)
+
+    def _set_files_per_run(self, n):
+        PushFeed.objects.filter(pk=self.feed.pk).update(files_per_run=n)
+
+    def test_a_one_file_delivery_closes_its_run_as_declared_set(self):
+        self._deliver(0)
+        _complete_file(self.collection, 0)
+
+        run = RunIngestion.objects.get()
+        self.assertEqual(run.status, RunIngestion.Status.CLOSED)
+        self.assertEqual(run.closed_by, RunIngestion.Closer.DECLARED_SET)
+
+    def test_the_run_stays_open_until_the_count_is_reached(self):
+        self._set_files_per_run(3)
+        for step in (0, 6, 12):
+            self._deliver(step)
+
+        _complete_file(self.collection, 0)
+        _complete_file(self.collection, 6)
+        self.assertEqual(RunIngestion.objects.get().status, RunIngestion.Status.OPEN)
+
+        _complete_file(self.collection, 12)
+        run = RunIngestion.objects.get()
+        self.assertEqual(run.status, RunIngestion.Status.CLOSED)
+        self.assertEqual(run.closed_by, RunIngestion.Closer.DECLARED_SET)
+
+    def test_a_delivery_not_yet_ingested_does_not_count(self):
+        self._set_files_per_run(2)
+        self._deliver(0)
+        self._deliver(6)
+        _complete_file(self.collection, 0)
+
+        self.assertEqual(RunIngestion.objects.get().status, RunIngestion.Status.OPEN)
+
+    def test_rejected_deliveries_do_not_count(self):
+        self._set_files_per_run(2)
+        self._deliver(0)
+        self._deliver(6, status=Delivery.Status.REJECTED)
+        _complete_file(self.collection, 0)
+        _complete_file(self.collection, 6)
+
+        self.assertEqual(RunIngestion.objects.get().status, RunIngestion.Status.OPEN)
+
+    def test_a_run_that_stays_short_falls_back_to_the_quiet_period(self):
+        from georiva.ingestion.run_closers import close_quiet_runs
+
+        self._set_files_per_run(3)
+        self._deliver(0)
+        _complete_file(self.collection, 0)
+        RunIngestion.objects.update(last_file_at=dj_timezone.now() - timedelta(minutes=60))
+
+        close_quiet_runs()
+
+        run = RunIngestion.objects.get()
+        self.assertEqual(run.closed_by, RunIngestion.Closer.QUIET_PERIOD)
+
+    def test_a_later_delivery_reopens_the_closed_run(self):
+        self._deliver(0)
+        _complete_file(self.collection, 0)
+        self._deliver(6)
+        _complete_file(self.collection, 6)
+
+        run = RunIngestion.objects.get()
+        self.assertEqual(run.revision, 1)
+        self.assertEqual(run.status, RunIngestion.Status.CLOSED)
+
+    def test_a_persons_batch_still_closes_as_upload_session(self):
+        session = UploadSession.objects.create(push_feed=self.feed, status=UploadSession.Status.COMPLETED)
+        delivery = Delivery.receive(
+            push_feed=self.feed, filename="s0.grib2", file_path=_key(self.collection, 0), session=session
+        )
+        Delivery.objects.filter(pk=delivery.pk).update(status=Delivery.Status.ACCEPTED)
+        _complete_file(self.collection, 0)
+
+        self.assertEqual(RunIngestion.objects.get().closed_by, RunIngestion.Closer.UPLOAD_SESSION)
+
+    def test_a_non_forecast_collection_opens_no_run(self):
+        collection = _collection(slug="obs", is_forecast=False)
+        delivery = Delivery.receive(
+            push_feed=PushFeed.objects.create(catalog=collection.catalog, name="Obs", valid_time_format="YYYYMMDD"),
+            filename="a.grib2",
+            file_path=_key(collection, 0),
+        )
+        Delivery.objects.filter(pk=delivery.pk).update(status=Delivery.Status.ACCEPTED)
+        _complete_file(collection, 0)
+
+        self.assertFalse(RunIngestion.objects.exists())
+
+
 class QuietPeriodCloserTests(TestCase):
     """The safety net under the other two."""
 
