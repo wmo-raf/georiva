@@ -247,7 +247,7 @@ def _apply_variable_edits(feed, posted):
         if variable is None:
             errors.append(_("Unknown variable in the form — reload the page and try again."))
             continue
-        label = variable.slug
+        label = f"{variable.name} ({variable.slug})"
 
         try:
             vmin, vmax = float(row.get("value_min")), float(row.get("value_max"))

@@ -86,6 +86,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const collected = GrVariableCards.collect();
         if (collected.error) {
             e.preventDefault();
+            if (collected.errorCard) collected.errorCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
             errEl.textContent = collected.error;
             errEl.classList.add('gfe-error--visible');
             return;

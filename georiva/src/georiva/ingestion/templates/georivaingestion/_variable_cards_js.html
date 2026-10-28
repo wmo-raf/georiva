@@ -134,6 +134,7 @@ window.GrVariableCards = (function () {
         card.className = 'gr-vc-card';
         card.dataset.key = row.key;
         card.dataset.hasData = row.has_data ? '1' : '0';
+        card.dataset.label = row.long_name ? row.long_name + ' (' + row.name + ')' : row.name;
         const createSymbol = row.can_create ? row.incoming_symbol : '';
         card.dataset.createSymbol = createSymbol;
         card.dataset.originalOut = row.unit_create ? '__create__' : (row.unit_id != null ? String(row.unit_id) : '');
@@ -229,8 +230,9 @@ window.GrVariableCards = (function () {
     /** {rows, error}: the first problem found, or the rows ready to post. **/
     function collect() {
         let error = '';
+        let errorCard = null;
         const rows = Array.from(cfg.tbody.querySelectorAll('.gr-vc-card')).map(function (tr) {
-            const name = tr.dataset.key;
+            const name = tr.dataset.label;
             const outEl = tr.querySelector('.gr-vc-out');
             const minEl = tr.querySelector('.gr-vc-min');
             const maxEl = tr.querySelector('.gr-vc-max');
@@ -249,8 +251,10 @@ window.GrVariableCards = (function () {
             if (!error && vmin >= vmax) error = name + ': ' + T.minMax;
             if (!error && needsConfirm && !confirmBox.checked) error = T.needConfirm + ' ' + name + '.';
 
+            if (error && !errorCard) errorCard = tr;
+
             return {
-                key: name,
+                key: tr.dataset.key,
                 long_name: tr.querySelector('.gr-vc-ln').value.trim(),
                 incoming_unit_id: inChosen ? parseInt(inSel.value) : null,
                 unit_id: outEl.value && outEl.value !== '__create__' ? parseInt(outEl.value) : null,
@@ -261,7 +265,7 @@ window.GrVariableCards = (function () {
                 confirm_unit_change: !!(confirmBox && confirmBox.checked),
             };
         });
-        return { rows: rows, error: error };
+        return { rows: rows, error: error, errorCard: errorCard };
     }
 
     return { init: init, addRow: addRow, clear: clear, collect: collect };

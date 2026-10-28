@@ -237,6 +237,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (collected.error) {
             e.preventDefault();
+            if (collected.errorCard) collected.errorCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
             varsErrEl.textContent = collected.error;
             varsErrEl.classList.add('uwiz-inline-error--visible');
             return;
