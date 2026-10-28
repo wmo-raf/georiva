@@ -35,7 +35,8 @@
     <tbody>
         {% for feed in feeds %}
         <tr>
-            <td><a href="{% url 'push_feed_page' feed.pk %}">{{ feed.name }}</a></td>
+            <td><a href="{% url 'push_feed_page' feed.pk %}">{{ feed.name }}</a>
+                {% if feed.overdue %}<span style="background: var(--w-color-critical-200); color: var(--w-color-white); padding: 0.1em 0.6em; border-radius: 1em; font-size: 0.85em;">{{ feed.overdue }}</span>{% endif %}</td>
             <td>{{ feed.catalog.name }}</td>
             <td>{% if feed.is_forecast %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}</td>
             <td><code>{{ feed.valid_time_format }}</code></td>

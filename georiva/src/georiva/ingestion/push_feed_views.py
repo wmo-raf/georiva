@@ -13,7 +13,13 @@ from georiva.organisations.access import (
 def push_feed_list(request):
     from georiva.ingestion.models import PushFeed
 
-    feeds = scoped_queryset(request, PushFeed.objects.all()).select_related("catalog").order_by("catalog__name", "name")
+    feeds = list(
+        PushFeed.with_last_delivery(scoped_queryset(request, PushFeed.objects.all()))
+        .select_related("catalog")
+        .order_by("catalog__name", "name")
+    )
+    for feed in feeds:
+        feed.overdue = feed.overdue_text()
 
     return render(
         request,

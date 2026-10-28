@@ -96,6 +96,7 @@
 {% endblock %}
 
 {% block main_content %}
+{% if overdue %}<p><span style="background: var(--w-color-critical-200); color: var(--w-color-white); padding: 0.1em 0.6em; border-radius: 1em; font-size: 0.85em;">{{ overdue }}</span></p>{% endif %}
 <div class="mup-meta">
     <span class="mup-meta-label">{% trans "Catalog:" %}</span> {{ feed.catalog.name }}
     &nbsp;·&nbsp;
