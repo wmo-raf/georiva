@@ -1174,7 +1174,8 @@ class UploadSession(models.Model):
 class Delivery(models.Model):
     """One file arriving into a push feed (ADR 0034).
 
-    Today only a person's upload on the feed's page makes one. It starts its own
+    A person's upload on the feed's page makes one, and so does a machine sender's
+    write into ``incoming``, which the consumer attributes by principal. It starts its own
     Correlation; an accepted delivery hands off to ingestion, and the outcome
     stays on the ``FileIngestion`` for its key rather than being copied here.
     """
@@ -1200,6 +1201,14 @@ class Delivery(models.Model):
         on_delete=models.SET_NULL,
         related_name="deliveries",
     )
+    push_sender = models.ForeignKey(
+        "georivaingestion.PushSender",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deliveries",
+        help_text="The machine sender that wrote the file, matched from the Bucket notification's principal.",
+    )
     original_filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=500, blank=True)
     correlation_id = models.UUIDField(
@@ -1224,7 +1233,9 @@ class Delivery(models.Model):
         super().save(*args, **kwargs)
 
     @classmethod
-    def receive(cls, *, push_feed, filename, file_path, session=None, sent_by=None, correlation_id=None):
+    def receive(
+        cls, *, push_feed, filename, file_path, session=None, sent_by=None, push_sender=None, correlation_id=None
+    ):
         """Record a delivery as received, with its ``DeliveryReceived`` event."""
         from georiva.events.context import new_context, use_context
 
@@ -1232,12 +1243,13 @@ class Delivery(models.Model):
             push_feed=push_feed,
             session=session,
             sent_by=sent_by,
+            push_sender=push_sender,
             original_filename=filename,
             file_path=file_path,
             correlation_id=correlation_id,
         )
         context = new_context(
-            actor=f"user:{sent_by.pk}" if sent_by else "system:upload",
+            actor=delivery.actor,
             organisation_id=push_feed.catalog.organisation_id,
             correlation_id=delivery.correlation_id,
         )
@@ -1250,9 +1262,25 @@ class Delivery(models.Model):
                 catalog_slug=push_feed.catalog.slug,
                 filename=filename,
                 file_path=file_path,
-                sender=sent_by.get_username() if sent_by else "",
+                sender=delivery.sender_name,
             )
         return delivery
+
+    @property
+    def actor(self) -> str:
+        """Who stored the file, as the actor of the chain's events."""
+        if self.sent_by_id:
+            return f"user:{self.sent_by_id}"
+        if self.push_sender_id:
+            return f"sender:{self.push_sender.label}"
+        return "system:upload"
+
+    @property
+    def sender_name(self) -> str:
+        """The person's username or the machine sender's label; blank when unknown."""
+        if self.sent_by_id:
+            return self.sent_by.get_username()
+        return self.push_sender.label if self.push_sender_id else ""
 
     def mark_accepted(self, file_path="", bytes=0, *, check_session=True):
         """Accept the delivery. A caller still adding to the batch passes ``check_session=False``
@@ -1284,7 +1312,11 @@ class DeliveryReceived(DomainEvent):
     catalog_slug = models.CharField(max_length=255)
     filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=500)
-    sender = models.CharField(max_length=150, blank=True, help_text="Username of the person; blank when unknown.")
+    sender = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text="Username of the person or label of the machine sender; blank when unknown.",
+    )
 
     class Meta(DomainEvent.Meta):
         indexes = [models.Index(fields=["delivery", "-occurred_at"], name="idx_delivrecv_delivery")]

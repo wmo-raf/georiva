@@ -7,6 +7,7 @@ from urllib.parse import unquote
 
 import redis
 from django.conf import settings
+from django.db import transaction
 
 from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
@@ -67,6 +68,54 @@ def _required_time_error(catalog, key: str) -> str | None:
     )
 
 
+def _principal_of(ev: dict) -> str:
+    return (ev.get("userIdentity") or {}).get("principalId", "")
+
+
+def _attribute_incoming(ev: dict, key: str, meta: dict) -> None:
+    """Record the Delivery for a file a machine sender wrote into ``incoming`` (ADR 0034).
+
+    The Delivery starts the chain, so it is recorded before the arrival's context is
+    chosen: ``context_for_arrival`` then adopts it by key.
+
+    This is the seam for the quarantine slice: a writer that matches no sender of the
+    key's feed, and a key with no push feed, fall through unchanged for now. A person's
+    upload is recognised by the Delivery the upload view already recorded for the key.
+    """
+    from georiva.ingestion.models import Delivery, PushSender
+
+    sender = (
+        PushSender.objects.filter(
+            access_key=_principal_of(ev),
+            push_feed__catalog__slug=meta["catalog"],
+            push_feed__catalog__organisation__slug=meta["org"],
+        )
+        .select_related("push_feed__catalog")
+        .first()
+    )
+    if sender is None:
+        return
+
+    # MinIO can notify more than once for one write; while the first is still in flight
+    # the repeat is the same delivery, not a second one.
+    in_flight = FileIngestion.objects.filter(
+        bucket=BucketType.INCOMING,
+        file_path=key,
+        status__in=[FileIngestion.Status.PENDING, FileIngestion.Status.PROCESSING],
+    ).exists()
+    if in_flight and Delivery.objects.filter(file_path=key, push_sender=sender).exists():
+        return
+
+    with transaction.atomic():
+        delivery = Delivery.receive(
+            push_feed=sender.push_feed,
+            filename=Path(key).name,
+            file_path=key,
+            push_sender=sender,
+        )
+        delivery.mark_accepted(file_path=key, bytes=ev.get("s3", {}).get("object", {}).get("size") or 0)
+
+
 def _should_stop(stop_event) -> bool:
     return stop_event is not None and stop_event.is_set()
 
@@ -97,6 +146,9 @@ def _handle_event(ev: dict):
     org_slug = meta["org"]
     catalog_slug = meta["catalog"]
     collection_slug = meta.get("collection")
+
+    if origin_bucket == BucketType.INCOMING:
+        _attribute_incoming(ev, key, meta)
 
     # A Bucket notification belongs to the chain of the fetch (or upload) that stored
     # the file, found by lookup; with none behind it, it is a drop-zone arrival and
