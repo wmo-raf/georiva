@@ -1,0 +1,273 @@
+{% load i18n %}
+<script>
+/**
+ * The variable table shared by the push-feed wizard (step 4) and the feed's Edit page.
+ * One column, one cell per variable: the cell stacks the inputs, so a row never scrolls sideways.
+ *
+ * The range is always in the OUTPUT unit. Picking another output unit re-expresses the
+ * range through the server (pint), because offset units (K to degC) are not a plain factor.
+ **/
+window.GrVariableCards = (function () {
+    const T = {
+        unknownUnit: '{% trans "unknown" %}',
+        chooseUnit: '{% trans "— choose unit —" %}',
+        createUnit: '{% trans "Create unit" %}',
+        displayName: '{% trans "Display name" %}',
+        units: '{% trans "Units (incoming → output)" %}',
+        range: '{% trans "Value range" %}',
+        collection: '{% trans "Collection" %}',
+        min: '{% trans "min" %}',
+        max: '{% trans "max" %}',
+        converted: '{% trans "Range converted from" %}',
+        confirm: '{% trans "Existing data keeps its old unit and range and is not reprocessed. I understand." %}',
+        fromFile: '{% trans "From file:" %}',
+        reset: '{% trans "Reset" %}',
+        notSet: '{% trans "not set" %}',
+        set: '{% trans "Set" %}',
+        needIncoming: '{% trans "Set the incoming unit for" %}',
+        needUnit: '{% trans "Choose an output unit for" %}',
+        needRange: '{% trans "Enter a value range for" %}',
+        minMax: '{% trans "min must be less than max." %}',
+        needConfirm: '{% trans "Confirm the unit change for" %}',
+    };
+
+    let cfg = null;
+
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function unitSymbol(id) {
+        const u = cfg.units.find(function (x) { return x.id === id; });
+        return u ? u.symbol : '';
+    }
+
+    function unitOptions(selectedId, createSymbol, createSelected, blankLabel) {
+        let html = '<option value="">' + esc(blankLabel) + '</option>';
+        if (createSymbol) {
+            html += '<option value="__create__"' + (createSelected ? ' selected' : '') + '>' +
+                esc(T.createUnit) + ' &quot;' + esc(createSymbol) + '&quot;</option>';
+        }
+        cfg.units.forEach(function (u) {
+            html += '<option value="' + u.id + '"' + (selectedId === u.id ? ' selected' : '') + '>' +
+                esc(u.name) + ' (' + esc(u.symbol) + ')</option>';
+        });
+        return html;
+    }
+
+    function init(options) {
+        cfg = options;
+    }
+
+    function outputSymbol(card) {
+        const sel = card.querySelector('.gr-vc-out');
+        if (sel.value === '__create__') return card.dataset.createSymbol;
+        return sel.value ? unitSymbol(parseInt(sel.value)) : '';
+    }
+
+    function incomingSymbol(card) {
+        const sel = card.querySelector('.gr-vc-in-select');
+        if (sel && !sel.hidden && sel.value) return unitSymbol(parseInt(sel.value));
+        return card.dataset.incomingSymbol || '';
+    }
+
+    function showNote(card, text, isError) {
+        const note = card.querySelector('.gr-vc-note');
+        note.textContent = text;
+        note.classList.toggle('gr-vc-note--error', !!isError);
+    }
+
+    function refreshState(card) {
+        const out = outputSymbol(card);
+        const incoming = incomingSymbol(card);
+        const min = card.querySelector('.gr-vc-min').value;
+        const max = card.querySelector('.gr-vc-max').value;
+        card.querySelector('.gr-vc-range-unit').textContent = out ? '(' + out + ')' : '';
+
+        const units = incoming && out && incoming !== out ? incoming + ' → ' + out : out;
+        const range = min !== '' && max !== '' ? min + '–' + max : '';
+        card.querySelector('.gr-vc-summary').textContent = [units, range].filter(Boolean).join(' · ');
+
+        const changed = card.querySelector('.gr-vc-out').value !== card.dataset.originalOut;
+        card.querySelector('.gr-vc-confirm').hidden = !(card.dataset.hasData === '1' && changed);
+    }
+
+    function onOutputChange(card) {
+        const from = card.dataset.prevSymbol;
+        const to = outputSymbol(card);
+        const minEl = card.querySelector('.gr-vc-min');
+        const maxEl = card.querySelector('.gr-vc-max');
+        card.dataset.prevSymbol = to;
+        refreshState(card);
+        showNote(card, '', false);
+        if (!from || !to || from === to || minEl.value === '' || maxEl.value === '') return;
+
+        const params = new URLSearchParams({
+            from_symbol: from, to_symbol: to, min: minEl.value, max: maxEl.value,
+        });
+        fetch(cfg.convertUrl + '?' + params.toString())
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    showNote(card, data.error, true);
+                    return;
+                }
+                const note = T.converted + ' ' + minEl.value + '–' + maxEl.value + ' ' + from +
+                    ' → ' + data.value_min + '–' + data.value_max + ' ' + to;
+                minEl.value = data.value_min;
+                maxEl.value = data.value_max;
+                showNote(card, note, false);
+                refreshState(card);
+            })
+            .catch(function () { showNote(card, '', false); });
+    }
+
+    /**
+     * row: {key, name, long_name, incoming_symbol, incoming_unit_id, unit_id, unit_create,
+     *       can_create, value_min, value_max, has_data}
+     * collectionNode: the DOM node for the collection. A select is a field in the card body;
+     * with collectionBadge it is plain text and goes in the card header instead.
+     **/
+    function addRow(row, collectionNode, collectionBadge) {
+        const card = document.createElement('div');
+        card.className = 'gr-vc-card';
+        card.dataset.key = row.key;
+        card.dataset.hasData = row.has_data ? '1' : '0';
+        card.dataset.label = row.long_name ? row.long_name + ' (' + row.name + ')' : row.name;
+        const createSymbol = row.can_create ? row.incoming_symbol : '';
+        card.dataset.createSymbol = createSymbol;
+        card.dataset.originalOut = row.unit_create ? '__create__' : (row.unit_id != null ? String(row.unit_id) : '');
+
+        const knownIncoming = row.incoming_symbol || (row.incoming_unit_id ? unitSymbol(row.incoming_unit_id) : '');
+        card.dataset.incomingSymbol = knownIncoming;
+        const incomingHtml = knownIncoming
+            ? '<span class="gr-vc-incoming">' + esc(knownIncoming) + '</span>'
+            : '<span class="gr-vc-incoming gr-vc-incoming--unset">' + esc(T.notSet) + '</span>' +
+                '<button type="button" class="button button-small button-secondary gr-vc-set-in">' + esc(T.set) + '</button>' +
+                '<select class="w-field__input gr-vc-in-select" hidden>' + unitOptions(null, '', false, T.unknownUnit) + '</select>';
+
+        card.innerHTML =
+            '<div class="gr-vc-card-head">' +
+                '<span class="gr-vc-code">' + esc(row.name) + '</span>' +
+                (collectionBadge ? '<span class="gr-vc-badge"></span>' : '') +
+                '<span class="gr-vc-summary"></span>' +
+            '</div>' +
+            '<div class="gr-vc-body">' +
+                '<div><label class="gr-vc-label">' + esc(T.displayName) + '</label>' +
+                    '<input type="text" class="w-field__input gr-vc-ln" value="' + esc(row.long_name || '') + '">' +
+                    (row.source_long_name
+                        ? '<div class="gr-vc-source-name">' + esc(T.fromFile) + ' ' + esc(row.source_long_name) +
+                            '<a href="#" class="gr-vc-reset" hidden>' + esc(T.reset) + '</a></div>'
+                        : '') +
+                '</div>' +
+                '<div><label class="gr-vc-label">' + esc(T.units) + '</label>' +
+                    '<div class="gr-vc-units">' + incomingHtml + '<span class="gr-vc-arrow">→</span>' +
+                    '<select class="w-field__input gr-vc-unit-select gr-vc-out" required>' +
+                        unitOptions(row.unit_id, createSymbol, !!row.unit_create, T.chooseUnit) +
+                    '</select></div></div>' +
+                '<div><label class="gr-vc-label">' + esc(T.range) + ' <span class="gr-vc-range-unit"></span></label>' +
+                    '<div class="gr-vc-range">' +
+                        '<input type="number" step="any" class="w-field__input gr-vc-range-input gr-vc-min" value="' +
+                            (row.value_min != null ? esc(row.value_min) : '') + '" placeholder="' + esc(T.min) + '" required>' +
+                        '<span class="gr-vc-sep">–</span>' +
+                        '<input type="number" step="any" class="w-field__input gr-vc-range-input gr-vc-max" value="' +
+                            (row.value_max != null ? esc(row.value_max) : '') + '" placeholder="' + esc(T.max) + '" required>' +
+                    '</div></div>' +
+                (collectionBadge ? '' :
+                    '<div><label class="gr-vc-label">' + esc(T.collection) + '</label>' +
+                        '<div class="gr-vc-collection"></div></div>') +
+                '<div class="gr-vc-note" aria-live="polite"></div>' +
+                '<div class="gr-vc-confirm" hidden><label>' +
+                    '<input type="checkbox" class="gr-vc-confirm-box"> ' + esc(T.confirm) + '</label></div>' +
+            '</div>';
+
+        if (collectionBadge) {
+            card.querySelector('.gr-vc-badge').textContent = collectionNode.textContent;
+        } else {
+            card.querySelector('.gr-vc-collection').appendChild(collectionNode);
+        }
+        cfg.tbody.appendChild(card);
+
+        card.dataset.prevSymbol = outputSymbol(card);
+        refreshState(card);
+        card.querySelector('.gr-vc-out').addEventListener('change', function () { onOutputChange(card); });
+        card.querySelector('.gr-vc-min').addEventListener('input', function () { refreshState(card); });
+        card.querySelector('.gr-vc-max').addEventListener('input', function () { refreshState(card); });
+
+        const nameEl = card.querySelector('.gr-vc-ln');
+        const resetEl = card.querySelector('.gr-vc-reset');
+        if (resetEl) {
+            // Reset is offered only while the name differs from the file's.
+            const syncReset = function () { resetEl.hidden = nameEl.value.trim() === row.source_long_name; };
+            nameEl.addEventListener('input', syncReset);
+            resetEl.addEventListener('click', function (e) {
+                e.preventDefault();
+                nameEl.value = row.source_long_name;
+                syncReset();
+            });
+            syncReset();
+        }
+
+        const setBtn = card.querySelector('.gr-vc-set-in');
+        if (setBtn) {
+            setBtn.addEventListener('click', function () {
+                card.querySelector('.gr-vc-incoming').hidden = true;
+                setBtn.hidden = true;
+                const sel = card.querySelector('.gr-vc-in-select');
+                sel.hidden = false;
+                sel.focus();
+            });
+            card.querySelector('.gr-vc-in-select').addEventListener('change', function () { refreshState(card); });
+        }
+        return card;
+    }
+
+    function clear() {
+        cfg.tbody.innerHTML = '';
+    }
+
+    /** {rows, error}: the first problem found, or the rows ready to post. **/
+    function collect() {
+        let error = '';
+        let errorCard = null;
+        const rows = Array.from(cfg.tbody.querySelectorAll('.gr-vc-card')).map(function (tr) {
+            const name = tr.dataset.label;
+            const outEl = tr.querySelector('.gr-vc-out');
+            const minEl = tr.querySelector('.gr-vc-min');
+            const maxEl = tr.querySelector('.gr-vc-max');
+            const inSel = tr.querySelector('.gr-vc-in-select');
+            const inChosen = inSel && !inSel.hidden && inSel.value;
+            const vmin = minEl.value !== '' ? parseFloat(minEl.value) : null;
+            const vmax = maxEl.value !== '' ? parseFloat(maxEl.value) : null;
+            const confirmBox = tr.querySelector('.gr-vc-confirm-box');
+            const needsConfirm = !tr.querySelector('.gr-vc-confirm').hidden;
+
+            if (!error && !tr.dataset.incomingSymbol && !inChosen) error = T.needIncoming + ' ' + name + '.';
+            if (!error && !outEl.value) error = T.needUnit + ' ' + name + '.';
+            if (!error && (vmin === null || vmax === null || isNaN(vmin) || isNaN(vmax))) {
+                error = T.needRange + ' ' + name + '.';
+            }
+            if (!error && vmin >= vmax) error = name + ': ' + T.minMax;
+            if (!error && needsConfirm && !confirmBox.checked) error = T.needConfirm + ' ' + name + '.';
+
+            if (error && !errorCard) errorCard = tr;
+
+            return {
+                key: tr.dataset.key,
+                long_name: tr.querySelector('.gr-vc-ln').value.trim(),
+                incoming_unit_id: inChosen ? parseInt(inSel.value) : null,
+                unit_id: outEl.value && outEl.value !== '__create__' ? parseInt(outEl.value) : null,
+                unit_create: outEl.value === '__create__' ? tr.dataset.createSymbol : '',
+                unit_display: outEl.value ? outEl.options[outEl.selectedIndex].textContent : '',
+                value_min: vmin,
+                value_max: vmax,
+                confirm_unit_change: !!(confirmBox && confirmBox.checked),
+            };
+        });
+        return { rows: rows, error: error, errorCard: errorCard };
+    }
+
+    return { init: init, addRow: addRow, clear: clear, collect: collect };
+}());
+</script>

@@ -95,6 +95,7 @@ nothing -- stranding the operator with no chip to click back to All.
                     <div class="gfeed-row__actions">
                         <a class="button button-small button-secondary" href="{{ row.detail_url }}">{% trans "Upload" %}</a>
                         {% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More feed options") %}
+                            <a href="{{ row.edit_url }}">{% icon name="edit" %}{% trans "Edit" %}</a>
                             <a href="{{ row.delete_url }}">{% icon name="bin" %}{% trans "Delete" %}</a>
                         {% enddropdown %}
                     </div>

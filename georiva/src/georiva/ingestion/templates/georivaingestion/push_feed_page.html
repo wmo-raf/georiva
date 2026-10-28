@@ -108,6 +108,8 @@
     &nbsp;·&nbsp;
     <span class="mup-meta-label">{% trans "Filename format:" %}</span> <code>{{ feed.valid_time_format }}</code>
     {% endif %}
+    &nbsp;·&nbsp;
+    <a href="{% url 'push_feed_edit' feed.pk %}">{% trans "Edit configuration" %}</a>
 </div>
 
 <form id="upload-form" class="mup-form">

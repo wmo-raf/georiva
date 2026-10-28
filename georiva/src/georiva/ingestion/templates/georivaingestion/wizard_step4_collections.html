@@ -27,14 +27,8 @@
     .uwiz-inline-error--visible { display: block; }
     .uwiz-section-help { margin-bottom: 0.75em; }
     .uwiz-add-coll-btn { margin-bottom: 1em; }
-    .uwiz-vars-table { width: 100%; margin-bottom: 1.25em; }
-    .uwiz-range-cell { display: flex; align-items: center; gap: 0.35em; }
-    .uwiz-range-input { width: 6em !important; }
-    .uwiz-range-sep { color: var(--w-color-grey-400); }
-    .uwiz-unit-select { min-width: 11em; }
-    .uwiz-row-error td { border-top: none; padding-top: 0; }
-    .uwiz-row-error .uwiz-inline-error { margin-top: 0; }
 </style>
+{% include "georivaingestion/_variable_cards_css.html" %}
 {% endblock %}
 
 {% block wizard_content %}
@@ -57,20 +51,9 @@
     {# ── Variable assignment ── #}
     <div class="uwiz-section-title">{% trans "Variable assignments" %}</div>
     <p class="w-field__help-text uwiz-section-help">
-        {% trans "Edit the display name, unit, and expected value range for each variable, and assign it to a collection. The value range drives color mapping and tile encoding — it was pre-filled from the sample file where possible." %}
+        {% trans "Edit the display name, output unit and expected value range for each variable, and assign it to a collection. Values are converted from the incoming unit (read from the sample file) to the output unit you choose, and the value range is in the output unit. It drives color mapping and tile encoding, and was pre-filled from the sample file where possible." %}
     </p>
-    <table class="listing uwiz-vars-table">
-        <thead>
-            <tr>
-                <th>{% trans "Variable" %}</th>
-                <th>{% trans "Display name" %}</th>
-                <th>{% trans "Unit" %} <sup>*</sup></th>
-                <th>{% trans "Value range" %} <sup>*</sup></th>
-                <th>{% trans "Collection" %} <sup>*</sup></th>
-            </tr>
-        </thead>
-        <tbody id="variables-tbody"></tbody>
-    </table>
+    <div class="gr-vc-list" id="variables-tbody"></div>
     <div class="uwiz-inline-error" id="vars-error"></div>
 
     <div class="uwiz-actions">
@@ -85,6 +68,7 @@
 
 {% block extra_js %}
 {{ block.super }}
+{% include "georivaingestion/_variable_cards_js.html" %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
 
@@ -92,6 +76,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const SELECTED_VARS = {{ selected_variables_json|safe }};
     const UNITS        = {{ units_json|safe }};
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    GrVariableCards.init({
+        tbody: document.getElementById('variables-tbody'),
+        units: UNITS,
+        convertUrl: '{% url "push_feed_convert_range" %}',
+    });
 
     let nextId = 0;
     let collections = [];
@@ -175,46 +165,31 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // ── Variable rows ──────────────────────────────────────────────────────
-    function unitOptionsHtml(v, savedUnitId, savedCreate) {
-        let html = '<option value="">{% trans "— choose unit —" %}</option>';
-        if (v.can_create && v.units) {
-            html += '<option value="__create__"' + (savedCreate ? ' selected' : '') + '>' +
-                '{% trans "Create unit" %} &quot;' + esc(v.units) + '&quot;</option>';
-        }
-        UNITS.forEach(function (u) {
-            const sel = savedUnitId === u.id;
-            html += '<option value="' + u.id + '"' + (sel ? ' selected' : '') + '>' +
-                esc(u.name) + ' (' + esc(u.symbol) + ')</option>';
-        });
-        return html;
-    }
-
     function buildVariableRows(vars, assignments) {
-        const tbody = document.getElementById('variables-tbody');
-        tbody.innerHTML = '';
+        GrVariableCards.clear();
         vars.forEach(function (v) {
             const a = assignments ? assignments.find(function (x) { return x.variable_name === v.name; }) : null;
-            const longName = a ? a.long_name : (v.long_name || '');
-            const vmin = a ? a.value_min : (v.value_min != null ? v.value_min : null);
-            const vmax = a ? a.value_max : (v.value_max != null ? v.value_max : null);
             // Preselect: saved assignment first, then the scan's matched unit
             const unitId = a ? a.unit_id : (v.unit_id != null ? v.unit_id : null);
             const unitCreate = a ? !!a.unit_create : (unitId == null && v.can_create);
-            const sid = 'vr_' + v.name.replace(/\W/g, '_');
-
-            const tr = document.createElement('tr');
-            tr.innerHTML =
-                '<td><code>' + esc(v.name) + '</code></td>' +
-                '<td><input type="text" class="w-field__input" id="' + sid + '_ln" value="' + esc(longName) + '"></td>' +
-                '<td><select class="w-field__input uwiz-unit-select" id="' + sid + '_unit" required>' +
-                    unitOptionsHtml(v, unitCreate ? null : unitId, unitCreate) + '</select></td>' +
-                '<td><div class="uwiz-range-cell">' +
-                    '<input type="number" step="any" class="w-field__input uwiz-range-input" id="' + sid + '_min" value="' + (vmin != null ? esc(vmin) : '') + '" placeholder="{% trans "min" %}" required>' +
-                    '<span class="uwiz-range-sep">–</span>' +
-                    '<input type="number" step="any" class="w-field__input uwiz-range-input" id="' + sid + '_max" value="' + (vmax != null ? esc(vmax) : '') + '" placeholder="{% trans "max" %}" required>' +
-                '</div></td>' +
-                '<td><select class="w-field__input uwiz-var-coll" data-varname="' + esc(v.name) + '" data-sid="' + sid + '" required></select></td>';
-            tbody.appendChild(tr);
+            const sel = document.createElement('select');
+            sel.className = 'w-field__input uwiz-var-coll';
+            sel.dataset.varname = v.name;
+            sel.required = true;
+            GrVariableCards.addRow({
+                key: v.name,
+                name: v.name,
+                long_name: a ? a.long_name : (v.long_name || ''),
+                source_long_name: v.long_name || '',
+                incoming_symbol: v.units || '',
+                incoming_unit_id: null,
+                unit_id: unitCreate ? null : unitId,
+                unit_create: unitCreate,
+                can_create: v.can_create,
+                value_min: a ? a.value_min : (v.value_min != null ? v.value_min : null),
+                value_max: a ? a.value_max : (v.value_max != null ? v.value_max : null),
+                has_data: false,
+            }, sel);
         });
 
         rebuildDropdowns();
@@ -258,54 +233,37 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         const varsErrEl = document.getElementById('vars-error');
-        let varError = '';
+        const collected = GrVariableCards.collect();
 
-        const assignArr = SELECTED_VARS.map(function (v) {
-            const sid = 'vr_' + v.name.replace(/\W/g, '_');
-            const sel = document.querySelector('.uwiz-var-coll[data-varname="' + esc(v.name) + '"]');
-            const collId  = sel ? parseInt(sel.value) : (collections[0] ? collections[0].id : 0);
-            const collIdx = collections.findIndex(function (c) { return c.id === collId; });
-            const lnEl   = document.getElementById(sid + '_ln');
-            const unitEl = document.getElementById(sid + '_unit');
-            const minEl  = document.getElementById(sid + '_min');
-            const maxEl  = document.getElementById(sid + '_max');
-
-            const unitVal = unitEl ? unitEl.value : '';
-            const vmin = minEl && minEl.value !== '' ? parseFloat(minEl.value) : null;
-            const vmax = maxEl && maxEl.value !== '' ? parseFloat(maxEl.value) : null;
-
-            if (!varError && !unitVal) {
-                varError = '{% trans "Choose a unit for" %} ' + v.name + '.';
-            }
-            if (!varError && (vmin === null || vmax === null || isNaN(vmin) || isNaN(vmax))) {
-                varError = '{% trans "Enter a value range for" %} ' + v.name + '.';
-            }
-            {# Pre-submit convenience only — the rule itself lives on #}
-            {# Variable.validate_value_range (ADR 0022), enforced server-side. #}
-            if (!varError && vmin >= vmax) {
-                varError = v.name + ': {% trans "min must be less than max." %}';
-            }
-
-            return {
-                variable_name:  v.name,
-                long_name:      lnEl ? lnEl.value.trim() : '',
-                units:          v.units || '',
-                unit_id:        unitVal && unitVal !== '__create__' ? parseInt(unitVal) : null,
-                unit_create:    unitVal === '__create__' ? (v.units || '') : '',
-                unit_display:   unitEl && unitVal ? unitEl.options[unitEl.selectedIndex].textContent : '',
-                value_min:      vmin,
-                value_max:      vmax,
-                collection_idx: collIdx >= 0 ? collIdx : 0,
-            };
-        });
-
-        if (varError) {
+        if (collected.error) {
             e.preventDefault();
-            varsErrEl.textContent = varError;
+            if (collected.errorCard) collected.errorCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            varsErrEl.textContent = collected.error;
             varsErrEl.classList.add('uwiz-inline-error--visible');
             return;
         }
         varsErrEl.classList.remove('uwiz-inline-error--visible');
+
+        const assignArr = collected.rows.map(function (r) {
+            const v = SELECTED_VARS.find(function (x) { return x.name === r.key; });
+            const sel = document.querySelector('.uwiz-var-coll[data-varname="' + esc(r.key) + '"]');
+            const collId  = sel ? parseInt(sel.value) : (collections[0] ? collections[0].id : 0);
+            const collIdx = collections.findIndex(function (c) { return c.id === collId; });
+            return {
+                variable_name:  r.key,
+                long_name:      r.long_name,
+                source_long_name: v.long_name || '',
+                units:          v.units || '',
+                source_symbol:  v.units || '',
+                source_unit_id: r.incoming_unit_id,
+                unit_id:        r.unit_id,
+                unit_create:    r.unit_create,
+                unit_display:   r.unit_display,
+                value_min:      r.value_min,
+                value_max:      r.value_max,
+                collection_idx: collIdx >= 0 ? collIdx : 0,
+            };
+        });
 
         // Validate no empty collections
         const usedIdxs = new Set(assignArr.map(function (a) { return a.collection_idx; }));

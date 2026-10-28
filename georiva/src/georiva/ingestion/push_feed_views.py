@@ -1,7 +1,12 @@
+import json
 import logging
 from collections import Counter
+from datetime import timedelta
 
+from django import forms
 from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Case, IntegerField, Value, When
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect, render
@@ -106,6 +111,7 @@ class PushFeedIndexView(OrgScopedViewMixin, IndexView):
             "feed": feed,
             "health": health,
             "detail_url": reverse("push_feed_page", args=[feed.pk]),
+            "edit_url": reverse("push_feed_edit", args=[feed.pk]),
             "delete_url": reverse("push_feed_delete", args=[feed.pk]),
             "interval_label": _humanize_minutes(int(interval.total_seconds() // 60)) if interval else "",
             # timesince returns "1 week, 5 days"; on a scan surface the leading unit is the signal.
@@ -168,6 +174,194 @@ def push_feed_delete(request, pk):
             "header_title": _("Delete push feed — %s") % feed.name,
             "header_icon": "bin",
             "feed": feed,
+        },
+    )
+
+
+class PushFeedEditForm(forms.ModelForm):
+    """A push feed's own settings. Its catalog and collections are fixed once it exists."""
+
+    expected_interval_hours = forms.FloatField(
+        required=False,
+        min_value=0,
+        label=gettext_lazy("Expected interval (hours)"),
+        help_text=gettext_lazy("How often a file is expected. Leave empty when there is no schedule to check."),
+    )
+
+    class Meta:
+        model = PushFeed
+        fields = ["name", "is_forecast", "valid_time_format", "files_per_run"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        interval = self.instance.expected_interval
+        if interval is not None:
+            self.initial["expected_interval_hours"] = interval.total_seconds() / 3600
+
+    def save(self, commit=True):
+        feed = super().save(commit=False)
+        hours = self.cleaned_data.get("expected_interval_hours")
+        feed.expected_interval = timedelta(hours=hours) if hours else None
+        if commit:
+            feed.save()
+        return feed
+
+
+def _variable_rows(feed):
+    """The feed's variables as the shared variable table wants them."""
+    from georiva.core.models import Asset
+
+    variables = list(
+        feed.variables().select_related("collection", "unit", "source_unit").order_by("collection__name", "name")
+    )
+    with_data = set(Asset.objects.filter(variable__in=variables).values_list("variable_id", flat=True).distinct())
+    return [
+        {
+            "key": str(v.pk),
+            "name": v.slug,
+            "long_name": v.name,
+            "source_long_name": v.source_long_name,
+            "incoming_symbol": v.source_unit.symbol if v.source_unit_id else "",
+            "incoming_unit_id": v.source_unit_id,
+            "unit_id": v.unit_id,
+            "unit_create": False,
+            "can_create": False,
+            "value_min": v.value_min,
+            "value_max": v.value_max,
+            "has_data": v.pk in with_data,
+            "collection": v.collection.name,
+        }
+        for v in variables
+    ]
+
+
+def _apply_variable_edits(feed, posted):
+    """Validate and save the posted variable rows. Returns the list of problems (empty on success)."""
+    from georiva.core.models import Asset, Unit, Variable
+    from georiva.ingestion.unit_range import units_convertible
+
+    by_id = {str(v.pk): v for v in feed.variables().select_related("unit", "source_unit")}
+    errors, updates = [], []
+    for row in posted:
+        variable = by_id.get(str(row.get("key")))
+        if variable is None:
+            errors.append(_("Unknown variable in the form — reload the page and try again."))
+            continue
+        label = f"{variable.name} ({variable.slug})"
+
+        try:
+            vmin, vmax = float(row.get("value_min")), float(row.get("value_max"))
+            Variable.validate_value_range(vmin, vmax)
+        except (TypeError, ValueError):
+            errors.append(_("Variable '%s' needs numeric min and max values.") % label)
+            continue
+        except ValidationError:
+            errors.append(_("Variable '%s': min value must be less than max.") % label)
+            continue
+
+        unit = Unit.objects.filter(pk=row.get("unit_id")).first() if row.get("unit_id") else None
+        if unit is None:
+            errors.append(_("Variable '%s' needs an output unit.") % label)
+            continue
+
+        # The incoming unit is read-only once known; a variable that never had one can be given it here.
+        source = variable.source_unit
+        if source is None and row.get("incoming_unit_id"):
+            source = Unit.objects.filter(pk=row["incoming_unit_id"]).first()
+        if source is None:
+            errors.append(_("Variable '%s' needs its incoming unit: set the unit the files carry.") % label)
+            continue
+        if not units_convertible(source.symbol, unit.symbol):
+            errors.append(
+                _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
+                % {"var": label, "a": source.symbol, "b": unit.symbol}
+            )
+            continue
+
+        if (
+            unit.pk != variable.unit_id
+            and not row.get("confirm_unit_change")
+            and Asset.objects.filter(variable=variable).exists()
+        ):
+            errors.append(
+                _("Variable '%s' already has data: confirm the unit change, existing data is not reprocessed.") % label
+            )
+            continue
+
+        updates.append((variable, source, unit, vmin, vmax, (row.get("long_name") or "").strip()))
+
+    if errors:
+        return errors
+
+    with transaction.atomic():
+        for variable, source, unit, vmin, vmax, long_name in updates:
+            variable.source_unit, variable.unit = source, unit
+            variable.value_min, variable.value_max = vmin, vmax
+            if long_name:
+                variable.name = long_name
+            variable.save(update_fields=["source_unit", "unit", "value_min", "value_max", "name"])
+    return []
+
+
+def push_feed_edit(request, pk):
+    """Edit a push feed's settings and its variables' name, unit and range. Collections stay as they are."""
+    from georiva.core.models import Unit
+
+    feed = get_org_object_or_404(request, PushFeed.objects.select_related("catalog"), pk=pk)
+    form = PushFeedEditForm(request.POST or None, instance=feed)
+    variables_json = ""
+
+    if request.method == "POST":
+        variables_json = request.POST.get("variables_json", "")
+        try:
+            posted = json.loads(variables_json) if variables_json else []
+        except ValueError:
+            posted = None
+            messages.error(request, _("Invalid variable data — please try again."))
+
+        if posted is not None and form.is_valid():
+            problems = _apply_variable_edits(feed, posted)
+            if problems:
+                for problem in problems:
+                    messages.error(request, problem)
+            else:
+                form.save()
+                messages.success(request, _("Push feed '%s' updated.") % feed.name)
+                return redirect("push_feed_page", pk=feed.pk)
+
+    rows = _variable_rows(feed)
+    if variables_json:
+        # A rejected save shows what the person typed, not what is stored.
+        try:
+            typed = {str(r.get("key")): r for r in json.loads(variables_json)}
+            for row in rows:
+                t = typed.get(row["key"])
+                if t:
+                    row.update(
+                        long_name=t.get("long_name", row["long_name"]),
+                        unit_id=t.get("unit_id") or row["unit_id"],
+                        value_min=t.get("value_min", row["value_min"]),
+                        value_max=t.get("value_max", row["value_max"]),
+                    )
+        except (ValueError, AttributeError):
+            pass
+
+    return render(
+        request,
+        "georivaingestion/push_feed_edit.html",
+        {
+            "breadcrumbs_items": [
+                {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+                {"url": reverse("push_feed_list"), "label": _("Push feeds")},
+                {"url": reverse("push_feed_page", args=[feed.pk]), "label": feed.name},
+                {"url": None, "label": _("Edit")},
+            ],
+            "header_title": _("Edit push feed — %s") % feed.name,
+            "header_icon": "edit",
+            "feed": feed,
+            "form": form,
+            "variable_rows": rows,
+            "units": list(Unit.objects.order_by("name").values("id", "name", "symbol")),
         },
     )
 

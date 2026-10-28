@@ -575,6 +575,19 @@ class Step4CollectionsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    def test_step4_missing_incoming_unit_rerenders(self):
+        collections = [{"name": "Col A", "slug": "col-a"}]
+        assignments = [_assignment(units="", source_symbol="", source_unit_id=None)]
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps(assignments),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "needs its incoming unit")
+
     def test_step4_invalid_create_unit_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(unit_create="not_a_real_unit_xyz")]
@@ -784,6 +797,29 @@ class ProvisionTests(TestCase):
         self.assertEqual(var.slug, "2t")
         self.assertEqual(var.collection, collection)
         self.assertEqual(var.name, "2m temperature")
+
+    def test_provision_records_the_incoming_unit_beside_the_output_unit(self):
+        celsius = Unit.objects.get_or_create(symbol="degC", defaults={"name": "Celsius"})[0]
+        session = _full_session()
+        session["assignments"] = [
+            _assignment(source_symbol="K", unit_id=celsius.pk, unit_create="", value_min=-40.0, value_max=50.0)
+        ]
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        var = Variable.objects.get()
+        self.assertEqual(var.source_unit.symbol, "K")
+        self.assertEqual(var.unit, celsius)
+
+    def test_provision_keeps_the_files_own_name_when_the_display_name_is_edited(self):
+        session = _full_session()
+        session["assignments"] = [_assignment(long_name="Air temp", source_long_name="2 metre temperature")]
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        var = Variable.objects.get()
+        self.assertEqual(var.name, "Air temp")
+        self.assertEqual(var.source_long_name, "2 metre temperature")
 
     def test_provision_stores_files_per_run_and_expected_interval(self):
         from datetime import timedelta
