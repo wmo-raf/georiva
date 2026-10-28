@@ -26,7 +26,6 @@ from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.db.models import Max, Q
 from django.utils import timezone as dj_timezone
-from django.utils.timesince import timesince
 from django.utils.translation import gettext_lazy as _
 from wagtail.snippets.models import register_snippet
 
@@ -1096,7 +1095,9 @@ class PushFeed(models.Model):
         last = self.last_delivery_at()
         if last is None:
             return _("Overdue · no deliveries yet")
-        return _("Overdue · last delivery %(ago)s ago") % {"ago": timesince(last, now)}
+        hours = int((now - last).total_seconds() // 3600)
+        ago = f"{hours} h" if hours < 72 else f"{hours // 24} d"
+        return _("Overdue · last delivery %(ago)s ago") % {"ago": ago}
 
     @classmethod
     def with_last_delivery(cls, queryset):
@@ -1335,7 +1336,9 @@ class PushFeedOverdue(DomainEvent):
     def failure_group(self):
         from georiva.events.models import FailureGroup
 
-        return FailureGroup(key=self.failure_group_key(), label=self.feed_name, url=self.subject_url())
+        # A rename shows at once (ADR 0033); the snapshot stands in once the feed is gone.
+        label = self.push_feed.name if self.push_feed_id else self.feed_name
+        return FailureGroup(key=self.failure_group_key(), label=label, url=self.subject_url())
 
     def summary(self):
         if self.last_delivery_at is None:

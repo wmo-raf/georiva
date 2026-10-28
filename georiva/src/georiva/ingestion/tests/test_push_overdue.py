@@ -73,10 +73,13 @@ class IsOverdueTests(TestCase):
     def test_chip_text_names_the_last_delivery(self):
         feed = _feed()
         _accept(feed, self.now - timedelta(hours=31))
-        self.assertEqual(feed.overdue_text(self.now), "Overdue · last delivery 1\xa0day, 7\xa0hours ago")
+        self.assertEqual(feed.overdue_text(self.now), "Overdue · last delivery 31 h ago")
         empty = _feed("e", since=self.now - timedelta(hours=9))
         self.assertEqual(empty.overdue_text(self.now), "Overdue · no deliveries yet")
-        self.assertIsNone(_accept(_feed("ok"), self.now) and _feed("n", interval=None).overdue_text(self.now))
+        self.assertIsNone(_feed("n", interval=None).overdue_text(self.now))
+        fresh = _feed("ok")
+        _accept(fresh, self.now)
+        self.assertIsNone(fresh.overdue_text(self.now))
 
 
 class RecordOverdueTests(TestCase):
@@ -122,3 +125,12 @@ class RecordOverdueTests(TestCase):
         record_overdue_feeds(self.now)
         keys = {e.failure_group_key() for e in PushFeedOverdue.objects.all()}
         self.assertEqual(len(keys), 2)
+
+
+class OverdueTaskTests(TestCase):
+    def test_the_beat_task_records_through_the_sweep_wrapper(self):
+        from georiva.ingestion.tasks import record_overdue_push_feeds
+
+        _feed(since=timezone.now() - timedelta(hours=7))
+        self.assertEqual(record_overdue_push_feeds(), 1)
+        self.assertEqual(record_overdue_push_feeds(), 0)
