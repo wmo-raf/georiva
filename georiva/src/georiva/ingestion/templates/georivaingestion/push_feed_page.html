@@ -235,11 +235,17 @@
     {% for d in deliveries %}
         <tr>
             <td>{{ d.received_at|date:"Y-m-d H:i" }}</td>
-            <td>{{ d.sent_by.get_username|default:"—" }}</td>
+            <td>{{ d.sender_name|default:"—" }}</td>
             <td><code>{{ d.original_filename }}</code></td>
-            <td>{{ d.get_status_display }}</td>
+            <td>{{ d.get_status_display }}{% if d.reason %}<br><small>{{ d.reason }}</small>{% endif %}</td>
             <td>{% if d.file_ingestion %}<a href="{% url 'file_ingestion_detail' d.file_ingestion.pk %}">{{ d.file_ingestion.get_status_display }}</a>{% else %}—{% endif %}</td>
-            <td><a href="{{ d.timeline_url }}">{% trans "Timeline" %}</a></td>
+            <td><a href="{{ d.timeline_url }}">{% trans "Timeline" %}</a>
+                {% if d.status == "rejected" %}
+                <form method="post" action="{% url 'delivery_retry' feed.pk d.pk %}" style="display:inline">{% csrf_token %}
+                    <button type="submit" class="button button-small button-secondary">{% trans "Retry" %}</button>
+                </form>
+                {% endif %}
+            </td>
         </tr>
     {% endfor %}
     </tbody>

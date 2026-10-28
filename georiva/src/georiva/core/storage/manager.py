@@ -50,8 +50,9 @@ class BucketType:
     ASSETS = "assets"
     ZARR = "zarr"
     PUBLICATIONS = "publications"
+    QUARANTINE = "quarantine"
 
-    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR, PUBLICATIONS]
+    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR, PUBLICATIONS, QUARANTINE]
 
 
 def get_bucket_config() -> dict[str, str]:
@@ -366,6 +367,15 @@ class StorageManager:
         rule that completion markers go last lives.
         """
         return self._get_bucket(BucketType.PUBLICATIONS)
+
+    @property
+    def quarantine(self) -> Bucket:
+        """Deliveries refused out of ``incoming`` (ADR 0034), under the key they arrived with.
+
+        Nothing reads from here except a Retry, and no sweep or notification covers it, so a
+        rejected file stays rejected until someone sends it back. Files expire after 30 days.
+        """
+        return self._get_bucket(BucketType.QUARANTINE)
 
     def get_zarr_fs(self):
         """

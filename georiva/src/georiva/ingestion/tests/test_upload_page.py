@@ -625,36 +625,45 @@ class UploadSubmitMultiFileTests(TestCase):
         self.assertNotEqual(data["files"][0]["job_id"], data["files"][1]["job_id"])
 
 
+@patch("georiva.ingestion.quarantine.storage")
 @patch("georiva.ingestion.consumer.process_incoming_file")
 class DirectDropTimeValidationTests(TestCase):
-    """Direct MinIO drops with unextractable required times must fail clearly."""
+    """A machine delivery with an unextractable required time is quarantined, with its reason."""
 
     def _event(self, key):
         return {
             "s3": {
                 "bucket": {"name": INCOMING_BUCKET_NAME},
                 "object": {"key": key},
-            }
+            },
+            "userIdentity": {"principalId": "AKSENDER"},
         }
 
-    def test_unparseable_geotiff_drop_fails_file_ingestion(self, mock_task):
-        from georiva.ingestion.consumer import _handle_event
+    def _sender(self, config):
+        from georiva.ingestion.models import PushSender
 
-        _geotiff_setup()
+        PushSender.objects.create(push_feed=config, label="sender", access_key="AKSENDER")
+
+    def test_unparseable_geotiff_drop_is_quarantined(self, mock_task, mock_storage):
+        from georiva.ingestion.consumer import _handle_event
+        from georiva.ingestion.models import Delivery
+
+        self._sender(_geotiff_setup()[2])
 
         _handle_event(self._event("test-org/imagery/random_name.tif"))
 
-        fi = FileIngestion.objects.get(file_path="test-org/imagery/random_name.tif")
-        self.assertEqual(fi.status, FileIngestion.Status.FAILED)
-        self.assertIn("Could not extract a valid time", fi.error)
-        self.assertIn("YYYYMMDD", fi.error)
-
+        delivery = Delivery.objects.get(file_path="test-org/imagery/random_name.tif")
+        self.assertEqual(delivery.status, Delivery.Status.REJECTED)
+        self.assertIn("Could not extract a valid time", delivery.reason)
+        self.assertIn("YYYYMMDD", delivery.reason)
+        self.assertFalse(FileIngestion.objects.exists())
+        mock_storage.move_between.assert_called_once()
         mock_task.delay.assert_not_called()
 
-    def test_parseable_geotiff_drop_is_enqueued(self, mock_task):
+    def test_parseable_geotiff_drop_is_enqueued(self, mock_task, mock_storage):
         from georiva.ingestion.consumer import _handle_event
 
-        _geotiff_setup()
+        self._sender(_geotiff_setup()[2])
 
         _handle_event(self._event("test-org/imagery/20250115.tif"))
 
@@ -662,10 +671,10 @@ class DirectDropTimeValidationTests(TestCase):
         self.assertEqual(fi.status, FileIngestion.Status.PENDING)
         mock_task.delay.assert_called_once()
 
-    def test_grib_drop_not_subject_to_filename_check(self, mock_task):
+    def test_grib_drop_not_subject_to_filename_check(self, mock_task, mock_storage):
         from georiva.ingestion.consumer import _handle_event
 
-        _grib_setup()
+        self._sender(_grib_setup()[2])
 
         _handle_event(self._event("test-org/models/any_name.grib2"))
 
@@ -673,16 +682,15 @@ class DirectDropTimeValidationTests(TestCase):
         self.assertEqual(fi.status, FileIngestion.Status.PENDING)
         mock_task.delay.assert_called_once()
 
-    def test_consumer_applies_time_check_uniformly(self, mock_task):
+    def test_consumer_applies_time_check_uniformly(self, mock_task, mock_storage):
         """Consumer checks time extractability for all drops — no bypass."""
         from georiva.ingestion.consumer import _handle_event
 
-        _geotiff_setup()
+        self._sender(_geotiff_setup()[2])
 
         _handle_event(self._event("test-org/imagery/operator_named.tif"))
 
-        fi = FileIngestion.objects.get(file_path="test-org/imagery/operator_named.tif")
-        self.assertEqual(fi.status, FileIngestion.Status.FAILED)
+        mock_storage.move_between.assert_called_once()
         mock_task.delay.assert_not_called()
 
 

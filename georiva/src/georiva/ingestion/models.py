@@ -1183,6 +1183,7 @@ class Delivery(models.Model):
     class Status(models.TextChoices):
         RECEIVED = "received", "Received"
         ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
 
     ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
 
@@ -1216,6 +1217,7 @@ class Delivery(models.Model):
         help_text="The chain this delivery started; the Bucket-notification consumer adopts it by key (ADR 0030).",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
+    reason = models.TextField(blank=True, help_text="Why the delivery was rejected.")
     bytes = models.BigIntegerField(default=0)
     received_at = models.DateTimeField(auto_now_add=True)
     accepted_at = models.DateTimeField(null=True, blank=True)
@@ -1295,6 +1297,13 @@ class Delivery(models.Model):
         if check_session and self.session_id:
             self.session._check_auto_complete()
 
+    def mark_rejected(self, reason: str, bytes=0):
+        """Reject the delivery; its file has already left ``incoming`` for quarantine."""
+        self.status = self.Status.REJECTED
+        self.reason = reason
+        self.bytes = bytes or self.bytes
+        self.save(update_fields=["status", "reason", "bytes"])
+
     def timeline_url(self):
         from django.urls import reverse
 
@@ -1331,6 +1340,60 @@ class DeliveryReceived(DomainEvent):
     def summary(self):
         by = f" from {self.sender}" if self.sender else ""
         return f"{self.filename} received by {self.feed_name}{by}"
+
+
+class DeliveryRejected(DomainEvent):
+    """A file written into ``incoming`` was refused and moved to quarantine (ADR 0034).
+
+    Belongs to the key's organisation; when that organisation does not exist it is
+    unattributed. Groups under the push feed when one is known, else under the
+    ``org/catalog`` the key names.
+    """
+
+    label = "Delivery rejected"
+
+    delivery = models.ForeignKey(Delivery, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255, blank=True)
+    file_path = models.CharField(max_length=500)
+    reason = models.TextField()
+    sender = models.CharField(max_length=150, blank=True, help_text="Who wrote the file, when known.")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["push_feed", "-occurred_at"], name="idx_delivrej_feed")]
+
+    @property
+    def outcome_class(self):
+        return "refused"
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def _key_prefix(self) -> str:
+        """``org/catalog`` of the key, or its first segment when it has no such shape."""
+        parts = self.file_path.split("/")
+        if len(parts) > 2:
+            return "/".join(parts[:2])
+        return parts[0]
+
+    def failure_group_key(self):
+        if self.push_feed_id:
+            return f"push-feed:{self.push_feed_id}"
+        return f"catalog:{self._key_prefix()}"
+
+    def failure_group(self):
+        from georiva.events.models import FailureGroup
+
+        if self.push_feed_id:
+            return FailureGroup(key=self.failure_group_key(), label=self.push_feed.name, url=self.subject_url())
+        return FailureGroup(key=self.failure_group_key(), label=self._key_prefix())
+
+    def summary(self):
+        return f"{self.file_path} rejected: {self.reason}"[:300]
 
 
 class PushFeedOverdue(DomainEvent):

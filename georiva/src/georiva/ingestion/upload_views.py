@@ -113,7 +113,7 @@ def push_feed_page(request, pk, issued=None):
                 seen.add(v.collection_id)
                 affected_collections.append(v.collection)
 
-    deliveries = list(config.deliveries.select_related("sent_by")[:RECENT_DELIVERIES])
+    deliveries = list(config.deliveries.select_related("sent_by", "push_sender")[:RECENT_DELIVERIES])
     ingestions = {
         fi.file_path: fi
         for fi in FileIngestion.objects.filter(

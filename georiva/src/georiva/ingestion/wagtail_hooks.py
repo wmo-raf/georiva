@@ -73,6 +73,7 @@ def register_ingestion_dashboard_urls():
 @hooks.register("register_admin_urls")
 def register_push_feed_urls():
     from .push_feed_views import (
+        delivery_retry,
         push_feed_delete,
         push_feed_list,
         push_sender_add,
@@ -91,6 +92,7 @@ def register_push_feed_urls():
         path("push-feeds/<int:pk>/", push_feed_page, name="push_feed_page"),
         path("push-feeds/<int:pk>/extract-times/", push_feed_extract_times, name="push_feed_extract_times"),
         path("push-feeds/<int:pk>/submit/", push_feed_submit, name="push_feed_submit"),
+        path("push-feeds/<int:pk>/deliveries/<int:delivery_pk>/retry/", delivery_retry, name="delivery_retry"),
         path("push-feeds/<int:pk>/senders/add/", push_sender_add, name="push_sender_add"),
         path("push-feeds/<int:pk>/senders/<int:sender_pk>/rotate/", push_sender_rotate, name="push_sender_rotate"),
         path("push-feeds/<int:pk>/senders/<int:sender_pk>/revoke/", push_sender_revoke, name="push_sender_revoke"),
