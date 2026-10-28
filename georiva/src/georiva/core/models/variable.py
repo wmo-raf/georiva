@@ -98,6 +98,15 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
         ),
     )
     name = models.CharField(max_length=200)
+    source_long_name = models.CharField(
+        max_length=255,
+        blank=True,
+        editable=False,
+        help_text=(
+            "The variable's own display name as the source file named it, kept when 'name' is renamed. "
+            "Set once at provisioning; empty for variables provisioned before it was recorded."
+        ),
+    )
     description = models.TextField(
         blank=True,
         help_text=(

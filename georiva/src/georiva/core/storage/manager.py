@@ -50,8 +50,9 @@ class BucketType:
     ASSETS = "assets"
     ZARR = "zarr"
     PUBLICATIONS = "publications"
+    QUARANTINE = "quarantine"
 
-    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR, PUBLICATIONS]
+    ALL = [INCOMING, SOURCES, STAGING, ARCHIVE, ASSETS, ZARR, PUBLICATIONS, QUARANTINE]
 
 
 def get_bucket_config() -> dict[str, str]:
@@ -259,8 +260,38 @@ class Bucket:
             return None
 
     def get_upload_url(self, path: str, expiration: int = 3600) -> str | None:
-        """Convenience: presigned URL for PUT upload."""
-        return self.get_presigned_url(path, expiration, method="put_object")
+        """
+        Presigned PUT URL for a client outside the stack, such as a browser.
+
+        Signed against ``MINIO_PUBLIC_ENDPOINT``, not the endpoint the app reaches
+        MinIO by: the signature covers the Host header, and a URL signed for
+        ``georiva-minio:9000`` cannot be used from anywhere else. Signing is
+        offline, so MinIO is not contacted. None when the backend is not S3.
+        """
+        if not self.is_s3:
+            return None
+
+        import boto3
+        from botocore.config import Config
+        from django.conf import settings
+
+        scheme = "https" if settings.MINIO_PUBLIC_ENDPOINT_USE_SSL else "http"
+        client = boto3.client(
+            "s3",
+            endpoint_url=f"{scheme}://{settings.MINIO_PUBLIC_ENDPOINT}",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME,
+            config=Config(
+                signature_version=settings.AWS_S3_SIGNATURE_VERSION,
+                s3={"addressing_style": settings.AWS_S3_ADDRESSING_STYLE},
+            ),
+        )
+        return client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.storage.bucket_name, "Key": path},
+            ExpiresIn=expiration,
+        )
 
     # ---- Intra-bucket operations --------------------------------------------
 
@@ -366,6 +397,15 @@ class StorageManager:
         rule that completion markers go last lives.
         """
         return self._get_bucket(BucketType.PUBLICATIONS)
+
+    @property
+    def quarantine(self) -> Bucket:
+        """Deliveries refused out of ``incoming`` (ADR 0034), under the key they arrived with.
+
+        Nothing reads from here except a Retry, and no sweep or notification covers it, so a
+        rejected file stays rejected until someone sends it back. Files expire after 30 days.
+        """
+        return self._get_bucket(BucketType.QUARANTINE)
 
     def get_zarr_fs(self):
         """

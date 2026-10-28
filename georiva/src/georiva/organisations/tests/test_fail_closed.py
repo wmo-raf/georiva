@@ -22,8 +22,7 @@ from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.events.testing import event_context
 from georiva.ingestion.models import (
     FileIngestion,
-    ManualUploadConfig,
-    ManualUploadConfigVariable,
+    PushFeed,
     RunIngestion,
     UploadSession,
 )
@@ -109,7 +108,7 @@ def build_org_page(organisation, *, name):
 
 
 def build_org_tree(organisation, *, name):
-    """One organisation's whole data tree, down to an asset and an upload config."""
+    """One organisation's whole data tree, down to an asset and a push feed."""
     catalog = Catalog.objects.create(
         organisation=organisation,
         name=name,
@@ -133,13 +132,17 @@ def build_org_tree(organisation, *, name):
     link = DataFeedCollectionLink.objects.create(data_feed=feed, collection=collection, definition_key=SHARED_SLUG)
     product = DerivedProduct.objects.create(data_feed=feed, definition_key=SHARED_SLUG, recipe_type="promotion")
     run = FetchRun.objects.create(data_feed=feed)
-    config = ManualUploadConfig.objects.create(
-        catalog=catalog, name=name, valid_time_format=ManualUploadConfig.ValidTimeFormat.YYYYMMDD
+    # A catalog has one feed, so the push feed fronts a catalog of its own.
+    push_catalog = Catalog.objects.create(
+        organisation=organisation,
+        name=name,
+        slug=f"{SHARED_SLUG}-push",
+        file_format=Catalog.FileFormat.GEOTIFF,
     )
-    config_variable = ManualUploadConfigVariable.objects.create(
-        config=config, collection=collection, variable_name=SHARED_SLUG
+    push_feed = PushFeed.objects.create(
+        catalog=push_catalog, name=name, valid_time_format=PushFeed.ValidTimeFormat.YYYYMMDD
     )
-    session = UploadSession.objects.create(catalog=catalog)
+    session = UploadSession.objects.create(push_feed=push_feed)
     file_ingestion = FileIngestion.objects.create(bucket="sources", file_path=f"{organisation.slug}/x/y/z.tif")
     model_run = RunIngestion.objects.create(collection=collection, reference_time="2026-01-01T00:00:00Z")
     with event_context(organisation_id=organisation.pk):
@@ -158,8 +161,7 @@ def build_org_tree(organisation, *, name):
         "link": link,
         "product": product,
         "run": run,
-        "config": config,
-        "config_variable": config_variable,
+        "push_feed": push_feed,
         "session": session,
         "model_run": model_run,
         "attempt": attempt,
@@ -253,9 +255,11 @@ class CrossOrgAdminTests(TestCase):
         url = reverse("data_feed_detail", args=[self.uganda_tree["feed"].pk])
         self.assertEqual(self.client.get(url).status_code, 404)
 
-    def test_another_organisations_upload_config_is_not_found(self):
-        url = reverse("manual_upload_config_edit", args=[self.uganda_tree["config"].pk])
-        self.assertEqual(self.client.get(url).status_code, 404)
+    def test_another_organisations_push_feed_is_not_found(self):
+        for name in ("push_feed_page", "push_feed_delete"):
+            with self.subTest(view=name):
+                url = reverse(name, args=[self.uganda_tree["push_feed"].pk])
+                self.assertEqual(self.client.get(url).status_code, 404)
 
     def test_another_organisations_item_preview_is_not_found(self):
         url = reverse("item_preview", args=[self.uganda_tree["item"].pk])
@@ -268,7 +272,7 @@ class CrossOrgAdminTests(TestCase):
             ("catalog:edit", [self.kenya_tree["catalog"].pk]),
             ("collection_items_list", [self.kenya_tree["collection"].pk]),
             ("data_feed_detail", [self.kenya_tree["feed"].pk]),
-            ("manual_upload_config_edit", [self.kenya_tree["config"].pk]),
+            ("push_feed_page", [self.kenya_tree["push_feed"].pk]),
             ("item_preview", [self.kenya_tree["item"].pk]),
         ]:
             with self.subTest(view=name):
@@ -348,21 +352,15 @@ class AdminUrlSweepTests(TestCase):
             "file_ingestion_id": tree["file_ingestion"].pk,
             "run": tree["run"].pk,
             "run_pk": tree["run"].pk,
-            "config": tree["config"].pk,
             "session": tree["session"].pk,
             "session_id": tree["session"].pk,
             # Matched by URL prefix: the manifest snippet's admin paths use a
             # bare <pk>, and "manifest" appears in the model's URL segment.
             "manifest": tree["manifest"].pk,
-            # Two different models answer to a name starting "var", and the
-            # longer one is listed first on purpose: "var" is a substring of
-            # "variable_pk", so without these entries the substring pass hands
-            # the virtual-zarr routes a ManualUploadConfigVariable pk. Both
-            # passes below walk this dict in order, so specific precedes vague.
+            # "var" is a substring of "variable_pk"; both passes below walk this
+            # dict in order, so the specific names precede the vague.
             "variable": tree["variable"].pk,
             "variable_pk": tree["variable"].pk,
-            "var": tree["config_variable"].pk,
-            "var_pk": tree["config_variable"].pk,
             # Matches page_id, parent_page_id and page_to_move_id by substring;
             # destination_id names a page without saying so, so it is listed too.
             "page": tree["page"].pk,

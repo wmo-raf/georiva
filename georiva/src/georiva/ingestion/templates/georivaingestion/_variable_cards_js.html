@@ -1,0 +1,524 @@
+{% load i18n %}
+<script>
+/**
+ * The variable cards shared by the push-feed wizard (step 4) and the feed's Edit page.
+ * One card per variable, its inputs stacked, so a row never scrolls sideways.
+ *
+ * The range is always in the OUTPUT unit. Picking another output unit re-expresses the
+ * range through the server (pint), because offset units (K to degC) are not a plain factor.
+ *
+ * A card is a passthrough variable, a stored derived variable (wind speed or direction, its
+ * components fixed), or a new derived variable still being filled in.
+ **/
+window.GrVariableCards = (function () {
+    const MAGNITUDE = 'vector_magnitude';
+    const DIRECTION = 'vector_direction';
+    const T = {
+        unknownUnit: '{% trans "unknown" %}',
+        chooseUnit: '{% trans "— choose unit —" %}',
+        createUnit: '{% trans "Create unit" %}',
+        displayName: '{% trans "Display name" %}',
+        units: '{% trans "Units (incoming → output)" %}',
+        degrees: '{% trans "Degrees (fixed: direction is always 0–360°)" %}',
+        range: '{% trans "Value range" %}',
+        collection: '{% trans "Collection" %}',
+        min: '{% trans "min" %}',
+        max: '{% trans "max" %}',
+        converted: '{% trans "Range converted from" %}',
+        confirm: '{% trans "Existing data keeps its old unit and range and is not reprocessed. I understand." %}',
+        fromFile: '{% trans "From file:" %}',
+        reset: '{% trans "Reset" %}',
+        notSet: '{% trans "not set" %}',
+        set: '{% trans "Set" %}',
+        needIncoming: '{% trans "Set the incoming unit for" %}',
+        needUnit: '{% trans "Choose an output unit for" %}',
+        needRange: '{% trans "Enter a value range for" %}',
+        minMax: '{% trans "min must be less than max." %}',
+        needConfirm: '{% trans "Confirm the unit change for" %}',
+        derivedLabel: '{% trans "Derived:" %}',
+        newDerived: '{% trans "New derived variable" %}',
+        speed: '{% trans "wind speed" %}',
+        direction: '{% trans "wind direction" %}',
+        from: '{% trans "from" %}',
+        type: '{% trans "Type" %}',
+        uComponent: '{% trans "U component (eastward)" %}',
+        vComponent: '{% trans "V component (northward)" %}',
+        choose: '{% trans "— choose —" %}',
+        other: '{% trans "Other…" %}',
+        otherPlaceholder: '{% trans "Source variable name in the file" %}',
+        remove: '{% trans "Remove" %}',
+        needName: '{% trans "Enter a name for the new derived variable." %}',
+        needComponents: '{% trans "Choose the U and V components for" %}',
+        sameComponents: '{% trans "U and V must be different variables for" %}',
+        unitMismatch: '{% trans "U and V are in different units for" %}',
+        assumedFrom: '{% trans "assumed from" %}',
+        needCollection: '{% trans "Choose a collection for" %}',
+    };
+
+    let cfg = null;
+    let derivedSeq = 0;
+
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function unitSymbol(id) {
+        const u = cfg.units.find(function (x) { return x.id === id; });
+        return u ? u.symbol : '';
+    }
+
+    function unitIdBySymbol(symbol) {
+        const key = (symbol || '').toLowerCase();
+        const u = cfg.units.find(function (x) { return x.symbol.toLowerCase() === key; });
+        return u ? u.id : null;
+    }
+
+    function unitOptions(selectedId, createSymbol, createSelected, blankLabel) {
+        let html = '<option value="">' + esc(blankLabel) + '</option>';
+        if (createSymbol) {
+            html += '<option value="__create__"' + (createSelected ? ' selected' : '') + '>' +
+                esc(T.createUnit) + ' &quot;' + esc(createSymbol) + '&quot;</option>';
+        }
+        cfg.units.forEach(function (u) {
+            html += '<option value="' + u.id + '"' + (selectedId === u.id ? ' selected' : '') + '>' +
+                esc(u.name) + ' (' + esc(u.symbol) + ')</option>';
+        });
+        return html;
+    }
+
+    function init(options) {
+        cfg = options;
+    }
+
+    function transformName(transform) {
+        return transform === DIRECTION ? T.direction : T.speed;
+    }
+
+    function outputSymbol(card) {
+        const sel = card.querySelector('.gr-vc-out');
+        if (sel.value === '__create__') return card.dataset.createSymbol;
+        return sel.value ? unitSymbol(parseInt(sel.value)) : '';
+    }
+
+    function incomingSymbol(card) {
+        const sel = card.querySelector('.gr-vc-in-select');
+        if (sel && !sel.hidden && sel.value) return unitSymbol(parseInt(sel.value));
+        return card.dataset.incomingSymbol || '';
+    }
+
+    function showNote(card, text, isError) {
+        const note = card.querySelector('.gr-vc-note');
+        note.textContent = text;
+        note.classList.toggle('gr-vc-note--error', !!isError);
+    }
+
+    function isDirection(card) {
+        return card.dataset.direction === '1';
+    }
+
+    function refreshState(card) {
+        const out = outputSymbol(card);
+        const incoming = incomingSymbol(card);
+        const min = card.querySelector('.gr-vc-min').value;
+        const max = card.querySelector('.gr-vc-max').value;
+        card.querySelector('.gr-vc-range-unit').textContent = out ? '(' + out + ')' : '';
+
+        const units = !isDirection(card) && incoming && out && incoming !== out ? incoming + ' → ' + out : out;
+        const range = min !== '' && max !== '' ? min + '–' + max : '';
+        card.querySelector('.gr-vc-summary').textContent = [units, range].filter(Boolean).join(' · ');
+
+        const changed = card.querySelector('.gr-vc-out').value !== card.dataset.originalOut;
+        card.querySelector('.gr-vc-confirm').hidden = !(card.dataset.hasData === '1' && changed);
+    }
+
+    function onOutputChange(card) {
+        const from = card.dataset.prevSymbol;
+        const to = outputSymbol(card);
+        const minEl = card.querySelector('.gr-vc-min');
+        const maxEl = card.querySelector('.gr-vc-max');
+        card.dataset.prevSymbol = to;
+        refreshState(card);
+        showNote(card, '', false);
+        if (!from || !to || from === to || minEl.value === '' || maxEl.value === '') return;
+
+        const params = new URLSearchParams({
+            from_symbol: from, to_symbol: to, min: minEl.value, max: maxEl.value,
+        });
+        fetch(cfg.convertUrl + '?' + params.toString())
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    showNote(card, data.error, true);
+                    return;
+                }
+                const note = T.converted + ' ' + minEl.value + '–' + maxEl.value + ' ' + from +
+                    ' → ' + data.value_min + '–' + data.value_max + ' ' + to;
+                minEl.value = data.value_min;
+                maxEl.value = data.value_max;
+                showNote(card, note, false);
+                refreshState(card);
+            })
+            .catch(function () { showNote(card, '', false); });
+    }
+
+    /** Fill the incoming-unit slot: the unit as text, or "not set" with a Set button. **/
+    function renderIncoming(card, symbol, assumedFrom) {
+        card.dataset.incomingSymbol = symbol || '';
+        const wrap = card.querySelector('.gr-vc-in-wrap');
+        wrap.innerHTML = symbol
+            ? '<span class="gr-vc-incoming">' + esc(symbol) + '</span>' +
+                (assumedFrom ? '<span class="gr-vc-assumed">(' + esc(T.assumedFrom) + ' ' + esc(assumedFrom) + ')</span>' : '')
+            : '<span class="gr-vc-incoming gr-vc-incoming--unset">' + esc(T.notSet) + '</span>' +
+                '<button type="button" class="button button-small button-secondary gr-vc-set-in">' + esc(T.set) + '</button>' +
+                '<select class="w-field__input gr-vc-in-select" hidden>' + unitOptions(null, '', false, T.unknownUnit) + '</select>';
+
+        const setBtn = wrap.querySelector('.gr-vc-set-in');
+        if (setBtn) {
+            setBtn.addEventListener('click', function () {
+                wrap.querySelector('.gr-vc-incoming').hidden = true;
+                setBtn.hidden = true;
+                const sel = wrap.querySelector('.gr-vc-in-select');
+                sel.hidden = false;
+                sel.focus();
+                sel.addEventListener('change', function () { refreshState(card); });
+            });
+        }
+        refreshState(card);
+    }
+
+    function unitsFieldHtml(row, createSymbol) {
+        return '<div class="gr-vc-units-field"><label class="gr-vc-label">' + esc(T.units) + '</label>' +
+            '<div class="gr-vc-units"><span class="gr-vc-in-wrap"></span><span class="gr-vc-arrow">→</span>' +
+            '<select class="w-field__input gr-vc-unit-select gr-vc-out" required>' +
+                unitOptions(row.unit_id, createSymbol, !!row.unit_create, T.chooseUnit) +
+            '</select></div></div>' +
+            '<div class="gr-vc-fixed-unit gr-vc-note" hidden>' + esc(T.degrees) + '</div>';
+    }
+
+    function rangeFieldHtml(row) {
+        return '<div><label class="gr-vc-label">' + esc(T.range) + ' <span class="gr-vc-range-unit"></span></label>' +
+            '<div class="gr-vc-range">' +
+                '<input type="number" step="any" class="w-field__input gr-vc-range-input gr-vc-min" value="' +
+                    (row.value_min != null ? esc(row.value_min) : '') + '" placeholder="' + esc(T.min) + '" required>' +
+                '<span class="gr-vc-sep">–</span>' +
+                '<input type="number" step="any" class="w-field__input gr-vc-range-input gr-vc-max" value="' +
+                    (row.value_max != null ? esc(row.value_max) : '') + '" placeholder="' + esc(T.max) + '" required>' +
+            '</div></div>';
+    }
+
+    function footerHtml() {
+        return '<div class="gr-vc-note" aria-live="polite"></div>' +
+            '<div class="gr-vc-confirm" hidden><label>' +
+                '<input type="checkbox" class="gr-vc-confirm-box"> ' + esc(T.confirm) + '</label></div>';
+    }
+
+    /** Direction is always degrees: no incoming unit, nothing to convert. **/
+    function setDirectionMode(card, on) {
+        card.dataset.direction = on ? '1' : '0';
+        card.querySelector('.gr-vc-units-field').hidden = on;
+        card.querySelector('.gr-vc-fixed-unit').hidden = !on;
+        const out = card.querySelector('.gr-vc-out');
+        if (on && cfg.degreeUnitId != null) {
+            out.value = String(cfg.degreeUnitId);
+            card.dataset.prevSymbol = outputSymbol(card);
+        }
+        refreshState(card);
+    }
+
+    function wire(card, row) {
+        card.querySelector('.gr-vc-out').addEventListener('change', function () { onOutputChange(card); });
+        card.querySelector('.gr-vc-min').addEventListener('input', function () { refreshState(card); });
+        card.querySelector('.gr-vc-max').addEventListener('input', function () { refreshState(card); });
+
+        const nameEl = card.querySelector('.gr-vc-ln');
+        const resetEl = card.querySelector('.gr-vc-reset');
+        if (resetEl) {
+            // Reset is offered only while the name differs from the file's.
+            const syncReset = function () { resetEl.hidden = nameEl.value.trim() === row.source_long_name; };
+            nameEl.addEventListener('input', syncReset);
+            resetEl.addEventListener('click', function (e) {
+                e.preventDefault();
+                nameEl.value = row.source_long_name;
+                syncReset();
+            });
+            syncReset();
+        }
+    }
+
+    /**
+     * row: {key, name, long_name, source_long_name, incoming_symbol, incoming_unit_id, unit_id,
+     *       unit_create, can_create, value_min, value_max, has_data,
+     *       derived: {transform, u_source, v_source} for a stored derived variable}
+     * collectionNode: the DOM node for the collection. A select is a field in the card body;
+     * with collectionBadge it is plain text and goes in the card header instead.
+     **/
+    function addRow(row, collectionNode, collectionBadge) {
+        const derived = row.derived || null;
+        const card = document.createElement('div');
+        card.className = 'gr-vc-card';
+        card.dataset.key = row.key;
+        card.dataset.kind = derived ? 'derived' : 'passthrough';
+        card.dataset.hasData = row.has_data ? '1' : '0';
+        card.dataset.label = row.long_name ? row.long_name + ' (' + row.name + ')' : row.name;
+        const createSymbol = row.can_create ? row.incoming_symbol : '';
+        card.dataset.createSymbol = createSymbol;
+        card.dataset.originalOut = row.unit_create ? '__create__' : (row.unit_id != null ? String(row.unit_id) : '');
+
+        const heading = derived
+            ? esc(T.derivedLabel) + ' ' + esc(transformName(derived.transform)) + ' ' + esc(T.from) + ' ' +
+                esc(derived.u_source) + ' + ' + esc(derived.v_source)
+            : esc(row.name);
+
+        card.innerHTML =
+            '<div class="gr-vc-card-head">' +
+                '<span class="gr-vc-code">' + heading + '</span>' +
+                (collectionBadge ? '<span class="gr-vc-badge"></span>' : '') +
+                '<span class="gr-vc-summary"></span>' +
+            '</div>' +
+            '<div class="gr-vc-body">' +
+                '<div><label class="gr-vc-label">' + esc(T.displayName) + '</label>' +
+                    '<input type="text" class="w-field__input gr-vc-ln" value="' + esc(row.long_name || '') + '">' +
+                    (row.source_long_name
+                        ? '<div class="gr-vc-source-name">' + esc(T.fromFile) + ' ' + esc(row.source_long_name) +
+                            '<a href="#" class="gr-vc-reset" hidden>' + esc(T.reset) + '</a></div>'
+                        : '') +
+                '</div>' +
+                unitsFieldHtml(row, createSymbol) +
+                rangeFieldHtml(row) +
+                (collectionBadge ? '' :
+                    '<div><label class="gr-vc-label">' + esc(T.collection) + '</label>' +
+                        '<div class="gr-vc-collection"></div></div>') +
+                footerHtml() +
+            '</div>';
+
+        if (collectionBadge) {
+            card.querySelector('.gr-vc-badge').textContent = collectionNode.textContent;
+        } else {
+            card.querySelector('.gr-vc-collection').appendChild(collectionNode);
+        }
+        cfg.tbody.appendChild(card);
+
+        renderIncoming(card, row.incoming_symbol || (row.incoming_unit_id ? unitSymbol(row.incoming_unit_id) : ''));
+        card.dataset.prevSymbol = outputSymbol(card);
+        wire(card, row);
+        setDirectionMode(card, !!derived && derived.transform === DIRECTION);
+        return card;
+    }
+
+    function sourceSelect(label, cls, options, allowOther) {
+        let html = '<div><label class="gr-vc-label">' + esc(label) + '</label>' +
+            '<select class="w-field__input ' + cls + '"><option value="">' + esc(T.choose) + '</option>';
+        options.forEach(function (o) {
+            html += '<option value="' + esc(o.name) + '">' + esc(o.name) + (o.symbol ? ' (' + esc(o.symbol) + ')' : '') + '</option>';
+        });
+        if (allowOther) html += '<option value="__other__">' + esc(T.other) + '</option>';
+        html += '</select>';
+        if (allowOther) {
+            html += '<input type="text" class="w-field__input gr-vc-other ' + cls + '-other" hidden placeholder="' +
+                esc(T.otherPlaceholder) + '">';
+        }
+        return html + '</div>';
+    }
+
+    function sourceValue(card, cls) {
+        const sel = card.querySelector('.' + cls);
+        if (sel.value !== '__other__') return sel.value;
+        return card.querySelector('.' + cls + '-other').value.trim();
+    }
+
+    /**
+     * A new derived variable, still to be created.
+     * opts: {sourceOptions: [{name, symbol}], allowOther, collectionNode, prefill: {transform, u_source,
+     *        v_source, long_name, unit_id, incoming_symbol, value_min, value_max}}
+     **/
+    function addDerivedRow(opts) {
+        const pre = opts.prefill || {};
+        const card = document.createElement('div');
+        card.className = 'gr-vc-card';
+        card.dataset.key = 'derived-' + (derivedSeq++);
+        card.dataset.kind = 'derived-new';
+        card.dataset.hasData = '0';
+        card.dataset.label = T.newDerived;
+        card.dataset.createSymbol = '';
+        card.dataset.originalOut = '';
+
+        card.innerHTML =
+            '<div class="gr-vc-card-head">' +
+                '<span class="gr-vc-code">' + esc(T.newDerived) + '</span>' +
+                '<span class="gr-vc-summary"></span>' +
+                '<button type="button" class="button button-small button-secondary gr-vc-remove">' + esc(T.remove) + '</button>' +
+            '</div>' +
+            '<div class="gr-vc-body">' +
+                '<div><label class="gr-vc-label">' + esc(T.type) + '</label>' +
+                    '<select class="w-field__input gr-vc-transform">' +
+                        '<option value="' + MAGNITUDE + '">' + esc(T.speed) + '</option>' +
+                        '<option value="' + DIRECTION + '">' + esc(T.direction) + '</option>' +
+                    '</select></div>' +
+                sourceSelect(T.uComponent, 'gr-vc-u', opts.sourceOptions, opts.allowOther) +
+                sourceSelect(T.vComponent, 'gr-vc-v', opts.sourceOptions, opts.allowOther) +
+                '<div><label class="gr-vc-label">' + esc(T.displayName) + '</label>' +
+                    '<input type="text" class="w-field__input gr-vc-ln" value="' + esc(pre.long_name || '') + '"></div>' +
+                unitsFieldHtml({unit_id: pre.unit_id != null ? pre.unit_id : null}, '') +
+                rangeFieldHtml({value_min: pre.value_min, value_max: pre.value_max}) +
+                '<div><label class="gr-vc-label">' + esc(T.collection) + '</label>' +
+                    '<div class="gr-vc-collection"></div></div>' +
+                footerHtml() +
+            '</div>';
+
+        card.querySelector('.gr-vc-collection').appendChild(opts.collectionNode);
+        cfg.tbody.appendChild(card);
+        renderIncoming(card, pre.incoming_symbol || '');
+        card.dataset.prevSymbol = outputSymbol(card);
+        wire(card, {});
+
+        const transformEl = card.querySelector('.gr-vc-transform');
+        const uEl = card.querySelector('.gr-vc-u');
+        const vEl = card.querySelector('.gr-vc-v');
+        if (pre.transform) transformEl.value = pre.transform;
+        if (pre.u_source) uEl.value = pre.u_source;
+        if (pre.v_source) vEl.value = pre.v_source;
+
+        function syncOther(sel) {
+            const other = card.querySelector('.' + (sel === uEl ? 'gr-vc-u' : 'gr-vc-v') + '-other');
+            if (other) other.hidden = sel.value !== '__other__';
+        }
+
+        // The incoming unit is the unit both components share. A component with no stored unit is taken
+        // to be in the unit it is labelled with (nothing was ever converted), and that is shown as assumed.
+        function syncIncoming() {
+            const optionOf = function (el) {
+                return opts.sourceOptions.find(function (o) { return o.name === el.value; }) || null;
+            };
+            const u = optionOf(uEl);
+            const v = optionOf(vEl);
+            const same = !!(u && v && u.symbol && v.symbol && u.symbol.toLowerCase() === v.symbol.toLowerCase());
+            const bothStored = !!(u && v && u.symbol && v.symbol && !u.assumed && !v.assumed);
+            const mismatch = bothStored && !same;
+            card.dataset.mismatch = mismatch ? '1' : '0';
+            showNote(card, mismatch ? T.unitMismatch + ' ' + u.symbol + ' / ' + v.symbol : '', mismatch);
+
+            const assumed = same && (u.assumed || v.assumed);
+            const from = assumed ? [u, v].filter(function (o) { return o.assumed; }).map(function (o) { return o.name; }).join('/') : '';
+            renderIncoming(card, same ? u.symbol : '', from);
+        }
+
+        // Wind speed is in m/s unless the person picks another unit; direction is always degrees.
+        function defaultSpeedOutput() {
+            const out = card.querySelector('.gr-vc-out');
+            const ms = unitIdBySymbol('m/s');
+            if (!out.value && ms != null) {
+                out.value = String(ms);
+                card.dataset.prevSymbol = outputSymbol(card);
+            }
+        }
+
+        function syncTransform() {
+            const direction = transformEl.value === DIRECTION;
+            const wasDirection = isDirection(card);
+            const min = card.querySelector('.gr-vc-min');
+            const max = card.querySelector('.gr-vc-max');
+            const isRange = function (lo, hi) { return min.value === String(lo) && max.value === String(hi); };
+            const untouched = min.value === '' || isRange(0, 40) || isRange(0, 360);
+
+            setDirectionMode(card, direction);
+            if (!direction && wasDirection) {
+                // Back from direction: its degrees unit and 0–360 range are not a speed's.
+                const out = card.querySelector('.gr-vc-out');
+                out.value = '';
+                card.dataset.prevSymbol = '';
+            }
+            if (!direction) defaultSpeedOutput();
+
+            // Defaults in the output unit: direction 0–360°, speed 0–40 m/s. Only an untouched range is replaced.
+            if (untouched) {
+                if (direction) {
+                    min.value = 0;
+                    max.value = 360;
+                } else if (outputSymbol(card) === 'm/s') {
+                    min.value = 0;
+                    max.value = 40;
+                }
+            }
+            refreshState(card);
+        }
+
+        transformEl.addEventListener('change', syncTransform);
+        uEl.addEventListener('change', function () { syncOther(uEl); syncIncoming(); });
+        vEl.addEventListener('change', function () { syncOther(vEl); syncIncoming(); });
+        card.querySelector('.gr-vc-remove').addEventListener('click', function () { card.remove(); });
+
+        syncOther(uEl);
+        syncOther(vEl);
+        if (pre.u_source && !pre.incoming_symbol) syncIncoming();
+        syncTransform();
+        return card;
+    }
+
+    function clear() {
+        cfg.tbody.innerHTML = '';
+    }
+
+    /** {rows, error, errorCard}: the first problem found, or the rows ready to post. **/
+    function collect() {
+        let error = '';
+        let errorCard = null;
+        const rows = Array.from(cfg.tbody.querySelectorAll('.gr-vc-card')).map(function (tr) {
+            const name = tr.dataset.label;
+            const kind = tr.dataset.kind;
+            const outEl = tr.querySelector('.gr-vc-out');
+            const minEl = tr.querySelector('.gr-vc-min');
+            const maxEl = tr.querySelector('.gr-vc-max');
+            const inSel = tr.querySelector('.gr-vc-in-select');
+            const inChosen = inSel && !inSel.hidden && inSel.value;
+            const vmin = minEl.value !== '' ? parseFloat(minEl.value) : null;
+            const vmax = maxEl.value !== '' ? parseFloat(maxEl.value) : null;
+            const confirmBox = tr.querySelector('.gr-vc-confirm-box');
+            const needsConfirm = !tr.querySelector('.gr-vc-confirm').hidden;
+            const direction = isDirection(tr);
+            const collectionSel = tr.querySelector('.gr-vc-collection select');
+
+            let derived = null;
+            if (kind === 'derived-new') {
+                const uSource = sourceValue(tr, 'gr-vc-u');
+                const vSource = sourceValue(tr, 'gr-vc-v');
+                derived = {transform: tr.querySelector('.gr-vc-transform').value, u_source: uSource, v_source: vSource};
+                const longName = tr.querySelector('.gr-vc-ln').value.trim();
+                if (!error && !longName) error = T.needName;
+                if (!error && (!uSource || !vSource)) error = T.needComponents + ' ' + (longName || name) + '.';
+                if (!error && uSource === vSource) error = T.sameComponents + ' ' + (longName || name) + '.';
+                if (!error && tr.dataset.mismatch === '1') error = T.unitMismatch + ' ' + (longName || name) + '.';
+                if (!error && collectionSel && !collectionSel.value) error = T.needCollection + ' ' + (longName || name) + '.';
+            }
+
+            if (!error && !direction && !tr.dataset.incomingSymbol && !inChosen) error = T.needIncoming + ' ' + name + '.';
+            if (!error && !outEl.value) error = T.needUnit + ' ' + name + '.';
+            if (!error && (vmin === null || vmax === null || isNaN(vmin) || isNaN(vmax))) {
+                error = T.needRange + ' ' + name + '.';
+            }
+            if (!error && vmin >= vmax) error = name + ': ' + T.minMax;
+            if (!error && needsConfirm && !confirmBox.checked) error = T.needConfirm + ' ' + name + '.';
+            if (error && !errorCard) errorCard = tr;
+
+            return {
+                key: tr.dataset.key,
+                new_derived: kind === 'derived-new',
+                derived: derived,
+                collection_value: collectionSel ? collectionSel.value : '',
+                long_name: tr.querySelector('.gr-vc-ln').value.trim(),
+                incoming_symbol: tr.dataset.incomingSymbol || '',
+                incoming_unit_id: !direction && inChosen ? parseInt(inSel.value) : null,
+                unit_id: outEl.value && outEl.value !== '__create__' ? parseInt(outEl.value) : null,
+                unit_create: outEl.value === '__create__' ? tr.dataset.createSymbol : '',
+                unit_display: outEl.value ? outEl.options[outEl.selectedIndex].textContent : '',
+                value_min: vmin,
+                value_max: vmax,
+                confirm_unit_change: !!(confirmBox && confirmBox.checked),
+            };
+        });
+        return { rows: rows, error: error, errorCard: errorCard };
+    }
+
+    return { init: init, addRow: addRow, addDerivedRow: addDerivedRow, clear: clear, collect: collect };
+}());
+</script>

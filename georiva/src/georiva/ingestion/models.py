@@ -21,11 +21,15 @@ import os
 from datetime import timedelta
 from functools import partial
 
+from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
+from django.db.models import Max, Q
 from django.utils import timezone as dj_timezone
+from django.utils.translation import gettext_lazy as _
 from wagtail.snippets.models import register_snippet
 
-from georiva.events.context import ensure_context, update_context
+from georiva.events.context import ensure_context, update_context, use_context
 from georiva.events.models import DomainEvent
 from georiva.events.recording import record
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
@@ -167,6 +171,7 @@ class FileIngestion(models.Model):
     # =========================================================================
 
     MAX_RETRIES = 3
+    RETRIES_EXHAUSTED = "Gave up after {max} attempts without finishing"
     LOCK_TIMEOUT = timedelta(minutes=30)
     # A pending row older than this has lost its dispatched task (#401).
     PENDING_TIMEOUT = timedelta(minutes=45)
@@ -358,6 +363,7 @@ class FileIngestion(models.Model):
                 return
             from georiva.ingestion.run_closers import (
                 close_if_declared_set_complete,
+                close_if_files_per_run_reached,
                 close_if_upload_batches_complete,
             )
 
@@ -367,13 +373,13 @@ class FileIngestion(models.Model):
                 run, _reopened = RunIngestion.record_file(collection, log.reference_time, completed_at)
                 if run is None:
                     continue
-                # Both evidence-based closers are checked on arrival, not on a
+                # The evidence-based closers are checked on arrival, not on a
                 # timer: the last file to arrive is the only moment either
-                # condition becomes true, and either is a stronger claim than the
+                # condition becomes true, and each is a stronger claim than the
                 # quiet period that would otherwise close the run 20 minutes
                 # later. Neither fires when its route did not produce this run —
                 # both return False on no evidence.
-                if not close_if_declared_set_complete(run):
+                if not close_if_declared_set_complete(run) and not close_if_files_per_run_reached(run):
                     close_if_upload_batches_complete(run)
         except Exception:
             logger.exception("RunIngestion bookkeeping failed for %s:%s", bucket, file_path)
@@ -473,20 +479,67 @@ class FileIngestion(models.Model):
         """
         Reset locks that have exceeded LOCK_TIMEOUT.
 
-        Returns the number of locks reset.
+        A file whose retries are spent is failed instead: ``acquire`` will not lock it
+        again, so putting it back to pending would leave it there for good.
+
+        Returns the number of locks reset or failed.
         """
         stale_cutoff = dj_timezone.now() - cls.LOCK_TIMEOUT
 
         stale = cls.objects.filter(status=cls.Status.PROCESSING, locked_at__lt=stale_cutoff)
+        retryable = stale.filter(retry_count__lt=cls.MAX_RETRIES)
         # Each reset file is a recorded intervention, inside the file's own chain.
         # Read before the update: afterwards nothing says which rows it touched.
         # The reset and its events commit together or not at all.
         with transaction.atomic():
-            targets = list(stale.values_list("pk", "bucket", "file_path")) if sweep else []
-            updated = stale.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
+            targets = list(retryable.values_list("pk", "bucket", "file_path")) if sweep else []
+            updated = retryable.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
             for pk, bucket, file_path in targets:
                 record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
-        return updated
+            failed = cls._give_up(stale.filter(retry_count__gte=cls.MAX_RETRIES), sweep)
+        return updated + failed
+
+    @classmethod
+    def fail_exhausted_pending(cls, sweep=None) -> int:
+        """
+        Fail pending files that have no retries left.
+
+        ``acquire`` only locks a file with retries to spare, so such a file can never be
+        picked up: re-dispatching it, which the sweep does for any stale pending file,
+        only makes a job that finds the lock refused. Rows left this way before
+        ``reset_stale_locks`` learned to fail them are cleared here.
+
+        Returns the number of files failed.
+        """
+        return cls._give_up(cls.objects.filter(status=cls.Status.PENDING, retry_count__gte=cls.MAX_RETRIES), sweep)
+
+    @classmethod
+    def _give_up(cls, candidates, sweep=None) -> int:
+        """Fail each of ``candidates``, a queryset of files with no retries left.
+
+        Each is updated again under the queryset's own conditions, so a file a worker
+        finished or released since it was listed is left as that worker left it. The
+        failure joins the file's own chain, as the sweep when there is one.
+        """
+        failed = 0
+        for pk, bucket, file_path in list(candidates.values_list("pk", "bucket", "file_path")):
+            if sweep:
+                from georiva.ingestion.chains import context_for_revival
+
+                context = use_context(context_for_revival(bucket, file_path, sweep))
+            else:
+                context = ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path))
+            with context, transaction.atomic():
+                updated = candidates.filter(pk=pk).update(
+                    status=cls.Status.FAILED,
+                    locked_at=None,
+                    locked_by="",
+                    error=cls.RETRIES_EXHAUSTED.format(max=cls.MAX_RETRIES),
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.FAILED)
+                    failed += 1
+        return failed
 
     @classmethod
     def is_stale_pending(cls, bucket, file_path) -> bool:
@@ -973,12 +1026,148 @@ class RunIngestionReopened(DomainEvent):
 
 
 # ---------------------------------------------------------------------------
-# Acquisition tracking models
+# Push feeds (ADR 0034)
 # ---------------------------------------------------------------------------
 
 
+class PushFeed(models.Model):
+    """A catalog's single route in for files that are sent to GeoRiva.
+
+    It describes one file shape. Routing stays on each Variable's ``sources``.
+    """
+
+    class ValidTimeFormat(models.TextChoices):
+        YYYYMMDD = "YYYYMMDD", "YYYYMMDD"
+        DDMMYYYY = "DDMMYYYY", "DDMMYYYY"
+        YYYYMMDDHH = "YYYYMMDDHH", "YYYYMMDDHH"
+        YYYYMMDDHHMM = "YYYYMMDDHHMM", "YYYYMMDDHHMM"
+        DDMMYY = "DDMMYY", "DDMMYY"
+        YYMMDD = "YYMMDD", "YYMMDD"
+        CONTENT = "CONTENT", "From file content"
+
+    ORGANISATION_LOOKUP = "catalog__organisation"
+
+    catalog = models.OneToOneField(
+        "georivacore.Catalog",
+        on_delete=models.CASCADE,
+        related_name="push_feed",
+    )
+    name = models.CharField(max_length=255)
+    is_forecast = models.BooleanField(default=False)
+    valid_time_format = models.CharField(max_length=20, choices=ValidTimeFormat.choices)
+    files_per_run = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="How many files make up one model run.",
+    )
+    expected_interval = models.DurationField(
+        null=True,
+        blank=True,
+        help_text="How often a file is expected. Leave empty when there is no schedule to check.",
+    )
+    expected_since = models.DateTimeField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="When the expected interval was set: the clock a feed with no delivery yet is measured from.",
+    )
+
+    class Meta:
+        app_label = "georivaingestion"
+        permissions = [("manage_push_senders", "Can add, rotate and revoke a push feed's machine senders")]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        super().clean()
+        self.refuse_pull_fed_catalog()
+
+    def refuse_pull_fed_catalog(self):
+        """A catalog has one route in (ADR 0034): not a push feed beside a pull feed."""
+        if not self.catalog_id:
+            return
+        from georiva.sources.models import DataFeed
+
+        pull_feed = DataFeed.objects.filter(catalog_id=self.catalog_id).first()
+        if pull_feed:
+            raise ValidationError(
+                {
+                    "catalog": _(
+                        "This catalog already has a pull feed, \u201c%(name)s\u201d. A catalog has at most one feed."
+                    )
+                    % {"name": pull_feed.name}
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        self.refuse_pull_fed_catalog()
+        self._restart_overdue_clock()
+        super().save(*args, **kwargs)
+
+    def _restart_overdue_clock(self):
+        """Stamp ``expected_since`` when the interval is set or changed, and clear it when removed."""
+        if self.expected_interval is None:
+            self.expected_since = None
+            return
+        previous = None
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values_list("expected_interval", flat=True).first()
+        if self.expected_since is None or previous != self.expected_interval:
+            self.expected_since = dj_timezone.now()
+
+    def last_delivery_at(self):
+        """When the newest accepted delivery was accepted, or ``None``.
+
+        Reads the ``last_accepted`` annotation when a list query supplied one.
+        """
+        if hasattr(self, "last_accepted"):
+            return self.last_accepted
+        return self.deliveries.filter(status=Delivery.Status.ACCEPTED).aggregate(m=Max("accepted_at"))["m"]
+
+    def overdue_reference(self):
+        """The instant the interval is counted from: the last accepted delivery, else when the interval was set."""
+        return self.last_delivery_at() or self.expected_since
+
+    def is_overdue(self, now=None) -> bool:
+        """Derived on read (ADR 0034): the reference is older than the expected interval."""
+        reference = self.overdue_reference()
+        if self.expected_interval is None or reference is None:
+            return False
+        return (now or dj_timezone.now()) - reference > self.expected_interval
+
+    def overdue_text(self, now=None) -> str | None:
+        """The chip's words, or ``None`` when the feed is not overdue."""
+        now = now or dj_timezone.now()
+        if not self.is_overdue(now):
+            return None
+        last = self.last_delivery_at()
+        if last is None:
+            return _("Overdue · no deliveries yet")
+        hours = int((now - last).total_seconds() // 3600)
+        ago = f"{hours} h" if hours < 72 else f"{hours // 24} d"
+        return _("Overdue · last delivery %(ago)s ago") % {"ago": ago}
+
+    @classmethod
+    def with_last_delivery(cls, queryset):
+        """Annotate ``last_accepted`` so a list reads each feed's last delivery in one query."""
+        return queryset.annotate(last_accepted=Max("deliveries__accepted_at", filter=Q(deliveries__status="accepted")))
+
+    def strptime_pattern(self) -> str | None:
+        """Return the Python strptime pattern, or None for content-based formats."""
+        from georiva.ingestion.time_extraction import _FORMAT_PATTERNS
+
+        return _FORMAT_PATTERNS.get(self.valid_time_format)
+
+    def variables(self):
+        """The active Variables of the feed's catalog: what an uploaded file is read for."""
+        from georiva.core.models import Variable
+
+        return Variable.objects.filter(collection__catalog=self.catalog_id, is_active=True)
+
+
 class UploadSession(models.Model):
-    """Tracks a batch of files uploaded through the manual upload UI."""
+    """A person's batch of deliveries on a push feed's page (ADR 0034)."""
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -986,10 +1175,10 @@ class UploadSession(models.Model):
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
 
-    ORGANISATION_LOOKUP = "catalog__organisation"
+    ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
 
-    catalog = models.ForeignKey(
-        "georivacore.Catalog",
+    push_feed = models.ForeignKey(
+        "georivaingestion.PushFeed",
         on_delete=models.CASCADE,
         related_name="upload_sessions",
     )
@@ -1021,150 +1210,388 @@ class UploadSession(models.Model):
     def mark_cancelled(self):
         self._finish(self.Status.CANCELLED)
 
-    def _check_auto_complete(self):
-        """Auto-complete when all files have reached a terminal state."""
+    def close_if_settled(self):
+        """Close a session nothing is still waiting on: completed if a file was accepted, else failed."""
         if self.status != self.Status.ACTIVE:
             return
-        terminal = {UploadedFile.Status.STORED, UploadedFile.Status.FAILED}
-        files = list(self.uploaded_files.values_list("status", flat=True))
-        if files and all(s in terminal for s in files):
+        statuses = set(self.deliveries.values_list("status", flat=True))
+        if Delivery.Status.RECEIVED in statuses:
+            return
+        if Delivery.Status.ACCEPTED in statuses:
+            self._finish(self.Status.COMPLETED)
+        else:
+            self.mark_failed()
+
+    def _check_auto_complete(self):
+        """Auto-complete when all deliveries have reached a terminal state."""
+        if self.status != self.Status.ACTIVE:
+            return
+        terminal = {Delivery.Status.ACCEPTED}
+        deliveries = list(self.deliveries.values_list("status", flat=True))
+        if deliveries and all(s in terminal for s in deliveries):
             self._finish(self.Status.COMPLETED)
 
 
-class UploadedFile(models.Model):
-    """Per-file record within an UploadSession."""
+class Delivery(models.Model):
+    """One file arriving into a push feed (ADR 0034).
+
+    A person's upload on the feed's page makes one, and so does a machine sender's
+    write into ``incoming``, which the consumer attributes by principal. It starts its own
+    Correlation; an accepted delivery hands off to ingestion, and the outcome
+    stays on the ``FileIngestion`` for its key rather than being copied here.
+    """
 
     class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        UPLOADING = "uploading", "Uploading"
-        STORED = "stored", "Stored"
-        FAILED = "failed", "Failed"
+        RECEIVED = "received", "Received"
+        ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
 
-    ORGANISATION_LOOKUP = "session__catalog__organisation"
+    ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
 
+    push_feed = models.ForeignKey(PushFeed, on_delete=models.CASCADE, related_name="deliveries")
     session = models.ForeignKey(
         UploadSession,
+        null=True,
+        blank=True,
         on_delete=models.CASCADE,
-        related_name="uploaded_files",
+        related_name="deliveries",
+    )
+    sent_by = models.ForeignKey(
+        "auth.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deliveries",
+    )
+    push_sender = models.ForeignKey(
+        "georivaingestion.PushSender",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="deliveries",
+        help_text="The machine sender that wrote the file, matched from the Bucket notification's principal.",
     )
     original_filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=500, blank=True)
     correlation_id = models.UUIDField(
-        null=True,
-        blank=True,
         db_index=True,
-        help_text="The chain this upload started; the Bucket-notification consumer adopts it by key (ADR 0030).",
+        help_text="The chain this delivery started; the Bucket-notification consumer adopts it by key (ADR 0030).",
     )
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    error = models.TextField(blank=True)
+    found_by_sweep = models.BooleanField(
+        default=False,
+        help_text="The Sweep found the file in incoming with no notification; attributed by prefix, with no sender.",
+    )
+    awaits_completion = models.BooleanField(
+        default=False,
+        help_text=(
+            "The person's browser is uploading straight to storage and will say when it is done; "
+            "until then the Bucket notification admits the file but does not start its ingestion."
+        ),
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
+    reason = models.TextField(blank=True, help_text="Why the delivery was rejected.")
     bytes = models.BigIntegerField(default=0)
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         app_label = "georivaingestion"
-        ordering = ["id"]
+        ordering = ["-received_at", "-id"]
+        verbose_name_plural = "deliveries"
 
     def save(self, *args, **kwargs):
         if self._state.adding and self.correlation_id is None:
-            from georiva.events.context import starting_correlation
+            import uuid
 
-            self.correlation_id = starting_correlation()
+            self.correlation_id = uuid.uuid4()
         super().save(*args, **kwargs)
 
-    def mark_uploading(self):
+    @classmethod
+    def receive(
+        cls,
+        *,
+        push_feed,
+        filename,
+        file_path,
+        session=None,
+        sent_by=None,
+        push_sender=None,
+        correlation_id=None,
+        found_by_sweep=False,
+        awaits_completion=False,
+    ):
+        """Record a delivery as received, with its ``DeliveryReceived`` event."""
+        from georiva.events.context import new_context, use_context
+
+        delivery = cls.objects.create(
+            push_feed=push_feed,
+            session=session,
+            sent_by=sent_by,
+            push_sender=push_sender,
+            found_by_sweep=found_by_sweep,
+            awaits_completion=awaits_completion,
+            original_filename=filename,
+            file_path=file_path,
+            correlation_id=correlation_id,
+        )
+        context = new_context(
+            actor=delivery.actor,
+            organisation_id=push_feed.catalog.organisation_id,
+            correlation_id=delivery.correlation_id,
+        )
+        with use_context(context):
+            record(
+                DeliveryReceived,
+                delivery=delivery,
+                push_feed=push_feed,
+                feed_name=push_feed.name,
+                catalog_slug=push_feed.catalog.slug,
+                filename=filename,
+                file_path=file_path,
+                sender=delivery.sender_name,
+            )
+        return delivery
+
+    @property
+    def actor(self) -> str:
+        """Who stored the file, as the actor of the chain's events."""
+        if self.sent_by_id:
+            return f"user:{self.sent_by_id}"
+        if self.push_sender_id:
+            return f"sender:{self.push_sender.label}"
+        if self.found_by_sweep:
+            return "system:sweep"
+        return "system:upload"
+
+    @property
+    def sender_name(self) -> str:
+        """The person's username or the machine sender's label; blank when unknown."""
+        if self.sent_by_id:
+            return self.sent_by.get_username()
+        return self.push_sender.label if self.push_sender_id else ""
+
+    def mark_accepted(self, file_path="", bytes=0, *, check_session=True):
+        """Accept the delivery. A caller still adding to the batch passes ``check_session=False``
+        and checks once at the end, so the session cannot complete on a partial batch."""
         from django.utils import timezone
 
-        self.status = self.Status.UPLOADING
-        self.started_at = timezone.now()
-        self.save(update_fields=["status", "started_at"])
-
-    def mark_stored(self, file_path="", bytes=0):
-        from django.utils import timezone
-
-        self.status = self.Status.STORED
-        self.file_path = file_path
+        self.status = self.Status.ACCEPTED
+        self.file_path = file_path or self.file_path
         self.bytes = bytes
-        self.completed_at = timezone.now()
-        self.save(update_fields=["status", "file_path", "bytes", "completed_at"])
-        self.session._check_auto_complete()
+        self.accepted_at = timezone.now()
+        self.save(update_fields=["status", "file_path", "bytes", "accepted_at"])
+        if check_session and self.session_id:
+            self.session._check_auto_complete()
 
-    def mark_failed(self, error=""):
-        from django.utils import timezone
+    def mark_rejected(self, reason: str, bytes=0):
+        """Reject the delivery: its file has left ``incoming`` for quarantine, or never arrived."""
+        self.status = self.Status.REJECTED
+        self.reason = reason
+        self.bytes = bytes or self.bytes
+        self.save(update_fields=["status", "reason", "bytes"])
 
-        self.status = self.Status.FAILED
-        self.error = error
-        self.completed_at = timezone.now()
-        self.save(update_fields=["status", "error", "completed_at"])
-        self.session._check_auto_complete()
+    def timeline_url(self):
+        from django.urls import reverse
 
-
-# ---------------------------------------------------------------------------
-# Manual upload configuration models
-# ---------------------------------------------------------------------------
+        return reverse("events_timeline", args=[self.correlation_id])
 
 
-class ManualUploadConfig(models.Model):
-    """Operator-created configuration enabling manual file uploads for a Catalog."""
+class DeliveryReceived(DomainEvent):
+    """A file arrived into a push feed; the first event of its chain (ADR 0034)."""
 
-    class ValidTimeFormat(models.TextChoices):
-        YYYYMMDD = "YYYYMMDD", "YYYYMMDD"
-        DDMMYYYY = "DDMMYYYY", "DDMMYYYY"
-        YYYYMMDDHH = "YYYYMMDDHH", "YYYYMMDDHH"
-        YYYYMMDDHHMM = "YYYYMMDDHHMM", "YYYYMMDDHHMM"
-        DDMMYY = "DDMMYY", "DDMMYY"
-        YYMMDD = "YYMMDD", "YYMMDD"
-        CONTENT = "CONTENT", "From file content"
+    label = "Delivery received"
 
-    ORGANISATION_LOOKUP = "catalog__organisation"
-
-    catalog = models.ForeignKey(
-        "georivacore.Catalog",
-        on_delete=models.CASCADE,
-        related_name="manual_upload_configs",
+    delivery = models.ForeignKey(Delivery, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    filename = models.CharField(max_length=500)
+    file_path = models.CharField(max_length=500)
+    sender = models.CharField(
+        max_length=150,
+        blank=True,
+        help_text="Username of the person or label of the machine sender; blank when unknown.",
     )
-    name = models.CharField(max_length=255)
-    is_forecast = models.BooleanField(default=False)
-    valid_time_format = models.CharField(max_length=20, choices=ValidTimeFormat.choices)
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["delivery", "-occurred_at"], name="idx_delivrecv_delivery")]
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def summary(self):
+        by = f" from {self.sender}" if self.sender else ""
+        return f"{self.filename} received by {self.feed_name}{by}"
+
+
+class DeliveryRejected(DomainEvent):
+    """A file written into ``incoming`` was refused and moved to quarantine (ADR 0034).
+
+    Belongs to the key's organisation; when that organisation does not exist it is
+    unattributed. Groups under the push feed when one is known, else under the
+    ``org/catalog`` the key names.
+    """
+
+    label = "Delivery rejected"
+
+    delivery = models.ForeignKey(Delivery, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255, blank=True)
+    file_path = models.CharField(max_length=500)
+    reason = models.TextField()
+    sender = models.CharField(max_length=150, blank=True, help_text="Who wrote the file, when known.")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["push_feed", "-occurred_at"], name="idx_delivrej_feed")]
+
+    @property
+    def outcome_class(self):
+        return "refused"
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def _key_prefix(self) -> str:
+        """``org/catalog`` of the key, or its first segment when it has no such shape."""
+        parts = self.file_path.split("/")
+        if len(parts) > 2:
+            return "/".join(parts[:2])
+        return parts[0]
+
+    def failure_group_key(self):
+        if self.push_feed_id:
+            return f"push-feed:{self.push_feed_id}"
+        return f"catalog:{self._key_prefix()}"
+
+    def failure_group(self):
+        from georiva.events.models import FailureGroup
+
+        if self.push_feed_id:
+            return FailureGroup(key=self.failure_group_key(), label=self.push_feed.name, url=self.subject_url())
+        return FailureGroup(key=self.failure_group_key(), label=self._key_prefix())
+
+    def summary(self):
+        return f"{self.file_path} rejected: {self.reason}"[:300]
+
+
+class PushFeedOverdue(DomainEvent):
+    """A push feed first went overdue: nothing accepted within its expected interval (ADR 0034).
+
+    Recorded once per overdue spell by the beat task; an accepted delivery ends the spell.
+    """
+
+    label = "Push feed overdue"
+
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    expected_interval = models.DurationField()
+    last_delivery_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["push_feed", "-occurred_at"], name="idx_pushoverdue_feed")]
+
+    @property
+    def outcome_class(self):
+        return "failed"
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def failure_group_key(self):
+        # The name stands in once the feed is gone, so its last failures still group together.
+        return f"push-feed:{self.push_feed_id}" if self.push_feed_id else f"push-feed-name:{self.feed_name}"
+
+    def failure_group(self):
+        from georiva.events.models import FailureGroup
+
+        # A rename shows at once (ADR 0033); the snapshot stands in once the feed is gone.
+        label = self.push_feed.name if self.push_feed_id else self.feed_name
+        return FailureGroup(key=self.failure_group_key(), label=label, url=self.subject_url())
+
+    def summary(self):
+        if self.last_delivery_at is None:
+            return f"{self.feed_name}: no delivery yet, one expected every {self.expected_interval}"
+        return f"{self.feed_name}: no delivery since {self.last_delivery_at:%Y-%m-%d %H:%M}"
+
+
+class PushSender(models.Model):
+    """A machine sender of a push feed: one MinIO user GeoRiva created for it (ADR 0034).
+
+    Only the access key is kept; it is what a Bucket notification's
+    ``principalId`` is matched against. The secret is shown once, when it is
+    issued, and is never written down here.
+    """
+
+    ORGANISATION_LOOKUP = "push_feed__catalog__organisation"
+
+    push_feed = models.ForeignKey(PushFeed, on_delete=models.CASCADE, related_name="senders")
+    label = models.CharField(max_length=100, help_text="Who or what sends, e.g. the system's name.")
+    access_key = models.CharField(max_length=100, unique=True)
+    created_by = models.ForeignKey("auth.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         app_label = "georivaingestion"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["catalog", "name"],
-                name="unique_manual_upload_config_name_per_catalog",
-            ),
-        ]
+        ordering = ["label", "id"]
 
-    def strptime_pattern(self) -> str | None:
-        """Return the Python strptime pattern, or None for content-based formats."""
-        from georiva.ingestion.time_extraction import _FORMAT_PATTERNS
-
-        return _FORMAT_PATTERNS.get(self.valid_time_format)
+    def __str__(self):
+        return f"{self.label} ({self.access_key})"
 
 
-class ManualUploadConfigVariable(models.Model):
-    """Links a ManualUploadConfig to a Collection for one variable."""
+class _PushSenderEvent(DomainEvent):
+    """The shared snapshot of an event about a machine sender."""
 
-    ORGANISATION_LOOKUP = "config__catalog__organisation"
-
-    config = models.ForeignKey(
-        ManualUploadConfig,
-        on_delete=models.CASCADE,
-        related_name="variables",
-    )
-    collection = models.ForeignKey(
-        "georivacore.Collection",
-        on_delete=models.CASCADE,
-        related_name="manual_upload_variables",
-    )
-    variable_name = models.CharField(max_length=255)
-    long_name = models.CharField(max_length=255, blank=True, default="")
-    units = models.CharField(max_length=50, blank=True, default="")
+    push_feed = models.ForeignKey(PushFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    sender_label = models.CharField(max_length=100)
+    access_key = models.CharField(max_length=100)
 
     class Meta:
-        app_label = "georivaingestion"
-        unique_together = [("config", "variable_name")]
+        abstract = True
+
+    def subject_url(self):
+        if self.push_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("push_feed_page", args=[self.push_feed_id])
+
+    def summary(self):
+        return f"Sender {self.sender_label} {self.verb} on {self.feed_name}"
+
+
+class PushSenderAdded(_PushSenderEvent):
+    """A machine sender was added to a push feed."""
+
+    label = "Sender added"
+    verb = "added"
+
+
+class PushSenderRotated(_PushSenderEvent):
+    """A machine sender's secret was replaced; the old one stopped working."""
+
+    label = "Sender rotated"
+    verb = "rotated"
+
+
+class PushSenderRevoked(_PushSenderEvent):
+    """A machine sender was removed; its credentials stopped working."""
+
+    label = "Sender revoked"
+    verb = "revoked"
 
 
 # ---------------------------------------------------------------------------

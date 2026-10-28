@@ -1,0 +1,106 @@
+{% extends "wagtailadmin/generic/index_results.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% comment %}
+Results-only fragment, swapped in by the header search box via AJAX. The
+stylesheet is linked from push_feed_list.html.
+
+The chips go in before_results, NOT results: Wagtail wraps {% block results %}
+in {% if object_list %}, so anything inside it disappears when a filter matches
+nothing -- stranding the operator with no chip to click back to All.
+{% endcomment %}
+{% block before_results %}
+    {{ block.super }}
+    <div class="nice-padding">
+        <div class="gfeed-controls">
+            <ul class="gfeed-chips">
+                <li>
+                    <a class="gfeed-filter{% if active_health is None %} gfeed-filter--on{% endif %}"
+                       href="{{ all_chip_url }}">
+                        {% trans "All" %} <span class="gfeed-filter__n">{{ total_count }}</span>
+                    </a>
+                </li>
+                {% for chip in health_chips %}
+                    <li>
+                        <a class="gfeed-filter{% if active_health == chip.state.rank %} gfeed-filter--on{% endif %}"
+                           href="{{ chip.url }}">
+                            {{ chip.state.label }} <span class="gfeed-filter__n">{{ chip.count }}</span>
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+{% endblock %}
+
+{% block no_results_message %}
+    {% if is_searching %}
+        <p>{% blocktrans with query=search_form.q.value %}No push feeds match &ldquo;{{ query }}&rdquo;.{% endblocktrans %}</p>
+    {% elif active_health is not None %}
+        <p>{% trans "No push feeds in this state." %}</p>
+    {% else %}
+        <p>
+            {% trans "No push feeds yet." %}
+            <a href="{{ add_url }}">{% trans "Create your first push feed." %}</a>
+        </p>
+    {% endif %}
+{% endblock %}
+
+{% block results %}
+    <div class="nice-padding">
+        <ul class="gfeed-rows">
+            {% for row in feed_rows %}
+                <li class="gfeed-row gfeed-row--{{ row.health.color }}">
+                    <div class="gfeed-row__main">
+                        <div class="gfeed-row__title">
+                            <a class="gfeed-row__link" href="{{ row.detail_url }}">{{ row.feed.name }}</a>
+                        </div>
+
+                        <p class="gfeed-row__identity">
+                            {{ row.feed.catalog.slug }} &middot;
+                            {% if row.feed.is_forecast %}{% trans "Forecast" %}{% else %}{% trans "Observation" %}{% endif %} &middot;
+                            <code>{{ row.feed.valid_time_format }}</code> &middot;
+                            {% if row.interval_label %}
+                                {% blocktrans with interval=row.interval_label %}expected every {{ interval }}{% endblocktrans %}
+                            {% else %}
+                                {% trans "no schedule" %}
+                            {% endif %}
+                        </p>
+
+                        <p class="gfeed-row__health">
+                            <span class="gfeed-chip gfeed-chip--{{ row.health.color }}">
+                                {% icon name=row.health.icon classname="gfeed-chip__icon" %}
+                                {{ row.health.label }}
+                            </span>
+                            {% if row.last_delivery_label %}
+                                <span class="gfeed-row__when">
+                                    {% blocktrans with when=row.last_delivery_label %}last delivery {{ when }} ago{% endblocktrans %}
+                                </span>
+                            {% endif %}
+                            {% if row.recent_rejections %}
+                                <span class="gfeed-row__reason">
+                                    &mdash; {% blocktrans count counter=row.recent_rejections %}{{ counter }} rejected in the last 7 days{% plural %}{{ counter }} rejected in the last 7 days{% endblocktrans %}
+                                </span>
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    <div class="gfeed-row__totals">
+                        {% blocktrans count counter=row.feed.accepted_files with n=row.feed.accepted_files|intcomma %}{{ n }} file{% plural %}{{ n }} files{% endblocktrans %}
+                        {% if row.accepted_bytes %}
+                            &middot; {{ row.accepted_bytes|filesizeformat }}
+                        {% endif %}
+                    </div>
+
+                    <div class="gfeed-row__actions">
+                        <a class="button button-small button-secondary" href="{{ row.detail_url }}">{% trans "Upload" %}</a>
+                        {% dropdown toggle_icon="dots-horizontal" toggle_aria_label=_("More feed options") %}
+                            <a href="{{ row.edit_url }}">{% icon name="edit" %}{% trans "Edit" %}</a>
+                            <a href="{{ row.delete_url }}">{% icon name="bin" %}{% trans "Delete" %}</a>
+                        {% enddropdown %}
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}

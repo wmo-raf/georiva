@@ -14,7 +14,7 @@ from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
 from georiva.events.context import current_context
 from georiva.ingestion.consumer import _handle_event
-from georiva.ingestion.models import FileIngestion, RunIngestion, RunIngestionClosed, UploadedFile
+from georiva.ingestion.models import Delivery, FileIngestion, RunIngestion, RunIngestionClosed
 from georiva.organisations.testing import dial_org, make_organisation
 
 from .test_upload_page import SUBMIT_URL, _geotiff_setup, _mock_incoming_bucket
@@ -67,7 +67,7 @@ class UploadAttributionTests(TestCase):
         _post_upload(self.client, config, variable, HTTP_X_CORRELATION_ID=str(mine))
 
         self.assertEqual(seen[0].correlation_id, mine)
-        self.assertEqual(UploadedFile.objects.get().correlation_id, mine)
+        self.assertEqual(Delivery.objects.get().correlation_id, mine)
 
     def test_a_malformed_correlation_header_is_ignored(self, mock_incoming, task):
         mock_incoming.return_value = _mock_incoming_bucket()
@@ -84,7 +84,7 @@ class UploadAttributionTests(TestCase):
         original = bucket.save.side_effect
 
         def save(path, upload):
-            recorded_at_store.append(UploadedFile.objects.filter(file_path=path).exists())
+            recorded_at_store.append(Delivery.objects.filter(file_path=path).exists())
             return original(path, upload) if callable(original) else path
 
         bucket.save.side_effect = save
@@ -118,7 +118,7 @@ class UploadAttributionTests(TestCase):
 
         (context,) = adopted
         self.assertEqual(context.actor, f"user:{self.user.pk}")
-        self.assertEqual(context.correlation_id, UploadedFile.objects.get().correlation_id)
+        self.assertEqual(context.correlation_id, Delivery.objects.get().correlation_id)
 
 
 class AdminActionAttributionTests(TestCase):

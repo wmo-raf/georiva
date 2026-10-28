@@ -1,0 +1,118 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+
+{% block titletag %}{% trans "Edit push feed" %} — {{ feed.name }}{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+    .gfe-section-title {
+        font-weight: 700; font-size: 1em;
+        margin: 1.5em 0 0.75em; padding-bottom: 0.3em;
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        color: var(--w-color-text-label);
+    }
+    .gfe-form { max-width: 48em; }
+    .gfe-field { margin-bottom: 1.1em; }
+    .gfe-help { color: var(--w-color-grey-400); font-size: 0.9em; margin-top: 0.3em; }
+    .gfe-error { color: var(--w-color-critical-200); font-size: 0.9em; margin-top: 0.3em; }
+    .gfe-error--client { display: none; }
+    .gfe-error--client.gfe-error--visible { display: block; }
+    .gfe-actions { display: flex; gap: 1em; margin-top: 1.5em; }
+    .gfe-collection { color: var(--w-color-text-label); }
+</style>
+{% include "georivaingestion/_variable_cards_css.html" %}
+{% endblock %}
+
+{% block main_content %}
+<form id="edit-form" method="post">
+    {% csrf_token %}
+    <input type="hidden" name="variables_json" id="variables_json">
+
+    <div class="gfe-section-title">{% trans "Feed settings" %}</div>
+    <div class="gfe-form">
+        {% for field in form %}
+        <div class="gfe-field">
+            <label class="w-field__label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="gfe-help">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="gfe-error">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+        <div class="gfe-help">{% trans "Changes apply to files delivered from now on. Nothing already ingested is reprocessed. The catalog and its collections cannot be changed." %}</div>
+    </div>
+
+    <div class="gfe-section-title">{% trans "Variables" %}</div>
+    <p class="w-field__help-text">
+        {% trans "The incoming unit is what the files carry; the output unit is what GeoRiva stores and serves. Values are converted between them, and the value range is in the output unit." %}
+    </p>
+    <div class="gr-vc-list" id="variables-tbody"></div>
+    <button type="button" class="button button-secondary button-small gr-vc-add" id="add-derived-btn">
+        + {% trans "Add derived variable" %}
+    </button>
+    <div class="gfe-error gfe-error--client" id="vars-error"></div>
+
+    <div class="gfe-actions">
+        <button type="submit" class="button">{% trans "Save changes" %}</button>
+        <a href="{% url 'push_feed_page' feed.pk %}" class="button button-secondary">{% trans "Cancel" %}</a>
+    </div>
+</form>
+
+{{ variable_rows|json_script:"variable-rows" }}
+{{ units|json_script:"unit-options" }}
+{{ source_options|json_script:"source-options" }}
+{{ collection_options|json_script:"collection-options" }}
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% include "georivaingestion/_variable_cards_js.html" %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const ROWS = JSON.parse(document.getElementById('variable-rows').textContent);
+    const UNITS = JSON.parse(document.getElementById('unit-options').textContent);
+    const SOURCES = JSON.parse(document.getElementById('source-options').textContent);
+    const COLLECTIONS = JSON.parse(document.getElementById('collection-options').textContent);
+
+    GrVariableCards.init({
+        tbody: document.getElementById('variables-tbody'),
+        units: UNITS,
+        convertUrl: '{% url "push_feed_convert_range" %}',
+        degreeUnitId: {{ degree_unit_id }},
+    });
+
+    ROWS.forEach(function (row) {
+        // Collections are fixed once the feed exists, so it is a header badge here, not a select.
+        const label = document.createElement('span');
+        label.className = 'gfe-collection';
+        label.textContent = row.collection;
+        GrVariableCards.addRow(row, label, true);
+    });
+
+    document.getElementById('add-derived-btn').addEventListener('click', function () {
+        const select = document.createElement('select');
+        select.className = 'w-field__input';
+        select.innerHTML = '<option value="">{% trans "— choose —" %}</option>' + COLLECTIONS.map(function (c) {
+            return '<option value="' + c.id + '">' + c.name.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+        }).join('');
+        if (COLLECTIONS.length === 1) select.value = String(COLLECTIONS[0].id);
+        const card = GrVariableCards.addDerivedRow({sourceOptions: SOURCES, allowOther: true, collectionNode: select});
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    document.getElementById('edit-form').addEventListener('submit', function (e) {
+        const errEl = document.getElementById('vars-error');
+        const collected = GrVariableCards.collect();
+        if (collected.error) {
+            e.preventDefault();
+            if (collected.errorCard) collected.errorCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            errEl.textContent = collected.error;
+            errEl.classList.add('gfe-error--visible');
+            return;
+        }
+        errEl.classList.remove('gfe-error--visible');
+        document.getElementById('variables_json').value = JSON.stringify(collected.rows);
+    });
+});
+</script>
+{% endblock %}

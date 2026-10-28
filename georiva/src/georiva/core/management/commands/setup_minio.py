@@ -7,6 +7,7 @@ Sets up:
     georiva-archive    → no notifications, private
     georiva-assets     → public read access (serves processed data)
     georiva-publications → no notifications, private (re-exported for foreign readers)
+    georiva-quarantine   → no notifications, private, objects expire after 30 days
 
 Usage:
     python manage.py setup_minio
@@ -60,6 +61,15 @@ BUCKET_CONFIGS = {
         "public_read": False,
         "notify_on_create": False,
         "description": "Data re-exported for a foreign reader (private)",
+    },
+    # Rejected deliveries wait here under their original key (ADR 0034). No
+    # notifications, so a turned-away file is never ingested; the expiry rule
+    # is what stops the bucket growing without bound.
+    "quarantine": {
+        "public_read": False,
+        "notify_on_create": False,
+        "expiry_days": 30,
+        "description": "Rejected deliveries awaiting Retry (private, expires)",
     },
 }
 
@@ -126,6 +136,10 @@ class Command(BaseCommand):
                 if arn_setting:
                     arn = getattr(settings, arn_setting, redis_arn)
                 self._set_redis_notification(s3, bucket_name, arn, dry_run)
+
+            # 4. Expire objects that are only held temporarily.
+            if config.get("expiry_days"):
+                self._set_expiry_rule(s3, bucket_name, config["expiry_days"], dry_run)
 
         self.stdout.write(self.style.SUCCESS("\nMinIO setup complete."))
 
@@ -195,6 +209,34 @@ class Command(BaseCommand):
                 self.stdout.write("  ✓ Already private")
             else:
                 self.stdout.write(self.style.ERROR(f"  ✗ Failed to set private policy: {e}"))
+
+    # =========================================================================
+    # Lifecycle
+    # =========================================================================
+
+    def _set_expiry_rule(self, s3, bucket_name: str, days: int, dry_run: bool):
+        """Expire every object in the bucket ``days`` days after it was written."""
+        if dry_run:
+            self.stdout.write(f"  → Would set {days}-day expiry rule")
+            return
+
+        try:
+            s3.put_bucket_lifecycle_configuration(
+                Bucket=bucket_name,
+                LifecycleConfiguration={
+                    "Rules": [
+                        {
+                            "ID": f"GeoRiva-{bucket_name}-expiry",
+                            "Status": "Enabled",
+                            "Filter": {"Prefix": ""},
+                            "Expiration": {"Days": days},
+                        }
+                    ]
+                },
+            )
+            self.stdout.write(self.style.SUCCESS(f"  ✓ {days}-day expiry rule set"))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"  ✗ Failed to set expiry rule: {e}"))
 
     # =========================================================================
     # Redis notifications

@@ -1,7 +1,7 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% trans "Add Data Feed" %}{% endblock %}
+{% block titletag %}{% trans "Add pull feed" %}{% endblock %}
 
 {% block extra_css %}
     <style>
@@ -88,7 +88,7 @@
             </a>
             {% empty %}
             <p class="help-block">
-                {% trans "No data feed types are registered." %}
+                {% trans "No pull feed types are registered." %}
             </p>
         {% endfor %}
     </div>

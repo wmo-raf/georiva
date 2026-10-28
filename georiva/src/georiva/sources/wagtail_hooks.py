@@ -132,7 +132,7 @@ def urlconf_georivasources():
     ]
 
 
-# "Automated Sources" is reached via the "Data" menu group registered in
+# "Pull feeds" is reached via the "Data" menu group registered in
 # core/wagtail_hooks.py, not a top-level menu item. Derived products have no
 # menu surface at all — each feed's dashboard is their single home, with
 # per-product Runs links drilling into run history.

@@ -67,7 +67,7 @@
         <a class="add-data-card" href="{{ automated_url }}">
             <h2 class="add-data-card-title">
                 {% icon name="file-import" %}
-                {% trans "Fetched automatically from a provider" %}
+                {% trans "Pull feed: fetched automatically from a provider" %}
             </h2>
             <p class="add-data-card-text">
                 {% trans "The data is downloaded on a schedule from an external provider, such as CHIRPS, ECMWF or the Copernicus Climate Data Store. You choose what to fetch and how often; new data then arrives on its own." %}
@@ -77,10 +77,10 @@
         <a class="add-data-card" href="{{ upload_url }}">
             <h2 class="add-data-card-title">
                 {% icon name="upload" %}
-                {% trans "I will upload files" %}
+                {% trans "Push feed: sent to GeoRiva" %}
             </h2>
             <p class="add-data-card-text">
-                {% trans "You have the files yourself and will upload them from your computer, for example local model output or gridded station data. A sample file helps set everything up." %}
+                {% trans "The files are sent to you, or you upload them yourself, for example local model output or gridded station data. A sample file helps set everything up." %}
             </p>
         </a>
     </div>

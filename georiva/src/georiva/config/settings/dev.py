@@ -16,13 +16,12 @@ GEOS_LIBRARY_PATH = env.str("GEOS_LIBRARY_PATH", None)
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-INSTALLED_APPS = (
-    ["daphne"]
-    + INSTALLED_APPS
-    + [
-        "wagtail.contrib.styleguide",
-    ]
-)
+# The dev server is uvicorn (docker-entrypoint.sh), not runserver: Daphne, which
+# `daphne` in INSTALLED_APPS turns runserver into, holds an upload body in memory
+# at ~12x its size and never gives it back.
+INSTALLED_APPS = INSTALLED_APPS + [
+    "wagtail.contrib.styleguide",
+]
 
 try:
     from .local import *

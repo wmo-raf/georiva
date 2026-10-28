@@ -1,12 +1,15 @@
 import json
 import logging
 import time
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import unquote
 
 import redis
 from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
 
 from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
@@ -17,6 +20,11 @@ from georiva.ingestion.models import FileIngestion, FileIngestionFinished
 from georiva.ingestion.tasks import process_incoming_file
 
 logger = logging.getLogger(__name__)
+
+# How long a Delivery GeoRiva recorded for its own write stays the explanation for that key.
+# A person's upload is recorded when the page asks to send it, before the browser has
+# sent a byte, so this has to outlast the upload itself, not just the write.
+WAITING_WINDOW = timedelta(hours=6)
 
 REDIS_KEY = getattr(settings, "MINIO_REDIS_KEY", "georiva:minio:events")
 
@@ -41,33 +49,183 @@ def _required_time_error(catalog, key: str) -> str | None:
     valid time must be parseable from its filename. Returns a descriptive
     error string when extraction fails, None when the file is fine.
 
-    Only enforced when the catalog has ManualUploadConfigs to supply a
-    valid_time_format — catalogs fed purely by DataFeeds are unaffected.
+    Only enforced when the catalog has a push feed to supply a
+    valid_time_format — catalogs fed by a DataFeed are unaffected.
     """
     from georiva.formats.registry import format_registry
-    from georiva.ingestion.models import ManualUploadConfig
+    from georiva.ingestion.models import PushFeed
     from georiva.ingestion.time_extraction import extract_times
 
     plugin = format_registry.get(catalog.file_format)
     if plugin is None or not plugin.time_from_filename:
         return None  # time is read from file content during ingestion
 
-    formats = list(
-        ManualUploadConfig.objects.filter(catalog=catalog).values_list("valid_time_format", flat=True).distinct()
-    )
-    if not formats:
+    feed = PushFeed.objects.filter(catalog=catalog).first()
+    if feed is None:
         return None
 
     filename = Path(key).name
-    for fmt in formats:
-        if extract_times(filename, fmt).get("valid_time"):
-            return None
+    if extract_times(filename, feed.valid_time_format).get("valid_time"):
+        return None
 
     return (
         f"Could not extract a valid time from filename '{filename}'. "
-        f"Expected the filename stem to match one of: {', '.join(formats)} "
+        f"Expected the filename stem to match: {feed.valid_time_format} "
         f"(optionally with a GR--YYYYMMDDTHHMM-- reference time prefix)."
     )
+
+
+def _principal_of(ev: dict) -> str:
+    return (ev.get("userIdentity") or {}).get("principalId", "")
+
+
+def _waiting_person_delivery(key: str):
+    """The Delivery GeoRiva itself recorded for a file it just wrote: a person's upload, or a Retry.
+
+    It is waiting while still ``received``, or while its file's ingestion has not yet
+    finished registering; a later write by anyone else to the same key is not covered by it.
+    """
+    from georiva.ingestion.models import Delivery
+
+    delivery = Delivery.objects.filter(file_path=key, sent_by__isnull=False).order_by("-id").first()
+    if delivery is None or delivery.status == Delivery.Status.REJECTED:
+        return None
+    if delivery.status == Delivery.Status.RECEIVED:
+        # Recorded before the write, so a row older than the window covers nobody.
+        return delivery if timezone.now() - delivery.received_at < WAITING_WINDOW else None
+    in_flight = FileIngestion.objects.filter(
+        bucket=BucketType.INCOMING,
+        file_path=key,
+        status__in=[FileIngestion.Status.PENDING, FileIngestion.Status.PROCESSING],
+    ).exists()
+    return delivery if in_flight else None
+
+
+def _awaits_completion(key: str) -> bool:
+    """True when a person's browser is sending ``key`` straight to storage and will start its ingestion.
+
+    Such an upload is told apart by the delivery recorded for it before the first byte moved,
+    since its write carries GeoRiva's own credentials like any other. Starting the ingestion
+    from here as well would race the browser's, and the page would follow the run that lost.
+    """
+    from georiva.ingestion.models import Delivery
+
+    latest = Delivery.objects.filter(file_path=key, sent_by__isnull=False).order_by("-id").first()
+    return latest is not None and latest.awaits_completion
+
+
+def _no_feed_reason(org_slug: str, catalog_slug: str):
+    """Why ``org/catalog`` is not a push feed's area, or ``(feed, None)`` when it is."""
+    from georiva.ingestion.models import PushFeed
+
+    catalog, error = resolve_org_catalog(org_slug, catalog_slug, require_active=False)
+    if catalog is None:
+        return None, error
+    feed = PushFeed.objects.filter(catalog=catalog).select_related("catalog__organisation").first()
+    if feed is not None:
+        return feed, None
+    if hasattr(catalog, "data_feed"):
+        return None, f"Catalog '{org_slug}/{catalog_slug}' is fed by a pull feed, which nothing is sent to."
+    return None, f"Catalog '{org_slug}/{catalog_slug}' has no push feed."
+
+
+def _admit_incoming(ev: dict, key: str) -> bool:
+    """Decide whether a file written into ``incoming`` may be ingested (ADR 0034).
+
+    Admitted: a file GeoRiva wrote itself on a person's behalf, and a machine sender's
+    write to its own feed — which is recorded as an accepted Delivery here, starting the
+    chain, so ``context_for_arrival`` adopts it by key. Everything else is moved to
+    quarantine, with a rejected Delivery when the key names a push feed.
+    """
+    from georiva.ingestion.models import Delivery
+    from georiva.ingestion.quarantine import NOT_A_SENDER, quarantine
+
+    size = ev.get("s3", {}).get("object", {}).get("size") or 0
+
+    try:
+        meta = validate_path(key)
+    except ValueError as e:
+        quarantine(key, f"Path check failed: {e}", size=size)
+        return False
+
+    feed, reason = _no_feed_reason(meta["org"], meta["catalog"])
+    if feed is None:
+        quarantine(key, reason, size=size)
+        return False
+
+    waiting = _waiting_person_delivery(key)
+    sender = None
+    if waiting is None:
+        sender = feed.senders.filter(access_key=_principal_of(ev)).first()
+        if sender is None:
+            quarantine(key, NOT_A_SENDER, feed=feed, size=size)
+            return False
+
+    time_error = _required_time_error(feed.catalog, key)
+    if time_error:
+        quarantine(key, time_error, feed=feed, sender=sender, size=size)
+        return False
+
+    if waiting is not None:
+        if waiting.status == Delivery.Status.RECEIVED:
+            waiting.mark_accepted(file_path=key, bytes=size)
+        return True
+
+    # MinIO can notify more than once for one write; while the first is still in flight
+    # the repeat is the same delivery, not a second one.
+    in_flight = FileIngestion.objects.filter(
+        bucket=BucketType.INCOMING,
+        file_path=key,
+        status__in=[FileIngestion.Status.PENDING, FileIngestion.Status.PROCESSING],
+    ).exists()
+    if in_flight and Delivery.objects.filter(file_path=key, push_sender=sender).exists():
+        return True
+
+    with transaction.atomic():
+        delivery = Delivery.receive(push_feed=feed, filename=Path(key).name, file_path=key, push_sender=sender)
+        delivery.mark_accepted(file_path=key, bytes=size)
+    return True
+
+
+def admit_found_in_incoming(key: str) -> bool:
+    """Decide whether a file the Sweep found in ``incoming`` may be ingested (ADR 0034).
+
+    The same attribution as a notification, with no principal: a key inside a push feed's
+    area is safe to attribute by prefix, since only that feed's senders and GeoRiva can
+    write there, and becomes an accepted Delivery found by sweep. Anything else is
+    quarantined. A file a delivery already covers is not recorded again.
+    """
+    from georiva.ingestion.models import Delivery
+    from georiva.ingestion.quarantine import quarantine
+
+    try:
+        meta = validate_path(key)
+    except ValueError as e:
+        quarantine(key, f"Path check failed: {e}")
+        return False
+
+    feed, reason = _no_feed_reason(meta["org"], meta["catalog"])
+    if feed is None:
+        quarantine(key, reason)
+        return False
+
+    time_error = _required_time_error(feed.catalog, key)
+    if time_error:
+        quarantine(key, time_error, feed=feed)
+        return False
+
+    if (
+        _waiting_person_delivery(key) is not None
+        or Delivery.objects.filter(
+            file_path=key, status__in=[Delivery.Status.RECEIVED, Delivery.Status.ACCEPTED]
+        ).exists()
+    ):
+        return True
+
+    with transaction.atomic():
+        delivery = Delivery.receive(push_feed=feed, filename=Path(key).name, file_path=key, found_by_sweep=True)
+        delivery.mark_accepted(file_path=key)
+    return True
 
 
 def _should_stop(stop_event) -> bool:
@@ -90,6 +248,12 @@ def _handle_event(ev: dict):
     origin_bucket = _resolve_origin(bucket_name)
     if not origin_bucket:
         return
+
+    if origin_bucket == BucketType.INCOMING:
+        # Nothing reaches a catalog from incoming except through its push feed and a known
+        # sender; a refused file leaves the bucket here, so the Sweep never revives it.
+        if not _admit_incoming(ev, key):
+            return
 
     try:
         meta = validate_path(key)
@@ -136,6 +300,11 @@ def _handle_event(ev: dict):
             logger.warning("Time extraction failed for %s: %s", key, time_error)
             # Refused inside a known organisation: attributed to it.
             FileIngestion.mark_failed(origin_bucket, key, time_error, outcome=FileIngestionFinished.Outcome.REFUSED)
+            return
+
+        # Registered above, so the Sweep still revives it if the browser never reports back.
+        if origin_bucket == BucketType.INCOMING and _awaits_completion(key):
+            logger.debug("Awaiting the uploader's completion: %s/%s", origin_bucket, key)
             return
 
         if not created:

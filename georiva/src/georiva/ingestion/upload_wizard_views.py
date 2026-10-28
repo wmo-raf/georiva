@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
 from django.contrib import messages
@@ -16,6 +17,14 @@ from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 from georiva.formats.registry import format_registry
+from georiva.ingestion.derived_variables import (
+    degree_unit,
+    derived_slug,
+    derived_sources,
+    is_direction,
+    validate_derived,
+)
+from georiva.ingestion.unit_range import same_unit, units_convertible
 from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
@@ -29,8 +38,8 @@ SCAN_MAX_POINTS = 1_000_000
 
 STEP_LABELS = [
     _("Catalog"),
-    _("Config Name"),
-    _("File & Variables"),
+    _("Feed Settings"),
+    _("Sample File"),
     _("Collection Setup"),
     _("Review"),
 ]
@@ -43,10 +52,10 @@ def _wizard_chrome(step):
     return {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse("manual_upload_config_list"), "label": _("Manual Uploads")},
-            {"url": None, "label": _("Setup Wizard — %s") % STEP_LABELS[step - 1]},
+            {"url": reverse("push_feed_list"), "label": _("Push feeds")},
+            {"url": None, "label": _("New push feed — %s") % STEP_LABELS[step - 1]},
         ],
-        "header_title": _("Manual Upload Setup Wizard — %s") % STEP_LABELS[step - 1],
+        "header_title": _("New Push Feed — %s") % STEP_LABELS[step - 1],
         "header_icon": "upload",
         "step": step,
         "step_labels": STEP_LABELS,
@@ -89,6 +98,22 @@ def _session_catalog(request, session):
     from georiva.core.models import Catalog
 
     return scoped_queryset(request, Catalog.objects.all()).filter(pk=session["catalog_id"]).first()
+
+
+def _claimed_catalog_message(catalog):
+    """Why a catalog cannot take a push feed: it already has a feed, and the message names it (ADR 0034)."""
+    pull_feed = getattr(catalog, "data_feed", None)
+    if pull_feed is not None:
+        return _("This catalog already has a pull feed, \u201c%(name)s\u201d. A catalog has at most one feed.") % {
+            "name": pull_feed.name
+        }
+    push_feed = getattr(catalog, "push_feed", None)
+    if push_feed is not None:
+        return _(
+            "This catalog already has a push feed, \u201c%(name)s\u201d. A product that arrives in two "
+            "shapes is two catalogs."
+        ) % {"name": push_feed.name}
+    return _("Please choose a catalog.")
 
 
 def _catalog_format_from_session(request, session):
@@ -142,7 +167,9 @@ def upload_wizard_step1(request):
     # chosen catalog, so offering another tenant's catalog here would file every
     # subsequent upload under *their* `{org}/` prefix — server-side misfiling of
     # national data, which is precisely what org-scoped storage exists to stop.
-    all_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True).order_by("name")
+    all_catalogs = Catalog.objects.filter(organisation=org, data_feed__isnull=True, push_feed__isnull=True).order_by(
+        "name"
+    )
     file_format_choices = Catalog.FileFormat.choices
 
     if request.method == "POST":
@@ -162,7 +189,7 @@ def upload_wizard_step1(request):
                 # either way: this operator has no business learning which.
                 errors.append(_("Please choose a catalog."))
             elif not all_catalogs.filter(pk=catalog_id).exists():
-                errors.append(_("This catalog is managed by an automated source and cannot receive manual uploads."))
+                errors.append(_claimed_catalog_message(Catalog.objects.get(pk=catalog_id)))
         if catalog_mode == "create":
             if not new_catalog_name:
                 errors.append(_("Please enter a name for the new Catalog."))
@@ -213,42 +240,64 @@ def upload_wizard_step2(request):
         return redirect("upload_wizard_step1")
 
     if request.method == "POST":
-        from georiva.ingestion.models import ManualUploadConfig
+        from georiva.ingestion.models import PushFeed
 
-        config_name = request.POST.get("config_name", "").strip()
-        duplicate = (
-            config_name
-            and session.get("catalog_mode") == "select"
+        feed_name = request.POST.get("feed_name", "").strip()
+        errors = []
+        if not feed_name:
+            errors.append(_("Please enter a name for this push feed."))
+        if (
+            session.get("catalog_mode") == "select"
             and session.get("catalog_id")
-            and ManualUploadConfig.objects.filter(catalog_id=session["catalog_id"], name=config_name).exists()
-        )
-        if not config_name:
-            messages.error(request, _("Please enter a name for this upload configuration."))
-        elif duplicate:
-            messages.error(
-                request,
-                _("A configuration named '%s' already exists for this catalog.") % config_name,
+            and PushFeed.objects.filter(catalog_id=session["catalog_id"]).exists()
+        ):
+            errors.append(
+                _("This catalog already has a push feed. A product that arrives in two shapes is two catalogs.")
             )
+
+        try:
+            files_per_run = int(request.POST.get("files_per_run") or 1)
+            if files_per_run < 1:
+                raise ValueError
+        except ValueError:
+            files_per_run = 1
+            errors.append(_("Files per run must be a whole number, 1 or more."))
+
+        expected_hours = None
+        raw_hours = request.POST.get("expected_interval_hours", "").strip()
+        if raw_hours:
+            try:
+                expected_hours = float(raw_hours)
+                if not math.isfinite(expected_hours) or expected_hours <= 0:
+                    raise ValueError
+            except ValueError:
+                errors.append(_("Expected interval must be a number of hours greater than 0."))
+
+        if errors:
+            for e in errors:
+                messages.error(request, e)
         else:
-            session["config_name"] = config_name
+            session["feed_name"] = feed_name
+            session["files_per_run"] = files_per_run
+            session["expected_interval_hours"] = expected_hours
             _save_session(request, session)
             return redirect("upload_wizard_step3")
 
-    default_config_name = session.get("config_name", "")
-    if not default_config_name:
+    default_feed_name = session.get("feed_name", "")
+    if not default_feed_name:
         if session.get("catalog_mode") == "create" and session.get("new_catalog_name"):
-            default_config_name = f"{session['new_catalog_name']} Config"
+            default_feed_name = f"{session['new_catalog_name']} push feed"
         elif session.get("catalog_id"):
             catalog = _session_catalog(request, session)
             if catalog is not None:
-                default_config_name = f"{catalog.name} Config"
+                default_feed_name = f"{catalog.name} push feed"
 
     return render(
         request,
         "georivaingestion/wizard_step2_name.html",
         {
             "session": session,
-            "default_config_name": default_config_name,
+            "default_feed_name": default_feed_name,
             **_wizard_chrome(2),
         },
     )
@@ -402,13 +451,13 @@ def upload_wizard_upload_sample(request):
 
 
 def upload_wizard_step3(request):
-    from georiva.ingestion.models import ManualUploadConfig
+    from georiva.ingestion.models import PushFeed
 
     session = _session(request)
-    if not session.get("config_name"):
+    if not session.get("feed_name"):
         return redirect("upload_wizard_step2")
 
-    format_choices = ManualUploadConfig.ValidTimeFormat.choices
+    format_choices = PushFeed.ValidTimeFormat.choices
     catalog_format = _catalog_format_from_session(request, session)
     accept_extensions = _CATALOG_FORMAT_ACCEPT.get(catalog_format, ",".join(_CATALOG_FORMAT_ACCEPT.values()))
     format_label = _CATALOG_FORMAT_LABEL.get(catalog_format, "NetCDF, GRIB2, or GeoTIFF")
@@ -539,6 +588,10 @@ def upload_wizard_step4(request):
             {
                 "session": session,
                 "selected_variables_json": json.dumps(selected_variables),
+                "source_options_json": json.dumps(
+                    [{"name": v["name"], "symbol": v.get("units", "")} for v in all_variables]
+                ),
+                "degree_unit_id": degree_unit().pk,
                 "collection_base_name": collection_base_name,
                 "units_json": json.dumps(units),
                 "prefill_collections_json": prefill_collections_json,
@@ -579,10 +632,27 @@ def upload_wizard_step4(request):
             if i not in assigned_idxs:
                 errors.append(_("Collection '%s' has no variables assigned to it.") % collections[i].get("name", i + 1))
 
-        from georiva.core.models import Variable
+        from georiva.core.models import Unit, Variable
         from georiva.core.unit_utils import ureg
 
         for a in assignments:
+            derived = a.get("derived")
+            if derived:
+                a["variable_name"] = derived_slug(a.get("long_name"))
+                if not a["variable_name"]:
+                    errors.append(_("A derived variable needs a name."))
+                errors.extend(validate_derived(derived, a.get("long_name") or "?"))
+                file_units = {v["name"]: (v.get("units") or "").strip() for v in session.get("variables", [])}
+                u_units = file_units.get((derived.get("u_source") or "").strip(), "")
+                v_units = file_units.get((derived.get("v_source") or "").strip(), "")
+                if u_units and v_units and not same_unit(u_units, v_units):
+                    errors.append(
+                        _("Variable '%(var)s': U is in %(u)s but V is in %(v)s. Both components need the same unit.")
+                        % {"var": a.get("long_name") or "?", "u": u_units, "v": v_units}
+                    )
+                if is_direction(derived.get("transform")):
+                    # Direction is always degrees: one unit, nothing to convert.
+                    a.update(unit_id=degree_unit().pk, unit_create="", units="", source_symbol="", source_unit_id=None)
             var_label = a.get("variable_name", "?")
             vmin, vmax = a.get("value_min"), a.get("value_max")
             if (
@@ -602,6 +672,7 @@ def upload_wizard_step4(request):
 
             unit_id = a.get("unit_id")
             unit_create = (a.get("unit_create") or "").strip()
+            output_symbol = unit_create
             if not unit_id and not unit_create:
                 errors.append(_("Variable '%s' needs a unit.") % var_label)
             elif unit_create:
@@ -609,12 +680,29 @@ def upload_wizard_step4(request):
                     ureg(unit_create)
                 except Exception:
                     errors.append(_("Variable '%s': unit '%s' is not a valid unit symbol.") % (var_label, unit_create))
+            else:
+                output = Unit.objects.filter(pk=unit_id).first()
+                output_symbol = output.symbol if output else ""
+
+            # The extractor converts incoming → output, so the pair must be convertible.
+            incoming_symbol = _incoming_symbol(a)
+            if derived and is_direction(derived.get("transform")):
+                pass
+            elif not incoming_symbol:
+                errors.append(_("Variable '%s' needs its incoming unit: set the unit the file carries.") % var_label)
+            elif output_symbol and not units_convertible(incoming_symbol, output_symbol):
+                errors.append(
+                    _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
+                    % {"var": var_label, "a": incoming_symbol, "b": output_symbol}
+                )
 
         # Duplicate source_name check: each variable_name must map to exactly
         # one collection per catalog (unambiguous collection resolution for
         # GRIB/NetCDF ingestion).
         source_name_to_collection = {}
         for a in assignments:
+            if a.get("derived"):
+                continue
             source_name = a.get("variable_name", "").strip()
             coll_idx = a.get("collection_idx")
             if not source_name or coll_idx is None or coll_idx >= len(collections):
@@ -635,23 +723,45 @@ def upload_wizard_step4(request):
             else:
                 source_name_to_collection[source_name] = (coll_slug, coll_name)
 
-        # Also check against existing ManualUploadConfigs for the same catalog.
+        # A derived variable's slug comes from its name: unique within its collection.
+        seen_slugs = set()
+        for a in assignments:
+            slug = a["variable_name"] if a.get("derived") else slugify(a.get("variable_name", ""))
+            key = (a.get("collection_idx"), slug)
+            if a.get("derived") and key in seen_slugs:
+                errors.append(_("Two variables in one collection would both be '%s'.") % slug)
+            seen_slugs.add(key)
+
+        if session.get("catalog_id"):
+            from georiva.core.models import Variable as _Variable
+
+            for a in assignments:
+                idx = a.get("collection_idx")
+                if not a.get("derived") or idx is None or idx >= len(collections):
+                    continue
+                coll_slug = collections[idx].get("slug", "").strip() or slugify(collections[idx].get("name", ""))
+                if _Variable.objects.filter(
+                    collection__catalog_id=session["catalog_id"], collection__slug=coll_slug, slug=a["variable_name"]
+                ).exists():
+                    errors.append(
+                        _("Collection '%(coll)s' already has a variable '%(slug)s'.")
+                        % {"coll": collections[idx].get("name", coll_slug), "slug": a["variable_name"]}
+                    )
+
+        # Also check against the Variables the catalog already has.
         catalog_id = session.get("catalog_id")
         if catalog_id:
-            from georiva.ingestion.models import ManualUploadConfigVariable
+            from georiva.core.models import Variable
 
-            for ev in ManualUploadConfigVariable.objects.filter(config__catalog_id=catalog_id).select_related(
-                "collection"
-            ):
-                if ev.variable_name in source_name_to_collection:
-                    new_slug, new_name = source_name_to_collection[ev.variable_name]
-                    if ev.collection.slug != new_slug:
+            for ev in Variable.objects.filter(collection__catalog_id=catalog_id).select_related("collection"):
+                for source_name, (new_slug, new_name) in source_name_to_collection.items():
+                    if slugify(source_name) == ev.slug and ev.collection.slug != new_slug:
                         errors.append(
                             _(
                                 "Variable '%(var)s' is already assigned to collection '%(existing)s' "
                                 "in this catalog — cannot also assign it to '%(new)s'."
                             )
-                            % {"var": ev.variable_name, "existing": ev.collection.name, "new": new_name}
+                            % {"var": source_name, "existing": ev.collection.name, "new": new_name}
                         )
 
         if errors:
@@ -715,6 +825,26 @@ def upload_wizard_step5(request):
 # =============================================================================
 
 
+def _incoming_symbol(assignment: dict) -> str:
+    """The symbol of the unit the file's values arrive in: the scan's, or the one the person picked."""
+    from georiva.core.models import Unit
+
+    symbol = (assignment.get("source_symbol") or assignment.get("units") or "").strip()
+    if symbol:
+        return symbol
+    unit_id = assignment.get("source_unit_id")
+    unit = Unit.objects.filter(pk=unit_id).first() if unit_id else None
+    return unit.symbol if unit else ""
+
+
+def _source_unit_for_assignment(assignment: dict):
+    """The Unit the file's values arrive in, or None when the file did not say."""
+    from georiva.core.provisioning import resolve_unit
+
+    symbol = _incoming_symbol(assignment)
+    return resolve_unit(symbol) if symbol else None
+
+
 def _unit_for_assignment(assignment: dict):
     """Resolve the Unit for an assignment: existing pk or resolve/create from symbol."""
     from georiva.core.models import Unit
@@ -733,7 +863,7 @@ def _unit_for_assignment(assignment: dict):
 def upload_wizard_provision(request):
     from georiva.core.models import Catalog, Collection, Variable
     from georiva.core.provisioning import passthrough_sources
-    from georiva.ingestion.models import ManualUploadConfig, ManualUploadConfigVariable
+    from georiva.ingestion.models import PushFeed
     from georiva.organisations.access import require_active_org
 
     if request.method != "POST":
@@ -772,11 +902,8 @@ def upload_wizard_provision(request):
             # claimed the Catalog since) or the POST crafted. In create mode the
             # get_or_create above may also have fetched an existing claimed
             # Catalog by slug rather than creating one.
-            if getattr(catalog, "data_feed", None) is not None:
-                messages.error(
-                    request,
-                    _("This catalog is managed by an automated source and cannot receive manual uploads."),
-                )
+            if getattr(catalog, "data_feed", None) is not None or getattr(catalog, "push_feed", None) is not None:
+                messages.error(request, _claimed_catalog_message(catalog))
                 return redirect("upload_wizard_step1")
 
             created_collections = {}
@@ -788,25 +915,27 @@ def upload_wizard_provision(request):
                 )
                 created_collections[idx] = collection
 
-            config = ManualUploadConfig.objects.create(
+            hours = session.get("expected_interval_hours")
+            feed = PushFeed.objects.create(
                 catalog=catalog,
-                name=session["config_name"],
+                name=session["feed_name"],
                 is_forecast=session.get("is_forecast", False),
                 valid_time_format=session["valid_time_format"],
+                files_per_run=session.get("files_per_run") or 1,
+                expected_interval=timedelta(hours=hours) if hours else None,
             )
 
             for assignment in session.get("assignments", []):
                 collection = created_collections[assignment["collection_idx"]]
                 variable_name = assignment["variable_name"]
                 unit = _unit_for_assignment(assignment)
-
-                ManualUploadConfigVariable.objects.create(
-                    config=config,
-                    collection=collection,
-                    variable_name=variable_name,
-                    long_name=assignment.get("long_name", ""),
-                    units=assignment.get("units", "")[:50],
-                )
+                derived = assignment.get("derived")
+                if derived:
+                    transform = derived["transform"]
+                    sources = derived_sources(derived["u_source"], derived["v_source"])
+                else:
+                    transform = Variable.TransformType.PASSTHROUGH
+                    sources = passthrough_sources(variable_name)
 
                 # get_or_create: re-provisioning into an existing collection must
                 # not clobber hand-tuned Variables (styling, transform, ranges).
@@ -815,18 +944,20 @@ def upload_wizard_provision(request):
                     slug=slugify(variable_name),
                     defaults={
                         "name": assignment.get("long_name") or variable_name,
-                        "transform_type": Variable.TransformType.PASSTHROUGH,
+                        "source_long_name": (assignment.get("source_long_name") or "").strip(),
+                        "transform_type": transform,
+                        "source_unit": _source_unit_for_assignment(assignment),
                         "unit": unit,
                         "value_min": assignment["value_min"],
                         "value_max": assignment["value_max"],
-                        "sources": passthrough_sources(variable_name),
+                        "sources": sources,
                     },
                 )
 
     except IntegrityError:
         messages.error(
             request,
-            _("A configuration named '%s' already exists for this catalog.") % session.get("config_name", ""),
+            _("This catalog already has a push feed."),
         )
         return redirect("upload_wizard_step5")
     except Exception as exc:
@@ -836,6 +967,6 @@ def upload_wizard_provision(request):
     request.session.pop(_WIZARD_SESSION_KEY, None)
     messages.success(
         request,
-        _("Upload configuration '%s' created with %d variable(s).") % (config.name, config.variables.count()),
+        _("Push feed '%s' created with %d variable(s).") % (feed.name, feed.variables().count()),
     )
-    return redirect("manual_upload_config_list")
+    return redirect("push_feed_list")

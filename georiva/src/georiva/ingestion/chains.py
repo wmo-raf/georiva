@@ -3,7 +3,7 @@
 The fetch → ingestion hop crosses object storage, not the task queue, so no task
 header survives it. It is bridged by lookup instead: the Bucket-notification
 consumer, and the unprocessed-file sweep, find the most recent fetched-file (or
-uploaded-file) record for the key and adopt that fetch's Correlation and
+delivery) record for the key and adopt that fetch's Correlation and
 organisation. No match means a drop-zone arrival — a fresh chain, honestly
 recorded as "arrived in the bucket".
 
@@ -42,11 +42,11 @@ def context_for_arrival(file_path: str, *, actor: str) -> EventContext:
 
 def _adopt_latest(file_path: str, actor: str) -> EventContext | None:
     """The chain of whichever stored the key last: a fetch or a person's upload."""
-    from georiva.ingestion.models import UploadedFile
+    from georiva.ingestion.models import Delivery
 
     upload = (
-        UploadedFile.objects.filter(file_path=file_path, correlation_id__isnull=False)
-        .select_related("session__catalog", "session__user")
+        Delivery.objects.filter(file_path=file_path)
+        .select_related("push_feed__catalog", "push_sender")
         .order_by("-id")
         .first()
     )
@@ -55,10 +55,9 @@ def _adopt_latest(file_path: str, actor: str) -> EventContext | None:
         return fetch
     if fetch is not None and not _upload_is_newer(upload, file_path):
         return fetch
-    session = upload.session
     return new_context(
-        actor=f"user:{session.user_id}" if session.user_id else actor,
-        organisation_id=session.catalog.organisation_id,
+        actor=upload.actor if upload.sent_by_id or upload.push_sender_id else actor,
+        organisation_id=upload.push_feed.catalog.organisation_id,
         correlation_id=upload.correlation_id,
     )
 
@@ -80,7 +79,7 @@ def _upload_is_newer(upload, file_path: str) -> bool:
     """Whether the upload stored this key after the latest fetch did."""
     fetched = _reached_rows(file_path).order_by("-id").first()
     fetched_at = fetched.completed_at or fetched.started_at if fetched else None
-    return fetched_at is None or (upload.started_at is not None and upload.started_at >= fetched_at)
+    return fetched_at is None or (upload.received_at >= fetched_at)
 
 
 def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:

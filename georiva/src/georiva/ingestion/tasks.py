@@ -113,7 +113,7 @@ def sweep_unprocessed(sync: bool = False):
     Safety net — finds files that the webhook missed and retries failures.
 
     Three phases:
-    1. Reset stale locks (workers that crashed mid-processing)
+    1. Reset stale locks (workers that crashed mid-processing), and fail files with no retries left
     2. Scan incoming/sources buckets for untracked files and for pending
        files whose dispatched task was lost (pending past PENDING_TIMEOUT)
     3. Retry failed files that haven't exceeded max retries
@@ -128,6 +128,12 @@ def sweep_unprocessed(sync: bool = False):
     stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
         logger.warning("Reset %d stale locks", stale_count)
+
+    # A pending file with no retries left can never be locked again; fail it here, before
+    # the scan below finds it stale and re-dispatches it for nothing.
+    exhausted_count = FileIngestion.fail_exhausted_pending(sweep="unprocessed")
+    if exhausted_count:
+        logger.warning("Failed %d pending files with no retries left", exhausted_count)
 
     # -----------------------------------------------------------------
     # Phase 2: Scan buckets for untracked files
@@ -145,7 +151,7 @@ def sweep_unprocessed(sync: bool = False):
             write_sweep_intervention("unprocessed", why, log.pk if log else None, origin_bucket, file_path)
             raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
-    from georiva.ingestion.unprocessed import find_unprocessed
+    from georiva.ingestion.unprocessed import admit_untracked, find_unprocessed
 
     for unprocessed in find_unprocessed():
         reference_time_iso = unprocessed.reference_time.isoformat() if unprocessed.reference_time else None
@@ -164,6 +170,8 @@ def sweep_unprocessed(sync: bool = False):
                 why="reingest_required",
             )
         elif unprocessed.reason == "untracked":
+            if not admit_untracked(unprocessed):
+                continue
             logger.info(
                 "Found untracked file: %s/%s",
                 unprocessed.bucket,
@@ -344,6 +352,35 @@ def close_quiet_run_ingestions(minutes: int = None):
     return closed
 
 
+@app.task(
+    name="georiva.ingestion.tasks.record_overdue_push_feeds",
+    base=SweepTask,
+    sweep_name="push_feed_overdue",
+    queue="georiva-default",
+)
+def record_overdue_push_feeds():
+    """Record one ``PushFeedOverdue`` per push feed whose overdue spell has just begun (ADR 0034)."""
+    from georiva.ingestion.overdue import record_overdue_feeds
+
+    return record_overdue_feeds()
+
+
+@app.task(
+    name="georiva.ingestion.tasks.reject_abandoned_deliveries",
+    base=SweepTask,
+    sweep_name="abandoned_deliveries",
+    queue="georiva-default",
+)
+def reject_abandoned_deliveries():
+    """Reject deliveries a person prepared but never uploaded, once the consumer would no longer wait for them."""
+    from georiva.ingestion.abandoned import reject_abandoned
+
+    rejected = reject_abandoned()
+    if rejected:
+        logger.info("Rejected %d abandoned delivery(ies)", rejected)
+    return rejected
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     register_periodic_tasks(
@@ -361,9 +398,21 @@ def setup_periodic_tasks(sender, **kwargs):
                 IntervalSchedule.DAYS,
             ),
             PeriodicSpec(
+                "georiva.ingestion.record_overdue_push_feeds",
+                "georiva.ingestion.tasks.record_overdue_push_feeds",
+                15,
+                IntervalSchedule.MINUTES,
+            ),
+            PeriodicSpec(
                 "georiva.ingestion.close_quiet_run_ingestions",
                 "georiva.ingestion.tasks.close_quiet_run_ingestions",
                 5,
+                IntervalSchedule.MINUTES,
+            ),
+            PeriodicSpec(
+                "georiva.ingestion.reject_abandoned_deliveries",
+                "georiva.ingestion.tasks.reject_abandoned_deliveries",
+                15,
                 IntervalSchedule.MINUTES,
             ),
             PeriodicSpec(

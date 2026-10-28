@@ -31,15 +31,43 @@ class UnprocessedFile:
     reference_time: datetime | None = None
 
 
+def admit_untracked(unprocessed_file: UnprocessedFile) -> bool:
+    """Whether an untracked file may be ingested (ADR 0034).
+
+    A file found in ``incoming`` is attributed to its push feed, or quarantined as a
+    notification's would be. A failure here skips that one file, so a bad move cannot
+    stop the rest of the scan; the file stays in ``incoming`` for the next one.
+    """
+    import logging
+
+    from georiva.core.storage import BucketType
+    from georiva.ingestion.consumer import admit_found_in_incoming
+
+    if unprocessed_file.bucket != BucketType.INCOMING:
+        return True
+    try:
+        return admit_found_in_incoming(unprocessed_file.file_path)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not admit %s found in incoming", unprocessed_file.file_path)
+        return False
+
+
 def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
     """Queue Ingestion for a find_unprocessed() result: register untracked
     files, reset reingest candidates, and dispatch one processing task per
     file (pending files just get their lost dispatch re-sent)."""
+    from georiva.core.storage import BucketType
     from georiva.ingestion import tasks
+    from georiva.ingestion.consumer import admit_found_in_incoming
     from georiva.ingestion.models import FileIngestion
 
+    queued = 0
     for unprocessed_file in found:
         if unprocessed_file.reason == "untracked":
+            if unprocessed_file.bucket == BucketType.INCOMING and not admit_found_in_incoming(
+                unprocessed_file.file_path
+            ):
+                continue
             FileIngestion.register(
                 bucket=unprocessed_file.bucket,
                 file_path=unprocessed_file.file_path,
@@ -52,7 +80,8 @@ def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
             origin_bucket=unprocessed_file.bucket,
             reference_time=(unprocessed_file.reference_time.isoformat() if unprocessed_file.reference_time else None),
         )
-    return len(found)
+        queued += 1
+    return queued
 
 
 def reingest_records(records) -> int:

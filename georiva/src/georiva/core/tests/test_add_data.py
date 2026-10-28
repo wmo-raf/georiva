@@ -19,14 +19,14 @@ class AddDataFrontDoorTests(TestCase):
         response = self.client.get(reverse("add_data"))
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        # Routes to the DataFeed setup wizard and the Manual Upload Setup Wizard
+        # Routes to the DataFeed setup wizard and the New Push Feed Wizard
         self.assertIn(reverse("data_feed_add_select"), html)
         self.assertIn(reverse("upload_wizard_step1"), html)
 
     def test_front_door_speaks_data_manager_language(self):
         html = self.client.get(reverse("add_data")).content.decode()
         self.assertIn("automatically", html.lower())
-        self.assertIn("upload", html.lower())
+        self.assertIn("sent to GeoRiva", html)
 
     def test_front_door_requires_admin_access(self):
         self.client.logout()

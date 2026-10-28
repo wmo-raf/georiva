@@ -66,48 +66,47 @@ def register_ingestion_dashboard_urls():
     ]
 
 
-# "Manual Uploads" is reached via the "Data" menu group registered in
+# "Push feeds" is reached via the "Data" menu group registered in
 # core/wagtail_hooks.py, not a top-level menu item.
 
 
 @hooks.register("register_admin_urls")
-def register_manual_upload_config_urls():
-    from .manual_upload_views import (
-        manual_upload_config_delete,
-        manual_upload_config_edit,
-        manual_upload_config_list,
-        manual_upload_variable_add,
-        manual_upload_variable_edit,
-        manual_upload_variable_remove,
+def register_push_feed_urls():
+    from .push_feed_views import (
+        delivery_retry,
+        push_feed_delete,
+        push_feed_edit,
+        push_feed_list,
+        push_feed_list_results,
+        push_sender_add,
+        push_sender_revoke,
+        push_sender_rotate,
     )
+    from .unit_range import convert_range_view
     from .upload_views import (
-        manual_upload_extract_times,
-        manual_upload_page,
-        manual_upload_submit,
+        push_feed_complete,
+        push_feed_extract_times,
+        push_feed_page,
+        push_feed_prepare,
+        push_feed_submit,
     )
 
     return [
-        path("manual-uploads/", manual_upload_config_list, name="manual_upload_config_list"),
-        path("manual-uploads/<int:pk>/edit/", manual_upload_config_edit, name="manual_upload_config_edit"),
-        path("manual-uploads/<int:pk>/variables/add/", manual_upload_variable_add, name="manual_upload_variable_add"),
-        path(
-            "manual-uploads/<int:pk>/variables/<int:var_pk>/edit/",
-            manual_upload_variable_edit,
-            name="manual_upload_variable_edit",
-        ),
-        path(
-            "manual-uploads/<int:pk>/variables/<int:var_pk>/remove/",
-            manual_upload_variable_remove,
-            name="manual_upload_variable_remove",
-        ),
-        path("manual-uploads/<int:pk>/delete/", manual_upload_config_delete, name="manual_upload_config_delete"),
-        path("manual-uploads/<int:pk>/upload/", manual_upload_page, name="manual_upload_page"),
-        path(
-            "manual-uploads/<int:pk>/upload/extract-times/",
-            manual_upload_extract_times,
-            name="manual_upload_extract_times",
-        ),
-        path("manual-uploads/<int:pk>/upload/submit/", manual_upload_submit, name="manual_upload_submit"),
+        path("push-feeds/", push_feed_list, name="push_feed_list"),
+        path("push-feeds/convert-range/", convert_range_view, name="push_feed_convert_range"),
+        path("push-feeds/<int:pk>/edit/", push_feed_edit, name="push_feed_edit"),
+        # Results-only fragment the search box swaps in via AJAX.
+        path("push-feeds/results/", push_feed_list_results, name="push_feed_list_results"),
+        path("push-feeds/<int:pk>/delete/", push_feed_delete, name="push_feed_delete"),
+        path("push-feeds/<int:pk>/", push_feed_page, name="push_feed_page"),
+        path("push-feeds/<int:pk>/extract-times/", push_feed_extract_times, name="push_feed_extract_times"),
+        path("push-feeds/<int:pk>/submit/", push_feed_submit, name="push_feed_submit"),
+        path("push-feeds/<int:pk>/prepare/", push_feed_prepare, name="push_feed_prepare"),
+        path("push-feeds/<int:pk>/complete/", push_feed_complete, name="push_feed_complete"),
+        path("push-feeds/<int:pk>/deliveries/<int:delivery_pk>/retry/", delivery_retry, name="delivery_retry"),
+        path("push-feeds/<int:pk>/senders/add/", push_sender_add, name="push_sender_add"),
+        path("push-feeds/<int:pk>/senders/<int:sender_pk>/rotate/", push_sender_rotate, name="push_sender_rotate"),
+        path("push-feeds/<int:pk>/senders/<int:sender_pk>/revoke/", push_sender_revoke, name="push_sender_revoke"),
     ]
 
 
@@ -124,16 +123,26 @@ def register_upload_wizard_urls():
     )
 
     return [
-        path("manual-uploads/wizard/step1/", upload_wizard_step1, name="upload_wizard_step1"),
-        path("manual-uploads/wizard/step2/", upload_wizard_step2, name="upload_wizard_step2"),
-        path("manual-uploads/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
-        path("manual-uploads/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
-        path("manual-uploads/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
-        path("manual-uploads/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
-        path("manual-uploads/wizard/upload-sample/", upload_wizard_upload_sample, name="upload_wizard_upload_sample"),
+        path("push-feeds/wizard/step1/", upload_wizard_step1, name="upload_wizard_step1"),
+        path("push-feeds/wizard/step2/", upload_wizard_step2, name="upload_wizard_step2"),
+        path("push-feeds/wizard/step3/", upload_wizard_step3, name="upload_wizard_step3"),
+        path("push-feeds/wizard/step4/", upload_wizard_step4, name="upload_wizard_step4"),
+        path("push-feeds/wizard/step5/", upload_wizard_step5, name="upload_wizard_step5"),
+        path("push-feeds/wizard/provision/", upload_wizard_provision, name="upload_wizard_provision"),
+        path("push-feeds/wizard/upload-sample/", upload_wizard_upload_sample, name="upload_wizard_upload_sample"),
     ]
 
 
 @hooks.register("construct_homepage_panels")
 def add_ingestion_activity_panel(request, panels):
     panels.append(IngestionActivityPanel())
+
+
+@hooks.register("register_permissions")
+def register_push_sender_permission():
+    from django.contrib.auth.models import Permission
+
+    return Permission.objects.filter(
+        content_type__app_label="georivaingestion",
+        codename="manage_push_senders",
+    )

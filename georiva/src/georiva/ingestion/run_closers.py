@@ -128,6 +128,52 @@ def close_if_declared_set_complete(run) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Route 1b — a push feed's declared file count (ADR 0034)
+# ---------------------------------------------------------------------------
+
+
+def close_if_files_per_run_reached(run) -> bool:
+    """Close ``run`` iff its catalog's push feed has had ``files_per_run`` machine
+    deliveries for this reference time finish ingesting.
+
+    A machine delivery is one attributed to a ``PushSender``. The feed declares how
+    many files make up a run, so this is the push-side counterpart of the DataFeed's
+    declared set. A person's upload never counts: a batch proves the batch, not the
+    run, and keeps closing as ``upload_session``. Short of the count, the quiet
+    period still closes the run.
+    """
+    from georiva.ingestion.models import Delivery, PushFeed, RunIngestion
+
+    if not run.is_open:
+        return False
+
+    feed = PushFeed.objects.filter(catalog_id=run.collection.catalog_id).first()
+    if feed is None:
+        return False
+
+    arrived = arrived_paths(run.collection, run.reference_time)
+    delivered = (
+        Delivery.objects.filter(
+            push_feed=feed,
+            file_path__in=arrived,
+            push_sender__isnull=False,
+            status=Delivery.Status.ACCEPTED,
+        )
+        .values("file_path")
+        .distinct()
+        .count()
+    )
+    if delivered < feed.files_per_run:
+        return False
+
+    if run.expected_file_count != feed.files_per_run:
+        run.expected_file_count = feed.files_per_run
+        run.save(update_fields=["expected_file_count", "updated_at"])
+
+    return run.close(RunIngestion.Closer.DECLARED_SET)
+
+
+# ---------------------------------------------------------------------------
 # Route 2 — an upload session completing
 # ---------------------------------------------------------------------------
 
@@ -143,7 +189,7 @@ def close_if_upload_batches_complete(run) -> bool:
     actually matter are: the session is closed to new files, and every file it
     stored has finished ingesting.
 
-    ``UploadedFile`` carries no ``reference_time`` of its own — unlike
+    ``Delivery`` carries no ``reference_time`` of its own — unlike
     ``FetchedFile``, whose ``request_payload`` persists one — so the link runs
     through the ``FileIngestion`` rows the uploaded keys produced, which is also
     the only place the collection was resolved.
@@ -153,7 +199,7 @@ def close_if_upload_batches_complete(run) -> bool:
     twice and means "run complete" neither time — so this closes, and tomorrow's
     arrival reopens at a higher revision.
     """
-    from georiva.ingestion.models import FileIngestion, RunIngestion, UploadedFile, UploadSession
+    from georiva.ingestion.models import Delivery, FileIngestion, RunIngestion, UploadSession
 
     if not run.is_open:
         return False
@@ -162,7 +208,9 @@ def close_if_upload_batches_complete(run) -> bool:
     if not arrived:
         return False
 
-    session_ids = set(UploadedFile.objects.filter(file_path__in=arrived).values_list("session_id", flat=True))
+    session_ids = set(
+        Delivery.objects.filter(file_path__in=arrived, session__isnull=False).values_list("session_id", flat=True)
+    )
     if not session_ids:
         return False
 
@@ -171,9 +219,9 @@ def close_if_upload_batches_complete(run) -> bool:
         return False
 
     stored = set(
-        UploadedFile.objects.filter(
+        Delivery.objects.filter(
             session_id__in=session_ids,
-            status=UploadedFile.Status.STORED,
+            status=Delivery.Status.ACCEPTED,
         ).values_list("file_path", flat=True)
     )
     ingested = set(
