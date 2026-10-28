@@ -103,7 +103,11 @@ class VariableExtractor:
         if not sources:
             raise ValueError(f"Variable '{variable.slug}' has no sources")
 
-        primary = self._get_primary_source(sources)
+        # Vector variables have no primary block; both components share a grid
+        try:
+            primary = self._get_primary_source(sources)
+        except ValueError:
+            primary = self._get_source_by_role(sources, "u_component")
         kwargs = self._build_plugin_kwargs(primary)
 
         return self.plugin.get_metadata_for_variable(
