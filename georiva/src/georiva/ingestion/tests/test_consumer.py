@@ -91,3 +91,80 @@ class SweepDirectFileIngestionTests(TestCase):
             sweep_unprocessed(sync=True)
 
         self.assertTrue(FileIngestion.objects.filter(file_path=file_path, bucket=BT.SOURCES).exists())
+
+
+class MachineDeliveryAttributionTests(TestCase):
+    def setUp(self):
+        from georiva.ingestion.models import PushFeed, PushSender
+
+        org = make_organisation("test-org")
+        self.catalog = Catalog.objects.create(organisation=org, name="WRF", slug="wrf", file_format="netcdf")
+        self.feed = PushFeed.objects.create(catalog=self.catalog, name="WRF", valid_time_format="CONTENT")
+        self.alpha = PushSender.objects.create(push_feed=self.feed, label="alpha", access_key="AKALPHA")
+        self.beta = PushSender.objects.create(push_feed=self.feed, label="beta", access_key="AKBETA")
+        other = Catalog.objects.create(organisation=org, name="Other", slug="other", file_format="netcdf")
+        other_feed = PushFeed.objects.create(catalog=other, name="Other", valid_time_format="CONTENT")
+        self.stranger = PushSender.objects.create(push_feed=other_feed, label="stranger", access_key="AKOTHER")
+        self.key = "test-org/wrf/GR--20260101T0000--wrf.nc"
+
+    def _arrive(self, principal, key=None):
+        ev = _make_event("georiva-incoming", key or self.key)
+        ev["userIdentity"] = {"principalId": principal}
+        ev["s3"]["object"]["size"] = 42
+        meta = {"org": "test-org", "catalog": "wrf", "collection": None, "reference_time": None}
+        with (
+            patch("georiva.ingestion.consumer.validate_path", return_value=meta),
+            patch("georiva.ingestion.consumer._resolve_origin", return_value=BucketType.INCOMING),
+            patch("georiva.ingestion.consumer.process_incoming_file") as task,
+        ):
+            _handle_event(ev)
+        return task
+
+    def test_each_sender_of_a_feed_is_matched(self):
+        from georiva.ingestion.models import Delivery
+
+        for sender, name in ((self.alpha, "a.nc"), (self.beta, "b.nc")):
+            self._arrive(sender.access_key, f"test-org/wrf/{name}")
+            delivery = Delivery.objects.get(file_path=f"test-org/wrf/{name}")
+            self.assertEqual(delivery.push_sender, sender)
+            self.assertEqual(delivery.status, Delivery.Status.ACCEPTED)
+            self.assertEqual(delivery.bytes, 42)
+
+    def test_delivery_starts_the_timeline_naming_the_sender(self):
+        from georiva.ingestion.models import Delivery, DeliveryReceived
+
+        task = self._arrive("AKALPHA")
+        task.delay.assert_called_once()
+        delivery = Delivery.objects.get()
+        event = DeliveryReceived.objects.get(delivery=delivery)
+        self.assertEqual(event.actor, "sender:alpha")
+        self.assertEqual(event.correlation_id, delivery.correlation_id)
+        self.assertEqual(event.sender, "alpha")
+        log = FileIngestion.objects.get(file_path=self.key)
+        self.assertEqual(log.status, FileIngestion.Status.PENDING)
+
+    def test_principal_of_another_feed_is_not_matched(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("AKOTHER")
+        self.assertFalse(Delivery.objects.exists())
+
+    def test_unknown_writer_is_not_recorded(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("minioadmin")
+        self.assertFalse(Delivery.objects.exists())
+
+    def test_a_persons_upload_is_not_recorded_twice(self):
+        from georiva.ingestion.models import Delivery
+
+        Delivery.receive(push_feed=self.feed, filename="x.nc", file_path=self.key)
+        self._arrive("minioadmin")
+        self.assertEqual(Delivery.objects.count(), 1)
+
+    def test_a_repeat_notification_while_in_flight_is_one_delivery(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("AKALPHA")
+        self._arrive("AKALPHA")
+        self.assertEqual(Delivery.objects.count(), 1)

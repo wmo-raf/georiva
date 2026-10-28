@@ -44,14 +44,19 @@ def _adopt_latest(file_path: str, actor: str) -> EventContext | None:
     """The chain of whichever stored the key last: a fetch or a person's upload."""
     from georiva.ingestion.models import Delivery
 
-    upload = Delivery.objects.filter(file_path=file_path).select_related("push_feed__catalog").order_by("-id").first()
+    upload = (
+        Delivery.objects.filter(file_path=file_path)
+        .select_related("push_feed__catalog", "push_sender")
+        .order_by("-id")
+        .first()
+    )
     fetch = _adopt_fetch(file_path, actor)
     if upload is None:
         return fetch
     if fetch is not None and not _upload_is_newer(upload, file_path):
         return fetch
     return new_context(
-        actor=f"user:{upload.sent_by_id}" if upload.sent_by_id else actor,
+        actor=upload.actor if upload.sent_by_id or upload.push_sender_id else actor,
         organisation_id=upload.push_feed.catalog.organisation_id,
         correlation_id=upload.correlation_id,
     )
