@@ -17,7 +17,14 @@ from django.utils.text import slugify
 from django.utils.translation import gettext as _
 
 from georiva.formats.registry import format_registry
-from georiva.ingestion.unit_range import units_convertible
+from georiva.ingestion.derived_variables import (
+    degree_unit,
+    derived_slug,
+    derived_sources,
+    is_direction,
+    validate_derived,
+)
+from georiva.ingestion.unit_range import same_unit, units_convertible
 from georiva.organisations.access import scoped_queryset
 
 logger = logging.getLogger(__name__)
@@ -581,6 +588,10 @@ def upload_wizard_step4(request):
             {
                 "session": session,
                 "selected_variables_json": json.dumps(selected_variables),
+                "source_options_json": json.dumps(
+                    [{"name": v["name"], "symbol": v.get("units", "")} for v in all_variables]
+                ),
+                "degree_unit_id": degree_unit().pk,
                 "collection_base_name": collection_base_name,
                 "units_json": json.dumps(units),
                 "prefill_collections_json": prefill_collections_json,
@@ -625,6 +636,23 @@ def upload_wizard_step4(request):
         from georiva.core.unit_utils import ureg
 
         for a in assignments:
+            derived = a.get("derived")
+            if derived:
+                a["variable_name"] = derived_slug(a.get("long_name"))
+                if not a["variable_name"]:
+                    errors.append(_("A derived variable needs a name."))
+                errors.extend(validate_derived(derived, a.get("long_name") or "?"))
+                file_units = {v["name"]: (v.get("units") or "").strip() for v in session.get("variables", [])}
+                u_units = file_units.get((derived.get("u_source") or "").strip(), "")
+                v_units = file_units.get((derived.get("v_source") or "").strip(), "")
+                if u_units and v_units and not same_unit(u_units, v_units):
+                    errors.append(
+                        _("Variable '%(var)s': U is in %(u)s but V is in %(v)s. Both components need the same unit.")
+                        % {"var": a.get("long_name") or "?", "u": u_units, "v": v_units}
+                    )
+                if is_direction(derived.get("transform")):
+                    # Direction is always degrees: one unit, nothing to convert.
+                    a.update(unit_id=degree_unit().pk, unit_create="", units="", source_symbol="", source_unit_id=None)
             var_label = a.get("variable_name", "?")
             vmin, vmax = a.get("value_min"), a.get("value_max")
             if (
@@ -658,7 +686,9 @@ def upload_wizard_step4(request):
 
             # The extractor converts incoming → output, so the pair must be convertible.
             incoming_symbol = _incoming_symbol(a)
-            if not incoming_symbol:
+            if derived and is_direction(derived.get("transform")):
+                pass
+            elif not incoming_symbol:
                 errors.append(_("Variable '%s' needs its incoming unit: set the unit the file carries.") % var_label)
             elif output_symbol and not units_convertible(incoming_symbol, output_symbol):
                 errors.append(
@@ -671,6 +701,8 @@ def upload_wizard_step4(request):
         # GRIB/NetCDF ingestion).
         source_name_to_collection = {}
         for a in assignments:
+            if a.get("derived"):
+                continue
             source_name = a.get("variable_name", "").strip()
             coll_idx = a.get("collection_idx")
             if not source_name or coll_idx is None or coll_idx >= len(collections):
@@ -690,6 +722,31 @@ def upload_wizard_step4(request):
                     )
             else:
                 source_name_to_collection[source_name] = (coll_slug, coll_name)
+
+        # A derived variable's slug comes from its name: unique within its collection.
+        seen_slugs = set()
+        for a in assignments:
+            slug = a["variable_name"] if a.get("derived") else slugify(a.get("variable_name", ""))
+            key = (a.get("collection_idx"), slug)
+            if a.get("derived") and key in seen_slugs:
+                errors.append(_("Two variables in one collection would both be '%s'.") % slug)
+            seen_slugs.add(key)
+
+        if session.get("catalog_id"):
+            from georiva.core.models import Variable as _Variable
+
+            for a in assignments:
+                idx = a.get("collection_idx")
+                if not a.get("derived") or idx is None or idx >= len(collections):
+                    continue
+                coll_slug = collections[idx].get("slug", "").strip() or slugify(collections[idx].get("name", ""))
+                if _Variable.objects.filter(
+                    collection__catalog_id=session["catalog_id"], collection__slug=coll_slug, slug=a["variable_name"]
+                ).exists():
+                    errors.append(
+                        _("Collection '%(coll)s' already has a variable '%(slug)s'.")
+                        % {"coll": collections[idx].get("name", coll_slug), "slug": a["variable_name"]}
+                    )
 
         # Also check against the Variables the catalog already has.
         catalog_id = session.get("catalog_id")
@@ -872,6 +929,13 @@ def upload_wizard_provision(request):
                 collection = created_collections[assignment["collection_idx"]]
                 variable_name = assignment["variable_name"]
                 unit = _unit_for_assignment(assignment)
+                derived = assignment.get("derived")
+                if derived:
+                    transform = derived["transform"]
+                    sources = derived_sources(derived["u_source"], derived["v_source"])
+                else:
+                    transform = Variable.TransformType.PASSTHROUGH
+                    sources = passthrough_sources(variable_name)
 
                 # get_or_create: re-provisioning into an existing collection must
                 # not clobber hand-tuned Variables (styling, transform, ranges).
@@ -881,12 +945,12 @@ def upload_wizard_provision(request):
                     defaults={
                         "name": assignment.get("long_name") or variable_name,
                         "source_long_name": (assignment.get("source_long_name") or "").strip(),
-                        "transform_type": Variable.TransformType.PASSTHROUGH,
+                        "transform_type": transform,
                         "source_unit": _source_unit_for_assignment(assignment),
                         "unit": unit,
                         "value_min": assignment["value_min"],
                         "value_max": assignment["value_max"],
-                        "sources": passthrough_sources(variable_name),
+                        "sources": sources,
                     },
                 )
 

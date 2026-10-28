@@ -588,6 +588,61 @@ class Step4CollectionsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "needs its incoming unit")
 
+    def test_step4_derived_direction_is_degrees_with_no_incoming_unit(self):
+        collections = [{"name": "Col A", "slug": "col-a"}]
+        derived = {"transform": "vector_direction", "u_source": "u10", "v_source": "v10"}
+        assignments = [
+            _assignment(),
+            _assignment(
+                long_name="Wind direction",
+                units="",
+                source_symbol="",
+                unit_id=None,
+                unit_create="",
+                derived=derived,
+                value_min=0.0,
+                value_max=360.0,
+            ),
+        ]
+        response = self.client.post(
+            STEP4_URL,
+            {"collections_json": json.dumps(collections), "assignments_json": json.dumps(assignments)},
+        )
+        self.assertEqual(response.status_code, 302)
+        saved = self.client.session[SESSION_KEY]["assignments"][1]
+        self.assertEqual(saved["variable_name"], "wind-direction")
+        self.assertEqual(Unit.objects.get(pk=saved["unit_id"]).name, "Degree")
+
+    def test_step4_derived_with_components_in_different_units_rerenders(self):
+        session = _full_session()
+        session["variables"] = [
+            {"name": "u10", "long_name": "", "units": "m s-1"},
+            {"name": "v10", "long_name": "", "units": "km/h"},
+        ]
+        session["selected_variable_names"] = ["u10", "v10"]
+        _seed_session(self.client, session)
+        collections = [{"name": "Col A", "slug": "col-a"}]
+        derived = {"transform": "vector_magnitude", "u_source": "u10", "v_source": "v10"}
+        response = self.client.post(
+            STEP4_URL,
+            {
+                "collections_json": json.dumps(collections),
+                "assignments_json": json.dumps([_assignment(), _assignment(long_name="Speed", derived=derived)]),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Both components need the same unit")
+
+    def test_step4_derived_with_the_same_component_twice_rerenders(self):
+        collections = [{"name": "Col A", "slug": "col-a"}]
+        derived = {"transform": "vector_magnitude", "u_source": "u10", "v_source": "u10"}
+        assignments = [_assignment(), _assignment(long_name="Speed", derived=derived)]
+        response = self.client.post(
+            STEP4_URL,
+            {"collections_json": json.dumps(collections), "assignments_json": json.dumps(assignments)},
+        )
+        self.assertEqual(response.status_code, 200)
+
     def test_step4_invalid_create_unit_rerenders(self):
         collections = [{"name": "Col A", "slug": "col-a"}]
         assignments = [_assignment(unit_create="not_a_real_unit_xyz")]
@@ -820,6 +875,29 @@ class ProvisionTests(TestCase):
         var = Variable.objects.get()
         self.assertEqual(var.name, "Air temp")
         self.assertEqual(var.source_long_name, "2 metre temperature")
+
+    def test_provision_creates_a_derived_wind_speed_from_two_components(self):
+        session = _full_session()
+        session["assignments"] = [
+            _assignment(),
+            _assignment(
+                variable_name="10-m-wind-speed",
+                long_name="10 m wind speed",
+                units="",
+                source_symbol="K",
+                derived={"transform": "vector_magnitude", "u_source": "u10", "v_source": "v10"},
+            ),
+        ]
+        _seed_session(self.client, session)
+        self.client.post(PROVISION_URL)
+
+        speed = Variable.objects.get(slug="10-m-wind-speed")
+        self.assertEqual(speed.transform_type, "vector_magnitude")
+        self.assertEqual(
+            [(b.block_type, b.value["source_name"]) for b in speed.sources],
+            [("u_component", "u10"), ("v_component", "v10")],
+        )
+        self.assertEqual(Variable.objects.get(slug="2t").transform_type, "passthrough")
 
     def test_provision_stores_files_per_run_and_expected_interval(self):
         from datetime import timedelta

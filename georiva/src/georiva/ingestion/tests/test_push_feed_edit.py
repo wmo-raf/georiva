@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, TestCase
 from pint.errors import DimensionalityError
 
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
+from georiva.core.provisioning import passthrough_sources
 from georiva.ingestion.models import PushFeed
 from georiva.ingestion.unit_range import convert_range
 from georiva.organisations.testing import dial_org, make_organisation
@@ -47,7 +48,7 @@ class ConvertRangeViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
 
-class PushFeedEditTests(TestCase):
+class PushFeedEditBase(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("editor", "e@d.com", "pw")
         dial_org(self.client)
@@ -97,6 +98,8 @@ class PushFeedEditTests(TestCase):
         )
         Asset.objects.create(item=item, variable=self.variable, href="x.tif")
 
+
+class PushFeedEditTests(PushFeedEditBase):
     def test_get_renders_both_units(self):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
@@ -175,3 +178,158 @@ class PushFeedEditTests(TestCase):
     def test_the_edit_link_is_on_the_list_and_the_feed_page(self):
         for url in ("/admin/push-feeds/", f"/admin/push-feeds/{self.feed.pk}/"):
             self.assertContains(self.client.get(url), self.url)
+
+
+class DerivedVariableEditTests(PushFeedEditBase):
+    """Adding a wind speed or direction from a U and a V component, on the Edit page."""
+
+    def setUp(self):
+        super().setUp()
+        self.ms = Unit.objects.get_or_create(symbol="m/s", defaults={"name": "Metre per second"})[0]
+        self.kmh = Unit.objects.get_or_create(symbol="km/h", defaults={"name": "Kilometre per hour"})[0]
+        for slug in ("u10", "v10"):
+            Variable.objects.create(
+                collection=self.collection,
+                name=slug,
+                slug=slug,
+                unit=self.ms,
+                source_unit=self.ms,
+                sources=passthrough_sources(slug),
+            )
+
+    def _new(self, **overrides):
+        row = {
+            "key": "derived-0",
+            "new_derived": True,
+            "derived": {"transform": "vector_magnitude", "u_source": "u10", "v_source": "v10"},
+            "collection_value": str(self.collection.pk),
+            "long_name": "10 m wind speed",
+            "incoming_symbol": "m/s",
+            "unit_id": self.ms.pk,
+            "value_min": 0,
+            "value_max": 40,
+        }
+        row.update(overrides)
+        return row
+
+    def _existing(self):
+        return [
+            self._row(key=str(v.pk), long_name=v.name, unit_id=v.unit_id, value_min=v.value_min, value_max=v.value_max)
+            for v in self.feed.variables()
+        ]
+
+    def test_a_wind_speed_is_created_from_the_two_components(self):
+        self.assertEqual(self._post(self._existing() + [self._new()]).status_code, 302)
+
+        speed = Variable.objects.get(slug="10-m-wind-speed")
+        self.assertEqual(speed.transform_type, "vector_magnitude")
+        self.assertEqual(speed.collection, self.collection)
+        self.assertEqual(speed.source_unit, self.ms)
+        self.assertEqual(
+            [(b.block_type, b.value["source_name"]) for b in speed.sources],
+            [
+                ("u_component", "u10"),
+                ("v_component", "v10"),
+            ],
+        )
+
+    def test_the_speed_can_be_expressed_in_another_unit(self):
+        self._post(self._existing() + [self._new(unit_id=self.kmh.pk, value_min=0, value_max=144)])
+        speed = Variable.objects.get(slug="10-m-wind-speed")
+        self.assertEqual((speed.source_unit, speed.unit), (self.ms, self.kmh))
+
+    def test_a_direction_is_always_degrees_with_nothing_to_convert(self):
+        row = self._new(long_name="10 m wind direction", incoming_symbol="", unit_id=self.ms.pk, value_max=360)
+        row["derived"]["transform"] = "vector_direction"
+        self.assertEqual(self._post(self._existing() + [row]).status_code, 302)
+
+        direction = Variable.objects.get(slug="10-m-wind-direction")
+        self.assertEqual(direction.transform_type, "vector_direction")
+        self.assertEqual(direction.unit.name, "Degree")
+        self.assertIsNone(direction.source_unit)
+
+    def test_components_in_different_units_are_refused(self):
+        Variable.objects.filter(slug="v10").update(source_unit=self.kmh)
+        self.assertEqual(self._post(self._existing() + [self._new()]).status_code, 200)
+        self.assertFalse(Variable.objects.filter(slug="10-m-wind-speed").exists())
+
+    def test_the_incoming_unit_is_the_components_stored_unit(self):
+        # The page may send nothing for it: both components already say what they carry.
+        self._post(self._existing() + [self._new(incoming_symbol="")])
+        self.assertEqual(Variable.objects.get(slug="10-m-wind-speed").source_unit, self.ms)
+
+    def test_components_with_no_stored_unit_need_one_given(self):
+        Variable.objects.filter(slug__in=("u10", "v10")).update(source_unit=None)
+        self.assertEqual(self._post(self._existing() + [self._new(incoming_symbol="")]).status_code, 200)
+
+        # Set once on the components themselves, and the derived variable can name its own.
+        rows = self._existing()
+        for row in rows:
+            row["incoming_unit_id"] = self.ms.pk
+        self.assertEqual(self._post(rows + [self._new()]).status_code, 302)
+
+    def test_components_with_no_stored_unit_are_assumed_to_be_in_their_label(self):
+        # Provisioned before conversion existed: nothing was ever converted, so the label is the truth.
+        Variable.objects.filter(slug__in=("u10", "v10")).update(source_unit=None)
+        rows = self._existing()
+        for row in rows:
+            row["incoming_unit_id"] = self.ms.pk
+        self._post(rows + [self._new(incoming_symbol="")])
+        self.assertEqual(Variable.objects.get(slug="10-m-wind-speed").source_unit, self.ms)
+
+    def test_assumed_components_in_different_labels_need_the_unit_given(self):
+        Variable.objects.filter(slug__in=("u10", "v10")).update(source_unit=None)
+        Variable.objects.filter(slug="v10").update(unit=self.kmh)
+        rows = [
+            self._row(key=str(v.pk), long_name=v.name, unit_id=v.unit_id, value_min=0, value_max=10)
+            | {"incoming_unit_id": v.unit_id}
+            for v in self.feed.variables()
+        ]
+        self.assertEqual(self._post(rows + [self._new(incoming_symbol="")]).status_code, 200)
+
+    def test_the_edit_page_offers_the_assumed_unit_of_an_unset_component(self):
+        Variable.objects.filter(slug="u10").update(source_unit=None)
+        options = {o["name"]: o for o in self.client.get(self.url).context["source_options"]}
+        self.assertEqual((options["u10"]["symbol"], options["u10"]["assumed"]), ("m/s", True))
+        self.assertEqual((options["v10"]["symbol"], options["v10"]["assumed"]), ("m/s", False))
+
+    def test_the_same_component_twice_is_refused(self):
+        row = self._new()
+        row["derived"]["v_source"] = "u10"
+        self.assertEqual(self._post(self._existing() + [row]).status_code, 200)
+        self.assertFalse(Variable.objects.filter(slug="10-m-wind-speed").exists())
+
+    def test_a_component_named_by_hand_is_accepted(self):
+        row = self._new()
+        row["derived"]["u_source"] = "u100"
+        self.assertEqual(self._post(self._existing() + [row]).status_code, 302)
+
+    def test_a_name_already_used_in_the_collection_is_refused(self):
+        row = self._new(long_name="u10")
+        self.assertEqual(self._post(self._existing() + [row]).status_code, 200)
+
+    def test_a_collection_of_another_feed_is_refused(self):
+        other = Catalog.objects.create(
+            organisation=self.feed.catalog.organisation, name="Other", slug="other-2", file_format="grib2"
+        )
+        foreign = Collection.objects.create(catalog=other, name="Foreign", slug="foreign")
+        row = self._new(collection_value=str(foreign.pk))
+        self.assertEqual(self._post(self._existing() + [row]).status_code, 200)
+        self.assertFalse(Variable.objects.filter(collection=foreign).exists())
+
+    def test_a_stored_derived_variable_shows_its_components_and_keeps_them_when_edited(self):
+        self._post(self._existing() + [self._new()])
+        speed = Variable.objects.get(slug="10-m-wind-speed")
+        self.assertContains(self.client.get(self.url), "u10")
+
+        rows = [
+            self._row(key=str(v.pk), long_name=v.name, unit_id=v.unit_id, value_min=v.value_min, value_max=v.value_max)
+            for v in self.feed.variables()
+        ]
+        for row in rows:
+            if row["key"] == str(speed.pk):
+                row.update(long_name="Wind speed 10 m", value_max=50)
+        self.assertEqual(self._post(rows).status_code, 302)
+        speed.refresh_from_db()
+        self.assertEqual((speed.name, speed.value_max), ("Wind speed 10 m", 50))
+        self.assertEqual([b.value["source_name"] for b in speed.sources], ["u10", "v10"])
