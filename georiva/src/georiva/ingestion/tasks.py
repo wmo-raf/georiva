@@ -113,7 +113,7 @@ def sweep_unprocessed(sync: bool = False):
     Safety net — finds files that the webhook missed and retries failures.
 
     Three phases:
-    1. Reset stale locks (workers that crashed mid-processing)
+    1. Reset stale locks (workers that crashed mid-processing), and fail files with no retries left
     2. Scan incoming/sources buckets for untracked files and for pending
        files whose dispatched task was lost (pending past PENDING_TIMEOUT)
     3. Retry failed files that haven't exceeded max retries
@@ -128,6 +128,12 @@ def sweep_unprocessed(sync: bool = False):
     stale_count = FileIngestion.reset_stale_locks(sweep="unprocessed")
     if stale_count:
         logger.warning("Reset %d stale locks", stale_count)
+
+    # A pending file with no retries left can never be locked again; fail it here, before
+    # the scan below finds it stale and re-dispatches it for nothing.
+    exhausted_count = FileIngestion.fail_exhausted_pending(sweep="unprocessed")
+    if exhausted_count:
+        logger.warning("Failed %d pending files with no retries left", exhausted_count)
 
     # -----------------------------------------------------------------
     # Phase 2: Scan buckets for untracked files
