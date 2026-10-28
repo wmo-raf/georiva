@@ -14,6 +14,14 @@ def convert_value(value: float, from_symbol: str, to_symbol: str) -> float:
     return float(quantity.to(ureg(to_symbol).units).magnitude)
 
 
+def same_unit(a: str, b: str) -> bool:
+    """Whether two unit symbols name the same unit ('kelvin' and 'K' do)."""
+    try:
+        return ureg(a).units == ureg(b).units
+    except Exception:
+        return a.strip().lower() == b.strip().lower()
+
+
 def units_convertible(from_symbol: str, to_symbol: str) -> bool:
     try:
         convert_value(1.0, from_symbol, to_symbol)

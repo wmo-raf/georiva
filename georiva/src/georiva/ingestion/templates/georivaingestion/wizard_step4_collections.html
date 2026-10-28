@@ -54,6 +54,9 @@
         {% trans "Edit the display name, output unit and expected value range for each variable, and assign it to a collection. Values are converted from the incoming unit (read from the sample file) to the output unit you choose, and the value range is in the output unit. It drives color mapping and tile encoding, and was pre-filled from the sample file where possible." %}
     </p>
     <div class="gr-vc-list" id="variables-tbody"></div>
+    <button type="button" class="button button-secondary button-small gr-vc-add" id="add-derived-btn">
+        + {% trans "Add derived variable" %}
+    </button>
     <div class="uwiz-inline-error" id="vars-error"></div>
 
     <div class="uwiz-actions">
@@ -75,12 +78,14 @@ document.addEventListener('DOMContentLoaded', function () {
     const COLL_BASE    = '{{ collection_base_name|escapejs }}';
     const SELECTED_VARS = {{ selected_variables_json|safe }};
     const UNITS        = {{ units_json|safe }};
+    const SOURCE_OPTIONS = {{ source_options_json|safe }};
     const CSRF_TOKEN   = document.querySelector('[name=csrfmiddlewaretoken]').value;
 
     GrVariableCards.init({
         tbody: document.getElementById('variables-tbody'),
         units: UNITS,
         convertUrl: '{% url "push_feed_convert_range" %}',
+        degreeUnitId: {{ degree_unit_id }},
     });
 
     let nextId = 0;
@@ -164,6 +169,21 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // ── Derived variables ──────────────────────────────────────────────────
+    function addDerived(prefill) {
+        const sel = document.createElement('select');
+        sel.className = 'w-field__input uwiz-var-coll';
+        sel.required = true;
+        const card = GrVariableCards.addDerivedRow({
+            sourceOptions: SOURCE_OPTIONS,
+            allowOther: false,
+            collectionNode: sel,
+            prefill: prefill,
+        });
+        rebuildDropdowns();
+        return card;
+    }
+
     // ── Variable rows ──────────────────────────────────────────────────────
     function buildVariableRows(vars, assignments) {
         GrVariableCards.clear();
@@ -197,13 +217,34 @@ document.addEventListener('DOMContentLoaded', function () {
         // Restore collection selection from prefill
         if (assignments && assignments.length) {
             assignments.forEach(function (a) {
+                if (a.derived) return;
                 const sel = document.querySelector('.uwiz-var-coll[data-varname="' + esc(a.variable_name) + '"]');
                 if (!sel) return;
                 const c = collections[a.collection_idx];
                 if (c) sel.value = String(c.id);
             });
+
+            // Derived variables come back as new cards: they are only created at the end.
+            assignments.filter(function (a) { return a.derived; }).forEach(function (a) {
+                const card = addDerived({
+                    transform: a.derived.transform,
+                    u_source: a.derived.u_source,
+                    v_source: a.derived.v_source,
+                    long_name: a.long_name,
+                    unit_id: a.unit_id,
+                    incoming_symbol: a.source_symbol || '',
+                    value_min: a.value_min,
+                    value_max: a.value_max,
+                });
+                const c = collections[a.collection_idx];
+                if (c) card.querySelector('.gr-vc-collection select').value = String(c.id);
+            });
         }
     }
+
+    document.getElementById('add-derived-btn').addEventListener('click', function () {
+        addDerived({}).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
 
     // ── Add collection button ──────────────────────────────────────────────
     document.getElementById('add-coll-btn').addEventListener('click', function () {
@@ -245,6 +286,23 @@ document.addEventListener('DOMContentLoaded', function () {
         varsErrEl.classList.remove('uwiz-inline-error--visible');
 
         const assignArr = collected.rows.map(function (r) {
+            if (r.new_derived) {
+                const derivedIdx = collections.findIndex(function (c) { return String(c.id) === r.collection_value; });
+                return {
+                    variable_name:  '',
+                    long_name:      r.long_name,
+                    derived:        r.derived,
+                    units:          '',
+                    source_symbol:  r.incoming_symbol,
+                    source_unit_id: r.incoming_unit_id,
+                    unit_id:        r.unit_id,
+                    unit_create:    '',
+                    unit_display:   r.unit_display,
+                    value_min:      r.value_min,
+                    value_max:      r.value_max,
+                    collection_idx: derivedIdx >= 0 ? derivedIdx : 0,
+                };
+            }
             const v = SELECTED_VARS.find(function (x) { return x.name === r.key; });
             const sel = document.querySelector('.uwiz-var-coll[data-varname="' + esc(r.key) + '"]');
             const collId  = sel ? parseInt(sel.value) : (collections[0] ? collections[0].id : 0);

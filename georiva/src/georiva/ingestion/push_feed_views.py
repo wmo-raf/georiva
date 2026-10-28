@@ -20,8 +20,18 @@ from wagtail.admin.ui.tables import TitleColumn
 from wagtail.admin.views.generic import IndexView
 from wagtail.admin.widgets import HeaderButton
 
+from georiva.ingestion.derived_variables import (
+    degree_unit,
+    derived_slug,
+    derived_sources,
+    is_direction,
+    primary_source_name,
+    read_derived,
+    validate_derived,
+)
 from georiva.ingestion.models import PushFeed
 from georiva.ingestion.push_health import PushHealth, annotate_push_feeds, push_health
+from georiva.ingestion.unit_range import same_unit
 from georiva.organisations.access import get_org_object_or_404
 from georiva.organisations.scoping import OrgScopedViewMixin
 from georiva.sources.views import _humanize_minutes
@@ -230,65 +240,161 @@ def _variable_rows(feed):
             "value_max": v.value_max,
             "has_data": v.pk in with_data,
             "collection": v.collection.name,
+            "derived": read_derived(v),
         }
         for v in variables
     ]
 
 
-def _apply_variable_edits(feed, posted):
-    """Validate and save the posted variable rows. Returns the list of problems (empty on success)."""
-    from georiva.core.models import Asset, Unit, Variable
+def _component_units(feed):
+    """{file variable name: (Unit, assumed)} for the feed's passthrough variables.
+
+    The unit is the stored source unit. A variable that has none was provisioned before conversion
+    existed, so nothing was ever converted: its data is in the unit it is labelled with, which is
+    assumed (``assumed`` is True) and shown as such.
+    """
+    units = {}
+    for v in feed.variables().select_related("source_unit", "unit"):
+        name = primary_source_name(v)
+        if not name:
+            continue
+        found = (v.source_unit, False) if v.source_unit_id else (v.unit, True)
+        if name not in units or (units[name][1] and not found[1]):
+            units[name] = found
+    return units
+
+
+def _source_options(feed):
+    """The file variables the feed's passthrough variables read, for a derived variable's U and V."""
+    return [
+        {"name": name, "symbol": unit.symbol if unit else "", "assumed": assumed}
+        for name, (unit, assumed) in sorted(_component_units(feed).items())
+    ]
+
+
+def _incoming_unit(row, current=None):
+    """The Unit the files carry for a posted row: the stored one, else the one the person gave."""
+    from georiva.core.models import Unit
+    from georiva.core.provisioning import resolve_unit
+
+    if current is not None:
+        return current
+    if row.get("incoming_unit_id"):
+        return Unit.objects.filter(pk=row["incoming_unit_id"]).first()
+    symbol = (row.get("incoming_symbol") or "").strip()
+    return resolve_unit(symbol) if symbol else None
+
+
+def _check_units(row, label, variable, direction):
+    """(source, unit, problem): the units a posted row resolves to, or why it cannot be saved."""
+    from georiva.core.models import Asset, Unit
     from georiva.ingestion.unit_range import units_convertible
 
+    if direction:
+        # Direction comes out of the extractor in degrees: one unit, nothing to convert.
+        return None, degree_unit(), None
+
+    unit = Unit.objects.filter(pk=row.get("unit_id")).first() if row.get("unit_id") else None
+    if unit is None:
+        return None, None, _("Variable '%s' needs an output unit.") % label
+
+    source = _incoming_unit(row, variable.source_unit if variable else None)
+    if source is None:
+        return None, None, _("Variable '%s' needs its incoming unit: set the unit the files carry.") % label
+    if not units_convertible(source.symbol, unit.symbol):
+        return (
+            None,
+            None,
+            _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
+            % {"var": label, "a": source.symbol, "b": unit.symbol},
+        )
+
+    if (
+        variable is not None
+        and unit.pk != variable.unit_id
+        and not row.get("confirm_unit_change")
+        and Asset.objects.filter(variable=variable).exists()
+    ):
+        return (
+            None,
+            None,
+            _("Variable '%s' already has data: confirm the unit change, existing data is not reprocessed.") % label,
+        )
+    return source, unit, None
+
+
+def _apply_variable_edits(feed, posted):
+    """Validate and save the posted variable rows. Returns the list of problems (empty on success)."""
+    from georiva.core.models import Collection, Variable
+
     by_id = {str(v.pk): v for v in feed.variables().select_related("unit", "source_unit")}
-    errors, updates = [], []
+    collections = {str(c.pk): c for c in Collection.objects.filter(catalog=feed.catalog)}
+    errors, updates, creations = [], [], []
+    new_slugs = set()
+    component_units = _component_units(feed)
+
     for row in posted:
-        variable = by_id.get(str(row.get("key")))
-        if variable is None:
-            errors.append(_("Unknown variable in the form — reload the page and try again."))
-            continue
-        label = f"{variable.name} ({variable.slug})"
+        long_name = (row.get("long_name") or "").strip()
 
         try:
             vmin, vmax = float(row.get("value_min")), float(row.get("value_max"))
             Variable.validate_value_range(vmin, vmax)
         except (TypeError, ValueError):
-            errors.append(_("Variable '%s' needs numeric min and max values.") % label)
+            errors.append(_("Variable '%s' needs numeric min and max values.") % (long_name or row.get("key")))
             continue
         except ValidationError:
-            errors.append(_("Variable '%s': min value must be less than max.") % label)
+            errors.append(_("Variable '%s': min value must be less than max.") % (long_name or row.get("key")))
             continue
 
-        unit = Unit.objects.filter(pk=row.get("unit_id")).first() if row.get("unit_id") else None
-        if unit is None:
-            errors.append(_("Variable '%s' needs an output unit.") % label)
+        if row.get("new_derived"):
+            spec = row.get("derived") or {}
+            label = long_name or _("New derived variable")
+            problems = validate_derived(spec, label)
+            collection = collections.get(str(row.get("collection_value")))
+            slug = derived_slug(long_name)
+            if not long_name or not slug:
+                problems.append(_("Enter a name for the new derived variable."))
+            if collection is None:
+                problems.append(_("Variable '%s': choose one of the feed's collections.") % label)
+            elif (
+                Variable.objects.filter(collection=collection, slug=slug).exists() or (collection.pk, slug) in new_slugs
+            ):
+                problems.append(
+                    _("Variable '%(var)s': this collection already has a variable '%(slug)s'.")
+                    % {"var": label, "slug": slug}
+                )
+            if problems:
+                errors.extend(problems)
+                continue
+            u_unit, u_assumed = component_units.get(spec["u_source"].strip(), (None, False))
+            v_unit, v_assumed = component_units.get(spec["v_source"].strip(), (None, False))
+            agree = bool(u_unit and v_unit and same_unit(u_unit.symbol, v_unit.symbol))
+            if u_unit and v_unit and not agree and not (u_assumed or v_assumed):
+                errors.append(
+                    _("Variable '%(var)s': U is in %(u)s but V is in %(v)s. Both components need the same unit.")
+                    % {"var": label, "u": u_unit.symbol, "v": v_unit.symbol}
+                )
+                continue
+            if agree:
+                row = {**row, "incoming_unit_id": u_unit.pk}
+            source, unit, problem = _check_units(row, label, None, is_direction(spec["transform"]))
+            if problem:
+                errors.append(problem)
+                continue
+            new_slugs.add((collection.pk, slug))
+            creations.append((collection, slug, long_name, spec, source, unit, vmin, vmax))
             continue
 
-        # The incoming unit is read-only once known; a variable that never had one can be given it here.
-        source = variable.source_unit
-        if source is None and row.get("incoming_unit_id"):
-            source = Unit.objects.filter(pk=row["incoming_unit_id"]).first()
-        if source is None:
-            errors.append(_("Variable '%s' needs its incoming unit: set the unit the files carry.") % label)
+        variable = by_id.get(str(row.get("key")))
+        if variable is None:
+            errors.append(_("Unknown variable in the form — reload the page and try again."))
             continue
-        if not units_convertible(source.symbol, unit.symbol):
-            errors.append(
-                _("Variable '%(var)s': %(a)s cannot be converted to %(b)s.")
-                % {"var": label, "a": source.symbol, "b": unit.symbol}
-            )
+        label = f"{variable.name} ({variable.slug})"
+        source, unit, problem = _check_units(row, label, variable, is_direction(variable.transform_type))
+        if problem:
+            errors.append(problem)
             continue
-
-        if (
-            unit.pk != variable.unit_id
-            and not row.get("confirm_unit_change")
-            and Asset.objects.filter(variable=variable).exists()
-        ):
-            errors.append(
-                _("Variable '%s' already has data: confirm the unit change, existing data is not reprocessed.") % label
-            )
-            continue
-
-        updates.append((variable, source, unit, vmin, vmax, (row.get("long_name") or "").strip()))
+        updates.append((variable, source, unit, vmin, vmax, long_name))
 
     if errors:
         return errors
@@ -300,6 +406,18 @@ def _apply_variable_edits(feed, posted):
             if long_name:
                 variable.name = long_name
             variable.save(update_fields=["source_unit", "unit", "value_min", "value_max", "name"])
+        for collection, slug, long_name, spec, source, unit, vmin, vmax in creations:
+            Variable.objects.create(
+                collection=collection,
+                slug=slug,
+                name=long_name,
+                transform_type=spec["transform"],
+                sources=derived_sources(spec["u_source"].strip(), spec["v_source"].strip()),
+                source_unit=source,
+                unit=unit,
+                value_min=vmin,
+                value_max=vmax,
+            )
     return []
 
 
@@ -361,6 +479,9 @@ def push_feed_edit(request, pk):
             "feed": feed,
             "form": form,
             "variable_rows": rows,
+            "source_options": _source_options(feed),
+            "collection_options": [{"id": c.pk, "name": c.name} for c in feed.catalog.collections.order_by("name")],
+            "degree_unit_id": degree_unit().pk,
             "units": list(Unit.objects.order_by("name").values("id", "name", "symbol")),
         },
     )

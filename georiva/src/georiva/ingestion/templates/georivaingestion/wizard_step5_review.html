@@ -38,7 +38,7 @@
                     <ul class="uwiz-review-vars">
                         {% for a in coll.variables %}
                         <li>
-                            <code>{{ a.variable_name }}</code>
+                            <code>{{ a.variable_name }}</code>{% if a.derived %} <span class="uwiz-review-muted">{% trans "derived:" %} {{ a.derived.u_source }} + {{ a.derived.v_source }}</span>{% endif %}
                             {% if a.long_name %} — {{ a.long_name }}{% endif %}
                             <span class="uwiz-review-muted">
                                 ({{ a.value_min }} – {{ a.value_max }}
