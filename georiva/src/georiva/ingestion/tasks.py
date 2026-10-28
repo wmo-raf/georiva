@@ -365,6 +365,22 @@ def record_overdue_push_feeds():
     return record_overdue_feeds()
 
 
+@app.task(
+    name="georiva.ingestion.tasks.reject_abandoned_deliveries",
+    base=SweepTask,
+    sweep_name="abandoned_deliveries",
+    queue="georiva-default",
+)
+def reject_abandoned_deliveries():
+    """Reject deliveries a person prepared but never uploaded, once the consumer would no longer wait for them."""
+    from georiva.ingestion.abandoned import reject_abandoned
+
+    rejected = reject_abandoned()
+    if rejected:
+        logger.info("Rejected %d abandoned delivery(ies)", rejected)
+    return rejected
+
+
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     register_periodic_tasks(
@@ -391,6 +407,12 @@ def setup_periodic_tasks(sender, **kwargs):
                 "georiva.ingestion.close_quiet_run_ingestions",
                 "georiva.ingestion.tasks.close_quiet_run_ingestions",
                 5,
+                IntervalSchedule.MINUTES,
+            ),
+            PeriodicSpec(
+                "georiva.ingestion.reject_abandoned_deliveries",
+                "georiva.ingestion.tasks.reject_abandoned_deliveries",
+                15,
                 IntervalSchedule.MINUTES,
             ),
             PeriodicSpec(

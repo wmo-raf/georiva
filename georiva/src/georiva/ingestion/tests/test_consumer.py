@@ -307,13 +307,14 @@ class QuarantineTests(TestCase):
         from django.contrib.auth.models import User
         from django.utils import timezone
 
+        from georiva.ingestion.consumer import WAITING_WINDOW
         from georiva.ingestion.models import Delivery
 
         key = "test-org/wrf/GR--20260101T0000--wrf.nc"
         old = Delivery.receive(
             push_feed=self.feed, filename="x.nc", file_path=key, sent_by=User.objects.create(username="amina")
         )
-        Delivery.objects.filter(pk=old.pk).update(received_at=timezone.now() - timedelta(hours=1))
+        Delivery.objects.filter(pk=old.pk).update(received_at=timezone.now() - WAITING_WINDOW - timedelta(minutes=1))
 
         task = self._arrive(key, principal="minioadmin")
 

@@ -1210,6 +1210,18 @@ class UploadSession(models.Model):
     def mark_cancelled(self):
         self._finish(self.Status.CANCELLED)
 
+    def close_if_settled(self):
+        """Close a session nothing is still waiting on: completed if a file was accepted, else failed."""
+        if self.status != self.Status.ACTIVE:
+            return
+        statuses = set(self.deliveries.values_list("status", flat=True))
+        if Delivery.Status.RECEIVED in statuses:
+            return
+        if Delivery.Status.ACCEPTED in statuses:
+            self._finish(self.Status.COMPLETED)
+        else:
+            self.mark_failed()
+
     def _check_auto_complete(self):
         """Auto-complete when all deliveries have reached a terminal state."""
         if self.status != self.Status.ACTIVE:
@@ -1269,6 +1281,13 @@ class Delivery(models.Model):
         default=False,
         help_text="The Sweep found the file in incoming with no notification; attributed by prefix, with no sender.",
     )
+    awaits_completion = models.BooleanField(
+        default=False,
+        help_text=(
+            "The person's browser is uploading straight to storage and will say when it is done; "
+            "until then the Bucket notification admits the file but does not start its ingestion."
+        ),
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
     reason = models.TextField(blank=True, help_text="Why the delivery was rejected.")
     bytes = models.BigIntegerField(default=0)
@@ -1299,6 +1318,7 @@ class Delivery(models.Model):
         push_sender=None,
         correlation_id=None,
         found_by_sweep=False,
+        awaits_completion=False,
     ):
         """Record a delivery as received, with its ``DeliveryReceived`` event."""
         from georiva.events.context import new_context, use_context
@@ -1309,6 +1329,7 @@ class Delivery(models.Model):
             sent_by=sent_by,
             push_sender=push_sender,
             found_by_sweep=found_by_sweep,
+            awaits_completion=awaits_completion,
             original_filename=filename,
             file_path=file_path,
             correlation_id=correlation_id,
@@ -1363,7 +1384,7 @@ class Delivery(models.Model):
             self.session._check_auto_complete()
 
     def mark_rejected(self, reason: str, bytes=0):
-        """Reject the delivery; its file has already left ``incoming`` for quarantine."""
+        """Reject the delivery: its file has left ``incoming`` for quarantine, or never arrived."""
         self.status = self.Status.REJECTED
         self.reason = reason
         self.bytes = bytes or self.bytes

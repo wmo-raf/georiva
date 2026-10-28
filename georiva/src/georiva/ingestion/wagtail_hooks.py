@@ -84,8 +84,10 @@ def register_push_feed_urls():
     )
     from .unit_range import convert_range_view
     from .upload_views import (
+        push_feed_complete,
         push_feed_extract_times,
         push_feed_page,
+        push_feed_prepare,
         push_feed_submit,
     )
 
@@ -99,6 +101,8 @@ def register_push_feed_urls():
         path("push-feeds/<int:pk>/", push_feed_page, name="push_feed_page"),
         path("push-feeds/<int:pk>/extract-times/", push_feed_extract_times, name="push_feed_extract_times"),
         path("push-feeds/<int:pk>/submit/", push_feed_submit, name="push_feed_submit"),
+        path("push-feeds/<int:pk>/prepare/", push_feed_prepare, name="push_feed_prepare"),
+        path("push-feeds/<int:pk>/complete/", push_feed_complete, name="push_feed_complete"),
         path("push-feeds/<int:pk>/deliveries/<int:delivery_pk>/retry/", delivery_retry, name="delivery_retry"),
         path("push-feeds/<int:pk>/senders/add/", push_sender_add, name="push_sender_add"),
         path("push-feeds/<int:pk>/senders/<int:sender_pk>/rotate/", push_sender_rotate, name="push_sender_rotate"),

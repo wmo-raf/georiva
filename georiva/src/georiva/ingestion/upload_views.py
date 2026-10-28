@@ -6,8 +6,12 @@ their ingestion progress:
 
 1. GET  push_feed_page          — render the upload form
 2. POST push_feed_extract_times — pre-fill the time field from a filename
-3. POST push_feed_submit        — validate, write to MinIO incoming,
-                                      create UploadSession + Deliveries, enqueue ingestion
+3. POST push_feed_prepare       — validate, record an UploadSession + Deliveries, and hand the
+                                      browser a presigned PUT URL per file
+   (browser PUTs each file straight to MinIO ``incoming``; the bytes never touch this process)
+   POST push_feed_complete      — per file, once the PUT is done: confirm it landed, start ingestion
+   POST push_feed_submit        — the same for a backend with nothing to sign for: the files come
+                                      in the request, are written to ``incoming`` here, and ingested
 4. Client polls GET /api/arrivals/{id}/status/ until a terminal status.
 """
 
@@ -26,6 +30,13 @@ from georiva.organisations.access import get_org_object_or_404
 logger = logging.getLogger(__name__)
 
 RECENT_DELIVERIES = 25
+
+#: S3 takes a single PUT up to this size; anything larger needs a multipart upload.
+MAX_SINGLE_PUT_BYTES = 5 * 1024**3
+
+#: How long a presigned URL may wait before the browser starts its PUT. The upload itself
+#: may run longer: the URL is only checked as the request begins.
+PRESIGN_TTL = 3600
 
 
 def _parse_datetime_local(value: str):
@@ -84,6 +95,38 @@ def _build_incoming_path(config, variable, filename: str, reference_time, valid_
         coll_slug = variable.collection.slug
         return f"{catalog_prefix}/{coll_slug}/{var_slug}/{valid_time:%Y}/{valid_time:%m}/{valid_time:%d}/{final_name}"
     return f"{catalog_prefix}/{final_name}"
+
+
+def _batch_error(config, filenames, variable_ids, times) -> str | None:
+    """Why a batch of files cannot be sent, or None when every file passes.
+
+    Checked before anything is recorded, so a refused batch leaves nothing behind.
+    """
+    is_geotiff = config.catalog.file_format == "geotiff"
+
+    # For GeoTIFF, validate that each file has a corresponding variable.
+    if is_geotiff:
+        feed_variable_ids = {str(pk) for pk in config.variables().values_list("pk", flat=True)}
+        for i in range(len(filenames)):
+            vid = variable_ids[i] if i < len(variable_ids) else None
+            if not vid or vid not in feed_variable_ids:
+                return str(_("Please choose a variable for each file."))
+
+    # Pre-validate time requirements before creating the session.
+    for i, name in enumerate(filenames):
+        operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
+        reference_time, valid_time = _resolve_times(config, name, operator_time)
+        if config.is_forecast and reference_time is None:
+            return str(_("Model run time is required for forecast uploads."))
+        if is_geotiff and valid_time is None:
+            return str(
+                _(
+                    "Could not determine the observation date. Use a filename matching "
+                    "the '%s' format, or fill in the date field."
+                )
+                % config.valid_time_format
+            )
+    return None
 
 
 def push_feed_page(request, pk, issued=None):
@@ -204,43 +247,15 @@ def push_feed_submit(request, pk):
     config = get_org_object_or_404(request, PushFeed.objects.select_related("catalog__organisation"), pk=pk)
 
     uploaded_files = request.FILES.getlist("files")
-    is_geotiff = config.catalog.file_format == "geotiff"
     variable_ids = request.POST.getlist("variable_ids")
     times = request.POST.getlist("times")
 
     if not uploaded_files:
         return JsonResponse({"error": str(_("Please choose a file to upload."))}, status=400)
 
-    # For GeoTIFF, validate that each file has a corresponding variable.
-    if is_geotiff:
-        feed_variable_ids = {str(pk) for pk in config.variables().values_list("pk", flat=True)}
-        for i, _uploaded in enumerate(uploaded_files):
-            vid = variable_ids[i] if i < len(variable_ids) else None
-            if not vid or vid not in feed_variable_ids:
-                return JsonResponse({"error": str(_("Please choose a variable for each file."))}, status=400)
-
-    # Pre-validate time requirements before creating the session.
-    for i, uploaded in enumerate(uploaded_files):
-        operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
-        reference_time, valid_time = _resolve_times(config, uploaded.name, operator_time)
-        if config.is_forecast and reference_time is None:
-            return JsonResponse(
-                {"error": str(_("Model run time is required for forecast uploads."))},
-                status=400,
-            )
-        if is_geotiff and valid_time is None:
-            return JsonResponse(
-                {
-                    "error": str(
-                        _(
-                            "Could not determine the observation date. Use a filename matching "
-                            "the '%s' format, or fill in the date field."
-                        )
-                        % config.valid_time_format
-                    )
-                },
-                status=400,
-            )
+    error = _batch_error(config, [uploaded.name for uploaded in uploaded_files], variable_ids, times)
+    if error:
+        return JsonResponse({"error": error}, status=400)
 
     session = UploadSession.objects.create(
         push_feed=config,
@@ -314,3 +329,161 @@ def push_feed_submit(request, pk):
         session.mark_failed()
 
     return JsonResponse({"upload_session_id": session.pk, "files": result_files})
+
+
+def push_feed_prepare(request, pk):
+    """Record a batch of deliveries and hand the browser a presigned PUT URL for each file.
+
+    The browser sends the bytes straight to ``incoming``, so a large file never passes through
+    this process. The key, its organisation segment and the times are still decided here: the
+    browser only receives a URL good for the one key it was given.
+
+    Each delivery is recorded before its URL is used, as a submitted one is before its write,
+    so the Bucket notification finds it and admits the file as this person's. They are marked
+    ``awaits_completion``: the notification admits the file but leaves starting its ingestion
+    to ``push_feed_complete``, which has the job the page follows.
+    """
+    from django.db import transaction
+
+    from georiva.core.storage import storage
+    from georiva.events.middleware import inbound_correlation_id
+    from georiva.ingestion.models import Delivery, PushFeed, UploadSession
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    config = get_org_object_or_404(request, PushFeed.objects.select_related("catalog__organisation"), pk=pk)
+
+    # Nothing to sign for on a local backend: the page posts the files to push_feed_submit.
+    if not storage.incoming.is_s3:
+        return JsonResponse({"mode": "direct"})
+
+    filenames = request.POST.getlist("filenames")
+    variable_ids = request.POST.getlist("variable_ids")
+    times = request.POST.getlist("times")
+
+    if not filenames:
+        return JsonResponse({"error": str(_("Please choose a file to upload."))}, status=400)
+
+    try:
+        sizes = [int(size) for size in request.POST.getlist("sizes")]
+    except ValueError:
+        return JsonResponse({"error": str(_("Could not read the size of a file."))}, status=400)
+    if len(sizes) != len(filenames):
+        return JsonResponse({"error": str(_("Could not read the size of a file."))}, status=400)
+    for name, size in zip(filenames, sizes, strict=True):
+        if size > MAX_SINGLE_PUT_BYTES:
+            return JsonResponse(
+                {"error": str(_("%s is larger than the 5 GB a single upload can carry.")) % name},
+                status=400,
+            )
+
+    error = _batch_error(config, filenames, variable_ids, times)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+
+    user = request.user if request.user.is_authenticated else None
+    files = []
+    with transaction.atomic():
+        session = UploadSession.objects.create(push_feed=config, user=user)
+
+        for i, name in enumerate(filenames):
+            vid = variable_ids[i] if i < len(variable_ids) else None
+            variable = config.variables().select_related("collection").filter(pk=vid).first() if vid else None
+            operator_time = _parse_datetime_local(times[i] if i < len(times) else "")
+            reference_time, valid_time = _resolve_times(config, name, operator_time)
+
+            file_path = _build_incoming_path(config, variable, name, reference_time, valid_time)
+            delivery = Delivery.receive(
+                push_feed=config,
+                filename=name,
+                file_path=file_path,
+                session=session,
+                sent_by=user,
+                correlation_id=inbound_correlation_id(request),
+                awaits_completion=True,
+            )
+            files.append(
+                {
+                    "delivery_id": delivery.pk,
+                    "upload_url": storage.incoming.get_upload_url(file_path, PRESIGN_TTL),
+                }
+            )
+
+    return JsonResponse({"mode": "presigned", "upload_session_id": session.pk, "files": files})
+
+
+def push_feed_complete(request, pk):
+    """The browser's PUT of one file is done: confirm it landed, then start its ingestion.
+
+    Does for a presigned upload what the end of ``push_feed_submit`` does for a posted one:
+    register the file, create the job the page follows, and enqueue ingestion with it. Safe to
+    call again; a delivery already completed answers with the job it has.
+    """
+    from django.contrib.contenttypes.models import ContentType
+
+    from georiva.core.storage import BucketType, storage
+    from georiva.core.storage.filename import validate_path
+    from georiva.ingestion.models import Delivery, FileIngestion, FileIngestionJob, PushFeed
+    from georiva.ingestion.tasks import process_incoming_file
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    config = get_org_object_or_404(request, PushFeed, pk=pk)
+
+    try:
+        delivery_id = int(request.POST.get("delivery_id", ""))
+    except ValueError:
+        return JsonResponse({"error": str(_("No delivery given."))}, status=400)
+
+    delivery = config.deliveries.select_related("session").filter(pk=delivery_id, sent_by=request.user).first()
+    if delivery is None:
+        return JsonResponse({"error": "Not found"}, status=404)
+
+    key = delivery.file_path
+
+    if delivery.status == Delivery.Status.REJECTED:
+        return JsonResponse(
+            {"id": delivery.pk, "status": "rejected", "error": delivery.reason or str(_("The file was refused."))},
+            status=409,
+        )
+
+    if not delivery.awaits_completion:
+        job = FileIngestionJob.objects.filter(bucket=BucketType.INCOMING, file_path=key).order_by("-pk").first()
+        return JsonResponse({"id": delivery.pk, "status": "accepted", "job_id": job.pk if job else None})
+
+    if not storage.incoming.exists(key):
+        return JsonResponse(
+            {"id": delivery.pk, "status": "missing", "error": str(_("The file has not reached storage."))},
+            status=409,
+        )
+
+    # The notification may not have been seen yet; it recognises a delivery already accepted.
+    if delivery.status == Delivery.Status.RECEIVED:
+        delivery.mark_accepted(file_path=key, bytes=storage.incoming.size(key), check_session=False)
+
+    reference_time = validate_path(key).get("reference_time")
+
+    # Register before enqueueing — idempotent with the bucket event that registers it too.
+    _fi, created = FileIngestion.register(bucket=BucketType.INCOMING, file_path=key, reference_time=reference_time)
+    if not created:
+        FileIngestion.reset_for_reingest(BucketType.INCOMING, key)
+
+    ct = ContentType.objects.get_for_model(FileIngestionJob, for_concrete_model=False)
+    job = FileIngestionJob.objects.create(user=None, content_type=ct, file_path=key, bucket=BucketType.INCOMING)
+
+    delivery.awaits_completion = False
+    delivery.save(update_fields=["awaits_completion"])
+
+    process_incoming_file.delay(
+        file_path=key,
+        origin_bucket=BucketType.INCOMING,
+        reference_time=reference_time.isoformat() if reference_time else None,
+        job_id=job.pk,
+    )
+
+    if delivery.session_id:
+        delivery.session._check_auto_complete()
+
+    return JsonResponse({"id": delivery.pk, "status": "accepted", "job_id": job.pk})
