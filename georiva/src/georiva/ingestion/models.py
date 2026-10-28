@@ -362,6 +362,7 @@ class FileIngestion(models.Model):
                 return
             from georiva.ingestion.run_closers import (
                 close_if_declared_set_complete,
+                close_if_files_per_run_reached,
                 close_if_upload_batches_complete,
             )
 
@@ -371,13 +372,13 @@ class FileIngestion(models.Model):
                 run, _reopened = RunIngestion.record_file(collection, log.reference_time, completed_at)
                 if run is None:
                     continue
-                # Both evidence-based closers are checked on arrival, not on a
+                # The evidence-based closers are checked on arrival, not on a
                 # timer: the last file to arrive is the only moment either
-                # condition becomes true, and either is a stronger claim than the
+                # condition becomes true, and each is a stronger claim than the
                 # quiet period that would otherwise close the run 20 minutes
                 # later. Neither fires when its route did not produce this run —
                 # both return False on no evidence.
-                if not close_if_declared_set_complete(run):
+                if not close_if_declared_set_complete(run) and not close_if_files_per_run_reached(run):
                     close_if_upload_batches_complete(run)
         except Exception:
             logger.exception("RunIngestion bookkeeping failed for %s:%s", bucket, file_path)
