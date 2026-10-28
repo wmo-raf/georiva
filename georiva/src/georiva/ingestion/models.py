@@ -29,7 +29,7 @@ from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 from wagtail.snippets.models import register_snippet
 
-from georiva.events.context import ensure_context, update_context
+from georiva.events.context import ensure_context, update_context, use_context
 from georiva.events.models import DomainEvent
 from georiva.events.recording import record
 from georiva.organisations.lookups import NOT_ORM_SCOPABLE
@@ -171,6 +171,7 @@ class FileIngestion(models.Model):
     # =========================================================================
 
     MAX_RETRIES = 3
+    RETRIES_EXHAUSTED = "Gave up after {max} attempts without finishing"
     LOCK_TIMEOUT = timedelta(minutes=30)
     # A pending row older than this has lost its dispatched task (#401).
     PENDING_TIMEOUT = timedelta(minutes=45)
@@ -478,20 +479,67 @@ class FileIngestion(models.Model):
         """
         Reset locks that have exceeded LOCK_TIMEOUT.
 
-        Returns the number of locks reset.
+        A file whose retries are spent is failed instead: ``acquire`` will not lock it
+        again, so putting it back to pending would leave it there for good.
+
+        Returns the number of locks reset or failed.
         """
         stale_cutoff = dj_timezone.now() - cls.LOCK_TIMEOUT
 
         stale = cls.objects.filter(status=cls.Status.PROCESSING, locked_at__lt=stale_cutoff)
+        retryable = stale.filter(retry_count__lt=cls.MAX_RETRIES)
         # Each reset file is a recorded intervention, inside the file's own chain.
         # Read before the update: afterwards nothing says which rows it touched.
         # The reset and its events commit together or not at all.
         with transaction.atomic():
-            targets = list(stale.values_list("pk", "bucket", "file_path")) if sweep else []
-            updated = stale.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
+            targets = list(retryable.values_list("pk", "bucket", "file_path")) if sweep else []
+            updated = retryable.update(status=cls.Status.PENDING, locked_at=None, locked_by="")
             for pk, bucket, file_path in targets:
                 record_sweep_intervention(sweep, "stale_lock_reclaimed", pk, bucket, file_path)
-        return updated
+            failed = cls._give_up(stale.filter(retry_count__gte=cls.MAX_RETRIES), sweep)
+        return updated + failed
+
+    @classmethod
+    def fail_exhausted_pending(cls, sweep=None) -> int:
+        """
+        Fail pending files that have no retries left.
+
+        ``acquire`` only locks a file with retries to spare, so such a file can never be
+        picked up: re-dispatching it, which the sweep does for any stale pending file,
+        only makes a job that finds the lock refused. Rows left this way before
+        ``reset_stale_locks`` learned to fail them are cleared here.
+
+        Returns the number of files failed.
+        """
+        return cls._give_up(cls.objects.filter(status=cls.Status.PENDING, retry_count__gte=cls.MAX_RETRIES), sweep)
+
+    @classmethod
+    def _give_up(cls, candidates, sweep=None) -> int:
+        """Fail each of ``candidates``, a queryset of files with no retries left.
+
+        Each is updated again under the queryset's own conditions, so a file a worker
+        finished or released since it was listed is left as that worker left it. The
+        failure joins the file's own chain, as the sweep when there is one.
+        """
+        failed = 0
+        for pk, bucket, file_path in list(candidates.values_list("pk", "bucket", "file_path")):
+            if sweep:
+                from georiva.ingestion.chains import context_for_revival
+
+                context = use_context(context_for_revival(bucket, file_path, sweep))
+            else:
+                context = ensure_context(actor="system:ingestion", organisation_id=organisation_id_for_key(file_path))
+            with context, transaction.atomic():
+                updated = candidates.filter(pk=pk).update(
+                    status=cls.Status.FAILED,
+                    locked_at=None,
+                    locked_by="",
+                    error=cls.RETRIES_EXHAUSTED.format(max=cls.MAX_RETRIES),
+                )
+                if updated:
+                    cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.FAILED)
+                    failed += 1
+        return failed
 
     @classmethod
     def is_stale_pending(cls, bucket, file_path) -> bool:
