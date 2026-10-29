@@ -1,0 +1,5 @@
+# What a server keeps beside the release. Repeats patterns the root .gitignore
+# already has, because a server's sparse checkout has no root .gitignore.
+.env
+docker/
+docker-compose.override.yml

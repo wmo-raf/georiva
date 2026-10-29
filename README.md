@@ -64,7 +64,15 @@ see [docs/architecture/README.md](docs/architecture/README.md).
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
 - Git
 
-### Quick Start (Production)
+### Deploying to a server
+
+Servers run the images CI publishes and keep only the `deploy/` folder: no source code, no builds, upgrades by
+version. See **[deploy/README.md](deploy/README.md)** for install, upgrade and rollback.
+
+### Quick Start (from source)
+
+Builds the images locally, from a full clone — the way to run GeoRiva with plugins baked in (see
+[Installing Plugins](#installing-plugins)) until servers can install them.
 
 1. **Clone the repository**
 

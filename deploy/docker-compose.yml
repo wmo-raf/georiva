@@ -1,0 +1,340 @@
+# GeoRiva — server deployment.
+#
+# Image-only: nothing here builds. CI publishes the three GeoRiva images to
+# ghcr.io/wmo-raf/ and this file pulls them at ${GEORIVA_TAG}, which
+# ./deploy.sh writes into ./.env. See ./README.md.
+#
+# Derived from the root docker-compose.yml, which stays the dev/build setup.
+# The two are held together by .github/scripts/check-compose-drift.sh, so a
+# change to one that is not made to the other fails CI. The differences it
+# allows: no `build:`, published images, no host ports except the web proxy's,
+# compose's own project network, and site-specific values required here
+# rather than defaulted.
+#
+# Site customisations go in docker-compose.override.yml (gitignored; start from
+# docker-compose.override.sample.yml), never in this file — ./deploy.sh checks
+# out each release over it.
+
+# Otherwise compose names the project after this directory: deploy-georiva-1.
+name: georiva
+
+x-georiva-image: &georiva-image ghcr.io/wmo-raf/georiva:${GEORIVA_TAG:?set GEORIVA_TAG, or run ./deploy.sh <version>}
+
+# backend environment variables, their defaults if left blank etc.
+x-backend-variables: &backend-variables
+  WAIT_HOSTS: georiva-db:5432,georiva-pgbouncer:5432,georiva-redis:6379,georiva-minio:9000
+  WAIT_TIMEOUT: 120
+  GEORIVA_GUNICORN_NUM_OF_WORKERS: ${GEORIVA_GUNICORN_NUM_OF_WORKERS:-4}
+  GEORIVA_GUNICORN_TIMEOUT: ${GEORIVA_GUNICORN_TIMEOUT:-300}
+  DEBUG: ${DEBUG:-False}
+  WAGTAIL_SITE_NAME: ${WAGTAIL_SITE_NAME:-GeoRiva}
+  ADMIN_URL_PATH: ${ADMIN_URL_PATH:-georiva-admin}
+  TIME_ZONE: ${TIME_ZONE:-UTC}
+  SECRET_KEY: ${SECRET_KEY:?}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS}
+  DATABASE_URL: timescalegis://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-pgbouncer:5432/${GEORIVA_DB_NAME}
+  EMAIL_HOST: ${SMTP_EMAIL_HOST:-}
+  EMAIL_PORT: ${SMTP_EMAIL_PORT:-}
+  EMAIL_USE_TLS: ${SMTP_EMAIL_USE_TLS:-}
+  EMAIL_HOST_USER: ${SMTP_EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${SMTP_EMAIL_HOST_PASSWORD:-}
+  DJANGO_ADMINS: ${DJANGO_ADMINS:-}
+  WAGTAILADMIN_BASE_URL: ${WAGTAILADMIN_BASE_URL:-}
+  LANGUAGE_CODE: ${LANGUAGE_CODE:-en}
+  # Tenancy: organisations are served at <org-slug>.<GEORIVA_BASE_DOMAIN>. The port
+  # is where org Sites are created, and Wagtail reads the scheme off it (80 -> http,
+  # 443 -> https), so set it to 443 behind TLS or the APIs advertise http:// links.
+  GEORIVA_BASE_DOMAIN: ${GEORIVA_BASE_DOMAIN:?set GEORIVA_BASE_DOMAIN to this server's domain}
+  GEORIVA_SITE_PORT: ${GEORIVA_SITE_PORT:-80}
+  # First setup binds Wagtail's default Site to a "central" org on the base domain,
+  # so a single-institution install needs no tenancy ceremony.
+  GEORIVA_BOOTSTRAP_CENTRAL_ORG: ${GEORIVA_BOOTSTRAP_CENTRAL_ORG:-true}
+  GEORIVA_CENTRAL_ORG_SLUG: ${GEORIVA_CENTRAL_ORG_SLUG:-central}
+  GEORIVA_LOG_LEVEL: ${GEORIVA_LOG_LEVEL:-WARN}
+  GEORIVA_DATABASE_LOG_LEVEL: ${GEORIVA_DATABASE_LOG_LEVEL:-ERROR}
+  GEORIVA_CELERY_BEAT_DEBUG_LEVEL: ${GEORIVA_CELERY_BEAT_DEBUG_LEVEL:-INFO}
+  GEORIVA_CELERY_WORKER_LOG_LEVEL: ${GEORIVA_CELERY_WORKER_LOG_LEVEL:-INFO}
+  GEORIVA_FETCH_RUN_STALE_AFTER_HOURS: ${GEORIVA_FETCH_RUN_STALE_AFTER_HOURS:-6}
+  GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD: ${GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD:-3}
+  GEORIVA_FETCH_RUN_MAX_SECONDS: ${GEORIVA_FETCH_RUN_MAX_SECONDS:-7200}
+  GEORIVA_FETCH_RUN_MAX_RETRIES: ${GEORIVA_FETCH_RUN_MAX_RETRIES:-4}
+  GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS: ${GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS:-300}
+  GEORIVA_TASK_CONTEXT_MODE: ${GEORIVA_TASK_CONTEXT_MODE:-strict}
+  MIGRATE_ON_STARTUP: ${MIGRATE_ON_STARTUP:-true}
+  COLLECT_STATICFILES_ON_STARTUP: ${COLLECT_STATICFILES_ON_STARTUP:-true}
+  REDIS_URL: redis://georiva-redis:6379/0
+  GEORIVA_PLUGIN_DIR: ${GEORIVA_PLUGIN_DIR:-/georiva/plugins}
+  GEORIVA_PLUGIN_URLS: ${GEORIVA_PLUGIN_URLS:-}
+  GEORIVA_PLUGIN_SETUP_ALREADY_RUN: ${GEORIVA_PLUGIN_SETUP_ALREADY_RUN:-}
+  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ${GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP:-}
+  GEORIVA_STRICT_PLUGIN_ENV: ${GEORIVA_STRICT_PLUGIN_ENV:-false}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?set MINIO_PUBLIC_ENDPOINT to s3.<your domain>}
+  MINIO_PUBLIC_ENDPOINT_USE_SSL: ${MINIO_PUBLIC_ENDPOINT_USE_SSL:-false}
+  GEORIVA_STORAGE_BACKEND: ${GEORIVA_STORAGE_BACKEND:-s3}
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD}}
+  AWS_STORAGE_BUCKET_NAME: ${AWS_STORAGE_BUCKET_NAME:-georiva}
+  AWS_S3_REGION_NAME: ${AWS_S3_REGION_NAME:-us-east-1}
+  AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://georiva-minio:9000}
+  AWS_S3_CUSTOM_DOMAIN: ${AWS_S3_CUSTOM_DOMAIN:-}
+  AWS_DEFAULT_ACL: ${AWS_DEFAULT_ACL:-}
+  AWS_QUERYSTRING_AUTH: ${AWS_QUERYSTRING_AUTH:-True}
+  AWS_S3_FILE_OVERWRITE: ${AWS_S3_FILE_OVERWRITE:-True}
+  AWS_S3_SIGNATURE_VERSION: ${AWS_S3_SIGNATURE_VERSION:-s3v4}
+  AWS_S3_ADDRESSING_STYLE: ${AWS_S3_ADDRESSING_STYLE:-path}
+  STATIC_ROOT: ${STATIC_ROOT:-/georiva/static}
+  MEDIA_ROOT: ${MEDIA_ROOT:-/georiva/media}
+  GEORIVA_CHUNK_THRESHOLD_PIXELS: ${GEORIVA_CHUNK_THRESHOLD_PIXELS:-16777216}
+  GEORIVA_TEMP_DIR: ${GEORIVA_TEMP_DIR:-/var/tmp/georiva}
+
+# The published georiva image runs as uid/gid 9999, so these three host
+# directories must be owned by 9999:9999 — see "First install" in README.md.
+x-backend-volumes: &backend-volumes
+  volumes:
+    - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
+    - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
+    - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
+
+services:
+  georiva-db:
+    image: timescale/timescaledb-ha:pg18
+    restart: unless-stopped
+    command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-200} -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+    environment:
+      - POSTGRES_USER=${GEORIVA_DB_USER:?}
+      - POSTGRES_DB=${GEORIVA_DB_NAME:?}
+      - POSTGRES_PASSWORD=${GEORIVA_DB_PASSWORD:?}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${GEORIVA_DB_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # The image runs as postgres (uid 1000): the host directory must be owned
+    # by 1000:1000 — see "First install" in README.md.
+    volumes:
+      - ${GEORIVA_DB_VOLUME:-./docker/db_data/}:/home/postgres/pgdata/data
+
+  georiva-pgbouncer:
+    image: edoburu/pgbouncer:v1.25.1-p0
+    restart: unless-stopped
+    environment:
+      DB_HOST: georiva-db
+      DB_USER: ${GEORIVA_DB_USER}
+      DB_PASSWORD: ${GEORIVA_DB_PASSWORD}
+      DB_NAME: ${GEORIVA_DB_NAME}
+      DB_PORT: 5432
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 2000
+      DEFAULT_POOL_SIZE: 16
+      RESERVE_POOL_SIZE: 10
+      SERVER_RESET_QUERY: "DISCARD ALL"
+      IGNORE_STARTUP_PARAMETERS: "extra_float_digits"
+      QUERY_WAIT_TIMEOUT: 60000             # 60s
+      SERVER_IDLE_TIMEOUT: 600
+      # Transaction pooling means a client connect/disconnect per request or
+      # task; logging each one drowns the log. Pooler errors still log.
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
+    depends_on:
+      georiva-db:
+        condition: service_healthy
+
+  georiva-redis:
+    image: redis:alpine3.22
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  georiva-minio:
+    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_NOTIFY_REDIS_ENABLE_primary: "on"
+      MINIO_NOTIFY_REDIS_ADDRESS_primary: "georiva-redis:6379"
+      MINIO_NOTIFY_REDIS_KEY_primary: "georiva:minio:events"
+      MINIO_NOTIFY_REDIS_FORMAT_primary: "access"
+      # Separate target for the STAGING bucket → its own Redis list → staging consumer.
+      MINIO_NOTIFY_REDIS_ENABLE_staging: "on"
+      MINIO_NOTIFY_REDIS_ADDRESS_staging: "georiva-redis:6379"
+      MINIO_NOTIFY_REDIS_KEY_staging: "georiva:minio:staging-events"
+      MINIO_NOTIFY_REDIS_FORMAT_staging: "access"
+    volumes:
+      - ${MINIO_VOLUME:-./docker/minio}:/data
+
+  georiva:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: gunicorn
+    environment:
+      <<: *backend-variables
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      georiva-db:
+        condition: service_healthy
+      georiva-redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1" ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  georiva-celery-default-worker:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: celery-default-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      # The entrypoint reads only this queue-agnostic name — the per-queue name
+      # the operator sets in .env never reaches the container, which is what
+      # broke the dev workers in issue #399. So these three mappings are where
+      # each queue's default pool size lives; the entrypoint decides no sizes of
+      # its own, and the dev worker commands inherit these.
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_DEFAULT_WORKER_CONCURRENCY:-4}
+    depends_on:
+      - georiva
+
+  georiva-celery-ingestion-worker:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: celery-ingestion-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_INGESTION_WORKER_CONCURRENCY:-1}
+    depends_on:
+      - georiva
+
+  georiva-celery-processing-worker:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: celery-processing-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-4}
+    depends_on:
+      - georiva
+
+  georiva-celery-beat:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: celery-beat
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva
+
+  georiva-minio-consumer:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: minio-consumer
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva
+
+  georiva-staging-consumer:
+    image: *georiva-image
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: staging-consumer
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+    depends_on:
+      - georiva
+
+  georiva-titiler-app:
+    image: ghcr.io/wmo-raf/georiva-titiler-app:${GEORIVA_TAG:?set GEORIVA_TAG, or run ./deploy.sh <version>}
+    restart: unless-stopped
+    environment:
+      MINIO_ENDPOINT: "georiva-minio:9000"
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_REGION_NAME: "us-east-1"
+      MINIO_USE_HTTPS: "false"
+      CORS_ALLOWED_ORIGINS: "*"
+      MINIO_BUCKET_NAME: "georiva-assets"
+      REDIS_URL: "redis://georiva-redis:6379/0"
+      DJANGO_BASE_URL: "http://georiva:8000"
+      TTL_PORT: ${TTL_PORT:-8000}
+      TTL_WORKERS: ${TTL_WORKERS:-4}
+      TTL_LOG_LEVEL: ${TTL_LOG_LEVEL:-info}
+      TTL_MAX_REQUESTS: ${TTL_MAX_REQUESTS:-2000}
+      TTL_MAX_REQUESTS_JITTER: ${TTL_MAX_REQUESTS_JITTER:-200}
+      TTL_TIMEOUT: ${TTL_TIMEOUT:-120}
+      TTL_ROOT_PATH: ${TTL_ROOT_PATH:-/titiler}
+      GDAL_CACHEMAX: ${GDAL_CACHEMAX:-512}
+      CPL_VSIL_CURL_CACHE_SIZE: ${CPL_VSIL_CURL_CACHE_SIZE:-67108864}
+
+  georiva-stac-browser:
+    # Built with a GeoRiva config module that derives the catalog URL from the
+    # host — see stac-browser/config.custom.mjs. Deliberately sets no
+    # SB_catalogUrl: the entrypoint turns SB_* variables into runtime-config.js,
+    # which outranks that module and would pin every tenant to one catalog.
+    image: ghcr.io/wmo-raf/georiva-stac-browser:${GEORIVA_TAG:?set GEORIVA_TAG, or run ./deploy.sh <version>}
+    restart: unless-stopped
+
+  georiva-web-proxy:
+    image: nginx:1.29.5-alpine
+    restart: unless-stopped
+    volumes:
+      - ${GEORIVA_STATIC_VOLUME:-./docker/static}:/wagtail_static
+      - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:/wagtail_media
+      # Tile-auth verdicts + immutable encoded textures survive container
+      # recreation; nginx's cache manager bounds and evicts on its own
+      # (max_size / inactive on the proxy_cache_path lines).
+      - ${GEORIVA_TILE_CACHE_VOLUME:-./docker/tile_cache}:/var/cache/nginx
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    # The only port this stack publishes. TLS terminates in front of it — see
+    # "TLS" in README.md.
+    ports:
+      - ${GEORIVA_WEB_PROXY_PORT:-80}:80
+    depends_on:
+      - georiva
+      - georiva-titiler-app
+      - georiva-stac-browser
+      - georiva-martin
+
+  georiva-martin:
+    image: ghcr.io/maplibre/martin:1.5.0
+    restart: unless-stopped
+    command: --config /config/config.yaml
+    environment:
+      - DATABASE_URL=postgres://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-pgbouncer:5432/${GEORIVA_DB_NAME}
+    volumes:
+      - ./martin/config.yaml:/config/config.yaml
+    depends_on:
+      georiva-db:
+        condition: service_healthy
+      georiva-pgbouncer:
+        condition: service_started
+      georiva:
+        condition: service_healthy
