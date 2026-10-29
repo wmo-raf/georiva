@@ -80,6 +80,29 @@ def _principal_of(ev: dict) -> str:
     return (ev.get("userIdentity") or {}).get("principalId", "")
 
 
+def _write_id_of(ev: dict) -> str:
+    """Which write a notification reports: MinIO's sequencer, set once per write, else the ETag."""
+    obj = ev.get("s3", {}).get("object", {})
+    return obj.get("sequencer") or obj.get("eTag") or ""
+
+
+def _delivered_since_ingested(log) -> bool:
+    """True when a delivery to ``log``'s key was accepted after its ingestion finished.
+
+    A completed ingestion deletes its file from ``incoming``, so such a delivery is a
+    later write the ingestion never read: a sender resending a corrected run.
+    """
+    from georiva.ingestion.models import Delivery
+
+    if log.bucket != BucketType.INCOMING or log.completed_at is None:
+        return False
+    return Delivery.objects.filter(
+        file_path=log.file_path,
+        status=Delivery.Status.ACCEPTED,
+        accepted_at__gt=log.completed_at,
+    ).exists()
+
+
 def _waiting_person_delivery(key: str):
     """The Delivery GeoRiva itself recorded for a file it just wrote: a person's upload, or a Retry.
 
@@ -173,19 +196,29 @@ def _admit_incoming(ev: dict, key: str) -> bool:
             waiting.mark_accepted(file_path=key, bytes=size)
         return True
 
-    # MinIO can notify more than once for one write; while the first is still in flight
-    # the repeat is the same delivery, not a second one.
-    in_flight = FileIngestion.objects.filter(
-        bucket=BucketType.INCOMING,
-        file_path=key,
-        status__in=[FileIngestion.Status.PENDING, FileIngestion.Status.PROCESSING],
-    ).exists()
-    if in_flight and Delivery.objects.filter(file_path=key, push_sender=sender).exists():
-        return True
+    # MinIO can notify more than once for one write; the repeat is the same delivery, not
+    # a second one. A notification that names no write is a repeat while one is in flight.
+    write_id = _write_id_of(ev)
+    if write_id:
+        if Delivery.objects.filter(file_path=key, write_id=write_id).exists():
+            return True
+    else:
+        in_flight = FileIngestion.objects.filter(
+            bucket=BucketType.INCOMING,
+            file_path=key,
+            status__in=[FileIngestion.Status.PENDING, FileIngestion.Status.PROCESSING],
+        ).exists()
+        if in_flight and Delivery.objects.filter(file_path=key, push_sender=sender).exists():
+            return True
 
     with transaction.atomic():
         delivery = Delivery.receive(
-            push_feed=feed, filename=Path(key).name, file_path=key, push_sender=sender, sender_version=version
+            push_feed=feed,
+            filename=Path(key).name,
+            file_path=key,
+            push_sender=sender,
+            sender_version=version,
+            write_id=write_id,
         )
         delivery.mark_accepted(file_path=key, bytes=size)
     return True
@@ -316,7 +349,10 @@ def _handle_event(ev: dict):
                 logger.debug("Already processing: %s/%s", origin_bucket, key)
                 return
             if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
-                return
+                if not _delivered_since_ingested(log):
+                    return
+                logger.info("Written again since it was ingested, re-ingesting: %s", key)
+                FileIngestion.reset_for_reingest(origin_bucket, key)
             if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
                 logger.warning("Completed but no live data, re-ingesting: %s", key)
                 FileIngestion.reset_for_reingest(origin_bucket, key)

@@ -110,10 +110,10 @@ class MachineDeliveryAttributionTests(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _arrive(self, principal, key=None, user_agent=None):
+    def _arrive(self, principal, key=None, sequencer="17A0000000000001", etag="e1", user_agent=None):
         ev = _make_event("georiva-incoming", key or self.key)
         ev["userIdentity"] = {"principalId": principal}
-        ev["s3"]["object"]["size"] = 42
+        ev["s3"]["object"].update(size=42, sequencer=sequencer, eTag=etag)
         if user_agent is not None:
             ev["source"] = {"host": "10.0.0.7", "port": "", "userAgent": user_agent}
         meta = {"org": "test-org", "catalog": "wrf", "collection": None, "reference_time": None}
@@ -190,6 +190,48 @@ class MachineDeliveryAttributionTests(TestCase):
         delivery = Delivery.objects.get()
         self.assertEqual(delivery.status, Delivery.Status.REJECTED)
         self.assertEqual(delivery.sender_version, "1.0.0")
+
+    def _complete(self):
+        from django.utils import timezone
+
+        FileIngestion.objects.filter(file_path=self.key).update(
+            status=FileIngestion.Status.COMPLETED, completed_at=timezone.now()
+        )
+
+    def test_a_new_write_after_the_file_was_ingested_ingests_it_again(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("AKALPHA")
+        self._complete()
+        with patch.object(FileIngestion, "has_live_data", True):
+            task = self._arrive("AKALPHA", sequencer="17A0000000000002", etag="e2")
+
+        task.delay.assert_called_once()
+        self.assertEqual(FileIngestion.objects.get(file_path=self.key).status, FileIngestion.Status.PENDING)
+        self.assertEqual(Delivery.objects.filter(status=Delivery.Status.ACCEPTED).count(), 2)
+
+    def test_the_same_content_written_again_is_still_a_new_write(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("AKALPHA")
+        self._complete()
+        with patch.object(FileIngestion, "has_live_data", True):
+            task = self._arrive("AKALPHA", sequencer="17A0000000000002")
+
+        task.delay.assert_called_once()
+        self.assertEqual(Delivery.objects.count(), 2)
+
+    def test_a_repeat_notification_after_the_file_was_ingested_starts_nothing(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("AKALPHA")
+        self._complete()
+        with patch.object(FileIngestion, "has_live_data", True):
+            task = self._arrive("AKALPHA")
+
+        task.delay.assert_not_called()
+        self.assertEqual(Delivery.objects.count(), 1)
+        self.assertEqual(FileIngestion.objects.get(file_path=self.key).status, FileIngestion.Status.COMPLETED)
 
 
 class QuarantineTests(TestCase):

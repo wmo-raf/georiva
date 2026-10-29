@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('georivaingestion', '0017_delivery_awaits_completion'),
+        ('georivaingestion', '0018_delivery_write_id'),
     ]
 
     operations = [
