@@ -169,6 +169,19 @@ def sweep_unprocessed(sync: bool = False):
                 reference_time=reference_time_iso,
                 why="reingest_required",
             )
+        elif unprocessed.reason == "rewritten":
+            # Written again after it was ingested, with its notification lost (#549).
+            if not admit_untracked(unprocessed):
+                continue
+            logger.info("Found a write never ingested: %s/%s", unprocessed.bucket, unprocessed.file_path)
+            FileIngestion.reset_for_reingest(unprocessed.bucket, unprocessed.file_path)
+            dispatch(
+                file_path=unprocessed.file_path,
+                origin_bucket=unprocessed.bucket,
+                reference_time=reference_time_iso,
+                why="rewritten_file_found",
+            )
+            new_files += 1
         elif unprocessed.reason == "untracked":
             if not admit_untracked(unprocessed):
                 continue

@@ -131,6 +131,15 @@ class FileIngestion(models.Model):
     items_created = models.IntegerField(default=0)
     assets_created = models.IntegerField(default=0)
     error = models.TextField(blank=True, default="")
+    read_version = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text=(
+            "Which write of the key the last completed ingestion read (Bucket.version_of). "
+            "A file still stored under the key as another write is one it never read."
+        ),
+    )
 
     # =========================================================================
     # Collections M2M — populated after _resolve_collections() succeeds,
@@ -311,6 +320,7 @@ class FileIngestion(models.Model):
         valid_time_start=None,
         valid_time_end=None,
         timestep_count: int = None,
+        read_version: str = "",
     ):
         """Mark a file as successfully processed.
 
@@ -335,6 +345,7 @@ class FileIngestion(models.Model):
                     valid_time_start=valid_time_start,
                     valid_time_end=valid_time_end,
                     timestep_count=timestep_count,
+                    read_version=read_version or "",
                 )
                 if updated:
                     cls._record_finished(bucket, file_path, FileIngestionFinished.Outcome.COMPLETED)

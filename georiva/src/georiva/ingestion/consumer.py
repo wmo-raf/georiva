@@ -226,7 +226,9 @@ def admit_found_in_incoming(key: str) -> bool:
     The same attribution as a notification, with no principal: a key inside a push feed's
     area is safe to attribute by prefix, since only that feed's senders and GeoRiva can
     write there, and becomes an accepted Delivery found by sweep. Anything else is
-    quarantined. A file a delivery already covers is not recorded again.
+    quarantined. A file a delivery already covers is not recorded again; under a key
+    whose ingestion completed, only a delivery received since that run started covers
+    it, since the run read the write any earlier one was for (#549).
     """
     from georiva.ingestion.models import Delivery
     from georiva.ingestion.quarantine import quarantine
@@ -247,12 +249,15 @@ def admit_found_in_incoming(key: str) -> bool:
         quarantine(key, time_error, feed=feed)
         return False
 
-    if (
-        _waiting_person_delivery(key) is not None
-        or Delivery.objects.filter(
-            file_path=key, status__in=[Delivery.Status.RECEIVED, Delivery.Status.ACCEPTED]
-        ).exists()
-    ):
+    covering = Delivery.objects.filter(file_path=key, status__in=[Delivery.Status.RECEIVED, Delivery.Status.ACCEPTED])
+    completed = FileIngestion.objects.filter(
+        bucket=BucketType.INCOMING, file_path=key, status=FileIngestion.Status.COMPLETED
+    ).first()
+    if completed is not None:
+        # From when the run took the lock: a write delivered while it ran is one the run
+        # queues itself once it ends (#548), not one the Sweep found.
+        covering = covering.filter(received_at__gt=completed.locked_at or completed.completed_at)
+    if _waiting_person_delivery(key) is not None or covering.exists():
         return True
 
     with transaction.atomic():

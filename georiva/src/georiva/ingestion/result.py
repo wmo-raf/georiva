@@ -45,6 +45,9 @@ class IngestionResult:
     valid_time_end: datetime | None = None
     timestep_count: int | None = None
 
+    # Which write of the file was read (Bucket.version_of), None when nothing was stored
+    read_version: str | None = None
+
     def add_error(self, msg: str):
         self.errors.append(msg)
         logger.error(msg)
