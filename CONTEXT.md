@@ -418,8 +418,10 @@ _Avoid_: seed file, template file
 **Upload Page**:
 The admin page on a push feed where a person submits files, with multi-file upload (like Wagtail's
 images/multiple/add interface). Each submission creates one `UploadSession` with one `Delivery` per file, written to
-`incoming` by GeoRiva itself. After submit, the page shows per-file progress in real time. People's files never go
-client → MinIO directly (no presigned URLs); machine senders write to MinIO with their own credentials.
+`incoming`. The browser sends each file straight to MinIO on a presigned URL GeoRiva signs for it, then reports
+completion, which starts ingestion; a backend with nothing to sign for falls back to posting the files to GeoRiva.
+After submit, the page shows per-file progress in real time. Machine senders write to MinIO with their own
+credentials.
 _Avoid_: upload form, upload interface
 
 **Time Extraction**:

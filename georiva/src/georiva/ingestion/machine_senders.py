@@ -157,9 +157,15 @@ def _remove_user(admin, access_key, strict=False):
 
 
 def rclone_config(push_feed, sender_label, access_key, secret) -> str:
-    """A ready-to-paste rclone remote for a sender, and the target to copy to."""
-    scheme = "https" if settings.MINIO_PUBLIC_ENDPOINT_USE_SSL else "http"
-    bucket = get_bucket_config()[BucketType.INCOMING]["name"]
+    """A ready-to-paste rclone remote for a sender, and the target to copy to.
+
+    ``georiva_dest`` and ``georiva_allow_http`` are read by ``georiva_push.py``; rclone
+    ignores keys it does not know. The HTTP opt-in is written only while the endpoint is
+    plain HTTP, so a block issued after the instance moves to TLS no longer carries it.
+    """
+    plain_http = endpoint_is_plain_http()
+    scheme = "http" if plain_http else "https"
+    dest = f"{get_bucket_config()[BucketType.INCOMING]['name']}/{push_feed.catalog.storage_prefix}"
     return (
         "[georiva]\n"
         "type = s3\n"
@@ -168,8 +174,8 @@ def rclone_config(push_feed, sender_label, access_key, secret) -> str:
         f"secret_access_key = {secret}\n"
         f"endpoint = {scheme}://{settings.MINIO_PUBLIC_ENDPOINT}\n"
         f"region = {SENDER_REGION}\n"
-        "\n"
-        f"# rclone copy <file> georiva:{bucket}/{push_feed.catalog.storage_prefix}/\n"
+        f"georiva_dest = {dest}\n" + ("georiva_allow_http = true\n" if plain_http else "") + "\n"
+        f"# rclone copy <file> georiva:{dest}/\n"
     )
 
 

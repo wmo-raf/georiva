@@ -109,6 +109,25 @@ class SenderServiceTests(TestCase):
         self.assertIn("region = us-east-1", text)
         self.assertIn("incoming/test-org/wrf/", text)
 
+    def test_rclone_config_names_the_senders_destination(self):
+        import configparser
+
+        with override_settings(MINIO_PUBLIC_ENDPOINT_USE_SSL=True):
+            text = machine_senders.rclone_config(self.feed, "ops", "AK", "SK")
+        section = configparser.ConfigParser()
+        section.read_string(text)
+        prefix = machine_senders.sender_policy(self.feed)["Statement"][0]["Resource"][0]
+        self.assertEqual(f"arn:aws:s3:::{section['georiva']['georiva_dest']}/*", prefix)
+
+    def test_rclone_config_allows_http_only_while_the_endpoint_is_plain_http(self):
+        with override_settings(MINIO_PUBLIC_ENDPOINT="10.0.0.5:9000", MINIO_PUBLIC_ENDPOINT_USE_SSL=False):
+            text = machine_senders.rclone_config(self.feed, "ops", "AK", "SK")
+        self.assertIn("endpoint = http://10.0.0.5:9000", text)
+        self.assertIn("georiva_allow_http = true", text)
+        with override_settings(MINIO_PUBLIC_ENDPOINT_USE_SSL=True):
+            text = machine_senders.rclone_config(self.feed, "ops", "AK", "SK")
+        self.assertNotIn("georiva_allow_http", text)
+
 
 class SenderViewTests(TestCase):
     def setUp(self):
@@ -141,6 +160,12 @@ class SenderViewTests(TestCase):
         page = self.client.get(f"/admin/push-feeds/{self.feed.pk}/")
         self.assertNotContains(page, secret)
         self.assertContains(page, PushSender.objects.get().access_key)
+
+    def test_add_says_the_sending_machine_must_reach_the_endpoint(self):
+        self.client.force_login(self.manager)
+        with override_settings(MINIO_PUBLIC_ENDPOINT="10.0.0.5:9000"):
+            response = self.client.post(self._add_url(), {"label": "ops"})
+        self.assertContains(response, "The sending machine must reach 10.0.0.5:9000")
 
     def test_rotate_and_revoke(self):
         self.client.force_login(self.manager)

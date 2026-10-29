@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import timedelta
 
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -513,6 +514,7 @@ def _show_secret(request, feed, sender, secret, rotated=False):
             "secret": secret,
             "rotated": rotated,
             "rclone": rclone_config(feed, sender.label, sender.access_key, secret),
+            "endpoint": settings.MINIO_PUBLIC_ENDPOINT,
         },
     )
 

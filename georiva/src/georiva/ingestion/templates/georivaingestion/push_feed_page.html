@@ -182,6 +182,7 @@
     <p>{% trans "Copy this now. The secret is not stored and will not be shown again." %}</p>
     <p>{% trans "Secret:" %} <code>{{ issued.secret }}</code></p>
     <pre>{{ issued.rclone }}</pre>
+    <p>{% blocktrans with endpoint=issued.endpoint %}The sending machine must reach {{ endpoint }}. On a network of its own, such as an HPC beside this server, that is often a local address rather than the one browsers use.{% endblocktrans %}</p>
 </div>
 {% endif %}
 
