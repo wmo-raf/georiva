@@ -1288,6 +1288,14 @@ class Delivery(models.Model):
             "until then the Bucket notification admits the file but does not start its ingestion."
         ),
     )
+    write_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text=(
+            "Which write of the key this is: the Bucket notification's sequencer, else its ETag. "
+            "A repeated notification for the same write carries the same one."
+        ),
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
     reason = models.TextField(blank=True, help_text="Why the delivery was rejected.")
     bytes = models.BigIntegerField(default=0)
@@ -1319,6 +1327,7 @@ class Delivery(models.Model):
         correlation_id=None,
         found_by_sweep=False,
         awaits_completion=False,
+        write_id="",
     ):
         """Record a delivery as received, with its ``DeliveryReceived`` event."""
         from georiva.events.context import new_context, use_context
@@ -1330,6 +1339,7 @@ class Delivery(models.Model):
             push_sender=push_sender,
             found_by_sweep=found_by_sweep,
             awaits_completion=awaits_completion,
+            write_id=write_id,
             original_filename=filename,
             file_path=file_path,
             correlation_id=correlation_id,
