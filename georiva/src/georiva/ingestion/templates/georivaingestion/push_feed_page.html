@@ -172,6 +172,7 @@
 </div>
 
 <h2 class="mup-deliveries-title">{% trans "Machine senders" %}</h2>
+<p>{% url 'georiva_push_download' as push_url %}{% blocktrans with url=push_url %}A machine sender uploads with its own credentials. <a href="{{ url }}" download>Download georiva_push.py</a> (Python 3.6+, no dependencies) and run <code>python3 georiva_push.py send FILE --config sender.conf</code> with the block shown when the sender is added.{% endblocktrans %}</p>
 {% if plain_http %}
 <div class="help-block help-warning">{% trans "The sender endpoint is plain HTTP, so credentials travel unencrypted. Put TLS in front of it before using this outside a trusted network." %}</div>
 {% endif %}
@@ -182,6 +183,7 @@
     <p>{% trans "Copy this now. The secret is not stored and will not be shown again." %}</p>
     <p>{% trans "Secret:" %} <code>{{ issued.secret }}</code></p>
     <pre>{{ issued.rclone }}</pre>
+    <p>{% blocktrans with endpoint=issued.endpoint %}The sending machine must reach {{ endpoint }}. On a network of its own, such as an HPC beside this server, that is often a local address rather than the one browsers use.{% endblocktrans %}</p>
 </div>
 {% endif %}
 

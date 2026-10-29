@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import timedelta
 
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -500,6 +501,18 @@ def _forbidden_unless_manager(request):
         return HttpResponseForbidden(_("You do not have permission to manage push senders."))
 
 
+def georiva_push_download(request):
+    """The push feed's sender script, served by the instance it will send to (ADR 0034)."""
+    from pathlib import Path
+
+    from django.http import FileResponse
+
+    from georiva.ingestion import sender
+
+    script = Path(sender.__file__).with_name("georiva_push.py")
+    return FileResponse(script.open("rb"), as_attachment=True, filename=script.name, content_type="text/x-python")
+
+
 def _show_secret(request, feed, sender, secret, rotated=False):
     """Render the feed page with the new secret. This response is the only place it ever appears."""
     from georiva.ingestion.machine_senders import rclone_config
@@ -513,6 +526,7 @@ def _show_secret(request, feed, sender, secret, rotated=False):
             "secret": secret,
             "rotated": rotated,
             "rclone": rclone_config(feed, sender.label, sender.access_key, secret),
+            "endpoint": settings.MINIO_PUBLIC_ENDPOINT,
         },
     )
 
