@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dynamic = ["version"]
 classifiers = []
 dependencies = [
-    "wagtail==7.4.2",
+    "wagtail==7.4.3",
     "django-task-ferry==0.1.1",
     "dj-database-url==3.1.2",
     "django-timescaledb==0.2.13",
