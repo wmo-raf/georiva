@@ -91,7 +91,7 @@ class SourceFileManager:
         catalog,
         result: "IngestionResult",
         *,
-        read_version: str,
+        read_version: str | None,
     ) -> None:
         """
         Archive and/or delete the source file based on the ingestion outcome.

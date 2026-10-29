@@ -66,7 +66,7 @@ class RewriteDuringIngestionTests(TestCase):
             _handle_event(ev)
         return task
 
-    def _ingest(self, *, while_processing=lambda: None, success=True, on_dispatch=None):
+    def _ingest(self, *, while_processing=lambda: None, success=True, on_dispatch=None, left_in_incoming=True):
         """Run the ingestion job for KEY; ``while_processing`` runs while it holds the lock."""
         from georiva.ingestion.job_types import FileIngestionJobType
 
@@ -81,6 +81,7 @@ class RewriteDuringIngestionTests(TestCase):
             patch("georiva.ingestion.service.IngestionService.process_file", side_effect=process_file),
             patch("georiva.ingestion.progress.PublishingProgress"),
             patch("georiva.ingestion.tasks.process_incoming_file") as task,
+            patch.object(Bucket, "exists", return_value=left_in_incoming),
         ):
             task.delay.side_effect = on_dispatch
             try:
@@ -144,6 +145,16 @@ class RewriteDuringIngestionTests(TestCase):
 
         newer = Delivery.objects.order_by("-id").first()
         self.assertEqual(seen[0].correlation_id, newer.correlation_id)
+
+    def test_a_write_the_run_read_and_deleted_is_not_ingested_again(self):
+        # Written after the lock was taken but before the run read the file: the run
+        # ingested it, so nothing is left in incoming to queue.
+        self._arrive("seq-1")
+
+        task = self._ingest(while_processing=lambda: self._arrive("seq-2"), left_in_incoming=False)
+
+        task.delay.assert_not_called()
+        self.assertEqual(self._status(), FileIngestion.Status.COMPLETED)
 
     def test_a_repeated_notification_for_the_write_being_ingested_starts_nothing(self):
         self._arrive("seq-1")

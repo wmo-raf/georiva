@@ -1380,6 +1380,11 @@ class Delivery(models.Model):
             return self.sent_by.get_username()
         return self.push_sender.label if self.push_sender_id else ""
 
+    @classmethod
+    def accepted_since(cls, file_path: str, moment) -> bool:
+        """True when a delivery to ``file_path`` was accepted after ``moment``: a write made since then."""
+        return cls.objects.filter(file_path=file_path, status=cls.Status.ACCEPTED, accepted_at__gt=moment).exists()
+
     def mark_accepted(self, file_path="", bytes=0, *, check_session=True):
         """Accept the delivery. A caller still adding to the batch passes ``check_session=False``
         and checks once at the end, so the session cannot complete on a partial batch."""

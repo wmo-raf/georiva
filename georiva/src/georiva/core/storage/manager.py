@@ -173,7 +173,7 @@ class Bucket:
             return None
         return f"{self.size(path)}@{self.modified_time(path).isoformat()}"
 
-    def delete_if_version(self, path: str, version: str) -> bool:
+    def delete_if_version(self, path: str, version: str | None) -> bool:
         """Delete ``path`` only while it is still the write ``version`` names; True if deleted.
 
         A newer write under the same key is left in place. On S3 the delete itself is
