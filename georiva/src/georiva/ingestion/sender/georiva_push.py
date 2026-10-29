@@ -23,6 +23,15 @@ After a file is sent, a marker <file>.sent records its checksum. A file whose
 marker still matches is skipped, so running twice sends nothing twice; a file
 that changed since is sent again. --force sends regardless.
 
+With --dir, one pass sends every file in a folder whose marker does not match
+it, oldest first; run it from cron and a sender catches up after an outage on
+its own. A pass leaves alone dot-files, .part and .tmp names, files modified in
+the last --settle seconds (120) and files whose size changes over 10 seconds, so
+whatever writes the folder should write under a .part name and rename when done.
+--keep N then removes sent files beyond the newest N; a file without a matching
+marker is never removed. A file is locked while it is sent (where the system has
+flock), so overlapping passes, or a pass and a single send, never send it twice.
+
 Plain HTTP is refused unless the block says georiva_allow_http = true, which
 GeoRiva writes only while its own endpoint is plain HTTP.
 
@@ -34,25 +43,36 @@ Requirements: Python 3.6+, nothing else. boto3 is used instead when installed.
 Examples:
     python3 georiva_push.py send /data/georiva/wrf_20261027T06Z.nc --config ~/.georiva/sender.conf
 
+    # crontab, every 5 minutes, keeping the newest 20 sent files (one line in the crontab):
+    */5 * * * * python3 /opt/georiva/georiva_push.py send --dir /data/georiva --keep 20
+        --config ~/.georiva/sender.conf >> ~/.georiva/push.log 2>&1
+
 Exit status: 0 when every file was sent or already sent, 1 when a file could not
 be sent, 2 for a usage or configuration error.
 """
 
 import argparse
 import configparser
+import contextlib
 import datetime as dt
 import hashlib
 import hmac
 import json
 import os
 import socket
+import stat
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-__version__ = "1.0.0"
+try:
+    import fcntl
+except ImportError:  # Windows: sends there go unlocked
+    fcntl = None
+
+__version__ = "1.1.0"
 
 USER_AGENT = f"georiva-push/{__version__}"
 MARKER_SUFFIX = ".sent"
@@ -63,6 +83,10 @@ TIMEOUT = 300
 CHUNK = 1024 * 1024
 #: Above this one PUT is refused by S3; nothing a push feed takes should come near it.
 MAX_SINGLE_PUT = 5 * 1024**3
+#: Folder mode leaves alone what something else may still be writing.
+SKIP_SUFFIXES = (".part", ".tmp", MARKER_SUFFIX)
+SETTLE = 120
+SIZE_WAIT = 10
 
 
 class ConfigError(Exception):
@@ -144,23 +168,80 @@ def marker_path(path):
     return path + MARKER_SUFFIX
 
 
-def already_sent(path, checksum):
-    """True when ``path``'s marker records this checksum."""
+def read_marker(path):
+    """``path``'s marker as a dict, empty when there is none or it cannot be read."""
     try:
         with open(marker_path(path)) as fh:
-            return json.load(fh).get("sha256") == checksum
+            marker = json.load(fh)
     except (OSError, ValueError):
+        return {}
+    return marker if isinstance(marker, dict) else {}
+
+
+def fingerprint(st):
+    """What a file's stat says about whether it changed: its size and mtime."""
+    return (st.st_size, st.st_mtime_ns)
+
+
+def already_sent(path, checksum):
+    """True when ``path``'s marker records this checksum."""
+    return read_marker(path).get("sha256") == checksum
+
+
+def unchanged_since_sent(path, st):
+    """True when ``path`` has the size and mtime its marker recorded, so hashing it again would find the same.
+
+    Content rewritten in place under the same size and mtime (``touch -r``) goes unnoticed;
+    ``send FILE --force`` sends such a file.
+    """
+    marker = read_marker(path)
+    return "sha256" in marker and (marker.get("size"), marker.get("mtime_ns")) == fingerprint(st)
+
+
+def is_sent(path):
+    """True when ``path``'s marker matches it: unchanged since it was sent, or the same bytes."""
+    try:
+        st = os.stat(path)
+        return unchanged_since_sent(path, st) or already_sent(path, sha256_of(path))
+    except OSError:
         return False
 
 
-def write_marker(path, checksum, key):
+def write_marker(path, checksum, key, st, sent_at=None):
+    """Record that ``path`` was sent; ``st`` is its stat from before it was hashed."""
+    size, mtime_ns = fingerprint(st)
     tmp = marker_path(path) + ".part"
     with open(tmp, "w") as fh:
         json.dump(
-            {"sha256": checksum, "key": key, "sent_at": dt.datetime.now(dt.timezone.utc).isoformat()},
+            {
+                "sha256": checksum,
+                "key": key,
+                "size": size,
+                "mtime_ns": mtime_ns,
+                "sent_at": sent_at or dt.datetime.now(dt.timezone.utc).isoformat(),
+            },
             fh,
         )
     os.replace(tmp, marker_path(path))
+
+
+@contextlib.contextmanager
+def file_lock(path, block=True):
+    """Hold an advisory lock on ``path`` itself, so two senders never send it at once.
+
+    Yields False when another sender holds it and ``block`` is false. Where there is no
+    flock (Windows) or the filesystem refuses one, it yields True and nothing is locked.
+    """
+    with open(path, "rb") as fh:
+        held = True
+        if fcntl is not None:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB))
+            except BlockingIOError:
+                held = False
+            except OSError as exc:
+                log(f"Cannot lock {os.path.basename(path)} ({exc}); going on unlocked")
+        yield held
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +376,12 @@ def _have_boto3():
     return True
 
 
-def send_file(cfg, path, force=False, put=None, sleep=time.sleep, delays=None):
-    """Send one file, retrying what may pass on another try. True when sent or already sent."""
+def send_file(cfg, path, force=False, put=None, sleep=time.sleep, delays=None, block=True):
+    """Send one file, retrying what may pass on another try. True when sent or already sent.
+
+    The file is locked while it is sent. ``block`` false skips a file another sender is
+    already sending instead of waiting for it, and counts that as success.
+    """
     if not os.path.isfile(path):
         log(f"ERROR: {path} not found")
         return False
@@ -304,8 +389,26 @@ def send_file(cfg, path, force=False, put=None, sleep=time.sleep, delays=None):
         log(f"ERROR: {path} is larger than 5 GB, which one PUT cannot carry")
         return False
 
+    try:
+        with file_lock(path, block=block) as held:
+            if not held:
+                log(f"Skipping {os.path.basename(path)}: another sender is sending it")
+                return True
+            return _send_locked(cfg, path, force, put, sleep, delays)
+    except OSError as exc:
+        log(f"ERROR: could not send {os.path.basename(path)}: {exc}")
+        return False
+
+
+def _send_locked(cfg, path, force, put, sleep, delays):
+    st = os.stat(path)
     checksum = sha256_of(path)
-    if not force and already_sent(path, checksum):
+    marker = read_marker(path)
+    if not force and marker.get("sha256") == checksum:
+        if (marker.get("size"), marker.get("mtime_ns")) != fingerprint(st):
+            # Same bytes, new stat (touched, or a marker from before 1.1): record the stat
+            # so the next folder pass need not hash it again.
+            write_marker(path, checksum, marker.get("key") or object_key(cfg, path), st, marker.get("sent_at"))
         log(f"Already sent {os.path.basename(path)} (marker matches), skipping")
         return True
 
@@ -323,10 +426,95 @@ def send_file(cfg, path, force=False, put=None, sleep=time.sleep, delays=None):
             log(f"Attempt {attempt} failed ({exc}), retrying in {wait}s")
             sleep(wait)
             continue
-        write_marker(path, checksum, key)
+        write_marker(path, checksum, key, st)
         log(f"Sent {os.path.basename(path)} to {key}")
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Folder mode
+# ---------------------------------------------------------------------------
+
+
+def data_files(directory):
+    """``(path, stat)`` for the files a pass considers, oldest first.
+
+    Dot-files, partial names (.part, .tmp), markers and anything not a regular file are left out.
+    """
+    found = []
+    for name in os.listdir(directory):
+        if name.startswith(".") or name.endswith(SKIP_SUFFIXES):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        if stat.S_ISREG(st.st_mode):
+            found.append((st.st_mtime_ns, name, path, st))
+    return [(path, st) for _, _, path, st in sorted(found)]
+
+
+def send_dir(cfg, directory, keep=None, settle=SETTLE, put=None, sleep=time.sleep, now=time.time, delays=None):
+    """One pass over ``directory``: send every settled file whose marker does not match it.
+
+    A file modified within ``settle`` seconds, or whose size or mtime changes over
+    SIZE_WAIT seconds, is still being written and is left for the next pass. With
+    ``keep``, sent files beyond the newest ``keep`` are then removed. True when no send failed.
+    """
+    pending = []
+    for path, st in data_files(directory):
+        if unchanged_since_sent(path, st):
+            continue
+        if now() - st.st_mtime < settle:
+            log(f"Skipping {os.path.basename(path)}: modified in the last {settle}s")
+            continue
+        pending.append((path, st))
+
+    steady = []
+    if pending:
+        sleep(SIZE_WAIT)
+        for path, st in pending:
+            try:
+                again = os.stat(path)
+            except OSError:
+                continue
+            if fingerprint(again) != fingerprint(st):
+                log(f"Skipping {os.path.basename(path)}: still being written")
+                continue
+            steady.append(path)
+
+    results = []
+    for path in steady:
+        if not os.path.exists(path):
+            continue  # removed since, by an overlapping pass's retention or by whoever owns the folder
+        results.append(send_file(cfg, path, put=put, sleep=sleep, delays=delays, block=False))
+    if keep is not None:
+        prune(directory, keep)
+    return all(results)
+
+
+def prune(directory, keep):
+    """Remove sent files, oldest first, keeping the newest ``keep``.
+
+    A file without a matching marker is never removed.
+    """
+    sent = [path for path, _ in data_files(directory) if is_sent(path)]
+    for path in sent[: max(len(sent) - keep, 0)]:
+        try:
+            with file_lock(path, block=False) as held:
+                if not held or not is_sent(path):
+                    continue
+                os.remove(path)
+        except OSError as exc:
+            log(f"Could not remove {os.path.basename(path)}: {exc}")
+            continue
+        try:
+            os.remove(marker_path(path))
+        except FileNotFoundError:
+            pass
+        log(f"Removed {os.path.basename(path)} (sent, beyond the newest {keep})")
 
 
 # ---------------------------------------------------------------------------
@@ -338,22 +526,43 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Send files to a GeoRiva push feed.")
     p.add_argument("--version", action="version", version=USER_AGENT)
     sub = p.add_subparsers(dest="command")
-    s = sub.add_parser("send", help="send files")
-    s.add_argument("files", nargs="+", help="files to send")
+    s = sub.add_parser("send", help="send files, or every new file in a folder")
+    s.add_argument("files", nargs="*", help="files to send")
+    s.add_argument("--dir", help="send every settled file in this folder whose marker does not match it")
     s.add_argument("--config", help="the sender block from the feed's page (or set GEORIVA_PUSH_* variables)")
     s.add_argument("--remote", default="georiva", help="section of the config to use (default: georiva)")
     s.add_argument("--force", action="store_true", help="send even when the marker matches")
+    s.add_argument("--keep", type=int, help="with --dir: after the pass, remove sent files beyond the newest N")
+    s.add_argument(
+        "--settle",
+        type=int,
+        default=SETTLE,
+        help=f"with --dir: leave files modified within this many seconds (default: {SETTLE})",
+    )
     a = p.parse_args(argv)
 
     if a.command != "send":
         p.print_help()
         return 2
+    if bool(a.files) == bool(a.dir):
+        s.error("give either FILE... or --dir DIR")
+    if not a.dir and (a.keep is not None or a.settle != SETTLE):
+        s.error("--keep and --settle go with --dir")
+    if a.dir and a.force:
+        s.error("--force goes with FILE...: a folder pass would send every file again")
+    if a.keep is not None and a.keep < 0:
+        s.error("--keep must be 0 or more")
     try:
         cfg = load_config(a.config, a.remote)
     except ConfigError as exc:
         log(f"ERROR: {exc}")
         return 2
 
+    if a.dir:
+        if not os.path.isdir(a.dir):
+            log(f"ERROR: {a.dir} is not a folder")
+            return 2
+        return 0 if send_dir(cfg, a.dir, keep=a.keep, settle=a.settle) else 1
     results = [send_file(cfg, path, force=a.force) for path in a.files]
     return 0 if all(results) else 1
 

@@ -757,6 +757,8 @@ Machine senders upload over the S3 API only ([ADR-0034](../adr/0034-push-feeds-r
 no FTP or SFTP. The web proxy has a second server block for it, matched on any name starting `s3.` (for example
 `s3.example.org`, or `s3.localhost` in development). It proxies straight to MinIO with the `Host` header preserved, so
 request signatures verify, and streams bodies without buffering to disk, so multi-GB multipart uploads work.
+Setting up a sender, with `georiva_push.py` and its cron folder mode, is in
+[Sending to a Push Feed](../push-feed-senders.md).
 
 - Point DNS for `s3.<your domain>` at the proxy and set `MINIO_PUBLIC_ENDPOINT` to that name. The feed page builds its
   `rclone` config from it. If the proxy listens on a port other than 80/443 (`GEORIVA_WEB_PROXY_PORT`), include it

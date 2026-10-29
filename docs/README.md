@@ -54,6 +54,9 @@ reading order. If you're new, start at the top and work down.
     checking the org-wide WMTS service against QGIS and a real legacy KVP client: the two paste-able URLs, API-key
     setup for private layers, dimension defaults, exception rendering, and the two known risks (JSON-only InfoFormat,
     capabilities-document size). Run when the WMTS surface changes or before an NMHS rollout.
+12. **[Sending to a push feed](push-feed-senders.md)** — setting up a machine sender with `georiva_push.py`: single
+    sends, the cron folder mode (settle window, markers, retention, locking) and the three push scenarios (HPC
+    sends directly, HPC copies to a middle server, files already on a middle server).
 
 ## Contributing
 
