@@ -259,6 +259,7 @@ Start at the [documentation index](docs/README.md), which ties everything togeth
 | [Storage & Ingestion Architecture](docs/plugins/georiva-storage-architecture.md) | Buckets, event-driven ingestion, IngestionLog              |
 | [Download Deduplication](docs/architecture/download-dedup.md)                    | Multi-collection feeds and download dedup                  |
 | [Source Plugin Contract](docs/architecture/plugin-parameter-contract.md)         | CollectionDefinition contract and the setup wizard         |
+| [Sending to a Push Feed](docs/push-feed-senders.md)                              | `georiva_push.py` setup, cron folder mode, push scenarios  |
 | [Architecture Decision Records](docs/adr/)                                       | Every architectural decision, with the reasoning behind it |
 | [Contributing Guide](docs/contributing.md)                                       | How to set up a dev environment and contribute             |
 

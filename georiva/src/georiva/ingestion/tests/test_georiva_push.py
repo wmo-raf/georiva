@@ -1,9 +1,12 @@
 import ast
+import fcntl
 import hashlib
 import io
 import json
 import os
+import shutil
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from unittest import mock
@@ -201,6 +204,181 @@ class SendFileTests(SimpleTestCase):
     def test_a_missing_file_fails_without_sending(self):
         self.assertFalse(gp.send_file(CFG, self.path + ".nope", put=self.put))
         self.put.assert_not_called()
+
+
+class SendDirTests(SimpleTestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.put = mock.Mock()
+        self.sleep = mock.Mock()
+
+    def _write(self, name, data=b"netcdf bytes", age=600):
+        """A file last modified ``age`` seconds ago; older files get larger ages."""
+        path = os.path.join(self.dir, name)
+        with open(path, "wb") as fh:
+            fh.write(data)
+        stamp = time.time() - age
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def _pass(self, **kwargs):
+        return gp.send_dir(CFG, self.dir, put=self.put, sleep=self.sleep, **kwargs)
+
+    def _sent(self):
+        return sorted(os.path.basename(c.args[1]) for c in self.put.call_args_list)
+
+    def test_a_pass_sends_unmarked_and_changed_files_and_skips_matching_ones(self):
+        self._write("a.nc", age=900)
+        changed = self._write("b.nc", age=800)
+        self.assertTrue(self._pass())
+        self.assertEqual(self._sent(), ["a.nc", "b.nc"])
+
+        self.put.reset_mock()
+        self._write("b.nc", b"corrected run", age=700)
+        self._write("c.nc", age=600)
+        self.assertTrue(self._pass())
+        self.assertEqual(self._sent(), ["b.nc", "c.nc"])
+        with open(changed + ".sent") as fh:
+            self.assertEqual(json.load(fh)["sha256"], hashlib.sha256(b"corrected run").hexdigest())
+
+    def test_files_are_sent_oldest_first(self):
+        self._write("new.nc", age=300)
+        self._write("old.nc", age=900)
+        self._pass()
+        self.assertEqual([os.path.basename(c.args[1]) for c in self.put.call_args_list], ["old.nc", "new.nc"])
+
+    def test_partial_names_dot_files_and_markers_are_not_sent(self):
+        for name in ("run.nc.part", "run.nc.tmp", ".run.nc", "run.nc.sent"):
+            self._write(name)
+        os.mkdir(os.path.join(self.dir, "sub"))
+        self.assertTrue(self._pass())
+        self.put.assert_not_called()
+
+    def test_a_recently_modified_file_waits_for_the_settle_window(self):
+        self._write("fresh.nc", age=30)
+        self._write("settled.nc", age=200)
+        self._pass(settle=120)
+        self.assertEqual(self._sent(), ["settled.nc"])
+
+    def test_a_file_still_growing_is_left_for_the_next_pass(self):
+        growing = self._write("growing.nc")
+        self._write("done.nc")
+
+        def append(_seconds):
+            with open(growing, "ab") as fh:
+                fh.write(b"more")
+
+        self.sleep.side_effect = append
+        self._pass()
+        self.assertEqual(self._sent(), ["done.nc"])
+        self.sleep.assert_called_once_with(gp.SIZE_WAIT)
+
+    def test_a_pass_with_nothing_to_send_does_not_wait(self):
+        self._write("a.nc")
+        self._pass()
+        self.sleep.reset_mock()
+        self._pass()
+        self.sleep.assert_not_called()
+
+    def test_an_unchanged_marked_file_is_not_hashed_again(self):
+        self._write("a.nc")
+        self._pass()
+        with mock.patch.object(gp, "sha256_of") as sha256_of:
+            self._pass()
+        sha256_of.assert_not_called()
+
+    def test_a_file_another_sender_is_sending_is_skipped(self):
+        path = self._write("a.nc")
+        with open(path, "rb") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            self.assertTrue(self._pass())
+        self.put.assert_not_called()
+        self.assertFalse(os.path.exists(path + ".sent"))
+
+    def test_a_marker_without_a_stat_is_brought_up_to_date_instead_of_resending(self):
+        path = self._write("a.nc")
+        with open(path + ".sent", "w") as fh:  # as 1.0.0 wrote it
+            json.dump({"sha256": hashlib.sha256(b"netcdf bytes").hexdigest(), "key": "k", "sent_at": "then"}, fh)
+        self._pass()
+        self.put.assert_not_called()
+        self.assertEqual(gp.read_marker(path)["sent_at"], "then")
+        self.sleep.reset_mock()
+        with mock.patch.object(gp, "sha256_of") as sha256_of:
+            self._pass()
+        sha256_of.assert_not_called()
+        self.sleep.assert_not_called()
+
+    def test_a_file_that_cannot_be_read_does_not_stop_the_pass(self):
+        bad = self._write("bad.nc", age=900)
+        self._write("good.nc", age=800)
+        real = gp.sha256_of
+
+        def sha256_of(path):
+            if path == bad:
+                raise PermissionError("denied")
+            return real(path)
+
+        with mock.patch.object(gp, "sha256_of", side_effect=sha256_of):
+            self.assertFalse(self._pass(keep=0))
+        self.assertEqual(self._sent(), ["good.nc"])
+        self.assertTrue(os.path.exists(bad))
+
+    def test_retention_leaves_a_file_another_sender_holds(self):
+        path = self._write("a.nc")
+        self._pass()
+        with open(path, "rb") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            self._pass(keep=0)
+        self.assertTrue(os.path.exists(path))
+        self._pass(keep=0)
+        self.assertFalse(os.path.exists(path))
+
+    def test_a_failed_send_fails_the_pass(self):
+        self._write("a.nc")
+        self.put.side_effect = gp.SendError("refused (403)", retry=False)
+        self.assertFalse(self._pass())
+
+    def test_retention_keeps_the_newest_sent_files(self):
+        for i in range(5):
+            self._write(f"run{i}.nc", age=1000 - i * 100)
+        self._pass(keep=2)
+        self.assertEqual(sorted(os.listdir(self.dir)), ["run3.nc", "run3.nc.sent", "run4.nc", "run4.nc.sent"])
+
+    def test_retention_never_removes_a_file_without_a_matching_marker(self):
+        self._write("old_unsent.nc", age=1000)
+        # old_changed.nc was sent once and has changed since.
+        changed = self._write("old_changed.nc", b"first run", age=950)
+        gp.write_marker(changed, hashlib.sha256(b"first run").hexdigest(), "k", os.stat(changed))
+        self._write("old_changed.nc", b"corrected run", age=900)
+        self._write("new.nc", age=300)
+
+        def put(cfg, path, key, checksum):
+            if not path.endswith("new.nc"):
+                raise gp.SendError("refused (403)", retry=False)
+
+        self.put.side_effect = put
+        self._pass(keep=0)
+        self.assertEqual(sorted(os.listdir(self.dir)), ["old_changed.nc", "old_changed.nc.sent", "old_unsent.nc"])
+
+
+class CommandLineTests(SimpleTestCase):
+    def test_send_takes_files_or_a_folder_not_both(self):
+        for argv in (
+            ["send"],
+            ["send", "a.nc", "--dir", "/data"],
+            ["send", "a.nc", "--keep", "3"],
+            ["send", "--dir", "/data", "--force"],
+            ["send", "--dir", "/data", "--keep", "-1"],
+        ):
+            with self.subTest(argv=argv), mock.patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    gp.main(argv)
+                self.assertEqual(ctx.exception.code, 2)
+
+    def test_a_folder_that_does_not_exist_is_a_usage_error(self):
+        with mock.patch.object(gp, "load_config", return_value=CFG), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(gp.main(["send", "--dir", "/nonexistent/georiva"]), 2)
 
 
 class StdlibPutTests(SimpleTestCase):
