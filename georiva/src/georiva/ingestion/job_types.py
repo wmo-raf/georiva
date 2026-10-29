@@ -15,6 +15,38 @@ from .models import FileIngestion, FileIngestionJob
 logger = logging.getLogger(__name__)
 
 
+def _ingest_again_if_rewritten(bucket: str, file_path: str, *, since) -> None:
+    """Queue ``file_path`` again when a sender wrote its key while it was being ingested (#548).
+
+    The write's notification found the key locked and started nothing, though its delivery
+    was accepted. Whatever this run's outcome, that newer write is still in ``incoming``
+    (the cleanup deletes only the write it read), so it is ingested next, in its own chain.
+    A repeated notification for the write being read records no delivery, so starts nothing.
+    """
+    from georiva.core.storage import BucketType
+    from georiva.events.context import use_context
+    from georiva.ingestion.chains import context_for_arrival
+    from georiva.ingestion.models import Delivery
+    from georiva.ingestion.tasks import process_incoming_file
+
+    if bucket != BucketType.INCOMING or since is None:
+        return
+    written = Delivery.objects.filter(
+        file_path=file_path, status=Delivery.Status.ACCEPTED, accepted_at__gt=since
+    ).exists()
+    if not written or not FileIngestion.reset_for_reingest(bucket, file_path):
+        return
+
+    logger.info("Written again while it was ingested, ingesting the newer write: %s", file_path)
+    log = FileIngestion.objects.get(bucket=bucket, file_path=file_path)
+    with use_context(context_for_arrival(file_path, actor="system:ingestion")):
+        process_incoming_file.delay(
+            file_path=file_path,
+            origin_bucket=bucket,
+            reference_time=log.reference_time.isoformat() if log.reference_time else None,
+        )
+
+
 class FileIngestionJobType(JobType):
     type = "file_ingestion"
     model_class = FileIngestionJob
@@ -30,8 +62,6 @@ class FileIngestionJobType(JobType):
         }
 
     def run(self, job: FileIngestionJob, progress) -> None:
-        from georiva.ingestion.service import IngestionService
-
         worker_id = f"task-ferry-job-{job.id}"
 
         progress.increment(5, state="Acquiring processing lock…")
@@ -53,6 +83,20 @@ class FileIngestionJobType(JobType):
             job.save(update_fields=["file_ingestion"])
         except FileIngestion.DoesNotExist:
             pass
+
+        try:
+            self._ingest(job, progress)
+        except Exception as exc:
+            # Released here rather than in on_error, which runs after the check below:
+            # a write waiting on this lock must find it free.
+            FileIngestion.fail_if_held_by(job.bucket, job.file_path, worker_id, str(exc))
+            raise
+        finally:
+            _ingest_again_if_rewritten(job.bucket, job.file_path, since=fi.locked_at if fi else None)
+
+    def _ingest(self, job: FileIngestionJob, progress) -> None:
+        """Run the pipeline on a file this job holds the lock for, and record how it ended."""
+        from georiva.ingestion.service import IngestionService
 
         progress.increment(10, state="Lock acquired — starting ingestion")
 
