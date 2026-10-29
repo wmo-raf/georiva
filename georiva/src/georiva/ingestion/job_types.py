@@ -124,6 +124,7 @@ class FileIngestionJobType(JobType):
                 valid_time_start=result.valid_time_start,
                 valid_time_end=result.valid_time_end,
                 timestep_count=result.timestep_count,
+                read_version=result.read_version,
             )
             job.items_created = len(result.items_created)
             job.assets_created = len(result.assets_created)

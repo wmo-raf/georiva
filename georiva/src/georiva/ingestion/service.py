@@ -200,6 +200,7 @@ class IngestionService:
             # Read before the download, never after: a write landing in between is then
             # one the cleanup will not delete, rather than one it deletes unread.
             read_version = origin.version_of(file_path)
+            result.read_version = read_version
 
             try:
                 sfm = self._source_file_manager

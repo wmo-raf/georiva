@@ -8,6 +8,8 @@ prefix. Classifies every conforming file in the incoming/sources buckets:
 - ``untracked`` — no FileIngestion record at all (the webhook missed it)
 - ``pending``   — registered but never processed (a lost dispatch)
 - ``reingest``  — completed-but-dead data or an operator-forced re-ingest
+- ``rewritten`` — an ``incoming`` key written again after it was ingested,
+  whose notification was lost (#549)
 
 In-flight (processing) and failed records are not the scan's business —
 failures are the Sweep's bounded-retry phase.
@@ -27,12 +29,12 @@ from georiva.core.storage.filename import validate_path
 class UnprocessedFile:
     bucket: str
     file_path: str
-    reason: str  # 'untracked' | 'pending' | 'reingest'
+    reason: str  # 'untracked' | 'pending' | 'reingest' | 'rewritten'
     reference_time: datetime | None = None
 
 
 def admit_untracked(unprocessed_file: UnprocessedFile) -> bool:
-    """Whether an untracked file may be ingested (ADR 0034).
+    """Whether an untracked or rewritten file may be ingested (ADR 0034).
 
     A file found in ``incoming`` is attributed to its push feed, or quarantined as a
     notification's would be. A failure here skips that one file, so a bad move cannot
@@ -54,7 +56,7 @@ def admit_untracked(unprocessed_file: UnprocessedFile) -> bool:
 
 def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
     """Queue Ingestion for a find_unprocessed() result: register untracked
-    files, reset reingest candidates, and dispatch one processing task per
+    files, reset reingest candidates and rewrites, and dispatch one processing task per
     file (pending files just get their lost dispatch re-sent)."""
     from georiva.core.storage import BucketType
     from georiva.ingestion import tasks
@@ -63,17 +65,18 @@ def ingest_unprocessed(found: list[UnprocessedFile]) -> int:
 
     queued = 0
     for unprocessed_file in found:
-        if unprocessed_file.reason == "untracked":
+        if unprocessed_file.reason in ("untracked", "rewritten"):
             if unprocessed_file.bucket == BucketType.INCOMING and not admit_found_in_incoming(
                 unprocessed_file.file_path
             ):
                 continue
+        if unprocessed_file.reason == "untracked":
             FileIngestion.register(
                 bucket=unprocessed_file.bucket,
                 file_path=unprocessed_file.file_path,
                 reference_time=unprocessed_file.reference_time,
             )
-        elif unprocessed_file.reason == "reingest":
+        elif unprocessed_file.reason in ("reingest", "rewritten"):
             FileIngestion.reset_for_reingest(unprocessed_file.bucket, unprocessed_file.file_path)
         tasks.process_incoming_file.delay(
             file_path=unprocessed_file.file_path,
@@ -101,6 +104,24 @@ def reingest_records(records) -> int:
         )
         count += 1
     return count
+
+
+def _rewritten_since_ingested(bucket, record) -> bool:
+    """True when ``incoming`` holds a write of a completed key that its ingestion never read (#549).
+
+    A completed ingestion deletes the write it read, so another one stored there is a
+    sender's later write whose notification was lost. A partial ingest keeps the write it
+    read on purpose, and an ingestion that recorded no write cannot tell the two apart:
+    neither is one. ``sources`` is not a sender's bucket and keeps its own rules.
+    """
+    from georiva.ingestion.models import FileIngestion
+
+    if record.bucket != BucketType.INCOMING or record.status != FileIngestion.Status.COMPLETED:
+        return False
+    if not record.read_version:
+        return False
+    stored = bucket.version_of(record.file_path)
+    return stored is not None and stored != record.read_version
 
 
 def find_unprocessed(prefix: str | None = None) -> list[UnprocessedFile]:
@@ -137,6 +158,8 @@ def find_unprocessed(prefix: str | None = None) -> list[UnprocessedFile]:
                 reason = "reingest"
             elif record.status == FileIngestion.Status.PENDING:
                 reason = "pending"
+            elif _rewritten_since_ingested(bucket, record):
+                reason = "rewritten"
             else:
                 continue
 
