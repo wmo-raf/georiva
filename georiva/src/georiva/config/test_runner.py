@@ -10,8 +10,8 @@ ordinary single-organisation instance, which is what they were written for.
 Tests that care about tenancy override ``GEORIVA_BASE_DOMAIN`` and provision
 their own organisations on top.
 
-The runner also builds the test-only ``DataFeed`` subclass table (see
-``setup_databases``).
+It also swaps in a fast password hasher, and builds the test-only ``DataFeed``
+subclass table (see ``setup_databases``).
 """
 
 from django.db import connection
@@ -28,6 +28,14 @@ class GeoRivaTestRunner(DiscoverRunner):
         settings.GEORIVA_BASE_DOMAIN = TEST_BASE_DOMAIN
         # A dispatch site that loses the chain fails CI rather than production.
         settings.GEORIVA_TASK_CONTEXT_MODE = "strict"
+        # PBKDF2 at production strength costs ~0.4s a hash, and most admin tests hash
+        # twice (create_user, then client.login): over half the suite's runtime. No
+        # test depends on which hasher is used. The cache only clears on the
+        # setting_changed signal, which plain assignment does not send.
+        from django.contrib.auth.hashers import reset_hashers
+
+        settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+        reset_hashers(setting="PASSWORD_HASHERS")
 
     def setup_databases(self, **kwargs):
         """Create the test-only ``DataFeed`` subclass table before any test runs.
