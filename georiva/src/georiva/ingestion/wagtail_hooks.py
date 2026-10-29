@@ -74,6 +74,7 @@ def register_ingestion_dashboard_urls():
 def register_push_feed_urls():
     from .push_feed_views import (
         delivery_retry,
+        georiva_push_download,
         push_feed_delete,
         push_feed_edit,
         push_feed_list,
@@ -94,6 +95,7 @@ def register_push_feed_urls():
     return [
         path("push-feeds/", push_feed_list, name="push_feed_list"),
         path("push-feeds/convert-range/", convert_range_view, name="push_feed_convert_range"),
+        path("push-feeds/georiva_push.py", georiva_push_download, name="georiva_push_download"),
         path("push-feeds/<int:pk>/edit/", push_feed_edit, name="push_feed_edit"),
         # Results-only fragment the search box swaps in via AJAX.
         path("push-feeds/results/", push_feed_list_results, name="push_feed_list_results"),

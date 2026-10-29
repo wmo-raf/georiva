@@ -501,6 +501,18 @@ def _forbidden_unless_manager(request):
         return HttpResponseForbidden(_("You do not have permission to manage push senders."))
 
 
+def georiva_push_download(request):
+    """The push feed's sender script, served by the instance it will send to (ADR 0034)."""
+    from pathlib import Path
+
+    from django.http import FileResponse
+
+    from georiva.ingestion import sender
+
+    script = Path(sender.__file__).with_name("georiva_push.py")
+    return FileResponse(script.open("rb"), as_attachment=True, filename=script.name, content_type="text/x-python")
+
+
 def _show_secret(request, feed, sender, secret, rotated=False):
     """Render the feed page with the new secret. This response is the only place it ever appears."""
     from georiva.ingestion.machine_senders import rclone_config
