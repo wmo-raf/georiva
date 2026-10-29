@@ -110,10 +110,12 @@ class MachineDeliveryAttributionTests(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _arrive(self, principal, key=None, sequencer="17A0000000000001", etag="e1"):
+    def _arrive(self, principal, key=None, sequencer="17A0000000000001", etag="e1", user_agent=None):
         ev = _make_event("georiva-incoming", key or self.key)
         ev["userIdentity"] = {"principalId": principal}
         ev["s3"]["object"].update(size=42, sequencer=sequencer, eTag=etag)
+        if user_agent is not None:
+            ev["source"] = {"host": "10.0.0.7", "port": "", "userAgent": user_agent}
         meta = {"org": "test-org", "catalog": "wrf", "collection": None, "reference_time": None}
         with (
             patch("georiva.ingestion.consumer.validate_path", return_value=meta),
@@ -170,6 +172,24 @@ class MachineDeliveryAttributionTests(TestCase):
         self._arrive("AKALPHA")
         self._arrive("AKALPHA")
         self.assertEqual(Delivery.objects.count(), 1)
+
+    def test_a_georiva_push_delivery_records_the_senders_version(self):
+        from georiva.ingestion.models import Delivery
+
+        self._arrive("AKALPHA", "test-org/wrf/a.nc", user_agent="georiva-push/1.0.0")
+        self._arrive("AKBETA", "test-org/wrf/b.nc", user_agent="rclone/v1.68.1")
+        self._arrive("AKBETA", "test-org/wrf/c.nc")
+        versions = dict(Delivery.objects.values_list("original_filename", "sender_version"))
+        self.assertEqual(versions, {"a.nc": "1.0.0", "b.nc": "", "c.nc": ""})
+
+    def test_a_rejected_georiva_push_delivery_records_the_version_too(self):
+        from georiva.ingestion.models import Delivery
+
+        with patch("georiva.ingestion.consumer._required_time_error", return_value="no valid time"):
+            self._arrive("AKALPHA", user_agent="georiva-push/1.0.0")
+        delivery = Delivery.objects.get()
+        self.assertEqual(delivery.status, Delivery.Status.REJECTED)
+        self.assertEqual(delivery.sender_version, "1.0.0")
 
     def _complete(self):
         from django.utils import timezone

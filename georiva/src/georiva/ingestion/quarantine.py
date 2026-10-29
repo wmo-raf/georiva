@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 NOT_A_SENDER = "not written by a sender of this feed"
 
 
-def quarantine(key: str, reason: str, *, feed=None, sender=None, size: int = 0) -> None:
+def quarantine(key: str, reason: str, *, feed=None, sender=None, sender_version: str = "", size: int = 0) -> None:
     """Move ``key`` out of ``incoming`` and record why.
 
     With a push feed known, the delivery is recorded as rejected: a delivery still
@@ -37,7 +37,7 @@ def quarantine(key: str, reason: str, *, feed=None, sender=None, size: int = 0) 
             delivery = None
             if feed is not None:
                 delivery = _waiting_delivery(key) or Delivery.receive(
-                    push_feed=feed, filename=filename, file_path=key, push_sender=sender
+                    push_feed=feed, filename=filename, file_path=key, push_sender=sender, sender_version=sender_version
                 )
                 delivery.mark_rejected(reason, bytes=size)
             _record_rejection(key, reason, feed=feed, delivery=delivery, sender=sender)

@@ -10,8 +10,9 @@ from minio.error import S3Error
 
 from georiva.core.models import Catalog
 from georiva.core.storage import BucketType, get_bucket_config
-from georiva.ingestion import machine_senders
+from georiva.ingestion import machine_senders, sender_version
 from georiva.ingestion.models import (
+    Delivery,
     PushFeed,
     PushSender,
     PushSenderAdded,
@@ -196,6 +197,56 @@ class SenderViewTests(TestCase):
         self.client.force_login(self.manager)
         response = self.client.post(f"/admin/push-feeds/{other.pk}/senders/add/", {"label": "x"})
         self.assertEqual(response.status_code, 404)
+
+    def _deliver(self, sender, name, version, **kwargs):
+        return Delivery.receive(
+            push_feed=self.feed,
+            filename=name,
+            file_path=f"o/c/{name}",
+            push_sender=sender,
+            sender_version=version,
+            **kwargs,
+        )
+
+    def _sender_row(self, sender):
+        from lxml import html
+
+        page = self.client.get(f"/admin/push-feeds/{self.feed.pk}/")
+        (row,) = html.fromstring(page.content).xpath(f'//tr[td/code="{sender.access_key}"]')
+        return " ".join(row.text_content().split())
+
+    def test_a_senders_row_shows_its_last_seen_version(self):
+        sender, _ = machine_senders.add_sender(self.feed, "ops", admin=self.admin)
+        self._deliver(sender, "a.nc", "0.9.0")
+        self._deliver(sender, "b.nc", sender_version.served())
+        self.client.force_login(self.viewer)
+        row = self._sender_row(sender)
+        self.assertIn(f"georiva-push {sender_version.served()}", row)
+        self.assertNotIn("Outdated", row)
+
+    def test_an_outdated_sender_is_flagged(self):
+        sender, _ = machine_senders.add_sender(self.feed, "ops", admin=self.admin)
+        self._deliver(sender, "a.nc", "0.9.0")
+        self.client.force_login(self.viewer)
+        row = self._sender_row(sender)
+        self.assertIn("georiva-push 0.9.0", row)
+        self.assertIn(f"Outdated: this instance serves {sender_version.served()}", row)
+
+    def test_a_sender_on_another_client_shows_no_version(self):
+        sender, _ = machine_senders.add_sender(self.feed, "rclone", admin=self.admin)
+        self._deliver(sender, "a.nc", "0.9.0")
+        self._deliver(sender, "b.nc", "")  # since moved to rclone
+        self.client.force_login(self.viewer)
+        row = self._sender_row(sender)
+        self.assertNotIn("georiva-push", row)
+        self.assertNotIn("Outdated", row)
+
+    def test_a_persons_retry_of_a_senders_delivery_does_not_hide_its_version(self):
+        sender, _ = machine_senders.add_sender(self.feed, "ops", admin=self.admin)
+        self._deliver(sender, "a.nc", "0.9.0")
+        self._deliver(sender, "a.nc", "", sent_by=self.manager)
+        self.client.force_login(self.viewer)
+        self.assertIn("georiva-push 0.9.0", self._sender_row(sender))
 
     def test_warning_while_endpoint_is_plain_http(self):
         self.client.force_login(self.manager)

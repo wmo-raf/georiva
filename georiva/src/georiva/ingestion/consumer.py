@@ -15,6 +15,7 @@ from georiva.core.storage import BucketType, get_bucket_config
 from georiva.core.storage.filename import validate_path
 from georiva.core.storage.path_resolution import resolve_org_catalog
 from georiva.events.context import use_context
+from georiva.ingestion import sender_version
 from georiva.ingestion.chains import context_for_arrival
 from georiva.ingestion.models import FileIngestion, FileIngestionFinished
 from georiva.ingestion.tasks import process_incoming_file
@@ -184,9 +185,10 @@ def _admit_incoming(ev: dict, key: str) -> bool:
             quarantine(key, NOT_A_SENDER, feed=feed, size=size)
             return False
 
+    version = sender_version.of_event(ev) if sender is not None else ""
     time_error = _required_time_error(feed.catalog, key)
     if time_error:
-        quarantine(key, time_error, feed=feed, sender=sender, size=size)
+        quarantine(key, time_error, feed=feed, sender=sender, sender_version=version, size=size)
         return False
 
     if waiting is not None:
@@ -211,7 +213,12 @@ def _admit_incoming(ev: dict, key: str) -> bool:
 
     with transaction.atomic():
         delivery = Delivery.receive(
-            push_feed=feed, filename=Path(key).name, file_path=key, push_sender=sender, write_id=write_id
+            push_feed=feed,
+            filename=Path(key).name,
+            file_path=key,
+            push_sender=sender,
+            sender_version=version,
+            write_id=write_id,
         )
         delivery.mark_accepted(file_path=key, bytes=size)
     return True

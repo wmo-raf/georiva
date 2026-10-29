@@ -25,6 +25,7 @@ from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
 
 from georiva.core.storage.filename import build_filename, parse_filename
+from georiva.ingestion import sender_version
 from georiva.organisations.access import get_org_object_or_404
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,24 @@ def _batch_error(config, filenames, variable_ids, times) -> str | None:
     return None
 
 
+def _senders_with_versions(feed):
+    """The feed's machine senders, each with the georiva-push version it last wrote with.
+
+    The version is its latest own write's, so a sender that moved to another client shows
+    none; a person's Retry of its delivery is not its write and is passed over.
+    """
+    from django.db.models import OuterRef, Subquery
+
+    from georiva.ingestion.models import Delivery
+
+    latest = Delivery.objects.filter(push_sender=OuterRef("pk"), sent_by__isnull=True).order_by("-received_at", "-id")
+    senders = list(feed.senders.annotate(last_version=Subquery(latest.values("sender_version")[:1])))
+    for sender in senders:
+        sender.last_version = sender.last_version or ""
+        sender.version_outdated = sender_version.is_outdated(sender.last_version)
+    return senders
+
+
 def push_feed_page(request, pk, issued=None):
     from georiva.core.storage import BucketType
     from georiva.ingestion.machine_senders import endpoint_is_plain_http
@@ -183,7 +202,8 @@ def push_feed_page(request, pk, issued=None):
             # by the time extra_js renders.
             "feed": config,
             "overdue": config.overdue_text(),
-            "senders": list(config.senders.all()),
+            "senders": _senders_with_versions(config),
+            "served_version": sender_version.served(),
             "can_manage_senders": can_manage_senders(request.user),
             "plain_http": endpoint_is_plain_http(),
             "issued": issued,

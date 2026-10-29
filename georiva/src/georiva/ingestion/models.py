@@ -1271,6 +1271,11 @@ class Delivery(models.Model):
         related_name="deliveries",
         help_text="The machine sender that wrote the file, matched from the Bucket notification's principal.",
     )
+    sender_version = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="The georiva-push version the sender wrote it with, from its user agent; blank for other clients.",
+    )
     original_filename = models.CharField(max_length=500)
     file_path = models.CharField(max_length=500, blank=True)
     correlation_id = models.UUIDField(
@@ -1324,6 +1329,7 @@ class Delivery(models.Model):
         session=None,
         sent_by=None,
         push_sender=None,
+        sender_version="",
         correlation_id=None,
         found_by_sweep=False,
         awaits_completion=False,
@@ -1337,6 +1343,7 @@ class Delivery(models.Model):
             session=session,
             sent_by=sent_by,
             push_sender=push_sender,
+            sender_version=sender_version,
             found_by_sweep=found_by_sweep,
             awaits_completion=awaits_completion,
             write_id=write_id,

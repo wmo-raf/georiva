@@ -189,13 +189,19 @@
 
 {% if senders %}
 <table class="listing">
-    <thead><tr><th>{% trans "Label" %}</th><th>{% trans "Access key" %}</th><th>{% trans "Added" %}</th>{% if can_manage_senders %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>{% trans "Label" %}</th><th>{% trans "Access key" %}</th><th>{% trans "Added" %}</th><th>{% trans "Sends with" %}</th>{% if can_manage_senders %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for s in senders %}
         <tr>
             <td>{{ s.label }}</td>
             <td><code>{{ s.access_key }}</code></td>
             <td>{{ s.created_at|date:"Y-m-d H:i" }}</td>
+            <td>
+                {% if s.last_version %}georiva-push {{ s.last_version }}{% else %}—{% endif %}
+                {% if s.version_outdated %}
+                <div class="help-block help-warning">{% blocktrans with version=served_version %}Outdated: this instance serves {{ version }}. Send the sender's operator a fresh copy of georiva_push.py.{% endblocktrans %}</div>
+                {% endif %}
+            </td>
             {% if can_manage_senders %}
             <td>
                 <form method="post" action="{% url 'push_sender_rotate' feed.pk s.pk %}" style="display:inline">{% csrf_token %}
