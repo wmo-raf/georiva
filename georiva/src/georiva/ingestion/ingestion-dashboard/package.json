@@ -15,7 +15,7 @@
     "vite-plugin-css-injected-by-js": "^4.0.1",
     "vite-plugin-vue-devtools": "^8.0.7",
     "vue": "^3.5.25",
-    "vue-i18n": "^11.3.0",
+    "vue-i18n": "^11.4.14",
     "vue-plugin-django-utils": "^0.1.6"
   },
   "devDependencies": {
