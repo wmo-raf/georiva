@@ -90,6 +90,8 @@ class SourceFileManager:
         file_path: str,
         catalog,
         result: "IngestionResult",
+        *,
+        read_version: str | None,
     ) -> None:
         """
         Archive and/or delete the source file based on the ingestion outcome.
@@ -97,7 +99,8 @@ class SourceFileManager:
         Rules:
           Full success (no partial failures)
             → archive if catalog.archive_source_files
-            → delete from origin bucket
+            → delete from origin bucket, but only ``read_version``: a sender may have
+              written the key again during the run, and that write is ingested next
 
           Partial success (some variables failed)
             → keep in origin so sweep_unprocessed can retry
@@ -111,7 +114,8 @@ class SourceFileManager:
             if catalog.archive_source_files:
                 archived = self.archive(origin, file_path)
                 result.archive_path = archived or ""
-            origin.delete(file_path)
+            if not origin.delete_if_version(file_path, read_version):
+                logger.info("Written again while it was ingested, keeping the newer write: %s", file_path)
 
         elif result.success and has_partial_failures:
             logger.warning(

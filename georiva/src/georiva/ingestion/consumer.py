@@ -96,11 +96,7 @@ def _delivered_since_ingested(log) -> bool:
 
     if log.bucket != BucketType.INCOMING or log.completed_at is None:
         return False
-    return Delivery.objects.filter(
-        file_path=log.file_path,
-        status=Delivery.Status.ACCEPTED,
-        accepted_at__gt=log.completed_at,
-    ).exists()
+    return Delivery.accepted_since(log.file_path, log.completed_at)
 
 
 def _waiting_person_delivery(key: str):

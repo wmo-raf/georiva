@@ -197,6 +197,10 @@ class IngestionService:
             progress.increment(by=10, state="file opened")
 
             # ── Process ───────────────────────────────────────────────────────
+            # Read before the download, never after: a write landing in between is then
+            # one the cleanup will not delete, rather than one it deletes unread.
+            read_version = origin.version_of(file_path)
+
             try:
                 sfm = self._source_file_manager
                 with sfm.download_to_temp(origin, file_path) as local_path:
@@ -276,7 +280,7 @@ class IngestionService:
 
             # ── Archive + cleanup ─────────────────────────────────────────────
             progress.increment(by=10, state="archiving")
-            self._source_file_manager.cleanup(origin, file_path, catalog, result)
+            self._source_file_manager.cleanup(origin, file_path, catalog, result, read_version=read_version)
 
             progress.increment(by=5, state="done")
 

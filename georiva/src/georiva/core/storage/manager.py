@@ -151,6 +151,54 @@ class Bucket:
             return True
         return False
 
+    def version_of(self, path: str) -> str | None:
+        """Which write of ``path`` is stored now, or None when nothing is.
+
+        On S3 its ETag and last-modified time, so the same bytes written again are still
+        a different write; locally its size and modified time. Only compared, never parsed
+        outside this class.
+        """
+        if self.is_s3:
+            from botocore.exceptions import ClientError
+
+            try:
+                head = self.storage.connection.meta.client.head_object(Bucket=self.storage.bucket_name, Key=path)
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                    return None
+                raise
+            return f"{head['ETag']}@{head['LastModified'].isoformat()}"
+
+        if not self.exists(path):
+            return None
+        return f"{self.size(path)}@{self.modified_time(path).isoformat()}"
+
+    def delete_if_version(self, path: str, version: str | None) -> bool:
+        """Delete ``path`` only while it is still the write ``version`` names; True if deleted.
+
+        A newer write under the same key is left in place. On S3 the delete itself is
+        conditional on the ETag, so a write landing after the check is kept too.
+        """
+        if version is None or self.version_of(path) != version:
+            return False
+
+        if self.is_s3:
+            from botocore.exceptions import ClientError
+
+            etag, _, _ = version.partition("@")
+            try:
+                self.storage.connection.meta.client.delete_object(
+                    Bucket=self.storage.bucket_name, Key=path, IfMatch=etag
+                )
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "PreconditionFailed":
+                    return False
+                raise
+            return True
+
+        self.storage.delete(path)
+        return True
+
     def url(self, path: str) -> str:
         return self.storage.url(path)
 
