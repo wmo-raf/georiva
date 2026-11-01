@@ -186,6 +186,23 @@ how to put both on one network. If you choose a different `GEORIVA_WEB_PROXY_POR
 so the front proxy can take 80/443, remember `GEORIVA_SITE_PORT` is the port
 *users* see (443), not that one.
 
+## Settings to know about
+
+- **Base domain.** Set `GEORIVA_BASE_DOMAIN` before first start. Each organisation's
+  hostname is written once, when it is created. If you change the domain later, every
+  organisation stays on the old one, so run
+  `docker compose exec georiva python manage.py sync_site_domains --from <old domain>`.
+  Wildcard DNS (and TLS) for `*.<base domain>` is needed.
+- **HTTPS.** Set `GEORIVA_SITE_PORT=443`. Without it the APIs hand out `http://` links,
+  which STAC Browser refuses to follow. If organisations already exist, also run
+  `manage.py sync_site_ports`.
+- **`MINIO_PUBLIC_ENDPOINT`.** Use `s3.<base domain>`, with the port if it is not 80 or
+  443. Senders and public asset URLs use it to reach storage. Set
+  `MINIO_PUBLIC_ENDPOINT_USE_SSL=true` once TLS is in place.
+- **`GEORIVA_TASK_CONTEXT_MODE`.** `strict` (the default) rejects queued tasks that
+  carry no context, which tasks queued by older releases do not. Empty the task queues
+  before upgrading to `strict`, or run `warn` until they are empty.
+
 ## Day to day
 
 Run from `deploy/`:
