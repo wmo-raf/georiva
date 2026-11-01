@@ -85,7 +85,7 @@ check_data_dirs() {
         done
         echo "deploy: create them with:" >&2
         for i in "${!bad_dirs[@]}"; do
-            echo "  sudo install -d -o ${bad_owners[$i]} -g ${bad_owners[$i]} ${bad_dirs[$i]}" >&2
+            echo "  sudo mkdir -p ${bad_dirs[$i]} && sudo chown ${bad_owners[$i]}:${bad_owners[$i]} ${bad_dirs[$i]}" >&2
         done
         exit 1
     fi

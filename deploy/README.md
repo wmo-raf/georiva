@@ -82,8 +82,9 @@ exist on the host; ownership is just a number.
 
 ```bash
 cd deploy
-sudo install -d -o 9999 -g 9999 docker/static docker/media docker/backup
-sudo install -d -o 1000 -g 1000 docker/db_data
+sudo mkdir -p docker/static docker/media docker/backup docker/db_data
+sudo chown 9999:9999 docker/static docker/media docker/backup
+sudo chown 1000:1000 docker/db_data
 ```
 
 (If you point `GEORIVA_*_VOLUME` in `.env` elsewhere, create those instead.
