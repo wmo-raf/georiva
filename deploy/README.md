@@ -102,8 +102,7 @@ The first start binds Wagtail's default Site to a *central* organisation on
 your base domain (`GEORIVA_BOOTSTRAP_CENTRAL_ORG`). Further institutions get
 their own organisation, and hostname, with `python manage.py create_organisation`.
 
-Open `https://<base domain>/` — the admin is at `/<ADMIN_URL_PATH>/`
-(`georiva-admin` by default), STAC Browser at `/stac-browser/`.
+Open `https://<base domain>/` — the admin is at `/admin/`, STAC Browser at `/stac-browser/`.
 
 ## Upgrade
 
