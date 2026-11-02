@@ -82,6 +82,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The image build can run the runner out of disk (see the script).
+      - name: Free disk space
+        run: .github/scripts/free-disk-space.sh
+
       # The dev image ships no source — compose bind-mounts it, and so do we
       # below. Building as the runner's own user keeps that mount writable.
       - name: Resolve runner uid/gid
@@ -288,6 +292,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The image build can run the runner out of disk (see the script).
+      - name: Free disk space
+        run: .github/scripts/free-disk-space.sh
 
       - uses: docker/setup-buildx-action@v3
 
