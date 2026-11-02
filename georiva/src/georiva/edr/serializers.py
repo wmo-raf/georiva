@@ -22,6 +22,7 @@ from itertools import groupby
 
 from rest_framework import serializers
 
+from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, Item
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
@@ -86,14 +87,16 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             "transform_type": variable.transform_type,
         }
 
+        contract = render_contract(variable)
+        # The texture's encoding range; palette_min/palette_max below are the
+        # stops' span, for the legend only.
+        x_georiva["image_unscale"] = contract.image_unscale
+
         style = variable.default_style
         if style:
             try:
-                palette = style.as_weatherlayers_palette()
-                palette_min, palette_max = style.min_max_from_stops()
-                x_georiva["palette"] = palette
-                x_georiva["palette_min"] = palette_min
-                x_georiva["palette_max"] = palette_max
+                x_georiva["palette"] = contract.palette
+                x_georiva["palette_min"], x_georiva["palette_max"] = contract.legend_range
                 x_georiva["palette_name"] = style.name
                 if style.ramp:
                     # This key speaks the legacy palette vocabulary — clients
@@ -106,9 +109,8 @@ class EDRParameterSerializer(serializers.Serializer, EDRBaseURLMixin):
             except Exception:
                 pass
         else:
-            x_georiva["palette"] = variable.weather_layers_palette
-            x_georiva["palette_min"] = variable.value_min
-            x_georiva["palette_max"] = variable.value_max
+            x_georiva["palette"] = contract.palette
+            x_georiva["palette_min"], x_georiva["palette_max"] = contract.legend_range
 
         data["x-georiva"] = x_georiva
 

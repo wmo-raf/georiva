@@ -185,6 +185,7 @@ class ItemDetailMap {
         const palette = xg.palette || [[0, [0, 0, 0]], [1, [255, 255, 255]]];
         const paletteMin = xg.palette_min ?? xg.value_min ?? 0;
         const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
+        const imageUnscale = xg.image_unscale;
         const units = param?.unit?.symbol || '';
 
         this.currentPalette = {palette, paletteMin, paletteMax};
@@ -211,7 +212,7 @@ class ItemDetailMap {
                 bounds: [bbox[0], bbox[1], bbox[2], bbox[3]],
                 imageSmoothing: true,
                 imageInterpolation: 'LINEAR',
-                imageUnscale: [paletteMin, paletteMax],
+                imageUnscale,
                 palette,
                 opacity,
                 visible: true,

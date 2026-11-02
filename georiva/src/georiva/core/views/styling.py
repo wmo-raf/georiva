@@ -24,6 +24,7 @@ from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
 
 from georiva.core.machine_plane import titiler_encoded_preview_url
+from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, ColorRamp, Item, Variable, VariableStyle
 from georiva.core.models.visualization import _swatch_html, generate_stops
 from georiva.organisations.access import get_org_object_or_404, scoped_queryset
@@ -215,7 +216,7 @@ def _preview_context(variable):
         "config": {
             "textureUrl": titiler_encoded_preview_url(item, variable),
             "bounds": list(item.bounds),
-            "imageUnscale": [variable.value_min, variable.value_max],
+            "imageUnscale": render_contract(variable).image_unscale,
             "unit": variable.units or "",
         },
     }
