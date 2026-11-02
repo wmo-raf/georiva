@@ -511,7 +511,7 @@
                         <button type="submit" class="button">{% trans "Save range" %}</button>
                     </div>
                     <p class="vs-unsaved" id="vs-range-unsaved" hidden>
-                        {% trans "Unsaved — the range above is not saved until you press “Save range”." %}
+                        {% trans "Unsaved — the range is not saved until you press “Save range”." %}
                     </p>
                     <p class="help-text">
                         {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
@@ -654,6 +654,16 @@
                     <p class="help-text">
                         {% trans "Absolute data values mapped to colors, in ascending order. Edit values or colors to fine-tune — for example to pin a threshold like 0 °C to an exact color." %}
                     </p>
+                    {# Counterpart of the clip warning in the preview: that one is stops beyond the range, this one is range beyond the stops. #}
+                    <div class="help-block help-warning vs-range-hint" id="vs-range-hint" hidden
+                         data-selected-slug="{{ selected.slug }}"
+                         data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
+                         data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
+                        <span id="vs-range-hint-text"></span>
+                        <button type="button" class="button button-small button-secondary" id="vs-fit-range">
+                            {% trans "Fit range to stops" %}
+                        </button>
+                    </div>
                     <table class="vs-stops-table" id="vs-stops-table">
                         <thead>
                         <tr>
@@ -772,16 +782,6 @@
             {% endcomment %}
             <section class="vs-panel vs-map-panel">
                 <h2 class="w-label-1">{% trans "Preview" %}</h2>
-                {# Counterpart of the clip warning below: that one is stops beyond the range, this one is range beyond the stops. #}
-                <div class="vs-map-note vs-range-hint" id="vs-range-hint" hidden
-                     data-selected-slug="{{ selected.slug }}"
-                     data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
-                     data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
-                    <span id="vs-range-hint-text"></span>
-                    <button type="button" class="button button-small button-secondary" id="vs-fit-range">
-                        {% trans "Fit range to stops" %}
-                    </button>
-                </div>
                 {% if preview.unavailable == "no-data" %}
                     <p class="vs-map-note">
                         {% trans "Nothing to preview yet — no data has been ingested for this variable as a COG. The style can still be tuned; the map appears once the first file lands." %}
