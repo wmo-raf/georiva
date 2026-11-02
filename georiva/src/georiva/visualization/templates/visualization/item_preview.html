@@ -9,17 +9,20 @@
     <style>
         :root {
             --geo-sidebar-width: 280px;
-            --geo-primary: #007d7e;
-            --geo-primary-hover: #006566;
-            --geo-bg-primary: #ffffff;
-            --geo-bg-secondary: #f6f6f8;
-            --geo-bg-tertiary: #eceef2;
-            --geo-text-primary: #1a1a1a;
-            --geo-text-secondary: #5c5c5c;
-            --geo-text-muted: #8c8c8c;
-            --geo-border-color: #e0e0e0;
-            --geo-success: #0a8238;
-            --geo-warning: #d78800;
+            /* Surfaces, text and borders follow Wagtail's theme tokens, so the page flips with dark mode */
+            --geo-primary: var(--w-color-secondary);
+            --geo-primary-hover: var(--w-color-secondary);
+            --geo-primary-text: var(--w-color-text-link-default);
+            --geo-primary-tint: color-mix(in srgb, var(--geo-primary) 14%, var(--w-color-surface-page));
+            --geo-bg-primary: var(--w-color-surface-page);
+            --geo-bg-secondary: var(--w-color-surface-header);
+            --geo-bg-tertiary: color-mix(in srgb, var(--w-color-text-context) 8%, var(--w-color-surface-page));
+            --geo-text-primary: var(--w-color-text-context);
+            --geo-text-secondary: var(--w-color-text-meta);
+            --geo-text-muted: color-mix(in srgb, var(--w-color-text-meta) 70%, var(--w-color-surface-page));
+            --geo-border-color: var(--w-color-border-furniture);
+            --geo-success: var(--w-color-positive-100);
+            --geo-warning: var(--w-color-warning-100);
             --geo-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
             --geo-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
             --geo-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
@@ -159,7 +162,7 @@
         }
 
         .geo-asset-card.active {
-            background: #e6f4f4;
+            background: var(--geo-primary-tint);
             border-color: var(--geo-primary);
         }
 
@@ -211,7 +214,7 @@
 
         .geo-row-download:hover {
             background: var(--geo-bg-primary);
-            color: var(--geo-primary);
+            color: var(--geo-primary-text);
         }
 
         .geo-view-indicator svg,
@@ -256,13 +259,13 @@
         }
 
         .geo-badge--format {
-            background: #dbeafe;
-            color: #1e40af;
+            background: color-mix(in srgb, var(--w-color-info-100) 20%, var(--geo-bg-primary));
+            color: var(--geo-text-primary);
         }
 
         .geo-badge--role {
-            background: #d1fae5;
-            color: #065f46;
+            background: color-mix(in srgb, var(--w-color-positive-100) 20%, var(--geo-bg-primary));
+            color: var(--geo-text-primary);
         }
 
         .geo-badge--size {
@@ -423,8 +426,8 @@
         }
 
         .geo-basemap-option.active {
-            background: #e6f4f4;
-            color: var(--geo-primary);
+            background: var(--geo-primary-tint);
+            color: var(--geo-primary-text);
             font-weight: 500;
         }
 
@@ -432,7 +435,7 @@
             width: 12px;
             height: 12px;
             opacity: 0;
-            color: var(--geo-primary);
+            color: var(--geo-primary-text);
         }
 
         .geo-basemap-option.active .geo-check {
@@ -633,7 +636,7 @@
             position: absolute;
             bottom: 1rem;
             right: 1rem;
-            background: rgba(255, 255, 255, 0.95);
+            background: color-mix(in srgb, var(--geo-bg-primary) 95%, transparent);
             padding: 0.3125rem 0.5rem;
             border-radius: 3px;
             font-size: 0.625rem;
