@@ -266,6 +266,111 @@
             align-items: center;
         }
 
+        .vs-json-panel[hidden] {
+            display: none;
+        }
+
+        .vs-json-panel {
+            margin-top: 0.75rem;
+        }
+
+        .vs-json-panel label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        /*
+         * The wrapper is the bordered box; the gutter and textarea inside it
+         * share font, line-height and padding so the numbers stay on their
+         * lines. Everything is a Wagtail variable, so the box follows the
+         * admin's light/dark theme.
+         */
+        .vs-json-editor {
+            display: flex;
+            border: 1px solid var(--w-color-border-field-default);
+            border-radius: 3px;
+            background: var(--w-color-surface-field);
+            font-family: monospace;
+            font-size: 0.85em;
+            line-height: 1.5;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* A faint band over the line a validation error points at. It sits
+           above the gutter and text but lets every click through. */
+        .vs-json-flag {
+            position: absolute;
+            left: 0;
+            right: 0;
+            pointer-events: none;
+            background: color-mix(in srgb, var(--w-color-critical-200) 14%, transparent);
+            box-shadow: inset 3px 0 0 var(--w-color-critical-200);
+        }
+
+        .vs-json-flag[hidden] {
+            display: none;
+        }
+
+        .vs-json-gutter,
+        .vs-json-panel .vs-json-editor textarea {
+            margin: 0;
+            padding: 0.5rem;
+            font: inherit;
+            line-height: inherit;
+            white-space: pre;
+        }
+
+        .vs-json-gutter {
+            /* Extra bottom room for the textarea's horizontal scrollbar, so
+               the two reach the same scroll end. */
+            padding-bottom: 1.5rem;
+            overflow: hidden;
+            text-align: right;
+            user-select: none;
+            color: var(--w-color-text-meta);
+            border-right: 1px solid var(--w-color-border-furniture);
+            background: var(--w-color-surface-field-inactive);
+        }
+
+        .vs-json-panel .vs-json-editor textarea {
+            flex: 1;
+            min-width: 0;
+            width: auto;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            background: transparent;
+            color: var(--w-color-text-field);
+            overflow: auto;
+            resize: vertical;
+        }
+
+        .vs-json-panel .help-text {
+            margin: 0.5rem 0;
+        }
+
+        .vs-json-error[hidden] {
+            display: none;
+        }
+
+        .vs-json-error {
+            margin: 0.5rem 0 0.75rem;
+            padding-block: 0.75rem;
+            padding-inline-end: 1rem;
+        }
+
+        .vs-json-error p {
+            margin: 0;
+            color: var(--w-color-text-label);
+        }
+
+        .vs-json-status {
+            font-size: 0.85em;
+            color: var(--w-color-text-meta);
+        }
+
         /*
          * The map rides in the aside, pinned, because the stops table it
          * answers for is taller than a screen: a preview that scrolls away
@@ -576,6 +681,52 @@
                         <button type="button" class="vs-inline-button" id="vs-reverse-stops">
                             {% trans "Reverse colors" %}
                         </button>
+                        <button type="button" class="vs-inline-button" id="vs-json-toggle"
+                                aria-expanded="false" aria-controls="vs-json-panel">
+                            {% trans "Edit as JSON" %}
+                        </button>
+                    </div>
+                    {% comment %}
+                        A second way to edit the same rows, not a second field:
+                        the textarea has no name and is never posted. Applying
+                        it rewrites the table, and Save reads the table.
+                    {% endcomment %}
+                    <div class="vs-json-panel" id="vs-json-panel" hidden>
+                        <label for="vs-json-text">{% trans "Stops as JSON" %}</label>
+                        <div class="vs-json-editor">
+                            <div class="vs-json-gutter" id="vs-json-gutter" aria-hidden="true"></div>
+                            <div class="vs-json-flag" id="vs-json-flag" aria-hidden="true" hidden></div>
+                            <textarea id="vs-json-text" rows="12" spellcheck="false" wrap="off"
+                                      aria-describedby="vs-json-help vs-json-error"></textarea>
+                        </div>
+                        <p class="help-text" id="vs-json-help">
+                            {% trans 'An array of {"value": number, "color": "#RRGGBB" or "#RRGGBBAA"}, values not decreasing.' %}
+                        </p>
+                        {% comment %}
+                            Wagtail's own critical help block (tinted, icon at the
+                            start), as it draws field errors elsewhere in the admin.
+                        {% endcomment %}
+                        <div class="help-block help-critical vs-json-error" id="vs-json-error-box" hidden>
+                            {% icon name="warning" classname="default" %}
+                            <p id="vs-json-error" role="alert"
+                            data-not-array="{% trans 'Expected a non-empty array of stops.' %}"
+                            data-line="{% trans ' (line {line})' %}"
+                            data-not-object="{% trans 'Stop {n}{at}: expected an object with value and color.' %}"
+                            data-bad-value="{% trans 'Stop {n}{at}: value must be a number.' %}"
+                            data-bad-color="{% trans 'Stop {n}{at}: color must be #RRGGBB or #RRGGBBAA.' %}"
+                            data-decreasing="{% trans 'Stop {n}{at}: value is lower than the previous stop.' %}"></p>
+                        </div>
+                        <div class="vs-stop-tools">
+                            <button type="button" class="vs-inline-button" id="vs-json-apply">
+                                {% trans "Apply JSON" %}
+                            </button>
+                            <button type="button" class="vs-inline-button" id="vs-json-copy">
+                                {% trans "Copy" %}
+                            </button>
+                            <span class="vs-json-status" id="vs-json-status" role="status" aria-live="polite"
+                                  data-copied="{% trans 'Copied' %}"
+                                  data-copy-failed="{% trans 'Could not copy' %}"></span>
+                        </div>
                     </div>
 
                     <div class="vs-actions">
@@ -1037,6 +1188,216 @@
                 });
                 renderPreview();
                 markStopsEdited();
+            });
+
+            /**
+             The same rows as JSON, for pasting a scale in or copying one out.
+             The textarea is only another way to fill the table: Apply rewrites
+             the rows exactly as Apply ramp does, and Save still reads the rows.
+             Colors are held to what VariableStyle.clean() accepts, so a scale
+             that applies here cannot be refused on save.
+             **/
+
+            const jsonToggle = document.getElementById('vs-json-toggle');
+            const jsonPanel = document.getElementById('vs-json-panel');
+            const jsonText = document.getElementById('vs-json-text');
+            const jsonGutter = document.getElementById('vs-json-gutter');
+            const jsonFlag = document.getElementById('vs-json-flag');
+            const jsonError = document.getElementById('vs-json-error');
+            const jsonErrorBox = document.getElementById('vs-json-error-box');
+            const jsonStatus = document.getElementById('vs-json-status');
+            const hexColor = /^#([0-9a-f]{6}|[0-9a-f]{8})$/i;
+            let copiedTimer = null;
+
+            function rowsAsJson() {
+                const stops = [];
+                body.querySelectorAll('.vs-stop-row').forEach(function (row) {
+                    const value = parseFloat(row.querySelector('[name="stop_value"]').value);
+                    let color = row.querySelector('[name="stop_color"]').value.trim();
+                    if (color && !color.startsWith('#')) {
+                        color = '#' + color;
+                    }
+                    if (!Number.isNaN(value) && color) {
+                        stops.push({value: value, color: color});
+                    }
+                });
+                // One stop per line, so stop N is line N + 1 and the gutter
+                // lines up with the table.
+                return stops.length
+                    ? '[\n' + stops.map(function (stop) {
+                        return '  ' + JSON.stringify(stop);
+                    }).join(',\n') + '\n]'
+                    : '[]';
+            }
+
+            function renderGutter() {
+                const count = jsonText.value.split('\n').length;
+                let numbers = '';
+                for (let i = 1; i <= count; i++) {
+                    numbers += (i > 1 ? '\n' : '') + i;
+                }
+                jsonGutter.textContent = numbers;
+                jsonGutter.scrollTop = jsonText.scrollTop;
+            }
+
+            function setJsonText(text) {
+                jsonText.value = text;
+                renderGutter();
+            }
+
+            /**
+             Lay the band over `line` (1-based), or hide it. The textarea is
+             scrolled to the line first if it is out of view; the band follows
+             the textarea's own scroll, so it stays on the line.
+             **/
+
+            function flagJsonLine(line) {
+                if (!line) {
+                    jsonFlag.hidden = true;
+                    jsonFlag.dataset.line = '';
+                    return;
+                }
+                const style = getComputedStyle(jsonText);
+                const lineHeight = parseFloat(style.lineHeight);
+                const top = (line - 1) * lineHeight;
+                if (top < jsonText.scrollTop ||
+                    top + lineHeight > jsonText.scrollTop + jsonText.clientHeight) {
+                    jsonText.scrollTop = Math.max(0, top - jsonText.clientHeight / 2);
+                }
+                jsonFlag.dataset.line = String(line);
+                jsonFlag.style.height = lineHeight + 'px';
+                placeJsonFlag();
+                jsonFlag.hidden = false;
+            }
+
+            function placeJsonFlag() {
+                if (!jsonFlag.dataset.line) {
+                    return;
+                }
+                const style = getComputedStyle(jsonText);
+                const lineHeight = parseFloat(style.lineHeight);
+                jsonFlag.style.top = (jsonText.offsetTop + parseFloat(style.paddingTop) +
+                    (Number(jsonFlag.dataset.line) - 1) * lineHeight - jsonText.scrollTop) + 'px';
+            }
+
+            function showJsonError(message) {
+                jsonError.textContent = message;
+                jsonErrorBox.hidden = !message;
+            }
+
+            function setJsonStatus(message) {
+                jsonStatus.textContent = message;
+                clearTimeout(copiedTimer);
+                if (message) {
+                    copiedTimer = setTimeout(function () {
+                        jsonStatus.textContent = '';
+                    }, 2000);
+                }
+            }
+
+            function parseStopsJson(text) {
+                const messages = jsonError.dataset;
+                let oneStopPerLine = false;
+                const fail = function (template, n) {
+                    const at = oneStopPerLine
+                        ? messages.line.replace('{line}', n + 1)
+                        : '';
+                    return {
+                        error: template.replace('{n}', n).replace('{at}', at),
+                        line: oneStopPerLine ? n + 1 : null
+                    };
+                };
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (error) {
+                    // V8 names the line ("line 3 column 5"); other engines may not.
+                    const found = /line (\d+)/.exec(error.message);
+                    return {error: error.message, line: found ? Number(found[1]) : null};
+                }
+                if (!Array.isArray(data) || !data.length) {
+                    return fail(messages.notArray);
+                }
+                // A line is only named when the text is laid out one stop per
+                // line, as the export is; otherwise "line 8" could be wrong.
+                const lines = text.split('\n');
+                oneStopPerLine = lines.length === data.length + 2 &&
+                    lines[0].trim() === '[';
+                const stops = [];
+                for (let i = 0; i < data.length; i++) {
+                    const item = data[i];
+                    const n = i + 1;
+                    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+                        return fail(messages.notObject, n);
+                    }
+                    if (typeof item.value !== 'number' || !Number.isFinite(item.value)) {
+                        return fail(messages.badValue, n);
+                    }
+                    if (typeof item.color !== 'string' || !hexColor.test(item.color)) {
+                        return fail(messages.badColor, n);
+                    }
+                    if (stops.length && item.value < stops[stops.length - 1].value) {
+                        return fail(messages.decreasing, n);
+                    }
+                    stops.push({value: item.value, color: item.color});
+                }
+                return {stops: stops};
+            }
+
+            jsonToggle.addEventListener('click', function () {
+                const open = jsonPanel.hidden;
+                jsonPanel.hidden = !open;
+                jsonToggle.setAttribute('aria-expanded', String(open));
+                if (open) {
+                    setJsonText(rowsAsJson());
+                    showJsonError('');
+                    flagJsonLine(null);
+                    setJsonStatus('');
+                    jsonText.focus();
+                }
+            });
+
+            jsonText.addEventListener('input', function () {
+                renderGutter();
+                // The text moved under the band, so it no longer marks anything.
+                flagJsonLine(null);
+            });
+            jsonText.addEventListener('scroll', function () {
+                jsonGutter.scrollTop = jsonText.scrollTop;
+                placeJsonFlag();
+            });
+
+            document.getElementById('vs-json-apply').addEventListener('click', function () {
+                const result = parseStopsJson(jsonText.value);
+                if (result.error) {
+                    showJsonError(result.error);
+                    flagJsonLine(result.line);
+                    return;
+                }
+                showJsonError('');
+                flagJsonLine(null);
+                body.replaceChildren();
+                result.stops.forEach(function (stop) {
+                    addRow(stop.value, stop.color);
+                });
+                body.querySelectorAll('.vs-stop-row').forEach(syncPicker);
+                renderPreview();
+                markStopsEdited();
+                setJsonText(rowsAsJson());
+            });
+
+            document.getElementById('vs-json-copy').addEventListener('click', async function () {
+                try {
+                    await navigator.clipboard.writeText(jsonText.value);
+                    setJsonStatus(jsonStatus.dataset.copied);
+                    return;
+                } catch (error) {
+                    // Falls through: clipboard access needs a secure context.
+                }
+                jsonText.select();
+                setJsonStatus(document.execCommand('copy')
+                    ? jsonStatus.dataset.copied
+                    : jsonStatus.dataset.copyFailed);
             });
 
             /**
