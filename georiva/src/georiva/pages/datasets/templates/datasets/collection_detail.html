@@ -130,10 +130,6 @@
                 </dl>
 
                 <div class="gr-collection-api-links">
-                    <a href="/api/stac/collections/{{ catalog.slug }}/{{ collection.slug }}/"
-                       class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
-                        <i class="bi bi-code-slash"></i> {% trans "STAC Collection" %}
-                    </a>
                     <a href="/api/edr/collections/{{ collection.slug }}/"
                        class="gr-btn gr-btn-ghost-dark" target="_blank" rel="noopener">
                         <i class="bi bi-broadcast"></i> {% trans "EDR Collection" %}
@@ -150,11 +146,6 @@
 
             <div class="gr-section-header">
                 <h2 class="gr-section-title">{% trans "Items" %}</h2>
-                {% if items.paginator.count %}
-                    <span class="gr-section-count">
-                        {{ items.paginator.count }} {% trans "item" %}{{ items.paginator.count|pluralize }}
-                    </span>
-                {% endif %}
             </div>
 
             <div class="gr-datasets-layout gr-items-browser">
@@ -323,6 +314,42 @@
 
                 {# ── Items grid ── #}
                 <div class="gr-items-main">
+                    {% if active_variable %}
+                        {% comment %}
+                            A STAC Collection is one Variable, so the STAC link follows the
+                            active variable rather than the GeoRiva Collection.
+                        {% endcomment %}
+                        <header class="gr-items-variable-header">
+                            <span class="gr-items-variable-icon" aria-hidden="true">
+                                <i class="bi bi-layers"></i>
+                            </span>
+                            <div class="gr-items-variable-heading">
+                                <h3 class="gr-items-variable-name">{{ active_variable.name }}</h3>
+                                <div class="gr-items-variable-meta">
+                                    {% if active_variable.units %}
+                                        <span class="gr-mono gr-items-variable-unit">{{ active_variable.units }}</span>
+                                    {% endif %}
+                                    <span class="gr-items-variable-count">
+                                        {{ items.paginator.count }} {% trans "item" %}{{ items.paginator.count|pluralize }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="gr-api-pill">
+                                <span class="gr-api-pill-label">STAC</span>
+                                <code class="gr-api-pill-path" id="grStacPath">/api/stac/collections/{{ catalog_slug }}/{{ collection_slug }}/{{ active_variable.slug }}/</code>
+                                <button type="button" class="gr-api-pill-btn" id="grStacCopy"
+                                        title="{% trans 'Copy URL' %}" aria-label="{% trans 'Copy URL' %}">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                                <a href="/api/stac/collections/{{ catalog_slug }}/{{ collection_slug }}/{{ active_variable.slug }}/"
+                                   class="gr-api-pill-btn" target="_blank" rel="noopener"
+                                   title="{% trans 'Open STAC Collection' %}" aria-label="{% trans 'STAC Collection' %}">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </div>
+                        </header>
+                    {% endif %}
+
                     {% if items %}
                         <div class="gr-item-cards-grid">
                             {% for item in items %}
@@ -391,4 +418,22 @@
 
 {% block extra_js %}
     <script src="{% static 'js/collection-detail.js' %}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const copyBtn = document.getElementById('grStacCopy');
+            const path = document.getElementById('grStacPath');
+            if (!copyBtn || !path) return;
+
+            copyBtn.addEventListener('click', function () {
+                const url = window.location.origin + path.textContent.trim();
+                navigator.clipboard.writeText(url).then(function () {
+                    const icon = copyBtn.querySelector('i');
+                    icon.className = 'bi bi-check2';
+                    setTimeout(function () {
+                        icon.className = 'bi bi-clipboard';
+                    }, 1500);
+                });
+            });
+        });
+    </script>
 {% endblock %}

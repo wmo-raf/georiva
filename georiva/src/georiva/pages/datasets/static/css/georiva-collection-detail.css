@@ -261,6 +261,123 @@
     min-width: 0;
 }
 
+/* ── Active-variable header ── */
+
+.gr-items-variable-header {
+    align-items: center;
+    background: linear-gradient(100deg, var(--gr-accent-dim), var(--gr-light) 60%);
+    border: 1px solid var(--gr-accent-border);
+    border-radius: var(--gr-radius-lg);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+    padding: 0.9rem 1.1rem;
+}
+
+.gr-items-variable-icon {
+    align-items: center;
+    background: var(--gr-accent);
+    border-radius: var(--gr-radius);
+    color: var(--gr-dark);
+    display: inline-flex;
+    flex: none;
+    font-size: 1.15rem;
+    height: 2.5rem;
+    justify-content: center;
+    width: 2.5rem;
+}
+
+.gr-items-variable-heading {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+
+.gr-items-variable-name {
+    color: var(--gr-text-1);
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.gr-items-variable-meta {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.6rem;
+    margin-top: 0.2rem;
+}
+
+.gr-items-variable-unit {
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border);
+    border-radius: 999px;
+    color: var(--gr-text-2);
+    font-size: 0.72rem;
+    padding: 0.05rem 0.55rem;
+}
+
+.gr-items-variable-count {
+    color: var(--gr-text-3);
+    font-size: 0.8rem;
+}
+
+/* Endpoint pill — shows the real STAC URL, with copy + open */
+
+.gr-api-pill {
+    align-items: stretch;
+    background: var(--gr-light);
+    border: 1px solid var(--gr-light-border-2);
+    border-radius: var(--gr-radius);
+    display: inline-flex;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.gr-api-pill-label {
+    align-items: center;
+    background: var(--gr-accent-dim);
+    border-right: 1px solid var(--gr-light-border);
+    color: var(--gr-accent-dark);
+    display: inline-flex;
+    font-family: var(--gr-font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    padding: 0 0.6rem;
+}
+
+.gr-api-pill-path {
+    align-self: center;
+    color: var(--gr-text-2);
+    font-family: var(--gr-font-mono);
+    font-size: 0.75rem;
+    overflow: hidden;
+    padding: 0.45rem 0.7rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gr-api-pill-btn {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--gr-light-border);
+    color: var(--gr-text-3);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 0 0.7rem;
+    text-decoration: none;
+    transition: color var(--gr-dur) var(--gr-ease),
+                background var(--gr-dur) var(--gr-ease);
+}
+
+.gr-api-pill-btn:hover {
+    background: var(--gr-accent-dim);
+    color: var(--gr-accent-dark);
+}
+
 .gr-item-cards-grid {
     display: grid;
     gap: 1rem;

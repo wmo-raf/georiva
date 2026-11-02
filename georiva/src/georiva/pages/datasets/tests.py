@@ -336,3 +336,21 @@ class CollectionListingItemLinkTests(TestCase):
     def test_the_card_carries_the_default_variable_when_none_is_chosen(self):
         href = self._card_href()
         self.assertIn("?variable=", href)
+
+    def test_the_stac_link_points_at_the_selected_variable(self):
+        # A STAC Collection is one Variable, so the link needs all three slugs;
+        # the two-slug form (catalog/collection) is not a route in the STAC API.
+        url = f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/"
+        body = self.client.get(url, {"variable": self.other_variable.slug}).content.decode()
+        stac_path = f"/api/stac/collections/{self.catalog.slug}/{self.collection.slug}/{self.other_variable.slug}/"
+        self.assertIn(f'href="{stac_path}"', body)
+        self.assertIn(f">{stac_path}</code>", body)
+        self.assertNotIn(f'href="/api/stac/collections/{self.catalog.slug}/{self.collection.slug}/"', body)
+
+    def test_the_header_reports_the_variable_s_item_count(self):
+        url = f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/"
+        body = self.client.get(url, {"variable": self.other_variable.slug}).content.decode()
+        header = body[body.index("gr-items-variable-header") :]
+        header = header[: header.index("</header>")]
+        self.assertIn("Rainfall", header)
+        self.assertIn("1 item", header)
