@@ -17,7 +17,7 @@ the operator commits to it.
 from django import forms
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.formats import localize
@@ -275,7 +275,7 @@ def variable_preview_step(request, collection_pk, variable_pk):
     except ValueError:
         return JsonResponse({"error": _("Pick an item to step from.")}, status=400)
 
-    current = get_object_or_404(Item, pk=item_pk, collection=collection)
+    current = get_org_object_or_404(request, Item, pk=item_pk, collection=collection)
     neighbour = Item.objects.neighbour_for_variable(variable, current, direction)
     if neighbour is None:
         return JsonResponse({"item": None})
