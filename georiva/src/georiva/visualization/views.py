@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
 from django.utils.translation import gettext as _
 
 from georiva.core.machine_plane import titiler_encoded_preview_url
@@ -13,7 +13,8 @@ def item_preview(request, item_id):
 
     breadcrumbs_items = [
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": "#", "label": _("Preview")},
+        {"url": reverse("wagtailsnippets_georivacore_item:list"), "label": _("Items")},
+        {"url": None, "label": f"{item.collection.name} · {item.time:%Y-%m-%d %H:%M}"},
     ]
 
     assets = item.assets.all()
