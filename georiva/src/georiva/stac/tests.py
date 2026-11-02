@@ -211,3 +211,45 @@ class STACRenderExtensionTests(TestCase):
         response = self.client.get(reverse("stac:item-detail", args=["cmip6", "pr", "pr", "20260301T120000Z"])).json()
         self.assertNotIn("renders", response["properties"])
         self.assertNotIn(self.RENDER_SCHEMA, response["stac_extensions"])
+
+
+class STACSearchCollectionIdTests(TestCase):
+    """Search accepts the collection id the API itself emits, `{collection}/{variable}`."""
+
+    def setUp(self):
+        dial_org(self.client)
+        catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="CHIRPS", slug="chirps", file_format="geotiff"
+        )
+        unit, _ = Unit.objects.get_or_create(name="Millimetre", defaults={"symbol": "mm"})
+        collection = Collection.objects.create(
+            catalog=catalog,
+            name="Monthly",
+            slug="chirps-monthly",
+            visibility=Collection.Visibility.PUBLIC,
+        )
+        Variable.objects.create(
+            collection=collection, slug="precip", name="precip", unit=unit, value_min=0, value_max=500
+        )
+        Item.objects.create(collection=collection, time=datetime(2026, 6, 1, tzinfo=UTC))
+
+    def _matched(self, collection_id):
+        response = self.client.post(
+            reverse("stac:search"),
+            {"collections": [collection_id]},
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()["numberMatched"]
+
+    def test_the_emitted_two_part_id_matches(self):
+        listed = self.client.get(reverse("stac:collection-list", args=["chirps"])).json()["collections"]
+        emitted = listed[0]["id"]
+        self.assertEqual(emitted, "chirps-monthly/precip")
+        self.assertEqual(self._matched(emitted), 1)
+
+    def test_the_three_part_id_still_matches(self):
+        self.assertEqual(self._matched("chirps/chirps-monthly/precip"), 1)
+
+    def test_the_legacy_catalog_variable_id_still_matches(self):
+        self.assertEqual(self._matched("chirps/precip"), 1)

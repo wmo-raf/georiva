@@ -641,7 +641,9 @@ class STACSearchView(STACGeoAPIView):
         """
         Filter by collection IDs.
 
-        Collection IDs are in the format {catalog}/{collection}/{variable}.
+        Collection IDs are in the format {catalog}/{collection}/{variable}, or the
+        two-part {collection}/{variable} the API reports as a collection's ``id``
+        (falling back to the legacy {catalog}/{variable}).
         Resolves to the GeoRiva Variable and filters items to its parent Collection.
 
         Every branch resolves through ``_org_variables``, so a collection id
@@ -668,12 +670,18 @@ class STACSearchView(STACGeoAPIView):
                     slug=variable_slug,
                 )
             elif len(parts) == 2:
-                # Legacy format {catalog}/{variable} — kept for backward compatibility
-                catalog_slug, variable_slug = parts
+                # The id the API emits: {collection}/{variable}
+                collection_slug, variable_slug = parts
                 variables = org_variables.filter(
-                    collection__catalog__slug=catalog_slug,
+                    collection__slug=collection_slug,
                     slug=variable_slug,
                 )
+                if not variables.exists():
+                    # Legacy format {catalog}/{variable} — kept for backward compatibility
+                    variables = org_variables.filter(
+                        collection__catalog__slug=collection_slug,
+                        slug=variable_slug,
+                    )
             else:
                 # Bare variable slug — match across this organisation's catalogs
                 variables = org_variables.filter(slug=coll_id)
