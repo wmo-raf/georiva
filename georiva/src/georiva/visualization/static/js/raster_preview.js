@@ -15,7 +15,7 @@
  *   const preview = GeoRivaRasterPreview.create({
  *       container: 'vs-map',
  *       basemapStyleUrl,
- *       textureUrl, bounds, imageUnscale, unit,
+ *       textureUrl, bounds, imageUnscale, unit, compactAttribution,
  *       palette: [[value, [r, g, b, a]], ...],
  *       onStatus: (state, message) => { ... },
  *   });
@@ -147,12 +147,23 @@
                 style: style,
                 bounds: fitBounds,
                 fitBoundsOptions: {padding: 20},
-                attributionControl: true
+                attributionControl: options.compactAttribution ? {compact: true} : true
             });
             map.addControl(
                 new maplibregl.NavigationControl({showCompass: false}), 'top-right'
             );
-            map.once('load', onLoad);
+            map.once('load', function () {
+                if (options.compactAttribution) {
+                    // MapLibre's compact attribution starts open until the map
+                    // is first moved; start it as the small (i) button instead.
+                    const attribution = map.getContainer().querySelector('.maplibregl-ctrl-attrib');
+                    if (attribution) {
+                        attribution.classList.remove('maplibregl-compact-show');
+                        attribution.removeAttribute('open');
+                    }
+                }
+                onLoad();
+            });
         }).catch(function (error) {
             console.error('GeoRiva raster preview: basemap style failed', error);
             onStatus('error', 'style-failed');
