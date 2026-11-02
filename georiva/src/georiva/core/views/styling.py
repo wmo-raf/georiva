@@ -17,8 +17,10 @@ the operator commits to it.
 from django import forms
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.formats import localize
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from wagtail.admin import messages
@@ -229,12 +231,55 @@ def _preview_context(variable):
         "item": item,
         "item_url": reverse("item_preview", args=[item.pk]),
         "config": {
-            "textureUrl": titiler_encoded_preview_url(item, variable),
-            "bounds": list(item.bounds),
+            **_preview_frame(item, variable),
             "imageUnscale": render_contract(variable).image_unscale,
             "unit": variable.units or "",
+            "stepUrl": reverse("variable_preview_step", args=[variable.collection_id, variable.pk]),
         },
     }
+
+
+def _preview_frame(item, variable):
+    """One item as the map draws it — what the first paint and every step share.
+
+    ``time`` and ``referenceTime`` are pre-formatted the way the template shows
+    them, so the page never reformats a timestamp in another locale or zone.
+    """
+    return {
+        "itemPk": item.pk,
+        "textureUrl": titiler_encoded_preview_url(item, variable),
+        "bounds": list(item.bounds) if item.bounds else None,
+        "itemUrl": reverse("item_preview", args=[item.pk]),
+        "time": localize(timezone.localtime(item.time)),
+        "referenceTime": (localize(timezone.localtime(item.reference_time)) if item.reference_time else None),
+        "hasPrev": Item.objects.neighbour_for_variable(variable, item, "prev") is not None,
+        "hasNext": Item.objects.neighbour_for_variable(variable, item, "next") is not None,
+    }
+
+
+def variable_preview_step(request, collection_pk, variable_pk):
+    """The item before or after the one the map preview shows (#570).
+
+    Read-only JSON for the prev / next buttons: one small request per step, so a
+    collection of any size costs the page nothing up front. ``item`` null means
+    the run has no more in that direction.
+    """
+    collection = get_org_object_or_404(request, Collection, pk=collection_pk)
+    variable = get_org_object_or_404(request, Variable, pk=variable_pk, collection=collection)
+
+    direction = request.GET.get("direction", "")
+    if direction not in ("prev", "next"):
+        return JsonResponse({"error": _("Direction must be prev or next.")}, status=400)
+    try:
+        item_pk = int(request.GET.get("item", ""))
+    except ValueError:
+        return JsonResponse({"error": _("Pick an item to step from.")}, status=400)
+
+    current = get_object_or_404(Item, pk=item_pk, collection=collection)
+    neighbour = Item.objects.neighbour_for_variable(variable, current, direction)
+    if neighbour is None:
+        return JsonResponse({"item": None})
+    return JsonResponse(_preview_frame(neighbour, variable))
 
 
 def collection_styling(request, collection_pk):

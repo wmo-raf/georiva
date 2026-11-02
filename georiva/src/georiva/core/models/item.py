@@ -315,6 +315,32 @@ class ItemManager(models.Manager):
             return candidates.filter(reference_time=latest_ref).order_by("time").first()
         return candidates.order_by("-time").first()
 
+    def neighbour_for_variable(self, variable, item, direction):
+        """The item before or after ``item`` in a preview of ``variable``, or None.
+
+        The same candidates :meth:`latest_for_variable` draws from, ordered by
+        valid time and held to ``item``'s own run: a forecast feed repeats a
+        valid time once per run that predicted it, so stepping across runs would
+        repeat times and jump between forecasts. A feed with no reference times
+        is one long run in time order.
+        """
+        if direction not in ("prev", "next"):
+            raise ValueError(f"direction must be 'prev' or 'next', not {direction!r}")
+        candidates = self.filter(
+            collection_id=variable.collection_id,
+            assets__variable=variable,
+            assets__format=Asset.Format.COG,
+        ).distinct()
+        if item.reference_time is not None:
+            candidates = candidates.filter(reference_time=item.reference_time)
+        else:
+            candidates = candidates.filter(reference_time__isnull=True)
+        if direction == "next":
+            later = models.Q(time__gt=item.time) | models.Q(time=item.time, pk__gt=item.pk)
+            return candidates.filter(later).order_by("time", "pk").first()
+        earlier = models.Q(time__lt=item.time) | models.Q(time=item.time, pk__lt=item.pk)
+        return candidates.filter(earlier).order_by("-time", "-pk").first()
+
     def latest_forecast_run(self, collection):
         """Get items from the latest forecast run."""
         latest_ref = (

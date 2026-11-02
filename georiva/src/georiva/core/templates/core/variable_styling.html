@@ -477,6 +477,13 @@
             margin: 0;
         }
 
+        .vs-step-tools {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin: 0 0 0.5rem;
+        }
+
         .vs-map-note {
             border: 1px solid var(--w-color-border-furniture);
             border-radius: 4px;
@@ -873,13 +880,24 @@
                     <div class="vs-map-meta">
                         <dl>
                             <dt>{% trans "Valid" %}</dt>
-                            <dd>{{ preview.item.time }}</dd>
+                            <dd id="vs-step-time">{{ preview.item.time }}</dd>
                             {% if preview.item.reference_time %}
                                 <dt>{% trans "Run" %}</dt>
-                                <dd>{{ preview.item.reference_time }}</dd>
+                                <dd id="vs-step-run">{{ preview.item.reference_time }}</dd>
                             {% endif %}
                         </dl>
-                        <a href="{{ preview.item_url }}">{% trans "Open the full item preview" %}</a>
+                        {# A sparse variable can be honestly empty at one time; step until something shows (#570). #}
+                        <div class="vs-step-tools">
+                            <button type="button" class="vs-inline-button" id="vs-step-prev" disabled>
+                                {% trans "← Previous" %}
+                            </button>
+                            <button type="button" class="vs-inline-button" id="vs-step-next" disabled>
+                                {% trans "Next →" %}
+                            </button>
+                            <span id="vs-step-status" role="status" aria-live="polite"
+                                  data-failed="{% trans 'Could not load that time.' %}"></span>
+                        </div>
+                        <a href="{{ preview.item_url }}" id="vs-step-link">{% trans "Open the full item preview" %}</a>
                     </div>
                 {% endif %}
             </section>
@@ -1839,6 +1857,92 @@
                     if (mapPreview) {
                         mapPreview.setOpacity(parseInt(event.target.value, 10) / 100);
                     }
+                });
+            }
+
+
+            /**
+             Stepping the map through time (#570). Each press asks the server for
+             the neighbouring item of the same run and swaps its texture in
+             place; the palette, opacity and stops are untouched, so edits keep
+             repainting whichever item is on screen. Nothing is remembered: a
+             reload goes back to the latest item.
+             **/
+
+            const stepPrev = document.getElementById('vs-step-prev');
+            const stepNext = document.getElementById('vs-step-next');
+            const stepStatus = document.getElementById('vs-step-status');
+            let stepItemPk = previewConfig ? previewConfig.itemPk : null;
+            let stepBusy = false;
+
+            function setStepButtons(hasPrev, hasNext) {
+                stepPrev.disabled = stepBusy || !hasPrev;
+                stepNext.disabled = stepBusy || !hasNext;
+            }
+
+            async function step(direction) {
+                if (stepBusy || !previewConfig) {
+                    return;
+                }
+                stepBusy = true;
+                setStepButtons(false, false);
+                stepStatus.textContent = '';
+                let hasPrev = !stepPrev.dataset.end;
+                let hasNext = !stepNext.dataset.end;
+                try {
+                    const params = new URLSearchParams({item: stepItemPk, direction: direction});
+                    const response = await fetch(previewConfig.stepUrl + '?' + params.toString(), {
+                        headers: {'Accept': 'application/json'}
+                    });
+                    const frame = await response.json();
+                    if (!response.ok) {
+                        stepStatus.textContent = stepStatus.dataset.failed;
+                        return;
+                    }
+                    if (frame.item === null) {
+                        // An end of the run: nothing moved, and that direction
+                        // has nothing left to offer.
+                        if (direction === 'prev') {
+                            hasPrev = false;
+                        } else {
+                            hasNext = false;
+                        }
+                        return;
+                    }
+                    const drawn = mapPreview ? await mapPreview.setTexture(frame.textureUrl, frame.bounds) : false;
+                    if (!drawn) {
+                        stepStatus.textContent = stepStatus.dataset.failed;
+                        return;
+                    }
+                    stepItemPk = frame.itemPk;
+                    document.getElementById('vs-step-time').textContent = frame.time;
+                    const run = document.getElementById('vs-step-run');
+                    if (run && frame.referenceTime) {
+                        run.textContent = frame.referenceTime;
+                    }
+                    document.getElementById('vs-step-link').href = frame.itemUrl;
+                    hasPrev = frame.hasPrev;
+                    hasNext = frame.hasNext;
+                } catch (error) {
+                    console.error('Stepping the preview failed', error);
+                    stepStatus.textContent = stepStatus.dataset.failed;
+                } finally {
+                    stepBusy = false;
+                    stepPrev.dataset.end = hasPrev ? '' : '1';
+                    stepNext.dataset.end = hasNext ? '' : '1';
+                    setStepButtons(hasPrev, hasNext);
+                }
+            }
+
+            if (previewConfig) {
+                setStepButtons(previewConfig.hasPrev, previewConfig.hasNext);
+                stepPrev.dataset.end = previewConfig.hasPrev ? '' : '1';
+                stepNext.dataset.end = previewConfig.hasNext ? '' : '1';
+                stepPrev.addEventListener('click', function () {
+                    step('prev');
+                });
+                stepNext.addEventListener('click', function () {
+                    step('next');
                 });
             }
 

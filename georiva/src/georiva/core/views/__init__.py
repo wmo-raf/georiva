@@ -23,6 +23,7 @@ from .admin import (  # noqa: F401
 )
 from .styling import (  # noqa: F401
     collection_styling,
+    variable_preview_step,
     variable_style_stops,
     variable_styling,
 )
