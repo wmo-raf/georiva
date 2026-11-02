@@ -98,6 +98,33 @@ context = {
 Reference examples: `sources/templates/georivasources/derived_product_runs.html` + its view
 `sources/views.py:derived_product_runs`, and `visualization/templates/visualization/item_preview.html`.
 
+## Use Wagtail's styleguide for UI markup
+
+Before writing markup for a button, icon, status tag, listing, form field or other UI element, look at Wagtail's
+styleguide and copy its markup and template tags. Don't hand-roll a component, or write custom CSS, for something it
+already has.
+
+- Live: `/admin/styleguide/` (the `wagtail.contrib.styleguide` app, enabled in `config/settings/dev.py` only).
+- Source, for when there is no browser: `wagtail/contrib/styleguide/templates/wagtailstyleguide/base.html` in the
+  installed Wagtail package (`just shell`, then `python -c "import wagtail.contrib.styleguide as m; print(m.__file__)"`).
+- Buttons: `button` + `button-small` / `button-secondary`; with an icon, `button bicolor button--icon` and
+  `{% icon name="plus" wrapped=1 %}` — the `wrapped=1` is what spaces the icon from its label. Never `<input type="button">`.
+- Tags: `{% status label="…" classname="w-status--primary" %}`. `w-status-tag` has no styles in Wagtail 7.
+
+## Panel vs. card
+
+- **Panel** — a titled region of a page: a bordered, rounded block with a header strip (title, a muted note,
+  right-aligned actions) and a body below it. It groups and labels related content. The reference is the
+  dashboard's "Recent failures" (`gr-failures` in `events/static/georivaevents/history.css`); the item-preview page's
+  "Item details" (`gr-item-panel`) copies its shape. Also `vs-panel`, `vz-section`.
+- **Card** — a compact, self-contained summary of one thing, usually one of several in a grid or list (a catalog,
+  a feed, an item). No header strip. E.g. `gr-catalog-card`, `gfeed-card`, `core/card_view.html`.
+
+A header strip plus a body is a panel; a compact summary of one entity in a listing is a card. Name new classes
+accordingly (`gr-<name>-panel`, `gr-<name>-card`), and copy the panel shape into the page's own `<style>` block
+rather than reusing another app's stylesheet. This is the project's own vocabulary — it is **not** Wagtail's
+`{% panel %}` / `w-panel` component, which is a collapsible block used on editor screens.
+
 ## CSS variable namespaces
 
 Two separate CSS contexts — use the right tokens for each:

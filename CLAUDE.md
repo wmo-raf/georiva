@@ -210,6 +210,7 @@ Check these when working on related areas:
   `wagtailadmin/generic/base.html` (slim header + breadcrumbs rendered from `breadcrumbs_items`; content in
   `{% block main_content %}` — never include `wagtailadmin/shared/header.html`), CSS/JS placement rules, and the
   `--w-color-*` / `--gr-*` CSS variable namespaces
+  Also covers panel vs. card naming and when to copy markup from Wagtail's styleguide (`/admin/styleguide/`, dev only)
 
 ## Adding new features or fixing bugs
 
