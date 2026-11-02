@@ -804,6 +804,132 @@ class PreviewItemChoiceTests(TestCase):
         self.assertIsNone(Item.objects.latest_for_variable(self.variable))
 
 
+class PreviewStepTests(TestCase):
+    """Stepping the map preview through time (#570).
+
+    Neighbours are the variable's COG items ordered by valid time *within the
+    run* — a forecast's horizons, or plain time order on a feed with no run.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = make_org_tree(make_organisation())
+        cls.variable = cls.tree["variable"]
+        cls.collection = cls.tree["collection"]
+        cls.tree["item"].delete()
+
+    def _item(self, time, reference_time=None, fmt=Asset.Format.COG, variable=None):
+        item = Item.objects.create(
+            collection=self.collection, time=time, reference_time=reference_time, bounds=[0, 0, 10, 10]
+        )
+        Asset.objects.create(item=item, variable=variable or self.variable, href="x.tif", format=fmt)
+        return item
+
+    def _step(self, item, direction):
+        return Item.objects.neighbour_for_variable(self.variable, item, direction)
+
+    def test_steps_in_valid_time_order_within_a_run(self):
+        run = datetime(2026, 3, 1, tzinfo=UTC)
+        a = self._item(datetime(2026, 3, 1, 0, tzinfo=UTC), run)
+        b = self._item(datetime(2026, 3, 1, 3, tzinfo=UTC), run)
+        c = self._item(datetime(2026, 3, 1, 6, tzinfo=UTC), run)
+        self.assertEqual(self._step(a, "next"), b)
+        self.assertEqual(self._step(b, "next"), c)
+        self.assertEqual(self._step(c, "prev"), b)
+
+    def test_the_ends_of_a_run_have_no_neighbour(self):
+        run = datetime(2026, 3, 1, tzinfo=UTC)
+        a = self._item(datetime(2026, 3, 1, 0, tzinfo=UTC), run)
+        b = self._item(datetime(2026, 3, 1, 3, tzinfo=UTC), run)
+        self.assertIsNone(self._step(a, "prev"))
+        self.assertIsNone(self._step(b, "next"))
+
+    def test_another_runs_items_are_never_stepped_to(self):
+        run = datetime(2026, 3, 1, tzinfo=UTC)
+        other_run = datetime(2026, 3, 2, tzinfo=UTC)
+        a = self._item(datetime(2026, 3, 1, 0, tzinfo=UTC), run)
+        self._item(datetime(2026, 3, 1, 3, tzinfo=UTC), other_run)
+        self.assertIsNone(self._step(a, "next"))
+
+    def test_a_feed_without_runs_steps_through_plain_time_order(self):
+        a = self._item(datetime(2026, 3, 1, tzinfo=UTC))
+        b = self._item(datetime(2026, 3, 2, tzinfo=UTC))
+        self.assertEqual(self._step(a, "next"), b)
+        self.assertEqual(self._step(b, "prev"), a)
+
+    def test_items_without_a_cog_for_the_variable_are_skipped(self):
+        a = self._item(datetime(2026, 3, 1, tzinfo=UTC))
+        self._item(datetime(2026, 3, 2, tzinfo=UTC), fmt=Asset.Format.PNG)
+        c = self._item(datetime(2026, 3, 3, tzinfo=UTC))
+        self.assertEqual(self._step(a, "next"), c)
+
+    def test_an_unknown_direction_is_refused(self):
+        a = self._item(datetime(2026, 3, 1, tzinfo=UTC))
+        with self.assertRaises(ValueError):
+            self._step(a, "sideways")
+
+
+class PreviewStepEndpointTests(StylingSurfaceTestCase):
+    """The JSON the preview's prev / next buttons read."""
+
+    def setUp(self):
+        super().setUp()
+        Item.objects.filter(collection=self.collection).delete()
+        self.run = datetime(2026, 3, 1, tzinfo=UTC)
+        self.first = self._item(datetime(2026, 3, 1, 0, tzinfo=UTC))
+        self.second = self._item(datetime(2026, 3, 1, 3, tzinfo=UTC))
+
+    def _item(self, time, collection=None):
+        item = Item.objects.create(
+            collection=collection or self.collection, time=time, reference_time=self.run, bounds=[0.0, 0.0, 10.0, 10.0]
+        )
+        Asset.objects.create(item=item, variable=self.variable, href="x.tif", format=Asset.Format.COG)
+        return item
+
+    @property
+    def step_url(self):
+        return reverse("variable_preview_step", args=[self.collection.pk, self.variable.pk])
+
+    def test_returns_the_neighbour_and_what_the_map_needs_to_draw_it(self):
+        response = self.client.get(self.step_url, {"item": self.first.pk, "direction": "next"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.variable.refresh_from_db()
+        self.assertEqual(data["textureUrl"], titiler_encoded_preview_url(self.second, self.variable))
+        self.assertEqual(data["bounds"], [0.0, 0.0, 10.0, 10.0])
+        self.assertEqual(data["itemUrl"], reverse("item_preview", args=[self.second.pk]))
+        self.assertEqual(data["itemPk"], self.second.pk)
+        self.assertTrue(data["hasPrev"])
+        self.assertFalse(data["hasNext"])
+
+    def test_an_end_of_the_run_returns_nothing(self):
+        response = self.client.get(self.step_url, {"item": self.second.pk, "direction": "next"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["item"])
+
+    def test_a_bad_direction_or_item_is_a_400(self):
+        self.assertEqual(self.client.get(self.step_url, {"item": self.first.pk, "direction": "x"}).status_code, 400)
+        self.assertEqual(self.client.get(self.step_url, {"item": "nope", "direction": "next"}).status_code, 400)
+
+    def test_an_item_of_another_collection_is_a_404(self):
+        foreign = make_org_tree(self.other_org)["item"]
+        response = self.client.get(self.step_url, {"item": foreign.pk, "direction": "next"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_another_organisations_variable_is_a_404(self):
+        foreign_variable = make_org_tree(self.other_org)["variable"]
+        url = reverse("variable_preview_step", args=[foreign_variable.collection_id, foreign_variable.pk])
+        self.assertEqual(self.client.get(url, {"item": self.first.pk, "direction": "next"}).status_code, 404)
+
+    def test_the_panel_hands_the_page_its_starting_point(self):
+        response = self.client.get(self.form_url)
+        config = response.context["preview"]["config"]
+        self.assertEqual(config["itemPk"], self.first.pk)
+        self.assertEqual(config["stepUrl"], self.step_url)
+        self.assertFalse(config["hasPrev"])
+        self.assertTrue(config["hasNext"])
+
+
 class PreviewPanelTests(StylingSurfaceTestCase):
     """What the styling form hands the map, and what it says when it cannot."""
 

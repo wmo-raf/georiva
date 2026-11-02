@@ -15,7 +15,7 @@
  *   const preview = GeoRivaRasterPreview.create({
  *       container: 'vs-map',
  *       basemapStyleUrl,
- *       textureUrl, bounds, imageUnscale, unit,
+ *       textureUrl, bounds, imageUnscale, unit, compactAttribution,
  *       palette: [[value, [r, g, b, a]], ...],
  *       onStatus: (state, message) => { ... },
  *   });
@@ -69,8 +69,9 @@
         let overlay = null;
         let map = null;
 
-        const bounds = options.bounds;
-        const fitBounds = [[bounds[0], bounds[1]], [bounds[2], bounds[3]]];
+        let bounds = options.bounds;
+        let textureUrl = options.textureUrl;
+        let fitBounds = [[bounds[0], bounds[1]], [bounds[2], bounds[3]]];
 
         function layer() {
             if (!image) {
@@ -128,7 +129,7 @@
             instance.props.onLoad();
 
             try {
-                image = await WeatherLayers.loadTextureData(options.textureUrl);
+                image = await WeatherLayers.loadTextureData(textureUrl);
             } catch (error) {
                 console.error('GeoRiva raster preview: texture failed', error);
                 onStatus('error', 'texture-failed');
@@ -146,12 +147,23 @@
                 style: style,
                 bounds: fitBounds,
                 fitBoundsOptions: {padding: 20},
-                attributionControl: true
+                attributionControl: options.compactAttribution ? {compact: true} : true
             });
             map.addControl(
                 new maplibregl.NavigationControl({showCompass: false}), 'top-right'
             );
-            map.once('load', onLoad);
+            map.once('load', function () {
+                if (options.compactAttribution) {
+                    // MapLibre's compact attribution starts open until the map
+                    // is first moved; start it as the small (i) button instead.
+                    const attribution = map.getContainer().querySelector('.maplibregl-ctrl-attrib');
+                    if (attribution) {
+                        attribution.classList.remove('maplibregl-compact-show');
+                        attribution.removeAttribute('open');
+                    }
+                }
+                onLoad();
+            });
         }).catch(function (error) {
             console.error('GeoRiva raster preview: basemap style failed', error);
             onStatus('error', 'style-failed');
@@ -161,6 +173,36 @@
             setPalette: function (next) {
                 palette = next;
                 repaint();
+            },
+
+            /**
+             * Swap the drawn item in place. The palette, opacity and basemap
+             * stay; the old texture stays on screen until the new one has
+             * loaded, so stepping through time does not flash empty. Resolves
+             * true once drawn, false when the texture failed.
+             */
+            setTexture: async function (nextUrl, nextBounds) {
+                textureUrl = nextUrl;
+                if (nextBounds) {
+                    bounds = nextBounds;
+                    fitBounds = [[bounds[0], bounds[1]], [bounds[2], bounds[3]]];
+                }
+                if (!overlay) {
+                    // Still loading: onLoad reads textureUrl when it gets there.
+                    return true;
+                }
+                try {
+                    const next = await WeatherLayers.loadTextureData(nextUrl);
+                    if (nextUrl !== textureUrl) {
+                        return true;  // a later step superseded this one
+                    }
+                    image = next;
+                } catch (error) {
+                    console.error('GeoRiva raster preview: texture failed', error);
+                    return false;
+                }
+                repaint();
+                return true;
             },
 
             setOpacity: function (next) {

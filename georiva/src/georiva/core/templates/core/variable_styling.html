@@ -477,6 +477,103 @@
             margin: 0;
         }
 
+        .vs-map-wrap {
+            position: relative;
+        }
+
+        /* Dark and see-through so the data stays readable behind it; lifted off
+           the bottom edge so MapLibre's attribution (bottom-right) never meets it. */
+        .vs-step-overlay {
+            position: absolute;
+            inset-inline: 0;
+            inset-block-end: 2rem;
+            margin-inline: auto;
+            inline-size: max-content;
+            max-inline-size: calc(100% - 7rem);
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem;
+            border-radius: 6px;
+            background: rgb(20 20 25 / 0.7);
+            color: #fff;
+            z-index: 2;
+        }
+
+        .vs-step-overlay button {
+            inline-size: 2rem;
+            block-size: 2rem;
+            border: 0;
+            border-radius: 4px;
+            background: transparent;
+            color: inherit;
+            font-size: 1.4rem;
+            line-height: 1;
+            cursor: pointer;
+        }
+
+        .vs-step-overlay button:hover:not(:disabled) {
+            background: rgb(255 255 255 / 0.18);
+        }
+
+        .vs-step-overlay button:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+
+        .vs-step-label {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-inline: 0.25rem;
+            text-align: center;
+            font-size: 0.85em;
+        }
+
+        .vs-step-label small {
+            font-size: 0.8em;
+            opacity: 0.75;
+        }
+
+        .vs-step-label small:empty {
+            display: none;
+        }
+
+        .vs-step-label small.vs-step-failed {
+            color: #ffb4a9;
+            opacity: 1;
+        }
+
+        .vs-step-veil {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            background: rgb(255 255 255 / 0.45);
+            z-index: 1;
+        }
+
+        .vs-step-veil[hidden] {
+            display: none;
+        }
+
+        .vs-step-spinner {
+            inline-size: 2rem;
+            block-size: 2rem;
+            border: 3px solid rgb(0 0 0 / 0.2);
+            border-top-color: rgb(0 0 0 / 0.65);
+            border-radius: 50%;
+            animation: vs-step-spin 0.8s linear infinite;
+        }
+
+        @keyframes vs-step-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
         .vs-map-note {
             border: 1px solid var(--w-color-border-furniture);
             border-radius: 4px;
@@ -853,7 +950,23 @@
                         {% trans "The latest item recorded no spatial extent, so there is nothing to place on a map. This is an ingestion problem, not a styling one." %}
                     </p>
                 {% else %}
-                    <div class="vs-map" id="vs-map"></div>
+                    <div class="vs-map-wrap">
+                        <div class="vs-map" id="vs-map"></div>
+                        {# Prev / next through time, floating on the map (#570). Valid is the headline, run the small print under it. #}
+                        <div class="vs-step-overlay" role="group" aria-label="{% trans 'Preview time' %}">
+                            <button type="button" id="vs-step-prev" aria-label="{% trans 'Previous time' %}" disabled>&lsaquo;</button>
+                            <div class="vs-step-label" aria-live="polite">
+                                <strong id="vs-step-time">{{ preview.item.time }}</strong>
+                                <small id="vs-step-run"
+                                       data-failed="{% trans 'Could not load that time.' %}"
+                                       data-run-label="{% trans 'Run' %}">{% if preview.item.reference_time %}{% trans "Run" %} {{ preview.item.reference_time }}{% endif %}</small>
+                            </div>
+                            <button type="button" id="vs-step-next" aria-label="{% trans 'Next time' %}" disabled>&rsaquo;</button>
+                        </div>
+                        <div class="vs-step-veil" id="vs-step-veil" hidden aria-hidden="true">
+                            <span class="vs-step-spinner"></span>
+                        </div>
+                    </div>
                     <p class="vs-map-note" id="vs-map-status"
                        data-style-failed="{% trans 'The basemap style could not be loaded, so the map cannot be drawn. Everything else on this page still works.' %}"
                        data-no-webgl="{% trans 'This browser has no WebGL, so the map cannot be drawn. Everything else on this page still works.' %}"
@@ -871,15 +984,7 @@
                         {% trans "Some stops fall outside the saved value range, so the map renders them as flat clipped color. Save a wider range to see them." %}
                     </p>
                     <div class="vs-map-meta">
-                        <dl>
-                            <dt>{% trans "Valid" %}</dt>
-                            <dd>{{ preview.item.time }}</dd>
-                            {% if preview.item.reference_time %}
-                                <dt>{% trans "Run" %}</dt>
-                                <dd>{{ preview.item.reference_time }}</dd>
-                            {% endif %}
-                        </dl>
-                        <a href="{{ preview.item_url }}">{% trans "Open the full item preview" %}</a>
+                        <a href="{{ preview.item_url }}" id="vs-step-link">{% trans "Open the full item preview" %}</a>
                     </div>
                 {% endif %}
             </section>
@@ -1817,6 +1922,7 @@
                     bounds: previewConfig.bounds,
                     imageUnscale: previewConfig.imageUnscale,
                     unit: previewConfig.unit,
+                    compactAttribution: true,
                     palette: paletteFromStops(readStops()),
                     onStatus: function (state, code) {
                         if (state === 'ready') {
@@ -1839,6 +1945,101 @@
                     if (mapPreview) {
                         mapPreview.setOpacity(parseInt(event.target.value, 10) / 100);
                     }
+                });
+            }
+
+
+            /**
+             Stepping the map through time (#570). Each press asks the server for
+             the neighbouring item of the same run and swaps its texture in
+             place; the palette, opacity and stops are untouched, so edits keep
+             repainting whichever item is on screen. Nothing is remembered: a
+             reload goes back to the latest item.
+             **/
+
+            const stepPrev = document.getElementById('vs-step-prev');
+            const stepNext = document.getElementById('vs-step-next');
+            const stepRun = document.getElementById('vs-step-run');
+            const stepVeil = document.getElementById('vs-step-veil');
+            let stepItemPk = previewConfig ? previewConfig.itemPk : null;
+            let stepBusy = false;
+            let stepRunText = stepRun ? stepRun.textContent : '';
+
+            function setStepButtons(hasPrev, hasNext) {
+                stepPrev.disabled = stepBusy || !hasPrev;
+                stepNext.disabled = stepBusy || !hasNext;
+            }
+
+            /** The failure takes the run line's place until the next step. */
+            function showStepFailure() {
+                stepRun.textContent = stepRun.dataset.failed;
+                stepRun.classList.add('vs-step-failed');
+            }
+
+            async function step(direction) {
+                if (stepBusy || !previewConfig) {
+                    return;
+                }
+                stepBusy = true;
+                stepVeil.hidden = false;
+                setStepButtons(false, false);
+                stepRun.textContent = stepRunText;
+                stepRun.classList.remove('vs-step-failed');
+                let hasPrev = !stepPrev.dataset.end;
+                let hasNext = !stepNext.dataset.end;
+                try {
+                    const params = new URLSearchParams({item: stepItemPk, direction: direction});
+                    const response = await fetch(previewConfig.stepUrl + '?' + params.toString(), {
+                        headers: {'Accept': 'application/json'}
+                    });
+                    const frame = await response.json();
+                    if (!response.ok) {
+                        showStepFailure();
+                        return;
+                    }
+                    if (frame.item === null) {
+                        // An end of the run: nothing moved, and that direction
+                        // has nothing left to offer.
+                        if (direction === 'prev') {
+                            hasPrev = false;
+                        } else {
+                            hasNext = false;
+                        }
+                        return;
+                    }
+                    const drawn = mapPreview ? await mapPreview.setTexture(frame.textureUrl, frame.bounds) : false;
+                    if (!drawn) {
+                        showStepFailure();
+                        return;
+                    }
+                    stepItemPk = frame.itemPk;
+                    document.getElementById('vs-step-time').textContent = frame.time;
+                    stepRunText = frame.referenceTime ? stepRun.dataset.runLabel + ' ' + frame.referenceTime : '';
+                    stepRun.textContent = stepRunText;
+                    document.getElementById('vs-step-link').href = frame.itemUrl;
+                    hasPrev = frame.hasPrev;
+                    hasNext = frame.hasNext;
+                } catch (error) {
+                    console.error('Stepping the preview failed', error);
+                    showStepFailure();
+                } finally {
+                    stepBusy = false;
+                    stepVeil.hidden = true;
+                    stepPrev.dataset.end = hasPrev ? '' : '1';
+                    stepNext.dataset.end = hasNext ? '' : '1';
+                    setStepButtons(hasPrev, hasNext);
+                }
+            }
+
+            if (previewConfig) {
+                setStepButtons(previewConfig.hasPrev, previewConfig.hasNext);
+                stepPrev.dataset.end = previewConfig.hasPrev ? '' : '1';
+                stepNext.dataset.end = previewConfig.hasNext ? '' : '1';
+                stepPrev.addEventListener('click', function () {
+                    step('prev');
+                });
+                stepNext.addEventListener('click', function () {
+                    step('next');
                 });
             }
 

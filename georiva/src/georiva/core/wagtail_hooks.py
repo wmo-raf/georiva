@@ -17,6 +17,7 @@ from .views import (
     collection_items_list,
     collection_styling,
     plugin_list,
+    variable_preview_step,
     variable_style_stops,
     variable_styling,
 )
@@ -41,6 +42,11 @@ def urlconf_georivacore():
             "collection/<int:collection_pk>/styling/<int:variable_pk>/stops/",
             variable_style_stops,
             name="variable_style_stops",
+        ),
+        path(
+            "collection/<int:collection_pk>/styling/<int:variable_pk>/preview-step/",
+            variable_preview_step,
+            name="variable_preview_step",
         ),
         path("plugins/", plugin_list, name="plugin_list"),
     ]
