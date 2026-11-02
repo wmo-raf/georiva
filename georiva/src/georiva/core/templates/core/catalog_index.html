@@ -13,7 +13,7 @@
         }
 
         .ccl-empty {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .ccl-panel {
@@ -27,13 +27,13 @@
             align-items: center;
             gap: 0.75rem;
             padding: 0.75rem 1rem;
-            background: var(--w-color-grey-50);
+            background: var(--w-color-surface-header);
             cursor: pointer;
             user-select: none;
         }
 
         .ccl-header:hover {
-            background: var(--w-color-grey-100);
+            background: color-mix(in srgb, var(--w-color-text-label) 6%, var(--w-color-surface-header));
         }
 
         .ccl-header:focus-visible {
@@ -45,7 +45,7 @@
             display: flex;
             align-items: center;
             transition: transform 0.15s ease;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .ccl-panel.is-open .ccl-chevron {
@@ -75,7 +75,7 @@
         }
 
         .ccl-badge {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.85rem;
             white-space: nowrap;
         }

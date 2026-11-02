@@ -139,8 +139,8 @@ Two separate CSS contexts — use the right tokens for each:
 Key `--w-color-*` tokens for admin templates:
 
 - Borders: `--w-color-border-furniture`
-- Muted text / secondary: `--w-color-grey-400`
-- Subtle backgrounds / Panel headers bg: `--w-color-grey-50`, `--w-color-grey-100`
+- Muted text / secondary: `--w-color-text-meta`
+- Panel header background: `--w-color-surface-header` (not the grey scale — see *Theme-aware colours*)
 - Menus: `--w-color-surface-menus`, `--w-color-surface-field`, `--w-color-surface-page`
 - Labels / primary text: `--w-color-text-label`
 - White: `--w-color-white`
@@ -156,3 +156,21 @@ Key `--gr-*` tokens for public templates (full list in `georiva.css`):
 
 `visualization/templates/visualization/item_preview.html` defines its own `--geo-*` variables
 locally on top of the generic base — leave them as-is.
+
+## Theme-aware colours (light and dark)
+
+Every admin page must work in both the light and dark theme. Colour comes from `--w-color-*` semantic tokens,
+never from fixed values.
+
+- **No fixed colours** for surfaces, text or borders in admin templates: no hex, `rgb()`, or named colours.
+- **Never the `--w-color-grey-*` scale for backgrounds or text.** Wagtail inverts it in dark mode (`grey-50` becomes
+  near-white), so a `grey-50` panel header is a light bar under light text. Use the tokens that flip with the theme:
+  `--w-color-surface-header`, `--w-color-surface-page`, `--w-color-text-meta`, `--w-color-border-furniture`, …
+- **Page-local variables** (`--geo-*` and the like) are fine, but define them *from* `--w-color-*` tokens, not hex.
+- **A tint or hover with no semantic token:** mix one in, e.g.
+  `color-mix(in srgb, var(--w-color-text-label) 6%, var(--w-color-surface-header))`.
+- **Allowed exceptions**, each with a one-line comment saying why: colours that are data (palettes, legends, chart
+  series), overlays that sit on a map and are dark by design, and elements inside the always-dark sidebar.
+- **The public site is out of scope.** It uses the separate `--gr-*` system and has no theme switch.
+- **Done means checked in both themes.** In dev, swap the `<html>` class `w-theme-system` for `w-theme-dark` in the
+  console, and include both in PR evidence for a UI change.
