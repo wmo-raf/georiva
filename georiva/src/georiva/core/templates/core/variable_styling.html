@@ -367,6 +367,21 @@
             color: var(--w-color-text-label);
         }
 
+        .vs-range-hint {
+            margin: 0.5rem 0 0.75rem;
+            padding-block: 0.75rem;
+            padding-inline-end: 1rem;
+        }
+
+        .vs-range-hint p {
+            margin: 0;
+            color: var(--w-color-text-label);
+        }
+
+        #vs-range-unsaved {
+            margin: 0.75rem 0;
+        }
+
         .vs-json-status {
             font-size: 0.85em;
             color: var(--w-color-text-meta);
@@ -659,10 +674,13 @@
                          data-selected-slug="{{ selected.slug }}"
                          data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
                          data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
-                        <span id="vs-range-hint-text"></span>
-                        <button type="button" class="button button-small button-secondary" id="vs-fit-range">
-                            {% trans "Fit range to stops" %}
-                        </button>
+                        {% icon name="warning" classname="default" %}
+                        <p>
+                            <span id="vs-range-hint-text"></span>
+                            <button type="button" class="button button-small button-secondary" id="vs-fit-range">
+                                {% trans "Fit range to stops" %}
+                            </button>
+                        </p>
                     </div>
                     <table class="vs-stops-table" id="vs-stops-table">
                         <thead>
