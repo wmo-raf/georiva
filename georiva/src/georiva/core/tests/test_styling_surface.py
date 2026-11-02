@@ -851,3 +851,39 @@ class PreviewPanelTests(StylingSurfaceTestCase):
         response = self.client.get(self.form_url)
         self.assertEqual(response.context["preview"]["unavailable"], "no-bounds")
         self.assertContains(response, "no spatial extent")
+
+
+class FitRangeHintTests(StylingSurfaceTestCase):
+    """The range hint's server half (#562): the span of each style's stops,
+    handed to the page so it can name the styles a fitted range would clip.
+    The hint itself — when it shows, the Fit button — is JavaScript, verified
+    by hand like the map."""
+
+    def _style(self, slug, stops, **kwargs):
+        return VariableStyle.objects.create(
+            variable=self.variable,
+            name=slug.title(),
+            slug=slug,
+            stops=[{"value": v, "color": "#123456"} for v in stops],
+            **kwargs,
+        )
+
+    def test_each_style_hands_over_the_span_of_its_stops(self):
+        self._style("official", [0, 100], is_default=True)
+        self._style("analyst", [-5, 40])
+        response = self.client.get(self.form_url)
+        spans = {s["slug"]: s for s in response.context["style_spans"]}
+        self.assertEqual((spans["official"]["min"], spans["official"]["max"]), (0, 100))
+        self.assertEqual((spans["analyst"]["min"], spans["analyst"]["max"]), (-5, 40))
+        self.assertEqual(spans["analyst"]["name"], "Analyst")
+
+    def test_a_style_without_stops_is_left_out(self):
+        self._style("official", [0, 100], is_default=True)
+        self._style("empty", [])
+        response = self.client.get(self.form_url)
+        self.assertEqual([s["slug"] for s in response.context["style_spans"]], ["official"])
+
+    def test_the_spans_reach_the_page_as_json(self):
+        self._style("official", [0, 100], is_default=True)
+        response = self.client.get(self.form_url)
+        self.assertContains(response, 'id="vs-style-spans"')

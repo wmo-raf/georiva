@@ -247,6 +247,7 @@
          * spelled out.
          */
         .vs-apply-ramp[hidden],
+        .vs-range-hint[hidden],
         .vs-unsaved[hidden] {
             display: none;
         }
@@ -509,6 +510,9 @@
                         </div>
                         <button type="submit" class="button">{% trans "Save range" %}</button>
                     </div>
+                    <p class="vs-unsaved" id="vs-range-unsaved" hidden>
+                        {% trans "Unsaved — the range above is not saved until you press “Save range”." %}
+                    </p>
                     <p class="help-text">
                         {% trans "Changing the range never rewrites existing stops — use “Apply ramp” in the style editor to regenerate them over a new range. The preview draws against the saved range, so save here before judging stops that fall outside it." %}
                     </p>
@@ -768,6 +772,16 @@
             {% endcomment %}
             <section class="vs-panel vs-map-panel">
                 <h2 class="w-label-1">{% trans "Preview" %}</h2>
+                {# Counterpart of the clip warning below: that one is stops beyond the range, this one is range beyond the stops. #}
+                <div class="vs-map-note vs-range-hint" id="vs-range-hint" hidden
+                     data-selected-slug="{{ selected.slug }}"
+                     data-text="{% trans 'Stops cover {stops_min}–{stops_max} of the {range_min}–{range_max} range, so much of the texture’s resolution is spent on empty space.' %}"
+                     data-clip-text="{% trans 'Fitting would clip the stops of: {styles}.' %}">
+                    <span id="vs-range-hint-text"></span>
+                    <button type="button" class="button button-small button-secondary" id="vs-fit-range">
+                        {% trans "Fit range to stops" %}
+                    </button>
+                </div>
                 {% if preview.unavailable == "no-data" %}
                     <p class="vs-map-note">
                         {% trans "Nothing to preview yet — no data has been ingested for this variable as a COG. The style can still be tuned; the map appears once the first file lands." %}
@@ -865,6 +879,7 @@
     </div>
 
     {{ preview.config|json_script:"vs-preview-config" }}
+    {{ style_spans|json_script:"vs-style-spans" }}
 {% endblock %}
 
 {% block extra_js %}
@@ -1019,8 +1034,87 @@
              VariableStyle.css_gradient() gives the saved snapshot.
              **/
 
+            /**
+             The range hint: the stops cover less than half of the saved-or-
+             edited range, so most of the encoded texture's resolution sits
+             where no stop colors it. Reads the Range inputs, not the saved
+             range, so it follows an unsaved edit. "Fit range to stops" only
+             fills those inputs — Save range is still the one thing that
+             persists. The range is shared by every style (ADR 0023), so the
+             hint names saved siblings whose stops the fitted range would clip.
+             **/
+
+            const rangeHint = document.getElementById('vs-range-hint');
+            const rangeHintText = document.getElementById('vs-range-hint-text');
+            const rangeUnsaved = document.getElementById('vs-range-unsaved');
+            const rangeMinInput = document.querySelector('input[name="value_min"]');
+            const rangeMaxInput = document.querySelector('input[name="value_max"]');
+            const styleSpansEl = document.getElementById('vs-style-spans');
+            const styleSpans = styleSpansEl ? JSON.parse(styleSpansEl.textContent) : [];
+            let fitted = null;
+
+            function fill(template, values) {
+                return template.replace(/\{(\w+)\}/g, function (match, key) {
+                    return key in values ? values[key] : match;
+                });
+            }
+
+            function updateRangeHint(stops) {
+                if (!rangeHint || !rangeMinInput || !rangeMaxInput) {
+                    return;
+                }
+                const rangeMin = parseFloat(rangeMinInput.value);
+                const rangeMax = parseFloat(rangeMaxInput.value);
+                const rangeSpan = rangeMax - rangeMin;
+                fitted = null;
+                if (!stops.length || Number.isNaN(rangeSpan) || rangeSpan <= 0) {
+                    rangeHint.hidden = true;
+                    return;
+                }
+                const low = stops[0].value;
+                const high = stops[stops.length - 1].value;
+                if ((high - low) * 2 >= rangeSpan || high <= low) {
+                    rangeHint.hidden = true;
+                    return;
+                }
+                fitted = [low, high];
+                const clipped = styleSpans.filter(function (other) {
+                    return other.slug !== rangeHint.dataset.selectedSlug
+                        && (other.min < low || other.max > high);
+                }).map(function (other) {
+                    return other.name;
+                });
+                let text = fill(rangeHint.dataset.text, {
+                    stops_min: low, stops_max: high, range_min: rangeMin, range_max: rangeMax
+                });
+                if (clipped.length) {
+                    text += ' ' + fill(rangeHint.dataset.clipText, {styles: clipped.join(', ')});
+                }
+                rangeHintText.textContent = text;
+                rangeHint.hidden = false;
+            }
+
+            if (rangeHint) {
+                document.getElementById('vs-fit-range').addEventListener('click', function () {
+                    if (!fitted) {
+                        return;
+                    }
+                    rangeMinInput.value = fitted[0];
+                    rangeMaxInput.value = fitted[1];
+                    rangeUnsaved.hidden = false;
+                    updateRangeHint(readStops());
+                });
+                [rangeMinInput, rangeMaxInput].forEach(function (input) {
+                    input.addEventListener('input', function () {
+                        rangeUnsaved.hidden = false;
+                        updateRangeHint(readStops());
+                    });
+                });
+            }
+
             function renderPreview() {
                 const stops = readStops();
+                updateRangeHint(stops);
                 if (!stops.length) {
                     preview.style.background = '';
                     previewMin.textContent = '';
