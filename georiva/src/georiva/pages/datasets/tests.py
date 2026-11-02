@@ -280,3 +280,59 @@ class ItemDetailBoundaryAvailabilityTests(TestCase):
         self._stats(self.variable, self.level_1)
 
         self.assertEqual(self._config()["boundaryLevelsByVariable"], {self.variable.slug: [1]})
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class CollectionListingItemLinkTests(TestCase):
+    """A card on the items listing opens the item map on the variable it shows.
+
+    The thumbnail is drawn for the sidebar's variable, so the link has to carry
+    that variable; otherwise the item page falls back to its first one.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
+        from georiva.pages.datasets.models import DatasetsIndexPage
+
+        cls.index = DatasetsIndexPage.objects.descendant_of(cls.organisation.site.root_page).get()
+
+        tree = make_org_tree(cls.organisation)
+        cls.catalog = tree["catalog"]
+        cls.collection = tree["collection"]
+        cls.item = tree["item"]
+        cls.variable = tree["variable"]
+
+        from georiva.core.models import Variable
+
+        cls.other_variable = Variable.objects.create(
+            collection=cls.collection,
+            name="Rainfall",
+            slug="rainfall",
+            unit=cls.variable.unit,
+            value_min=0,
+            value_max=50,
+        )
+        Asset.objects.create(item=cls.item, variable=cls.other_variable, href="rain.tif")
+        Asset.objects.filter(item=cls.item).update(format=Asset.Format.COG)
+        Collection.objects.filter(pk=cls.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+
+    def setUp(self):
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _card_href(self, **params):
+        url = f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/"
+        response = self.client.get(url, params)
+        self.assertEqual(response.status_code, 200, url)
+        body = response.content.decode()
+        item_path = f"{url}items/{self.item.pk}/"
+        start = body.index(item_path)
+        return body[start : body.index('"', start)]
+
+    def test_the_card_carries_the_selected_variable(self):
+        href = self._card_href(variable=self.other_variable.slug)
+        self.assertTrue(href.endswith(f"?variable={self.other_variable.slug}"), href)
+
+    def test_the_card_carries_the_default_variable_when_none_is_chosen(self):
+        href = self._card_href()
+        self.assertIn("?variable=", href)
