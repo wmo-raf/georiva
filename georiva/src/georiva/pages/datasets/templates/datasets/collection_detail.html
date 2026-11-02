@@ -315,39 +315,7 @@
                 {# ── Items grid ── #}
                 <div class="gr-items-main">
                     {% if active_variable %}
-                        {% comment %}
-                            A STAC Collection is one Variable, so the STAC link follows the
-                            active variable rather than the GeoRiva Collection.
-                        {% endcomment %}
-                        <header class="gr-items-variable-header">
-                            <span class="gr-items-variable-icon" aria-hidden="true">
-                                <i class="bi bi-layers"></i>
-                            </span>
-                            <div class="gr-items-variable-heading">
-                                <h3 class="gr-items-variable-name">{{ active_variable.name }}</h3>
-                                <div class="gr-items-variable-meta">
-                                    {% if active_variable.units %}
-                                        <span class="gr-mono gr-items-variable-unit">{{ active_variable.units }}</span>
-                                    {% endif %}
-                                    <span class="gr-items-variable-count">
-                                        {{ items.paginator.count }} {% trans "item" %}{{ items.paginator.count|pluralize }}
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="gr-api-pill">
-                                <span class="gr-api-pill-label">STAC</span>
-                                <code class="gr-api-pill-path" id="grStacPath">/api/stac/collections/{{ catalog_slug }}/{{ collection_slug }}/{{ active_variable.slug }}/</code>
-                                <button type="button" class="gr-api-pill-btn" id="grStacCopy"
-                                        title="{% trans 'Copy URL' %}" aria-label="{% trans 'Copy URL' %}">
-                                    <i class="bi bi-clipboard"></i>
-                                </button>
-                                <a href="/api/stac/collections/{{ catalog_slug }}/{{ collection_slug }}/{{ active_variable.slug }}/"
-                                   class="gr-api-pill-btn" target="_blank" rel="noopener"
-                                   title="{% trans 'Open STAC Collection' %}" aria-label="{% trans 'STAC Collection' %}">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </a>
-                            </div>
-                        </header>
+                        {% include "datasets/includes/connect_panel.html" %}
                     {% endif %}
 
                     {% if items %}
@@ -420,20 +388,74 @@
     <script src="{% static 'js/collection-detail.js' %}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-            const copyBtn = document.getElementById('grStacCopy');
-            const path = document.getElementById('grStacPath');
-            if (!copyBtn || !path) return;
+            const panel = document.getElementById('connect');
+            if (!panel) return;
 
-            copyBtn.addEventListener('click', function () {
-                const url = window.location.origin + path.textContent.trim();
-                navigator.clipboard.writeText(url).then(function () {
-                    const icon = copyBtn.querySelector('i');
+            // ── #connect opens the panel ──
+            function openFromHash() {
+                if (window.location.hash === '#connect') panel.open = true;
+            }
+
+            openFromHash();
+            window.addEventListener('hashchange', openFromHash);
+
+            // ── Copy: the absolute URL the server rendered ──
+            panel.addEventListener('click', function (event) {
+                const btn = event.target.closest('[data-copy]');
+                if (!btn) return;
+                navigator.clipboard.writeText(btn.dataset.copy).then(function () {
+                    const icon = btn.querySelector('i');
                     icon.className = 'bi bi-check2';
                     setTimeout(function () {
                         icon.className = 'bi bi-clipboard';
                     }, 1500);
                 });
             });
+
+            // ── Side panel: per-connection instructions ──
+            const side = document.getElementById('grSidePanel');
+            const backdrop = document.getElementById('grSidePanelBackdrop');
+            const content = document.getElementById('grSidePanelContent');
+            let trigger = null;
+
+            function closeSide() {
+                side.hidden = true;
+                backdrop.hidden = true;
+                document.removeEventListener('keydown', onKeydown);
+                if (trigger) trigger.focus();
+            }
+
+            function onKeydown(event) {
+                if (event.key === 'Escape') closeSide();
+            }
+
+            panel.addEventListener('click', function (event) {
+                const btn = event.target.closest('[data-howto]');
+                if (!btn) return;
+                const tpl = document.getElementById('grHowto-' + btn.dataset.howto);
+                if (!tpl) return;
+                trigger = btn;
+                content.replaceChildren(tpl.content.cloneNode(true));
+                side.hidden = false;
+                backdrop.hidden = false;
+                document.addEventListener('keydown', onKeydown);
+                side.focus();
+            });
+
+            // ── Tabs inside the side panel ──
+            content.addEventListener('click', function (event) {
+                const tab = event.target.closest('[data-tab]');
+                if (!tab) return;
+                content.querySelectorAll('[data-tab]').forEach(function (t) {
+                    t.classList.toggle('is-active', t === tab);
+                });
+                content.querySelectorAll('[data-tab-panel]').forEach(function (p) {
+                    p.classList.toggle('is-active', p.dataset.tabPanel === tab.dataset.tab);
+                });
+            });
+
+            backdrop.addEventListener('click', closeSide);
+            document.getElementById('grSidePanelClose').addEventListener('click', closeSide);
         });
     </script>
 {% endblock %}

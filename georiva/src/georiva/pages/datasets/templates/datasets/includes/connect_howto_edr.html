@@ -1,0 +1,41 @@
+{% load i18n %}
+<h3 class="gr-sidepanel-heading">{% trans "Read this collection over EDR" %}</h3>
+<p>
+    {% blocktrans %}The EDR collection document is a catalogue entry for the whole collection: its variables, units, extent and times. It covers every variable in the collection, not only the one you are viewing.{% endblocktrans %}
+</p>
+<code class="gr-sidepanel-code">{{ origin }}{{ url }}</code>
+
+<h4>{% trans "Example" %}</h4>
+<pre class="gr-sidepanel-pre"><code>curl "{{ origin }}{{ url }}"</code></pre>
+
+<h4>{% trans "Fields to read" %}</h4>
+<table class="gr-sidepanel-table">
+    <tbody>
+    <tr>
+        <td><code>parameter_names</code></td>
+        <td>{% trans "The collection's variables, with units." %}</td>
+    </tr>
+    <tr>
+        <td><code>extent.spatial</code></td>
+        <td>{% trans "Bounding box and CRS." %}</td>
+    </tr>
+    <tr>
+        <td><code>extent.temporal.values</code></td>
+        <td>{% trans "Every valid time, in one response with no paging." %}</td>
+    </tr>
+    {% if has_runs %}
+        <tr>
+            <td><code>x-georiva.runs</code></td>
+            <td>{% trans "Forecast runs, newest first, each with its reference_time and valid_times." %}</td>
+        </tr>
+    {% endif %}
+    </tbody>
+</table>
+<p>
+    {% blocktrans %}The XYZ guide uses this list to build a time picker for map tiles.{% endblocktrans %}
+</p>
+
+<h4>{% trans "Not available yet" %}</h4>
+<p>
+    {% blocktrans %}EDR data queries, such as position and area, are not available yet. The collection document may list a position link; it does not work.{% endblocktrans %}
+</p>

@@ -1,0 +1,50 @@
+{% load i18n %}
+<h3 class="gr-sidepanel-heading">{% trans "Use this variable over STAC" %}</h3>
+<p>
+    {% blocktrans %}STAC is the catalogue standard for geospatial data. This variable is one STAC collection, and each timestep is an item with its own data files.{% endblocktrans %}
+</p>
+<code class="gr-sidepanel-code">{{ origin }}{{ url }}</code>
+
+<h4>{% trans "Browse it" %}</h4>
+<p>
+    <a href="{{ origin }}{{ browser_url }}" target="_blank" rel="noopener">STAC Browser <i class="bi bi-box-arrow-up-right"></i></a>
+    {% trans "shows the catalogue, collections and items in a web page, with no code." %}
+</p>
+
+<h4>{% trans "Example" %}</h4>
+<div class="gr-tabs" role="tablist">
+    <button type="button" class="gr-tab is-active" role="tab" data-tab="python">Python</button>
+    <button type="button" class="gr-tab" role="tab" data-tab="curl">curl</button>
+</div>
+
+<div class="gr-tab-panel is-active" data-tab-panel="python" role="tabpanel">
+    <pre class="gr-sidepanel-pre"><code>from pystac_client import Client
+
+client = Client.open("{{ origin }}{{ root_url }}"{% if private %},
+                     parameters={"api_key": "YOUR_KEY"}{% endif %})
+collection = client.get_collection("{{ collection_id }}")
+
+items = collection.get_items(datetime="2026-01-01/2026-03-31")
+for item in items:
+    print(item.id, item.datetime)</code></pre>
+    <p class="gr-sidepanel-links">
+        <a href="https://pystac-client.readthedocs.io/" target="_blank" rel="noopener">pystac-client <i class="bi bi-box-arrow-up-right"></i></a>
+    </p>
+</div>
+
+<div class="gr-tab-panel" data-tab-panel="curl" role="tabpanel">
+    <pre class="gr-sidepanel-pre"><code>curl "{{ origin }}{{ url }}items/?limit=10&amp;datetime=2026-01-01T00:00:00Z/2026-03-31T00:00:00Z{% if private %}&amp;api_key=YOUR_KEY{% endif %}"</code></pre>
+    <p class="gr-sidepanel-links">
+        <a href="https://github.com/radiantearth/stac-api-spec" target="_blank" rel="noopener">STAC API specification <i class="bi bi-box-arrow-up-right"></i></a>
+    </p>
+</div>
+
+<h4>{% trans "Good to know" %}</h4>
+<ul class="gr-sidepanel-steps">
+    <li>{% blocktrans %}Items come newest first, 100 at a time by default. <code>limit</code> goes up to 1000; follow the <code>next</code> link for more.{% endblocktrans %}</li>
+    <li>{% blocktrans %}<code>datetime</code> takes one instant or a range, <code>start/end</code>, in ISO 8601 UTC.{% endblocktrans %}</li>
+    <li>{% blocktrans %}Each item's <code>assets</code> lists its data files; the cloud-optimised GeoTIFF is the one to read.{% endblocktrans %}</li>
+</ul>
+{% if private %}
+    <p>{% blocktrans %}This collection is private. Replace YOUR_KEY with an API key from your account.{% endblocktrans %}</p>
+{% endif %}

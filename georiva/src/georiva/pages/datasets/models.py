@@ -23,6 +23,7 @@ from georiva.organisations.access import (
     scoped_queryset,
 )
 from georiva.organisations.lookups import PAGE_TREE
+from georiva.pages.datasets.connect import connect_context
 
 ITEMS_PER_PAGE = 24
 
@@ -318,6 +319,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "variable_groups": variable_groups,
                 "active_var_slug": active_var_slug,
                 "active_variable": active_variable,
+                "connect": connect_context(request, catalog, collection, active_variable),
                 "items": items_page,
                 "page_range": page_range,
                 "filters": filters,

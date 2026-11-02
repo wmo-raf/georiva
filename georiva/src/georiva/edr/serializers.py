@@ -171,10 +171,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         Covers is_forecast=True but also reanalysis/hindcast datasets
         where reference_time is set but is_forecast may be False.
         """
-        return Item.objects.filter(
-            collection=collection,
-            reference_time__isnull=False,
-        ).exists()
+        return collection.has_runs()
 
     # ── Extent ────────────────────────────────────────────────────────────
 

@@ -261,18 +261,27 @@
     min-width: 0;
 }
 
-/* ── Active-variable header ── */
+/* ── Active-variable header / Connect panel ── */
 
-.gr-items-variable-header {
-    align-items: center;
+.gr-connect {
     background: linear-gradient(100deg, var(--gr-accent-dim), var(--gr-light) 60%);
     border: 1px solid var(--gr-accent-border);
     border-radius: var(--gr-radius-lg);
+    margin-bottom: 1rem;
+}
+
+.gr-items-variable-header {
+    align-items: center;
+    cursor: pointer;
     display: flex;
     flex-wrap: wrap;
     gap: 0.9rem 1.1rem;
-    margin-bottom: 1rem;
+    list-style: none;
     padding: 0.9rem 1.1rem;
+}
+
+.gr-items-variable-header::-webkit-details-marker {
+    display: none;
 }
 
 .gr-items-variable-icon {
@@ -322,41 +331,87 @@
     font-size: 0.8rem;
 }
 
-/* Endpoint pill — shows the real STAC URL, with copy + open */
+.gr-connect-chevron {
+    transition: transform var(--gr-dur) var(--gr-ease);
+}
+
+.gr-connect[open] .gr-connect-chevron {
+    transform: rotate(180deg);
+}
+
+.gr-connect-body {
+    border-top: 1px solid var(--gr-accent-border);
+    padding: 1rem 1.1rem 1.1rem;
+}
+
+.gr-connect-note {
+    color: var(--gr-text-2);
+    font-size: 0.82rem;
+    margin: 0 0 1rem;
+}
+
+.gr-connect-rows {
+    display: grid;
+    gap: 1rem;
+    /* minmax(0, …): a long URL may not widen the column past the card */
+    grid-template-columns: minmax(0, 1fr);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.gr-connect-row-head {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.6rem;
+    margin-bottom: 0.3rem;
+}
+
+.gr-connect-row-label {
+    color: var(--gr-text-1);
+    font-family: var(--gr-font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.gr-connect-row-note {
+    color: var(--gr-text-3);
+    font-size: 0.75rem;
+}
+
+.gr-connect-alt {
+    margin-top: 0.5rem;
+}
+
+/* Endpoint pill — shows the real URL, with copy + open */
 
 .gr-api-pill {
     align-items: stretch;
     background: var(--gr-light);
     border: 1px solid var(--gr-light-border-2);
     border-radius: var(--gr-radius);
-    display: inline-flex;
+    display: flex;
     max-width: 100%;
     min-width: 0;
     overflow: hidden;
 }
 
-.gr-api-pill-label {
-    align-items: center;
-    background: var(--gr-accent-dim);
-    border-right: 1px solid var(--gr-light-border);
-    color: var(--gr-accent-dark);
-    display: inline-flex;
-    font-family: var(--gr-font-mono);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    padding: 0 0.6rem;
-}
-
 .gr-api-pill-path {
     align-self: center;
     color: var(--gr-text-2);
+    flex: 1;
     font-family: var(--gr-font-mono);
     font-size: 0.75rem;
-    overflow: hidden;
+    min-width: 0;
+    overflow-wrap: anywhere;
     padding: 0.45rem 0.7rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+}
+
+.gr-api-pill-origin {
+    color: var(--gr-text-3);
 }
 
 .gr-api-pill-btn {
@@ -367,6 +422,7 @@
     color: var(--gr-text-3);
     cursor: pointer;
     display: inline-flex;
+    flex: none;
     padding: 0 0.7rem;
     text-decoration: none;
     transition: color var(--gr-dur) var(--gr-ease),
@@ -376,6 +432,174 @@
 .gr-api-pill-btn:hover {
     background: var(--gr-accent-dim);
     color: var(--gr-accent-dark);
+}
+
+/* The guide is the one segment with a word: it is an action, not a utility */
+.gr-api-pill-guide {
+    background: var(--gr-accent-dim);
+    color: var(--gr-accent-dark);
+    font-size: 0.75rem;
+    font-weight: 500;
+    gap: 0.35rem;
+}
+
+.gr-api-pill-guide:hover {
+    background: var(--gr-accent-border);
+}
+
+@media (max-width: 575px) {
+    .gr-api-pill-guide-label {
+        display: none;
+    }
+}
+
+/* ── Side panel (per-connection instructions) ── */
+
+.gr-sidepanel-backdrop {
+    background: rgba(15, 23, 42, 0.25);
+    inset: 0;
+    position: fixed;
+    z-index: 1040;
+}
+
+.gr-sidepanel {
+    background: var(--gr-light);
+    border-left: 1px solid var(--gr-light-border);
+    bottom: 0;
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+    max-width: 100%;
+    outline: none;
+    overflow-y: auto;
+    padding: 1.5rem 1.5rem 2rem;
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 36rem;
+    z-index: 1050;
+}
+
+.gr-sidepanel[hidden],
+.gr-sidepanel-backdrop[hidden] {
+    display: none;
+}
+
+.gr-sidepanel-close {
+    background: none;
+    border: 0;
+    color: var(--gr-text-3);
+    cursor: pointer;
+    font-size: 1rem;
+    position: absolute;
+    right: 1rem;
+    top: 1rem;
+}
+
+.gr-sidepanel-close:hover {
+    color: var(--gr-text-1);
+}
+
+.gr-sidepanel-heading {
+    font-size: 1.1rem;
+    margin: 0 2rem 0.75rem 0;
+}
+
+.gr-sidepanel-content h4 {
+    font-size: 0.85rem;
+    margin: 1.25rem 0 0.4rem;
+}
+
+.gr-sidepanel-content p,
+.gr-sidepanel-steps {
+    color: var(--gr-text-2);
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.gr-sidepanel-steps {
+    padding-left: 1.2rem;
+}
+
+.gr-sidepanel-table {
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    width: 100%;
+}
+
+.gr-sidepanel-table td {
+    border-top: 1px solid var(--gr-light-border);
+    color: var(--gr-text-2);
+    line-height: 1.45;
+    padding: 0.5rem 0.6rem 0.5rem 0;
+    vertical-align: top;
+}
+
+.gr-sidepanel-table td:first-child {
+    white-space: nowrap;
+}
+
+.gr-tabs {
+    border-bottom: 1px solid var(--gr-light-border);
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.gr-tab {
+    background: none;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--gr-text-3);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 500;
+    margin-bottom: -1px;
+    padding: 0.4rem 0.9rem;
+}
+
+.gr-tab:hover {
+    color: var(--gr-text-1);
+}
+
+.gr-tab.is-active {
+    border-bottom-color: var(--gr-accent);
+    color: var(--gr-text-1);
+}
+
+.gr-tab-panel {
+    display: none;
+}
+
+.gr-tab-panel.is-active {
+    display: block;
+}
+
+.gr-sidepanel-pre {
+    background: var(--gr-light-1);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    font-family: var(--gr-font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    margin: 0;
+    overflow-x: auto;
+    padding: 0.75rem 0.9rem;
+}
+
+.gr-sidepanel-links {
+    font-size: 0.8rem;
+    margin: 0.5rem 0 0;
+}
+
+.gr-sidepanel-code {
+    background: var(--gr-light-1);
+    border: 1px solid var(--gr-light-border);
+    border-radius: var(--gr-radius);
+    display: block;
+    font-family: var(--gr-font-mono);
+    font-size: 0.72rem;
+    margin-top: 0.3rem;
+    overflow-wrap: anywhere;
+    padding: 0.4rem 0.6rem;
 }
 
 .gr-item-cards-grid {

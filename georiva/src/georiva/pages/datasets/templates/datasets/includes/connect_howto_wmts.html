@@ -1,0 +1,50 @@
+{% load i18n %}
+<h3 class="gr-sidepanel-heading">{% trans "Use this layer over WMTS" %}</h3>
+<p>
+    {% blocktrans %}WMTS is the standard way to bring these layers into desktop GIS. One organisation-wide URL lists every layer you can see.{% endblocktrans %}
+</p>
+
+<h4>{% trans "Which URL do I use?" %}</h4>
+<table class="gr-sidepanel-table">
+    <tbody>
+    <tr>
+        <td>{% trans "Service URL" %}</td>
+        <td>{% blocktrans %}For desktop GIS such as QGIS. Paste it where the client asks for a WMTS server; it lists every layer you can see and answers tile requests.{% endblocktrans %}</td>
+    </tr>
+    <tr>
+        <td>{% trans "Capabilities" %}</td>
+        <td>{% blocktrans %}The same catalogue as a document you can read directly. For scripts and tooling: layer identifiers, the Time and Reftime dimensions and their values, the styles, and the tile URL templates.{% endblocktrans %}</td>
+    </tr>
+    </tbody>
+</table>
+<code class="gr-sidepanel-code">{{ origin }}{{ alt_url }}</code>
+<p>
+    {% blocktrans %}In it, each layer is named <code>catalog:collection:variable</code> and carries its own tile template, so you can build a tile URL without guessing the path.{% endblocktrans %}
+</p>
+
+<h4>QGIS</h4>
+<ol class="gr-sidepanel-steps">
+    <li>{% trans "Open Layer ▸ Add Layer ▸ Add WMS/WMTS Layer…" %}</li>
+    <li>{% trans "Choose New, give the connection a name and paste this URL:" %}
+        <code class="gr-sidepanel-code">{{ origin }}{{ url }}</code>
+    </li>
+    <li>{% trans "Choose Connect. The layer list fills from the service." %}</li>
+    <li>{% trans "Select a layer and choose Add." %}</li>
+</ol>
+
+<h4>{% trans "Other WMTS clients" %}</h4>
+<p>
+    {% blocktrans %}Any client that asks for a WMTS or "OGC tile" server takes the same URL. Tiles are PNG in the WebMercatorQuad grid.{% endblocktrans %}
+</p>
+
+<h4>{% trans "Looking for WMS?" %}</h4>
+<p>
+    {% blocktrans %}GeoRiva does not serve WMS. WMTS covers the same use in desktop GIS and is faster to render because tiles are cached.{% endblocktrans %}
+</p>
+
+{% if private %}
+    <h4>{% trans "Private collections" %}</h4>
+    <p>
+        {% blocktrans %}Replace YOUR_KEY in the URL with an API key from your account.{% endblocktrans %}
+    </p>
+{% endif %}

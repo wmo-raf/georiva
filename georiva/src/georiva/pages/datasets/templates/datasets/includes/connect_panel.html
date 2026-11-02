@@ -1,0 +1,119 @@
+{% load i18n %}
+{% comment %}
+    The Connect panel for the active variable (#580). The <details> is the
+    card: its <summary> is the variable header, its body the endpoint rows.
+    Works without JS; JS only adds copy, the side panel and #connect opening.
+{% endcomment %}
+<details class="gr-connect" id="connect">
+    <summary class="gr-items-variable-header">
+        <span class="gr-items-variable-icon" aria-hidden="true">
+            <i class="bi bi-layers"></i>
+        </span>
+        <div class="gr-items-variable-heading">
+            <h3 class="gr-items-variable-name">{{ active_variable.name }}</h3>
+            <span class="gr-items-variable-meta">
+                {% if active_variable.units %}
+                    <span class="gr-mono gr-items-variable-unit">{{ active_variable.units }}</span>
+                {% endif %}
+                <span class="gr-items-variable-count">
+                    {{ items.paginator.count }} {% trans "item" %}{{ items.paginator.count|pluralize }}
+                </span>
+            </span>
+        </div>
+        <span class="gr-btn gr-btn-outline gr-connect-toggle">
+            <i class="bi bi-plug"></i> {% trans "Connect" %}
+            <i class="bi bi-chevron-down gr-connect-chevron"></i>
+        </span>
+    </summary>
+
+    <div class="gr-connect-body">
+        {% if connect.private %}
+            <p class="gr-connect-note">
+                <i class="bi bi-key"></i>
+                {% blocktrans with key=connect.api_key_placeholder %}This collection is private. Replace <code>{{ key }}</code> in each URL with an API key from{% endblocktrans %}
+                <a href="{{ connect.api_keys_url }}">{% trans "your account" %}</a>.
+            </p>
+        {% endif %}
+
+        <ul class="gr-connect-rows">
+            {% for row in connect.rows %}
+                <li class="gr-connect-row">
+                    <div class="gr-connect-row-head">
+                        <span class="gr-connect-row-label">{{ row.label }}</span>
+                        {% if row.note %}
+                            <span class="gr-connect-row-note">{{ row.note }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="gr-api-pill">
+                        <code class="gr-api-pill-path"><span class="gr-api-pill-origin">{{ connect.origin }}</span>{{ row.url }}</code>
+                        {% if row.howto %}
+                            <button type="button" class="gr-api-pill-btn gr-api-pill-guide" data-howto="{{ row.howto }}"
+                                    title="{% trans 'How to use' %}">
+                                <i class="bi bi-book"></i>
+                                <span class="gr-api-pill-guide-label">{% trans "Guide" %}</span>
+                            </button>
+                        {% endif %}
+                        <button type="button" class="gr-api-pill-btn" data-copy="{{ connect.origin }}{{ row.url }}"
+                                title="{% trans 'Copy URL' %}" aria-label="{% trans 'Copy URL' %}">
+                            <i class="bi bi-clipboard"></i>
+                        </button>
+                        {% if row.openable %}
+                            <a href="{{ connect.origin }}{{ row.url }}" class="gr-api-pill-btn" target="_blank" rel="noopener"
+                               title="{% trans 'Open in new tab' %}" aria-label="{% trans 'Open in new tab' %}">
+                                <i class="bi bi-box-arrow-up-right"></i>
+                            </a>
+                        {% endif %}
+                    </div>
+                    {% if row.alt_url %}
+                        <div class="gr-connect-alt">
+                            <span class="gr-connect-row-note">{{ row.alt_label }}</span>
+                            <div class="gr-api-pill">
+                                <code class="gr-api-pill-path"><span class="gr-api-pill-origin">{{ connect.origin }}</span>{{ row.alt_url }}</code>
+                                {% if row.howto %}
+                                    <button type="button" class="gr-api-pill-btn gr-api-pill-guide" data-howto="{{ row.howto }}"
+                                            title="{% trans 'How to use' %}">
+                                        <i class="bi bi-book"></i>
+                                        <span class="gr-api-pill-guide-label">{% trans "Guide" %}</span>
+                                    </button>
+                                {% endif %}
+                                <button type="button" class="gr-api-pill-btn" data-copy="{{ connect.origin }}{{ row.alt_url }}"
+                                        title="{% trans 'Copy URL' %}" aria-label="{% trans 'Copy URL' %}">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                                <a href="{{ connect.origin }}{{ row.alt_url }}" class="gr-api-pill-btn" target="_blank" rel="noopener"
+                                   title="{% trans 'Open in new tab' %}" aria-label="{% trans 'Open in new tab' %}">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                    {% endif %}
+                    {% if row.howto == "wmts" %}
+                        <template id="grHowto-wmts">
+                            {% include "datasets/includes/connect_howto_wmts.html" with url=row.url alt_url=row.alt_url origin=connect.origin private=connect.private %}
+                        </template>
+                    {% elif row.howto == "stac" %}
+                        <template id="grHowto-stac">
+                            {% include "datasets/includes/connect_howto_stac.html" with url=row.url origin=connect.origin root_url=connect.stac_root_url browser_url=connect.stac_browser_url collection_id=connect.stac_collection_id private=connect.private %}
+                        </template>
+                    {% elif row.howto == "edr" %}
+                        <template id="grHowto-edr">
+                            {% include "datasets/includes/connect_howto_edr.html" with url=row.url origin=connect.origin has_runs=connect.has_runs %}
+                        </template>
+                    {% elif row.howto == "xyz" %}
+                        <template id="grHowto-xyz">
+                            {% include "datasets/includes/connect_howto_xyz.html" with url=row.url origin=connect.origin edr_url=connect.edr_url has_runs=connect.has_runs private=connect.private %}
+                        </template>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+</details>
+
+<div class="gr-sidepanel-backdrop" id="grSidePanelBackdrop" hidden></div>
+<aside class="gr-sidepanel" id="grSidePanel" role="dialog" aria-label="{% trans 'How to use' %}" tabindex="-1" hidden>
+    <button type="button" class="gr-sidepanel-close" id="grSidePanelClose" aria-label="{% trans 'Close' %}">
+        <i class="bi bi-x-lg"></i>
+    </button>
+    <div class="gr-sidepanel-content" id="grSidePanelContent"></div>
+</aside>
