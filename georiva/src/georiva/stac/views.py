@@ -671,15 +671,17 @@ class STACSearchView(STACGeoAPIView):
                 )
             elif len(parts) == 2:
                 # The id the API emits: {collection}/{variable}
-                collection_slug, variable_slug = parts
+                first_slug, variable_slug = parts
                 variables = org_variables.filter(
-                    collection__slug=collection_slug,
+                    collection__slug=first_slug,
                     slug=variable_slug,
                 )
                 if not variables.exists():
-                    # Legacy format {catalog}/{variable} — kept for backward compatibility
+                    # Legacy format {catalog}/{variable} — kept for backward
+                    # compatibility; a collection slug that equals a catalog slug
+                    # shadows it.
                     variables = org_variables.filter(
-                        collection__catalog__slug=collection_slug,
+                        collection__catalog__slug=first_slug,
                         slug=variable_slug,
                     )
             else:

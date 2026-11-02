@@ -253,3 +253,6 @@ class STACSearchCollectionIdTests(TestCase):
 
     def test_the_legacy_catalog_variable_id_still_matches(self):
         self.assertEqual(self._matched("chirps/precip"), 1)
+
+    def test_an_unknown_two_part_id_matches_nothing(self):
+        self.assertEqual(self._matched("nope/precip"), 0)
