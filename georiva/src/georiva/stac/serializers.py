@@ -25,6 +25,7 @@ from rest_framework import serializers
 
 from georiva.core.machine_plane import titiler_encoded_preview_url, titiler_preview_url
 from georiva.core.machine_plane.palette_cache import build_colormap_256
+from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import visible_visibilities
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
@@ -393,7 +394,7 @@ class STACItemSerializer(serializers.Serializer, STACBaseURLMixin):
                         "Value-encoded texture rendered on demand from the COG; unscale pixels with imageUnscale."
                     ),
                     "roles": ["visual"],
-                    "imageUnscale": [variable.value_min, variable.value_max],
+                    "imageUnscale": render_contract(variable).image_unscale,
                 }
 
         return assets

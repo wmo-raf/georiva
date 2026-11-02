@@ -186,8 +186,8 @@ class ItemDetailMap {
         const paletteMin = xg.palette_min ?? xg.value_min ?? 0;
         const paletteMax = xg.palette_max ?? xg.value_max ?? 1;
         // The texture is decoded over the variable's own range (ADR 0022 §4),
-        // not the span of the style's stops, which is a display concern.
-        const imageUnscale = [xg.value_min ?? paletteMin, xg.value_max ?? paletteMax];
+        // as the server's render contract states it — never the stops' span.
+        const imageUnscale = xg.image_unscale;
         const units = param?.unit?.symbol || '';
 
         this.currentPalette = {palette, paletteMin, paletteMax};

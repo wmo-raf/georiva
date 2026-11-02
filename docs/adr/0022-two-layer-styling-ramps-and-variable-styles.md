@@ -89,6 +89,10 @@ Styling splits into a reusable **aesthetic** layer and a per-variable
    styling. The `min < max` validation moves onto `Variable.clean()`,
    replacing the three form copies; the three aliases of the range tuple
    collapse to one.
+   `imageUnscale` is only ever derived from this range, never from a style's
+   stops (their span is a legend concern): `machine_plane/render_contract.py`
+   builds it once, and the STAC asset, styling preview, EDR `x-georiva` block
+   and item preview page all read it from there.
 
 5. **Provisioning seeds; only the styling surface tunes.** The plugin
    contract becomes a tiered, all-optional, **create-only** seed with

@@ -834,9 +834,10 @@
                                  data-asset-max="{{ asset.stats_max|default:'' }}"
                                  data-asset-units="{{ asset.units|default:'' }}"
                                  data-asset-name="{{ asset.variable.name }}"
-                                 data-asset-palette='{{ asset.variable.weather_layers_palette|to_json }}'
-                                 data-asset-palette-min="{{ asset.variable.value_range.0 }}"
-                                 data-asset-palette-max="{{ asset.variable.value_range.1 }}"
+                                 data-asset-palette='{{ asset.render_contract.palette|to_json }}'
+                                 data-asset-image-unscale='{{ asset.render_contract.image_unscale|to_json }}'
+                                 data-asset-palette-min="{{ asset.render_contract.legend_range.0 }}"
+                                 data-asset-palette-max="{{ asset.render_contract.legend_range.1 }}"
                                  data-visualizable="{% if asset.texture_url %}true{% else %}false{% endif %}">
                                 <div class="geo-asset-header">
                                     <div class="geo-asset-info">
@@ -1278,9 +1279,8 @@
                 const textureUrl = assetElement.dataset.assetTextureUrl;
                 const bounds = parseBounds(assetElement.dataset.assetBounds); // [w,s,e,n]
 
-                // Get palette range for imageUnscale (from palette or asset stats)
-                const paletteMin = safeParseFloat(assetElement.dataset.assetPaletteMin);
-                const paletteMax = safeParseFloat(assetElement.dataset.assetPaletteMax);
+                // The texture's encoding range, from the server's render contract.
+                const imageUnscale = JSON.parse(assetElement.dataset.assetImageUnscale || 'null');
 
                 if (!textureUrl) {
                     clearDeckLayers();
@@ -1305,10 +1305,6 @@
                     // Load as texture data
                     const image = await WeatherLayers.loadTextureData(textureUrl);
 
-                    const imageUnscale = (Number.isFinite(paletteMin) && Number.isFinite(paletteMax))
-                        ? [paletteMin, paletteMax]
-                        : null
-
                     // Create the raster layer
                     currentRasterLayer = new WeatherLayers.RasterLayer({
                         id: 'weather-raster',
@@ -1318,7 +1314,7 @@
                         bounds, // [west, south, east, north]
                         imageSmoothing: true,
                         imageInterpolation: "LINEAR",
-                        // Use palette range for unscaling
+                        // The variable's range, never the stops' span
                         imageUnscale,
                         palette,
                         opacity,

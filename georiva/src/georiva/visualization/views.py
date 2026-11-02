@@ -3,6 +3,7 @@ from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
 
 from georiva.core.machine_plane import titiler_encoded_preview_url
+from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Item
 from georiva.organisations.access import get_org_object_or_404
 
@@ -23,6 +24,7 @@ def item_preview(request, item_id):
         asset.texture_url = (
             titiler_encoded_preview_url(item, asset.variable) if asset.format == asset.Format.COG else ""
         )
+        asset.render_contract = render_contract(asset.variable)
 
     context = {
         "breadcrumbs_items": breadcrumbs_items,
