@@ -107,6 +107,12 @@ Two separate CSS contexts — use the right tokens for each:
 | **Wagtail admin** templates (`extends "wagtailadmin/generic/base.html"`) | `--w-color-*` | Wagtail 7 admin CSS             |
 | **Public-facing** templates (`extends "georiva/base.html"`)              | `--gr-*`      | `config/static/css/georiva.css` |
 
+**Use semantic tokens, never the `--w-color-grey-*` scale, for backgrounds and text.** Wagtail inverts the grey
+scale in dark mode (`grey-50` becomes near-white), so a `grey-50` panel header is a light bar with light text there.
+The semantic tokens (`--w-color-surface-header`, `--w-color-surface-page`, `--w-color-text-meta`, …) flip with the
+theme. For a hover tint with no semantic token, mix: `color-mix(in srgb, var(--w-color-text-label) 6%, var(--w-color-surface-header))`.
+Check a new page with the html class `w-theme-dark` as well as light.
+
 **Never mix them.** Wagtail 7 removed the old unprefixed `--color-*` aliases entirely — use `--w-color-*` only.
 
 Key `--w-color-*` tokens for admin templates:
