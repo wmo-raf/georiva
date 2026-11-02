@@ -265,6 +265,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             fallback = next((v for v in variables if v.has_coverage), None)
             active_var_slug = fallback.slug if fallback else active_var_slug
 
+        active_variable = next((v for v in variables if v.slug == active_var_slug), None)
+
         # --- Item queryset ---
         # Only items that have a COG asset for the active variable.
         items_qs = (
@@ -315,6 +317,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "ungrouped_variables": ungrouped_variables,
                 "variable_groups": variable_groups,
                 "active_var_slug": active_var_slug,
+                "active_variable": active_variable,
                 "items": items_page,
                 "page_range": page_range,
                 "filters": filters,
