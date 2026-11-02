@@ -326,7 +326,7 @@
                     {% if items %}
                         <div class="gr-item-cards-grid">
                             {% for item in items %}
-                                <a href="{{ page.url }}{{ catalog_slug }}/{{ collection_slug }}/items/{{ item.pk }}/"
+                                <a href="{{ page.url }}{{ catalog_slug }}/{{ collection_slug }}/items/{{ item.pk }}/{% if active_var_slug %}?variable={{ active_var_slug }}{% endif %}"
                                    class="gr-item-card">
                                     <div class="gr-item-card-thumb">
                                         {% titiler_preview_url item active_var_slug as thumb_url %}
