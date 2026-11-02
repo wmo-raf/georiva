@@ -1,0 +1,138 @@
+{% load i18n %}
+<h3 class="gr-sidepanel-heading">{% trans "Use these tiles in a web map" %}</h3>
+<p>
+    {% blocktrans %}The XYZ URL serves PNG map tiles in the standard web-map grid. It needs a time to draw, so a client has to know which times exist.{% endblocktrans %}
+</p>
+<code class="gr-sidepanel-code">{{ origin }}{{ url }}</code>
+
+<h4>{% trans "Parameters" %}</h4>
+<table class="gr-sidepanel-table">
+    <tbody>
+    <tr>
+        <td><code>{z}/{x}/{y}</code></td>
+        <td>{% trans "Tile position. Your map library fills these in." %}</td>
+    </tr>
+    <tr>
+        <td><code>time</code></td>
+        <td>{% blocktrans %}Required. ISO 8601 UTC, such as <code>2026-03-23T12:00:00Z</code>. It must equal the time of an existing item exactly; otherwise the tile is a 404.{% endblocktrans %}</td>
+    </tr>
+    {% if has_runs %}
+        <tr>
+            <td><code>reftime</code></td>
+            <td>{% blocktrans %}Required for this collection, whose data comes in runs. The run a time belongs to, in the same format. A valid time belongs to one run, so send a run's reference time together with one of its valid times.{% endblocktrans %}</td>
+        </tr>
+    {% endif %}
+    <tr>
+        <td><code>style</code></td>
+        <td>{% trans "Optional. A style name; leave it out for the variable's default." %}</td>
+    </tr>
+    {% if private %}
+        <tr>
+            <td><code>api_key</code></td>
+            <td>{% trans "Private collection: replace YOUR_KEY with a key from your account." %}</td>
+        </tr>
+    {% endif %}
+    </tbody>
+</table>
+
+<h4>{% trans "Which times exist?" %}</h4>
+<p>
+    {% blocktrans %}Read them from the EDR collection document. It lists every time in one response, with no paging.{% endblocktrans %}
+</p>
+<code class="gr-sidepanel-code">{{ origin }}{{ edr_url }}</code>
+<p>
+    {% if has_runs %}
+        {% blocktrans %}<code>x-georiva.runs</code> is a list of runs, newest first. Each has a <code>reference_time</code> and its <code>valid_times</code>. Send a run's <code>reference_time</code> as <code>reftime</code> and one of its <code>valid_times</code> as <code>time</code>. (<code>extent.temporal.values</code> holds only the newest run's times.){% endblocktrans %}
+    {% else %}
+        {% blocktrans %}<code>extent.temporal.values</code> is the list, oldest first. Each value is a valid <code>time</code>.{% endblocktrans %}
+    {% endif %}
+</p>
+<p>
+    {% blocktrans %}The list covers the whole collection, not only this variable. A time this variable has no data for returns 404, so skip it. Timestamps end in <code>+00:00</code>; send them as <code>Z</code>, because a raw <code>+</code> in a query string is read as a space.{% endblocktrans %}
+</p>
+
+<h4>{% trans "Example" %}</h4>
+<div class="gr-tabs" role="tablist">
+    <button type="button" class="gr-tab is-active" role="tab" data-tab="leaflet">Leaflet</button>
+    <button type="button" class="gr-tab" role="tab" data-tab="maplibre">MapLibre</button>
+</div>
+
+<div class="gr-tab-panel is-active" data-tab-panel="leaflet" role="tabpanel">
+    <pre class="gr-sidepanel-pre"><code>// Needs a &lt;div id="map"&gt; and a &lt;select id="time"&gt;.
+const map = L.map("map").setView([0, 20], 4);
+
+const EDR = "{{ origin }}{{ edr_url }}";
+const TILES = "{{ origin }}{{ url }}";
+const iso = (t) => t.replace("+00:00", "Z");
+
+fetch(EDR)
+  .then((r) => r.json())
+  .then((doc) => {
+    {% if has_runs %}// One entry per (run, valid time) pair.
+    const steps = doc["x-georiva"].runs.flatMap((run) =>
+      run.valid_times.map((t) => ({ time: t, reftime: run.reference_time }))
+    );{% else %}const steps = doc.extent.temporal.values.map((t) => ({ time: t }));{% endif %}
+    const select = document.getElementById("time");
+    steps.forEach((s, i) => select.add(new Option({% if has_runs %}`${s.reftime} → ${s.time}`{% else %}s.time{% endif %}, i)));
+
+    // Extra options fill the {Time}{% if has_runs %} and {Reftime}{% endif %} placeholders.
+    const pick = (i) => ({
+      Time: iso(steps[i].time),{% if has_runs %}
+      Reftime: iso(steps[i].reftime),{% endif %}
+    });
+    const layer = L.tileLayer(TILES, pick(0)).addTo(map);
+
+    select.onchange = () => {
+      Object.assign(layer.options, pick(select.value));
+      layer.redraw();
+    };
+  });</code></pre>
+    <p class="gr-sidepanel-links">
+        <a href="https://leafletjs.com/reference.html#tilelayer" target="_blank" rel="noopener">Leaflet TileLayer <i class="bi bi-box-arrow-up-right"></i></a>
+    </p>
+</div>
+
+<div class="gr-tab-panel" data-tab-panel="maplibre" role="tabpanel">
+    <pre class="gr-sidepanel-pre"><code>// Needs `map` (a maplibregl.Map) and a &lt;select id="time"&gt;.
+const EDR = "{{ origin }}{{ edr_url }}";
+const TILES = "{{ origin }}{{ url }}";
+
+const iso = (t) => t.replace("+00:00", "Z");
+const tilesFor = (s) =>
+  TILES.replace("{Time}", iso(s.time)){% if has_runs %}
+       .replace("{Reftime}", iso(s.reftime)){% endif %};
+
+fetch(EDR)
+  .then((r) => r.json())
+  .then((doc) => {
+    {% if has_runs %}// One entry per (run, valid time) pair.
+    const steps = doc["x-georiva"].runs.flatMap((run) =>
+      run.valid_times.map((t) => ({ time: t, reftime: run.reference_time }))
+    );{% else %}const steps = doc.extent.temporal.values.map((t) => ({ time: t }));{% endif %}
+    const select = document.getElementById("time");
+    steps.forEach((s, i) => select.add(new Option({% if has_runs %}`${s.reftime} → ${s.time}`{% else %}s.time{% endif %}, i)));
+
+    map.on("load", () => {
+      map.addSource("data", {
+        type: "raster",
+        tiles: [tilesFor(steps[0])],
+        tileSize: 256,
+      });
+      map.addLayer({ id: "data", type: "raster", source: "data" });
+    });
+
+    // A raster source has no per-request parameters: give it a new URL.
+    select.onchange = () =>
+      map.getSource("data").setTiles([tilesFor(steps[select.value])]);
+  });</code></pre>
+    <p class="gr-sidepanel-links">
+        <a href="https://maplibre.org/maplibre-style-spec/sources/#raster" target="_blank" rel="noopener">MapLibre raster sources <i class="bi bi-box-arrow-up-right"></i></a>
+    </p>
+</div>
+
+<h4>{% trans "If a tile does not draw" %}</h4>
+<ul class="gr-sidepanel-steps">
+    <li>{% blocktrans %}<strong>422</strong>: a required parameter, usually <code>time</code>, is missing.{% endblocktrans %}</li>
+    <li>{% blocktrans %}<strong>400</strong>: the timestamp is not ISO 8601 UTC, often a <code>+</code> that became a space.{% endblocktrans %}</li>
+    <li>{% blocktrans %}<strong>404 "File not found in storage"</strong>: no item has exactly this time{% endblocktrans %}{% if has_runs %} {% trans "and run" %}{% endif %}. {% trans "Take it from the items list." %}</li>
+</ul>

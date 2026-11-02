@@ -325,6 +325,16 @@ class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
             source_vars.extend(variable_sources_params)
         return source_vars
 
+    def has_runs(self) -> bool:
+        """Whether any item carries a ``reference_time`` — the data's own answer.
+
+        The EDR document and the WMTS capabilities decide from this, not from
+        ``is_forecast``, because reanalysis and hindcast collections have runs
+        without being forecasts. Anything that tells a client whether it must
+        name a run asks here, so the three cannot disagree.
+        """
+        return self.items.filter(reference_time__isnull=False).exists()
+
     def get_latest_item_date(self) -> datetime | None:
         """
         Latest valid_time in this collection (Item.time).
