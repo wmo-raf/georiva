@@ -178,7 +178,7 @@ georiva/src/georiva/static
 georiva/src/georiva/media
 
 backup/
-georiva_data/
+**/georiva_data/
 .vscode
 data/
 
@@ -204,3 +204,4 @@ data/
 **/.mypy_cache
 .git
 /dev-plugins
+/docs
