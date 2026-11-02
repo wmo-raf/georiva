@@ -189,6 +189,21 @@ def _ramp_groups(ramp_queryset, selected_ramp_id):
     ]
 
 
+def _style_spans(styles) -> list[dict]:
+    """The span of every style's saved stops, for the range hint (#562).
+
+    The range is shared by all of a variable's styles (ADR 0023), so fitting
+    it to the stops on screen can clip a sibling; the page needs their spans
+    to say which. A style with no stops has nothing to clip.
+    """
+    spans = []
+    for style in styles:
+        low, high = style.min_max_from_stops()
+        if low is not None:
+            spans.append({"slug": style.slug, "name": style.name, "min": low, "max": high})
+    return spans
+
+
 def _preview_context(variable):
     """What the map preview draws, or why it draws nothing (#382).
 
@@ -424,6 +439,7 @@ def variable_styling(request, collection_pk, variable_pk):
         "collection": collection,
         "variable": variable,
         "styles": styles,
+        "style_spans": _style_spans(styles),
         "selected": selected,
         "creating": creating,
         "range_form": range_form,
