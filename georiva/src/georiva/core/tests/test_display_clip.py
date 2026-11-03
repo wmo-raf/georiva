@@ -143,3 +143,32 @@ class RewarmingTests(TestCase):
         self.catalog.save()
 
         self.assertNotIn("boundary", self.cached())
+
+
+class TextureTokenTests(TestCase):
+    """The encoded texture is cached as immutable under a ``v`` token; the crop is baked into it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tree = make_org_tree(make_organisation("kenya"), name="Kenya Forecast")
+        cls.catalog = cls.tree["catalog"]
+        cls.boundary = make_boundary()
+
+    def token(self, mode, boundary=True):
+        from georiva.core.machine_plane import render_config_token
+        from georiva.core.models import Variable
+
+        Catalog.objects.filter(pk=self.catalog.pk).update(clip_mode=mode, boundary=self.boundary if boundary else None)
+        return render_config_token(Variable.objects.get(pk=self.tree["variable"].pk))
+
+    def test_moving_to_display_is_a_different_url(self):
+        """Or a browser keeps the uncropped texture it already fetched."""
+        self.assertNotEqual(self.token(ClipMode.MASK), self.token(ClipMode.DISPLAY))
+
+    def test_every_other_mode_keeps_the_url_it_had(self):
+        tokens = {self.token(mode) for mode in (ClipMode.NONE, ClipMode.BBOX, ClipMode.MASK)}
+
+        self.assertEqual(len(tokens), 1)
+
+    def test_display_without_a_boundary_changes_nothing(self):
+        self.assertEqual(self.token(ClipMode.DISPLAY, boundary=False), self.token(ClipMode.MASK))

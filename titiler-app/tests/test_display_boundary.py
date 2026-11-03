@@ -35,8 +35,9 @@ def seed(fake_redis, seed_cog, boundary=None):
 
 
 def alpha_of(png: bytes) -> np.ndarray:
+    """The alpha channel: the last band, whether the PNG is RGBA (a tile) or value+alpha (a texture)."""
     with MemoryFile(png) as memfile, memfile.open() as src:
-        return src.read(4)
+        return src.read(src.count)
 
 
 def identify(client, i):
@@ -128,3 +129,49 @@ class TestAClickFollowsTheMap:
         seed(fake_redis, seed_cog)
 
         assert identify(client, 192) is not None
+
+
+class TestTheEncodedTextureIsCroppedToo:
+    """``encoded-preview.png`` reads the COG without going through the tile algorithm.
+
+    It is what WeatherLayers draws and reads hover values from, so a crop that
+    stopped at the tiles would leave the whole extent live on every layer built on it.
+    """
+
+    PATH = f"/{ORG}/{CATALOG}/{COLLECTION}/{VARIABLE}/encoded-preview.png"
+    QUERY = {"time": "2026-03-23T12:00:00Z"}
+
+    def test_the_texture_is_transparent_outside_and_opaque_inside(self, client, fake_redis, seed_cog):
+        seed(fake_redis, seed_cog, boundary=WEST_HALF)
+
+        response = client.get(self.PATH, params=self.QUERY)
+
+        assert response.status_code == 200
+        alpha = alpha_of(response.content)
+        height, width = alpha.shape
+        assert alpha[height // 2, width // 4] == 255
+        assert alpha[height // 2, 3 * width // 4] == 0
+
+    def test_without_an_outline_the_whole_extent_is_encoded(self, client, fake_redis, seed_cog):
+        seed(fake_redis, seed_cog)
+
+        alpha = alpha_of(client.get(self.PATH, params=self.QUERY).content)
+
+        assert (alpha == 255).all()
+
+    def test_the_values_inside_are_the_cogs_own(self, client, fake_redis, seed_cog):
+        """Cropping masks pixels; it does not touch the ones it keeps."""
+        seed(fake_redis, seed_cog, boundary=WEST_HALF)
+        whole = client.get(self.PATH, params=self.QUERY)
+        fake_redis.store[KEY] = json.dumps(TILE_CONFIG)
+        uncropped = client.get(self.PATH, params=self.QUERY)
+
+        def red(png):
+            with MemoryFile(png) as memfile, memfile.open() as src:
+                return src.read(1)
+
+        cropped_red, whole_red = red(whole.content), red(uncropped.content)
+        height, width = cropped_red.shape
+        # Inside the outline both ways: the west half, clear of the poles it stops short of.
+        inside = (slice(height // 4, 3 * height // 4), slice(0, width // 2 - 2))
+        assert (cropped_red[inside] == whole_red[inside]).all()

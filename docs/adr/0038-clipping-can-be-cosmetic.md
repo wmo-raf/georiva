@@ -28,7 +28,9 @@ border withheld; it just was not wanted on screen.
   when `mask`", so no ingestion code changes.
 - The catalog's boundary travels to the tile server in the tile config (`boundary`, a simplified GeoJSON geometry, in
   both the Redis payload and the `tile-config` endpoint). Titiler masks each tile to it where it rescales, so the
-  colormap draws nothing outside. WMTS `GetTile` re-enters the same tile route and inherits it.
+  colormap draws nothing outside. WMTS `GetTile` re-enters the same tile route and inherits it. The value-encoded
+  texture (`encoded-preview.png`, ADR 0021) is cropped the same way, through the same helper, because it is read
+  from the COG without going through the tile algorithm and is what WeatherLayers draws and reads hover values from.
 - WMTS `GetFeatureInfo` follows the map: a click outside the boundary answers a null value, as it does for any
   point with no data.
 - Saving a catalog re-warms the render config of every variable under it, because the outline lives in each.
@@ -61,5 +63,8 @@ publisher's own area follows the data extent instead.
 - The outline is simplified to 0.002° before it is cached, which is far finer than any grid a map is drawn from and
   keeps a country outline from being hundreds of kilobytes in every Redis value. A change to the boundary row itself
   (rather than the catalog) is not seen until the next palette warm.
+- The encoded texture is served `immutable` under a `v` token that hashes what is baked into it. That token now
+  includes the display boundary's id, so moving a catalog to or from `display` is a different URL while every other
+  mode keeps the one it had. Without it a browser would keep the uncropped texture it already fetched.
 - Items ingested before a catalog moves to `display` stay masked until they are re-ingested.
 - Publisher areas follow the data's extent, so a plugin's area picker no longer pads a country by a margin.

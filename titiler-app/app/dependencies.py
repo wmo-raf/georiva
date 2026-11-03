@@ -4,13 +4,13 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
-import numpy as np
 import redis
 from fastapi import Depends, HTTPException, Path, Query
 from rio_tiler.models import ImageData
 from rio_tiler.types import ColorMapType
 from titiler.core.algorithm.base import BaseAlgorithm
 
+from app.boundary import crop
 from app.config import (
     DJANGO_BASE_URL,
     MINIO_BUCKET_NAME,
@@ -253,11 +253,7 @@ class RescaleAlgorithm(BaseAlgorithm):
     boundary: dict | None = None
 
     def __call__(self, img: ImageData) -> ImageData:
-        if self.boundary:
-            from app.boundary import inside_mask
-
-            inside = inside_mask(self.boundary, img.bounds, img.crs, (img.height, img.width))
-            img.array = np.ma.masked_array(img.array.data, mask=np.ma.getmaskarray(img.array) | ~inside)
+        crop(img, self.boundary)
         img.rescale(in_range=[(self.vmin, self.vmax)], out_range=[(0, 255)])
         return img
 

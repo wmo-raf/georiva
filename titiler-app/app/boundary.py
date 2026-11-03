@@ -47,6 +47,20 @@ def inside_mask(geometry: dict, bounds, crs, shape: tuple[int, int]) -> np.ndarr
     return geometry_mask([projected], out_shape=shape, transform=transform, invert=True, all_touched=True)
 
 
+def crop(img, geometry: dict | None):
+    """Mask an ``ImageData`` to the boundary, in place, and return it.
+
+    The one place a drawn or encoded image is cropped, so a tile, a preview and an
+    encoded texture cannot disagree about where the outline is. With no boundary
+    the image is returned untouched.
+    """
+    if not geometry:
+        return img
+    inside = inside_mask(geometry, img.bounds, img.crs, (img.height, img.width))
+    img.array = np.ma.masked_array(img.array.data, mask=np.ma.getmaskarray(img.array) | ~inside)
+    return img
+
+
 def contains(geometry: dict, lon: float, lat: float) -> bool:
     """Whether a longitude/latitude lies inside a (Multi)Polygon, holes honoured.
 

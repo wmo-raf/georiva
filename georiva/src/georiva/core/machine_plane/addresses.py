@@ -280,7 +280,14 @@ def _render_range_basis(variable) -> str:
 
     One spelling for the two token schemes, so a change to what "the render
     range" means cannot move one token and not the other."""
-    return f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
+    basis = f"{variable.value_min}:{variable.value_max}:{variable.scale_type or 'linear'}"
+    # A catalog that crops its maps to a boundary (ADR 0038) bakes that crop into
+    # every texture and preview, so moving to or from it must be a different URL.
+    # Only when it applies, so every other catalog keeps the URLs it already has.
+    catalog = variable.collection.catalog
+    if catalog.clip_mode == "display" and catalog.boundary_id is not None:
+        basis += f":display={catalog.boundary_id}"
+    return basis
 
 
 def style_version_token(variable, style=None) -> str:
