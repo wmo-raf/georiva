@@ -18,6 +18,7 @@ svc() {
     default) echo georiva-celery-default-worker ;;
     ingestion) echo georiva-celery-ingestion-worker ;;
     processing) echo georiva-celery-processing-worker ;;
+    bookkeeping) echo georiva-celery-bookkeeping-worker ;;
     beat) echo georiva-celery-beat ;;
     titiler) echo georiva-titiler-app ;;
     *) echo "$1" ;;

@@ -42,12 +42,15 @@ gunicorn              : Start GeoRiva django using a prod ready gunicorn server:
                            * Binds to 0.0.0.0
 celery-default-worker   : Start the default celery worker (scheduled tasks, pruning, sweeps
 celery-ingestion-worker : Start the ingestion celery worker (heavy GRIB/raster processing)
-celery-processing-worker: Start the processing celery worker (derivation units, zonal stats)
+celery-processing-worker: Start the processing celery worker (derivation units, publishes)
+celery-bookkeeping-worker: Start the bookkeeping celery worker (zonal stats, virtual-Zarr manifests)
 celery-default-worker-dev       : Start the default celery worker with auto-reload on code changes
                           (requires the dev build target).
 celery-ingestion-worker-dev     : Start the ingestion celery worker with auto-reload on code changes
                           (requires the dev build target).
 celery-processing-worker-dev    : Start the processing celery worker with auto-reload on code changes
+                          (requires the dev build target).
+celery-bookkeeping-worker-dev   : Start the bookkeeping celery worker with auto-reload on code changes
                           (requires the dev build target).
 celery-beat             : Start the celery beat service used to schedule periodic jobs
 
@@ -218,6 +221,9 @@ celery-ingestion-worker)
 celery-processing-worker)
     start_celery_worker georiva-processing processing-worker@%h "${@:2}"
     ;;
+celery-bookkeeping-worker)
+    start_celery_worker georiva-bookkeeping bookkeeping-worker@%h "${@:2}"
+    ;;
 celery-default-worker-dev)
     start_celery_worker_dev georiva-default default-worker@%h
     ;;
@@ -226,6 +232,9 @@ celery-ingestion-worker-dev)
     ;;
 celery-processing-worker-dev)
     start_celery_worker_dev georiva-processing processing-worker@%h
+    ;;
+celery-bookkeeping-worker-dev)
+    start_celery_worker_dev georiva-bookkeeping bookkeeping-worker@%h
     ;;
 celery-beat)
     exec celery -A georiva beat -l "${GEORIVA_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"

@@ -12,13 +12,13 @@ Meteorological Services.
 - **Framework**: Django 5.x + Wagtail 7.x (CMS/admin)
 - **Database**: PostgreSQL 18 + TimescaleDB + PostGIS (TimescaleDB HA image), fronted by PgBouncer
 - **Object Storage**: MinIO (S3-compatible), multi-bucket (incoming, sources, archive, assets, zarr)
-- **Task Queue**: Celery + Redis (three queues: `georiva-default`, `georiva-ingestion`, `georiva-processing`)
+- **Task Queue**: Celery + Redis (four queues: `georiva-default`, `georiva-ingestion`, `georiva-processing`, `georiva-bookkeeping`)
 - **Event Bus**: MinIO bucket notifications → Redis list → `minio-consumer` / `staging-consumer` (no MQTT/Mosquitto)
 - **Tile Servers**: Titiler (raster, FastAPI, `titiler-app/`); Martin (vector/MVT from PostGIS)
 - **Data Libraries**: xarray, rasterio, cfgrib, dask, geopandas; virtualizarr + virtual-tiff (kerchunk)
 - **API**: Django REST Framework + drf-spectacular (OpenAPI)
 - **Frontend**: STAC Browser (Radiant Earth), Vue.js for dashboards
-- **Container**: Docker Compose (15 services), Nginx reverse proxy + tile auth gateway (`georiva-web-proxy`)
+- **Container**: Docker Compose (16 services), Nginx reverse proxy + tile auth gateway (`georiva-web-proxy`)
 - **Package Manager**: uv — core is a standalone project (`georiva/pyproject.toml` + `georiva/uv.lock`); repo-root
   `pyproject.toml` is a dev workspace overlay that ties in plugins
 - **Python**: 3.12+
@@ -98,7 +98,7 @@ just build                         # Build dev images
 just up                            # Start with hot-reload (`just up -d` to detach)
 just down                          # Stop
 just logs                          # All service logs
-just logs app                      # One service (app, default, ingestion, processing, beat, titiler, or any compose name)
+just logs app                      # One service (app, default, ingestion, processing, bookkeeping, beat, titiler, or any compose name)
 just shell                         # Shell into app container (`just shell ingestion` for another)
 just migrate                       # Run migrations
 just makemigrations                # Create migrations
@@ -158,9 +158,10 @@ Defined in `api/urls.py`:
 - **Celery tasks**: Late imports inside task body to avoid circular imports; `bind=True` + `acks_late=True`
 - **Celery queues**: split by what waits on the task, not by weight (ADR 0025). `georiva-ingestion` carries fetch
   and extraction *and nothing else* — it runs one pool process, so anything on it delays every file behind it;
-  the admitted set is closed and asserted in `ingestion/tests/test_queue_routing.py`. Deferrable derived work
-  (derivation units, zonal stats, virtual-Zarr manifests) goes to `georiva-processing`; sweeps, cleanup and
-  scheduling to `georiva-default`. Declare the queue on the task and dispatch with `delay(...)` — never
+  the admitted set is closed and asserted in `ingestion/tests/test_queue_routing.py`. Derived work something
+  waits on (derivation units, publishes) goes to `georiva-processing`; per-asset bookkeeping nothing waits on
+  (zonal stats, virtual-Zarr manifests) to `georiva-bookkeeping`, which has its own worker so a fan-out cannot sit
+  in front of a publish (ADR 0037); sweeps, cleanup and scheduling to `georiva-default`. Declare the queue on the task and dispatch with `delay(...)` — never
   `apply_async(queue=...)`, which silently overrides the declaration
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`

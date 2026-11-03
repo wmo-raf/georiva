@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
     # Idempotent — persist_stats upserts on its unique constraint — so it is
     # safe on a multi-slot worker.  A dropped run is re-issued by
     # sweep_missing_boundary_stats (#402).
-    queue="georiva-processing",
+    queue="georiva-bookkeeping",
 )
 def compute_boundary_zonal_stats(self, asset_id: int) -> None:
     """
@@ -165,7 +165,7 @@ MISSING_STATS_GRACE = timedelta(minutes=15)
 MISSING_STATS_CLAIM = timedelta(minutes=30)
 
 #: Dispatch ceiling per pass, so a large outage drains over several passes
-#: instead of flooding georiva-processing at once.
+#: instead of flooding georiva-bookkeeping at once.
 MISSING_STATS_BATCH = 500
 
 
@@ -271,7 +271,7 @@ def _claim_redispatch(asset_id: int) -> bool:
     """
     True if no sweep has re-dispatched this asset within ``MISSING_STATS_CLAIM``.
 
-    Without it, a deep ``georiva-processing`` backlog would receive the same
+    Without it, a deep ``georiva-bookkeeping`` backlog would receive the same
     asset every 5 minutes.  A cache outage fails open: a duplicate run is
     harmless, a skipped recovery is not.
     """

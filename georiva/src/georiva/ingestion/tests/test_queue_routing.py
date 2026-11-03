@@ -31,6 +31,7 @@ from georiva.config.celery import app
 
 INGESTION_QUEUE = "georiva-ingestion"
 PROCESSING_QUEUE = "georiva-processing"
+BOOKKEEPING_QUEUE = "georiva-bookkeeping"
 
 #: Tasks whose latency is data availability: until these run, a fetched file is
 #: not fetched and a staged file is not extracted. These, and only these.
@@ -42,7 +43,9 @@ TIME_CRITICAL = {
 }
 
 #: Bookkeeping derived from an ingested COG. Nothing a reader can observe waits
-#: on it — tiles, STAC and EDR all answer without it — so it is deferrable.
+#: on it — tiles, STAC and EDR all answer without it — so it is deferrable, and
+#: it has a queue and a worker of its own (ADR 0037) so a burst of it cannot sit
+#: in front of a derivation or a publish.
 #: (Recovery differs: a dropped manifest build is re-dispatched by the
 #: virtual-Zarr sweep; a dropped zonal-stats task is re-issued
 #: by ``sweep_missing_boundary_stats`` — #402. Orthogonal to routing.)
@@ -97,12 +100,34 @@ class IngestionQueueAdmissionTests(TestCase):
             "file behind it. Route deferrable work to georiva-processing.",
         )
 
-    def test_per_asset_followups_are_deferrable_and_run_on_the_processing_queue(self):
+    def test_per_asset_followups_are_deferrable_and_run_on_the_bookkeeping_queue(self):
         tasks = core_tasks()
 
         for name in DEFERRABLE_FOLLOWUPS:
             with self.subTest(task=name):
-                self.assertEqual(getattr(tasks[name], "queue", None), PROCESSING_QUEUE)
+                self.assertEqual(getattr(tasks[name], "queue", None), BOOKKEEPING_QUEUE)
+
+    def test_the_bookkeeping_queue_carries_bookkeeping_and_nothing_else(self):
+        on_bookkeeping = {
+            name for name, task in core_tasks().items() if getattr(task, "queue", None) == BOOKKEEPING_QUEUE
+        }
+
+        self.assertEqual(
+            on_bookkeeping,
+            DEFERRABLE_FOLLOWUPS,
+            "georiva-bookkeeping exists so a fan-out of bookkeeping cannot delay anything "
+            "else. A task that something waits on belongs on georiva-processing.",
+        )
+
+    def test_no_bookkeeping_sits_on_the_processing_queue(self):
+        """The reason the bookkeeping queue exists. Derivation units and, in a
+        plugin, publishes share georiva-processing, and a fan-out of per-asset
+        bookkeeping in front of them is the delay ADR 0037 was written about."""
+        on_processing = {
+            name for name, task in core_tasks().items() if getattr(task, "queue", None) == PROCESSING_QUEUE
+        }
+
+        self.assertFalse(on_processing & DEFERRABLE_FOLLOWUPS)
 
 
 class TaskFerryQueueTests(TestCase):
