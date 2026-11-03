@@ -40,6 +40,7 @@ _default:
 
 # Start the stack; extra args go to compose, e.g. `just up -d`
 up *args:
+    @touch deploy/plugins.toml  # bind-mounted by georiva-plugins; Docker would create a directory if absent
     {{ dc }} up {{ args }}
 
 # Stop and remove the stack

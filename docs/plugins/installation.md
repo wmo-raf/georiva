@@ -37,6 +37,27 @@ any directory name. The derived names are added to `INSTALLED_APPS`. The dev plu
 
 ## Production installation
 
+### Image-only servers (deploy/plugins.toml)
+
+A server running the published `ghcr.io/wmo-raf/georiva` images has no `plugins.toml` baked in and builds
+nothing. It installs plugins once, into a volume every service shares ([ADR 0035](../adr/0035-source-plugins-install-once-into-a-shared-volume.md)):
+
+```bash
+cd deploy
+cp plugins.toml.sample plugins.toml   # then list your plugins (git + tag, or url)
+./deploy.sh v0.5.0                    # or: docker compose up -d
+```
+
+The one-shot `georiva-plugins` service installs the plugins and their dependencies, pinned to the versions core
+ships, then exits; the other services wait for it. Re-running is instant while `plugins.toml` and the release are
+unchanged; editing the manifest or upgrading reinstalls. `docker compose run --rm georiva-plugins install-plugins --force`
+reinstalls regardless.
+
+Limits: it needs internet at install time (no air-gapped mode yet); dependencies need a prebuilt linux/amd64
+wheel (the image has no compilers); and `build.sh` / `runtime_setup.sh` must be empty of commands, as they are not
+run. A plugin's `requires_env` variables must be passed to the services in `docker-compose.override.yml`; the
+installer warns when one is unset in its own container.
+
 ### Method 1: Build-time (plugins.toml)
 
 Plugins declared in `plugins.toml` are baked into the Docker image at build time. This is the

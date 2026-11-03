@@ -73,6 +73,12 @@ COPY --chown=$UID:$GID ./georiva /georiva/app
 RUN --mount=type=cache,mode=777,target=$UV_CACHE_DIR,uid=$UID,gid=$GID \
     uv sync --frozen --no-dev --inexact --no-editable
 
+# What a server-installed plugin may add but never move: core's locked versions,
+# as pip constraints (ADR 0035). The .pth puts the shared plugin-dependency
+# directory on the path *after* the venv's site-packages, so core always wins.
+RUN uv export --frozen --no-dev --no-hashes --no-emit-project --output-file /georiva/constraints.txt \
+    && echo /georiva/site-plugins/lib > "$(/georiva/venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/georiva-site-plugins.pth"
+
 # Install plugins at build time
 COPY --chown=$UID:$GID ./deploy/plugins/*.sh /georiva/plugins/
 COPY --chown=$UID:$GID ./deploy/plugins/parse_plugins_toml.py /georiva/plugins/
@@ -131,6 +137,10 @@ RUN if getent group $GID > /dev/null; then \
 
 RUN mkdir -p /var/tmp/georiva && chown $UID:$GID /var/tmp/georiva
 
+# Mount point of the georiva-plugins volume. Owned by the app user so a fresh
+# named volume inherits it and the one-shot installer can write to it.
+RUN mkdir -p /georiva/site-plugins && chown $UID:$GID /georiva/site-plugins
+
 # Install runtime dependencies (no compilers, no -dev headers)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -176,6 +186,7 @@ USER $UID:$GID
 COPY --from=builder --chown=$UID:$GID /georiva/venv /georiva/venv
 COPY --from=builder --chown=$UID:$GID /georiva/app /georiva/app
 COPY --from=builder --chown=$UID:$GID /georiva/plugins /georiva/plugins
+COPY --from=builder --chown=$UID:$GID /georiva/constraints.txt /georiva/constraints.txt
 
 WORKDIR /georiva/app/src/georiva
 
@@ -201,6 +212,7 @@ USER $UID:$GID
 
 COPY --from=builder --chown=$UID:$GID /georiva/venv /georiva/venv
 COPY --from=builder --chown=$UID:$GID /georiva/plugins /georiva/plugins
+COPY --from=builder --chown=$UID:$GID /georiva/constraints.txt /georiva/constraints.txt
 
 # Tools only this image needs. `watchfiles` drives the auto-reloaders; `lxml`
 # is what the XSD-validating tests need to run rather than skip — the WMTS
