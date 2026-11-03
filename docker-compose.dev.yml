@@ -53,6 +53,17 @@ services:
     volumes:
       - ./georiva:/georiva/app
 
+  georiva-celery-bookkeeping-worker:
+    build:
+      target: dev
+    command: celery-bookkeeping-worker-dev
+    environment:
+      <<: *dev-env
+      # A smaller pool than production's 4; set GEORIVA_CELERY_BOOKKEEPING_WORKER_CONCURRENCY in .env to change it.
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_BOOKKEEPING_WORKER_CONCURRENCY:-2}
+    volumes:
+      - ./georiva:/georiva/app
+
   georiva-celery-beat:
     build:
       target: dev

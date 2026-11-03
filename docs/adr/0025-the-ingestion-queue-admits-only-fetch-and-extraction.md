@@ -4,6 +4,8 @@
 
 accepted
 
+Refined by ADR 0037, which gives zonal statistics and virtual-Zarr builds a queue and worker of their own.
+
 Refines ADR 0005 (generic derivation engine), which introduced
 `georiva-processing` to keep long derivation runs off `georiva-ingestion`.
 

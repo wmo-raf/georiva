@@ -738,7 +738,8 @@ database lookup.
 | Web Application (`georiva`)               | Django / Wagtail                      | Core engine, admin, STAC API, EDR API, Jobs API, plugin host              |
 | Default Worker (`...-default-worker`)     | Celery                                | Lightweight tasks (sweeps, cleanup, scheduling) — `georiva-default` queue |
 | Ingestion Worker (`...-ingestion-worker`) | Celery                                | Fetch and extraction only — `georiva-ingestion` queue (1 process by default) |
-| Processing Worker (`...-processing-worker`) | Celery                              | Deferrable derived work: derivation units + per-asset bookkeeping — `georiva-processing` queue |
+| Processing Worker (`...-processing-worker`) | Celery                              | Derived work something waits on: derivation units and publishes — `georiva-processing` queue |
+| Bookkeeping Worker (`...-bookkeeping-worker`) | Celery                            | Per-asset bookkeeping nothing waits on: zonal stats, virtual-Zarr manifests — `georiva-bookkeeping` queue |
 | Scheduler (`...-celery-beat`)             | Celery Beat                           | Schedules periodic tasks (source polling, sweeps, maintenance)            |
 | MinIO Consumer (`...-minio-consumer`)     | App process (BLPOP)                   | Consumes Bucket notifications from a Redis list and enqueues drop-zone ingestion  |
 | Staging Consumer (`...-staging-consumer`) | App process (BLPOP)                   | Same, for files landing in the staging bucket ahead of derivation         |

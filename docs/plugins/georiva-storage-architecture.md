@@ -402,7 +402,8 @@ lightweight routine tasks:
 | Queue | Worker service | Workload |
 |---|---|---|
 | `georiva-ingestion` | `georiva-celery-ingestion-worker` | Fetch and extraction, and nothing else (`process_incoming_file`, `process_staging_file`, `run_data_feed_loader`, `retry_fetched_file`) |
-| `georiva-processing` | `georiva-celery-processing-worker` | Deferrable derived work: derivation units, zonal stats, virtual-Zarr builds |
+| `georiva-processing` | `georiva-celery-processing-worker` | Derived work something waits on: derivation units, publishes |
+| `georiva-bookkeeping` | `georiva-celery-bookkeeping-worker` | Bookkeeping nothing waits on: zonal stats, virtual-Zarr builds |
 | `georiva-default` | `georiva-celery-default-worker` | Lightweight tasks (`sweep_unprocessed`, `cleanup_archives`, `prune_ingestion_logs`, scheduling) |
 
 The ingestion worker runs a single pool process by default (extraction is memory-hungry), which makes its queue a

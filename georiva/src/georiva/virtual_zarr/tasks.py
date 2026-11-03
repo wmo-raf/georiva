@@ -68,7 +68,7 @@ SNAPSHOT_RETENTION = timedelta(days=7)
     # and the sweep re-dispatches anything dropped.  Keeping it off
     # georiva-ingestion keeps one large fetch's fan-out out of the way of the
     # next file to be extracted (#398).  Always dispatch via ``dispatch_build``.
-    queue="georiva-processing",
+    queue="georiva-bookkeeping",
 )
 def build_virtual_zarr_manifest(self, manifest_id: int, claim: str = "") -> None:
     """

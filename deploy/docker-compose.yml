@@ -260,6 +260,22 @@ services:
       georiva-plugins:
         condition: service_completed_successfully
 
+  georiva-celery-bookkeeping-worker:
+    image: georiva
+    <<: *backend-volumes
+    restart: unless-stopped
+    command: celery-bookkeeping-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
+      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
+      GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_BOOKKEEPING_WORKER_CONCURRENCY:-4}
+    depends_on:
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
+
   georiva-celery-beat:
     image: *georiva-image
     <<: *backend-volumes
