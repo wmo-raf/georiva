@@ -47,6 +47,12 @@ class EDRVisibilityTests(TestCase):
         hidden = self.client.get(reverse("edr:collection-detail", args=["tas-anomaly"]))
         self.assertEqual(hidden.status_code, 404)
 
+    def test_collection_advertises_no_data_query_it_cannot_serve(self):
+        # EDR is metadata-only: a client reads data_queries to decide what a
+        # collection supports, so listing one with no route sends it to a 404.
+        body = self.client.get(reverse("edr:collection-detail", args=["tas"])).json()
+        self.assertEqual(body["data_queries"], {})
+
 
 class EDRStyledParameterTests(TestCase):
     """The ``x-georiva`` block keeps the legacy palette vocabulary across the
