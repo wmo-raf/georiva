@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 import httpx
+import numpy as np
 import redis
 from fastapi import Depends, HTTPException, Path, Query
 from rio_tiler.models import ImageData
@@ -240,12 +241,23 @@ def SemanticColorMap(
 
 
 class RescaleAlgorithm(BaseAlgorithm):
-    """Rescale raw float COG data to 0-255 before colormap lookup."""
+    """Rescale raw float COG data to 0-255 before colormap lookup.
+
+    When the layer's catalog crops its maps to a boundary (``display`` clip mode,
+    ADR 0038) the tile is also masked to it here, so the colormap step paints
+    nothing outside. The stored COG is untouched: only this drawing is cropped.
+    """
 
     vmin: float
     vmax: float
+    boundary: dict | None = None
 
     def __call__(self, img: ImageData) -> ImageData:
+        if self.boundary:
+            from app.boundary import inside_mask
+
+            inside = inside_mask(self.boundary, img.bounds, img.crs, (img.height, img.width))
+            img.array = np.ma.masked_array(img.array.data, mask=np.ma.getmaskarray(img.array) | ~inside)
         img.rescale(in_range=[(self.vmin, self.vmax)], out_range=[(0, 255)])
         return img
 
@@ -254,4 +266,4 @@ def SemanticRescale(
     tile_config: dict = Depends(SemanticTileConfig),
 ) -> BaseAlgorithm | None:
     """Return a rescale algorithm using vmin/vmax from the tile config."""
-    return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"])
+    return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"], boundary=tile_config.get("boundary"))
