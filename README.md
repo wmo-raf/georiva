@@ -7,9 +7,8 @@
 
 **Geospatial Raster Ingestion, Visualization & Analysis**
 
-GeoRiva is a geospatial backend platform for automated ingestion, processing, visualization, and analysis of gridded
-raster data. Built on Django/Wagtail, it provides a plugin-driven architecture for pulling data from diverse sources,
-serving it through modern standards-compliant APIs, and enabling analytical workflows on top of it.
+GeoRiva is a geospatial backend for automated ingestion, processing, visualization, and analysis of gridded raster
+data, built on Django/Wagtail with a plugin-driven architecture.
 
 > **Status:** Active development — core ingestion, the two-tier STAC data model, the derivation engine, multi-tenancy,
 > STAC API, tile serving (Titiler + Martin), WMTS, and the analysis modules are built; some areas (EDR data-retrieval
@@ -28,7 +27,24 @@ serving it through modern standards-compliant APIs, and enabling analytical work
 - **Derive** new products from ingested data — climatologies, anomalies, promotions — with declarative recipes run by
   a generic derivation engine
 - **Analyze** data using pluggable modules that integrate with the Xarray-compatible scientific Python ecosystem
-- **Visualize** with modern browser-side rendering (WeatherLayers GL), moving beyond legacy WMS
+- **Visualize** data in a built-in explorer with a detail page for each item, powered by the tiles and encoded textures
+  that any client can use
+
+## Approach
+
+**GeoRiva is a modular geospatial backend.** It fetches gridded data, processes it into cloud-ready formats, derives
+products such as anomalies, and serves them through open standards. It's the foundation you build weather and climate
+apps on.
+
+**GeoRiva doesn't try to be the app.** A forecast viewer, a drought monitor and a national climate website all need the
+same foundation but very different experiences. GeoRiva includes an explorer for browsing and inspecting its data; the
+apps people use day to day are built on top.
+
+**Each thing has one home:**
+
+- **Core:** what any app needs
+- **Plugins:** domain knowledge
+- **Apps:** what users see, in their own repos, alongside GeoRiva
 
 ## Architecture at a Glance
 
