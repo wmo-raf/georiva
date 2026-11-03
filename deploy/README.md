@@ -20,6 +20,7 @@ georiva/                      sparse checkout, nothing else
     ├── .env                  yours: this server's settings (gitignored)
     ├── docker-compose.yml    the stack, image-only
     ├── docker-compose.override.yml   yours, optional (gitignored)
+    ├── plugins.toml          yours: source plugins to install (gitignored; see plugins.toml.sample)
     ├── deploy.sh             install / upgrade / rollback
     ├── docker/               yours: data — database, objects, media (gitignored)
     ├── nginx/  martin/       service config, owned by the release

@@ -76,6 +76,7 @@ x-backend-volumes: &backend-volumes
     - ${GEORIVA_STATIC_VOLUME:-./docker/static}:${STATIC_ROOT:-/georiva/static}
     - ${GEORIVA_MEDIA_VOLUME:-./docker/media}:${MEDIA_ROOT:-/georiva/media}
     - ${GEORIVA_BACKUP_VOLUME:-./docker/backup}:/georiva/backup
+    - georiva-plugins:/georiva/site-plugins:ro
 
 services:
   georiva-db:
@@ -155,6 +156,20 @@ services:
     volumes:
       - ${MINIO_VOLUME:-./docker/minio}:/data
 
+  # One-shot: installs the source plugins in plugins.toml into the shared
+  # georiva-plugins volume (ADR 0035). Every backend service mounts that volume
+  # read-only and waits for this to finish; with an unchanged manifest and
+  # release it exits in under a second.
+  georiva-plugins:
+    image: georiva
+    restart: "no"
+    command: install-plugins
+    environment:
+      GEORIVA_TAG: ${GEORIVA_TAG:-}
+    volumes:
+      - ./deploy/plugins.toml:/georiva/plugins.toml:ro
+      - georiva-plugins:/georiva/site-plugins
+
   georiva:
     image: georiva
     <<: *backend-volumes
@@ -176,6 +191,8 @@ services:
         condition: service_healthy
       georiva-redis:
         condition: service_healthy
+      georiva-plugins:
+        condition: service_completed_successfully
     ports:
       - "8000"
     healthcheck:
@@ -201,7 +218,10 @@ services:
       # its own, and the dev worker commands inherit these.
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_DEFAULT_WORKER_CONCURRENCY:-4}
     depends_on:
-      - georiva
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
 
   georiva-celery-ingestion-worker:
     image: georiva
@@ -214,7 +234,10 @@ services:
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_INGESTION_WORKER_CONCURRENCY:-1}
     depends_on:
-      - georiva
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
 
   georiva-celery-processing-worker:
     image: georiva
@@ -227,7 +250,10 @@ services:
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-4}
     depends_on:
-      - georiva
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
 
   georiva-celery-beat:
     image: georiva
@@ -239,7 +265,10 @@ services:
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
-      - georiva
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
 
   georiva-minio-consumer:
     image: georiva
@@ -251,7 +280,10 @@ services:
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
-      - georiva
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
 
   georiva-staging-consumer:
     image: georiva
@@ -263,7 +295,10 @@ services:
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
       GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
-      - georiva
+      georiva:
+        condition: service_started
+      georiva-plugins:
+        condition: service_completed_successfully
 
   georiva-titiler-app:
     image: georiva-titiler-app:latest
@@ -346,6 +381,9 @@ services:
         condition: service_started
       georiva:
         condition: service_healthy
+
+volumes:
+  georiva-plugins:
 
 networks:
   default:

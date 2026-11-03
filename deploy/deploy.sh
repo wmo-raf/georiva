@@ -157,6 +157,9 @@ main() {
 
     check_data_dirs
 
+    # Bind-mounted by georiva-plugins; if absent Docker creates a directory there.
+    [[ -e plugins.toml ]] || : >plugins.toml
+
     if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
         git status --short --untracked-files=no >&2
         die "tracked files under this checkout are modified. Site changes go in docker-compose.override.yml and .env; restore the rest with: git checkout -- ."

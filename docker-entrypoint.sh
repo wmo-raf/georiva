@@ -29,6 +29,7 @@ The available GeoRiva related commands and services are shown below:
 ADMIN COMMANDS:
 manage          : Manage GeoRiva and its database
 shell           : Start a Django Python shell
+install-plugins : Install the plugins in plugins.toml into the shared site-plugins volume (ADR 0035).
 install-plugin  : Installs a plugin (append --help for more info).
 uninstall-plugin: Un-installs a plugin (append --help for more info).
 list-plugins    : Lists currently installed plugins.
@@ -234,6 +235,9 @@ minio-consumer)
     ;;
 staging-consumer)
       exec python /georiva/app/src/georiva/manage.py staging_event_consumer "${@:2}"
+    ;;
+install-plugins)
+    exec python -m georiva.site_plugins "${@:2}"
     ;;
 install-plugin)
     exec /georiva/plugins/install_plugin.sh --runtime "${@:2}"

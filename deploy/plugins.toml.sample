@@ -1,0 +1,27 @@
+# GeoRiva source plugins for this server
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy to plugins.toml (next to docker-compose.yml) and list the plugins this
+# server needs. `./deploy.sh <version>` installs them once into the shared
+# georiva-plugins volume; every service reads them from there. Changing this
+# file, or upgrading to another release, reinstalls on the next `up`.
+#
+# Needs internet access at install time, and every dependency must have a
+# prebuilt linux/amd64 wheel: the image has no compilers.
+#
+# Fields (use exactly one of git / url per entry):
+#   git     = "..."   Git repository URL
+#   tag     = "..."   Release tag to clone (git only; omit for the default branch)
+#   url     = "..."   Direct .tar.gz download URL
+#   hash    = "..."   sha256 of the .tar.gz (url only; optional)
+#   name    = "..."   Label shown in logs
+#   enabled = false   Skip without deleting the entry (default: true)
+#
+# A plugin may need settings of its own (see its georiva_plugin_info.json,
+# "requires_env"). Containers only receive what compose lists, so pass them in
+# docker-compose.override.yml, e.g. CDSAPI_KEY under the georiva services.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# [[plugins]]
+# name = "GeoRiva Copernicus Data Store Plugin"
+# git  = "https://github.com/wmo-raf/georiva-source-cds.git"
+# tag  = "1.0.0"
