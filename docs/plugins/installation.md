@@ -1,16 +1,20 @@
 # Plugin Installation Guide
 
-This guide covers how to install and develop GeoRiva source plugins — for both production deployments
-and local development against a running stack.
+This guide covers how to install and develop GeoRiva source plugins — on a server, in an image you build
+yourself, and in local development against a running stack.
+
+**Which section do I want?** A server runs the images CI publishes to `ghcr.io/wmo-raf/` ("published images")
+and builds nothing — that is the normal way to run GeoRiva, and its plugins go in `deploy/plugins.toml`. Only
+a site that builds its own image (a fork, or its own CI) bakes plugins in with the repo-root `plugins.toml`.
 
 ---
 
 ## Table of Contents
 
 - [How the plugin system works](#how-the-plugin-system-works)
-- [Production installation](#production-installation)
-  - [Method 1: Build-time (plugins.toml)](#method-1-build-time-pluginstoml)
-  - [Method 2: Runtime (GEORIVA_PLUGIN_URLS)](#method-2-runtime-georiva_plugin_urls)
+- [Servers (published images)](#servers-published-images)
+- [Building your own image](#building-your-own-image)
+- [Deprecated: runtime install (GEORIVA_PLUGIN_URLS)](#deprecated-runtime-install-georiva_plugin_urls)
 - [Local development](#local-development)
 - [Creating a new plugin](#creating-a-new-plugin)
 - [Reference: environment variables](#reference-environment-variables)
@@ -35,12 +39,10 @@ any directory name. The derived names are added to `INSTALLED_APPS`. The dev plu
 
 ---
 
-## Production installation
+## Servers (published images)
 
-### Image-only servers (deploy/plugins.toml)
-
-A server running the published `ghcr.io/wmo-raf/georiva` images has no `plugins.toml` baked in and builds
-nothing. It installs plugins once, into a volume every service shares ([ADR 0035](../adr/0035-source-plugins-install-once-into-a-shared-volume.md)):
+A server running the published `ghcr.io/wmo-raf/georiva` images (see `deploy/README.md`) has no
+`plugins.toml` baked in and builds nothing. It installs plugins once, into a volume every service shares ([ADR 0035](../adr/0035-source-plugins-install-once-into-a-shared-volume.md)):
 
 ```bash
 cd deploy
@@ -58,10 +60,11 @@ wheel (the image has no compilers); and `build.sh` / `runtime_setup.sh` must be 
 run. A plugin's `requires_env` variables must be passed to the services in `docker-compose.override.yml`; the
 installer warns when one is unset in its own container.
 
-### Method 1: Build-time (plugins.toml)
+## Building your own image
 
-Plugins declared in `plugins.toml` are baked into the Docker image at build time. This is the
-recommended approach for production — the image is self-contained and container startup is fast.
+For sites that fork the repo or run their own CI. Plugins declared in the repo-root `plugins.toml` are baked
+into the Docker image at build time, so the image is self-contained and starts fast. A server running the
+published images does not do this — see [Servers](#servers-published-images).
 
 **Step 1** — copy the sample manifest and edit it:
 
@@ -72,7 +75,7 @@ cp plugins.toml.sample plugins.toml
 **Step 2** — declare your plugins. Supported source types:
 
 ```toml
-# From a GitHub release tag (recommended for production)
+# From a GitHub release tag (recommended: reproducible)
 [[plugins]]
 name = "GeoRiva CDS Plugin"
 git  = "https://github.com/wmo-raf/georiva-source-cds.git"
@@ -87,7 +90,7 @@ git  = "https://github.com/org/my-plugin.git"
 [[plugins]]
 name = "My Plugin"
 url  = "https://example.com/my-plugin-1.0.tar.gz"
-hash = "abc123def456"   # optional SHA-1 integrity check
+hash = "abc123def456"   # optional SHA-1 of the plugin contents (on a server, hash is the sha256 of the .tar.gz)
 
 # Disabled — kept in file but skipped during install
 [[plugins]]
@@ -103,34 +106,17 @@ docker compose build georiva
 docker compose up -d
 ```
 
-The `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` flag is set to `"true"` for the production service
+The `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` flag is set to `"true"` for the services
 in `docker-compose.yml` — plugins are already baked in, so startup skips the install phase.
 
 ---
 
-### Method 2: Runtime (GEORIVA_PLUGIN_URLS)
+## Deprecated: runtime install (GEORIVA_PLUGIN_URLS)
 
-For deployments where rebuilding the image is impractical, plugins can be downloaded and installed
-when the container starts. Add to your `.env`:
-
-```bash
-GEORIVA_PLUGIN_URLS=https://example.com/plugin1.tar.gz,https://example.com/plugin2.tar.gz
-```
-
-Remove or set to `false`:
-
-```bash
-GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP=false
-```
-
-Then restart:
-
-```bash
-docker compose restart georiva georiva-celery-default-worker georiva-celery-ingestion-worker georiva-celery-beat
-```
-
-> **Note:** Runtime installation adds to container startup time and requires network access on every
-> cold start. Build-time baking is preferred for production.
+> **Deprecated — will be removed in the next release.** Setting `GEORIVA_PLUGIN_URLS` installs the plugins in
+> every container, on every start, from PyPI with unpinned dependencies; nothing is shared and nothing survives
+> the container being recreated. Use [Servers (published images)](#servers-published-images) instead: list the
+> same tarball in `deploy/plugins.toml` as a `url = "..."` entry.
 
 ---
 
@@ -258,8 +244,8 @@ tag  = "1.0.0"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GEORIVA_PLUGIN_DIR` | `/georiva/plugins` | Where baked and runtime plugins are copied on install |
-| `GEORIVA_PLUGIN_DIRS` | `/georiva/plugins` | Comma-separated list of dirs settings scans for `INSTALLED_APPS` |
+| `GEORIVA_PLUGIN_DIRS` | `/georiva/plugins,/georiva/site-plugins/src` | Comma-separated list of dirs settings scans for `INSTALLED_APPS` |
 | `GEORIVA_DEV_PLUGIN_DIR` | `/georiva/dev-plugins` | Dir for bind-mounted dev plugins; auto-added to `GEORIVA_PLUGIN_DIRS` when it exists |
-| `GEORIVA_PLUGIN_URLS` | _(empty)_ | Comma-separated tarball URLs to download and install at startup |
-| `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` | _(unset)_ | Set to `"true"` to skip all startup plugin installation (used in prod where plugins are baked in) |
+| `GEORIVA_PLUGIN_URLS` | _(empty)_ | **Deprecated.** Comma-separated tarball URLs to download and install at startup |
+| `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` | _(unset)_ | **Deprecated.** Set to `"true"` to skip all startup plugin installation |
 | `GEORIVA_STRICT_PLUGIN_ENV` | `false` | When `true`, a plugin's missing required `requires_env` variable is a `manage.py check` error instead of a warning |
