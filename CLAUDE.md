@@ -47,7 +47,7 @@ georiva/src/georiva/          # Main Django application
 │   ├── models.py             # IngestionLog (distributed locking, state machine)
 │   ├── extractor.py          # Data extraction
 │   ├── asset_writer.py       # COG asset writer (encoded textures on-demand, ADR 0021)
-│   └── clipper.py            # Boundary clipping
+│   └── clipper.py            # Boundary clipping (clip_mode none/bbox/mask; `display` crops only the map, ADR 0038)
 ├── formats/                  # Format handler plugins (GRIB, NetCDF, GeoTIFF)
 │   ├── base.py               # BaseFormatPlugin ABC
 │   └── registry.py           # FormatRegistry (decorator-based registration)

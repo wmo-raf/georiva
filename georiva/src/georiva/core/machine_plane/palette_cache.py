@@ -22,6 +22,8 @@ is a bug in the default-flip signal, not a feature.
 Value format (JSON):
   With a style:    {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear", "colormap": {"0": [r,g,b,a], ...}}
   Without one:     {"vmin": -10.0, "vmax": 40.0, "scale_type": "linear"}
+  A catalog in ``display`` clip mode adds ``"boundary"``: a GeoJSON geometry the
+  tile server crops tiles to (ADR 0038).
 """
 
 import json
@@ -108,7 +110,38 @@ def build_variable_payload(variable, style=None) -> dict:
         stops = style.as_weatherlayers_palette()
         payload["colormap"] = build_colormap_256(stops, variable.value_min, variable.value_max)
 
+    boundary = display_boundary(variable.collection.catalog)
+    if boundary is not None:
+        payload["boundary"] = boundary
+
     return payload
+
+
+#: Degrees. A map mask has no use for vertices closer together than a pixel of
+#: any zoom a data grid can be read at, and a country outline is otherwise
+#: hundreds of kilobytes of coastline in every Redis value.
+BOUNDARY_SIMPLIFY_TOLERANCE = 0.002
+
+
+def display_boundary(catalog) -> dict | None:
+    """The GeoJSON geometry a tile server crops this catalog's maps to, or ``None``.
+
+    Only a catalog in ``display`` mode with a boundary has one. The other clip
+    modes shape the stored data at ingestion and leave nothing for the renderer
+    to do (ADR 0038), so they carry no ``boundary`` key at all.
+
+    Simplified, and rounded by the simplification, because this rides in every
+    variable's palette payload. It is a cosmetic outline: it is never read back
+    by anything that measures.
+    """
+    from georiva.core.models import Catalog
+
+    if catalog.clip_mode != Catalog.ClipMode.DISPLAY or catalog.boundary_id is None:
+        return None
+    geom = catalog.boundary.geom
+    if geom is None or geom.empty:
+        return None
+    return json.loads(geom.simplify(BOUNDARY_SIMPLIFY_TOLERANCE, preserve_topology=True).geojson)
 
 
 def variable_cache_key(variable, style=None) -> str:

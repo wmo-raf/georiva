@@ -95,6 +95,7 @@ class Catalog(Indexed, TimeStampedModel):
         NONE = "none", "No clipping"
         BBOX = "bbox", "Bounding box only"
         MASK = "mask", "Precise geometry mask"
+        DISPLAY = "display", "Bounding box, masked on the map only"
 
     file_format = models.CharField(max_length=20, choices=FileFormat.choices)
     archive_source_files = models.BooleanField(default=False, help_text="Should archive source files")
@@ -108,7 +109,15 @@ class Catalog(Indexed, TimeStampedModel):
         help_text="Boundary to clip data to",
     )
     clip_mode = models.CharField(
-        max_length=20, choices=ClipMode.choices, default=ClipMode.MASK, help_text="How to apply boundary clipping"
+        max_length=20,
+        choices=ClipMode.choices,
+        default=ClipMode.MASK,
+        help_text=(
+            "How to apply boundary clipping. 'Precise geometry mask' blanks everything outside the "
+            "boundary in the stored data. 'Bounding box, masked on the map only' stores the full "
+            "bounding box and crops only what the tile server draws, so every other consumer "
+            "still gets complete data."
+        ),
     )
 
     # The admin header search uses autocomplete() (partial/as-you-type

@@ -12,6 +12,27 @@ def on_variable_save(sender, instance, **kwargs):
     warm_variable(instance)
 
 
+def on_catalog_save(sender, instance, **kwargs):
+    """A catalog's clip mode or boundary may have changed: re-warm every variable under it.
+
+    The display boundary rides in each variable's render config (ADR 0038), so
+    the catalog is the one row whose edit changes how many variables draw. Cheap
+    when nothing relevant changed — a handful of Redis writes — and a catalog
+    with no variables yet has nothing to warm.
+    """
+    from georiva.core.machine_plane.palette_cache import warm_variable
+
+    from .models import Variable
+
+    variables = (
+        Variable.objects.filter(collection__catalog=instance, is_active=True)
+        .select_related("collection__catalog__organisation", "collection__catalog__boundary")
+        .prefetch_related("styles")
+    )
+    for variable in variables:
+        warm_variable(variable)
+
+
 def on_style_change(sender, instance, **kwargs):
     """A style was saved or deleted: re-warm its variable's render config.
 
@@ -179,6 +200,9 @@ class CoreConfig(AppConfig):
         post_save.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
         post_delete.connect(update_link_data_feed_periodic_task, sender=DataFeedCollectionLink)
 
+        from .models import Catalog
+
+        post_save.connect(on_catalog_save, sender=Catalog)
         post_save.connect(on_variable_save, sender=Variable)
         post_delete.connect(on_variable_delete, sender=Variable)
         post_save.connect(on_style_change, sender=VariableStyle)

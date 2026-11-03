@@ -44,6 +44,7 @@ from rio_tiler.errors import PointOutsideBounds
 from starlette.concurrency import run_in_threadpool
 
 from app import dependencies
+from app.boundary import contains as boundary_contains
 
 logger = logging.getLogger(__name__)
 
@@ -601,7 +602,14 @@ async def _identify(
     """
     lon, lat = _pixel_lonlat(zoom, row, col, i, j)
     config = await _tile_config_for(address, style)
-    value = await _read_point(request, address, lon, lat, query, style)
+    # A map cropped to a boundary (ADR 0038) draws nothing outside it, so a click
+    # there answers what the map shows. Only the visualization plane does this;
+    # the data underneath is whole.
+    boundary = config.get("boundary")
+    if boundary and not boundary_contains(boundary, lon, lat):
+        value = None
+    else:
+        value = await _read_point(request, address, lon, lat, query, style)
 
     payload = {
         "layer": ":".join(address[1:]),

@@ -10,6 +10,7 @@ from rio_tiler.models import ImageData
 from rio_tiler.types import ColorMapType
 from titiler.core.algorithm.base import BaseAlgorithm
 
+from app.boundary import crop
 from app.config import (
     DJANGO_BASE_URL,
     MINIO_BUCKET_NAME,
@@ -240,12 +241,19 @@ def SemanticColorMap(
 
 
 class RescaleAlgorithm(BaseAlgorithm):
-    """Rescale raw float COG data to 0-255 before colormap lookup."""
+    """Rescale raw float COG data to 0-255 before colormap lookup.
+
+    When the layer's catalog crops its maps to a boundary (``display`` clip mode,
+    ADR 0038) the tile is also masked to it here, so the colormap step paints
+    nothing outside. The stored COG is untouched: only this drawing is cropped.
+    """
 
     vmin: float
     vmax: float
+    boundary: dict | None = None
 
     def __call__(self, img: ImageData) -> ImageData:
+        crop(img, self.boundary)
         img.rescale(in_range=[(self.vmin, self.vmax)], out_range=[(0, 255)])
         return img
 
@@ -254,4 +262,4 @@ def SemanticRescale(
     tile_config: dict = Depends(SemanticTileConfig),
 ) -> BaseAlgorithm | None:
     """Return a rescale algorithm using vmin/vmax from the tile config."""
-    return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"])
+    return RescaleAlgorithm(vmin=tile_config["vmin"], vmax=tile_config["vmax"], boundary=tile_config.get("boundary"))

@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from app.boundary import crop
 from app.config import TTL_ROOT_PATH
 from app.dependencies import (
     SemanticColorMap,
@@ -135,6 +136,10 @@ def encoded_preview(
     with ResilientReader(src_path) as src:
         img = src.preview(max_size=max_size)
 
+    # A catalog that crops its maps to a boundary (ADR 0038) crops the texture
+    # the same way: masked pixels render with alpha 0, which is how a layer
+    # already says "no data here" and what keeps hover readouts blank outside it.
+    crop(img, tile_config.get("boundary"))
     img.rescale(in_range=((tile_config["vmin"], tile_config["vmax"]),))
 
     return Response(
