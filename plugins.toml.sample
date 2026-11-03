@@ -1,7 +1,10 @@
 # GeoRiva Plugins Manifest
 # ─────────────────────────────────────────────────────────────────────────────
-# Copy this file to plugins.toml and uncomment the plugins you want to install.
-# Then run `docker compose build` to bake them into the image.
+# For sites that BUILD THEIR OWN image. Copy this file to plugins.toml, uncomment
+# the plugins you want, and run `docker compose build` to bake them into the image.
+#
+# A server running the published ghcr.io/wmo-raf images builds nothing: it uses
+# deploy/plugins.toml.sample instead (see deploy/README.md).
 #
 # Each plugin is declared with a [[plugins]] header followed by its fields.
 # No indentation is required. Comments start with #.

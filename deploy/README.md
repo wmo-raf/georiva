@@ -105,6 +105,19 @@ their own organisation, and hostname, with `python manage.py create_organisation
 
 Open `https://<base domain>/` — the admin is at `/admin/`, STAC Browser at `/stac-browser/`.
 
+## Plugins
+
+Source plugins (e.g. `georiva-source-cds`) are not in the published images. List the ones this server
+needs in `deploy/plugins.toml`; they are installed once, into a volume every service shares:
+
+```bash
+cp plugins.toml.sample plugins.toml    # then add your plugins (git + tag, or url)
+./deploy.sh v0.5.0                     # installs them as part of the upgrade
+```
+
+It needs internet access at install time. Details, limits and the settings a plugin may require:
+[docs/plugins/installation.md](../docs/plugins/installation.md#servers-published-images).
+
 ## Upgrade
 
 ```bash
