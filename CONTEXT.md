@@ -750,3 +750,16 @@ recovery, an input fingerprint that skips an unchanged build, and a durable per-
 a writer abstraction — no `BasePublisher`, no registry. `VirtualZarrManifest` is the shape it was extracted from and
 is not migrated onto it. See ADR 0027.
 _Avoid_: publisher framework, build pipeline, BasePublisher
+
+### Apps
+
+**App**:
+An application that helps people use GeoRiva's data for a purpose, such as following a forecast or monitoring drought.
+Lives in its own repository beside GeoRiva, never in core, and reaches GeoRiva's data through its public interfaces. An
+app that needs its own backend ships it as a plugin in that same repository. See ADR 0036.
+_Avoid_: module, client (for an app the project maintains or lists; a client is anything calling the API)
+
+**Explorer**:
+The built-in surface for browsing datasets and inspecting their data, with a detail page for each item. Generic to any
+dataset and part of core. It shows what data exists and that it is correct; helping people act on it is an **App**'s job.
+_Avoid_: viewer (a viewer is an app), portal
