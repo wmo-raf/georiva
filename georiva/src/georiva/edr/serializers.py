@@ -276,16 +276,9 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
     # ── Data queries ──────────────────────────────────────────────────────
 
     def _build_data_queries(self, collection_url: str) -> dict:
-        return {
-            "position": {
-                "link": {
-                    "href": f"{collection_url}position/",
-                    "rel": "data",
-                    "type": "application/prs.coverage+json",
-                    "title": "Position query — retrieve data at one or more points",
-                }
-            },
-        }
+        # Metadata plane only: no data-query route exists (see edr/urls.py), so
+        # advertising one would send an EDR client to a 404.
+        return {}
 
     # ── Providers ─────────────────────────────────────────────────────────
 
