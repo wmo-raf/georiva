@@ -18,7 +18,7 @@ from georiva.core.plugin_manifest import load_manifest, missing_required_env, pa
 from .manifest import PluginSpec, load_specs
 
 HOOKS = ("build.sh", "runtime_setup.sh")
-SET_LINE = re.compile(r"\s*set\s+-[\w]+(\s+\w+)?\s*")
+SET_LINE = re.compile(r"\s*(set(\s+-\S+)+(\s+\w+)?|exit\s+0)\s*")
 STAMP = "stamp"
 
 
@@ -84,6 +84,10 @@ def install(
     environ: Mapping[str, str],
     force: bool = False,
 ) -> Result:
+    if manifest.is_dir():
+        # Docker makes a directory of a bind-mounted file that was missing. Reading that as "no plugins"
+        # would uninstall everything, so stop and say what happened.
+        raise InstallError(f"{manifest} is a directory: create the file (cp plugins.toml.sample plugins.toml)")
     stamp = stamp_for(manifest, tag)
     stamp_file = site / STAMP
     if not force and stamp_file.is_file() and stamp_file.read_text().strip() == stamp:
@@ -116,9 +120,14 @@ def install(
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
+    # Old aside, new in, old deleted: at no point is a directory missing for a service that is reading it.
     for name in ("src", "lib"):
-        shutil.rmtree(site / name, ignore_errors=True)
+        aside = site / f".old-{name}"
+        shutil.rmtree(aside, ignore_errors=True)
+        if (site / name).exists():
+            (site / name).rename(aside)
         (staging / name).rename(site / name)
+        shutil.rmtree(aside, ignore_errors=True)
     shutil.rmtree(staging, ignore_errors=True)
     stamp_file.write_text(stamp + "\n")
     return Result(installed=True, warnings=warnings)

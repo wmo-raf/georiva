@@ -2,15 +2,19 @@
 
 import argparse
 import hashlib
+import importlib.metadata
 import io
 import json
 import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import urllib.request
 from pathlib import Path
+
+from packaging.utils import canonicalize_name
 
 from .installer import InstallError, install
 from .manifest import PluginSpec
@@ -44,20 +48,29 @@ def _strip_top_level(tar: tarfile.TarFile):
     return [m for m in members if m.name]
 
 
-def pip(requirements: list[str], target: Path, constraints: Path) -> None:
-    """Install what the venv does not already provide, never moving a version core pins.
+def _core_distributions() -> dict[str, str]:
+    """What the venv itself provides. Read from its site-packages alone: the .pth that exposes the
+    live plugin ``lib`` would otherwise make a reinstall think those dependencies are still satisfied."""
+    purelib = sysconfig.get_paths()["purelib"]
+    return {canonicalize_name(d.metadata["Name"]): d.version for d in importlib.metadata.distributions(path=[purelib])}
 
-    A dry run against the venv names the packages still missing (directly or
-    transitively), so ``lib`` holds only those and not a second copy of numpy.
+
+def pip(requirements: list[str], target: Path, constraints: Path) -> None:
+    """Install what core does not already provide, never moving a version core pins.
+
+    ``--ignore-installed`` makes the dry run name everything the plugins need, so the
+    packages core already has can be left out and ``lib`` holds no second copy of numpy.
     """
     base = [sys.executable, "-m", "pip", "install", "--only-binary=:all:", "-c", str(constraints)]
     report = Path(target).parent / ".pip-report.json"
-    _run(base + ["--dry-run", "--quiet", "--report", str(report), *requirements], "resolving plugin dependencies")
-    missing = [
-        f"{item['metadata']['name']}=={item['metadata']['version']}"
-        for item in json.loads(report.read_text())["install"]
-    ]
+    _run(
+        base + ["--dry-run", "--ignore-installed", "--quiet", "--report", str(report), *requirements],
+        "resolving plugin dependencies",
+    )
+    core = _core_distributions()
+    needed = [item["metadata"] for item in json.loads(report.read_text())["install"]]
     report.unlink()
+    missing = [f"{m['name']}=={m['version']}" for m in needed if canonicalize_name(m["name"]) not in core]
     if missing:
         _run(base + ["--no-deps", "--target", str(target), *missing], "installing plugin dependencies")
 

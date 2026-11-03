@@ -135,6 +135,18 @@ class InstallTests(SimpleTestCase):
         with self.assertRaisesRegex(InstallError, "build.sh"):
             site.run()
 
+    def test_a_manifest_that_is_a_directory_fails_instead_of_uninstalling_everything(self):
+        site = Site(self)
+        site.run()
+        site.manifest.unlink()
+        site.manifest.mkdir()
+        with self.assertRaisesRegex(InstallError, "is a directory"):
+            site.run()
+        self.assertTrue((site.site / "src" / "georiva_source_cds").exists())
+
+    def test_combined_set_flags_and_exit_zero_are_still_no_ops(self):
+        Site(self, hook="#!/bin/bash\nset -e -u\nexit 0\n").run()
+
     def test_a_no_op_hook_is_ignored(self):
         Site(self, hook=NOOP_HOOK).run()
 
