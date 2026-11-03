@@ -261,7 +261,7 @@ services:
         condition: service_completed_successfully
 
   georiva-celery-bookkeeping-worker:
-    image: georiva
+    image: *georiva-image
     <<: *backend-volumes
     restart: unless-stopped
     command: celery-bookkeeping-worker
