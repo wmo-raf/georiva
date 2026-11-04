@@ -16,15 +16,30 @@ Temporal values strategy:
                                           + structured runs in x-georiva.runs
                                           (keeps spec compliance while enabling
                                            frontend URL construction)
+
+Both time lists are bounded on purpose: the flat list is the latest run only,
+and ``x-georiva.runs`` is the newest ``runs_limit`` runs. A client that wants
+more follows the ``related`` link to ``/api/runs/{catalog}/{collection}/``,
+which knows every run and will hand over one run's valid times on request.
+Why the window exists, and why the runs route is where the rest lives, is ADR
+0026's "valid times belong to the runs route" amendment (issue #600).
 """
 
-from itertools import groupby
-
+from django.urls import reverse
 from rest_framework import serializers
 
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, Item
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
+
+# How many recent runs x-georiva.runs carries, and the most a caller may ask
+# for with ?runs_limit=. The ceiling is a *body* bound, not a row count a client
+# may raise at will: each run drags its every lead time along, so twenty runs of
+# a 48-step model is already ~1,000 timestamps. A client that wants further back
+# than that follows the related link to the runs route, which lists runs without
+# their times.
+DEFAULT_RUNS_LIMIT = 5
+MAX_RUNS_LIMIT = 20
 
 # =============================================================================
 # Base URL mixin
@@ -156,7 +171,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             "parameter_names": self._build_parameter_names(collection),
             "data_queries": self._build_data_queries(collection_url),
             "providers": self._build_providers(collection),
-            "links": self._build_links(collection, collection_url, stac_base_url),
+            "links": self._build_links(collection, collection_url, stac_base_url, has_reference_time),
             "x-georiva": self._build_georiva_metadata(collection, has_reference_time),
         }
 
@@ -222,12 +237,31 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
 
         return [t.isoformat() for t in qs.values_list("time", flat=True).distinct()]
 
-    def _get_runs(self, collection: Collection) -> list[dict]:
-        """
-        Build the structured runs list for x-georiva.runs.
+    def _runs_limit(self) -> int:
+        """How many recent runs this request gets, clamped to a sane window.
 
-        Single query — groups in Python via itertools.groupby.
-        Runs ordered newest → oldest; valid_times oldest → newest within each run.
+        A client says ``?runs_limit=N``; nonsense falls back to the default and
+        anything above ``MAX_RUNS_LIMIT`` is capped, because the point of the
+        bound is that the server decides how big this document may get.
+        """
+        request = self.context.get("request")
+        raw = request.query_params.get("runs_limit") if request else None
+        if raw is None:
+            return DEFAULT_RUNS_LIMIT
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return DEFAULT_RUNS_LIMIT
+        return max(1, min(value, MAX_RUNS_LIMIT))
+
+    def _get_runs(self, collection: Collection, limit: int) -> list[dict]:
+        """
+        Build the structured runs list for x-georiva.runs — newest ``limit`` runs.
+
+        Two bounded queries on the Item manager — the newest ``limit`` reference
+        times, then the valid times belonging to them (the runs route asks the
+        same of the same methods). Runs newest → oldest; valid_times oldest →
+        newest within each run.
 
         Shape:
         [
@@ -238,22 +272,15 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
           ...
         ]
         """
-        rows = list(
-            Item.objects.filter(collection=collection, reference_time__isnull=False)
-            .order_by("-reference_time", "time")
-            .values_list("reference_time", "time")
-        )
-
-        runs = []
-        for ref_time, group in groupby(rows, key=lambda r: r[0]):
-            runs.append(
-                {
-                    "reference_time": ref_time.isoformat(),
-                    "valid_times": [t.isoformat() for _, t in group],
-                }
-            )
-
-        return runs
+        reference_times = Item.objects.recent_reference_times(collection, limit)
+        valid_times = Item.objects.valid_times_by_run(collection, reference_times)
+        return [
+            {
+                "reference_time": reference_time.isoformat(),
+                "valid_times": valid_times[reference_time],
+            }
+            for reference_time in reference_times
+        ]
 
     # ── Parameter names ───────────────────────────────────────────────────
     def _build_parameter_names(self, collection: Collection) -> dict:
@@ -299,6 +326,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         collection: Collection,
         collection_url: str,
         stac_base_url: str,
+        has_reference_time: bool,
     ) -> list:
         catalog = collection.catalog
         links = [
@@ -328,6 +356,21 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             },
         ]
 
+        if has_reference_time:
+            # x-georiva.runs is a window; this route knows every run, which are
+            # complete, and one run's valid times (#600).
+            links.append(
+                {
+                    "rel": "related",
+                    "href": get_full_url_by_request(
+                        self.context.get("request"),
+                        reverse("run-list", args=[catalog.slug, collection.slug]),
+                    ),
+                    "type": "application/json",
+                    "title": f"{collection.name} model runs",
+                }
+            )
+
         if catalog.license and catalog.provider_url:
             links.append(
                 {
@@ -347,8 +390,11 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
 
         For collections with reference_time, adds:
           - has_reference_time: true
-          - runs: [{reference_time, valid_times[]}]
-            used by the frontend to pick times without a DB lookup.
+          - runs: [{reference_time, valid_times[]}] — the newest runs only,
+            used by the frontend to pick times without a DB lookup
+          - runs_limit: how many runs that window was allowed to hold, so a
+            client can tell a short list from a truncated one and knows what
+            ``?runs_limit=`` it may raise.
         """
         catalog = collection.catalog
         meta = {
@@ -371,7 +417,9 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
             meta["license"] = catalog.license
 
         if has_reference_time:
-            meta["runs"] = self._get_runs(collection)
+            limit = self._runs_limit()
+            meta["runs"] = self._get_runs(collection, limit)
+            meta["runs_limit"] = limit
 
         return {k: v for k, v in meta.items() if v is not None}
 

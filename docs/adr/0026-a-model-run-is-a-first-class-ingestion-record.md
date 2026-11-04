@@ -219,3 +219,26 @@ collection, while a STAC collection is a variable, so the run list would repeat 
   closed revision in the meantime is not done: the row keeps no snapshot of the earlier revision.
 - **No complete run** is a 200 with `latest_complete: null`. A collection the caller cannot see is a 404, the same as
   anywhere else (`Collection.objects.visible_to`).
+
+## Amendment — valid times belong to the runs route (issue #600)
+
+`x-georiva.runs` in the EDR collection document carried every run with every one of its valid times. There is one
+`Item` row per `(reference_time, time)`, so both the query and the body grew as runs × lead times — invisible only
+because `retain_past_forecasts = False` leaves one or two runs standing. A collection that keeps its past forecasts
+(WRF, 48 lead times, four runs a day, a month retained) is ~5,800 entries in a document that is `no-store` for private
+collections and re-fetched on every model switch.
+
+Both ceilings bound the *body*, so neither is a row count a client may raise at will; each run drags its every lead
+time along. The bound and the answer are split between the two routes a forecast client already uses:
+
+- **The EDR document carries a window.** `x-georiva.runs` is the newest `runs_limit` runs — five by default,
+  `?runs_limit=N` to change it, capped at 20 — and reports `runs_limit` beside them so a client can tell a short
+  list from a truncated one. The flat `extent.temporal.values` beside it was already the latest run only. A `related`
+  link now points at the runs route, so a client that needs more can find it from the document.
+- **The runs route answers for one run.** `?valid_times=1` adds each listed run's `valid_times`, and
+  `?reference_time=<iso>` narrows the listing to the run the user picked — which is the one thing a viewer needed and
+  previously had to download every run's every lead time to get. Asking for valid times also caps `limit` at 20,
+  because a run carries its every lead time and that product — not the run count — is the body this is about: 200 runs
+  of a 48-step model is ~9,600 timestamps, worse than what was reported. `reference_time` narrows the `runs` listing only,
+  never `latest_complete`, exactly as `closed_by` touches only `latest_complete`; unparseable is a 400 and no match is
+  an empty listing.
