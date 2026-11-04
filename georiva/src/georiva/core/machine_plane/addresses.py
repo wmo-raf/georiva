@@ -332,6 +332,48 @@ def titiler_encoded_preview_url(item, variable) -> str:
     return f"{root}/encoded-preview.png?{urlencode(params)}"
 
 
+def vector_render_config_token(u_variable, v_variable) -> str:
+    """A short hash of everything baked into a two-band vector texture's pixels.
+
+    Both components are encoded over the union of their ranges, so a change to
+    *either* variable's range moves every pixel of both bands: the basis is the
+    two single-band bases in order (u, then v), and the URL it rides on is
+    ``immutable`` for exactly that reason (ADR 0021). Order matters because the
+    bands are not interchangeable.
+    """
+    basis = f"{_render_range_basis(u_variable)}|{_render_range_basis(v_variable)}"
+    return hashlib.sha1(basis.encode()).hexdigest()[:8]
+
+
+def titiler_vector_preview_url(item, u_variable, v_variable) -> str:
+    """The two-band (u, v) encoded texture for ``item``'s time (#593).
+
+    Addressed on the *collection* — ``/{org}/{catalog}/{collection}/vector-preview.png`` —
+    with the pair named in the query. The leaf stands where a variable slug
+    stands in every other tile URL, so :func:`scope_of` authorises it against
+    the collection like any tile route, and one visibility decision covers both
+    components. That only holds while both variables live in that one
+    collection, so a pair from elsewhere has no address.
+    """
+    collection = item.collection
+    for variable in (u_variable, v_variable):
+        if variable.collection_id != collection.pk:
+            raise ValueError(f"{variable.slug!r} is not a variable of the item's collection")
+    params = {"u_variable": u_variable.slug, "v_variable": v_variable.slug, "time": item.time_iso}
+    if item.reference_time:
+        params["reftime"] = item.reference_time_iso
+    params["v"] = vector_render_config_token(u_variable, v_variable)
+    root = "/".join(
+        (
+            TITILER_PREFIX.rstrip("/"),
+            org_slug_of(collection),
+            collection.catalog.slug,
+            collection.slug,
+        )
+    )
+    return f"{root}/vector-preview.png?{urlencode(params)}"
+
+
 def martin_boundary_stats_url(collection, base) -> str:
     """Martin's zonal-stats tile URL for ``collection``, less the varying params.
 

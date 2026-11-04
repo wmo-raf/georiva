@@ -99,3 +99,24 @@ next texture request.
 - The prototype evidencing pixel-identity is preserved on branch
   `prototype/encoded-preview-endpoint` as the primary source for this
   decision.
+
+## Amendment: two-band vector texture (#593)
+
+A particle layer needs u and v together, so the same on-demand rule serves a
+**pair** of existing variables as one RGBA texture (R = u, G = v, B = 0):
+`GET /titiler/{org}/{catalog}/{collection}/vector-preview.png?u_variable=&v_variable=&time=[&reftime=]&v=`.
+
+- **The pair is declared in the request**, not on the model. Both variables
+  must belong to the one collection in the path, so the nginx gate's existing
+  collection-level decision (ADR 0015) covers both and nothing in `scope_of`
+  or `auth_view` changed. `titiler_vector_preview_url` refuses a pair from
+  two collections.
+- **One range for both bands**: the union of the two variables' current
+  `vmin`/`vmax`, announced as `X-Image-Unscale`. Per-band ranges would bend
+  every decoded angle.
+- **Alpha** is 0 where either component is nodata or outside the `display`
+  crop (ADR 0038), 255 elsewhere.
+- **Grids that differ** (shape or bounds) answer 422; nothing is resampled,
+  because resampling would distort direction.
+- **The `v=` token** hashes both variables' render-range bases in order, so
+  an edit to either component's range is a new URL and `immutable` stays honest.

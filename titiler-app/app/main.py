@@ -4,9 +4,11 @@ configure_logging()
 
 import logging
 
-from fastapi import Depends, FastAPI, Query, Request, Response
+import numpy as np
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from rasterio.errors import RasterioIOError
+from rio_tiler.models import ImageData
 from starlette.middleware.cors import CORSMiddleware
 from titiler.core.factory import TilerFactory
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -18,6 +20,9 @@ from app.dependencies import (
     SemanticPathParams,
     SemanticRescale,
     SemanticTileConfig,
+    build_cog_url,
+    parse_iso_datetime,
+    resolve_tile_config,
 )
 from app.middleware import PreviewCacheMiddleware, RequestLoggingMiddleware
 from app.reader import ResilientReader, is_not_found
@@ -149,5 +154,77 @@ def encoded_preview(
             "Cache-Control": "public, max-age=31536000, immutable",
             "X-Image-Unscale": f"{tile_config['vmin']},{tile_config['vmax']}",
             "X-Image-Bounds": ",".join(str(b) for b in img.bounds) if img.bounds else "",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Two-band vector texture (#593)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/{org_slug}/{catalog_slug}/{collection_slug}/vector-preview.png")
+def vector_preview(
+    org_slug: str = Path(...),
+    catalog_slug: str = Path(...),
+    collection_slug: str = Path(...),
+    u_variable: str = Query(..., description="Slug of the eastward (u) component"),
+    v_variable: str = Query(..., description="Slug of the northward (v) component"),
+    time: str = Query(..., description="Valid time in ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)"),
+    reftime: str | None = Query(None, description="Forecast reference time in ISO 8601 UTC"),
+    max_size: int = Query(4096, ge=1, description="Cap on the longest image side (native grid if smaller)"),
+    v: str | None = Query(None, description="Render-config version token; varies the URL for caches"),
+) -> Response:
+    """A u/v pair as one texture: R = u, G = v, B = 0, alpha = both components valid.
+
+    Both bands are rescaled over one range, the union of the two variables'
+    current ranges, so ``atan2(v, u)`` of the decoded pixel is the direction
+    in the source data; per-band ranges would bend every angle off the axes.
+    Like ``encoded-preview.png`` this is derived per request and never stored
+    (ADR 0021); ``v`` is opaque here and exists to key caches, and the
+    collection-scoped address is gated by nginx like every other tile route.
+    """
+    time_dt = parse_iso_datetime(time, "time")
+    reftime_dt = parse_iso_datetime(reftime, "reftime") if reftime else None
+
+    configs, images = [], []
+    for variable in (u_variable, v_variable):
+        configs.append(resolve_tile_config(org_slug, catalog_slug, collection_slug, variable))
+    for variable in (u_variable, v_variable):
+        src_path = build_cog_url(org_slug, catalog_slug, collection_slug, variable, time_dt, reftime_dt)
+        with ResilientReader(src_path) as src:
+            images.append(src.preview(max_size=max_size))
+    u_img, v_img = images
+
+    if u_img.array.shape != v_img.array.shape or tuple(u_img.bounds) != tuple(v_img.bounds):
+        raise HTTPException(
+            status_code=422,
+            detail="The u and v components are on different grids — a vector texture needs one shared grid.",
+        )
+
+    lo = min(c["vmin"] for c in configs)
+    hi = max(c["vmax"] for c in configs)
+
+    bands = []
+    for img in (u_img, v_img):
+        img.rescale(in_range=((lo, hi),))
+        bands.append(img.array[0])
+    zero = np.ma.masked_array(np.zeros_like(bands[0].data), mask=False)
+    mask = np.ma.getmaskarray(bands[0]) | np.ma.getmaskarray(bands[1])
+    array = np.ma.masked_array(
+        np.ma.stack([bands[0], bands[1], zero]).data,
+        mask=np.broadcast_to(mask, (3, *mask.shape)),
+    )
+    out = ImageData(array, assets=u_img.assets, crs=u_img.crs, bounds=u_img.bounds)
+    # Same crop as every other output (ADR 0038); the catalog is one, so u's config speaks for both.
+    crop(out, configs[0].get("boundary"))
+
+    return Response(
+        out.render(img_format="PNG"),
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Image-Unscale": f"{lo},{hi}",
+            "X-Image-Bounds": ",".join(str(b) for b in out.bounds) if out.bounds else "",
         },
     )

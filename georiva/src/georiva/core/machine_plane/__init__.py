@@ -55,6 +55,8 @@ from .addresses import (  # noqa: F401
     titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,
+    titiler_vector_preview_url,
+    vector_render_config_token,
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,

@@ -165,6 +165,17 @@ def SemanticTileConfig(
         description="Named style to render with; omission means the variable's default style",
     ),
 ) -> dict:
+    """Resolve rendering config for the variable the path names (see :func:`resolve_tile_config`)."""
+    return resolve_tile_config(org_slug, catalog_slug, collection_slug, variable_slug, style)
+
+
+def resolve_tile_config(
+    org_slug: str,
+    catalog_slug: str,
+    collection_slug: str,
+    variable_slug: str,
+    style: str | None = None,
+) -> dict:
     """Resolve rendering config for a variable.
 
     Resolution order: Redis → Django internal API → HTTP 404/503.

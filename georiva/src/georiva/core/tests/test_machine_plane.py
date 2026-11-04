@@ -32,10 +32,12 @@ from georiva.core.machine_plane import (
     org_slug_of,
     preview_version_token,
     render_config_token,
+    scope_of,
     style_version_token,
     titiler_encoded_preview_url,
     titiler_preview_url,
     titiler_variable_root,
+    titiler_vector_preview_url,
     wmts_capabilities_url,
     wmts_kvp_endpoint,
     wmts_layer_identifier,
@@ -117,6 +119,48 @@ class MachinePlaneAddressTests(TestCase):
             render_config_token(self.kenya_tree["variable"]),
             render_config_token(self.kenya_tree["variable"]),
         )
+
+    def _wind_pair(self):
+        tree = self.kenya_tree
+        u = tree["variable"]
+        v = Variable.objects.create(
+            collection=tree["collection"], name="V wind", slug="v10", unit=u.unit, value_min=-20, value_max=5
+        )
+        return tree["item"], u, v
+
+    def test_a_vector_url_names_the_pair_on_the_collection_address(self):
+        item, u, v = self._wind_pair()
+        url = titiler_vector_preview_url(item, u, v)
+        self.assertTrue(
+            url.startswith(f"/titiler/kenya/{SHARED_SLUG}/{SHARED_SLUG}/vector-preview.png?"),
+            url,
+        )
+        self.assertIn(f"u_variable={u.slug}", url)
+        self.assertIn("v_variable=v10", url)
+        self.assertIn("time=2026-03-01T12", url)
+
+    def test_a_vector_url_is_scoped_to_its_collection_by_the_gate(self):
+        item, u, v = self._wind_pair()
+        scope = scope_of(titiler_vector_preview_url(item, u, v))
+        self.assertEqual(tuple(scope), ("kenya", SHARED_SLUG, SHARED_SLUG))
+
+    def test_a_vector_url_changes_when_either_range_changes(self):
+        item, u, v = self._wind_pair()
+        before = titiler_vector_preview_url(item, u, v)
+        v.value_max += 1
+        self.assertNotEqual(before, titiler_vector_preview_url(item, u, v))
+        v.value_max -= 1
+        u.value_min -= 1
+        self.assertNotEqual(before, titiler_vector_preview_url(item, u, v))
+
+    def test_a_vector_url_token_is_not_the_single_band_token(self):
+        item, u, v = self._wind_pair()
+        self.assertNotIn(f"v={render_config_token(u)}", titiler_vector_preview_url(item, u, v))
+
+    def test_a_pair_from_two_collections_has_no_address(self):
+        item, u, _ = self._wind_pair()
+        with self.assertRaises(ValueError):
+            titiler_vector_preview_url(item, u, self.uganda_tree["variable"])
 
     def test_a_forecast_preview_carries_its_reference_time(self):
         item = Item.objects.create(
