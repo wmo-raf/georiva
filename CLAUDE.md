@@ -139,6 +139,8 @@ Defined in `api/urls.py`:
 - `/api/wmts/<org>/WMTSCapabilities.xml` — WMTS capabilities; `GetTile` is the KVP shim in `titiler-app`
   at `/titiler/<org>/wmts?REQUEST=GetTile` (gated by nginx like every other tile route)
 - `/api/jobs/` — Async job status (task_ferry)
+- `/api/runs/<catalog>/<collection>/` — a collection's model runs and `latest_complete` (closed = complete; a reopened
+  run is incomplete until it closes again; ADR 0026)
 - `/api/analysis/` — Analysis API (e.g. `timeseries/point`, `timeseries/area`)
 - `/api/tile-config/<org>/<catalog>/<collection>/<variable>/` — Tile/render config (machine plane; see ADR 0013)
 - `/api/datasets/` — Dataset pages API
