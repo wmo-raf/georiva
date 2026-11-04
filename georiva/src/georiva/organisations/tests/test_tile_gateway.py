@@ -60,6 +60,14 @@ def titiler_uri(collection_slug, org="kenya", catalog="forecast", variable=None)
     )
 
 
+def vector_uri(collection_slug, org="kenya", catalog="forecast"):
+    """A two-band u/v texture URL: the pair rides in the query, the collection in the path (#593)."""
+    return (
+        f"/titiler/{org}/{catalog}/{collection_slug}/vector-preview.png"
+        f"?u_variable=u10&v_variable=v10&time=2026-03-01T12:00:00Z&v=abcd1234"
+    )
+
+
 def wmts_uri(collection_slug, org="kenya", catalog="forecast", request="GetTile", layer=None, extra=""):
     """A KVP request against the org-scoped WMTS endpoint under the proxy."""
     layer = layer if layer is not None else f"{catalog}:{collection_slug}:{collection_slug}"
@@ -270,6 +278,24 @@ class TileGatewayTestCase(TestCase):
     def ask(self, uri, **extra):
         """Put nginx's question to the gate: may this URI be proxied?"""
         return self.client.get(reverse("tile_auth"), HTTP_X_ORIGINAL_URI=uri, **extra).status_code
+
+
+class VectorTextureTests(TileGatewayTestCase):
+    """A texture built from two variables is as visible as the collection holding both."""
+
+    def test_a_public_texture_is_served_anonymously(self):
+        self.assertEqual(self.ask(vector_uri(PUBLIC_SLUG)), ALLOW)
+
+    def test_a_private_texture_is_refused_anonymously(self):
+        self.assertEqual(self.ask(vector_uri(PRIVATE_SLUG)), DENY)
+
+    def test_a_private_texture_is_served_to_a_member(self):
+        self.login(self.member)
+        self.assertEqual(self.ask(vector_uri(PRIVATE_SLUG)), ALLOW)
+
+    def test_a_private_texture_is_refused_to_another_organisations_member(self):
+        self.login(self.outsider)
+        self.assertEqual(self.ask(vector_uri(PRIVATE_SLUG)), DENY)
 
 
 class TitilerTilesTests(TileGatewayTestCase):
