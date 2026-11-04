@@ -329,7 +329,7 @@ exposes the status of long-running loader and processing jobs.
 >
 > Both time lists in the document are bounded, because one item row exists per `(reference_time,
 > time)`: `extent.temporal.values` is the latest run's valid times, and `x-georiva.runs` is the
-> newest `runs_limit` runs (five by default, `?runs_limit=N` up to 200). A client that needs the
+> newest `runs_limit` runs (five by default, `?runs_limit=N` up to 20). A client that needs the
 > runs beyond that window, or one run's valid times, follows the `related` link to
 > `/api/runs/{catalog}/{collection}/` and asks there with `?reference_time=` and `?valid_times=1`
 > ([ADR-0026](../adr/0026-a-model-run-is-a-first-class-ingestion-record.md)).

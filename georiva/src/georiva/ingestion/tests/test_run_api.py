@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from django.test import TestCase
 from django.urls import reverse
 
-from georiva.core.models import Catalog, Collection
+from georiva.core.models import Catalog, Collection, Item
 from georiva.ingestion.models import RunIngestion
 from georiva.organisations.testing import dial_org, make_organisation
 
@@ -146,8 +146,6 @@ class RunValidTimeTests(TestCase):
         )
 
     def _run(self, hours, lead_times=3):
-        from georiva.core.models import Item
-
         reference_time = REF + timedelta(hours=hours)
         run = RunIngestion.objects.create(
             collection=self.collection,
@@ -206,3 +204,11 @@ class RunValidTimeTests(TestCase):
         self._run(0)
         response = self._get(reference_time="yesterday")
         self.assertEqual(response.status_code, 400)
+
+    def test_asking_for_valid_times_bounds_the_listing_tighter(self):
+        # Runs alone are cheap and the ceiling stays 200; runs × lead times is
+        # the body #600 is about, so that listing is held to a shorter window.
+        for hours in range(0, 12 * 25, 12):
+            self._run(hours, lead_times=1)
+        self.assertEqual(len(self._get(limit=200).json()["runs"]), 25)
+        self.assertEqual(len(self._get(limit=200, valid_times="1").json()["runs"]), 20)

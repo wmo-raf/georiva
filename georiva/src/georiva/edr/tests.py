@@ -5,7 +5,9 @@ intermediates are read by the engine but never served.
 
 from datetime import UTC, datetime, timedelta
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Item
@@ -201,7 +203,7 @@ class EDRRunsBoundTests(TestCase):
     def test_the_runs_limit_is_capped_server_side(self):
         self._runs(3)
         body = self._body(runs_limit=10_000)
-        self.assertEqual(body["x-georiva"]["runs_limit"], 200)
+        self.assertEqual(body["x-georiva"]["runs_limit"], 20)
         self.assertEqual(len(self._reference_times(body)), 3)
 
     def test_the_document_points_at_the_route_that_knows_every_run(self):
@@ -221,3 +223,15 @@ class EDRRunsBoundTests(TestCase):
         values = self._body()["extent"]["temporal"]["values"]
         newest = self.REF + timedelta(hours=24)
         self.assertEqual(values, [newest.isoformat(), (newest + timedelta(hours=6)).isoformat()])
+
+    def test_the_query_does_not_grow_with_the_runs_behind_it(self):
+        # The window is two bounded queries, not one scan per run: a collection
+        # that retains a month of forecasts costs what a fresh one costs.
+        self._runs(2)
+        with CaptureQueriesContext(connection) as small:
+            self._body()
+        Item.objects.all().delete()
+        self._runs(12)
+        with CaptureQueriesContext(connection) as large:
+            self._body()
+        self.assertEqual(len(large), len(small))

@@ -24,10 +24,11 @@ client that already loaded the run notice it was republished.
 ``valid_times`` — the item times carried by that reference time, oldest first —
 and ``?reference_time=<iso>`` narrows the listing to one run, which is what a
 forecast viewer actually needs once the user has picked a run (issue #600).
-They are opt-in because twenty runs with every lead time each is exactly the
-unbounded body this answers; ``reference_time`` narrows the ``runs`` listing
-only, never ``latest_complete``, the same way ``closed_by`` touches only
-``latest_complete``. An unparseable ``reference_time`` is a 400; one that
+They are opt-in *and* bounded tighter than a plain listing — asking for them
+caps ``limit`` at ``MAX_LIMIT_WITH_VALID_TIMES``, because every run carries its
+every lead time and that product is the unbounded body this answers.
+``reference_time`` narrows the ``runs`` listing only, never ``latest_complete``,
+the same way ``closed_by`` touches only ``latest_complete``. An unparseable ``reference_time`` is a 400; one that
 matches no run is a 200 with an empty listing.
 
 **Visibility is the collection's.** The collection is resolved through
@@ -49,39 +50,25 @@ from georiva.organisations.access import get_org_object_or_404
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 200
+# A listing that carries valid times is bounded tighter than one that does not:
+# each run drags its every lead time along, so 200 runs of a 48-step model is
+# ~9,600 timestamps — the body issue #600 is about. Runs alone stay cheap.
+MAX_LIMIT_WITH_VALID_TIMES = 20
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def _limit(request: Request) -> int:
+    ceiling = MAX_LIMIT_WITH_VALID_TIMES if _wants_valid_times(request) else MAX_LIMIT
     try:
         value = int(request.query_params.get("limit", DEFAULT_LIMIT))
     except ValueError:
-        return DEFAULT_LIMIT
-    return max(1, min(value, MAX_LIMIT))
+        value = DEFAULT_LIMIT
+    return max(1, min(value, ceiling))
 
 
 def _wants_valid_times(request: Request) -> bool:
     return (request.query_params.get("valid_times") or "").strip().lower() in TRUE_VALUES
-
-
-def valid_times_for(collection: Collection, reference_times: list[datetime]) -> dict[datetime, list[str]]:
-    """One bounded query for the listed runs' item times, oldest first per run.
-
-    Keyed by reference time so the caller can hand each run its own list; a run
-    whose items have not arrived yet simply has none.
-    """
-    if not reference_times:
-        return {}
-    times: dict[datetime, list[str]] = {ref: [] for ref in reference_times}
-    rows = (
-        Item.objects.filter(collection=collection, reference_time__in=reference_times)
-        .order_by("reference_time", "time")
-        .values_list("reference_time", "time")
-    )
-    for reference_time, time in rows:
-        times.setdefault(reference_time, []).append(time.isoformat())
-    return times
 
 
 def serialize_run(run: RunIngestion, valid_times: dict[datetime, list[str]] | None = None) -> dict:
@@ -148,7 +135,7 @@ class RunListView(APIView):
             references = [run.reference_time for run in listed]
             if latest and latest.reference_time not in references:
                 references.append(latest.reference_time)
-            valid_times = valid_times_for(collection, references)
+            valid_times = Item.objects.valid_times_by_run(collection, references)
 
         return Response(
             {

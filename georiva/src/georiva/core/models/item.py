@@ -285,6 +285,41 @@ class ItemManager(models.Manager):
             qs = qs.filter(collection=collection)
         return qs.order_by("-time").first()
 
+    def recent_reference_times(self, collection, limit):
+        """The newest ``limit`` run reference times in ``collection``, newest first.
+
+        The first half of answering "which runs may I show?" without reading a
+        row per lead time: there is one item per ``(reference_time, time)``, so
+        a caller that wants runs must ask for runs (issue #600).
+        """
+        return list(
+            self.filter(collection=collection, reference_time__isnull=False)
+            .order_by("-reference_time")
+            .values_list("reference_time", flat=True)
+            .distinct()[:limit]
+        )
+
+    def valid_times_by_run(self, collection, reference_times):
+        """Each named run's valid times as ISO strings, oldest first, keyed by run.
+
+        One query for a caller that has already decided which runs it will
+        answer for — the EDR document's run window and the runs route's opt-in
+        valid times are the same question asked of two routes (issue #600). A
+        run whose items have not arrived yet maps to an empty list rather than
+        going missing, so a caller can serve every key it promised.
+        """
+        times = {reference_time: [] for reference_time in reference_times}
+        if not reference_times:
+            return times
+        rows = (
+            self.filter(collection=collection, reference_time__in=reference_times)
+            .order_by("reference_time", "time")
+            .values_list("reference_time", "time")
+        )
+        for reference_time, time in rows:
+            times.setdefault(reference_time, []).append(time.isoformat())
+        return times
+
     def latest_for_variable(self, variable):
         """The item a preview of ``variable`` should show: newest run, earliest
         horizon.
