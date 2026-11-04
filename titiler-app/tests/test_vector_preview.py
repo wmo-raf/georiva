@@ -33,12 +33,14 @@ def config(vrange, **extra):
     return json.dumps({**TILE_CONFIG, "vmin": vrange[0], "vmax": vrange[1], **extra})
 
 
-def seed_pair(fake_redis, seed_cog, u, v, boundary=None, u_nodata=None, v_nodata=None, v_bounds=None, bounds=None):
+def seed_pair(
+    fake_redis, seed_cog, u, v, boundary=None, u_nodata=None, v_nodata=None, v_bounds=None, bounds=None, reftime=None
+):
     extra = {"boundary": boundary} if boundary else {}
     fake_redis.store[key("u10")] = config(U_RANGE, **extra)
     fake_redis.store[key("v10")] = config(V_RANGE, **extra)
-    seed_cog(variable="u10", data=u.astype("float32"), nodata=u_nodata, bounds=bounds)
-    seed_cog(variable="v10", data=v.astype("float32"), nodata=v_nodata, bounds=v_bounds or bounds)
+    seed_cog(variable="u10", data=u.astype("float32"), nodata=u_nodata, bounds=bounds, reftime=reftime)
+    seed_cog(variable="v10", data=v.astype("float32"), nodata=v_nodata, bounds=v_bounds or bounds, reftime=reftime)
 
 
 def decode(png):
@@ -147,3 +149,33 @@ class TestRefusals:
         fake_redis.store[key("u10")] = config(U_RANGE)
 
         assert client.get(PATH, params=QUERY).status_code == 404
+
+    def test_one_variable_twice_is_refused(self, client, fake_redis, seed_cog):
+        seed_pair(fake_redis, seed_cog, ramp(-10, 10), ramp(-20, 5))
+
+        response = client.get(PATH, params={**QUERY, "v_variable": "u10"})
+
+        assert response.status_code == 422
+
+    def test_a_component_without_a_range_is_refused_not_a_crash(self, client, fake_redis, seed_cog):
+        seed_pair(fake_redis, seed_cog, ramp(-10, 10), ramp(-20, 5))
+        fake_redis.store[key("v10")] = json.dumps({**TILE_CONFIG, "vmin": None, "vmax": None})
+
+        assert client.get(PATH, params=QUERY).status_code == 422
+
+    def test_a_missing_component_cog_is_not_found(self, client, fake_redis, seed_cog):
+        seed_pair(fake_redis, seed_cog, ramp(-10, 10), ramp(-20, 5))
+
+        assert client.get(PATH, params={**QUERY, "time": "2026-03-23T18:00:00Z"}).status_code == 404
+
+
+class TestAForecastRun:
+    def test_the_reference_time_selects_the_cogs(self, client, fake_redis, seed_cog):
+        u, v = np.full((SIZE, SIZE), 2.0), np.full((SIZE, SIZE), 2.0)
+        seed_pair(fake_redis, seed_cog, u, v, reftime="2026-03-23T00:00:00Z")
+
+        with_ref = client.get(PATH, params={**QUERY, "reftime": "2026-03-23T00:00:00Z"})
+        without = client.get(PATH, params=QUERY)
+
+        assert with_ref.status_code == 200
+        assert without.status_code == 404

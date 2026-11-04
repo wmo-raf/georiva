@@ -170,9 +170,14 @@ def org_slug_of(collection) -> str:
     return collection.catalog.organisation.slug
 
 
+def titiler_collection_root(org_slug, catalog_slug, collection_slug) -> str:
+    """The Titiler route prefix identifying one collection of one organisation."""
+    return f"{TITILER_PREFIX}/{org_slug}/{catalog_slug}/{collection_slug}"
+
+
 def titiler_variable_root(org_slug, catalog_slug, collection_slug, variable_slug) -> str:
     """The Titiler route prefix identifying one variable of one organisation."""
-    return f"{TITILER_PREFIX}/{org_slug}/{catalog_slug}/{collection_slug}/{variable_slug}"
+    return f"{titiler_collection_root(org_slug, catalog_slug, collection_slug)}/{variable_slug}"
 
 
 def titiler_preview_url(item, variable, style=None) -> str:
@@ -363,14 +368,7 @@ def titiler_vector_preview_url(item, u_variable, v_variable) -> str:
     if item.reference_time:
         params["reftime"] = item.reference_time_iso
     params["v"] = vector_render_config_token(u_variable, v_variable)
-    root = "/".join(
-        (
-            TITILER_PREFIX.rstrip("/"),
-            org_slug_of(collection),
-            collection.catalog.slug,
-            collection.slug,
-        )
-    )
+    root = titiler_collection_root(org_slug_of(collection), collection.catalog.slug, collection.slug)
     return f"{root}/vector-preview.png?{urlencode(params)}"
 
 

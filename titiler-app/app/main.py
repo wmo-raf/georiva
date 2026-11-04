@@ -187,23 +187,30 @@ def vector_preview(
     time_dt = parse_iso_datetime(time, "time")
     reftime_dt = parse_iso_datetime(reftime, "reftime") if reftime else None
 
+    if u_variable == v_variable:
+        raise HTTPException(status_code=422, detail="u_variable and v_variable must name two different variables.")
+
     configs, images = [], []
     for variable in (u_variable, v_variable):
         configs.append(resolve_tile_config(org_slug, catalog_slug, collection_slug, variable))
-    for variable in (u_variable, v_variable):
         src_path = build_cog_url(org_slug, catalog_slug, collection_slug, variable, time_dt, reftime_dt)
         with ResilientReader(src_path) as src:
             images.append(src.preview(max_size=max_size))
     u_img, v_img = images
 
-    if u_img.array.shape != v_img.array.shape or tuple(u_img.bounds) != tuple(v_img.bounds):
+    if u_img.array.shape != v_img.array.shape or tuple(u_img.bounds) != tuple(v_img.bounds) or u_img.crs != v_img.crs:
         raise HTTPException(
             status_code=422,
             detail="The u and v components are on different grids — a vector texture needs one shared grid.",
         )
 
-    lo = min(c["vmin"] for c in configs)
-    hi = max(c["vmax"] for c in configs)
+    ends = [(c.get("vmin"), c.get("vmax")) for c in configs]
+    if any(a is None or b is None for a, b in ends):
+        raise HTTPException(status_code=422, detail="Both components need a configured value range.")
+    lo = min(a for a, _ in ends)
+    hi = max(b for _, b in ends)
+    if not lo < hi:
+        raise HTTPException(status_code=422, detail="The shared value range is empty.")
 
     bands = []
     for img in (u_img, v_img):
