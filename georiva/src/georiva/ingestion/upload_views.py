@@ -148,6 +148,24 @@ def _senders_with_versions(feed):
     return senders
 
 
+def upload_endpoint_for(request):
+    """Where this page's browser uploads go, judged from the page. None when no browser
+    ``PUT`` is involved: a backend with nothing to sign for takes the files in the request."""
+    from django.conf import settings
+
+    from georiva.core.storage import storage
+    from georiva.core.storage.public_endpoint import describe
+
+    if not storage.incoming.is_s3:
+        return None
+    return describe(
+        settings.MINIO_PUBLIC_ENDPOINT,
+        settings.MINIO_PUBLIC_ENDPOINT_USE_SSL,
+        site_host=request.get_host(),
+        site_is_secure=request.is_secure(),
+    )
+
+
 def push_feed_page(request, pk, issued=None):
     from georiva.core.storage import BucketType
     from georiva.ingestion.machine_senders import endpoint_is_plain_http
@@ -206,6 +224,7 @@ def push_feed_page(request, pk, issued=None):
             "served_version": sender_version.served(),
             "can_manage_senders": can_manage_senders(request.user),
             "plain_http": endpoint_is_plain_http(),
+            "upload_endpoint": upload_endpoint_for(request),
             "issued": issued,
             "deliveries": deliveries,
             "variables": variables,

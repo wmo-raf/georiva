@@ -52,3 +52,36 @@ def check_plugin_requires_env(app_configs, **kwargs):
                 )
             )
     return messages
+
+
+@register()
+def check_public_endpoint_name(app_configs, **kwargs):
+    """Warn when ``MINIO_PUBLIC_ENDPOINT`` is not named the way the bundled proxy routes
+    the S3 API (``s3.<domain>``).
+
+    A browser upload is a ``PUT`` to that name. Anything else reaches the admin site,
+    which has no route for it: the progress bar still hits 100% and the file is never
+    stored. Only a warning: an operator may pin another sender host in the proxy.
+    Whether the name is the site's own host needs a request, so that is the upload
+    page's job, not this check's.
+    """
+    if getattr(settings, "GEORIVA_STORAGE_BACKEND", "local") != "s3":
+        return []
+
+    from georiva.core.storage.public_endpoint import NO_S3_PREFIX, describe
+
+    endpoint = describe(settings.MINIO_PUBLIC_ENDPOINT, settings.MINIO_PUBLIC_ENDPOINT_USE_SSL)
+    if endpoint.advisory != NO_S3_PREFIX:
+        return []
+    return [
+        Warning(
+            f"MINIO_PUBLIC_ENDPOINT is '{endpoint.host}', which does not start with 's3.'.",
+            hint=(
+                "Browser uploads go to this name, and the bundled proxy routes only s3.<your domain> "
+                "to storage; anything else reaches the admin site and the upload fails with a 404. "
+                "Set it in the stack .env and re-run ./deploy.sh. Ignore this if you pinned a "
+                "different sender host in the proxy."
+            ),
+            id="georiva.W003",
+        )
+    ]
