@@ -140,7 +140,8 @@ Defined in `api/urls.py`:
   at `/titiler/<org>/wmts?REQUEST=GetTile` (gated by nginx like every other tile route)
 - `/api/jobs/` — Async job status (task_ferry)
 - `/api/runs/<catalog>/<collection>/` — a collection's model runs and `latest_complete` (closed = complete; a reopened
-  run is incomplete until it closes again; ADR 0026)
+  run is incomplete until it closes again; ADR 0026). `?valid_times=1` adds each run's valid times and
+  `?reference_time=<iso>` narrows the listing to one run — the bounded answer EDR's windowed `x-georiva.runs` points at
 - `/api/analysis/` — Analysis API (e.g. `timeseries/point`, `timeseries/area`)
 - `/api/tile-config/<org>/<catalog>/<collection>/<variable>/` — Tile/render config (machine plane; see ADR 0013)
 - `/api/datasets/` — Dataset pages API

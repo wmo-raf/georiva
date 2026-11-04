@@ -125,3 +125,84 @@ class RunApiTests(TestCase):
     def test_unknown_closed_by_is_400(self):
         response = self.client.get(reverse("run-list", args=["models", "ifs-surface"]), {"closed_by": "bogus"})
         self.assertEqual(response.status_code, 400)
+
+
+class RunValidTimeTests(TestCase):
+    """A client that picked a run next needs that run's valid times (#600).
+
+    The EDR collection document only carries a bounded window of recent runs, so
+    the route that says which runs exist is also the one that answers "what
+    times does *this* run have?" — opt-in, because a listing of twenty runs with
+    every lead time each is the unbounded body all over again.
+    """
+
+    def setUp(self):
+        dial_org(self.client)
+        self.catalog = Catalog.objects.create(
+            organisation=make_organisation(), name="Models", slug="models", file_format="grib2"
+        )
+        self.collection = Collection.objects.create(
+            catalog=self.catalog, name="IFS", slug="ifs-surface", visibility=Collection.Visibility.PUBLIC
+        )
+
+    def _run(self, hours, lead_times=3):
+        from georiva.core.models import Item
+
+        reference_time = REF + timedelta(hours=hours)
+        run = RunIngestion.objects.create(
+            collection=self.collection,
+            reference_time=reference_time,
+            status=RunIngestion.Status.CLOSED,
+            closed_by="declared_set",
+        )
+        for lead in range(lead_times):
+            Item.objects.create(
+                collection=self.collection,
+                reference_time=reference_time,
+                time=reference_time + timedelta(hours=6 * lead),
+            )
+        return run
+
+    def _get(self, **params):
+        return self.client.get(reverse("run-list", args=["models", "ifs-surface"]), params)
+
+    def test_valid_times_are_absent_unless_asked_for(self):
+        self._run(0)
+        self.assertNotIn("valid_times", self._get().json()["runs"][0])
+        self.assertNotIn("valid_times", self._get().json()["latest_complete"])
+
+    def test_valid_times_are_each_runs_own_times_oldest_first(self):
+        self._run(0, lead_times=2)
+        self._run(12, lead_times=3)
+        body = self._get(valid_times="true").json()
+        newest, older = body["runs"]
+        self.assertEqual(
+            newest["valid_times"],
+            [(REF + timedelta(hours=12 + 6 * lead)).isoformat() for lead in range(3)],
+        )
+        self.assertEqual(older["valid_times"], [REF.isoformat(), (REF + timedelta(hours=6)).isoformat()])
+        self.assertEqual(body["latest_complete"]["valid_times"], newest["valid_times"])
+
+    def test_a_run_whose_items_have_not_arrived_has_an_empty_list(self):
+        RunIngestion.objects.create(collection=self.collection, reference_time=REF, status=RunIngestion.Status.OPEN)
+        self.assertEqual(self._get(valid_times="1").json()["runs"][0]["valid_times"], [])
+
+    def test_one_run_can_be_asked_for_by_reference_time(self):
+        self._run(0)
+        wanted = self._run(12)
+        body = self._get(reference_time=wanted.reference_time.isoformat(), valid_times="1").json()
+        self.assertEqual([r["reference_time"] for r in body["runs"]], [wanted.reference_time.isoformat()])
+        self.assertEqual(len(body["runs"][0]["valid_times"]), 3)
+        # Narrowing the listing does not change which run is the latest complete one.
+        self.assertEqual(body["latest_complete"]["reference_time"], wanted.reference_time.isoformat())
+
+    def test_an_unknown_reference_time_is_an_empty_listing_not_a_404(self):
+        self._run(0)
+        response = self._get(reference_time=(REF + timedelta(hours=36)).isoformat())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["runs"], [])
+
+    def test_an_unparseable_reference_time_is_a_400(self):
+        self._run(0)
+        response = self._get(reference_time="yesterday")
+        self.assertEqual(response.status_code, 400)
