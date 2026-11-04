@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.ingestion.models import (
@@ -13,7 +13,7 @@ from georiva.ingestion.models import (
     PushFeed,
     UploadSession,
 )
-from georiva.organisations.testing import dial_org, make_organisation
+from georiva.organisations.testing import dial_org, make_organisation, org_host
 
 User = get_user_model()
 
@@ -131,6 +131,79 @@ class UploadPageRenderTests(TestCase):
         _, _, config, _ = _geotiff_setup()
         response = self.client.get(PAGE_URL.format(config.pk))
         self.assertContains(response, 'id="upload-form"')
+
+
+@patch("georiva.core.storage.StorageManager.incoming", new_callable=PropertyMock)
+class UploadDestinationTests(TestCase):
+    """The page says where the file goes, and refuses a place it can never reach.
+
+    The progress bar reaches 100% whatever answers the PUT, so the only way to learn the
+    endpoint was wrong used to be digging through logs.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_dest", "d@p.com", "pw")
+        dial_org(self.client)
+        self.client.force_login(self.user)
+        _, _, self.config, _ = _geotiff_setup()
+
+    def _page(self, mock_incoming, is_s3=True, **extra):
+        mock_incoming.return_value = MagicMock(is_s3=is_s3)
+        return self.client.get(PAGE_URL.format(self.config.pk), **extra)
+
+    @override_settings(MINIO_PUBLIC_ENDPOINT="s3.kmsa.example.org", MINIO_PUBLIC_ENDPOINT_USE_SSL=False)
+    def test_the_page_names_where_the_files_go(self, mock_incoming):
+        response = self._page(mock_incoming)
+
+        self.assertContains(response, 'id="upload-destination"')
+        self.assertContains(response, "http://s3.kmsa.example.org")
+        self.assertNotContains(response, 'id="upload-endpoint-blocked"')
+        self.assertNotContains(response, 'id="upload-endpoint-advisory"')
+        self.assertNotContains(response, 'id="submit-btn" class="button bicolor button--icon" disabled')
+
+    def test_the_site_itself_as_the_endpoint_disables_the_upload(self, mock_incoming):
+        with override_settings(MINIO_PUBLIC_ENDPOINT=org_host(), MINIO_PUBLIC_ENDPOINT_USE_SSL=False):
+            response = self._page(mock_incoming)
+
+        self.assertContains(response, 'id="upload-endpoint-blocked"')
+        self.assertContains(response, 'id="submit-btn" class="button bicolor button--icon" disabled')
+        self.assertContains(response, "const UPLOAD_BLOCKED = true")
+        self.assertNotContains(response, 'id="upload-destination"')
+
+    @override_settings(MINIO_PUBLIC_ENDPOINT="s3.kmsa.example.org", MINIO_PUBLIC_ENDPOINT_USE_SSL=False)
+    def test_an_https_page_with_an_http_endpoint_disables_the_upload(self, mock_incoming):
+        response = self._page(mock_incoming, secure=True)
+
+        self.assertContains(response, 'id="upload-endpoint-blocked"')
+        self.assertContains(response, "MINIO_PUBLIC_ENDPOINT_USE_SSL=true")
+        self.assertContains(response, "const UPLOAD_BLOCKED = true")
+
+    @override_settings(MINIO_PUBLIC_ENDPOINT="storage.kmsa.example.org", MINIO_PUBLIC_ENDPOINT_USE_SSL=False)
+    def test_a_name_without_s3_warns_and_leaves_the_upload_usable(self, mock_incoming):
+        response = self._page(mock_incoming)
+
+        self.assertContains(response, 'id="upload-endpoint-advisory"')
+        self.assertContains(response, "const UPLOAD_BLOCKED = false")
+        self.assertContains(response, 'id="upload-destination"')
+
+    @override_settings(MINIO_PUBLIC_ENDPOINT="kmsa.example.org", MINIO_PUBLIC_ENDPOINT_USE_SSL=False)
+    def test_local_storage_has_no_endpoint_to_describe(self, mock_incoming):
+        """Files are posted to the app there, so the setting is not in play."""
+        response = self._page(mock_incoming, is_s3=False)
+
+        self.assertNotContains(response, 'id="upload-destination"')
+        self.assertNotContains(response, 'id="upload-endpoint-blocked"')
+        self.assertNotContains(response, 'id="upload-endpoint-advisory"')
+        self.assertContains(response, "const UPLOAD_BLOCKED = false")
+
+    @override_settings(MINIO_PUBLIC_ENDPOINT="s3.kmsa.example.org", MINIO_PUBLIC_ENDPOINT_USE_SSL=False)
+    def test_a_failed_upload_names_the_status_and_the_host(self, mock_incoming):
+        """The script turns the PUT's outcome into the reason shown on the row."""
+        response = self._page(mock_incoming)
+
+        self.assertContains(response, "new URL(url).host")
+        self.assertContains(response, "'HTTP ' + xhr.status")
+        self.assertContains(response, "failed.push(files[i].name + (reason")
 
 
 class ExtractTimesTests(TestCase):

@@ -112,6 +112,27 @@
     <a href="{% url 'push_feed_edit' feed.pk %}">{% trans "Edit configuration" %}</a>
 </div>
 
+{% if upload_endpoint %}
+    {% if upload_endpoint.blocked == "same_host" %}
+    <div class="help-block help-critical" id="upload-endpoint-blocked">
+        {% blocktrans with host=upload_endpoint.host %}Uploads cannot work from this page. The upload endpoint, <code>{{ host }}</code>, is this site itself, which has no route to storage, so a file sent there is answered by the app and never stored. Set <code>MINIO_PUBLIC_ENDPOINT</code> to the S3 name (for example <code>s3.your-domain</code>) and re-run <code>./deploy.sh</code>.{% endblocktrans %}
+    </div>
+    {% elif upload_endpoint.blocked == "mixed_content" %}
+    <div class="help-block help-critical" id="upload-endpoint-blocked">
+        {% blocktrans with host=upload_endpoint.host %}Uploads cannot work from this page. It is served over HTTPS, but the upload endpoint, <code>{{ host }}</code>, is plain HTTP, and a browser refuses to send a file to it. Set <code>MINIO_PUBLIC_ENDPOINT_USE_SSL=true</code> and re-run <code>./deploy.sh</code>.{% endblocktrans %}
+    </div>
+    {% else %}
+    <p class="mup-help" id="upload-destination">
+        {% blocktrans with url=upload_endpoint.url %}Files are sent directly from your browser to <code>{{ url }}</code> (storage), not through this server.{% endblocktrans %}
+    </p>
+    {% endif %}
+    {% if upload_endpoint.advisory == "no_s3_prefix" %}
+    <div class="help-block help-warning" id="upload-endpoint-advisory">
+        {% blocktrans with host=upload_endpoint.host %}The upload endpoint, <code>{{ host }}</code>, does not start with <code>s3.</code>, which is the name the bundled proxy routes to storage. If uploads fail with a 404, this is the first thing to check. If you pinned a different sender host in the proxy, ignore this.{% endblocktrans %}
+    </div>
+    {% endif %}
+{% endif %}
+
 <form id="upload-form" class="mup-form">
     {% csrf_token %}
 
@@ -154,7 +175,7 @@
     <div class="mup-error" id="form-error"></div>
 
     <div class="mup-actions">
-        <button type="submit" id="submit-btn" class="button bicolor button--icon">
+        <button type="submit" id="submit-btn" class="button bicolor button--icon"{% if upload_endpoint.blocked %} disabled{% endif %}>
             <span class="icon-wrapper"><svg class="icon icon-upload" aria-hidden="true"><use href="#icon-upload"></use></svg></span>
             {% trans "Upload & ingest" %}
         </button>
@@ -280,6 +301,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const POLL_MS      = 2500;
     const TERMINAL     = ['completed', 'failed', 'cancelled'];
     const IS_GEOTIFF   = {{ is_geotiff|yesno:"true,false" }};
+    // The endpoint can never be reached from this page (see the banner above the form).
+    const UPLOAD_BLOCKED = {% if upload_endpoint.blocked %}true{% else %}false{% endif %};
     const TIME_LABEL   = '{{ time_label|escapejs }}';
     const VARIABLES    = [{% for var in variables %}{"id": {{ var.pk }}, "label": "{{ var.name|escapejs }} ({{ var.collection.name|escapejs }})"}{% if not forloop.last %},{% endif %}{% endfor %}];
 
@@ -508,7 +531,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function resetRows() {
-        submitBtn.disabled = false;
+        submitBtn.disabled = UPLOAD_BLOCKED;
         fileRows.forEach(function (row) { setRowStatus(row, 'pending'); });
     }
 
@@ -520,11 +543,16 @@ document.addEventListener('DOMContentLoaded', function () {
             xhr.upload.onprogress = function (e) {
                 if (e.lengthComputable) onProgress(Math.round(100 * e.loaded / e.total));
             };
+            // Name the host that answered. The progress bar reaches 100% whatever is
+            // listening, so the status and the host are the only way to tell a file that
+            // reached storage from one that was sent to the wrong place.
+            let host = url;
+            try { host = new URL(url).host; } catch (err) { /* keep the raw url */ }
             xhr.onload = function () {
                 if (xhr.status >= 200 && xhr.status < 300) resolve();
-                else reject(new Error('HTTP ' + xhr.status));
+                else reject(new Error('HTTP ' + xhr.status + ' {% trans "from" %} ' + host));
             };
-            xhr.onerror = function () { reject(new Error('network')); };
+            xhr.onerror = function () { reject(new Error('{% trans "network error contacting" %} ' + host)); };
             xhr.send(file);
         });
     }
@@ -586,9 +614,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     setRowStatus(row, res.data.status);
                     if (res.data.job_id) jobIds.push(res.data.job_id);
                 })
-                .catch(function () {
-                    setRowStatus(row, 'failed');
-                    failed.push(files[i].name);
+                .catch(function (err) {
+                    const reason = err && err.message ? err.message : '';
+                    setRowStatus(row, 'failed', reason ? '{% trans "failed" %}: ' + reason : '');
+                    failed.push(files[i].name + (reason ? ' (' + reason + ')' : ''));
                 })
                 .then(function () { return sendFrom(i + 1); });
         }
@@ -610,6 +639,7 @@ document.addEventListener('DOMContentLoaded', function () {
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         clearError();
+        if (UPLOAD_BLOCKED) return;
         if (pollTimer) clearTimeout(pollTimer);
 
         const files = Array.from(fileInput.files);
