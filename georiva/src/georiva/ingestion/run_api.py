@@ -11,6 +11,10 @@ evidence: ``declared_set`` and ``upload_session`` are strong claims, ``quiet_per
 and ``manual`` are weaker. The route reports every closed run as complete and leaves
 a client that wants only the strong claims to filter on ``closed_by``.
 
+``?closed_by=declared_set,upload_session`` narrows ``latest_complete`` to runs closed on
+that evidence (the values of ``RunIngestion.Closer``); an unknown value is a 400. It does
+not change the ``runs`` listing or each run's ``complete`` flag.
+
 **A reopened run is incomplete again.** A late file reopens a closed run and bumps
 ``revision`` (ADR 0026), so it drops out of ``latest_complete`` — the client falls
 back to the run before it — until it closes again. ``version`` and ``revision`` let a
@@ -45,7 +49,7 @@ def _limit(request: Request) -> int:
 def serialize_run(run: RunIngestion) -> dict:
     return {
         "reference_time": run.reference_time.isoformat(),
-        "complete": run.status == RunIngestion.Status.CLOSED,
+        "complete": run.is_complete,
         "status": run.status,
         "revision": run.revision,
         "version": run.version,
@@ -69,8 +73,22 @@ class RunListView(APIView):
             catalog__slug=catalog_slug,
             slug=collection_slug,
         )
+        closers = request.query_params.get("closed_by")
+        complete = RunIngestion.objects.filter(collection=collection, status=RunIngestion.COMPLETE_STATUS)
+        if closers:
+            wanted = {c.strip() for c in closers.split(",") if c.strip()}
+            unknown = wanted - set(RunIngestion.Closer.values)
+            if unknown:
+                return Response(
+                    {
+                        "detail": f"Unknown closed_by: {', '.join(sorted(unknown))}.",
+                        "allowed": RunIngestion.Closer.values,
+                    },
+                    status=400,
+                )
+            complete = complete.filter(closed_by__in=wanted)
+        latest = complete.order_by("-reference_time").first()
         runs = RunIngestion.objects.filter(collection=collection)
-        latest = runs.filter(status=RunIngestion.Status.CLOSED).order_by("-reference_time").first()
         return Response(
             {
                 "catalog": catalog_slug,

@@ -204,3 +204,18 @@ beside `run`. Receivers written as `(sender, run, **kwargs)` keep working. The
 `georiva-publisher-forti` plugin already subscribes to both; moving the signals
 after commit is a live behaviour change for it, and a beneficial one — its
 publish task reads the run, which is now guaranteed visible.
+
+## Amendment — ADR 0036 (the public runs route)
+
+`GET /api/runs/{catalog}/{collection}/` exposes a collection's runs and a `latest_complete` run to any forecast client
+(issue #592). It is a dedicated route, not part of the STAC collection document: a run belongs to a GeoRiva
+collection, while a STAC collection is a variable, so the run list would repeat on every variable.
+
+- **Complete means closed**, whatever the closer. `closed_by` is reported with each run, and
+  `?closed_by=declared_set,upload_session` narrows `latest_complete` to the strong evidence for a client that wants it.
+  An unknown value is a 400.
+- **A reopened run is incomplete again** until it closes, so `latest_complete` falls back to the previous closed run.
+  `revision` and `version` tell a client that already loaded the run that it was republished. Serving the previous
+  closed revision in the meantime is not done: the row keeps no snapshot of the earlier revision.
+- **No complete run** is a 200 with `latest_complete: null`. A collection the caller cannot see is a 404, the same as
+  anywhere else (`Collection.objects.visible_to`).

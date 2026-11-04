@@ -764,6 +764,13 @@ class RunIngestion(models.Model):
     def is_open(self) -> bool:
         return self.status == self.Status.OPEN
 
+    #: A run is complete when it is closed. The one place that says so (ADR 0026).
+    COMPLETE_STATUS = Status.CLOSED
+
+    @property
+    def is_complete(self) -> bool:
+        return self.status == self.COMPLETE_STATUS
+
     @property
     def version(self) -> int:
         """``ref_epoch_seconds * 100 + revision`` — a single sortable integer that

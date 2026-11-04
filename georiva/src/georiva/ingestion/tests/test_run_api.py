@@ -107,3 +107,21 @@ class RunApiTests(TestCase):
             self._run(h)
         body = self.client.get(reverse("run-list", args=["models", "ifs-surface"]), {"limit": 2}).json()
         self.assertEqual(len(body["runs"]), 2)
+
+    def test_closed_by_narrows_latest_complete(self):
+        strong = self._run(0, closed_by="declared_set")
+        self._run(12, closed_by="quiet_period")
+        url = reverse("run-list", args=["models", "ifs-surface"])
+        body = self.client.get(url, {"closed_by": "declared_set,upload_session"}).json()
+        self.assertEqual(body["latest_complete"]["reference_time"], strong.reference_time.isoformat())
+        self.assertEqual(len(body["runs"]), 2)
+
+    def test_closed_by_with_no_match_is_null(self):
+        self._run(0, closed_by="quiet_period")
+        url = reverse("run-list", args=["models", "ifs-surface"])
+        body = self.client.get(url, {"closed_by": "declared_set"}).json()
+        self.assertIsNone(body["latest_complete"])
+
+    def test_unknown_closed_by_is_400(self):
+        response = self.client.get(reverse("run-list", args=["models", "ifs-surface"]), {"closed_by": "bogus"})
+        self.assertEqual(response.status_code, 400)
