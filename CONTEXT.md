@@ -759,6 +759,19 @@ Lives in its own repository beside GeoRiva, never in core, and reaches GeoRiva's
 app that needs its own backend ships it as a plugin in that same repository. See ADR 0036.
 _Avoid_: module, client (for an app the project maintains or lists; a client is anything calling the API)
 
+**Page route**:
+A user-facing path a plugin contributes, outside `/api/`, that serves its built bundle's entry document and falls back
+to it for unknown sub-paths. Lives under a prefix reserved for plugin pages (`/app/` by default), so it can take
+neither a path core answers nor a page slug an editor chose. Declared as data — a `WebApp` in the plugin's `web_app`
+module — never as a `urlpatterns` list, because the serving behaviour belongs to the mechanism. See ADR 0039.
+_Avoid_: page URL, SPA route, frontend route
+
+**Mount**:
+The address a page route is served at: the reserved prefix plus one **label**. The plugin declares a default label and
+the operator chooses the real one (`GEORIVA_WEB_APP_MOUNTS`), because what an organisation tells its users to visit is
+the organisation's to pick. A label can be claimed by one plugin only.
+_Avoid_: slug (the field's name, not the concept), mount point, install path
+
 **Explorer**:
 The built-in surface for browsing datasets and inspecting their data, with a detail page for each item. Generic to any
 dataset and part of core. It shows what data exists and that it is correct; helping people act on it is an **App**'s job.

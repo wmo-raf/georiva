@@ -1,7 +1,10 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
+from georiva.core.web_apps import WebAppMount
 from georiva.organisations.testing import dial_org
 
 User = get_user_model()
@@ -18,6 +21,25 @@ class PluginListTests(TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Plugins")
+
+    def test_a_plugin_with_a_page_shows_where_it_is_served(self):
+        """The mount label is the operator's, set in the environment (ADR 0039),
+        so this screen is where they read back what it ended up as."""
+        mount = WebAppMount(
+            plugin="wagtail",
+            slug="viewer",
+            index="viewer/index.html",
+            name="A Viewer",
+            path="/app/viewer/",
+        )
+
+        with (
+            self.settings(GEORIVA_PLUGIN_NAMES=["wagtail"]),
+            patch("georiva.core.web_apps.web_app_mounts", return_value=[mount]),
+        ):
+            response = self.client.get(self.url)
+
+        self.assertContains(response, "/app/viewer/")
 
     def test_metadata_for_installed_package(self):
         # Use a package guaranteed to be installed to exercise the helper

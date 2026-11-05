@@ -117,3 +117,9 @@ serves other tenants' data through the same resolver.
 - `georiva/api/urls.py` now has an ordering that is load-bearing rather than
   incidental. It is asserted by a test that resolves `/stac/` against core's real
   pattern table with a plugin declaring `stac/` appended.
+- **ADR 0039 extends this to a plugin's *page* surface**, with the same
+  discovery-only registration and the same "absent is not broken" import rule
+  (now shared, as `plugins.import_plugin_module`). It differs where the surface
+  differs: a page is confined to a reserved prefix and its label is the
+  operator's, because a page is an address an organisation gives its users rather
+  than a contract with somebody's client.

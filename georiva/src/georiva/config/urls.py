@@ -8,6 +8,7 @@ from wagtail.documents import urls as wagtaildocs_urls
 
 from georiva.api import urls as georiva_urls
 from georiva.core.machine_plane.auth_view import TileAuthView
+from georiva.core.web_apps import first_segments, web_app_urlpatterns
 from georiva.organisations.hopper import org_hopper_script
 from georiva.organisations.pages import OrgScopedPageSearchView
 from georiva.organisations.reports import report_urlpatterns
@@ -27,7 +28,10 @@ handler404 = page_not_found
 # are derived from it rather than repeating the literal and drifting from it.
 ADMIN_PREFIX = settings.GEORIVA_ADMIN_PATH_PREFIX.lstrip("/")
 
-urlpatterns = [
+#: Core's own routes. Named so the ordering below is readable and so a test can
+#: ask about core's surface with a plugin's pages appended to it rather than
+#: mixed into it.
+core_urlpatterns = [
     path("django-admin/", admin.site.urls),
     # Page search, scoped to the host organisation's page tree, standing in front
     # of Wagtail's own route at the same path — Wagtail's `register_admin_urls`
@@ -74,15 +78,41 @@ if settings.DEBUG:
     from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 
     # Serve static and media files from development server
-    urlpatterns += staticfiles_urlpatterns()
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    core_urlpatterns += staticfiles_urlpatterns()
+    core_urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-urlpatterns = urlpatterns + [
-    # For anything not caught by a more specific rule above, hand over to
-    # Wagtail's page serving mechanism. This should be the last pattern in
-    # the list:
+#: For anything not caught by a more specific rule, hand over to Wagtail's page
+#: serving mechanism. This is last, and everything above it is reached first.
+page_tree_urlpatterns = [
     path("", include(wagtail_urls)),
     # Alternatively, if you want Wagtail pages to be served from a subpath
     # of your site, rather than the site root:
     #    path("pages/", include(wagtail_urls)),
 ]
+
+
+def build_urlpatterns():
+    """The instance's URL conf, in the order that is load-bearing.
+
+    Plugin-contributed page routes go between the two lists above (ADR 0039).
+    After core's, for the reason ADR 0028 appends a plugin's API routes: a plugin
+    must not be able to take a path core already answers. Before the page tree's
+    catch-all, because Wagtail's resolver answers for every path under it and
+    would otherwise swallow a mount the operator put at the site root.
+
+    A function so that a test can assemble the real composition with a plugin
+    discovered, rather than restate it and assert against the copy.
+    """
+    return core_urlpatterns + web_app_urlpatterns(reserved_segments()) + page_tree_urlpatterns
+
+
+def reserved_segments():
+    """The first path segments core answers on, which no plugin page may take.
+
+    Derived here rather than in `core.web_apps` because core's patterns are this
+    module's to know; the page mechanism is handed the answer.
+    """
+    return first_segments(core_urlpatterns)
+
+
+urlpatterns = build_urlpatterns()

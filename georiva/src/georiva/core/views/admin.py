@@ -302,8 +302,24 @@ def _collection_history(request, collection):
 
 
 def plugin_list(request):
-    """Admin page listing all installed GeoRiva plugins and their metadata."""
+    """Admin page listing all installed GeoRiva plugins and their metadata.
+
+    A plugin that contributes a page (ADR 0039) is shown with the address this
+    instance serves it from. That address is the operator's own choice, made in
+    the environment, so this is the one screen that can answer "where did the
+    app end up" without reading a log line or the settings.
+    """
+    from georiva.config.urls import reserved_segments
+
     from ..plugins import get_installed_plugins
+    from ..web_apps import web_app_mounts
+
+    # The same question the URL conf asked, so a mount it refused is not shown
+    # here as an address somebody could visit.
+    mounts = {mount.plugin: mount for mount in web_app_mounts(reserved_segments())}
+    plugins = get_installed_plugins()
+    for plugin in plugins:
+        plugin["mount"] = mounts.get(plugin["module"])
 
     context = {
         "header_title": _("Installed Plugins"),
@@ -312,7 +328,7 @@ def plugin_list(request):
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
             {"url": None, "label": _("Plugins")},
         ],
-        "plugins": get_installed_plugins(),
+        "plugins": plugins,
     }
     return render(request, "core/plugin_list.html", context)
 

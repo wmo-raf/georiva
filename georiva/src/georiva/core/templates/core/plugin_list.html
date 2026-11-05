@@ -86,6 +86,16 @@
             width: 1rem;
         }
 
+        .pl-page {
+            padding: 0 1.25rem 1rem;
+            font-size: 0.85rem;
+            color: var(--w-color-text-context);
+        }
+
+        .pl-page code {
+            color: var(--w-color-text-label);
+        }
+
         .pl-unavailable {
             padding: 0 1.25rem 1rem;
             color: var(--w-color-grey-400);
@@ -111,6 +121,19 @@
                             <span class="pl-version">v{{ plugin.version }}</span>
                         {% endif %}
                     </div>
+
+                    {% if plugin.mount %}
+                        {% comment %}
+                            Where this instance serves the plugin's app from — an address the operator
+                            chose in the environment, so the admin is the one place to read it back.
+                        {% endcomment %}
+                        <div class="pl-page">
+                            {% trans "Served at" %}
+                            <a href="{{ plugin.mount.path }}" target="_blank" rel="noopener noreferrer">
+                                <code>{{ plugin.mount.path }}</code>
+                            </a>
+                        </div>
+                    {% endif %}
 
                     {% if plugin.available %}
                         {% if plugin.summary %}
