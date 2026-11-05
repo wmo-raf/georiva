@@ -157,6 +157,11 @@ Defined in `api/urls.py`:
 
 - **Models**: Split into separate files under `core/models/`, re-exported from `__init__.py`
 - **Plugins**: Register via decorator (`@FormatRegistry.register`) or programmatic `registry.register()`
+- **Plugin routes**: a plugin publishes an `api_urls` module for routes under `/api/` (ADR 0028) and a `web_app`
+  module — one `WebApp(slug, index, name)` — for a page route serving its built bundle, mounted under
+  `GEORIVA_WEB_APP_PATH_PREFIX` (`/app/` by default) and renameable by the operator (ADR 0039). Both conventions are
+  discovery-only: no registry, no settings list of what is routed. Core's routes are matched first and the Wagtail
+  page tree last; `core/web_apps.py` holds the page half
 - **Singletons**: `storage`, `format_registry`, `loader_profile_viewset_registry` — import from their modules
 - **Celery tasks**: Late imports inside task body to avoid circular imports; `bind=True` + `acks_late=True`
 - **Celery queues**: split by what waits on the task, not by weight (ADR 0025). `georiva-ingestion` carries fetch

@@ -433,6 +433,16 @@ GEORIVA_SITE_PORT = env.int("GEORIVA_SITE_PORT", default=80)
 # membership in one place.
 GEORIVA_ADMIN_PATH_PREFIX = "/admin/"
 
+# Where a plugin's app is served from (ADR 0039). The prefix is reserved for
+# plugin pages, so a page route cannot take a path core answers or a page slug an
+# editor chose; emptying it mounts apps at the site root, which shares a space
+# with the page tree and is the operator's own call. `GEORIVA_WEB_APP_MOUNTS`
+# renames one plugin's mount — `georiva_forecast_viewer=viewer` serves it at
+# `/app/viewer/` — because the address an organisation gives its users is theirs
+# to pick, not the plugin's.
+GEORIVA_WEB_APP_PATH_PREFIX = env.str("GEORIVA_WEB_APP_PATH_PREFIX", default="app/")
+GEORIVA_WEB_APP_MOUNTS = env.dict("GEORIVA_WEB_APP_MOUNTS", default={})
+
 # First setup binds Wagtail's default Site to an ordinary "central" organisation
 # on the base domain, so a single-institution install needs no tenancy ceremony.
 GEORIVA_BOOTSTRAP_CENTRAL_ORG = env.bool("GEORIVA_BOOTSTRAP_CENTRAL_ORG", default=True)

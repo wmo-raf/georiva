@@ -95,6 +95,9 @@ could not add a model without a redeploy, and a hand-written list bypasses the v
   until it exists a plugin's read logic is a custom route under ADR 0028.
 - An app with a plugin has two parts to deploy. Plugin installation (ADR 0035) carries Python packages and has no way to
   bring a frontend container, so `web/` needs its own deployment step for now.
+  **Amended by ADR 0039** for half of this: a bundle committed into the plugin's `static/` folder is carried by the same
+  install and now gets a page route of its own, so `web/` is no longer addressless. A container is still the answer for
+  an app that needs one; nothing here forces that step on a static bundle.
 - Core's Python interfaces become something plugins depend on, as well as its HTTP routes, and neither carries a
   stability promise yet. App builders are early collaborators who should expect breakage.
 - An app's concept may share a name with another plugin's. Forti's "Model" is one collection × one window, and the

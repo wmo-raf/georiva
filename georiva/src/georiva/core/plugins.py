@@ -6,8 +6,11 @@ import-package names are exposed as ``settings.GEORIVA_PLUGIN_NAMES``.
 
 Metadata is read from the installed distribution via ``importlib.metadata``.
 
-Two things live here: what a plugin *is* (the metadata above) and the one place
-a plugin may reach into the instance's public surface — :func:`api_urlpatterns`.
+Three things live here: what a plugin *is* (the metadata above), the place a
+plugin reaches into the instance's public data surface — :func:`api_urlpatterns`
+— and the import rule every such convention shares,
+:func:`import_plugin_module`. A plugin's *page* surface is the same idea one step
+out and lives beside this, in :mod:`georiva.core.web_apps`.
 """
 
 import importlib
@@ -121,7 +124,7 @@ def api_urlpatterns():
     patterns = []
 
     for module_name in getattr(settings, "GEORIVA_PLUGIN_NAMES", []) or []:
-        module = _import_api_urls(module_name)
+        module = import_plugin_module(module_name, API_URLS_MODULE, logger=logger, contributes="routes")
         if module is None:
             continue
         if not getattr(module, "urlpatterns", None):
@@ -136,29 +139,34 @@ def api_urlpatterns():
     return patterns
 
 
-def _import_api_urls(module_name):
-    """The plugin's ``api_urls`` module, or None if it has none or it is broken.
+def import_plugin_module(module_name, submodule, logger, contributes):
+    """A plugin's convention module, or None if it has none or it is broken.
 
-    The two are told apart deliberately, and it is the whole reason this is not
-    a bare ``try: import_module``. Most plugins publish no routes at all, so
-    "no such module" is the ordinary case and must stay silent — but an
-    ``api_urls`` that imports a dependency the operator did not install raises
-    ``ModuleNotFoundError`` too, and catching both together would file a genuine
-    fault under the silent case. Asking the finder first separates "the file is
-    not there" from "the file is there and does not work", and only the second
-    is worth waking anybody for.
+    Every convention a plugin may opt into — ``api_urls`` (ADR 0028),
+    ``web_app`` (ADR 0039) — is discovered by looking for a module with a fixed
+    name, and all of them need the same two cases told apart. That distinction is
+    the whole reason this is not a bare ``try: import_module``. Most plugins
+    publish no such module at all, so "no such module" is the ordinary case and
+    must stay silent — but a module that imports a dependency the operator did
+    not install raises ``ModuleNotFoundError`` too, and catching both together
+    would file a genuine fault under the silent case. Asking the finder first
+    separates "the file is not there" from "the file is there and does not work",
+    and only the second is worth waking anybody for.
+
+    ``logger`` is the caller's, so the log line comes from the mechanism the
+    operator lost something to, and ``contributes`` names what was lost.
     """
-    dotted = f"{module_name}.{API_URLS_MODULE}"
+    dotted = f"{module_name}.{submodule}"
 
     try:
         if importlib.util.find_spec(dotted) is None:
             return None
     except Exception:
-        logger.exception("could not look for %s; plugin %r contributes no routes", dotted, module_name)
+        logger.exception("could not look for %s; plugin %r contributes no %s", dotted, module_name, contributes)
         return None
 
     try:
         return importlib.import_module(dotted)
     except Exception:
-        logger.exception("%s will not import; plugin %r contributes no routes", dotted, module_name)
+        logger.exception("%s will not import; plugin %r contributes no %s", dotted, module_name, contributes)
         return None

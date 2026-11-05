@@ -222,6 +222,54 @@ reads the name from the package, not the folder, so cloning the repo under its n
 A plugin declares only its own extra dependencies in `[project.dependencies]`; it does **not** depend on
 `georiva` — the core package is provided by the runtime environment (the image, or the dev workspace).
 
+### Contributing routes and a page
+
+A plugin reaches the public surface through two discovery-only conventions — there is no registry to
+register with and no settings list of what is routed, so a plugin cannot be installed and routed
+separately.
+
+**Routes under `/api/`** (ADR 0028): publish an `api_urls` module with a `urlpatterns` list.
+
+```python
+# src/georiva_my_plugin/api_urls.py
+from django.urls import path
+
+from .views import ThingView
+
+app_name = "georiva_my_plugin"
+
+urlpatterns = [path("things/", ThingView.as_view(), name="things")]
+```
+
+Core's own patterns are matched first, so a plugin declaring `stac/` gets a route that can never be
+reached. Between plugins the first match wins, in discovery order.
+
+**A page for a built bundle** (ADR 0039): ship the bundle in the package's `static/` folder, where
+`collectstatic` collects it, and publish a `web_app` module naming its entry document.
+
+```python
+# src/georiva_my_plugin/web_app.py
+from georiva.core.web_apps import WebApp
+
+app = WebApp(slug="my-app", index="my_app/index.html", name="My App")
+```
+
+`index` is a staticfiles path — the same path `{% static %}` would take. The page is then served at
+`/app/my-app/`, and **every unknown sub-path under it serves the same document**, which is what
+client-side routing and shareable URLs need. A sub-path whose last segment contains a dot is a 404
+instead: a bundle's assets are served from `/static/`, and answering a script request with HTML hides
+the real error. The document is sent `Cache-Control: no-cache`, so replacing a bundle takes effect at
+once.
+
+`slug` is only a default. Operators rename the mount with `GEORIVA_WEB_APP_MOUNTS`, and a plugin should
+reverse its own page by `reverse("web_app_georiva_my_plugin")` rather than writing the path down.
+
+Operators: `/app/` is reserved for plugin pages instance-wide, so a Wagtail page with the slug `app` at
+the root of a page tree would not be reachable. Setting `GEORIVA_WEB_APP_PATH_PREFIX=` (empty) mounts
+apps at the site root — `/my-app/` — which shares a space with your own page slugs. A label that would
+take a path core answers on (`api`, `admin`, `static`, …) is refused and logged; so is a label two
+plugins both want, where a name you set in `GEORIVA_WEB_APP_MOUNTS` wins over a plugin's default.
+
 ### Distributing your plugin
 
 Once the plugin is ready for production use:
@@ -249,3 +297,5 @@ tag  = "1.0.0"
 | `GEORIVA_PLUGIN_URLS` | _(empty)_ | **Deprecated.** Comma-separated tarball URLs to download and install at startup |
 | `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` | _(unset)_ | **Deprecated.** Set to `"true"` to skip all startup plugin installation |
 | `GEORIVA_STRICT_PLUGIN_ENV` | `false` | When `true`, a plugin's missing required `requires_env` variable is a `manage.py check` error instead of a warning |
+| `GEORIVA_WEB_APP_PATH_PREFIX` | `app/` | Prefix reserved for plugin pages (ADR 0039). Empty mounts them at the site root |
+| `GEORIVA_WEB_APP_MOUNTS` | _(empty)_ | Rename a plugin's page mount, e.g. `georiva_forecast_viewer=viewer` serves it at `/app/viewer/` |
