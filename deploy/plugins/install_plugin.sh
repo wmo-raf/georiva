@@ -10,7 +10,6 @@ Usage: install_plugin.sh [-d] [-f <plugin folder>]
   -u, --url <plugin url>              An url to a .tar.gz file containing the plugin to install.
       --hash <plugin hash>            If provided the plugin's contents will be hashed and checked against this hash, if they do not match the install will fail.
   -d, --dev                           Install the plugin for development.
-  -r, --runtime                       If provided any runtime plugin setup scripts will be run if found. Should never be set if being called from a Dockerfile.
   -o, --overwrite                     If provided any existing plugin of the same name will be overwritten and force re-installed, built and/or setup.
   -h, --help                          Show this help message and exit.
 
@@ -65,7 +64,7 @@ resolve_plugin_name(){
 DOCKER_USER="${DOCKER_USER:-georiva}"
 
 # First parse the args using getopt
-VALID_ARGS=$(getopt -o u:dhf:rg:o --long hash:,url:,git:,help,dev,folder:,runtime,overwrite -- "$@")
+VALID_ARGS=$(getopt -o u:dhf:g:o --long hash:,url:,git:,help,dev,folder:,overwrite -- "$@")
 if [[ $? -ne 0 ]]; then
     error "Incorrect options provided."
     show_help
@@ -86,7 +85,6 @@ folder=
 hash=
 git=
 exclusive_flag_count=0
-runtime=
 overwrite=
 resolved_plugin_name=
 # shellcheck disable=SC2078
@@ -115,10 +113,6 @@ while [ : ]; do
         git="$2"
         shift 2
         exclusive_flag_count=$((exclusive_flag_count+1))
-        ;;
-    -r | --runtime)
-        runtime="true"
-        shift
         ;;
     -o | --overwrite)
         overwrite="true"
@@ -300,14 +294,6 @@ if [[ -d "$folder" ]]; then
       touch "$BUILT_MARKER"
     else
       log "Skipping install of ${plugin_name} as it is already installed."
-    fi
-
-    PLUGIN_RUNTIME_SETUP_MARKER=/georiva/container_markers/$plugin_name.runtime-setup
-    if [[ ( ! -f "$PLUGIN_RUNTIME_SETUP_MARKER" || "$overwrite" == "true" ) && $runtime == "true" ]]; then
-      check_and_run_script "$folder" runtime_setup.sh
-      touch "$PLUGIN_RUNTIME_SETUP_MARKER"
-    else
-      log "Skipping runtime setup of ${plugin_name}."
     fi
 fi
 

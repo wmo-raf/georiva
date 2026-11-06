@@ -45,10 +45,7 @@ x-backend-variables: &backend-variables
   MIGRATE_ON_STARTUP: ${MIGRATE_ON_STARTUP:-true}
   COLLECT_STATICFILES_ON_STARTUP: ${COLLECT_STATICFILES_ON_STARTUP:-true}
   REDIS_URL: redis://georiva-redis:6379/0
-  GEORIVA_PLUGIN_DIR: ${GEORIVA_PLUGIN_DIR:-/georiva/plugins}
-  GEORIVA_PLUGIN_URLS: ${GEORIVA_PLUGIN_URLS:-}
   GEORIVA_PLUGIN_SETUP_ALREADY_RUN: ${GEORIVA_PLUGIN_SETUP_ALREADY_RUN:-}
-  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ${GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP:-true}
   GEORIVA_STRICT_PLUGIN_ENV: ${GEORIVA_STRICT_PLUGIN_ENV:-false}
   MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
   MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
@@ -185,7 +182,6 @@ services:
     command: gunicorn
     environment:
       <<: *backend-variables
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
       georiva-db:
         condition: service_healthy
@@ -210,7 +206,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
       # The entrypoint reads only this queue-agnostic name — the per-queue name
       # the operator sets in .env never reaches the container, which is what
       # broke the dev workers in issue #399. So these three mappings are where
@@ -231,7 +226,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_INGESTION_WORKER_CONCURRENCY:-1}
     depends_on:
       georiva:
@@ -247,7 +241,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_PROCESSING_WORKER_CONCURRENCY:-4}
     depends_on:
       georiva:
@@ -263,7 +256,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_BOOKKEEPING_WORKER_CONCURRENCY:-4}
     depends_on:
       georiva:
@@ -279,7 +271,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
       georiva:
         condition: service_started
@@ -294,7 +285,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
       georiva:
         condition: service_started
@@ -309,7 +299,6 @@ services:
     environment:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
-      GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: "true"
     depends_on:
       georiva:
         condition: service_started

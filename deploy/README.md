@@ -230,16 +230,10 @@ docker compose restart georiva-celery-processing-worker
 
 ## Plugins
 
-Not yet supported on image-only servers: the published images carry GeoRiva's
-core only, and source plugins are installed when an image is built. A design
-for installing them on a server is tracked in
-[#532](https://github.com/wmo-raf/georiva/issues/532). A server that needs a
-plugin today has to build its own image (`plugins.toml` and the root
-`docker-compose.yml`, as before). The older install-at-container-start path,
-[
-`GEORIVA_PLUGIN_URLS`](https://github.com/wmo-raf/georiva/blob/main/docs/plugins/installation.md#method-2-runtime-georiva_plugin_urls),
-is switched off in `docker-compose.yml` and untested against the published
-images.
+The published images carry GeoRiva's core only. List the plugins a server
+needs in `deploy/plugins.toml`; the one-shot `georiva-plugins` service installs
+them into a volume shared by every backend service (ADR 0035). See
+[Servers (published images)](https://github.com/wmo-raf/georiva/blob/main/docs/plugins/installation.md#servers-published-images).
 
 ## For maintainers
 

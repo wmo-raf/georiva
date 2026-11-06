@@ -3,12 +3,6 @@ x-backend-variables: &backend-variables
 
 x-dev-plugin-env: &dev-plugin-env
   GEORIVA_PLUGIN_DIRS: /georiva/plugins,/georiva/dev-plugins
-  # Re-enable install-on-startup (the base compose hardcodes it "true" for
-  # production, where plugins are baked into the image at build time). Empty
-  # string is treated as "not set" by the entrypoint, so dev plugins
-  # bind-mounted into /georiva/dev-plugins get `pip install -e`'d — pulling
-  # their declared dependencies (e.g. cdsapi) into the container.
-  GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP: ""
 
 x-dev-plugin-volumes: &dev-plugin-volumes
   # Mount the whole dev-plugins folder; each subdir is a flat plugin package.

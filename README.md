@@ -194,16 +194,15 @@ at the repo root. See [docs/contributing.md](docs/contributing.md#managing-pytho
 
 ### Installing Plugins
 
-Plugins can be installed at build time or at runtime.
+**Servers running the published images** — list plugins in `deploy/plugins.toml`; the one-shot `georiva-plugins`
+service installs them into a shared volume. See the
+[Plugin Installation Guide](docs/plugins/installation.md#servers-published-images).
 
-**Build time** — declare plugins in `plugins.toml` (copy `plugins.toml.sample` and edit), then build:
+**Your own image** — declare plugins in `plugins.toml` (copy `plugins.toml.sample` and edit), then build:
 
 ```bash
 docker compose build georiva
 ```
-
-**Runtime** — set `GEORIVA_PLUGIN_URLS` in your `.env` file and restart. Ensure
-`GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` is not set to `"true"`.
 
 **Local development** — clone plugin repos into `dev-plugins/` and run with the dev override
 (`just up`, which picks up `docker-compose.override.yml` automatically); each subdirectory is auto-discovered and editable-installed. See the

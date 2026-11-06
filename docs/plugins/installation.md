@@ -14,7 +14,6 @@ a site that builds its own image (a fork, or its own CI) bakes plugins in with t
 - [How the plugin system works](#how-the-plugin-system-works)
 - [Servers (published images)](#servers-published-images)
 - [Building your own image](#building-your-own-image)
-- [Deprecated: runtime install (GEORIVA_PLUGIN_URLS)](#deprecated-runtime-install-georiva_plugin_urls)
 - [Local development](#local-development)
 - [Creating a new plugin](#creating-a-new-plugin)
 - [Reference: environment variables](#reference-environment-variables)
@@ -27,8 +26,8 @@ A GeoRiva plugin is a standard Python package that is also a Django/Wagtail app.
 two phases:
 
 **Install phase** — the package is installed into the virtualenv (via `pip install`). This makes
-the Python code importable. It is handled by `deploy/plugins/install_plugin.sh` (build-time) or
-`startup_plugin_setup` in `deploy/plugins/utils.sh` (runtime).
+the Python code importable. It is handled by `deploy/plugins/install_plugin.sh` (when you build your own image), by the
+`georiva-plugins` service (on a server), or by `install_dev_plugins` in `deploy/plugins/utils.sh` (local development).
 
 **Discovery phase** — Django needs to know the app label so it can load models, migrations, signals,
 and admin hooks. `settings/base.py` scans the directories listed in `GEORIVA_PLUGIN_DIRS` (default:
@@ -106,18 +105,6 @@ docker compose build georiva
 docker compose up -d
 ```
 
-The `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` flag is set to `"true"` for the services
-in `docker-compose.yml` — plugins are already baked in, so startup skips the install phase.
-
----
-
-## Deprecated: runtime install (GEORIVA_PLUGIN_URLS)
-
-> **Deprecated — will be removed in the next release.** Setting `GEORIVA_PLUGIN_URLS` installs the plugins in
-> every container, on every start, from PyPI with unpinned dependencies; nothing is shared and nothing survives
-> the container being recreated. Use [Servers (published images)](#servers-published-images) instead: list the
-> same tarball in `deploy/plugins.toml` as a `url = "..."` entry.
-
 ---
 
 ## Local development
@@ -153,7 +140,7 @@ just up    # picks up docker-compose.override.yml automatically when it exists
 # or: docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d
 ```
 
-At startup, `startup_plugin_setup` runs `pip install -e --no-build-isolation` against each plugin in
+At startup, `install_dev_plugins` runs `pip install -e --no-build-isolation` against each plugin in
 the live bind-mount (building with the setuptools already in the image — no network needed for the
 build itself, only to fetch a plugin's own new dependencies). Settings auto-discovers the plugins and
 adds them to `INSTALLED_APPS`, so edits to plugin source are reflected immediately.
@@ -291,11 +278,9 @@ tag  = "1.0.0"
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GEORIVA_PLUGIN_DIR` | `/georiva/plugins` | Where baked and runtime plugins are copied on install |
+| `GEORIVA_PLUGIN_DIR` | `/georiva/plugins` | Where plugins baked into your own image are copied at build time |
 | `GEORIVA_PLUGIN_DIRS` | `/georiva/plugins,/georiva/site-plugins/src` | Comma-separated list of dirs settings scans for `INSTALLED_APPS` |
 | `GEORIVA_DEV_PLUGIN_DIR` | `/georiva/dev-plugins` | Dir for bind-mounted dev plugins; auto-added to `GEORIVA_PLUGIN_DIRS` when it exists |
-| `GEORIVA_PLUGIN_URLS` | _(empty)_ | **Deprecated.** Comma-separated tarball URLs to download and install at startup |
-| `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP` | _(unset)_ | **Deprecated.** Set to `"true"` to skip all startup plugin installation |
 | `GEORIVA_STRICT_PLUGIN_ENV` | `false` | When `true`, a plugin's missing required `requires_env` variable is a `manage.py check` error instead of a warning |
 | `GEORIVA_WEB_APP_PATH_PREFIX` | `app/` | Prefix reserved for plugin pages (ADR 0039). Empty mounts them at the site root |
 | `GEORIVA_WEB_APP_MOUNTS` | _(empty)_ | Rename a plugin's page mount, e.g. `georiva_forecast_viewer=viewer` serves it at `/app/viewer/` |

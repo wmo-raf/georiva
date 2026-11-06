@@ -30,8 +30,6 @@ ADMIN COMMANDS:
 manage          : Manage GeoRiva and its database
 shell           : Start a Django Python shell
 install-plugins : Install the plugins in plugins.toml into the shared site-plugins volume (ADR 0035).
-install-plugin  : Installs a plugin (append --help for more info).
-uninstall-plugin: Un-installs a plugin (append --help for more info).
 list-plugins    : Lists currently installed plugins.
 help            : Show this message
 
@@ -61,7 +59,7 @@ django-dev      : Start a normal GeoRiva backend django development server, perf
 }
 
 run_setup_commands_if_configured(){
-  startup_plugin_setup
+  install_dev_plugins
   if [ "$MIGRATE_ON_STARTUP" = "true" ] ; then
     echo "python /georiva/app/src/georiva/manage.py migrate"
     /georiva/app/src/georiva/manage.py migrate
@@ -100,7 +98,7 @@ start_celery_worker() {
     local queue="$1" node_name="$2"
     shift 2
 
-    startup_plugin_setup
+    install_dev_plugins
 
     local concurrency_flag
     concurrency_flag="$(celery_concurrency_flag)"
@@ -122,7 +120,7 @@ start_celery_worker() {
 start_celery_worker_dev() {
     local queue="$1" node_name="$2"
 
-    startup_plugin_setup
+    install_dev_plugins
 
     local concurrency_flag
     concurrency_flag="$(celery_concurrency_flag)"
@@ -247,12 +245,6 @@ staging-consumer)
     ;;
 install-plugins)
     exec python -m georiva.site_plugins "${@:2}"
-    ;;
-install-plugin)
-    exec /georiva/plugins/install_plugin.sh --runtime "${@:2}"
-    ;;
-uninstall-plugin)
-    exec /georiva/plugins/uninstall_plugin.sh "${@:2}"
     ;;
 list-plugins)
     exec /georiva/plugins/list_plugins.sh "${@:2}"

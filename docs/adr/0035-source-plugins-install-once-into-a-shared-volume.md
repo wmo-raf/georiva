@@ -53,5 +53,7 @@ Settled alongside:
   (`file://` tarballs and a local wheelhouse); the manifest format does not preclude them.
 - Every backend service now waits on `georiva-plugins`. With an empty manifest that is a sub-second no-op.
 - Removing a plugin from the manifest removes it from the volume on the next run.
-- The old startup path (`startup_plugin_setup`, `GEORIVA_PLUGIN_URLS`, `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP`) is
-  left working by this change and retired in a follow-up, once the new path has run on a real server.
+- The old startup path is gone: `GEORIVA_PLUGIN_URLS`, `GEORIVA_DISABLE_PLUGIN_INSTALL_ON_STARTUP`, the
+  `install-plugin` / `uninstall-plugin` entrypoint commands and `install_plugin.sh --runtime`. What remains of
+  `startup_plugin_setup` is `install_dev_plugins`, the editable install of `dev-plugins/`, which never runs on a
+  server. `install_plugin.sh` stays as the build-time installer for your own image.
