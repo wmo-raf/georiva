@@ -30,7 +30,6 @@ ADMIN COMMANDS:
 manage          : Manage GeoRiva and its database
 shell           : Start a Django Python shell
 install-plugins : Install the plugins in plugins.toml into the shared site-plugins volume (ADR 0035).
-list-plugins    : Lists currently installed plugins.
 help            : Show this message
 
 SERVICE COMMANDS:
@@ -245,9 +244,6 @@ staging-consumer)
     ;;
 install-plugins)
     exec python -m georiva.site_plugins "${@:2}"
-    ;;
-list-plugins)
-    exec /georiva/plugins/list_plugins.sh "${@:2}"
     ;;
 *)
     echo "Command given was $*"
