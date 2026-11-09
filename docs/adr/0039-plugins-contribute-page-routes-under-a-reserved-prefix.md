@@ -228,3 +228,30 @@ context.
   cache. It is a few kilobytes and it is what makes replacing a bundle take
   effect; a per-process cache is the additive way back if an app ever gets
   traffic that makes it matter.
+
+## Amendment: the portal links to the apps it serves
+
+An address nobody can find is only half an address. The public portal now lists
+every served app, in an **Apps** dropdown in the navbar and an **Apps** section on
+the home page just after Explore. Both show the same list.
+
+- **The declaration also says how the app is presented.** `WebApp` gains an
+  optional `icon` (a Bootstrap Icons name, defaulting to `grid-3x3-gap`) and
+  `description` (which may be a lazy translation). Both are optional, so a plugin
+  declared before this keeps its page and gets a generic card.
+- **The links are read back from the URL conf** (`served_web_apps()`), not
+  worked out again. A link points at wherever the resolver actually answers,
+  including any operator rename or prefix, and rendering a page does not repeat
+  `web_app_mounts()`'s log lines.
+- **Shown by default, curated per site.** Each organisation's `GeoRivaSettings`
+  holds `PortalAppEntry` rows, which record exceptions only: hide an app, restate
+  its title, description or icon, or move it up. An app with no row is shown as
+  its plugin describes it, after the apps that have a row. Installing a plugin
+  needs nothing from any site's editors.
+- **Rows are keyed by plugin name, not by mount label.** The label is the
+  operator's to rename, and a rename must not detach an editor's choices. A row
+  whose plugin is no longer served is skipped on the portal and shown in the
+  admin as "(not installed)". Two rows for one app are refused.
+- Whether a site lists an app is a presentation choice only. Every site's host
+  serves every mount, and the app resolves its organisation from the host like
+  any other request.

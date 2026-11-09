@@ -1,7 +1,8 @@
-{% load wagtailimages_tags wagtailsettings_tags static georiva_tags %}
+{% load wagtailimages_tags wagtailsettings_tags static georiva_tags portal_apps_tags i18n %}
 {% get_settings %}
 
 {% datasets_index_url as datasets_url %}
+{% portal_apps as apps %}
 
 {% with s=settings.home.GeoRivaSettings %}
     <nav class="gr-navbar" role="navigation" aria-label="main navigation">
@@ -44,6 +45,30 @@
                     <a class="gr-navbar-item" href="{{ s.stac_browser_url }}">
                         <i class="bi bi-collection"></i> STAC Browser
                     </a>
+                {% endif %}
+                {% if apps %}
+                    <div class="gr-navbar-dropdown" data-gr-dropdown>
+                        <button class="gr-navbar-item gr-navbar-dropdown-toggle" type="button"
+                                id="gr-navbar-apps-toggle" aria-expanded="false" aria-controls="gr-navbar-apps"
+                                aria-haspopup="true">
+                            <i class="bi bi-grid-3x3-gap"></i> {% trans "Apps" %}
+                            <i class="bi bi-chevron-down gr-navbar-dropdown-caret"></i>
+                        </button>
+                        <div class="gr-navbar-dropdown-menu" id="gr-navbar-apps" role="menu"
+                             aria-labelledby="gr-navbar-apps-toggle" hidden>
+                            {% for app in apps %}
+                                <a class="gr-navbar-app" href="{{ app.url }}" role="menuitem">
+                                    <span class="gr-navbar-app-icon"><i class="bi bi-{{ app.icon }}"></i></span>
+                                    <span class="gr-navbar-app-text">
+                                        <span class="gr-navbar-app-title">{{ app.title }}</span>
+                                        {% if app.description %}
+                                            <span class="gr-navbar-app-desc">{{ app.description }}</span>
+                                        {% endif %}
+                                    </span>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    </div>
                 {% endif %}
             </div>
         </div>

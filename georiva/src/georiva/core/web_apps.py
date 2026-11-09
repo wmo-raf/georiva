@@ -43,7 +43,7 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.staticfiles import finders
 from django.http import Http404, HttpResponse
-from django.urls import path
+from django.urls import get_resolver, path
 from django.views import View
 
 from georiva.core.plugins import import_plugin_module
@@ -59,6 +59,9 @@ WEB_APP_ATTRIBUTE = "app"
 #: Where page routes live unless the operator says otherwise.
 DEFAULT_PATH_PREFIX = "app/"
 
+#: The Bootstrap Icons glyph an app is drawn with when it names none.
+DEFAULT_ICON = "grid-3x3-gap"
+
 #: One segment of a URL, and nothing that could be read as more than one: no
 #: slash, no dot, no empty string, nothing to climb with.
 _SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -72,12 +75,21 @@ class WebApp:
     ``index`` is the bundle's entry document as a *staticfiles* path — the same
     path ``{% static %}`` would take — because the bundle is collected with
     every other static file and the finders are the only thing that knows where
-    it landed. ``name`` is for people, in a log line or an admin listing.
+    it landed. ``name`` is for people, in a log line, an admin listing, and the
+    public portal's Apps menu.
+
+    ``icon`` and ``description`` are how the portal presents the app: a
+    Bootstrap Icons name (``"cloud-sun"``, without the ``bi-``) and a sentence
+    saying what it is for, which may be a lazy translation. Both are optional
+    and both are defaults — each organisation's editors may restate them for
+    their own site (``home.GeoRivaSettings``).
     """
 
     slug: str
     index: str
     name: str = ""
+    icon: str = ""
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -89,6 +101,8 @@ class WebAppMount:
     index: str
     name: str
     path: str
+    icon: str = DEFAULT_ICON
+    description: str = ""
 
 
 def first_segments(patterns):
@@ -212,6 +226,8 @@ def web_app_mounts(reserved=()):
             index=app.index,
             name=app.name or plugin,
             path=f"/{prefix}{label}/",
+            icon=_icon_name(app.icon),
+            description=app.description or "",
         )
         logger.info("plugin %r serves %r at %s", plugin, mount.name, mount.path)
         mounts.append(mount)
@@ -262,11 +278,29 @@ def web_app_urlpatterns(reserved=()):
 
     for mount in web_app_mounts(reserved):
         route = mount.path.lstrip("/")
-        view = WebAppIndexView.as_view(index=mount.index, plugin=mount.plugin)
+        view = WebAppIndexView.as_view(index=mount.index, plugin=mount.plugin, mount=mount)
         patterns.append(path(route, view, name=f"web_app_{mount.plugin}"))
         patterns.append(path(f"{route}<path:subpath>", view))
 
     return patterns
+
+
+def served_web_apps(urlconf=None):
+    """The apps this instance actually serves, in URL-conf order.
+
+    Read back from the URL conf rather than computed again: what a link should
+    point at is what the resolver will answer, and the URL conf has already made
+    every decision about that — prefix, renames, refusals. Asking
+    :func:`web_app_mounts` again on every page render would also repeat its log
+    lines on every page render.
+    """
+    mounts = []
+    for pattern in get_resolver(urlconf).url_patterns:
+        callback = getattr(pattern, "callback", None)
+        mount = getattr(callback, "view_initkwargs", {}).get("mount")
+        if isinstance(mount, WebAppMount) and mount not in mounts:
+            mounts.append(mount)
+    return mounts
 
 
 class WebAppIndexView(View):
@@ -277,6 +311,10 @@ class WebAppIndexView(View):
     #: The staticfiles path of the document, and the plugin to name in a log line.
     index = None
     plugin = None
+
+    #: The whole :class:`WebAppMount`, kept on the view so that
+    #: :func:`served_web_apps` can read the routed apps back out of the URL conf.
+    mount = None
 
     def get(self, request, subpath=""):
         if _asset_shaped(subpath):
@@ -334,6 +372,14 @@ def _label_for(plugin, app, chosen_labels):
     """The operator's label for this plugin's app, falling back to the plugin's own."""
     label = chosen_labels[plugin] if plugin in chosen_labels else app.slug
     return str(label or "").strip().strip("/")
+
+
+def _icon_name(icon):
+    """A Bootstrap Icons name, without the ``bi-`` a plugin may have written."""
+    icon = str(icon or "").strip()
+    if icon.startswith("bi-"):
+        icon = icon[3:]
+    return icon or DEFAULT_ICON
 
 
 def _is_static_path(index):

@@ -1,0 +1,24 @@
+{% load portal_apps_tags %}
+{% portal_apps as apps %}
+
+{% if apps %}
+    <section class="gr-section gr-apps-section">
+        <div class="gr-container">
+            <div class="gr-section-header gr-animate">
+                <h2 class="gr-section-title">{{ page.apps_heading }}</h2>
+            </div>
+
+            <div class="gr-entry-grid">
+                {% for app in apps %}
+                    <a href="{{ app.url }}" class="gr-entry-card gr-animate gr-animate-{{ forloop.counter }}">
+                        <div class="gr-entry-icon"><i class="bi bi-{{ app.icon }}"></i></div>
+                        <div class="gr-entry-title">{{ app.title }}</div>
+                        {% if app.description %}
+                            <div class="gr-entry-desc">{{ app.description }}</div>
+                        {% endif %}
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+{% endif %}
