@@ -13,10 +13,22 @@ def create_datasets_index_page(apps, schema_editor):
     orders by path and it is the earliest home page on the instance
     (``00010001``); organisation roots are added after it.
     """
-    from georiva.pages.datasets.models import DatasetsIndexPage
-    from georiva.pages.home.models import HomePage
+    from django.contrib.contenttypes.models import ContentType
+    from wagtail.models import Page
 
-    home_page = HomePage.objects.first()
+    from georiva.pages.datasets.models import DatasetsIndexPage
+
+    # The home page is found as a plain ``Page``, by content type, and never
+    # through the live ``HomePage`` model. A live model selects every column its
+    # *current* code declares, and this migration runs before any later ``home``
+    # migration has added them — so on a fresh database, a field added to
+    # ``HomePage`` after this was written fails here ("column does not exist").
+    # Wagtail's own ``Page`` is still needed live, for treebeard's ``add_child``.
+    home_type = ContentType.objects.filter(app_label="home", model="homepage").first()
+    if home_type is None:
+        return
+
+    home_page = Page.objects.filter(content_type=home_type).order_by("path").first()
     if not home_page:
         return
 
@@ -31,6 +43,10 @@ def create_datasets_index_page(apps, schema_editor):
         show_in_menus=False,
         live=True,
         draft_title="Datasets",
+        # Given, not left to Wagtail: its default asks the parent's *specific*
+        # model for the locale, which is the live ``HomePage`` query above all
+        # over again.
+        locale_id=home_page.locale_id,
     )
 
     home_page.add_child(instance=datasets_page)

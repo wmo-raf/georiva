@@ -1,6 +1,8 @@
 from django.db import models
 from modelcluster.fields import ParentalKey
-from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
+from modelcluster.models import ClusterableModel
+from wagtail.admin.forms import WagtailAdminModelForm
+from wagtail.admin.panels import FieldPanel, HelpPanel, InlinePanel, MultiFieldPanel
 from wagtail.contrib.settings.models import BaseSiteSetting, register_setting
 from wagtail.models import Orderable, Page
 from wagtail_color_panel.edit_handlers import NativeColorPanel
@@ -8,9 +10,35 @@ from wagtail_color_panel.fields import ColorField
 
 from georiva.organisations.lookups import PAGE_TREE, via_related
 
+from .widgets import PortalAppSelect
+
+
+class GeoRivaSettingsForm(WagtailAdminModelForm):
+    def is_valid(self):
+        # After the formsets have been cleaned, not in clean(): the parent form
+        # is cleaned first, when no row has cleaned_data yet.
+        valid = super().is_valid()
+        return self._one_row_per_app() and valid
+
+    def _one_row_per_app(self):
+        """One row per app: a second would leave the editor guessing which of two
+        contradicting rows the portal obeys."""
+        seen = set()
+        unique = True
+        for form in self.formsets["app_entries"].forms:
+            data = getattr(form, "cleaned_data", None) or {}
+            plugin = data.get("plugin")
+            if not plugin or data.get("DELETE"):
+                continue
+            if plugin in seen:
+                form.add_error("plugin", "This app already has a row above.")
+                unique = False
+            seen.add(plugin)
+        return unique
+
 
 @register_setting
-class GeoRivaSettings(BaseSiteSetting):
+class GeoRivaSettings(BaseSiteSetting, ClusterableModel):
     # Per-Site settings, and the Site *is* the organisation: the one-to-one on
     # Organisation gives these rows a real ORM path to their owner.
     ORGANISATION_LOOKUP = "site__organisation"
@@ -68,7 +96,22 @@ class GeoRivaSettings(BaseSiteSetting):
             ],
             heading="Appearance",
         ),
+        MultiFieldPanel(
+            [
+                HelpPanel(
+                    content=(
+                        "Every app installed on this instance is listed in the navbar's Apps menu and on the "
+                        "home page. Add a row only to change that for this site: to hide an app, reword it, "
+                        "give it another icon, or move it up. Apps with a row come first, in row order."
+                    )
+                ),
+                InlinePanel("app_entries", label="App"),
+            ],
+            heading="Apps",
+        ),
     ]
+
+    base_form_class = GeoRivaSettingsForm
 
     class Meta:
         verbose_name = "GeoRiva Settings"
@@ -109,6 +152,13 @@ class HomePage(Page):
     stats_custom_label = models.CharField(max_length=100, blank=True)
     stats_custom_value = models.CharField(max_length=100, blank=True)
 
+    # --- Apps ---
+    apps_heading = models.CharField(
+        max_length=255,
+        default="Apps",
+        help_text="Which apps are listed, and how, is set in Settings → GeoRiva Settings → Apps.",
+    )
+
     # --- Featured Catalogs ---
     featured_heading = models.CharField(max_length=255, default="Featured Datasets")
 
@@ -132,6 +182,7 @@ class HomePage(Page):
             ],
             heading="Stats Bar",
         ),
+        MultiFieldPanel([FieldPanel("apps_heading")], heading="Apps"),
         MultiFieldPanel(
             [
                 FieldPanel("featured_heading"),
@@ -155,3 +206,45 @@ class FeaturedCatalog(Orderable):
         FieldPanel("catalog"),
         FieldPanel("override_description"),
     ]
+
+
+class PortalAppEntry(Orderable):
+    """One site's word on one installed app: hide it, restate it, or move it up.
+
+    Only exceptions are stored. An app with no row is shown, as its plugin
+    describes it, after the apps that have one — so installing a plugin needs
+    nothing from any site's editors, and uninstalling one leaves a row the
+    portal quietly skips.
+
+    Keyed by plugin name rather than by the app's mount label, because the label
+    is the operator's to rename (ADR 0039) and a rename should not detach an
+    editor's choices from the app they were about.
+    """
+
+    ORGANISATION_LOOKUP = "settings__site__organisation"
+
+    settings = ParentalKey(GeoRivaSettings, on_delete=models.CASCADE, related_name="app_entries")
+    plugin = models.CharField(max_length=255, verbose_name="App")
+    hidden = models.BooleanField(default=False, help_text="Leave this app out of the navbar and the home page.")
+    title = models.CharField(max_length=100, blank=True, help_text="Leave blank to use the app's own name.")
+    description = models.CharField(
+        max_length=255, blank=True, help_text="Leave blank to use the app's own description."
+    )
+    icon = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text=(
+            'A Bootstrap Icons name, such as "cloud-sun" (icons.getbootstrap.com). Leave blank for the app\'s own.'
+        ),
+    )
+
+    panels = [
+        FieldPanel("plugin", widget=PortalAppSelect),
+        FieldPanel("hidden"),
+        FieldPanel("title"),
+        FieldPanel("description"),
+        FieldPanel("icon"),
+    ]
+
+    class Meta(Orderable.Meta):
+        verbose_name = "app"

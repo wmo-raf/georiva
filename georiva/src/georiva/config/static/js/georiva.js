@@ -16,6 +16,64 @@
     }
 
     // -------------------------------------------------------------------------
+    // Navbar dropdowns (Apps) — click and keyboard, not hover, so it works the
+    // same on a phone, where it opens inline inside the burger menu.
+    // -------------------------------------------------------------------------
+    document.querySelectorAll('[data-gr-dropdown]').forEach((dropdown) => {
+        const toggle = dropdown.querySelector('.gr-navbar-dropdown-toggle');
+        const panel = dropdown.querySelector('.gr-navbar-dropdown-menu');
+        if (!toggle || !panel) return;
+
+        const items = () => Array.from(panel.querySelectorAll('a'));
+
+        const setOpen = (open) => {
+            panel.hidden = !open;
+            dropdown.classList.toggle('is-open', open);
+            toggle.setAttribute('aria-expanded', String(open));
+        };
+
+        toggle.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setOpen(panel.hidden);
+        });
+
+        toggle.addEventListener('keydown', (event) => {
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setOpen(true);
+                items()[0]?.focus();
+            }
+        });
+
+        panel.addEventListener('keydown', (event) => {
+            const links = items();
+            const index = links.indexOf(document.activeElement);
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                links[(index + 1) % links.length]?.focus();
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                links[(index - 1 + links.length) % links.length]?.focus();
+            }
+        });
+
+        dropdown.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !panel.hidden) {
+                setOpen(false);
+                toggle.focus();
+            }
+        });
+
+        dropdown.addEventListener('focusout', (event) => {
+            if (!dropdown.contains(event.relatedTarget)) setOpen(false);
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!dropdown.contains(event.target)) setOpen(false);
+        });
+    });
+
+    // -------------------------------------------------------------------------
     // Stats bar — live counts from STAC API
     // -------------------------------------------------------------------------
     const STAC_BASE = window.GEORIVA_STAC_URL || '/stac';

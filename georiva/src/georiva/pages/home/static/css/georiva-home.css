@@ -294,6 +294,8 @@
 /* --------------------------------------------------------------------------
    Entry Point Cards
    -------------------------------------------------------------------------- */
+/* Explore's three cards. The Apps grid below mirrors these columns (its "3"
+   and 200px are this rule's card count and minimum) — change them together. */
 .gr-entry-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -333,6 +335,22 @@
     justify-content: center;
     font-size: 1.15rem;
     color: var(--gr-accent-dark);
+}
+
+/* Apps follow Explore on the same surface, so they read as one continued list
+   rather than a second band. */
+.gr-apps-section {
+    padding-top: 0;
+}
+
+/* Apps line up column for column with Explore's three cards, at every width.
+   auto-fill rather than Explore's auto-fit, so one or two apps keep a third of
+   the row instead of stretching across it; the minimum is a third of the row
+   (less two gaps), floored at Explore's 200px, so the columns drop to two and
+   then one at the same widths Explore's do. The 3 is Explore's card count —
+   change it with the .gr-entry-grid rule above. */
+.gr-apps-section .gr-entry-grid {
+    grid-template-columns: repeat(auto-fill, minmax(max(200px, (100% - 2 * 1.25rem) / 3), 1fr));
 }
 
 .gr-entry-title {

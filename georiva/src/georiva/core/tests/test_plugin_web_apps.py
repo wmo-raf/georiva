@@ -460,3 +460,75 @@ class PluginWebAppTests(SimpleTestCase):
             response = self.get(urlconf, "/demo-viewer/")
 
         self.assertEqual(response.status_code, 200)
+
+    # -- how the portal presents it ----------------------------------------
+
+    def test_an_app_may_say_how_the_portal_presents_it(self):
+        name = self.make_plugin(
+            "plugin_that_describes_itself",
+            """
+            from georiva.core.web_apps import WebApp
+
+            app = WebApp(
+                slug="demo-viewer",
+                index="demo_viewer/index.html",
+                name="Demo Viewer",
+                icon="cloud-sun",
+                description="Look at the demo.",
+            )
+            """,
+        )
+
+        with self.instance(name):
+            (mount,) = web_apps.web_app_mounts()
+
+        self.assertEqual(mount.icon, "cloud-sun")
+        self.assertEqual(mount.description, "Look at the demo.")
+
+    def test_an_app_that_says_nothing_gets_a_generic_icon_and_no_description(self):
+        """Presentation is optional: a plugin declared before it existed keeps its page."""
+        name = self.make_plugin("plugin_that_describes_nothing", WORKING)
+
+        with self.instance(name):
+            (mount,) = web_apps.web_app_mounts()
+
+        self.assertEqual(mount.icon, web_apps.DEFAULT_ICON)
+        self.assertEqual(mount.description, "")
+
+    def test_an_icon_may_be_written_with_its_class_prefix(self):
+        name = self.make_plugin(
+            "plugin_with_a_prefixed_icon",
+            """
+            from georiva.core.web_apps import WebApp
+
+            app = WebApp(slug="demo-viewer", index="demo_viewer/index.html", icon="bi-cloud-sun")
+            """,
+        )
+
+        with self.instance(name):
+            (mount,) = web_apps.web_app_mounts()
+
+        self.assertEqual(mount.icon, "cloud-sun")
+
+    def test_the_served_apps_are_read_back_from_the_url_conf(self):
+        """Once per app, not once per pattern, and only what the URL conf routes:
+        core's own patterns contribute nothing."""
+        name = self.make_plugin("plugin_read_back", WORKING)
+
+        with self.instance(name):
+            urlconf = self.urlconf(config_urls.build_urlpatterns())
+
+            served = web_apps.served_web_apps(urlconf)
+
+        self.assertEqual([(m.plugin, m.path) for m in served], [(name, "/app/demo-viewer/")])
+
+    def test_the_served_address_follows_an_operators_rename(self):
+        """A link is to wherever the app is actually served, not its default slug."""
+        name = self.make_plugin("plugin_read_back_renamed", WORKING)
+
+        with self.instance(name, GEORIVA_WEB_APP_MOUNTS={name: "viewer"}, GEORIVA_WEB_APP_PATH_PREFIX="tools/"):
+            urlconf = self.urlconf(config_urls.build_urlpatterns())
+
+            served = web_apps.served_web_apps(urlconf)
+
+        self.assertEqual([m.path for m in served], ["/tools/viewer/"])
