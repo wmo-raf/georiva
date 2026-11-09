@@ -4,6 +4,7 @@
 #   ./deploy.sh v0.5.0        a release tag (what production should run)
 #   ./deploy.sh main          the tip of main — a moving target, for staging
 #   ./deploy.sh sha-abc1234   one commit of main, as CI tagged its images
+#   ./deploy.sh plugins       apply an edited plugins.toml (--force: reinstall)
 #
 # Checks out that version of deploy/, writes GEORIVA_TAG into .env, pulls the
 # images and restarts the stack. If the pull fails nothing has restarted, so the
@@ -26,7 +27,7 @@ warn() { echo "deploy: warning: $*" >&2; }
 info() { echo "deploy: $*"; }
 
 usage() {
-    sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -139,9 +140,115 @@ prune_images() {
     docker image prune -f >/dev/null
 }
 
+# How long the georiva container gets to report healthy after a plugin update:
+# its own healthcheck allows a 60 s start period and five 15 s retries, plus
+# whatever plugin migrations take.
+readonly HEALTH_TIMEOUT=600
+
+# The installer's last line when it reinstalled. Pinned on the Python side by
+# georiva/site_plugins/tests/test_installer.py (INSTALLED_LINE): change both.
+readonly INSTALLED_LINE="install-plugins: installed"
+
+# The running services that mount the georiva-plugins volume, and so hold
+# plugin code in memory. Read from Docker rather than listed here, so a service
+# an override or a plugin overlay adds is restarted too (ADR 0040).
+plugin_services() {
+    local project volume
+    project="$(docker compose config --format json | sed -n 's/^  "name": "\(.*\)",$/\1/p' | head -n 1)"
+    volume="$(docker volume ls -q \
+        --filter "label=com.docker.compose.project=$project" \
+        --filter label=com.docker.compose.volume=georiva-plugins)"
+    [[ -n "$volume" ]] || return 0
+    docker ps --filter "volume=$volume" --filter "label=com.docker.compose.project=$project" \
+        --format '{{.Label "com.docker.compose.service"}}' | grep -v '^georiva-plugins$' | sort -u
+}
+
+wait_healthy() {
+    local service="$1" container status waited=0
+    container="$(docker compose ps -q "$service")"
+    [[ -n "$container" ]] || return 1
+    while ((waited < HEALTH_TIMEOUT)); do
+        status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
+        case "$status" in
+            healthy | none) return 0 ;;
+            unhealthy) return 1 ;;
+        esac
+        sleep 5
+        waited=$((waited + 5))
+    done
+    return 1
+}
+
+# ./deploy.sh plugins [--force]: apply an edited plugins.toml to a running
+# server. The installer swaps the shared volume, but a running service keeps
+# the plugin code it imported, so whatever mounts the volume is restarted:
+# georiva first, which runs any plugin migrations, then the rest once it is
+# healthy. No image is pulled and no checkout changes.
+update_plugins() {
+    local force="" output services rest=()
+    case "${1:-}" in
+        "") ;;
+        --force) force="--force" ;;
+        *) usage 1 ;;
+    esac
+
+    cd "$(dirname "$0")"
+    [[ -f .env ]] || die "no .env here: this server has not been deployed yet (README.md)"
+    command -v docker >/dev/null || die "docker is not installed"
+    docker compose version >/dev/null 2>&1 || die "the docker compose plugin is not installed"
+    [[ -f plugins.toml ]] || die "no plugins.toml here, or it is a directory: cp plugins.toml.sample plugins.toml"
+
+    local config_error
+    config_error="$(docker compose config --quiet 2>&1)" || die "docker-compose.yml does not accept this .env: ${config_error}"
+
+    services="$(plugin_services)"
+
+    info "installing plugins from plugins.toml"
+    # shellcheck disable=SC2086 # $force is empty or one word
+    output="$(docker compose run --rm --no-deps georiva-plugins install-plugins $force 2>&1 | tee /dev/stderr)" ||
+        die "the plugin install failed; the previous install is still in place and nothing was restarted"
+
+    if ! grep -qx "$INSTALLED_LINE" <<<"$output"; then
+        info "plugins are up to date; nothing to restart"
+        return 0
+    fi
+    if [[ -z "$services" ]]; then
+        info "installed. No running service mounts the plugins volume; they load it when they start"
+        return 0
+    fi
+
+    if grep -qx georiva <<<"$services"; then
+        info "restarting georiva (runs any plugin migrations)"
+        docker compose restart georiva
+        if ! wait_healthy georiva; then
+            warn "georiva did not become healthy. The other services were not restarted and still run the previous plugin code."
+            echo "  see why:   docker compose logs --tail 200 georiva" >&2
+            echo "  roll back: set the previous tag in plugins.toml, then ./deploy.sh plugins" >&2
+            exit 1
+        fi
+    fi
+
+    while read -r service; do
+        [[ "$service" == georiva ]] || rest+=("$service")
+    done <<<"$services"
+    if ((${#rest[@]})); then
+        info "restarting ${rest[*]}"
+        docker compose restart "${rest[@]}"
+    fi
+    info "plugins updated; every service that loads them has restarted"
+}
+
 main() {
+    [[ $# -ge 1 ]] || usage 1
+    case "$1" in
+        -h | --help) usage ;;
+        plugins)
+            shift
+            update_plugins "$@"
+            return
+            ;;
+    esac
     [[ $# -eq 1 ]] || usage 1
-    case "$1" in -h | --help) usage ;; esac
     local version="$1"
 
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ||

@@ -1,5 +1,10 @@
 # Source plugins install once into a volume every service shares
 
+> **Amended by [ADR-0040](0040-plugin-updates-restart-what-loads-them.md).**
+> Reinstalling swaps the volume but restarts nothing, so a plugin-only change left running services on the old code.
+> `./deploy.sh plugins` now reinstalls and restarts what mounts the volume, and the installer records what it
+> installed in `installed.json`.
+
 ## Status
 
 accepted
