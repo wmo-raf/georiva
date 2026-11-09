@@ -115,7 +115,8 @@ cp plugins.toml.sample plugins.toml    # then add your plugins (git + tag, or ur
 ./deploy.sh v0.5.0                     # installs them as part of the upgrade
 ```
 
-It needs internet access at install time. Details, limits and the settings a plugin may require:
+The one-shot `georiva-plugins` service does the installing (ADR 0035). It needs internet access at install time.
+Details, limits and the settings a plugin may require:
 [docs/plugins/installation.md](../docs/plugins/installation.md#servers-published-images).
 
 To update a plugin, change its `tag` in `plugins.toml`, then:
@@ -129,8 +130,12 @@ Details: [Updating a plugin](../docs/plugins/installation.md#updating-a-plugin).
 
 ## Upgrade
 
+Read the release notes first: they call out anything to do by hand. Then back
+up the database, because [migrations do not roll back](#rollback):
+
 ```bash
 cd georiva/deploy
+docker compose exec -T georiva-db sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > georiva-$(date +%F).dump
 ./deploy.sh v0.6.0
 ```
 
@@ -148,7 +153,16 @@ If step 4 fails — a new required setting, or images CI has not finished
 publishing — nothing has restarted, and the checkout and `GEORIVA_TAG` are put
 back as they were.
 
-Read the release notes before upgrading: they call out anything to do by hand.
+Do not `git pull` or check out a version by hand first. Step 2 fetches the
+version itself, and the checkout sits on a detached HEAD at the version it runs,
+so there is no branch for `pull` to move — and moving the files without
+`deploy.sh` leaves `GEORIVA_TAG` and the running images on the old version.
+
+An upgrade runs with the `deploy.sh` you already have: the script reads itself
+in full before step 2 replaces it. A change a release makes to `deploy.sh`
+takes effect from the next run — a new subcommand is there as soon as the
+upgrade finishes, a change to how upgrades work applies to the upgrade after
+this one.
 
 ## Rollback
 
@@ -162,13 +176,8 @@ The previous version's images are kept, so this needs no download.
 
 **Migrations do not roll back.** Code is rolled back, the database is not: if
 the newer release migrated the database, the older code may not run against
-it. Before upgrading a production server, back up the database:
-
-```bash
-docker compose exec -T georiva-db sh -c 'pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"' > georiva-$(date +%F).dump
-```
-
-and restore it before rolling back across a migration. Objects in MinIO are not
+it. Restore the dump you took [before upgrading](#upgrade) before rolling back
+across a migration. Objects in MinIO are not
 touched by migrations; `docker/minio/` is backed up as plain files.
 
 ## Overrides
@@ -237,12 +246,21 @@ docker compose exec georiva bash      # a shell in the app container
 docker compose restart georiva-celery-processing-worker
 ```
 
-## Plugins
+The version a server runs is the `GEORIVA_TAG` that `deploy.sh` wrote into `.env`:
 
-The published images carry GeoRiva's core only. List the plugins a server
-needs in `deploy/plugins.toml`; the one-shot `georiva-plugins` service installs
-them into a volume shared by every backend service (ADR 0035). See
-[Servers (published images)](https://github.com/wmo-raf/georiva/blob/main/docs/plugins/installation.md#servers-published-images).
+```bash
+grep GEORIVA_TAG .env
+```
+
+After editing `.env`, apply it by re-running the version already running:
+
+```bash
+./deploy.sh "$(sed -n 's/^GEORIVA_TAG=//p' .env | tail -n 1)"
+```
+
+That validates the new `.env` before anything restarts, then recreates the
+services whose settings changed. For a release tag the GeoRiva images are the
+ones already on the server; for `main` it moves to whatever `main` is now.
 
 ## For maintainers
 
