@@ -162,11 +162,16 @@ uv-sync:
 # nobody touched. CI runs `just lint`, so this is the only place it is set.
 
 ruff := "ruff@0.15.20"
+# The server scripts in deploy/, pinned for the same reason; shellcheck-py
+# ships the shellcheck binary as a wheel, so uvx runs it like ruff.
+shellcheck := "shellcheck-py==0.10.0.1"
 
 # What CI runs. Reports, changes nothing.
 lint:
     uvx {{ ruff }} check .
     uvx {{ ruff }} format --check .
+    bash -n deploy/*.sh
+    uvx --from {{ shellcheck }} shellcheck deploy/*.sh
 
 # What to run before committing: sorts imports, applies safe fixes, formats.
 format:

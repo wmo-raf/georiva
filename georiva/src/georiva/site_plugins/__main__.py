@@ -16,18 +16,20 @@ from pathlib import Path
 
 from packaging.utils import canonicalize_name
 
-from .installer import InstallError, install
+from .installer import INSTALLED_LINE, UP_TO_DATE_LINE, InstallError, install, report
 from .manifest import PluginSpec
 
 
-def fetch(spec: PluginSpec, dest: Path) -> None:
+def fetch(spec: PluginSpec, dest: Path) -> str | None:
+    """Put the plugin's source at ``dest``; returns the commit for a git source."""
     if spec.git:
         cmd = ["git", "clone", "--quiet", "--depth", "1"]
         if spec.tag:
             cmd += ["--branch", spec.tag]
         _run(cmd + [spec.git, str(dest)], f"cloning {spec.git}")
+        head = subprocess.run(["git", "-C", str(dest), "rev-parse", "HEAD"], capture_output=True, text=True)
         shutil.rmtree(dest / ".git", ignore_errors=True)
-        return
+        return head.stdout.strip() or None
 
     with urllib.request.urlopen(spec.url, timeout=120) as response:  # noqa: S310 - the operator's own manifest
         body = response.read()
@@ -35,6 +37,7 @@ def fetch(spec: PluginSpec, dest: Path) -> None:
         raise InstallError(f"{spec.name}: the download at {spec.url} does not match its sha256 hash")
     with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as tar:
         tar.extractall(dest, filter="data", members=_strip_top_level(tar))
+    return None
 
 
 def _strip_top_level(tar: tarfile.TarFile):
@@ -104,7 +107,9 @@ def main(argv=None) -> int:
         print(f"install-plugins: {exc}", file=sys.stderr)
         return 1
 
-    print("install-plugins: installed" if result.installed else "install-plugins: up to date")
+    for line in report(result.changes):
+        print(f"install-plugins:   {line}")
+    print(INSTALLED_LINE if result.installed else UP_TO_DATE_LINE)
     for warning in result.warnings:
         print(f"install-plugins: warning: {warning}", file=sys.stderr)
     return 0

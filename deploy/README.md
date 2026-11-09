@@ -118,6 +118,15 @@ cp plugins.toml.sample plugins.toml    # then add your plugins (git + tag, or ur
 It needs internet access at install time. Details, limits and the settings a plugin may require:
 [docs/plugins/installation.md](../docs/plugins/installation.md#servers-published-images).
 
+To update a plugin, change its `tag` in `plugins.toml`, then:
+
+```bash
+./deploy.sh plugins                    # reinstalls, reports what changed, restarts what loads plugins
+```
+
+Not `docker compose up -d`: that reinstalls but leaves every running service on the old plugin code.
+Details: [Updating a plugin](../docs/plugins/installation.md#updating-a-plugin).
+
 ## Upgrade
 
 ```bash

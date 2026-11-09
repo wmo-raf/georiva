@@ -51,8 +51,32 @@ cp plugins.toml.sample plugins.toml   # then list your plugins (git + tag, or ur
 
 The one-shot `georiva-plugins` service installs the plugins and their dependencies, pinned to the versions core
 ships, then exits; the other services wait for it. Re-running is instant while `plugins.toml` and the release are
-unchanged; editing the manifest or upgrading reinstalls. `docker compose run --rm georiva-plugins install-plugins --force`
-reinstalls regardless.
+unchanged; editing the manifest or upgrading reinstalls.
+
+### Updating a plugin
+
+Edit the plugin's `tag` in `plugins.toml` (or add or remove an entry), then:
+
+```bash
+./deploy.sh plugins            # --force reinstalls even when nothing changed
+```
+
+It reinstalls, prints one line per plugin, and restarts every running service that mounts the plugins volume:
+`georiva` first, which runs any plugin migrations, then the rest once it is healthy. Unchanged, it restarts nothing.
+
+```text
+install-plugins:   ~ georiva_publisher_forti  0.2.0 → 0.2.1  (git 0.2.1 @ 5703bd8)
+install-plugins:   = georiva_source_cds       1.4.0
+install-plugins: installed
+```
+
+A bare `docker compose up -d` is **not** enough here. It reinstalls into the volume, but compose leaves running
+containers alone when only the volume changed, so every service goes on running the plugin code it imported at startup
+([ADR 0040](../adr/0040-plugin-updates-restart-what-loads-them.md)). A core upgrade with `./deploy.sh <version>` does not
+have this problem: new images recreate every container.
+
+A plugin pinned by branch rather than tag follows that branch, and a new commit does not change `plugins.toml`: use
+`./deploy.sh plugins --force` to pick it up. What a server runs is recorded in `installed.json` in the plugins volume.
 
 Limits: it needs internet at install time (no air-gapped mode yet); dependencies need a prebuilt linux/amd64
 wheel (the image has no compilers); and `build.sh` / `runtime_setup.sh` must be empty of commands, as they are not
