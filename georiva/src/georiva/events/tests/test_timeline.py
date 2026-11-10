@@ -2,6 +2,7 @@
 
 import datetime
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
@@ -335,6 +336,96 @@ class TimelineRepeatWeightTests(TestCase):
         response = self._get(repeat=str(self.folded[0].pk), fragment="members")
 
         self.assertEqual(response.status_code, 403)
+
+    def test_the_events_of_a_closed_repeat_are_not_read(self):
+        """Only what is drawn has its details read: a folded member is counted, not summarised."""
+        layout = self._get().context["layout"]
+
+        repeat = layout.repeat(self.folded[0].pk)
+        self.assertTrue(all(member.row is None for member in repeat.members))
+        self.assertIsNotNone(layout.rows[0].entry.row)
+
+    def test_each_burst_is_marked_where_it_starts(self):
+        response = self._get(repeat=str(self.folded[0].pk), fragment="members")
+
+        # Every member is its own burst; the first needs no mark, the row above it is one.
+        self.assertContains(response, "gr-rail__member--burst", count=len(self.folded) - 1)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+@patch("georiva.events.timeline.MEMBERS_PAGE", 2)
+class TimelineRepeatPageTests(TimelineRepeatWeightTests):
+    """An open repeat draws a page of its members at a time (#611).
+
+    Five folded members at two a page: [0, 1], [2, 3], [4].
+    """
+
+    def _key(self):
+        return str(self.folded[0].pk)
+
+    def _drawn(self, response):
+        return [event for event in self.folded if f'id="event-{event.pk}"' in response.content.decode()]
+
+    def test_a_repeat_asked_for_is_sent_open_with_its_members(self):
+        response = self._get(repeat=self._key())
+
+        self.assertTrue(self._repeat(response).open)
+        self.assertEqual(self._drawn(response), self.folded[:2])
+        self.assertContains(response, "page=2&amp;more=later")
+        self.assertNotContains(response, "more=earlier")
+
+    def test_the_members_of_one_repeat_come_alone(self):
+        response = self._get(repeat=self._key(), fragment="members")
+
+        self.assertEqual(self._drawn(response), self.folded[:2])
+        self.assertNotContains(response, "gr-rail__row")
+
+    def test_each_burst_is_marked_where_it_starts(self):
+        response = self._get(repeat=self._key(), fragment="members", page="2")
+
+        # A burst starting at the top of a page is still marked.
+        self.assertContains(response, "gr-rail__member--burst", count=2)
+
+    def test_the_next_page_comes_with_only_the_way_further_on(self):
+        response = self._get(repeat=self._key(), fragment="members", page="2", more="later")
+
+        self.assertEqual(self._drawn(response), self.folded[2:4])
+        self.assertContains(response, "page=3&amp;more=later")
+        self.assertNotContains(response, "more=earlier")
+
+    def test_an_earlier_page_comes_with_only_the_way_further_back(self):
+        response = self._get(repeat=self._key(), fragment="members", page="2", more="earlier")
+
+        self.assertEqual(self._drawn(response), self.folded[2:4])
+        self.assertContains(response, "page=1&amp;more=earlier")
+        self.assertNotContains(response, "more=later")
+
+    def test_the_last_page_offers_nothing_later(self):
+        response = self._get(repeat=self._key(), fragment="members", page="3", more="later")
+
+        self.assertEqual(self._drawn(response), self.folded[4:])
+        self.assertNotContains(response, "more=later")
+
+    def test_a_page_out_of_range_is_the_nearest_one(self):
+        self.assertEqual(self._drawn(self._get(repeat=self._key(), fragment="members", page="99")), self.folded[4:])
+        self.assertEqual(self._drawn(self._get(repeat=self._key(), fragment="members", page="x")), self.folded[:2])
+
+    def test_an_event_inside_a_repeat_still_lands_on_it(self):
+        """A deep link draws the page holding its target, with the way either side."""
+        target = self.folded[3]
+
+        response = self._get(event=str(target.pk))
+
+        self.assertEqual(self._drawn(response), self.folded[2:4])
+        self.assertContains(response, "gr-rail__member--target")
+        self.assertContains(response, "page=1&amp;more=earlier")
+        self.assertContains(response, "page=3&amp;more=later")
+
+    def test_only_the_drawn_page_is_read(self):
+        layout = self._get(repeat=self._key()).context["layout"]
+
+        repeat = layout.repeat(self.folded[0].pk)
+        self.assertEqual([member.row is not None for member in repeat.members], [True, True, False, False, False])
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])

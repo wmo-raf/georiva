@@ -20,19 +20,24 @@ A chain can be large two ways, and each has its own fold:
 """
 
 import itertools
+import math
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import timedelta
+from functools import cached_property
 
 from django.urls import NoReverseMatch, reverse
 
 from .models import OutcomeClass
+from .registry import model_for
 
 #: How many same-type siblings in one burst fold into a group.
 FOLD_AT = 4
 #: A quiet spell longer than this breaks the rail into bursts.
 GAP = timedelta(minutes=10)
+#: How many of an open repeat's members are drawn at a time.
+MEMBERS_PAGE = 100
 #: How many quiet bursts must follow the first of a run before they collapse.
 REPEAT_AT = 2
 
@@ -76,10 +81,10 @@ class Entry:
     burst: int = 0
 
 
-def _label(members, event_type):
-    """What a type is called, read from any of its events that can be read."""
-    readable = next((member.row for member in members if member.row is not None), None)
-    return readable.type_label if readable else event_type
+def _label(event_type):
+    """What a type is called: its class says, so no event of it need be read."""
+    model = model_for(event_type)
+    return model.label if model is not None else event_type
 
 
 @dataclass
@@ -117,7 +122,7 @@ class Group:
 
     @property
     def label(self):
-        return _label(self.members, self.event_type)
+        return _label(self.event_type)
 
     @property
     def outcome_class(self):
@@ -145,6 +150,33 @@ class Repeat:
     end: timedelta = None
     open: bool = False
     target: object = None
+    page: int = 1
+
+    @property
+    def pages(self):
+        return math.ceil(len(self.members) / MEMBERS_PAGE)
+
+    def turn_to(self, page):
+        """Draw ``page`` of the members, or the nearest page there is."""
+        self.page = min(max(page, 1), self.pages)
+
+    @property
+    def page_members(self):
+        """The members drawn when the repeat is open: one page of them, never all (#611)."""
+        return self.members[(self.page - 1) * MEMBERS_PAGE : self.page * MEMBERS_PAGE]
+
+    @cached_property
+    def burst_starts(self):
+        """Members that start a burst, except the first: a page break never hides one."""
+        return {later.id for earlier, later in itertools.pairwise(self.members) if later.burst != earlier.burst}
+
+    @property
+    def previous_page(self):
+        return self.page - 1 if self.page > 1 else None
+
+    @property
+    def next_page(self):
+        return self.page + 1 if self.page < self.pages else None
 
     @property
     def summary(self):
@@ -190,6 +222,19 @@ class Layout:
     def repeat(self, key):
         """The repeat named ``key``, or ``None``."""
         return next((row.repeat for row in self.rows if row.repeat and row.repeat.key == key), None)
+
+    def drawn(self):
+        """Every entry the page draws — so only these need their details read.
+
+        A closed repeat draws none of its members, and an open one a page of them.
+        """
+        for row in self.rows:
+            if row.entry:
+                yield row.entry
+            elif row.group:
+                yield from row.group.members
+            elif row.repeat and row.repeat.open:
+                yield from row.repeat.page_members
 
 
 @dataclass(eq=False)
@@ -277,15 +322,12 @@ def _repeats(bursts, children_of, target, open_repeat):
     return repeats
 
 
-def _tally(entries, labelled_from):
-    """``"N × label"`` per type of ``entries``, in the order each first occurs; a lone one is just its label.
-
-    Labels are read from ``labelled_from``, where an event of each type can be read.
-    """
+def _tally(entries):
+    """``"N × label"`` per type of ``entries``, in the order each first occurs; a lone one is just its label."""
     times = Counter(entry.event_type for entry in entries)
     tally = []
     for event_type in dict.fromkeys(entry.event_type for entry in entries):
-        label = _label([entry for entry in labelled_from if entry.event_type == event_type], event_type)
+        label = _label(event_type)
         tally.append(label if times[event_type] == 1 else f"{times[event_type]} × {label}")
     return tally
 
@@ -299,13 +341,15 @@ def _repeat(bursts, target, open_repeat, *, same):
         count=len(bursts),
         every=timedelta(seconds=round(every)),
         same=same,
-        shape=_tally(bursts[0], members) if same else [],
-        totals=_tally(members, members),
+        shape=_tally(bursts[0]) if same else [],
+        totals=_tally(members),
         start=members[0].offset,
         end=members[-1].offset,
     )
-    if target is not None and any(member.id == target for member in members):
+    held = next((index for index, member in enumerate(members) if member.id == target), None)
+    if held is not None:
         repeat.open, repeat.target = True, target
+        repeat.turn_to(held // MEMBERS_PAGE + 1)
     elif open_repeat is not None and repeat.key == open_repeat:
         repeat.open = True
     return repeat

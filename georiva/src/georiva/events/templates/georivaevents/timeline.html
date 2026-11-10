@@ -389,6 +389,12 @@
             font-size: 0.85em;
         }
 
+        .gr-rail__member--burst {
+            margin-top: 0.4em;
+            border-top: 1px dashed var(--w-color-border-furniture);
+            padding-top: 0.4em;
+        }
+
         .gr-rail__gap {
             display: block;
             padding: 10px 0;
@@ -410,36 +416,56 @@
     {{ block.super }}
     <script>
         /*
-         * A closed repeat is sent without its members (#611). Opening it fetches
-         * them in place of the link that would otherwise reload the page open.
+         * A repeat's members are sent a page at a time, and a closed repeat sends
+         * none (#611). Each link would reload the page with that page drawn; the
+         * script fetches the page instead and puts it where the link was.
          */
         document.addEventListener('DOMContentLoaded', function () {
+            function load(link, {navigateOnFailure}) {
+                if (link.dataset.loading) {
+                    return;
+                }
+                link.dataset.loading = '1';
+                const url = new URL(link.href);
+                url.searchParams.set('fragment', 'members');
+                url.hash = '';
+                fetch(url, {credentials: 'same-origin'})
+                    .then(function (response) {
+                        if (!response.ok) {
+                            throw new Error(response.status);
+                        }
+                        return response.text();
+                    })
+                    .then(function (html) {
+                        link.insertAdjacentHTML('afterend', html);
+                        link.remove();
+                    })
+                    .catch(function () {
+                        delete link.dataset.loading;
+                        // Its click was taken over, so follow the link: the page reloads with those members drawn.
+                        if (navigateOnFailure) {
+                            window.location.href = link.href;
+                        }
+                    });
+            }
+
             document.querySelectorAll('[data-repeat-members]').forEach(function (link) {
                 const details = link.closest('details');
                 details.addEventListener('toggle', function () {
-                    if (!details.open || !link.isConnected || link.dataset.loading) {
-                        return;
+                    if (details.open && link.isConnected) {
+                        load(link, {navigateOnFailure: false});
                     }
-                    link.dataset.loading = '1';
-                    const url = new URL(link.href);
-                    url.searchParams.set('fragment', 'members');
-                    url.hash = '';
-                    fetch(url, {credentials: 'same-origin'})
-                        .then(function (response) {
-                            if (!response.ok) {
-                                throw new Error(response.status);
-                            }
-                            return response.text();
-                        })
-                        .then(function (html) {
-                            link.insertAdjacentHTML('afterend', html);
-                            link.remove();
-                        })
-                        .catch(function () {
-                            // The link still works: it reloads the page with this repeat open.
-                            delete link.dataset.loading;
-                        });
                 });
+            });
+
+            document.addEventListener('click', function (event) {
+                const link = event.target.closest('[data-repeat-page]');
+                // A click meant for a new tab or window is left to the browser.
+                if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                    return;
+                }
+                event.preventDefault();
+                load(link, {navigateOnFailure: true});
             });
         });
     </script>

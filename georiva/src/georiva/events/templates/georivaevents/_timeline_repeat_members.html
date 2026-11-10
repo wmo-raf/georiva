@@ -1,12 +1,28 @@
+{% load i18n %}
 {% comment %}
-    The events one repeat stands for. Drawn only for an open repeat, inline or
-    as the fragment a closed one fetches when it opens (#611).
+    One page of the events a repeat stands for (#611). Drawn only for an open
+    repeat, inline or as the fragment fetched when it opens. ``earlier`` and
+    ``later`` say which ways on are offered: inline, both; a fetched page, only
+    the way it was fetched in, since the other side is already drawn. A burst's
+    first event is marked, so the bursts read apart.
 {% endcomment %}
+{% if earlier and repeat.previous_page %}
+    <a class="gr-rail__load" data-repeat-page
+       href="?{% if focus %}from={{ focus.id }}&amp;{% endif %}repeat={{ repeat.key }}&amp;page={{ repeat.previous_page }}&amp;more=earlier#{{ repeat.anchor }}">
+        {% trans "Show earlier events" %}
+    </a>
+{% endif %}
 <ol class="gr-rail__members">
-    {% for member in repeat.members %}
-        <li class="gr-rail__member gr-rail__member--ok{% if member.id == repeat.target %} gr-rail__member--target{% endif %}"
+    {% for member in repeat.page_members %}
+        <li class="gr-rail__member gr-rail__member--ok{% if member.id in repeat.burst_starts %} gr-rail__member--burst{% endif %}{% if member.id == repeat.target %} gr-rail__member--target{% endif %}"
             id="event-{{ member.id }}">
             {% include "georivaevents/_timeline_member.html" %}
         </li>
     {% endfor %}
 </ol>
+{% if later and repeat.next_page %}
+    <a class="gr-rail__load" data-repeat-page
+       href="?{% if focus %}from={{ focus.id }}&amp;{% endif %}repeat={{ repeat.key }}&amp;page={{ repeat.next_page }}&amp;more=later#{{ repeat.anchor }}">
+        {% trans "Show later events" %}
+    </a>
+{% endif %}

@@ -310,10 +310,11 @@ class RepeatTests(SimpleTestCase):
 
         repeat = next(row.repeat for row in build_layout([e for b in bursts for e in b]).rows if row.repeat)
 
-        # In the order one burst runs, read from the events (their types are not installed in this test).
+        # In the order one burst runs. An installed type is named by its class, without
+        # reading an event of it; one not installed here by its key.
         self.assertEqual(
             repeat.shape,
-            ["georivaevents.sweepintervened", "ingestion.fileingestionfinished", "core.productpublished"],
+            ["Sweep intervened", "ingestion.fileingestionfinished", "core.productpublished"],
         )
 
     def test_a_type_that_occurs_more_than_once_a_burst_says_how_often(self):
@@ -365,7 +366,7 @@ class QuietRunTests(SimpleTestCase):
         self.assertEqual(
             repeat.totals,
             [
-                "4 × georivaevents.sweepintervened",
+                "4 × Sweep intervened",
                 "ingestion.fileingestionfinished",
                 "core.productpublished",
             ],

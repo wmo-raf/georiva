@@ -69,8 +69,10 @@ def timeline(request, correlation_id):
 
     ``?from=<event>`` draws one branch of the chain; ``?event=<event>`` marks
     one event and opens the group folding it. A folded repeat is sent without
-    its members (#611): ``?repeat=<its first member>`` draws it open, and with
-    ``&fragment=members`` the response is that repeat's members alone.
+    its members (#611): ``?repeat=<its first member>`` draws it open, one
+    ``&page=`` of members at a time. With ``&fragment=members`` the response is
+    that page alone, offering the way further in the direction ``&more=``
+    (``earlier`` or ``later``) it was fetched in.
     """
     from django.http import Http404
 
@@ -89,33 +91,35 @@ def timeline(request, correlation_id):
     continues_elsewhere = everything.filter(organisation__isnull=False).count() > len(visible)
 
     existing = installed_tables()
-    by_type: dict[str, list] = {}
-    for row in visible:
-        by_type.setdefault(row.event_type, []).append(row.event_id)
 
-    events = {}
-    for key, ids in by_type.items():
-        model = model_for(key)
-        if model is None or model._meta.db_table not in existing:
-            continue
-        for event in model._default_manager.filter(pk__in=ids):
-            events[event.pk] = event
+    def tables(index_rows):
+        """``(model, ids)`` per type among ``index_rows`` whose table is installed here."""
+        by_type: dict[str, list] = {}
+        for row in index_rows:
+            by_type.setdefault(row.event_type, []).append(row.event_id)
+        for key, ids in by_type.items():
+            model = model_for(key)
+            if model is not None and model._meta.db_table in existing:
+                yield model, ids
 
-    entries = []
-    for index_row in visible:
-        # Indexed, but its type may not be installed here or its table gone:
-        # then it is drawn from the index alone, and its own cause is unknown.
-        event = events.get(index_row.event_id)
-        entries.append(
-            Entry(
-                id=index_row.event_id,
-                event_type=index_row.event_type,
-                occurred_at=index_row.occurred_at,
-                outcome_class=index_row.outcome_class,
-                caused_by_id=event.caused_by_id if event else None,
-                row=row_for(event) if event else None,
-            )
+    # The rail needs every event's cause, but only what it draws needs its details:
+    # a chain of thousands folds into a few rows (#611).
+    causes = {}
+    for model, ids in tables(visible):
+        causes.update(model._default_manager.filter(pk__in=ids).values_list("pk", "caused_by_id"))
+
+    # Indexed, but its type may not be installed here or its table gone:
+    # then it is drawn from the index alone, and its own cause is unknown.
+    entries = [
+        Entry(
+            id=index_row.event_id,
+            event_type=index_row.event_type,
+            occurred_at=index_row.occurred_at,
+            outcome_class=index_row.outcome_class,
+            caused_by_id=causes.get(index_row.event_id),
         )
+        for index_row in visible
+    ]
 
     focus = _uuid_param(request, "from")
     open_repeat = _uuid_param(request, "repeat")
@@ -123,11 +127,35 @@ def timeline(request, correlation_id):
     if layout is None:
         raise Http404(_("No such event in this chain."))
 
-    if request.GET.get("fragment") == "members":
-        repeat = layout.repeat(open_repeat)
-        if repeat is None:
-            raise Http404(_("No such repeat in this chain."))
-        return render(request, "georivaevents/_timeline_repeat_members.html", {"repeat": repeat})
+    fragment = request.GET.get("fragment") == "members"
+    repeat = layout.repeat(open_repeat) if open_repeat else None
+    if fragment and repeat is None:
+        raise Http404(_("No such repeat in this chain."))
+    if repeat is not None and "page" in request.GET:
+        try:
+            repeat.turn_to(int(request.GET["page"]))
+        except ValueError:
+            pass
+
+    drawn = {entry.id: entry for entry in layout.drawn()}
+    index_by_id = {row.event_id: row for row in visible}
+    for model, ids in tables(index_by_id[event_id] for event_id in drawn):
+        for event in model._default_manager.filter(pk__in=ids):
+            drawn[event.pk].row = row_for(event)
+
+    if fragment:
+        # Fetched by "earlier" or "later": only the way further on in that direction.
+        more = request.GET.get("more", "later")
+        return render(
+            request,
+            "georivaevents/_timeline_repeat_members.html",
+            {
+                "repeat": repeat,
+                "focus": layout.rows[0].entry if focus else None,
+                "earlier": more == "earlier",
+                "later": more == "later",
+            },
+        )
 
     return render(
         request,
