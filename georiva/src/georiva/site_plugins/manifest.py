@@ -19,6 +19,10 @@ def load_specs(path: Path) -> list[PluginSpec]:
 
     Only ``git`` and ``url`` sources are accepted: a ``folder`` names a path inside
     a container, which a server installing for every service cannot rely on.
+
+    A manifest with keys but no ``plugins`` table is refused rather than read as no
+    plugins: it is almost always a misspelt table (``[[plugin]]``), and no plugins
+    here means uninstall every one already on the server.
     """
     if not path.is_file():
         return []
@@ -26,9 +30,18 @@ def load_specs(path: Path) -> list[PluginSpec]:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"{path} is not valid TOML: {exc}") from exc
+    if data and "plugins" not in data:
+        found = ", ".join(sorted(data))
+        raise ValueError(
+            f"{path} declares no [[plugins]] entries (found: {found}), "
+            "refused rather than read as no plugins; an empty file means no plugins"
+        )
+    entries = data.get("plugins", [])
+    if not (isinstance(entries, list) and all(isinstance(e, dict) for e in entries)):
+        raise ValueError(f"{path}: 'plugins' must be [[plugins]] entries, not {type(entries).__name__}")
 
     specs = []
-    for index, entry in enumerate(data.get("plugins") or [], 1):
+    for index, entry in enumerate(entries, 1):
         if not entry.get("enabled", True):
             continue
         name = entry.get("name", f"plugin #{index}")

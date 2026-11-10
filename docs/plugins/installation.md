@@ -78,6 +78,10 @@ have this problem: new images recreate every container.
 A plugin pinned by branch rather than tag follows that branch, and a new commit does not change `plugins.toml`: use
 `./deploy.sh plugins --force` to pick it up. What a server runs is recorded in `installed.json` in the plugins volume.
 
+Removing every entry uninstalls every plugin; an empty or comments-only `plugins.toml` means exactly that. A file
+with keys but no `[[plugins]]` entries — usually a misspelt `[[plugin]]` or a single `[plugins]` — is refused
+instead, naming what it found, and nothing is installed, removed or restarted.
+
 Limits: it needs internet at install time (no air-gapped mode yet); dependencies need a prebuilt linux/amd64
 wheel (the image has no compilers); and `build.sh` / `runtime_setup.sh` must be empty of commands, as they are not
 run. A plugin's `requires_env` variables must be passed to the services in `docker-compose.override.yml`; the
@@ -121,6 +125,9 @@ name    = "Old Plugin"
 git     = "https://github.com/org/old-plugin.git"
 enabled = false
 ```
+
+Each entry is a `[[plugins]]` table, plural and doubled. A misspelt `[[plugin]]` or a single `[plugins]` does not
+fail the build: it prints a `WARNING` naming what it found and builds an image with no plugins.
 
 **Step 3** — build and start:
 
