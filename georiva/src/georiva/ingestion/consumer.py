@@ -349,13 +349,14 @@ def _handle_event(ev: dict):
             if log.status == FileIngestion.Status.PROCESSING:
                 logger.debug("Already processing: %s/%s", origin_bucket, key)
                 return
-            if log.status == FileIngestion.Status.COMPLETED and log.has_live_data:
-                if not _delivered_since_ingested(log):
+            if log.status == FileIngestion.Status.COMPLETED:
+                if log.lost_its_data:
+                    logger.warning("Completed but no live data, re-ingesting: %s", key)
+                elif _delivered_since_ingested(log):
+                    # Live, or pruned by forecast retention (#499): only a new write is ingested.
+                    logger.info("Written again since it was ingested, re-ingesting: %s", key)
+                else:
                     return
-                logger.info("Written again since it was ingested, re-ingesting: %s", key)
-                FileIngestion.reset_for_reingest(origin_bucket, key)
-            if log.status == FileIngestion.Status.COMPLETED and not log.has_live_data:
-                logger.warning("Completed but no live data, re-ingesting: %s", key)
                 FileIngestion.reset_for_reingest(origin_bucket, key)
 
         process_incoming_file.delay(

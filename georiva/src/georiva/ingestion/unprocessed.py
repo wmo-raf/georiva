@@ -150,11 +150,9 @@ def find_unprocessed(prefix: str | None = None) -> list[UnprocessedFile]:
 
             if record is None:
                 reason = "untracked"
-            elif record.force_reingest or (
-                record.status == FileIngestion.Status.COMPLETED and not record.has_live_data
-            ):
+            elif record.force_reingest or record.lost_its_data:
                 # force_reingest wins regardless of status — matches the
-                # pre-extraction sweep.
+                # pre-extraction sweep. Items forecast retention pruned are not lost (#499).
                 reason = "reingest"
             elif record.status == FileIngestion.Status.PENDING:
                 reason = "pending"

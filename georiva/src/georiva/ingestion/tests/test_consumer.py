@@ -233,6 +233,25 @@ class MachineDeliveryAttributionTests(TestCase):
         self.assertEqual(Delivery.objects.count(), 1)
         self.assertEqual(FileIngestion.objects.get(file_path=self.key).status, FileIngestion.Status.COMPLETED)
 
+    def test_a_repeat_notification_for_a_file_retention_pruned_starts_nothing(self):
+        """Its Items are gone, but forecast retention removed them — nothing was lost (#499)."""
+        self._arrive("AKALPHA")
+        self._complete()
+        with (
+            patch.object(FileIngestion, "has_live_data", False),
+            patch("georiva.core.retention.retires", return_value=True),
+        ):
+            FileIngestion.objects.get(file_path=self.key).collections.add(self._any_collection())
+            task = self._arrive("AKALPHA")
+
+        task.delay.assert_not_called()
+        self.assertEqual(FileIngestion.objects.get(file_path=self.key).status, FileIngestion.Status.COMPLETED)
+
+    def _any_collection(self):
+        from georiva.core.models import Catalog, Collection
+
+        return Collection.objects.create(catalog=Catalog.objects.first(), name="Surface", slug="surface")
+
 
 class QuarantineTests(TestCase):
     """A rejected file leaves ``incoming`` for quarantine, with a Delivery and a refused event (ADR 0034)."""
