@@ -49,10 +49,31 @@ def main():
         )
         sys.exit(1)
 
-    if not config or "plugins" not in config:
+    if not config:
+        sys.exit(0)  # empty or comments only: no plugins, as the sample ships
+
+    if "plugins" not in config:
+        # Usually a misspelt table ([[plugin]]). Not fatal: the image builds with no
+        # plugins, but the build log says why instead of saying nothing.
+        found = ", ".join(sorted(config))
+        print(
+            f"WARNING: '{manifest_file}' declares no [[plugins]] entries (found: {found}). Nothing to install.",
+            file=sys.stderr,
+        )
         sys.exit(0)
 
-    for i, plugin in enumerate(config.get("plugins") or [], 1):
+    entries = config["plugins"]
+    if not (isinstance(entries, list) and all(isinstance(e, dict) for e in entries)):
+        # A single [plugins] table, or plugins = <something else>. Same treatment as a
+        # misspelt table, rather than a traceback.
+        print(
+            f"WARNING: '{manifest_file}': 'plugins' must be [[plugins]] entries, "
+            f"not {type(entries).__name__}. Nothing to install.",
+            file=sys.stderr,
+        )
+        sys.exit(0)
+
+    for i, plugin in enumerate(entries, 1):
         if not plugin.get("enabled", True):
             name = plugin.get("name", f"plugin #{i}")
             print(f"SKIP {name}", file=sys.stderr)

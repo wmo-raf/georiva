@@ -166,6 +166,14 @@ class InstallTests(SimpleTestCase):
             site.run()
         self.assertTrue((site.site / "src" / "georiva_source_cds").exists())
 
+    def test_a_misspelt_plugins_table_fails_instead_of_uninstalling_everything(self):
+        site = Site(self)
+        site.run()
+        site.manifest.write_text(MANIFEST.replace("[[plugins]]", "[[plugin]]"))
+        with self.assertRaisesRegex(ValueError, r"no \[\[plugins\]\] entries \(found: plugin\)"):
+            site.run()
+        self.assertTrue((site.site / "src" / "georiva_source_cds").exists())
+
     def test_combined_set_flags_and_exit_zero_are_still_no_ops(self):
         Site(self, hook="#!/bin/bash\nset -e -u\nexit 0\n").run()
 
@@ -333,3 +341,26 @@ class ManifestTests(SimpleTestCase):
 
     def test_a_missing_manifest_is_no_plugins(self):
         self.assertEqual(load_specs(Path("/nonexistent/plugins.toml")), [])
+
+    def _specs(self, text):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml") as f:
+            f.write(text)
+            f.flush()
+            return load_specs(Path(f.name))
+
+    def test_an_empty_or_comment_only_manifest_is_no_plugins(self):
+        self.assertEqual(self._specs(""), [])
+        self.assertEqual(self._specs("# [[plugins]]\n# name = 'x'\n"), [])
+
+    def test_an_empty_plugins_list_or_all_disabled_is_no_plugins(self):
+        self.assertEqual(self._specs("plugins = []\n"), [])
+        self.assertEqual(self._specs('[[plugins]]\nname = "x"\ngit = "g"\nenabled = false\n'), [])
+
+    def test_keys_without_a_plugins_table_are_refused_naming_what_was_found(self):
+        with self.assertRaisesRegex(ValueError, r"no \[\[plugins\]\] entries \(found: Plugins, plugin\)"):
+            self._specs('[[plugin]]\ngit = "g"\n[[Plugins]]\ngit = "h"\n')
+
+    def test_a_plugins_value_that_is_not_a_list_of_tables_is_refused(self):
+        for text in ('[plugins]\ngit = "g"\n', "plugins = false\n", 'plugins = ["g"]\n'):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, r"\[\[plugins\]\] entries"):
+                self._specs(text)
