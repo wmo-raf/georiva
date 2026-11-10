@@ -1,0 +1,12 @@
+{% comment %}
+    The events one repeat stands for. Drawn only for an open repeat, inline or
+    as the fragment a closed one fetches when it opens (#611).
+{% endcomment %}
+<ol class="gr-rail__members">
+    {% for member in repeat.members %}
+        <li class="gr-rail__member gr-rail__member--ok{% if member.id == repeat.target %} gr-rail__member--target{% endif %}"
+            id="event-{{ member.id }}">
+            {% include "georivaevents/_timeline_member.html" %}
+        </li>
+    {% endfor %}
+</ol>

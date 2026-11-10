@@ -68,7 +68,9 @@ def timeline(request, correlation_id):
     elsewhere when rows exist beyond their scope.
 
     ``?from=<event>`` draws one branch of the chain; ``?event=<event>`` marks
-    one event and opens the group folding it.
+    one event and opens the group folding it. A folded repeat is sent without
+    its members (#611): ``?repeat=<its first member>`` draws it open, and with
+    ``&fragment=members`` the response is that repeat's members alone.
     """
     from django.http import Http404
 
@@ -116,9 +118,16 @@ def timeline(request, correlation_id):
         )
 
     focus = _uuid_param(request, "from")
-    layout = build_layout(entries, target=_uuid_param(request, "event"), focus=focus)
+    open_repeat = _uuid_param(request, "repeat")
+    layout = build_layout(entries, target=_uuid_param(request, "event"), focus=focus, open_repeat=open_repeat)
     if layout is None:
         raise Http404(_("No such event in this chain."))
+
+    if request.GET.get("fragment") == "members":
+        repeat = layout.repeat(open_repeat)
+        if repeat is None:
+            raise Http404(_("No such repeat in this chain."))
+        return render(request, "georivaevents/_timeline_repeat_members.html", {"repeat": repeat})
 
     return render(
         request,

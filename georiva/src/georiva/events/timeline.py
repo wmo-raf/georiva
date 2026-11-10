@@ -140,8 +140,13 @@ class Repeat:
     target: object = None
 
     @property
+    def key(self):
+        """What names this repeat: its first member. ``?repeat=<key>`` draws it open (#611)."""
+        return self.members[0].id
+
+    @property
     def anchor(self):
-        return f"repeat-{self.members[0].id}"
+        return f"repeat-{self.key}"
 
 
 @dataclass
@@ -169,6 +174,10 @@ class Layout:
     def size(self):
         """How many events are shown, folded or not."""
         return sum(self.counts.values())
+
+    def repeat(self, key):
+        """The repeat named ``key``, or ``None``."""
+        return next((row.repeat for row in self.rows if row.repeat and row.repeat.key == key), None)
 
 
 @dataclass(eq=False)
@@ -221,7 +230,7 @@ def _bursts(entries):
     return bursts
 
 
-def _repeats(bursts, children_of, target):
+def _repeats(bursts, children_of, target, open_repeat):
     """Runs of bursts that repeat the shape of the burst before them."""
 
     def shape(burst):
@@ -242,12 +251,12 @@ def _repeats(bursts, children_of, target):
         while shapes[first] is not None and last + 1 < len(bursts) and shapes[last + 1] == shapes[first]:
             last += 1
         if last - first >= REPEAT_AT:
-            repeats.append(_repeat(bursts[first + 1 : last + 1], target))
+            repeats.append(_repeat(bursts[first + 1 : last + 1], target, open_repeat))
         first = last + 1
     return repeats
 
 
-def _repeat(bursts, target):
+def _repeat(bursts, target, open_repeat):
     members = [entry for burst in bursts for entry in burst]
     starts = [burst[0].occurred_at for burst in bursts]
     every = statistics.median((later - earlier).total_seconds() for earlier, later in itertools.pairwise(starts))
@@ -266,15 +275,18 @@ def _repeat(bursts, target):
     )
     if target is not None and any(member.id == target for member in members):
         repeat.open, repeat.target = True, target
+    elif open_repeat is not None and repeat.key == open_repeat:
+        repeat.open = True
     return repeat
 
 
-def build_layout(entries, *, target=None, focus=None) -> Layout | None:
+def build_layout(entries, *, target=None, focus=None, open_repeat=None) -> Layout | None:
     """Lay ``entries`` (one chain, any order) out as rail rows.
 
     ``focus`` draws only that event and what it caused; ``None`` comes back
     when it is not among ``entries``. ``target`` marks one event and opens the
-    group or repeat that holds it.
+    group or repeat that holds it. ``open_repeat`` opens the repeat whose first
+    member it is: only an open repeat's members are drawn (#611).
     """
     entries = sorted(entries, key=lambda entry: (entry.occurred_at, str(entry.id)))
     children_of = defaultdict(list)
@@ -291,7 +303,7 @@ def build_layout(entries, *, target=None, focus=None) -> Layout | None:
     total = (finished - started).total_seconds()
     for entry in entries:
         entry.offset = entry.occurred_at - started
-    repeats = _repeats(_bursts(entries), children_of, target)
+    repeats = _repeats(_bursts(entries), children_of, target, open_repeat)
     collapsed = {member.id for repeat in repeats for member in repeat.members}
     shown = {entry.id for entry in entries if entry.id not in collapsed}
 

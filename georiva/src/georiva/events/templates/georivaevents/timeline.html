@@ -383,6 +383,12 @@
             white-space: nowrap;
         }
 
+        .gr-rail__load {
+            display: inline-block;
+            margin: 0.5em 0 0.2em 1.1em;
+            font-size: 0.85em;
+        }
+
         .gr-rail__gap {
             display: block;
             padding: 10px 0;
@@ -398,6 +404,45 @@
         }
         {% endif %}{% endfor %}
     </style>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        /*
+         * A closed repeat is sent without its members (#611). Opening it fetches
+         * them in place of the link that would otherwise reload the page open.
+         */
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('[data-repeat-members]').forEach(function (link) {
+                const details = link.closest('details');
+                details.addEventListener('toggle', function () {
+                    if (!details.open || !link.isConnected || link.dataset.loading) {
+                        return;
+                    }
+                    link.dataset.loading = '1';
+                    const url = new URL(link.href);
+                    url.searchParams.set('fragment', 'members');
+                    url.hash = '';
+                    fetch(url, {credentials: 'same-origin'})
+                        .then(function (response) {
+                            if (!response.ok) {
+                                throw new Error(response.status);
+                            }
+                            return response.text();
+                        })
+                        .then(function (html) {
+                            link.insertAdjacentHTML('afterend', html);
+                            link.remove();
+                        })
+                        .catch(function () {
+                            // The link still works: it reloads the page with this repeat open.
+                            delete link.dataset.loading;
+                        });
+                });
+            });
+        });
+    </script>
 {% endblock %}
 
 {% block main_content %}

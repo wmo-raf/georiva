@@ -3,6 +3,10 @@
     Bursts that repeat the shape of the burst drawn just above them
     (georiva.events.timeline.Repeat). Nothing in one failed, so there is
     nothing to pull out; opening it lists every event it stands for.
+
+    A closed repeat is sent without its members, so a chain that repeats for
+    weeks costs one row (#611). In their place is a link that draws it open;
+    the page's script fetches the members instead when the fold is opened.
 {% endcomment %}
 <div class="gr-rail__card gr-rail__repeat">
     <details{% if repeat.open %} open{% endif %}>
@@ -12,13 +16,13 @@
             <span class="gr-rail__span">+{{ repeat.start|elapsed }} → +{{ repeat.end|elapsed }}</span>
             <span class="gr-rail__summary">{{ repeat.shape|join:" → " }}</span>
         </summary>
-        <ol class="gr-rail__members">
-            {% for member in repeat.members %}
-                <li class="gr-rail__member gr-rail__member--ok{% if member.id == repeat.target %} gr-rail__member--target{% endif %}"
-                    id="event-{{ member.id }}">
-                    {% include "georivaevents/_timeline_member.html" %}
-                </li>
-            {% endfor %}
-        </ol>
+        {% if repeat.open %}
+            {% include "georivaevents/_timeline_repeat_members.html" %}
+        {% else %}
+            <a class="gr-rail__load" data-repeat-members
+               href="?{% if focus %}from={{ focus.id }}&amp;{% endif %}repeat={{ repeat.key }}#{{ repeat.anchor }}">
+                {% blocktrans count n=repeat.members|length %}Show the {{ n }} event{% plural %}Show the {{ n }} events{% endblocktrans %}
+            </a>
+        {% endif %}
     </details>
 </div>

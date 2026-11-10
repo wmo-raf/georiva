@@ -216,6 +216,102 @@ class TimelineTests(TestCase):
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class TimelineRepeatWeightTests(TestCase):
+    """A folded repeat sends its row, not its members, until it is opened (#611)."""
+
+    BURSTS = 6
+
+    @classmethod
+    def setUpTestData(cls):
+        from georiva.events.recording import record
+        from georiva.ingestion.models import FileIngestionFinished
+
+        cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        cls.chain = uuid.uuid4()
+        events = []
+        with event_context(organisation_id=cls.kenya.pk, correlation_id=cls.chain):
+            # One burst an hour: each its own burst, all of one shape.
+            for burst in range(cls.BURSTS):
+                events.append(
+                    record(
+                        FileIngestionFinished,
+                        bucket="sources",
+                        file_path="kenya/forecast/f000.grib2",
+                        outcome=FileIngestionFinished.Outcome.COMPLETED,
+                        occurred_at=REF + datetime.timedelta(hours=burst),
+                    )
+                )
+        cls.first, cls.folded = events[0], events[1:]
+
+    def setUp(self):
+        user = make_user("amina")
+        add_member(user, self.kenya, role=OrganisationMembership.Role.ADMIN)
+        group = Group.objects.create(name="everything")
+        group.permissions.add(*Permission.objects.all())
+        user.groups.add(group)
+        self.client.login(username="amina", password=PASSWORD)
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _get(self, **params):
+        return self.client.get(reverse("events_timeline", args=[self.chain]), params)
+
+    def _repeat(self, response):
+        return next(row.repeat for row in response.context["layout"].rows if row.repeat)
+
+    def test_a_closed_repeat_sends_none_of_its_members(self):
+        response = self._get()
+
+        repeat = self._repeat(response)
+        self.assertEqual(repeat.count, self.BURSTS - 1)
+        self.assertFalse(repeat.open)
+        for event in self.folded:
+            self.assertNotContains(response, f'id="event-{event.pk}"')
+        self.assertContains(response, f'id="event-{self.first.pk}"')
+
+    def test_a_closed_repeat_offers_the_way_to_open_it(self):
+        response = self._get()
+
+        self.assertContains(response, f"?repeat={self.folded[0].pk}#repeat-{self.folded[0].pk}")
+
+    def test_a_repeat_asked_for_is_sent_open_with_its_members(self):
+        response = self._get(repeat=str(self.folded[0].pk))
+
+        self.assertTrue(self._repeat(response).open)
+        for event in self.folded:
+            self.assertContains(response, f'id="event-{event.pk}"')
+
+    def test_an_event_inside_a_repeat_still_lands_on_it(self):
+        target = self.folded[2]
+
+        response = self._get(event=str(target.pk))
+
+        self.assertTrue(self._repeat(response).open)
+        self.assertContains(response, f'id="event-{target.pk}"')
+
+    def test_the_members_of_one_repeat_come_alone(self):
+        response = self._get(repeat=str(self.folded[0].pk), fragment="members")
+
+        self.assertEqual(response.status_code, 200)
+        for event in self.folded:
+            self.assertContains(response, f'id="event-{event.pk}"')
+        self.assertNotContains(response, f'id="event-{self.first.pk}"')
+        self.assertNotContains(response, "gr-rail__row")
+
+    def test_the_members_of_no_such_repeat_are_not_found(self):
+        response = self._get(repeat=str(self.first.pk), fragment="members")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_another_organisation_cannot_read_a_repeats_members(self):
+        provision_organisation(name="Uganda Met", slug="uganda")
+        self.client.defaults["HTTP_HOST"] = "uganda.georiva.test"
+
+        response = self._get(repeat=str(self.folded[0].pk), fragment="members")
+
+        self.assertEqual(response.status_code, 403)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
 class AttemptInputsTests(TestCase):
     @classmethod
     def setUpTestData(cls):
