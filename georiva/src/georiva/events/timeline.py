@@ -13,9 +13,10 @@ A chain can be large two ways, and each has its own fold:
   members are pulled out of a group, so a fold never hides one.
 - *Long*: a run's chain lasts days, and a quiet spell longer than :data:`GAP`
   breaks the rail into bursts. Folding never reaches across a break, so the
-  order of what happened survives; instead, consecutive bursts of one shape —
-  the same types the same number of times, nothing failed — collapse into one
-  repeat row after the first of them is drawn.
+  order of what happened survives; instead, consecutive quiet bursts — nothing
+  failed, no causal line crossing their edges — collapse into one repeat row
+  after the first of them is drawn. Bursts of one shape read as "the same
+  again"; a run of mixed shapes is counted by type (#611).
 """
 
 import itertools
@@ -32,7 +33,7 @@ from .models import OutcomeClass
 FOLD_AT = 4
 #: A quiet spell longer than this breaks the rail into bursts.
 GAP = timedelta(minutes=10)
-#: How many bursts must repeat the first of their shape before they collapse.
+#: How many quiet bursts must follow the first of a run before they collapse.
 REPEAT_AT = 2
 
 
@@ -128,16 +129,27 @@ class Group:
 
 @dataclass(eq=False)
 class Repeat:
-    """Consecutive bursts with the shape of the burst drawn just above them."""
+    """Consecutive quiet bursts after the burst drawn just above them.
+
+    ``same`` when every one has that burst's shape: ``shape`` is then what one
+    burst holds. ``totals`` is what all of them hold together.
+    """
 
     members: list
     count: int
     every: timedelta
+    same: bool
     shape: list
+    totals: list
     start: timedelta = None
     end: timedelta = None
     open: bool = False
     target: object = None
+
+    @property
+    def summary(self):
+        """One burst's shape when they share it; otherwise what they hold together."""
+        return " → ".join(self.shape) if self.same else " · ".join(self.totals)
 
     @property
     def key(self):
@@ -231,9 +243,16 @@ def _bursts(entries):
 
 
 def _repeats(bursts, children_of, target, open_repeat):
-    """Runs of bursts that repeat the shape of the burst before them."""
+    """Runs of quiet bursts, each folded after its first burst.
+
+    A burst is quiet when nothing in it failed and no causal line crosses its
+    edge. Its shape need not match its neighbours': a sweep whose revived file
+    finishes more than :data:`GAP` later leaves a burst of its own, so a looping
+    chain alternates shapes and would never fold on shape alone (#611).
+    """
 
     def shape(burst):
+        """The burst's shape, or ``None`` when it is not quiet and so cannot fold."""
         # Only a burst no causal line crosses can leave the rail without breaking a line.
         ids = {entry.id for entry in burst}
         if any(entry.outcome_class != OutcomeClass.OK for entry in burst):
@@ -245,31 +264,43 @@ def _repeats(bursts, children_of, target, open_repeat):
         return tuple(sorted(Counter(entry.event_type for entry in burst).items()))
 
     shapes = [shape(burst) for burst in bursts]
+    quiet = [burst_shape is not None for burst_shape in shapes]
     repeats, first = [], 0
     while first < len(bursts):
         last = first
-        while shapes[first] is not None and last + 1 < len(bursts) and shapes[last + 1] == shapes[first]:
+        while quiet[first] and last + 1 < len(bursts) and quiet[last + 1]:
             last += 1
         if last - first >= REPEAT_AT:
-            repeats.append(_repeat(bursts[first + 1 : last + 1], target, open_repeat))
+            same = len(set(shapes[first : last + 1])) == 1
+            repeats.append(_repeat(bursts[first + 1 : last + 1], target, open_repeat, same=same))
         first = last + 1
     return repeats
 
 
-def _repeat(bursts, target, open_repeat):
+def _tally(entries, labelled_from):
+    """``"N × label"`` per type of ``entries``, in the order each first occurs; a lone one is just its label.
+
+    Labels are read from ``labelled_from``, where an event of each type can be read.
+    """
+    times = Counter(entry.event_type for entry in entries)
+    tally = []
+    for event_type in dict.fromkeys(entry.event_type for entry in entries):
+        label = _label([entry for entry in labelled_from if entry.event_type == event_type], event_type)
+        tally.append(label if times[event_type] == 1 else f"{times[event_type]} × {label}")
+    return tally
+
+
+def _repeat(bursts, target, open_repeat, *, same):
     members = [entry for burst in bursts for entry in burst]
     starts = [burst[0].occurred_at for burst in bursts]
     every = statistics.median((later - earlier).total_seconds() for earlier, later in itertools.pairwise(starts))
-    times = Counter(entry.event_type for entry in bursts[0])
-    shape = []
-    for event_type in dict.fromkeys(entry.event_type for entry in bursts[0]):
-        label = _label([entry for entry in members if entry.event_type == event_type], event_type)
-        shape.append(label if times[event_type] == 1 else f"{times[event_type]} × {label}")
     repeat = Repeat(
         members=members,
         count=len(bursts),
         every=timedelta(seconds=round(every)),
-        shape=shape,
+        same=same,
+        shape=_tally(bursts[0], members) if same else [],
+        totals=_tally(members, members),
         start=members[0].offset,
         end=members[-1].offset,
     )

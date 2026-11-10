@@ -297,6 +297,32 @@ class TimelineRepeatWeightTests(TestCase):
         self.assertNotContains(response, f'id="event-{self.first.pk}"')
         self.assertNotContains(response, "gr-rail__row")
 
+    def test_one_shape_reads_as_the_same_again(self):
+        self.assertContains(self._get(), f"The same again {self.BURSTS - 1} times")
+
+    def test_quiet_bursts_of_mixed_shapes_read_as_a_tally(self):
+        from georiva.events.recording import record
+        from georiva.ingestion.models import FileIngestionFinished
+
+        chain = uuid.uuid4()
+        with event_context(organisation_id=self.kenya.pk, correlation_id=chain):
+            for burst in range(4):
+                for _ in range(1 + burst % 2):
+                    record(
+                        FileIngestionFinished,
+                        bucket="sources",
+                        file_path="kenya/forecast/f000.grib2",
+                        outcome=FileIngestionFinished.Outcome.COMPLETED,
+                        occurred_at=REF + datetime.timedelta(hours=burst),
+                    )
+
+        response = self.client.get(reverse("events_timeline", args=[chain]))
+
+        self.assertContains(response, "3 quiet bursts, nothing failed")
+        self.assertContains(response, "5 × File ingestion finished")
+        self.assertNotContains(response, "The same again")
+        self.assertNotContains(response, "about every")
+
     def test_the_members_of_no_such_repeat_are_not_found(self):
         response = self._get(repeat=str(self.first.pk), fragment="members")
 

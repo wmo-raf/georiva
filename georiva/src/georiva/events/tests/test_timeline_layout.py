@@ -323,6 +323,70 @@ class RepeatTests(SimpleTestCase):
 
         self.assertEqual(repeat.shape[-1], "2 × core.productpublished")
 
+    def test_a_run_of_one_shape_is_the_same_again(self):
+        bursts = [cycle(hour) for hour in range(3)]
+
+        repeat = next(row.repeat for row in build_layout([e for b in bursts for e in b]).rows if row.repeat)
+
+        self.assertTrue(repeat.same)
+
+
+def sweep_only(hour, times=1):
+    """A sweep whose revived file has not finished yet, ``hour`` hours into the chain."""
+    return [entry(hour * 3600 + n, event_type="georivaevents.sweepintervened") for n in range(times)]
+
+
+class QuietRunTests(SimpleTestCase):
+    """Quiet bursts of any shape fold into one row after the first (#611).
+
+    A sweep whose revived file finishes more than ``GAP`` later leaves a burst of
+    its own, so a looping chain alternates shapes and never repeats one.
+    """
+
+    def test_quiet_bursts_of_different_shapes_collapse_after_the_first(self):
+        bursts = [cycle(0), sweep_only(1), cycle(2), sweep_only(3, times=2), cycle(4)]
+
+        layout = build_layout([event for burst in bursts for event in burst])
+
+        self.assertEqual(drawn(layout)[:3], bursts[0])
+        repeats = [row.repeat for row in layout.rows if row.repeat]
+        self.assertEqual(len(repeats), 1)
+        self.assertEqual(len(layout.rows), 5)
+        repeat = repeats[0]
+        self.assertFalse(repeat.same)
+        self.assertEqual(repeat.count, 4)
+        self.assertEqual(repeat.members, [event for burst in bursts[1:] for event in burst])
+
+    def test_a_mixed_run_counts_each_type_in_the_order_it_first_occurs(self):
+        bursts = [cycle(0), sweep_only(1), cycle(2), sweep_only(3, times=2)]
+
+        repeat = next(row.repeat for row in build_layout([e for b in bursts for e in b]).rows if row.repeat)
+
+        self.assertEqual(
+            repeat.totals,
+            [
+                "4 × georivaevents.sweepintervened",
+                "ingestion.fileingestionfinished",
+                "core.productpublished",
+            ],
+        )
+
+    def test_a_failure_still_breaks_a_mixed_run(self):
+        bursts = [cycle(0), sweep_only(1), cycle(2, outcome="failed"), sweep_only(3), cycle(4)]
+
+        layout = build_layout([event for burst in bursts for event in burst])
+
+        self.assertFalse([row for row in layout.rows if row.repeat])
+        self.assertIn(bursts[2][1], drawn(layout))
+
+    def test_a_causal_line_still_breaks_a_mixed_run(self):
+        bursts = [cycle(0), sweep_only(1), cycle(2), sweep_only(3)]
+        bursts[2][0].caused_by_id = bursts[1][0].id
+
+        layout = build_layout([event for burst in bursts for event in burst])
+
+        self.assertFalse([row for row in layout.rows if row.repeat])
+
 
 class TargetTests(SimpleTestCase):
     def test_the_target_event_is_marked(self):
