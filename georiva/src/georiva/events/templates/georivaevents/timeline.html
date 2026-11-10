@@ -331,6 +331,17 @@
             border-left: 2px dotted var(--w-color-grey-200);
         }
 
+        /* A repeat's pages share one scroll box, so paging grows one list, not a stack of them. */
+        .gr-rail__pages {
+            max-height: 24em;
+            overflow-y: auto;
+        }
+
+        .gr-rail__pages .gr-rail__members {
+            max-height: none;
+            overflow-y: visible;
+        }
+
         .gr-rail__members--pulled {
             max-height: none;
             border-left-color: var(--w-color-critical-200);

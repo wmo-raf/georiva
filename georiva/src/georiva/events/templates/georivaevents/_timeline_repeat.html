@@ -22,13 +22,16 @@
             <span class="gr-rail__span">+{{ repeat.start|elapsed }} → +{{ repeat.end|elapsed }}</span>
             <span class="gr-rail__summary">{{ repeat.summary }}</span>
         </summary>
-        {% if repeat.open %}
-            {% include "georivaevents/_timeline_repeat_members.html" with earlier=True later=True %}
-        {% else %}
-            <a class="gr-rail__load" data-repeat-members
-               href="?{% if focus %}from={{ focus.id }}&amp;{% endif %}repeat={{ repeat.key }}#{{ repeat.anchor }}">
-                {% blocktrans count n=repeat.members|length %}Show the {{ n }} event{% plural %}Show the {{ n }} events{% endblocktrans %}
-            </a>
-        {% endif %}
+        {# One scroll box for every page, however many are fetched into it. #}
+        <div class="gr-rail__pages">
+            {% if repeat.open %}
+                {% include "georivaevents/_timeline_repeat_members.html" with earlier=True later=True %}
+            {% else %}
+                <a class="gr-rail__load" data-repeat-members
+                   href="?{% if focus %}from={{ focus.id }}&amp;{% endif %}repeat={{ repeat.key }}#{{ repeat.anchor }}">
+                    {% blocktrans count n=repeat.members|length %}Show the {{ n }} event{% plural %}Show the {{ n }} events{% endblocktrans %}
+                </a>
+            {% endif %}
+        </div>
     </details>
 </div>
