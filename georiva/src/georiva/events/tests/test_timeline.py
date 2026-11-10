@@ -2,6 +2,7 @@
 
 import datetime
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
@@ -213,6 +214,218 @@ class TimelineTests(TestCase):
         group = response.context["layout"].rows[0].group
         self.assertEqual(len(group.members), 5)
         self.assertContains(response, "5 × ")
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class TimelineRepeatWeightTests(TestCase):
+    """A folded repeat sends its row, not its members, until it is opened (#611)."""
+
+    BURSTS = 6
+
+    @classmethod
+    def setUpTestData(cls):
+        from georiva.events.recording import record
+        from georiva.ingestion.models import FileIngestionFinished
+
+        cls.kenya = provision_organisation(name="Kenya Met", slug="kenya")
+        cls.chain = uuid.uuid4()
+        events = []
+        with event_context(organisation_id=cls.kenya.pk, correlation_id=cls.chain):
+            # One burst an hour: each its own burst, all of one shape.
+            for burst in range(cls.BURSTS):
+                events.append(
+                    record(
+                        FileIngestionFinished,
+                        bucket="sources",
+                        file_path="kenya/forecast/f000.grib2",
+                        outcome=FileIngestionFinished.Outcome.COMPLETED,
+                        occurred_at=REF + datetime.timedelta(hours=burst),
+                    )
+                )
+        cls.first, cls.folded = events[0], events[1:]
+
+    def setUp(self):
+        user = make_user("amina")
+        add_member(user, self.kenya, role=OrganisationMembership.Role.ADMIN)
+        group = Group.objects.create(name="everything")
+        group.permissions.add(*Permission.objects.all())
+        user.groups.add(group)
+        self.client.login(username="amina", password=PASSWORD)
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _get(self, **params):
+        return self.client.get(reverse("events_timeline", args=[self.chain]), params)
+
+    def _repeat(self, response):
+        return next(row.repeat for row in response.context["layout"].rows if row.repeat)
+
+    def test_a_closed_repeat_sends_none_of_its_members(self):
+        response = self._get()
+
+        repeat = self._repeat(response)
+        self.assertEqual(repeat.count, self.BURSTS - 1)
+        self.assertFalse(repeat.open)
+        for event in self.folded:
+            self.assertNotContains(response, f'id="event-{event.pk}"')
+        self.assertContains(response, f'id="event-{self.first.pk}"')
+
+    def test_a_closed_repeat_offers_the_way_to_open_it(self):
+        response = self._get()
+
+        self.assertContains(response, f"?repeat={self.folded[0].pk}#repeat-{self.folded[0].pk}")
+
+    def test_a_repeat_asked_for_is_sent_open_with_its_members(self):
+        response = self._get(repeat=str(self.folded[0].pk))
+
+        self.assertTrue(self._repeat(response).open)
+        for event in self.folded:
+            self.assertContains(response, f'id="event-{event.pk}"')
+
+    def test_an_event_inside_a_repeat_still_lands_on_it(self):
+        target = self.folded[2]
+
+        response = self._get(event=str(target.pk))
+
+        self.assertTrue(self._repeat(response).open)
+        self.assertContains(response, f'id="event-{target.pk}"')
+
+    def test_the_members_of_one_repeat_come_alone(self):
+        response = self._get(repeat=str(self.folded[0].pk), fragment="members")
+
+        self.assertEqual(response.status_code, 200)
+        for event in self.folded:
+            self.assertContains(response, f'id="event-{event.pk}"')
+        self.assertNotContains(response, f'id="event-{self.first.pk}"')
+        self.assertNotContains(response, "gr-rail__row")
+
+    def test_one_shape_reads_as_the_same_again(self):
+        self.assertContains(self._get(), f"The same again {self.BURSTS - 1} times")
+
+    def test_quiet_bursts_of_mixed_shapes_read_as_a_tally(self):
+        from georiva.events.recording import record
+        from georiva.ingestion.models import FileIngestionFinished
+
+        chain = uuid.uuid4()
+        with event_context(organisation_id=self.kenya.pk, correlation_id=chain):
+            for burst in range(4):
+                for _ in range(1 + burst % 2):
+                    record(
+                        FileIngestionFinished,
+                        bucket="sources",
+                        file_path="kenya/forecast/f000.grib2",
+                        outcome=FileIngestionFinished.Outcome.COMPLETED,
+                        occurred_at=REF + datetime.timedelta(hours=burst),
+                    )
+
+        response = self.client.get(reverse("events_timeline", args=[chain]))
+
+        self.assertContains(response, "3 quiet bursts, nothing failed")
+        self.assertContains(response, "5 × File ingestion finished")
+        self.assertNotContains(response, "The same again")
+        self.assertNotContains(response, "about every")
+
+    def test_the_members_of_no_such_repeat_are_not_found(self):
+        response = self._get(repeat=str(self.first.pk), fragment="members")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_another_organisation_cannot_read_a_repeats_members(self):
+        provision_organisation(name="Uganda Met", slug="uganda")
+        self.client.defaults["HTTP_HOST"] = "uganda.georiva.test"
+
+        response = self._get(repeat=str(self.folded[0].pk), fragment="members")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_the_events_of_a_closed_repeat_are_not_read(self):
+        """Only what is drawn has its details read: a folded member is counted, not summarised."""
+        layout = self._get().context["layout"]
+
+        repeat = layout.repeat(self.folded[0].pk)
+        self.assertTrue(all(member.row is None for member in repeat.members))
+        self.assertIsNotNone(layout.rows[0].entry.row)
+
+    def test_each_burst_is_marked_where_it_starts(self):
+        response = self._get(repeat=str(self.folded[0].pk), fragment="members")
+
+        # Every member is its own burst; the first needs no mark, the row above it is one.
+        self.assertContains(response, "gr-rail__member--burst", count=len(self.folded) - 1)
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+@patch("georiva.events.timeline.MEMBERS_PAGE", 2)
+class TimelineRepeatPageTests(TimelineRepeatWeightTests):
+    """An open repeat draws a page of its members at a time (#611).
+
+    Five folded members at two a page: [0, 1], [2, 3], [4].
+    """
+
+    def _key(self):
+        return str(self.folded[0].pk)
+
+    def _drawn(self, response):
+        return [event for event in self.folded if f'id="event-{event.pk}"' in response.content.decode()]
+
+    def test_a_repeat_asked_for_is_sent_open_with_its_members(self):
+        response = self._get(repeat=self._key())
+
+        self.assertTrue(self._repeat(response).open)
+        self.assertEqual(self._drawn(response), self.folded[:2])
+        self.assertContains(response, "page=2&amp;more=later")
+        self.assertNotContains(response, "more=earlier")
+
+    def test_the_members_of_one_repeat_come_alone(self):
+        response = self._get(repeat=self._key(), fragment="members")
+
+        self.assertEqual(self._drawn(response), self.folded[:2])
+        self.assertNotContains(response, "gr-rail__row")
+
+    def test_each_burst_is_marked_where_it_starts(self):
+        response = self._get(repeat=self._key(), fragment="members", page="2")
+
+        # A burst starting at the top of a page is still marked.
+        self.assertContains(response, "gr-rail__member--burst", count=2)
+
+    def test_the_next_page_comes_with_only_the_way_further_on(self):
+        response = self._get(repeat=self._key(), fragment="members", page="2", more="later")
+
+        self.assertEqual(self._drawn(response), self.folded[2:4])
+        self.assertContains(response, "page=3&amp;more=later")
+        self.assertNotContains(response, "more=earlier")
+
+    def test_an_earlier_page_comes_with_only_the_way_further_back(self):
+        response = self._get(repeat=self._key(), fragment="members", page="2", more="earlier")
+
+        self.assertEqual(self._drawn(response), self.folded[2:4])
+        self.assertContains(response, "page=1&amp;more=earlier")
+        self.assertNotContains(response, "more=later")
+
+    def test_the_last_page_offers_nothing_later(self):
+        response = self._get(repeat=self._key(), fragment="members", page="3", more="later")
+
+        self.assertEqual(self._drawn(response), self.folded[4:])
+        self.assertNotContains(response, "more=later")
+
+    def test_a_page_out_of_range_is_the_nearest_one(self):
+        self.assertEqual(self._drawn(self._get(repeat=self._key(), fragment="members", page="99")), self.folded[4:])
+        self.assertEqual(self._drawn(self._get(repeat=self._key(), fragment="members", page="x")), self.folded[:2])
+
+    def test_an_event_inside_a_repeat_still_lands_on_it(self):
+        """A deep link draws the page holding its target, with the way either side."""
+        target = self.folded[3]
+
+        response = self._get(event=str(target.pk))
+
+        self.assertEqual(self._drawn(response), self.folded[2:4])
+        self.assertContains(response, "gr-rail__member--target")
+        self.assertContains(response, "page=1&amp;more=earlier")
+        self.assertContains(response, "page=3&amp;more=later")
+
+    def test_only_the_drawn_page_is_read(self):
+        layout = self._get(repeat=self._key()).context["layout"]
+
+        repeat = layout.repeat(self.folded[0].pk)
+        self.assertEqual([member.row is not None for member in repeat.members], [True, True, False, False, False])
 
 
 @override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
