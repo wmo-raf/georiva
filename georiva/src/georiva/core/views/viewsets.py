@@ -9,7 +9,7 @@ from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
 from wagtail.snippets.views.snippets import IndexView, SnippetViewSet
 
-from georiva.core.models import Asset, Catalog, Collection, ColorRamp, Item
+from georiva.core.models import Asset, Catalog, Collection, ColorRamp, Item, Town
 from georiva.core.models.catalog import Topic
 from georiva.organisations.access import may_change_org_object, require_active_org
 from georiva.organisations.permissions import SuperuserOnlyPermissionPolicy
@@ -259,6 +259,26 @@ class ColorRampModelViewSet(OrgScopedViewSetMixin, ModelViewSet):
     list_display = ["name", "preview", "ramp_type", "owner_label"]
 
 
+class TownViewSet(OrgScopedViewSetMixin, ModelViewSet):
+    """The town gazetteer: both tiers listed, one writable.
+
+    The instance-wide towns come from GeoNames through ``import_towns`` and are
+    the instance admin's to curate; an organisation adds its own here — the
+    station town or market GeoNames misses.
+    """
+
+    model = Town
+    icon = "site"
+    add_to_settings_menu = True
+    menu_order = 140
+    add_view_class = GlobalTierCreateView
+    index_view_class = GlobalTierIndexView
+    copy_view_enabled = False
+    list_display = ["name", "country_code", "rank", "population", "is_active", "owner_label"]
+    list_filter = ["country_code", "rank", "is_active"]
+    search_fields = ["name", "ascii_name"]
+
+
 CatalogChooserViewSetObject = CatalogChooserViewSet("catalog_chooser")
 
 admin_viewsets = [
@@ -267,4 +287,5 @@ admin_viewsets = [
     CatalogChooserViewSetObject,
     CollectionViewSet(),
     ColorRampModelViewSet(),
+    TownViewSet(),
 ]
