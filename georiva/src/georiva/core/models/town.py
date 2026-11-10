@@ -26,7 +26,7 @@ class Town(models.Model):
 
         Derived from the GeoNames feature code, so a capital outranks a
         regional seat however small it is. Within a rank, population orders the
-        towns (see :meth:`Town.importance`).
+        towns.
         """
 
         CAPITAL = 1, "Capital"
@@ -112,10 +112,6 @@ class Town(models.Model):
     @classmethod
     def rank_for(cls, feature_code: str) -> int:
         return cls.RANK_BY_FEATURE_CODE.get((feature_code or "").upper(), cls.Rank.TOWN)
-
-    def importance(self) -> tuple[int, int]:
-        """Sort key, most prominent first: rank, then larger population."""
-        return (self.rank, -self.population)
 
     def owner_label(self):
         return self.organisation.name if self.organisation_id else "Instance-wide"
