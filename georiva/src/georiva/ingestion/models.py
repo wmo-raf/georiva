@@ -608,6 +608,28 @@ class FileIngestion(models.Model):
         source_file = f"{self.bucket}:{self.file_path}"
         return Item.objects.filter(source_file=source_file).exists()
 
+    @property
+    def lost_its_data(self) -> bool:
+        """
+        True when a completed file's Items are gone and forecast retention did not remove
+        them — data lost, to be ingested again. Items retention pruned are not lost:
+        ingesting them again only hands them to the next prune (#499).
+        """
+        if self.status != self.Status.COMPLETED or self.has_live_data:
+            return False
+        from django.utils import timezone
+
+        from georiva.core import retention
+
+        collections = list(self.collections.all())
+        now = timezone.now()
+        return not collections or not all(
+            retention.retires(
+                collection, valid_time_end=self.valid_time_end, reference_time=self.reference_time, now=now
+            )
+            for collection in collections
+        )
+
     @classmethod
     def reset_for_reingest(cls, bucket: str, file_path: str) -> bool:
         updated = cls.objects.filter(
