@@ -37,7 +37,9 @@ someone who already knows which row to open.
 5. **One Correlation per chain.** The first event sets it; downstream events
    copy it. At fan-in the *trigger* wins; non-triggering inputs are reached
    through `DerivationLink` lineage. A sweep reviving a run reuses the
-   Correlation and organisation of that run's most recent event.
+   Correlation and organisation of that run's most recent event, and names that
+   event as the Caused-by of its `SweepIntervened`; the revived work is caused by
+   the intervention (#498).
 6. **Append-only is enforced in the database** — a row trigger rejecting DELETE
    and any UPDATE other than setting a nullable reference to NULL — as well as
    by a model/queryset guard. The one deletion path is an audited purge command.
@@ -52,10 +54,15 @@ someone who already knows which row to open.
   through `transaction.on_commit`.
 - Correlation travels in task headers; the fetch → ingestion hop crosses object
   storage and is bridged by lookup of the key's most recent fetched/uploaded
-  file.
+  file. A fetch records `FetchRunStarted` when it begins, so a file it stores
+  has an event to name as its cause while the fetch is still running; every
+  file of a run hangs from that start, and the run's `FetchRunFinished` does
+  too (#498).
 - Events are kept indefinitely; volume is low thousands of rows per day.
 - The Timeline draws a chain as a rail along `caused_by` and folds what is wide
-  or repetitive (`events/timeline.py`). It stays reachable by link only: `?from=`
+  or repetitive (`events/timeline.py`). A run of quiet bursts folds even when a
+  `caused_by` line runs through it; the repeat row hangs from the run's cause
+  and carries the line on to whatever follows it (#498). It stays reachable by link only: `?from=`
   narrows it to one event's branch and `?event=` lands on one event, both read
   through the same scoped index rows as the whole chain.
 - The plugin-facing surface (abstract base, `record()`, context, migration

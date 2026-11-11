@@ -12,7 +12,7 @@ only when two fetches of one key are in flight at once, which the file-ingestion
 lock largely prevents.
 """
 
-from georiva.events.context import EventContext, new_context
+from georiva.events.context import EventContext, context_after, new_context
 from georiva.ingestion.models import organisation_id_for_key
 
 
@@ -20,15 +20,15 @@ def context_for_revival(bucket: str, file_path: str, sweep: str) -> EventContext
     """The context a sweep reviving ``file_path`` should act under.
 
     It reuses the Correlation and organisation of the file's most recent event, as
-    the sweep and with no Caused-by, so a recovery does not split one story in two.
-    A file with no prior event is handled as a fresh arrival would be.
+    the sweep and with that event as the cause, so a recovery does not split one
+    story in two. A file with no prior event is handled as a fresh arrival would be.
     """
     from georiva.ingestion.models import FileIngestionFinished
 
     actor = f"sweep:{sweep}"
     last = FileIngestionFinished.objects.filter(bucket=bucket, file_path=file_path).order_by("-occurred_at").first()
     if last is not None:
-        return EventContext(correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id)
+        return context_after(last, actor=actor)
     return context_for_arrival(file_path, actor=actor)
 
 
@@ -55,10 +55,14 @@ def _adopt_latest(file_path: str, actor: str) -> EventContext | None:
         return fetch
     if fetch is not None and not _upload_is_newer(upload, file_path):
         return fetch
+    from georiva.ingestion.models import DeliveryReceived
+
+    received = DeliveryReceived.objects.filter(delivery=upload).order_by("-occurred_at")
     return new_context(
         actor=upload.actor if upload.sent_by_id or upload.push_sender_id else actor,
         organisation_id=upload.push_feed.catalog.organisation_id,
         correlation_id=upload.correlation_id,
+        caused_by=received.values_list("pk", flat=True).first(),
     )
 
 
@@ -83,7 +87,6 @@ def _upload_is_newer(upload, file_path: str) -> bool:
 
 
 def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:
-    from georiva.sources.models import FetchRunFinished
 
     fetched = (
         _reached_rows(file_path)
@@ -95,12 +98,9 @@ def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:
     if fetched is None:
         return None
     run = fetched.fetch_run
-    # The fetch may still be running when its file lands, in which case there is no
-    # event to point at yet — the chain is still the same chain.
-    finished = FetchRunFinished.objects.filter(fetch_run=run).order_by("-occurred_at").first()
     return new_context(
         actor=actor,
         organisation_id=run.data_feed.catalog.organisation_id,
         correlation_id=run.correlation_id,
-        caused_by=finished.pk if finished else None,
+        caused_by=run.file_cause(),
     )

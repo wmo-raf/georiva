@@ -774,6 +774,68 @@ class FetchRun(models.Model):
         continuing = self.resumed_from.correlation_id if self.resumed_from_id else None
         return starting_correlation(continuing=continuing)
 
+    @classmethod
+    def begin(cls, *, data_feed, **fields) -> "FetchRun":
+        """Create a running run and record ``FetchRunStarted`` with it, atomically (#498).
+
+        The start is what a file landing mid-fetch points at: until the run finishes
+        there is no other event in its chain to name as the cause.
+        """
+        from django.db import transaction
+
+        from georiva.events.context import current_context, use_context
+
+        active = current_context()
+        with transaction.atomic():
+            run = cls.objects.create(data_feed=data_feed, status=cls.Status.RUNNING, **fields)
+            continued = active.caused_by if active and active.correlation_id == run.correlation_id else None
+            with use_context(run._own_context(caused_by=run._retried_run_end() or continued)):
+                record(
+                    FetchRunStarted,
+                    fetch_run=run,
+                    data_feed=data_feed,
+                    feed_name=data_feed.name,
+                    catalog_slug=data_feed.catalog.slug,
+                    collection_slug=run.collection.slug if run.collection_id else "",
+                    retry_number=run.resume_generation(),
+                )
+        return run
+
+    def _own_context(self, *, caused_by):
+        """This run's own chain, whoever is acting on it — a sweep finishing a dead
+        run speaks in the run's story, not its own."""
+        from georiva.events.context import current_context, new_context
+
+        active = current_context()
+        return new_context(
+            actor=active.actor if active else "celery",
+            organisation_id=self.data_feed.catalog.organisation_id,
+            correlation_id=self.correlation_id,
+            caused_by=caused_by,
+        )
+
+    def _retried_run_end(self):
+        """The event that ended the run this one retries, if it is a retry: its cause."""
+        if not self.resumed_from_id:
+            return None
+        ended = FetchRunFinished.objects.filter(fetch_run_id=self.resumed_from_id).order_by("-occurred_at")
+        return ended.values_list("pk", flat=True).first()
+
+    def file_cause(self):
+        """The event a file this run stored hangs from: its start (#498).
+
+        The run is usually still going when its files land, so its finish does not
+        exist yet; pointing every file at the start keeps them siblings however
+        they race the finish. A run from before starts were recorded falls back to
+        its finish, and to nothing while it is still running.
+        """
+        for model in (FetchRunStarted, FetchRunFinished):
+            events = model.objects.filter(fetch_run=self).order_by("-occurred_at")
+            cause = events.values_list("pk", flat=True).first()
+            if cause is not None:
+                return cause
+        return None
+
     #: Terminal statuses that are a Domain event, and the outcome each records.
     #: Cancelled is deliberate and leaves no event; an interrupted run is a failure
     #: from the operator's point of view.
@@ -787,7 +849,7 @@ class FetchRun(models.Model):
         from django.db import transaction
         from django.utils import timezone
 
-        from georiva.events.context import current_context, new_context, use_context
+        from georiva.events.context import use_context
 
         self.status = status
         self.finished_at = timezone.now()
@@ -801,14 +863,10 @@ class FetchRun(models.Model):
             self.save(update_fields=fields)
             return
 
-        # The event belongs to this run's own chain, whoever finishes it — a
-        # sweep interrupting a dead run speaks in the run's story, not its own.
-        active = current_context()
-        context = new_context(
-            actor=active.actor if active else "celery",
-            organisation_id=self.data_feed.catalog.organisation_id,
-            correlation_id=self.correlation_id,
-        )
+        # Caused by the run's start; a run never started (one not attempted) by the
+        # end of the run it retries, if any.
+        started = FetchRunStarted.objects.filter(fetch_run=self).values_list("pk", flat=True).first()
+        context = self._own_context(caused_by=started or self._retried_run_end())
         with use_context(context), transaction.atomic():
             self.save(update_fields=fields)
             record(
@@ -1018,6 +1076,37 @@ class FetchedFile(models.Model):
 # ---------------------------------------------------------------------------
 # Task-ferry Job model
 # ---------------------------------------------------------------------------
+
+
+class FetchRunStarted(DomainEvent):
+    """A fetch run began (#498).
+
+    Recorded so the files a run stores have an event to name as their cause while
+    the run is still going — ``FetchRunFinished`` does not exist until it ends.
+    """
+
+    label = "Fetch started"
+
+    fetch_run = models.ForeignKey(FetchRun, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    data_feed = models.ForeignKey(DataFeed, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    feed_name = models.CharField(max_length=255)
+    catalog_slug = models.CharField(max_length=255)
+    collection_slug = models.CharField(max_length=255, blank=True, default="")
+    retry_number = models.IntegerField(default=0, help_text="0 for a first run; n for its n-th retry.")
+
+    class Meta(DomainEvent.Meta):
+        indexes = [models.Index(fields=["fetch_run", "-occurred_at"], name="idx_fetchstart_run")]
+
+    def subject_url(self):
+        if self.fetch_run_id is None or self.data_feed_id is None:
+            return None
+        from django.urls import reverse
+
+        return reverse("data_feed_fetch_run_detail", kwargs={"feed_pk": self.data_feed_id, "run_pk": self.fetch_run_id})
+
+    def summary(self):
+        subject = f"{self.feed_name} / {self.collection_slug}" if self.collection_slug else self.feed_name
+        return f"{subject}: retry {self.retry_number} started" if self.retry_number else f"{subject}: started"
 
 
 class FetchRunFinished(DomainEvent):

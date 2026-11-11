@@ -12,7 +12,7 @@ from django_celery_beat.models import IntervalSchedule
 from georiva.config.celery import app
 from georiva.core.storage import BucketType, storage
 from georiva.core.storage.filename import validate_path
-from georiva.events.context import use_context
+from georiva.events.context import caused_by, use_context
 from georiva.events.tasks import ChainedTask, EntryTask, SweepTask
 from georiva.ingestion.chains import context_for_arrival, context_for_revival
 from georiva.ingestion.models import FileIngestion, write_sweep_intervention
@@ -148,8 +148,11 @@ def sweep_unprocessed(sync: bool = False):
         """Revive one file inside the chain it belongs to, and record that the sweep did (ADR 0030)."""
         log = FileIngestion.objects.filter(bucket=origin_bucket, file_path=file_path).first()
         with use_context(context_for_revival(origin_bucket, file_path, "unprocessed")):
-            write_sweep_intervention("unprocessed", why, log.pk if log else None, origin_bucket, file_path)
-            raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
+            intervention = write_sweep_intervention(
+                "unprocessed", why, log.pk if log else None, origin_bucket, file_path
+            )
+            with caused_by(intervention):
+                raw_dispatch(file_path=file_path, origin_bucket=origin_bucket, reference_time=reference_time)
 
     from georiva.ingestion.unprocessed import admit_untracked, find_unprocessed
 

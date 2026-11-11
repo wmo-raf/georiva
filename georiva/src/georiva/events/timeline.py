@@ -287,34 +287,38 @@ def _bursts(entries):
     return bursts
 
 
-def _repeats(bursts, children_of, target, open_repeat):
+def _repeats(bursts, target, open_repeat):
     """Runs of quiet bursts, each folded after its first burst.
 
-    A burst is quiet when nothing in it failed and no causal line crosses its
-    edge. Its shape need not match its neighbours': a sweep whose revived file
-    finishes more than :data:`GAP` later leaves a burst of its own, so a looping
-    chain alternates shapes and would never fold on shape alone (#611).
+    A burst is quiet when nothing in it failed. Its shape need not match its
+    neighbours': a sweep whose revived file finishes more than :data:`GAP` later
+    leaves a burst of its own, so a looping chain alternates shapes and would
+    never fold on shape alone (#611).
+
+    A causal line may run within a run — a revival is caused by the previous
+    burst and causes the next (#498) — but a line into a folded burst from above
+    the run ends it there: that line would have nowhere to land. Lines out of a
+    run leave from its repeat row (see :func:`build_layout`).
     """
 
     def shape(burst):
         """The burst's shape, or ``None`` when it is not quiet and so cannot fold."""
-        # Only a burst no causal line crosses can leave the rail without breaking a line.
-        ids = {entry.id for entry in burst}
         if any(entry.outcome_class != OutcomeClass.OK for entry in burst):
-            return None
-        if any(entry.caused_by_id is not None and entry.caused_by_id not in ids for entry in burst):
-            return None
-        if any(child.id not in ids for entry in burst for child in children_of.get(entry.id, ())):
             return None
         return tuple(sorted(Counter(entry.event_type for entry in burst).items()))
 
     shapes = [shape(burst) for burst in bursts]
-    quiet = [burst_shape is not None for burst_shape in shapes]
     repeats, first = [], 0
     while first < len(bursts):
         last = first
-        while quiet[first] and last + 1 < len(bursts) and quiet[last + 1]:
-            last += 1
+        if shapes[first] is not None:
+            inside = {entry.id for entry in bursts[first]}
+            while last + 1 < len(bursts) and shapes[last + 1] is not None:
+                joining = bursts[last + 1]
+                inside |= {entry.id for entry in joining}
+                if any(entry.caused_by_id is not None and entry.caused_by_id not in inside for entry in joining):
+                    break
+                last += 1
         if last - first >= REPEAT_AT:
             same = len(set(shapes[first : last + 1])) == 1
             repeats.append(_repeat(bursts[first + 1 : last + 1], target, open_repeat, same=same))
@@ -378,9 +382,10 @@ def build_layout(entries, *, target=None, focus=None, open_repeat=None) -> Layou
     total = (finished - started).total_seconds()
     for entry in entries:
         entry.offset = entry.occurred_at - started
-    repeats = _repeats(_bursts(entries), children_of, target, open_repeat)
-    collapsed = {member.id for repeat in repeats for member in repeat.members}
-    shown = {entry.id for entry in entries if entry.id not in collapsed}
+    repeats = _repeats(_bursts(entries), target, open_repeat)
+    repeat_of = {member.id: repeat for repeat in repeats for member in repeat.members}
+    shown = {entry.id for entry in entries if entry.id not in repeat_of}
+    node_of = {}  # entry id → the node it is drawn in, an entry's own or its group's
 
     nodes = []
 
@@ -407,6 +412,7 @@ def build_layout(entries, *, target=None, focus=None, open_repeat=None) -> Layou
         if target is not None and any(member.id == target for member in members):
             group.open, group.target = True, target
         node = add(_Node(group=group), parent)
+        node_of.update((member.id, node) for member in members)
         effects = [child for member in members for child in children_of.get(member.id, ()) if child.id in shown]
         place(sorted(effects, key=lambda entry: (entry.occurred_at, str(entry.id))), node, folded=True)
 
@@ -425,12 +431,25 @@ def build_layout(entries, *, target=None, focus=None, open_repeat=None) -> Layou
                 fold(sibling.event_type, members, parent)
                 continue
             node = add(_Node(entry=sibling), parent)
+            node_of[sibling.id] = node
             node.stub = parent is None and sibling.caused_by_id is not None and sibling.id != focus
-            place(children_of.get(sibling.id, ()), node)
+            place([child for child in children_of.get(sibling.id, ()) if child.id in shown], node)
 
-    place([entry for entry in entries if entry.id in shown and entry.caused_by_id not in shown], None)
+    place(
+        [
+            entry
+            for entry in entries
+            if entry.id in shown and entry.caused_by_id not in shown and entry.caused_by_id not in repeat_of
+        ],
+        None,
+    )
+    # A repeat stands in for its members on the rail: it hangs from what caused the
+    # first of them, and what they caused outside it hangs from the repeat (#498).
     for repeat in repeats:
-        add(_Node(repeat=repeat), None)
+        cause = next((m.caused_by_id for m in repeat.members if m.caused_by_id not in repeat_of), None)
+        node = add(_Node(repeat=repeat), node_of.get(cause))
+        effects = [entry for entry in entries if entry.id in shown and repeat_of.get(entry.caused_by_id) is repeat]
+        place(effects, node)
 
     nodes.sort(key=lambda node: (node.time, node.depth, node.seq))
     for index, node in enumerate(nodes):

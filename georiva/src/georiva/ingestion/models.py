@@ -46,11 +46,14 @@ def record_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket
         write_sweep_intervention(sweep, reason, file_ingestion_id, bucket, file_path)
 
 
-def write_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket: str, file_path: str) -> None:
-    """The write itself, under whatever context is active — for a sweep that also dispatches inside it."""
+def write_sweep_intervention(sweep: str, reason: str, file_ingestion_id, bucket: str, file_path: str) -> DomainEvent:
+    """The write itself, under whatever context is active — for a sweep that also dispatches inside it.
+
+    Returns the event, so the sweep can name it as the cause of what it re-dispatches.
+    """
     from georiva.events.models import SweepIntervened
 
-    record(
+    return record(
         SweepIntervened,
         sweep_name=sweep,
         reason=reason,

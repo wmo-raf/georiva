@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection
 from georiva.core.storage import BucketType
-from georiva.events.context import current_context
+from georiva.events.context import current_context, use_context
 from georiva.events.testing import event_context
 from georiva.ingestion.consumer import _handle_event
 from georiva.ingestion.models import FileIngestion, FileIngestionFinished
@@ -18,7 +18,7 @@ from georiva.organisations.provisioning import provision_organisation
 from georiva.organisations.testing import make_organisation
 from georiva.organisations.tests.factories import PASSWORD, add_member, make_user
 from georiva.sources.loader import Loader
-from georiva.sources.models import DataFeed, FetchedFile, FetchRun, FetchRunFinished
+from georiva.sources.models import DataFeed, FetchedFile, FetchRun, FetchRunFinished, FetchRunStarted
 
 KEY = "kenya/chirps/rainfall/rain.tif"
 
@@ -91,6 +91,90 @@ class FetchRunEventTests(TestCase):
         self.assertEqual(resumed.correlation_id, first.correlation_id)
 
 
+class FetchRunStartedTests(TestCase):
+    """A fetch records its start, so the files it lands have an event to hang from (#498)."""
+
+    def setUp(self):
+        self.kenya = make_organisation("kenya")
+        self.feed, self.collection = _feed(self.kenya)
+
+    def test_beginning_a_run_records_a_started_event_in_its_own_chain(self):
+        with event_context(actor="celery", organisation_id=self.kenya.pk) as ctx:
+            run = FetchRun.begin(data_feed=self.feed, collection=self.collection)
+
+        event = FetchRunStarted.objects.get()
+        self.assertEqual(event.fetch_run, run)
+        self.assertEqual(event.correlation_id, ctx.correlation_id)
+        self.assertEqual(event.organisation_id, self.kenya.pk)
+        self.assertEqual(
+            (event.feed_name, event.catalog_slug, event.collection_slug), ("CHIRPS feed", "chirps", "rainfall")
+        )
+        self.assertEqual(event.actor, "celery")
+        self.assertIsNone(event.caused_by_id)
+
+    def test_a_run_begun_with_no_context_is_still_recorded_in_the_feeds_organisation(self):
+        run = FetchRun.begin(data_feed=self.feed)
+
+        event = FetchRunStarted.objects.get()
+        self.assertEqual((event.correlation_id, event.organisation_id), (run.correlation_id, self.kenya.pk))
+
+    def test_the_finished_event_is_caused_by_the_started_one(self):
+        run = FetchRun.begin(data_feed=self.feed)
+        run.mark_completed(files_fetched=1)
+
+        self.assertEqual(FetchRunFinished.objects.get().caused_by_id, FetchRunStarted.objects.get().pk)
+
+    def test_a_resumed_run_is_caused_by_the_end_of_the_run_it_retries(self):
+        first = FetchRun.begin(data_feed=self.feed)
+        first.mark_interrupted("worker died")
+        FetchRun.begin(data_feed=self.feed, resumed_from=first)
+
+        resumed_start = FetchRunStarted.objects.get(fetch_run__resumed_from=first)
+        self.assertEqual(resumed_start.caused_by_id, FetchRunFinished.objects.get(fetch_run=first).pk)
+        self.assertEqual(resumed_start.correlation_id, first.correlation_id)
+
+    def test_a_run_begun_inside_a_chain_continues_its_cause(self):
+        with event_context(actor="celery", organisation_id=self.kenya.pk) as ctx:
+            FetchRun.begin(data_feed=self.feed)
+            earlier_start = FetchRunStarted.objects.get()
+            with use_context(ctx.caused_by_event(earlier_start)):
+                FetchRun.begin(data_feed=self.feed)
+
+        later = FetchRunStarted.objects.exclude(pk=earlier_start.pk).get()
+        self.assertEqual(later.caused_by_id, earlier_start.pk)
+
+    def test_a_run_that_was_never_attempted_records_no_start(self):
+        loader = Loader(data_source=MagicMock(), collection=self.collection, data_feed=self.feed)
+
+        loader.record_not_attempted("source unavailable")
+
+        self.assertFalse(FetchRunStarted.objects.exists())
+        self.assertEqual(FetchRunFinished.objects.get().outcome, "failed")
+
+    def test_a_retry_that_was_never_attempted_still_follows_the_run_it_retries(self):
+        first = FetchRun.begin(data_feed=self.feed)
+        first.mark_interrupted("worker died")
+        loader = Loader(data_source=MagicMock(), collection=self.collection, data_feed=self.feed, resumed_from=first)
+
+        loader.record_not_attempted("source unavailable")
+
+        retry_end = FetchRunFinished.objects.exclude(fetch_run=first).get()
+        self.assertEqual(retry_end.caused_by_id, FetchRunFinished.objects.get(fetch_run=first).pk)
+
+    def test_a_loader_run_records_its_start(self):
+        loader = Loader(data_source=MagicMock(), collection=self.collection, data_feed=self.feed)
+        loader.data_source.generate_requests_for_collection.return_value = []
+
+        with (
+            patch.object(loader.fetch_strategy, "connect"),
+            patch.object(loader.fetch_strategy, "disconnect"),
+            patch.object(loader, "_cleanup_temp"),
+        ):
+            loader.run()
+
+        self.assertEqual(FetchRunStarted.objects.get().fetch_run, FetchRun.objects.get())
+
+
 class FetchToIngestionChainTests(TestCase):
     def setUp(self):
         self.kenya = make_organisation("kenya")
@@ -98,7 +182,7 @@ class FetchToIngestionChainTests(TestCase):
 
     def _fetched(self, key=KEY, finished=True):
         with event_context(actor="celery", organisation_id=self.kenya.pk):
-            run = FetchRun.objects.create(data_feed=self.feed)
+            run = FetchRun.begin(data_feed=self.feed)
         FetchedFile.objects.create(fetch_run=run, file_path=key, status=FetchedFile.Status.STORED)
         if finished:
             run.mark_completed(files_fetched=1)
@@ -111,15 +195,26 @@ class FetchToIngestionChainTests(TestCase):
 
         self.assertEqual(context.correlation_id, run.correlation_id)
         self.assertEqual(context.organisation_id, self.kenya.pk)
-        self.assertEqual(context.caused_by, FetchRunFinished.objects.get().pk)
+        self.assertEqual(context.caused_by, FetchRunStarted.objects.get(fetch_run=run).pk)
 
-    def test_a_file_that_lands_before_the_fetch_finishes_still_joins_the_chain(self):
+    def test_a_file_that_lands_before_the_fetch_finishes_is_caused_by_its_start(self):
         run = self._fetched(finished=False)
 
         (context,) = _notify(KEY)
 
         self.assertEqual(context.correlation_id, run.correlation_id)
-        self.assertIsNone(context.caused_by)
+        self.assertEqual(context.caused_by, FetchRunStarted.objects.get(fetch_run=run).pk)
+
+    def test_a_run_with_no_recorded_start_falls_back_to_its_finish(self):
+        # Runs from before the start was recorded have only their finish to point at.
+        with event_context(actor="celery", organisation_id=self.kenya.pk):
+            run = FetchRun.objects.create(data_feed=self.feed)
+        FetchedFile.objects.create(fetch_run=run, file_path=KEY, status=FetchedFile.Status.STORED)
+        run.mark_completed(files_fetched=1)
+
+        (context,) = _notify(KEY)
+
+        self.assertEqual(context.caused_by, FetchRunFinished.objects.get().pk)
 
     def test_the_whole_story_shares_one_correlation(self):
         run = self._fetched()
@@ -151,6 +246,20 @@ class FetchToIngestionChainTests(TestCase):
         (context,) = _notify(KEY)
 
         self.assertEqual(context.correlation_id, second.correlation_id)
+
+    def test_an_uploaded_file_is_caused_by_its_delivery(self):
+        from georiva.ingestion.chains import context_for_arrival
+        from georiva.ingestion.models import Delivery, DeliveryReceived, PushFeed
+
+        catalog = Catalog.objects.create(organisation=self.kenya, name="WRF", slug="wrf", file_format="netcdf")
+        push_feed = PushFeed.objects.create(catalog=catalog, name="Uploads", valid_time_format="CONTENT")
+        key = "kenya/wrf/rain.nc"
+        delivery = Delivery.receive(push_feed=push_feed, filename="rain.nc", file_path=key)
+
+        context = context_for_arrival(key, actor="system:bucket")
+
+        self.assertEqual(context.correlation_id, delivery.correlation_id)
+        self.assertEqual(context.caused_by, DeliveryReceived.objects.get().pk)
 
     def _planned_in_a_later_run(self, key=KEY, **fields):
         with event_context(actor="celery", organisation_id=self.kenya.pk):
@@ -304,3 +413,16 @@ class StagingArrivalCauseTests(TestCase):
         (context,) = seen
         self.assertEqual(context.caused_by, FetchRunFinished.objects.get().pk)
         self.assertEqual(context.correlation_id, run.correlation_id)
+
+    def test_a_staging_file_landed_mid_fetch_is_caused_by_the_fetchs_start(self):
+        from georiva.ingestion.chains import context_for_arrival
+
+        kenya = make_organisation("kenya")
+        feed, _ = _feed(kenya)
+        key = "kenya/chirps/rainfall/f.tif"
+        run = FetchRun.begin(data_feed=feed)
+        FetchedFile.objects.create(fetch_run=run, file_path=key, status=FetchedFile.Status.STORED)
+
+        context = context_for_arrival(key, actor="system:bucket")
+
+        self.assertEqual(context.caused_by, FetchRunStarted.objects.get().pk)
