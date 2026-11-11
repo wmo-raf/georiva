@@ -175,11 +175,7 @@
 
         <div class="gwiz-actions">
             <button type="submit" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-arrow-right icon" aria-hidden="true">
-                        <use href="#icon-arrow-right"></use>
-                    </svg>
-                </span>
+                {% icon name="arrow-right" wrapped=1 %}
                 {% trans "Next: Feed Details" %}
             </button>
             <a href="{% url 'setup_wizard_select' %}" class="button button-secondary">

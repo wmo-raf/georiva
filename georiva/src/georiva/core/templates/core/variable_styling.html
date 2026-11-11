@@ -699,9 +699,7 @@
                                     <span class="vs-ramp-toggle-name" id="vs-ramp-toggle-name">
                                         {% if selected_ramp %}{{ selected_ramp.name }}{% else %}{% trans "Choose a ramp" %}{% endif %}
                                     </span>
-                                    <svg class="icon icon-arrow-down w-dropdown__toggle-icon" aria-hidden="true">
-                                        <use href="#icon-arrow-down"></use>
-                                    </svg>
+                                    {% icon name="arrow-down" classname="w-dropdown__toggle-icon" %}
                                 </button>
                                 <div data-w-dropdown-target="content"
                                      class="w-dropdown__content vs-ramp-menu" hidden>
@@ -1033,11 +1031,7 @@
                 {% endif %}
                 <p>
                     <a href="{{ new_style_url }}" class="button button-small bicolor button--icon">
-                        <span class="icon-wrapper">
-                            <svg class="icon icon-plus" aria-hidden="true">
-                                <use href="#icon-plus"></use>
-                            </svg>
-                        </span>
+                        {% icon name="plus" wrapped=1 %}
                         {% trans "New style" %}
                     </a>
                 </p>

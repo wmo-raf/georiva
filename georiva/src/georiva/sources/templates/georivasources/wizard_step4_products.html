@@ -91,11 +91,7 @@
 
         <div class="gprod-submit-row">
             <button type="submit" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-arrow-right icon" aria-hidden="true">
-                        <use href="#icon-arrow-right"></use>
-                    </svg>
-                </span>
+                {% icon name="arrow-right" wrapped=1 %}
                 {% trans "Create Feed" %}
             </button>
             <a href="{% url 'wizard_step3_collections' model_name=model_name %}" class="button button-secondary">

@@ -188,11 +188,7 @@
 
         <div class="dcv-actions">
             <button type="submit" class="button bicolor button--icon">
-                <span class="icon-wrapper">
-                    <svg class="icon icon-tick icon" aria-hidden="true">
-                        <use href="#icon-tick"></use>
-                    </svg>
-                </span>
+                {% icon name="tick" wrapped=1 %}
                 {% trans "Save" %}
             </button>
             <a href="{% url 'data_feed_detail' pk=feed.pk %}" class="button button-secondary">

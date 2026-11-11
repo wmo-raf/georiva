@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n %}
+{% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Organisation settings" %} — {{ organisation.name }}{% endblock %}
 
@@ -36,7 +36,7 @@
     {% endfor %}
     <div class="gr-org-actions">
         <button type="submit" class="button bicolor button--icon">
-            <span class="icon-wrapper"><svg class="icon icon-tick" aria-hidden="true"><use href="#icon-tick"></use></svg></span>
+            {% icon name="tick" wrapped=1 %}
             {% trans "Save" %}
         </button>
     </div>

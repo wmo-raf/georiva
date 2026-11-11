@@ -471,12 +471,9 @@
 
                     <td>
                         <a href="{% url 'item_preview' item.pk %}"
-                           class="button button-small button-secondary"
+                           class="button button-small bicolor button--icon button-secondary"
                            title="{% trans 'View item' %}">
-                            <svg class="icon icon-view" aria-hidden="true" style="width:14px;height:14px;">
-                                <use href="#icon-view"></use>
-                            </svg>
-                            {% trans "View" %}
+                            {% icon name="view" wrapped=1 %}{% trans "View" %}
                         </a>
                     </td>
                 </tr>
@@ -537,9 +534,7 @@
 
             <div class="ci-automation-header">
                 <div class="ci-automation-header__left">
-                    <svg class="icon icon-plug ci-automation-icon" aria-hidden="true">
-                        <use href="#icon-plug"></use>
-                    </svg>
+                    {% icon name="plug" classname="ci-automation-icon" %}
                     <h2 class="w-label-2 ci-automation-header__title">{% trans "Automation" %}</h2>
                     <span class="w-font-mono w-text-14 ci-automation-header__profile-name">
                     {{ data_feed.name }}
@@ -560,11 +555,7 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="trigger_ingestion">
                         <button type="submit" class="button button-small bicolor button--icon">
-                        <span class="icon-wrapper">
-                            <svg class="icon icon-tick" aria-hidden="true">
-                                <use href="#icon-tick"></use>
-                            </svg>
-                        </span>
+                        {% icon name="tick" wrapped=1 %}
                             {% trans "Run now" %}
                         </button>
                     </form>

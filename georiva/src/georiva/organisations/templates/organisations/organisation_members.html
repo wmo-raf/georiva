@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n %}
+{% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Members" %} — {{ organisation.name }}{% endblock %}
 
@@ -32,7 +32,7 @@
         {% endblocktrans %}
     </p>
     <a href="{{ add_url }}" class="button bicolor button--icon">
-        <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+        {% icon name="plus" wrapped=1 %}
         {% trans "Add member" %}
     </a>
 </div>

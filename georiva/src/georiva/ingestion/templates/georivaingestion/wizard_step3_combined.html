@@ -1,5 +1,5 @@
 {% extends "georivaingestion/wizard_base.html" %}
-{% load i18n %}
+{% load i18n wagtailadmin_tags %}
 {% block titletag %}{% trans "New Push Feed — File & Variables" %}{% endblock %}
 
 {% block extra_css %}
@@ -197,7 +197,7 @@
     {# ── Actions (revealed after upload) ── #}
     <div class="uwiz-reveal uwiz-actions" id="actions-section">
         <button type="submit" class="button bicolor button--icon">
-            <span class="icon-wrapper"><svg class="icon icon-arrow-right" aria-hidden="true"><use href="#icon-arrow-right"></use></svg></span>
+            {% icon name="arrow-right" wrapped=1 %}
             {% trans "Next: Collection Setup" %}
         </button>
         <a href="{% url 'upload_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
