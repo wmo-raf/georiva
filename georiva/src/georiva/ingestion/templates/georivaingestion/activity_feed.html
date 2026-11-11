@@ -139,18 +139,6 @@
 
         .iaf-cancel-btn {
             margin-left: 0.5em;
-            padding: 0.1em 0.7em;
-            font-size: 0.8em;
-            border-radius: 3px;
-            cursor: pointer;
-            border: 1px solid var(--w-color-critical-200);
-            color: var(--w-color-critical-200);
-            background: transparent;
-        }
-
-        .iaf-cancel-btn:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
         }
     </style>
 {% endblock %}
@@ -203,7 +191,8 @@
 
             function addCancelButton(card, jobId) {
                 const btn = document.createElement('button');
-                btn.className = 'iaf-cancel-btn';
+                btn.type = 'button';
+                btn.className = 'button button-small no iaf-cancel-btn';
                 btn.textContent = '{% trans "Cancel" %}';
                 btn.dataset.cancelBtn = jobId;
                 btn.addEventListener('click', function (e) {

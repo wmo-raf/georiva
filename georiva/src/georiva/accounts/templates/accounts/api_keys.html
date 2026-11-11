@@ -39,7 +39,6 @@
     }
     .gr-keys-prefix { font-family: monospace; }
     .gr-keys-muted { color: var(--w-color-grey-400); }
-    .gr-keys-revoke { color: var(--w-color-critical-200); }
     .gr-keys-retired td { opacity: 0.6; }
 </style>
 {% endblock %}
@@ -103,7 +102,7 @@
                 {% elif key.is_expired %}
                     <span class="gr-keys-muted">{% trans "Expired" %}</span>
                 {% else %}
-                    <a href="{% url 'api_key_revoke' key.pk %}" class="gr-keys-revoke">{% trans "Revoke" %}</a>
+                    <a href="{% url 'api_key_revoke' key.pk %}" class="button button-small no">{% trans "Revoke" %}</a>
                 {% endif %}
             </td>
         </tr>

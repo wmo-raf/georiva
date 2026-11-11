@@ -269,20 +269,12 @@
     {# ── Action bar #}
     <div class="gfeed-action-bar">
         <a href="{% url 'data_feed_edit' pk=feed.pk %}" class="button bicolor button--icon">
-            <span class="icon-wrapper">
-                <svg class="icon icon-edit icon" aria-hidden="true">
-                    <use href="#icon-edit"></use>
-                </svg>
-            </span>
+            {% icon name="edit" wrapped=1 %}
             {% trans "Edit Details" %}
         </a>
 
         <a href="{% url 'derived_product_chain' feed_pk=feed.pk %}" class="button bicolor button--icon">
-            <span class="icon-wrapper">
-                <svg class="icon icon-site icon" aria-hidden="true">
-                    <use href="#icon-site"></use>
-                </svg>
-            </span>
+            {% icon name="site" wrapped=1 %}
             {% trans "View Chain" %}
         </a>
 
@@ -463,11 +455,7 @@
                                 {% else %}
                                     <a href="{% url 'definition_collection_add' feed_pk=feed.pk definition_key=defn.key %}"
                                        class="button button-small bicolor button--icon">
-                                        <span class="icon-wrapper">
-                                            <svg class="icon icon-plus icon" aria-hidden="true">
-                                                <use href="#icon-plus"></use>
-                                            </svg>
-                                        </span>
+                                        {% icon name="plus" wrapped=1 %}
                                         {% trans "Add" %}
                                     </a>
                                 {% endif %}

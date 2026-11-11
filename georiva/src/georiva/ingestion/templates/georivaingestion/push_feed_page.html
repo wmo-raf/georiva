@@ -176,7 +176,7 @@
 
     <div class="mup-actions">
         <button type="submit" id="submit-btn" class="button bicolor button--icon"{% if upload_endpoint.blocked %} disabled{% endif %}>
-            <span class="icon-wrapper"><svg class="icon icon-upload" aria-hidden="true"><use href="#icon-upload"></use></svg></span>
+            {% icon name="upload" wrapped=1 %}
             {% trans "Upload & ingest" %}
         </button>
         <a href="{% url 'push_feed_list' %}" class="button button-secondary">{% trans "Back" %}</a>

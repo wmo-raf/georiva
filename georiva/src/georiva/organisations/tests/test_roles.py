@@ -157,6 +157,11 @@ class MemberManagementTests(TestCase):
         self.assertContains(response, "juma")
         self.assertNotContains(response, "okot")
 
+    def test_remove_is_the_styleguides_destructive_button(self):
+        response = self.client.get(reverse("organisation_members"), headers=HOST)
+
+        self.assertContains(response, 'class="button button-small no"')
+
     def test_another_organisations_membership_cannot_be_edited(self):
         url = reverse("organisation_member_edit", args=[self.ugandan_membership.pk])
 

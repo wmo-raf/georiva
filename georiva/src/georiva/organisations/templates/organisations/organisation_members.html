@@ -1,5 +1,5 @@
 {% extends "wagtailadmin/generic/base.html" %}
-{% load i18n %}
+{% load i18n wagtailadmin_tags %}
 
 {% block titletag %}{% trans "Members" %} — {{ organisation.name }}{% endblock %}
 
@@ -18,7 +18,6 @@
         max-width: 46em;
     }
     .gr-members-role { color: var(--w-color-text-context); }
-    .gr-members-remove { color: var(--w-color-critical-200); }
     .gr-members-actions a { margin-right: 0.75em; }
 </style>
 {% endblock %}
@@ -32,7 +31,7 @@
         {% endblocktrans %}
     </p>
     <a href="{{ add_url }}" class="button bicolor button--icon">
-        <span class="icon-wrapper"><svg class="icon icon-plus" aria-hidden="true"><use href="#icon-plus"></use></svg></span>
+        {% icon name="plus" wrapped=1 %}
         {% trans "Add member" %}
     </a>
 </div>
@@ -54,7 +53,7 @@
             <td class="gr-members-role">{{ membership.get_role_display }}</td>
             <td class="gr-members-actions">
                 <a href="{% url 'organisation_member_edit' membership.pk %}">{% trans "Change role" %}</a>
-                <a href="{% url 'organisation_member_remove' membership.pk %}" class="gr-members-remove">{% trans "Remove" %}</a>
+                <a href="{% url 'organisation_member_remove' membership.pk %}" class="button button-small no">{% trans "Remove" %}</a>
             </td>
         </tr>
         {% empty %}

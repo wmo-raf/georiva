@@ -11,9 +11,7 @@
                     <div class="ccl-header" role="button" tabindex="0"
                          aria-expanded="{% if is_searching %}true{% else %}false{% endif %}">
                         <span class="ccl-chevron">
-                            <svg class="icon" aria-hidden="true">
-                                <use href="#icon-arrow-right"></use>
-                            </svg>
+                            {% icon name="arrow-right" %}
                         </span>
                         <span class="ccl-catalog-icon">{% icon name="globe" %}</span>
                         <span class="ccl-title">{{ panel.catalog.name }}</span>
@@ -28,11 +26,7 @@
                         <span class="ccl-actions">
                             {% if panel.add_collection_url %}
                                 <a href="{{ panel.add_collection_url }}" class="button button-small bicolor button--icon">
-                                    <span class="icon-wrapper">
-                                        <svg class="icon icon-plus icon" aria-hidden="true">
-                                            <use href="#icon-plus"></use>
-                                        </svg>
-                                    </span>
+                                    {% icon name="plus" wrapped=1 %}
                                     {% trans "Add Collection" %}
                                 </a>
                             {% endif %}

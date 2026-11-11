@@ -8,8 +8,8 @@
 <form method="post" action="">
     {% csrf_token %}
     <div style="display:flex;gap:1em;margin-top:1.5em;">
-        <button type="submit" class="button bicolor button--icon button-warning">
-            <span class="icon-wrapper"><svg class="icon icon-bin" aria-hidden="true"><use href="#icon-bin"></use></svg></span>
+        <button type="submit" class="button button--icon no">
+            {% icon name="bin" wrapped=1 %}
             {% trans "Yes, delete" %}
         </button>
         <a href="{% url 'push_feed_list' %}" class="button button-secondary">{% trans "Cancel" %}</a>

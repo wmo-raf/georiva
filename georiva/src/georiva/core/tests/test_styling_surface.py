@@ -655,6 +655,11 @@ class StyleSetManagementTests(StylingSurfaceTestCase):
         self.assertFalse(self.official.is_default)
         self.assertTrue(self.analyst.is_default)
 
+    def test_deleting_a_style_is_the_styleguides_destructive_button(self):
+        response = self.client.get(self.form_url)
+
+        self.assertContains(response, 'class="button button-small no"')
+
     def test_a_non_default_style_can_be_deleted(self):
         response = self.client.post(
             self.form_url,

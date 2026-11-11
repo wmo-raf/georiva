@@ -107,9 +107,13 @@
             font-size: 0.75rem;
         }
 
-        .ci-var-chip__tag {
-            font-size: 0.65rem;
-            padding: 0 4px;
+        /*
+         * Wagtail's status tag carries a half-em bottom margin for wrapping rows;
+         * centred in a one-line flex row it lifts the tag off the text.
+         */
+        .ci-var-chip .w-status,
+        .w-tabs__tab .w-status {
+            margin-block: 0;
         }
 
         /* ── Automation card ──────────────────────────────────────────── */
@@ -215,11 +219,7 @@
             color: var(--w-color-text-label);
         }
 
-        .ci-log-tag {
-            font-size: 0.7rem;
-        }
-
-        .ci-log-tag--help {
+        .ci-tag-help {
             cursor: help;
         }
 
@@ -277,12 +277,12 @@
             </div>
             <div class="ci-summary-badges">
                 {% if collection.is_active %}
-                    <span class="w-status-tag w-status-tag--primary">{% trans "Active" %}</span>
+                    {% status label=_("Active") classname="w-status--primary" %}
                 {% else %}
-                    <span class="w-status-tag w-status-tag--critical">{% trans "Inactive" %}</span>
+                    {% status label=_("Inactive") %}
                 {% endif %}
                 {% if collection.is_forecast %}
-                    <span class="w-status-tag w-status-tag--secondary">{% trans "Forecast" %}</span>
+                    {% status label=_("Forecast") %}
                 {% endif %}
             </div>
         </div>
@@ -293,9 +293,7 @@
                 <p class="help-text ci-meta-label">{% trans "Catalog" %}</p>
                 <p class="w-text-14 ci-meta-value">
                     {{ catalog.name }}
-                    <span class="w-status-tag ci-var-chip__tag" style="margin-left: 4px;">
-                    {{ catalog.get_file_format_display }}
-                </span>
+                    {% status label=catalog.get_file_format_display %}
                 </p>
             </div>
 
@@ -380,13 +378,12 @@
                         <code class="w-font-mono ci-var-chip__slug">{{ var.slug }}</code>
                         <span class="help-text ci-var-chip__name">{{ var.name }}</span>
                         {% if var.units %}
-                            <span class="w-status-tag ci-var-chip__tag">{{ var.units }}</span>
+                            {% status label=var.units %}
                         {% endif %}
                         {% if var.is_derived %}
-                            <span class="w-status-tag w-status-tag--secondary ci-var-chip__tag"
-                                  title="{{ var.get_transform_type_display }}">
-                            {% trans "derived" %}
-                        </span>
+                            <span class="ci-tag-help" title="{{ var.get_transform_type_display }}">
+                                {% status label=_("derived") %}
+                            </span>
                         {% endif %}
                     </div>
                 {% endfor %}
@@ -420,9 +417,7 @@
                        aria-selected="{% if active_var_slug == var.slug %}true{% else %}false{% endif %}">
                         {{ var.name }}
                         {% if var.units %}
-                            <span class="ci-var-chip__tag w-status-tag" style="margin-left: 4px;">
-                            {{ var.units }}
-                        </span>
+                            {% status label=var.units %}
                         {% endif %}
                     </a>
                 {% endfor %}
@@ -469,22 +464,13 @@
                         {% with log=item.ingestion_log %}
                             {% if log %}
                                 {% if log.status == 'completed' %}
-                                    <span class="w-status-tag w-status-tag--primary ci-log-tag">
-                                        {{ log.get_status_display }}
-                                    </span>
+                                    {% status label=log.get_status_display classname="w-status--primary ci-log-tag" %}
                                 {% elif log.status == 'failed' %}
-                                    <span class="w-status-tag w-status-tag--critical ci-log-tag ci-log-tag--help"
-                                          title="{{ log.error }}">
-                                        {{ log.get_status_display }}
-                                    </span>
-                                {% elif log.status == 'processing' %}
-                                    <span class="w-status-tag w-status-tag--secondary ci-log-tag">
-                                        {{ log.get_status_display }}
+                                    <span class="ci-tag-help" title="{{ log.error }}">
+                                        {% status label=log.get_status_display classname="ci-log-tag" %}
                                     </span>
                                 {% else %}
-                                    <span class="w-status-tag ci-log-tag">
-                                        {{ log.get_status_display }}
-                                    </span>
+                                    {% status label=log.get_status_display classname="ci-log-tag" %}
                                 {% endif %}
                             {% else %}
                                 <span class="w-text-grey-400">—</span>
@@ -494,12 +480,9 @@
 
                     <td>
                         <a href="{% url 'item_preview' item.pk %}"
-                           class="button button-small button-secondary"
+                           class="button button-small bicolor button--icon button-secondary"
                            title="{% trans 'View item' %}">
-                            <svg class="icon icon-view" aria-hidden="true" style="width:14px;height:14px;">
-                                <use href="#icon-view"></use>
-                            </svg>
-                            {% trans "View" %}
+                            {% icon name="view" wrapped=1 %}{% trans "View" %}
                         </a>
                     </td>
                 </tr>
@@ -560,17 +543,15 @@
 
             <div class="ci-automation-header">
                 <div class="ci-automation-header__left">
-                    <svg class="icon icon-plug ci-automation-icon" aria-hidden="true">
-                        <use href="#icon-plug"></use>
-                    </svg>
+                    {% icon name="plug" classname="ci-automation-icon" %}
                     <h2 class="w-label-2 ci-automation-header__title">{% trans "Automation" %}</h2>
                     <span class="w-font-mono w-text-14 ci-automation-header__profile-name">
                     {{ data_feed.name }}
                 </span>
                     {% if data_feed.is_active %}
-                        <span class="w-status-tag w-status-tag--primary ci-var-chip__tag">{% trans "Active" %}</span>
+                        {% status label=_("Active") classname="w-status--primary" %}
                     {% else %}
-                        <span class="w-status-tag ci-var-chip__tag">{% trans "Paused" %}</span>
+                        {% status label=_("Paused") %}
                     {% endif %}
                 </div>
 
@@ -583,11 +564,7 @@
                         {% csrf_token %}
                         <input type="hidden" name="action" value="trigger_ingestion">
                         <button type="submit" class="button button-small bicolor button--icon">
-                        <span class="icon-wrapper">
-                            <svg class="icon icon-tick" aria-hidden="true">
-                                <use href="#icon-tick"></use>
-                            </svg>
-                        </span>
+                        {% icon name="tick" wrapped=1 %}
                             {% trans "Run now" %}
                         </button>
                     </form>
@@ -657,15 +634,9 @@
                             <td class="w-text-14 w-font-mono">{{ run.started_at|date:"Y-m-d H:i" }}</td>
                             <td>
                                 {% if run.status == 'success' %}
-                                    <span class="w-status-tag w-status-tag--primary">{{ run.get_status_display }}</span>
-                                {% elif run.status == 'failed' %}
-                                    <span class="w-status-tag w-status-tag--critical">{{ run.get_status_display }}</span>
-                                {% elif run.status == 'partial' %}
-                                    <span class="w-status-tag w-status-tag--warning">{{ run.get_status_display }}</span>
-                                {% elif run.status == 'running' %}
-                                    <span class="w-status-tag w-status-tag--secondary">{{ run.get_status_display }}</span>
+                                    {% status label=run.get_status_display classname="w-status--primary" %}
                                 {% else %}
-                                    <span class="w-status-tag">{{ run.get_status_display }}</span>
+                                    {% status label=run.get_status_display %}
                                 {% endif %}
                             </td>
                             <td class="w-text-14">{{ run.files_fetched }}</td>
@@ -687,7 +658,7 @@
                             </td>
                             <td class="w-text-14">
                                 {% if run.errors %}
-                                    <span class="w-text-critical-100 ci-log-tag--help"
+                                    <span class="w-text-critical-100 ci-tag-help"
                                           title="{{ run.errors|join:', ' }}">
                                         {{ run.errors|length }} error{{ run.errors|length|pluralize }}
                                     </span>

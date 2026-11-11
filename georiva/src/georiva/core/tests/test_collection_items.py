@@ -49,7 +49,7 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "w-status-tag--primary")
+        self.assertContains(response, 'class="w-status w-status--primary ci-log-tag"')
 
     def test_failed_ingestion_shows_failed_badge_with_error(self):
         _make_item(self.collection, "mybucket:models/surface/failed.grib")
@@ -63,8 +63,11 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "w-status-tag--critical")
-        self.assertContains(response, "Decoding error")
+        # Wagtail's styleguide has no critical tag: a failure is the outline
+        # tag, its error on hover.
+        self.assertContains(response, 'class="w-status ci-log-tag"')
+        self.assertNotContains(response, "w-status--primary ci-log-tag")
+        self.assertContains(response, 'title="Decoding error"')
 
     def test_item_with_no_ingestion_shows_dash(self):
         _make_item(self.collection, "")
@@ -82,4 +85,4 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content.decode().count("w-status-tag--primary ci-log-tag"), 2)
+        self.assertEqual(response.content.decode().count('class="w-status w-status--primary ci-log-tag"'), 2)

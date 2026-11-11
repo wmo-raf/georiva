@@ -281,7 +281,7 @@ window.GrVariableCards = (function () {
                     '<input type="text" class="w-field__input gr-vc-ln" value="' + esc(row.long_name || '') + '">' +
                     (row.source_long_name
                         ? '<div class="gr-vc-source-name">' + esc(T.fromFile) + ' ' + esc(row.source_long_name) +
-                            '<a href="#" class="gr-vc-reset" hidden>' + esc(T.reset) + '</a></div>'
+                            '<button type="button" class="button button-small button-secondary gr-vc-reset" hidden>' + esc(T.reset) + '</button></div>'
                         : '') +
                 '</div>' +
                 unitsFieldHtml(row, createSymbol) +

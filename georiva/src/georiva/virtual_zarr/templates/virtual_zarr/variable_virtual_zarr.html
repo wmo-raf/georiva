@@ -267,9 +267,9 @@
                         </td>
                         <td>
                             {% if log.outcome == "success" %}
-                                <span class="w-status-tag w-status-tag--primary">{{ log.get_outcome_display }}</span>
+                                {% status label=log.get_outcome_display classname="w-status--primary" %}
                             {% else %}
-                                <span class="w-status-tag w-status-tag--critical">{{ log.get_outcome_display }}</span>
+                                {% status label=log.get_outcome_display %}
                             {% endif %}
                         </td>
                         <td class="w-text-14">{{ log.get_mode_display|default:"—" }}</td>

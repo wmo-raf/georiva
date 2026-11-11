@@ -200,11 +200,7 @@
 
         <div class="dcf-form-actions">
             <button type="submit" class="button bicolor button--icon">
-            <span class="icon-wrapper">
-                <svg class="icon icon-save icon" aria-hidden="true">
-                    <use href="#icon-save"></use>
-                </svg>
-            </span>
+            {% icon name="save" wrapped=1 %}
                 {% if is_edit %}
                     {% trans "Save Changes" %}
                 {% else %}
