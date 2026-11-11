@@ -8,7 +8,7 @@
         .iaf-empty {
             padding: 2em 0;
             text-align: center;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.95em;
         }
 
@@ -25,7 +25,7 @@
             align-items: center;
             gap: 0.75em;
             padding: 0.65em 1em;
-            background: var(--w-color-grey-50);
+            background: var(--w-color-surface-header);
             border-bottom: 1px solid var(--w-color-border-furniture);
             font-size: 0.88em;
             cursor: pointer;
@@ -39,7 +39,7 @@
         .iaf-chevron {
             display: inline-block;
             font-size: 0.75em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             transition: transform 0.15s;
             flex-shrink: 0;
         }
@@ -55,12 +55,12 @@
         }
 
         .iaf-collection {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .iaf-time {
             margin-left: auto;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.85em;
         }
 
@@ -69,7 +69,7 @@
             border-radius: 1em;
             font-size: 0.8em;
             font-weight: 600;
-            background: var(--w-color-grey-100);
+            background: color-mix(in srgb, var(--w-color-text-meta) 15%, transparent);
             color: var(--w-color-text-label);
         }
 
@@ -104,7 +104,7 @@
         .iaf-filepath {
             font-family: monospace;
             font-size: 0.82em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             word-break: break-all;
             margin-bottom: 0.5em;
         }
@@ -120,7 +120,7 @@
 
         .iaf-log-steps li::before {
             content: "›  ";
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .iaf-log-summary {

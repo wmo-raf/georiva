@@ -451,7 +451,7 @@
                                     (+{{ item.horizon_hours|floatformat:0 }}h)
                                 </span>
                             {% else %}
-                                <span class="w-text-grey-400">—</span>
+                                <span class="w-text-text-meta">—</span>
                             {% endif %}
                         </td>
                     {% endif %}
@@ -473,7 +473,7 @@
                                     {% status label=log.get_status_display classname="ci-log-tag" %}
                                 {% endif %}
                             {% else %}
-                                <span class="w-text-grey-400">—</span>
+                                <span class="w-text-text-meta">—</span>
                             {% endif %}
                         {% endwith %}
                     </td>

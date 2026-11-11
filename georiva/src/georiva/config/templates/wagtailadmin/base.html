@@ -6,6 +6,7 @@
         {% include "georiva/logos/georiva.svg" %}
     </figure>
 
+    {# Fixed colours on purpose (#577): the logo and version sit on the always-dark sidebar. #}
     <div style="color:#ababab; font-size: 12px; padding-top:1em; font-weight:600">
         <a href="https://github.com/wmo-raf/georiva" target="_blank" style="color:#fff; text-decoration:none">
             v{% georiva_version %}
@@ -13,7 +14,7 @@
     </div>
 
     <style>
-
+        /* On the always-dark sidebar in either theme (#577). */
         .georiva-logo {
             color: #fff;
             max-height: 100px;

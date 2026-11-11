@@ -52,8 +52,8 @@
         }
 
         .gchain-state--disabled {
-            background: var(--w-color-grey-100);
-            color: var(--w-color-grey-400);
+            background: color-mix(in srgb, var(--w-color-text-meta) 15%, transparent);
+            color: var(--w-color-text-meta);
         }
 
         .gchain-state--new {
@@ -67,7 +67,7 @@
         }
 
         .gchain-flow--orphan .gchain-product {
-            background: var(--w-color-grey-400);
+            background: var(--w-color-surface-button-inactive);
         }
 
         .gchain-flow {
@@ -82,13 +82,13 @@
             display: inline-block;
             padding: 0.2em 0.6em;
             border-radius: 4px;
-            background: var(--w-color-grey-50);
+            background: var(--w-color-surface-header);
             border: 1px solid var(--w-color-border-furniture);
             font-weight: 600;
         }
 
         .gchain-arrow {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             user-select: none;
         }
 
@@ -104,7 +104,7 @@
         .gchain-meta {
             margin-top: 0.5em;
             font-size: 0.8em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             display: flex;
             gap: 1em;
             flex-wrap: wrap;
@@ -116,7 +116,7 @@
 
         .gchain-empty {
             margin-top: 1.5em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
     </style>
 {% endblock %}

@@ -4,7 +4,7 @@
 
 .gr-history__since,
 .gr-history__empty {
-    color: var(--w-color-grey-400);
+    color: var(--w-color-text-meta);
     font-size: 0.85em;
 }
 
@@ -37,7 +37,7 @@
 .gr-history__actor {
     font-family: monospace;
     font-size: 0.8em;
-    color: var(--w-color-grey-400);
+    color: var(--w-color-text-meta);
 }
 
 .gr-history__type {
@@ -53,7 +53,7 @@
 }
 
 .gr-history__facts dt {
-    color: var(--w-color-grey-400);
+    color: var(--w-color-text-meta);
 }
 
 .gr-history__facts dd {

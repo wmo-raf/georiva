@@ -163,9 +163,16 @@ Every admin page must work in both the light and dark theme. Colour comes from `
 never from fixed values.
 
 - **No fixed colours** for surfaces, text or borders in admin templates: no hex, `rgb()`, or named colours.
-- **Never the `--w-color-grey-*` scale for backgrounds or text.** Wagtail inverts it in dark mode (`grey-50` becomes
-  near-white), so a `grey-50` panel header is a light bar under light text. Use the tokens that flip with the theme:
+- **Never the `--w-color-grey-*` scale for backgrounds or text.** The scale is the same in both themes (`grey-50` stays
+  near-white), so in dark mode a `grey-50` panel header is a light bar under light text. Use the tokens that flip with the theme:
   `--w-color-surface-header`, `--w-color-surface-page`, `--w-color-text-meta`, `--w-color-border-furniture`, …
+- **Nor `--w-color-white` / `--w-color-black` for a surface.** They don't flip either: a white panel body is
+  `--w-color-surface-page`. White *text* on a filled colour that doesn't flip (a status chip, an active step) is fine.
+- **Neutral pills and badges** take the same shape as the coloured ones beside them:
+  `color-mix(in srgb, var(--w-color-text-meta) 15%, transparent)`. Neutral marks (rails, stripes, dots) are
+  `--w-color-icon-secondary`; a grey chip with white text is `--w-color-surface-button-inactive`.
+- **Enforced** by `core/tests/test_admin_theme_colours.py`, which scans admin templates, app stylesheets and the
+  dashboard's Vue sources. An intentional exception goes in its pinned `ALLOWED` count, with the comment beside it.
 - **Page-local variables** (`--geo-*` and the like) are fine, but define them *from* `--w-color-*` tokens, not hex.
 - **A tint or hover with no semantic token:** mix one in, e.g.
   `color-mix(in srgb, var(--w-color-text-label) 6%, var(--w-color-surface-header))`.
