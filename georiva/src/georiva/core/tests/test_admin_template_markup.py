@@ -6,9 +6,9 @@ shapes kept coming back, and both fail quietly — the page renders, just wrong:
 
 - ``w-status-tag`` has no styles in Wagtail 7, so a tag built from it renders
   as bare text. ``{% status %}`` is the styleguide's tag.
-- A hand-expanded ``<svg><use href="#icon-…">`` duplicates what
-  ``{% icon %}`` renders, and drifts from it (the ``wrapped=1`` spacing, the
-  ``icon-<name>`` class).
+- An inline ``<svg>`` either duplicates what ``{% icon %}`` renders and drifts
+  from it (one had ``<use ref=…>`` and never drew), or draws an icon Wagtail
+  already ships.
 
 The public site (``pages/`` and ``config/templates/georiva/``) has its own
 design system and is not scanned.
@@ -27,7 +27,14 @@ PUBLIC_TEMPLATE_ROOTS = (
 
 FORBIDDEN = {
     "w-status-tag": 'a status tag is {% status label="…" classname="w-status--primary" %}',
-    '<use href="#icon-': 'an icon is {% icon name="…" %} (wrapped=1 inside a button)',
+    "<svg": 'an icon is {% icon name="…" %} (wrapped=1 inside a button)',
+}
+
+# Inline SVG the styleguide has no equivalent for: the item preview's map
+# overlay (basemap dropdown and its checkmarks, the layer legend's close).
+# Pinned as a count, so a new one is a decision rather than an accident.
+ALLOWED = {
+    ("visualization/templates/visualization/item_preview.html", "<svg"): 5,
 }
 
 
@@ -48,9 +55,11 @@ class AdminTemplatesUseStyleguideMarkupTests(SimpleTestCase):
     def test_no_hand_rolled_status_tags_or_icons(self):
         offences = []
         for path in admin_templates():
-            for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-                for needle, remedy in FORBIDDEN.items():
-                    if needle in line:
-                        offences.append(f"{path.relative_to(PACKAGE_ROOT)}:{lineno}: {remedy}")
+            name = str(path.relative_to(PACKAGE_ROOT))
+            lines = path.read_text().splitlines()
+            for needle, remedy in FORBIDDEN.items():
+                hits = [lineno for lineno, line in enumerate(lines, start=1) if needle in line]
+                if len(hits) != ALLOWED.get((name, needle), 0):
+                    offences += [f"{name}:{lineno}: {remedy}" for lineno in hits]
 
         self.assertEqual(offences, [], "\n" + "\n".join(offences))
