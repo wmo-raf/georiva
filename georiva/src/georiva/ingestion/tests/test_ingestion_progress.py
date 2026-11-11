@@ -214,3 +214,27 @@ class ProcessTimestampProgressTests(TestCase):
         state = mock_progress.increment.call_args.kwargs.get("state", "")
         self.assertIn("temperature", state)
         self.assertIn("band missing", state)
+
+
+# =============================================================================
+# A failed variable's reason reaches the failure record
+# =============================================================================
+
+
+class FailedVariableReasonTests(TestCase):
+    def test_process_timestamp_reports_each_failed_variable_with_its_reason(self):
+        handler = ProcessTimestampProgressTests()._make_handler()
+        handler.asset_handler.process_variable.side_effect = [
+            [MagicMock()],
+            ValueError("The grid's 'lat' axis is not evenly spaced"),
+        ]
+        collection, _ = ProcessTimestampProgressTests()._make_collection("temperature", "rainfall")
+
+        _, _, _, failed = handler.process_timestamp(
+            collection=collection,
+            local_path=Path("/tmp/file.nc"),
+            timestamp=datetime(2024, 1, 15, tzinfo=pytz.utc),
+            source_file="sources:wrf/file.nc",
+        )
+
+        self.assertEqual(failed, ["rainfall: The grid's 'lat' axis is not evenly spaced"])

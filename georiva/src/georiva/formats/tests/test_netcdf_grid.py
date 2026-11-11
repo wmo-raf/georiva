@@ -64,13 +64,6 @@ class NetCDFGridTests(SimpleTestCase):
 
         self.assertEqual((meta["width"], meta["height"]), (834, 557))
 
-    def test_global_0_to_360_longitudes_still_pass(self):
-        path = self._rectilinear(np.arange(-90, 90.01, 1.0), np.arange(0, 360, 1.0))
-
-        meta = self._metadata(path)
-
-        self.assertEqual(meta["width"], 360)
-
     def test_descending_latitudes_still_pass(self):
         path = self._rectilinear(np.arange(10, -10.01, -0.5), np.arange(20, 40.01, 0.5))
 
@@ -122,6 +115,95 @@ class NetCDFGridTests(SimpleTestCase):
 
         with self.assertRaisesRegex(UnsupportedGridError, "lat.*missing"):
             self._metadata(self._rectilinear(lats, np.arange(20, 40.01, 0.5)))
+
+    def test_wrf_coordinates_are_found_by_their_units_and_refused(self):
+        # Raw WRF names its 2D coordinates XLAT/XLONG on south_north/west_east.
+        xx, yy = np.meshgrid(np.arange(30), np.arange(20))
+        data = np.zeros((1, 20, 30), dtype=np.float32)
+        ds = xr.Dataset(
+            {"t2m": (("time", "south_north", "west_east"), data)},
+            coords={
+                "time": [np.datetime64(TIME)],
+                "XLAT": (("south_north", "west_east"), -5.0 + 0.1 * yy, {"units": "degree_north"}),
+                "XLONG": (("south_north", "west_east"), 30.0 + 0.1 * xx, {"units": "degree_east"}),
+            },
+        )
+
+        with self.assertRaisesRegex(UnsupportedGridError, "curvilinear"):
+            self._metadata(self._write(ds))
+
+    def test_a_grid_without_latitude_and_longitude_is_refused(self):
+        data = np.zeros((1, 20, 30), dtype=np.float32)
+        ds = xr.Dataset({"t2m": (("time", "rows", "cols"), data)}, coords={"time": [np.datetime64(TIME)]})
+
+        with self.assertRaisesRegex(UnsupportedGridError, "no latitude/longitude"):
+            self._metadata(self._write(ds))
+
+    def test_metre_axes_without_a_declared_crs_are_refused(self):
+        data = np.zeros((1, 20, 30), dtype=np.float32)
+        ds = xr.Dataset(
+            {"t2m": (("time", "y", "x"), data)},
+            coords={
+                "time": [np.datetime64(TIME)],
+                "y": 1_000_000.0 + 9000.0 * np.arange(20),
+                "x": 3_000_000.0 + 9000.0 * np.arange(30),
+            },
+        )
+
+        with self.assertRaisesRegex(UnsupportedGridError, "not in degrees"):
+            self._metadata(self._write(ds))
+
+    def test_projected_axes_are_preferred_over_2d_auxiliary_lat_lon(self):
+        xx, yy = np.meshgrid(np.arange(30), np.arange(20))
+        data = np.zeros((1, 20, 30), dtype=np.float32)
+        ds = xr.Dataset(
+            {
+                "t2m": (("time", "y", "x"), data),
+                "spatial_ref": ((), 0, {"crs_wkt": "EPSG:3857"}),
+            },
+            coords={
+                "time": [np.datetime64(TIME)],
+                "y": 1000.0 * np.arange(20),
+                "x": 1000.0 * np.arange(30),
+                "lat": (("y", "x"), 0.01 * yy),
+                "lon": (("y", "x"), 0.01 * xx),
+            },
+        )
+
+        meta = self._metadata(self._write(ds))
+
+        self.assertEqual(meta["bounds"], (-500.0, -500.0, 29500.0, 19500.0))
+        self.assertEqual(meta["crs"], "EPSG:3857")
+
+    # ── 0..360 longitudes ─────────────────────────────────────────────────
+
+    def test_global_0_to_360_grid_is_recentred_on_greenwich(self):
+        lons = np.arange(0, 360, 1.0)
+        data = np.broadcast_to(lons, (1, 5, 360)).astype(np.float32)
+        ds = xr.Dataset(
+            {"t2m": (("time", "lat", "lon"), data)},
+            coords={"time": [np.datetime64(TIME)], "lat": np.arange(-2, 3, 1.0), "lon": lons},
+        )
+
+        extracted = self.plugin.extract_variable(self._write(ds), "t2m", timestamp=TIME)
+
+        # Columns run west to east from -179 (stored as 181) to 180.
+        self.assertEqual(extracted.bounds[0], -179.5)
+        self.assertEqual(extracted.data[0, 0], 181.0)
+        self.assertEqual(extracted.data[0, -1], 180.0)
+
+    def test_regional_grid_east_of_180_is_shifted_west(self):
+        path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(190, 250.01, 0.5))
+
+        meta = self._metadata(path)
+
+        self.assertEqual(meta["bounds"], (-170.25, -10.25, -109.75, 10.25))
+
+    def test_regional_grid_crossing_the_antimeridian_is_refused(self):
+        path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(170, 200.01, 0.5))
+
+        with self.assertRaisesRegex(UnsupportedGridError, "antimeridian"):
+            self._metadata(path)
 
     def test_refusal_reaches_the_ingestion_failure_record(self):
         lats = np.concatenate([np.arange(-10, 0, 0.5), np.arange(0, 10.01, 1.0)])

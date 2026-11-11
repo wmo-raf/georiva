@@ -144,6 +144,12 @@ Handles NetCDF files (.nc, .nc4) using xarray.
   curvilinear grid (2D lat/lon, e.g. WRF on Lambert) or an unevenly spaced axis (e.g. WRF on Mercator) is refused with
   `UnsupportedGridError` (from `formats/base.py`, a `ValueError`) naming the problem, which fails the ingestion with
   that reason rather than publishing the data in the wrong place.
+- Finds the grid's coordinates by name (`lat`/`latitude`/`y`, `lon`/`longitude`/`x`), preferring 1D dimension
+  coordinates over 2D auxiliary ones, then by CF `standard_name` or `units` (`degrees_north`/`degrees_east`, which is
+  how raw WRF's `XLAT`/`XLONG` are recognised). A grid with no recognisable coordinates, or with axes outside degree
+  range and no declared CRS, is refused rather than placed at a placeholder.
+- Lays 0..360 longitudes out from -180 to 180, reordering the columns with the coordinates so a global grid is not
+  placed 180 degrees off. A regional 0..360 grid that straddles 180 is refused.
 - Detects CRS from dataset attributes or `spatial_ref` variable (not hardcoded to EPSG:4326 like GRIB).
 - Handles `_FillValue` replacement: both from `encoding["_FillValue"]` and `attrs["_FillValue"]`.
 
