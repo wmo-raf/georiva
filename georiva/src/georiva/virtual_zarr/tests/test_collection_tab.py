@@ -139,6 +139,9 @@ class CollectionVirtualZarrTabTests(TestCase):
 
         self.assertContains(response, "Stuck")
         self.assertContains(response, "Building")
+        # Styleguide tags (#575): Wagtail 7 does not style ``w-status-tag``.
+        self.assertContains(response, 'class="w-status"')
+        self.assertNotContains(response, "w-status-tag")
 
     def test_stale_manifest_renders_its_status(self):
         variable = add_variable(self.collection, slug="gone-stale")

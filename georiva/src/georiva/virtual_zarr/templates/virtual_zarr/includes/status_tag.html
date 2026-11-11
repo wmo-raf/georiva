@@ -1,28 +1,31 @@
-{% load i18n %}
+{% load i18n wagtailadmin_tags %}
 {% comment %}
     The status chip for one coverage report — shared between the collection
     tab rows and the drill-down summary.  Expects ``report`` in context.
+
+    Wagtail's styleguide tag has a filled (primary) and an outline variant
+    only, so a failure is the outline tag with its reason on hover. The
+    hover text sits on a wrapper: ``{% status %}`` renders ``title`` only on
+    its link form.
 {% endcomment %}
 {% if report.display_status == "no_manifest" %}
-    <span class="w-status-tag">{% trans "Not tracked" %}</span>
+    {% status label=_("Not tracked") %}
 {% elif report.display_status == "stuck" %}
-    <span class="w-status-tag w-status-tag--critical vz-status-help"
+    <span class="vz-status-help"
           title="{% trans 'Building with an expired lock — the worker likely died. The next sweep resets and retries it.' %}">
-        {% trans "Stuck" %}
+        {% status label=_("Stuck") %}
     </span>
 {% elif report.display_status == "ready" %}
-    <span class="w-status-tag w-status-tag--primary">{{ report.manifest.get_status_display }}</span>
-{% elif report.display_status == "building" %}
-    <span class="w-status-tag w-status-tag--secondary">{{ report.manifest.get_status_display }}</span>
+    {% status label=report.manifest.get_status_display classname="w-status--primary" %}
 {% elif report.display_status == "failed" %}
-    <span class="w-status-tag w-status-tag--critical vz-status-help"
-          title="{{ report.error }}">{{ report.manifest.get_status_display }}</span>
+    <span class="vz-status-help" title="{{ report.error }}">
+        {% status label=report.manifest.get_status_display %}
+    </span>
 {% else %}
-    <span class="w-status-tag">{{ report.manifest.get_status_display }}</span>
+    {% status label=report.manifest.get_status_display %}
 {% endif %}
 {% if report.repo_read_error %}
-    <span class="w-status-tag w-status-tag--warning vz-status-help"
-          title="{{ report.repo_read_error }}">
-        {% trans "Repo unreadable" %}
+    <span class="vz-status-help" title="{{ report.repo_read_error }}">
+        {% status label=_("Repo unreadable") %}
     </span>
 {% endif %}
