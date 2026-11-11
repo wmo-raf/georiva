@@ -58,7 +58,8 @@ dependencies = [
     "pint==0.25.3",
     "virtual-tiff==0.5.0",
     "virtualizarr==2.6.2",
-    "eccodeslib>=2.47.3.22",
+    # Held below 2.50: eckitlib 2.5 bundles a second libproj that breaks pyproj (#625)
+    "eccodeslib>=2.47.3.22,<2.50",
     "icechunk==2.1.2",
 ]
 
@@ -79,3 +80,8 @@ include = ["georiva", "georiva.*"]
 [tool.setuptools.dynamic]
 # version always from the code
 version = { attr = "georiva.version.__version__" }
+
+[tool.uv]
+# eckitlib 2.5 bundles its own libproj, which clashes with pyproj's (#625).
+# eccodeslib does not pin eckitlib, so the eccodeslib cap alone won't hold it.
+constraint-dependencies = ["eckitlib<2.5"]
