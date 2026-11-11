@@ -9,7 +9,11 @@ Design:
 - NetCDF variables are uniquely identified by name — no key indirection needed.
 - open_variable() is the primary interface: context manager, lazy DataArray.
 - extract_variable() and get_metadata_for_variable() are inherited from BaseFormatPlugin.
-- Supports rectilinear and curvilinear grids, CRS detection, and fill-value handling.
+- Places regular grids only: 1D coordinate axes with even spacing. A curvilinear
+  grid (2D lat/lon, e.g. WRF on Lambert) or an unevenly spaced axis (e.g. WRF on
+  Mercator) cannot be described by bounds plus one resolution, so it is refused
+  with UnsupportedGridError rather than stretched into a box and misplaced.
+- CRS detection and fill-value handling.
 """
 
 from __future__ import annotations
@@ -23,10 +27,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
+from rasterio.crs import CRS
+from rasterio.errors import CRSError
 
 from georiva.utils.path import PathLike
 
-from .base import BaseFormatPlugin, ExtractedVariable, VariableInfo
+from .base import BaseFormatPlugin, ExtractedVariable, UnsupportedGridError, VariableInfo
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +142,12 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
 
             valid_time = self._resolve_valid_time(var, ds, timestamp)
 
+            # Refuse a grid that cannot be placed, and lay 0..360 longitudes out
+            # west to east — on the whole grid, before any window is cut from it.
+            lat_name, lon_name = self._find_lat_lon_coords(var)
+            crs = self._detect_crs(ds)
+            var = self._regular_grid(var, lat_name, lon_name, crs)
+
             # Orientation check
             y_dim, x_dim = self._spatial_dims(var)
             needs_flip = False
@@ -154,7 +166,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                 h = min(h, full_height - y_off)
                 var = var.isel({x_dim: slice(x_off, x_off + w), y_dim: slice(y_off, y_off + h)})
 
-            bounds, resolution, crs = self._spatial_info(var, ds)
+            bounds, resolution = self._spatial_info(var, lat_name, lon_name)
 
             yield VariableInfo(
                 data=var,
@@ -279,57 +291,159 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                 x_dim = d
         return y_dim, x_dim
 
-    def _spatial_info(self, var, ds: xr.Dataset) -> tuple[tuple[float, ...], tuple[float, float], str]:
-        """Returns (bounds, resolution, crs). Supports rectilinear and curvilinear grids."""
-        lat_name, lon_name = self._find_lat_lon_coords(var)
+    def _spatial_info(self, var, lat_name: str, lon_name: str) -> tuple[tuple[float, ...], tuple[float, float]]:
+        """Returns (bounds, resolution) of a grid _regular_grid has accepted."""
+        lats = np.asarray(var.coords[lat_name].values, dtype=np.float64)
+        lons = np.asarray(var.coords[lon_name].values, dtype=np.float64)
 
-        if lat_name is None or lon_name is None:
-            return (0.0, 0.0, 1.0, 1.0), (1.0, 1.0), "EPSG:4326"
-
-        lats = np.array(var.coords[lat_name].values)
-        lons = np.array(var.coords[lon_name].values)
-
-        if np.nanmax(lons) > 180:
-            lons = np.where(lons > 180, lons - 360, lons)
-
-        lat_res = self._compute_resolution(lats, axis=0)
-        lon_res = self._compute_resolution(lons, axis=-1)
+        lat_res = self._compute_resolution(lats)
+        lon_res = self._compute_resolution(lons)
 
         bounds = (
-            float(np.nanmin(lons) - lon_res / 2),
-            float(np.nanmin(lats) - lat_res / 2),
-            float(np.nanmax(lons) + lon_res / 2),
-            float(np.nanmax(lats) + lat_res / 2),
+            float(lons.min() - lon_res / 2),
+            float(lats.min() - lat_res / 2),
+            float(lons.max() + lon_res / 2),
+            float(lats.max() + lat_res / 2),
         )
-        crs = self._detect_crs(ds)
-        return bounds, (lon_res, lat_res), crs
+        return bounds, (lon_res, lat_res)
 
-    def _find_lat_lon_coords(self, var) -> tuple[str | None, str | None]:
-        lat_name = lon_name = None
-        for name in var.coords:
-            nl = name.lower()
-            if nl in self._Y_NAMES and lat_name is None:
-                lat_name = name
-            elif nl in self._X_NAMES and lon_name is None:
-                lon_name = name
+    _LAT_UNITS = {"degrees_north", "degree_north", "degrees_n", "degree_n", "degreesn", "degreen"}
+    _LON_UNITS = {"degrees_east", "degree_east", "degrees_e", "degree_e", "degreese", "degreee"}
+
+    def _find_lat_lon_coords(self, var) -> tuple[str, str]:
+        """Name the coordinates that place *var*'s rows and columns.
+
+        A 1D dimension coordinate wins over an auxiliary one, so a projected
+        file's x/y axes are used even when it also carries 2D lat/lon. Failing
+        a known name, CF attributes identify the coordinate (raw WRF's XLAT and
+        XLONG carry only units). A grid with neither cannot be placed.
+        """
+        lat_name = self._find_axis_coord(var, self._Y_NAMES, "latitude", self._LAT_UNITS)
+        lon_name = self._find_axis_coord(var, self._X_NAMES, "longitude", self._LON_UNITS)
         if lat_name is None or lon_name is None:
-            for name in var.dims:
-                nl = name.lower()
-                if nl in self._Y_NAMES and lat_name is None:
-                    lat_name = name
-                elif nl in self._X_NAMES and lon_name is None:
-                    lon_name = name
+            raise UnsupportedGridError(
+                f"The grid has no latitude/longitude coordinates the NetCDF handler recognises "
+                f"(found coordinates: {', '.join(map(str, var.coords)) or 'none'}), so its cells "
+                f"cannot be placed. {self._REGULAR_GRIDS_ONLY}"
+            )
         return lat_name, lon_name
 
     @staticmethod
-    def _compute_resolution(coords: np.ndarray, axis: int) -> float:
+    def _find_axis_coord(var, names: set[str], standard_name: str, units: set[str]) -> str | None:
+        coords = [(name, var.coords[name]) for name in var.coords]
+        by_name = [name for name, c in coords if str(name).lower() in names]
+        for name in by_name:
+            if name in var.dims:
+                return name
+        if by_name:
+            return by_name[0]
+        for name, c in coords:
+            if c.attrs.get("standard_name") == standard_name:
+                return name
+            if str(c.attrs.get("units", "")).lower() in units:
+                return name
+        return None
+
+    # How far, in cells, any coordinate may sit from the evenly spaced axis
+    # running between the axis's two ends. Float32 jitter and decimal-rounded
+    # coordinates stay under 0.01 of a cell. A 9 km Mercator grid drifts ~1 cell
+    # over -12..15 deg and ~3.6 over -35..-20; a +-5 deg equatorial strip drifts
+    # 0.03 (~270 m) and passes.
+    _SPACING_TOLERANCE_CELLS = 0.1
+
+    _REGULAR_GRIDS_ONLY = (
+        "Only regular grids can be placed — reproject the file onto a regular "
+        "latitude-longitude grid before ingesting it."
+    )
+
+    def _regular_grid(self, var, lat_name: str, lon_name: str, crs: str):
+        """Return *var* on a placeable grid, or refuse it with UnsupportedGridError."""
+        lats = np.asarray(var.coords[lat_name].values)
+        lons = np.asarray(var.coords[lon_name].values)
+        # Before the 0..360 recentring, which reorders a global axis.
+        self._require_regular_grid(lats, lat_name, lons, lon_name)
+        if not self._is_geographic(crs):
+            return var
+        if np.abs(lats).max() > 90 or lons.min() < -180 or lons.max() > 360:
+            raise UnsupportedGridError(
+                f"The grid's '{lat_name}'/'{lon_name}' axes are not in degrees (they span "
+                f"{lats.min():g}..{lats.max():g} and {lons.min():g}..{lons.max():g}) and the file "
+                "declares no projected CRS, so its cells cannot be placed. Declare the CRS "
+                "(a 'crs' attribute or a 'spatial_ref' variable) or reproject the file onto a "
+                "regular latitude-longitude grid before ingesting it."
+            )
+        return self._recentre_longitudes(var, lon_name)
+
+    def _recentre_longitudes(self, var, lon_name: str):
+        """Lay a 0..360 longitude axis out from -180 to 180, west to east.
+
+        Wrapping the coordinate values alone would leave the columns in their
+        stored order, so a global grid starting at Greenwich would be placed
+        180 degrees off; the columns are reordered with it. A regional grid
+        that straddles 180 splits in two under -180..180 and is refused.
+        """
+        lons = np.asarray(var.coords[lon_name].values, dtype=np.float64)
+        if lons.max() <= 180:
+            return var
+        wrapped = np.where(lons > 180, lons - 360, lons)
+        order = np.argsort(wrapped, kind="stable")
         try:
-            if coords.ndim == 1 and coords.size > 1:
-                return float(np.nanmedian(np.abs(np.diff(coords))))
-            elif coords.ndim == 2 and coords.shape[abs(axis)] > 1:
-                return float(np.nanmedian(np.abs(np.diff(coords, axis=axis))))
-        except Exception:
-            pass
+            self._require_even_spacing(wrapped[order], lon_name)
+        except UnsupportedGridError:
+            raise UnsupportedGridError(
+                f"The grid's '{lon_name}' axis crosses the antimeridian ({lons.min():g}..{lons.max():g} "
+                "degrees east) without covering the globe, so it splits in two under -180..180. "
+                "Split the file at 180 degrees, or reproject it onto -180..180, before ingesting it."
+            ) from None
+        dim = var.coords[lon_name].dims[0]
+        var = var.assign_coords({lon_name: (dim, wrapped, var.coords[lon_name].attrs)})
+        if (order != np.arange(order.size)).any():
+            var = var.isel({dim: order})
+        return var
+
+    @staticmethod
+    def _is_geographic(crs: str) -> bool:
+        try:
+            return CRS.from_user_input(crs).is_geographic
+        except CRSError:
+            return crs == "EPSG:4326"
+
+    @classmethod
+    def _require_regular_grid(cls, lats: np.ndarray, lat_name: str, lons: np.ndarray, lon_name: str) -> None:
+        if lats.ndim != 1 or lons.ndim != 1:
+            raise UnsupportedGridError(
+                f"The grid is curvilinear: '{lat_name}' and '{lon_name}' are {lats.ndim}D/{lons.ndim}D "
+                f"coordinates, not 1D axes. {cls._REGULAR_GRIDS_ONLY}"
+            )
+        cls._require_even_spacing(lats, lat_name)
+        cls._require_even_spacing(lons, lon_name)
+
+    @classmethod
+    def _require_even_spacing(cls, coords: np.ndarray, name: str) -> None:
+        coords = coords.astype(np.float64)
+        if not np.isfinite(coords).all():
+            raise UnsupportedGridError(
+                f"The grid's '{name}' axis has missing (NaN or infinite) coordinates, so its "
+                f"cells cannot be placed. {cls._REGULAR_GRIDS_ONLY}"
+            )
+        if coords.size < 3:
+            return
+        cell = (coords[-1] - coords[0]) / (coords.size - 1)
+        even = np.linspace(coords[0], coords[-1], coords.size)
+        drift = float(np.max(np.abs(coords - even))) / abs(cell) if cell else np.inf
+        if drift > cls._SPACING_TOLERANCE_CELLS:
+            raise UnsupportedGridError(
+                f"The grid's '{name}' axis is not evenly spaced: its coordinates drift up to "
+                f"{drift:.2f} cells from an even spacing (tolerance "
+                f"{cls._SPACING_TOLERANCE_CELLS} cells), so placing it by one resolution would "
+                f"misplace the data. {cls._REGULAR_GRIDS_ONLY}"
+            )
+
+    @staticmethod
+    def _compute_resolution(coords: np.ndarray) -> float:
+        """Spacing of a 1D axis already checked by _require_even_spacing."""
+        if coords.size > 1:
+            return float(np.median(np.abs(np.diff(coords))))
         return 1.0
 
     @staticmethod

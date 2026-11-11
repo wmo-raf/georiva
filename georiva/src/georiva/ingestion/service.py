@@ -246,7 +246,7 @@ class IngestionService:
                                     result.add_error(
                                         f"Partial failure for {collection.slug} "
                                         f"@ {ts}: variables failed: "
-                                        f"{', '.join(failed_vars)}"
+                                        f"{'; '.join(failed_vars)}"
                                     )
 
                                 if item is None:

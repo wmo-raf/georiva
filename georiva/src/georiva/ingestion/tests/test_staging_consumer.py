@@ -18,6 +18,7 @@ from django.test import TestCase
 from georiva.core.models import Catalog
 from georiva.core.models.base import AbstractAsset
 from georiva.core.storage import BucketType
+from georiva.formats.base import UnsupportedGridError
 from georiva.organisations.testing import make_organisation
 from georiva.staging.models import StagingAsset, StagingCollection, StagingItem
 
@@ -43,7 +44,7 @@ class RegisterStagingFileTests(TestCase):
             organisation=make_organisation(), name="CMIP6", slug="cmip6", file_format="netcdf"
         )
 
-    def _register(self, timestamps, key="test-org/cmip6/tas-ssp245/series.nc"):
+    def _register(self, timestamps, key="test-org/cmip6/tas-ssp245/series.nc", metadata_error=None):
         plugin = MagicMock()
         plugin.list_variables.return_value = [{"name": "tas"}]
         plugin.get_timestamps.return_value = timestamps
@@ -53,6 +54,7 @@ class RegisterStagingFileTests(TestCase):
             "bounds": [0, 0, 1, 1],
             "crs": "EPSG:4326",
         }
+        plugin.get_metadata_for_variable.side_effect = metadata_error
         sfm = MagicMock()
         sfm.download_to_temp = lambda origin, key: _fake_temp()
 
@@ -128,6 +130,23 @@ class RegisterStagingFileTests(TestCase):
         item = self._register(_ts(1), key="test-org/nope/coll/file.nc")
         self.assertIsNone(item)
         self.assertEqual(StagingItem.objects.count(), 0)
+
+    def test_a_grid_the_handler_refuses_is_not_registered(self):
+        # Registering it with no bounds would hand derivation a file it would
+        # misplace; the refusal stops it here, as for the other refusals (#543).
+        refusal = UnsupportedGridError("The grid is curvilinear")
+
+        with self.assertLogs("georiva.ingestion.staging_consumer", "WARNING") as logs:
+            item = self._register(_ts(1), metadata_error=refusal)
+
+        self.assertIsNone(item)
+        self.assertEqual(StagingItem.objects.count(), 0)
+        self.assertIn("curvilinear", "\n".join(logs.output))
+
+    def test_a_metadata_scan_that_breaks_otherwise_still_registers(self):
+        item = self._register(_ts(1), metadata_error=OSError("flaky read"))
+
+        self.assertIsNotNone(item)
 
 
 class BackfillStagingLinkTests(TestCase):

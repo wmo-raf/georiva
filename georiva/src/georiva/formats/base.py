@@ -37,6 +37,14 @@ import xarray as xr
 from georiva.utils.path import PathLike
 
 
+class UnsupportedGridError(ValueError):
+    """The file's grid cannot be placed as bounds plus one resolution per axis.
+
+    Raised instead of guessing, so a grid the platform would misplace fails its
+    ingestion with the reason rather than publishing in the wrong place.
+    """
+
+
 @dataclass
 class VariableInfo:
     """

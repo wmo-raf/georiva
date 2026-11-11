@@ -33,6 +33,7 @@
     [
       "georiva.core",
       "georiva.events",
+      "georiva.formats",
       "georiva.site_plugins",
       "georiva.virtual_zarr",
       "georiva.wmts"

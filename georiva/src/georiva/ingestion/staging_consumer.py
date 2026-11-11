@@ -83,6 +83,7 @@ def register_staging_file(bucket: str, key: str):
     they are approximate Gregorian index bounds. The real time is read from
     file content at derivation time.
     """
+    from georiva.formats.base import UnsupportedGridError
     from georiva.formats.registry import format_registry
     from georiva.ingestion.handlers.source_file_manager import SourceFileManager
     from georiva.staging.models import (
@@ -125,6 +126,10 @@ def register_staging_file(bucket: str, key: str):
                 logger.warning("Staging: get_timestamps failed for %s: %s", key, e)
             try:
                 spatial = plugin.get_metadata_for_variable(local_path, first_var) or {}
+            except UnsupportedGridError as e:
+                # Derivation would place this grid wrongly; refuse it here (#543).
+                logger.warning("Staging: refusing %s: %s", key, e)
+                return None
             except Exception as e:
                 logger.warning("Staging: metadata scan failed for %s: %s", key, e)
 

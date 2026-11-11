@@ -60,10 +60,12 @@ class IngestionHandler:
         Process all Variables for *collection* at *timestamp*.
 
         Returns:
-            (item, assets, clip_info, failed_variable_slugs)
+            (item, assets, clip_info, failed_variables)
 
         item is None if every variable failed (orphan Item is deleted).
         clip_info holds original_size / clipped_size for the first variable.
+        failed_variables holds one "<slug>: <reason>" entry per failed variable,
+        so the reason reaches the ingestion's failure record.
         """
         logger.info("Processing %s @ %s", collection, timestamp)
 
@@ -157,7 +159,7 @@ class IngestionHandler:
                     e,
                     traceback.format_exc(),
                 )
-                failed_variables.append(variable.slug)
+                failed_variables.append(f"{variable.slug}: {e}")
                 if progress is not None:
                     progress.increment(state=f"{variable.slug}: failed — {e}")
 
