@@ -8,7 +8,7 @@
 <form method="post" action="">
     {% csrf_token %}
     <div style="display:flex;gap:1em;margin-top:1.5em;">
-        <button type="submit" class="button bicolor button--icon no">
+        <button type="submit" class="button button--icon no">
             {% icon name="bin" wrapped=1 %}
             {% trans "Yes, delete" %}
         </button>

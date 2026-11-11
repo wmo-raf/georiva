@@ -107,6 +107,15 @@
             font-size: 0.75rem;
         }
 
+        /*
+         * Wagtail's status tag carries a half-em bottom margin for wrapping rows;
+         * centred in a one-line flex row it lifts the tag off the text.
+         */
+        .ci-var-chip .w-status,
+        .w-tabs__tab .w-status {
+            margin-block: 0;
+        }
+
         /* ── Automation card ──────────────────────────────────────────── */
         .ci-automation-card {
             margin-top: 4rem;
