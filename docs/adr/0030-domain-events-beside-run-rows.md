@@ -60,7 +60,9 @@ someone who already knows which row to open.
   too (#498).
 - Events are kept indefinitely; volume is low thousands of rows per day.
 - The Timeline draws a chain as a rail along `caused_by` and folds what is wide
-  or repetitive (`events/timeline.py`). It stays reachable by link only: `?from=`
+  or repetitive (`events/timeline.py`). A run of quiet bursts folds even when a
+  `caused_by` line runs through it; the repeat row hangs from the run's cause
+  and carries the line on to whatever follows it (#498). It stays reachable by link only: `?from=`
   narrows it to one event's branch and `?event=` lands on one event, both read
   through the same scoped index rows as the whole chain.
 - The plugin-facing surface (abstract base, `record()`, context, migration

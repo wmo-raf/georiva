@@ -1,6 +1,7 @@
 """The Timeline's rail layout: lanes, folds, gaps and focus, without a database."""
 
 import datetime
+import itertools
 import uuid
 
 from django.test import SimpleTestCase
@@ -287,13 +288,23 @@ class RepeatTests(SimpleTestCase):
         self.assertEqual([repeat.count for repeat in repeats], [])
         self.assertIn(bursts[2][1], drawn(layout))
 
-    def test_a_burst_with_a_cause_across_its_edge_is_not_collapsed(self):
+    def test_a_line_into_the_run_from_above_it_breaks_the_run(self):
+        bursts = [cycle(0, outcome="failed"), cycle(1), cycle(2), cycle(3), cycle(4)]
+        bursts[3][0].caused_by_id = bursts[0][1].id
+
+        layout = build_layout([event for burst in bursts for event in burst])
+
+        self.assertFalse([row for row in layout.rows if row.repeat])
+
+    def test_a_line_from_the_first_burst_into_the_run_folds_with_it(self):
         bursts = [cycle(hour) for hour in range(4)]
         bursts[2][0].caused_by_id = bursts[0][0].id
 
         layout = build_layout([event for burst in bursts for event in burst])
 
-        self.assertFalse([row for row in layout.rows if row.repeat])
+        (repeat,) = [row.repeat for row in layout.rows if row.repeat]
+        self.assertIn(bursts[2][0], repeat.members)
+        self.assertNotIn(bursts[2][0], drawn(layout))
 
     def test_a_target_inside_a_repeat_opens_it(self):
         bursts = [cycle(hour) for hour in range(4)]
@@ -380,13 +391,48 @@ class QuietRunTests(SimpleTestCase):
         self.assertFalse([row for row in layout.rows if row.repeat])
         self.assertIn(bursts[2][1], drawn(layout))
 
-    def test_a_causal_line_still_breaks_a_mixed_run(self):
-        bursts = [cycle(0), sweep_only(1), cycle(2), sweep_only(3)]
-        bursts[2][0].caused_by_id = bursts[1][0].id
 
-        layout = build_layout([event for burst in bursts for event in burst])
+class LinkedLoopTests(SimpleTestCase):
+    """A sweep revival is caused by the run's last event and causes the next attempt
+    (#498), so a looping chain is one line from burst to burst. It still folds, and
+    the line runs through the repeat row instead of breaking it."""
 
-        self.assertFalse([row for row in layout.rows if row.repeat])
+    def _loop(self, *, ending="ok"):
+        bursts = [cycle(0), sweep_only(1), cycle(2), sweep_only(3), cycle(4), cycle(5, outcome=ending)]
+        for earlier, later in itertools.pairwise(bursts):
+            later[0].caused_by_id = earlier[-1].id
+        return bursts, build_layout([event for burst in bursts for event in burst])
+
+    def test_a_linked_loop_folds_after_its_first_burst(self):
+        bursts, layout = self._loop()
+
+        (repeat,) = [row.repeat for row in layout.rows if row.repeat]
+        self.assertEqual(repeat.members, [event for burst in bursts[1:] for event in burst])
+
+    def test_the_repeat_hangs_from_the_event_that_caused_it(self):
+        bursts, layout = self._loop()
+
+        rows = drawn(layout)
+        repeat_row = next(index for index, row in enumerate(layout.rows) if row.repeat)
+        cause_row = rows.index(bursts[0][-1])
+        self.assertTrue(layout.rows[cause_row].cells[0].s)
+        self.assertTrue(layout.rows[repeat_row].cells[0].n)
+        self.assertFalse(layout.rows[repeat_row].stub)
+
+    def test_what_breaks_the_loop_hangs_from_the_repeat_and_is_no_stub(self):
+        bursts, layout = self._loop(ending="failed")
+
+        (repeat,) = [row.repeat for row in layout.rows if row.repeat]
+        self.assertEqual(repeat.members, [event for burst in bursts[1:5] for event in burst])
+        failed_row = next(row for row in layout.rows if row.entry is bursts[5][0])
+        self.assertFalse(failed_row.stub)
+        self.assertTrue(failed_row.cells[0].n)
+
+    def test_a_folded_member_is_never_also_drawn(self):
+        bursts, layout = self._loop()
+
+        shown = drawn(layout)
+        self.assertFalse([member for burst in bursts[1:] for member in burst if member in shown])
 
 
 class TargetTests(SimpleTestCase):
