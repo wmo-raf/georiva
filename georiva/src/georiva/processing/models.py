@@ -57,6 +57,7 @@ class DerivationRun(TimeStampedModel):
         MANUAL_RERUN = "manual_rerun", "Manual re-run"
         NOT_READY_SWEEP = "not_ready_sweep", "Inputs ready (sweep revival)"
         INPUT_ARRIVED = "input_arrived", "Required input arrived"
+        INPUT_DELETED = "input_deleted", "Input deleted (ADR 0041)"
 
     recipe_type = models.CharField(max_length=100, db_index=True)
     recipe_version = models.CharField(max_length=50)
@@ -213,7 +214,7 @@ class DerivationRun(TimeStampedModel):
     # gets here, so it writes nothing. The context is whatever the dispatcher
     # carried; the engine never resolves an organisation of its own.
 
-    def _finish_attempt(self, outcome, update_fields, **extra):
+    def _finish_attempt(self, outcome, update_fields, *, produced_item_id=None):
         with ensure_context(actor="system:engine"):
             with transaction.atomic():
                 self.save(update_fields=[*update_fields, "modified"])
@@ -229,7 +230,7 @@ class DerivationRun(TimeStampedModel):
                     retry_reason=self.last_retry_reason,
                     input_hash=self.input_hash,
                     origin=self.origin or "",
-                    produced_item_id=self.produced_item_id,
+                    produced_item_id=produced_item_id if produced_item_id is not None else self.produced_item_id,
                     error=self.error,
                 )
         return self.last_event
@@ -266,6 +267,21 @@ class DerivationRun(TimeStampedModel):
             ["status", "locked_at", "locked_by"],
         )
 
+    def mark_retracted(self):
+        """The unit is no longer ready and the item it produced has been deleted
+        (ADR 0041). Parks as ``not_ready``, so the unit is revived like any other
+        when its inputs come back; the event names the item that was withdrawn."""
+        retracted_item_id = self.produced_item_id
+        self.status = self.Status.NOT_READY
+        self.produced_item = None
+        self.locked_at = None
+        self.locked_by = ""
+        return self._finish_attempt(
+            DerivationAttemptFinished.Outcome.RETRACTED,
+            ["status", "produced_item", "locked_at", "locked_by"],
+            produced_item_id=retracted_item_id,
+        )
+
     def mark_failed(self, error: str):
         self.status = self.Status.FAILED
         self.error = error or ""
@@ -295,6 +311,7 @@ class DerivationAttemptFinished(DomainEvent):
         FAILED = "failed", "Failed"
         SKIPPED = "skipped", "Skipped"
         NOT_READY = "not_ready", "Not ready"
+        RETRACTED = "retracted", "Retracted"
 
     derivation_run = models.ForeignKey(
         DerivationRun, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"

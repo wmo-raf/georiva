@@ -112,13 +112,14 @@ class AttemptEventTests(TestCase):
             self._run()  # completed
             self._run()  # inputs unchanged → skipped
             self.recipe.checksum, self.recipe.ready = "v2", False
-            self._run()  # changed but not ready
+            self._run()  # changed but not ready → the produced item is retracted (ADR 0041)
+            self._run()  # still not ready, nothing left to retract
             self.recipe.ready, self.recipe.fail = True, True
             with self.assertRaises(RuntimeError):
                 self._run()  # failed
 
         outcomes = list(DerivationAttemptFinished.objects.order_by("occurred_at").values_list("outcome", flat=True))
-        self.assertEqual(outcomes, ["completed", "skipped", "not_ready", "failed"])
+        self.assertEqual(outcomes, ["completed", "skipped", "retracted", "not_ready", "failed"])
 
     def test_a_retry_writes_a_second_event_and_leaves_the_first_untouched(self):
         self.recipe.fail = True

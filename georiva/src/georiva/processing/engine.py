@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class UnitResult:
-    status: str  # completed | skipped | not_ready | locked | failed
+    status: str  # completed | skipped | not_ready | retracted | locked | failed
     item_id: int | None = None
     input_hash: str = ""
     event_id: object = None  # the DerivationAttemptFinished this attempt wrote, if any
@@ -373,30 +373,14 @@ def _run_unit(
         )
 
         ihash = compute_input_hash(resolved, recipe.version)
-        out_item = recipe.outputs(unit)
-        logger.debug(
-            "[unit %s] %s input_hash=%s output→%s@%s",
-            pos,
-            tag,
-            ihash[:12],
-            getattr(out_item.collection, "slug", "?"),
-            out_item.time,
-        )
 
-        logger.info("[unit %s] %s step 2/6 — idempotency check…", pos, tag)
-        if _is_current(out_item, recipe, ihash):
-            logger.info(
-                "[unit %s] %s SKIP — output already current for this input_hash (no recompute)",
-                pos,
-                tag,
-            )
-            event = run.mark_skipped(input_hash=ihash)
-            _log_progress(origin, unit_total)
-            return UnitResult(status="skipped", input_hash=ihash, event_id=event.pk)
-
-        logger.info("[unit %s] %s step 3/6 — readiness check…", pos, tag)
+        # Readiness comes before ``outputs``: a recipe maps a unit onto its
+        # output item *from* its inputs, which a deleted input no longer offers.
+        logger.info("[unit %s] %s step 2/6 — readiness check…", pos, tag)
         if not recipe.readiness(unit, resolved):
             missing = [ri.name for ri in resolved.values() if ri.required and not ri.present]
+            if run.produced_item_id is not None:
+                return _retract(run, pos, tag, missing, origin, unit_total)
             logger.info(
                 "[unit %s] %s NOT READY — required input(s) absent: %s "
                 "(parked; revived when the input is derived, or by the periodic sweep)",
@@ -407,6 +391,27 @@ def _run_unit(
             event = run.mark_not_ready()
             _log_progress(origin, unit_total)
             return UnitResult(status="not_ready", event_id=event.pk)
+
+        out_item = recipe.outputs(unit)
+        logger.debug(
+            "[unit %s] %s input_hash=%s output→%s@%s",
+            pos,
+            tag,
+            ihash[:12],
+            getattr(out_item.collection, "slug", "?"),
+            out_item.time,
+        )
+
+        logger.info("[unit %s] %s step 3/6 — idempotency check…", pos, tag)
+        if _is_current(out_item, recipe, ihash):
+            logger.info(
+                "[unit %s] %s SKIP — output already current for this input_hash (no recompute)",
+                pos,
+                tag,
+            )
+            event = run.mark_skipped(input_hash=ihash)
+            _log_progress(origin, unit_total)
+            return UnitResult(status="skipped", input_hash=ihash, event_id=event.pk)
 
         if writer is None:
             from georiva.core.storage import storage
@@ -487,6 +492,34 @@ def _run_unit(
         run.mark_failed(str(exc))
         _log_progress(origin, unit_total)
         raise
+
+
+def _retract(run, pos, tag, missing, origin, unit_total) -> UnitResult:
+    """Withdraw the item a unit produced once it is no longer ready (ADR 0041).
+
+    A derived item exists only while its unit is ready. Deleting the item lets
+    its Asset rows take their files with them on commit (ADR 0032), and its own
+    ``DerivationLink`` rows as an input carry the retraction forward to whatever
+    was derived from it in turn. The run parks as ``not_ready``, so the unit is
+    revived like any other if its inputs come back.
+    """
+    from django.db import transaction
+
+    from georiva.core.models import Item
+
+    item_id = run.produced_item_id
+    logger.info(
+        "[unit %s] %s RETRACT — required input(s) absent: %s; withdrawing item id=%s",
+        pos,
+        tag,
+        ", ".join(missing) or "unknown",
+        item_id,
+    )
+    with transaction.atomic():
+        Item.objects.filter(pk=item_id).delete()
+        event = run.mark_retracted()
+    _log_progress(origin, unit_total)
+    return UnitResult(status="retracted", item_id=item_id, event_id=event.pk)
 
 
 def _record_published(out_item, item, attempt_event) -> None:
