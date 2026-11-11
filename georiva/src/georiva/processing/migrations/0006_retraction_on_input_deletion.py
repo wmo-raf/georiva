@@ -18,6 +18,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='derivationrun',
             name='last_retry_reason',
-            field=models.CharField(choices=[('initial', 'Initial run'), ('celery_retry', 'Celery auto-retry'), ('stale_running_reclaim', 'Stale RUNNING reclaimed'), ('input_stale', 'Input changed (recompute)'), ('manual_rerun', 'Manual re-run'), ('not_ready_sweep', 'Inputs ready (sweep revival)'), ('input_arrived', 'Required input arrived'), ('input_deleted', 'Input deleted (ADR 0041)')], default='initial', max_length=32),
+            field=models.CharField(choices=[('initial', 'Initial run'), ('celery_retry', 'Celery auto-retry'), ('stale_running_reclaim', 'Stale RUNNING reclaimed'), ('input_stale', 'Input changed (recompute)'), ('manual_rerun', 'Manual re-run'), ('not_ready_sweep', 'Inputs ready (sweep revival)'), ('input_arrived', 'Required input arrived'), ('input_deleted', 'Input deleted')], default='initial', max_length=32),
         ),
     ]

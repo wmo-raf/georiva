@@ -171,9 +171,46 @@ def sweep_stale_units(*, dispatch: bool = True, sweep=None) -> int:
             # it). Walks transitively through internal intermediates.
             if run_rec.produced_item_id:
                 invalidate_downstream(run_rec.produced_item, dispatch=dispatch, sweep=sweep)
+    stale += _redispatch_failed_orphans(dispatch=dispatch, sweep=sweep)
     if stale:
         logger.info("Sweep: re-dispatched %d stale unit(s)", stale)
     return stale
+
+
+def _redispatch_failed_orphans(*, dispatch: bool, sweep) -> int:
+    """Re-run failed units still serving an item whose inputs no longer resolve (ADR 0041).
+
+    A unit RUNNING when its input was deleted refuses the delete's re-dispatch at
+    the lock, and its own attempt then fails on the vanished input — leaving the
+    item it produced earlier served, and a FAILED run the hash pass above never
+    looks at. Re-running it lets the engine retract the item. A failed unit whose
+    inputs still resolve is left to its own retries.
+    """
+    from .models import DerivationRun
+
+    count = 0
+    failed = DerivationRun.objects.filter(status=DerivationRun.Status.FAILED, produced_item__isnull=False)
+    for run_rec in failed:
+        recipe = _recipe_for(run_rec.recipe_type)
+        if recipe is None:
+            continue
+        try:
+            if recipe.readiness(run_rec.unit_key, recipe.resolve_inputs(run_rec.unit_key)):
+                continue
+        except Exception as e:  # a recipe that can't resolve is skipped, not fatal
+            logger.warning("Sweep: cannot resolve %s: %s", run_rec, e)
+            continue
+        _dispatch_unit(
+            run_rec.recipe_type,
+            run_rec.unit_key,
+            dispatch=dispatch,
+            reason=DerivationRun.RetryReason.INPUT_DELETED,
+            run_rec=run_rec,
+            sweep=sweep,
+            why="inputs_lost",
+        )
+        count += 1
+    return count
 
 
 def resurrect_not_ready_units(*, dispatch: bool = True, origins=None, reason=None, sweep=None) -> int:

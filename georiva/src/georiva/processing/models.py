@@ -57,7 +57,7 @@ class DerivationRun(TimeStampedModel):
         MANUAL_RERUN = "manual_rerun", "Manual re-run"
         NOT_READY_SWEEP = "not_ready_sweep", "Inputs ready (sweep revival)"
         INPUT_ARRIVED = "input_arrived", "Required input arrived"
-        INPUT_DELETED = "input_deleted", "Input deleted (ADR 0041)"
+        INPUT_DELETED = "input_deleted", "Input deleted"
 
     recipe_type = models.CharField(max_length=100, db_index=True)
     recipe_version = models.CharField(max_length=50)

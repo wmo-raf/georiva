@@ -36,9 +36,11 @@ Two things happened to the orphan afterwards, both by accident:
 2. **The engine decides what that re-run means, as it would for any re-run.** Readiness is now checked *before*
    `outputs()` (a recipe maps a unit onto its output from its inputs, which a deleted input no longer offers):
    - **ready on the remaining inputs** → it recomputes and overwrites the item in place (the climatology case);
-   - **not ready, and the run produced an item before** → the engine **retracts** it: deletes the item, parks the run
-     as `not_ready` with no produced item, and records a `DerivationAttemptFinished` with the new outcome `retracted`,
-     naming the withdrawn item (the promotion case);
+   - **not ready, the run produced an item before, and its inputs have changed since** → the engine **retracts** it:
+     deletes the item, parks the run as `not_ready` with no produced item, and records a `DerivationAttemptFinished`
+     with the new outcome `retracted`, naming the withdrawn item (the promotion case). With the inputs unchanged (the
+     recorded `input_hash` still matches) the unit is `skipped` instead: a custom readiness that turned false on its
+     own — a minimum count, a time window — withdraws nothing;
    - **not ready, never produced** → `not_ready`, as before.
 
 3. **Retraction is a delete like any other, so it carries itself forward.** The retracted item's assets take their
@@ -48,6 +50,12 @@ Two things happened to the orphan afterwards, both by accident:
 4. **A retracted unit comes back like any parked unit.** It is `not_ready`, so `resurrect_not_ready_units` revives it
    when its inputs resolve again (ADR 0020). A re-ingested promotion source is a new `StagingItem`, hence a new unit,
    and promotes on arrival as usual.
+
+5. **A re-dispatch that loses the lock is caught by the sweep.** A unit RUNNING when its input is deleted refuses the
+   re-dispatch, and its own attempt then fails on the vanished input, leaving a FAILED run whose earlier item is still
+   served — and `sweep_stale_units` looks only at completed runs. The same sweep therefore also re-runs every FAILED
+   run that still has a produced item and whose unit is no longer ready, with reason `input_deleted`; the engine then
+   retracts. A failed unit whose inputs still resolve is left to its own retries.
 
 The same rule applies on every path that re-runs a unit, not only an input delete: a stale-sweep re-run that finds its
 unit not ready also retracts, which ends the forever-failing promotion.
@@ -63,6 +71,13 @@ unit not ready also retracts, which ends the forever-failing promotion.
   ADR 0032's receiver already does for assets.
 - A recomputed (not retracted) intermediate does not re-dispatch its own dependents here. They follow through the
   existing `sweep_stale_units` hash check, as for any changed input.
+- The re-dispatch runs in the deleter's event context: the delete is its cause, so it does not reuse the unit's own
+  Correlation the way a sweep revival does.
+- A delete inside a savepoint that rolls back, under an outer transaction that commits, still re-runs the units it
+  reached. The re-run finds them ready and unchanged and skips — wasted work, not a wrong answer.
+- A retracted unit whose input can never return (a promotion of a deleted `StagingItem`) stays parked as `not_ready`,
+  and `resurrect_not_ready_units` resolves its inputs on every sweep, as it already does for any unit waiting on input
+  that never comes.
 - Refusing a delete while dependents live, and a per-recipe policy knob, were considered and not taken: refusing
   blocks retention and feed deletes on lineage the operator cannot see, and a knob adds surface without a recipe that
   needs a different answer yet. A recipe that tolerates a missing input already says so through `readiness`.

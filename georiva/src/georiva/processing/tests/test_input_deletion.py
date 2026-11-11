@@ -288,3 +288,52 @@ class RetractionCascadesForwardTests(_Fixture):
 
         self.assertFalse(Item.objects.filter(pk=promoted.pk).exists())
         self.assertEqual(dispatched, ["promotion", "sum_fake"])
+
+
+class RetractionNeedsChangedInputsTests(_Fixture):
+    def test_a_unit_whose_inputs_are_unchanged_is_not_retracted_by_its_readiness(self):
+        # A custom readiness (a minimum count, a time window) can turn false with
+        # nothing deleted. The item it published stays: only lost inputs retract.
+        first = self._sum()
+        recipe = self._sum_recipe()
+        recipe.readiness = lambda unit, resolved: False
+
+        outcome = run_unit(recipe, {"sum": "all"}, writer=_mock_writer())
+
+        self.assertEqual(outcome.status, "skipped")
+        self.assertTrue(Item.objects.filter(pk=first.item_id).exists())
+
+
+class TheSweepCatchesARedispatchThatLostTheLockTests(_Fixture):
+    """A unit RUNNING when its input is deleted refuses the re-dispatch's lock;
+    the running attempt then fails on the vanished input. The stale sweep, which
+    looks only at completed runs, would never see it again."""
+
+    def test_a_failed_run_whose_item_lost_its_inputs_is_retracted_by_the_sweep(self):
+        from georiva.processing.invocation import sweep_stale_units
+
+        RecipeRegistry._recipes["promotion"] = PromotionRecipe
+        promoted_id = self._promote(self.sitem).item_id
+        with patch("georiva.processing.tasks.run_unit_task"):
+            with self.captureOnCommitCallbacks(execute=True):
+                self.sitem.delete()
+        DerivationRun.objects.filter(recipe_type="promotion").update(status=DerivationRun.Status.FAILED)
+
+        swept = sweep_stale_units(dispatch=False)
+
+        self.assertEqual(swept, 1)
+        self.assertFalse(Item.objects.filter(pk=promoted_id).exists())
+        run_rec = DerivationRun.objects.get(recipe_type="promotion")
+        self.assertEqual((run_rec.status, run_rec.last_retry_reason), ("not_ready", "input_deleted"))
+
+    def test_a_failed_run_whose_inputs_still_resolve_is_left_to_its_retries(self):
+        from georiva.processing.invocation import sweep_stale_units
+
+        self._promote(self.sitem)
+        DerivationRun.objects.filter(recipe_type="promotion").update(status=DerivationRun.Status.FAILED)
+
+        with patch("georiva.processing.tasks.run_unit_task") as task:
+            swept = sweep_stale_units()
+
+        self.assertEqual(swept, 0)
+        task.delay.assert_not_called()

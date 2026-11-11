@@ -380,6 +380,12 @@ def _run_unit(
         if not recipe.readiness(unit, resolved):
             missing = [ri.name for ri in resolved.values() if ri.required and not ri.present]
             if run.produced_item_id is not None:
+                if run.input_hash == ihash:
+                    # Nothing it was built from has changed; a readiness that
+                    # turned false on its own (a count, a window) withdraws nothing.
+                    event = run.mark_skipped(input_hash=ihash)
+                    _log_progress(origin, unit_total)
+                    return UnitResult(status="skipped", input_hash=ihash, event_id=event.pk)
                 return _retract(run, pos, tag, missing, origin, unit_total)
             logger.info(
                 "[unit %s] %s NOT READY — required input(s) absent: %s "
