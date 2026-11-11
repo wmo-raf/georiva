@@ -2,14 +2,15 @@
  *
  * Two surfaces, two sets of tokens: the block itself sits on the sidebar's dark
  * ground (white text, --w-color-surface-menu-item-active on hover), while the
- * popover is an ordinary light panel over the page (--w-color-surface-page,
- * --w-color-grey-*). Markup in
+ * popover is an ordinary panel over the page, in the theme-aware tokens (--w-color-surface-page,
+ * --w-color-surface-header). Markup in
  * organisations/templates/organisations/org_hopper_block.html.
  */
 
 .gr-orghop {
     position: relative;
     padding: 0.5rem 0.75rem 0.75rem;
+    /* On the always-dark sidebar in either theme (#577). */
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -91,7 +92,8 @@
     font-size: 0.6875rem;
 }
 
-/* Eight stable slots; organisations/hopper.py picks one per slug. */
+/* Eight stable slots; organisations/hopper.py picks one per slug. A
+   categorical palette, the same in either theme (#577). */
 .gr-orghop__avatar--0 { background: #0ea5e9; }
 .gr-orghop__avatar--1 { background: #22c55e; }
 .gr-orghop__avatar--2 { background: #b45309; }
@@ -125,7 +127,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: var(--w-color-grey-400);
+    color: var(--w-color-text-meta);
 }
 
 .gr-orghop__search {
@@ -158,11 +160,11 @@
 }
 
 .gr-orghop__link:hover {
-    background: var(--w-color-grey-50);
+    background: var(--w-color-surface-header);
 }
 
 .gr-orghop__item--current .gr-orghop__link {
-    background: var(--w-color-grey-100);
+    background: color-mix(in srgb, var(--w-color-text-label) 10%, var(--w-color-surface-page));
 }
 
 .gr-orghop__check {
@@ -175,7 +177,7 @@
     margin: 0;
     padding: 0.5rem 0.375rem;
     font-size: 0.8125rem;
-    color: var(--w-color-grey-400);
+    color: var(--w-color-text-meta);
 }
 
 /* -- collapsed sidebar ------------------------------------------------------ */

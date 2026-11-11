@@ -36,7 +36,7 @@
             margin-top: 1em;
             padding: 0.6em 0.8em;
             border: 1px dashed var(--w-color-border-furniture);
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         /* The rail: one row per event, group or quiet spell; lanes are fixed-width cells. */
@@ -60,7 +60,7 @@
             white-space: nowrap;
             font-family: monospace;
             font-size: 0.8em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__lanes {
@@ -86,7 +86,7 @@
             bottom: 0;
             left: 10.5px;
             width: 1px;
-            background: var(--w-color-grey-200);
+            background: var(--w-color-border-furniture-more-contrast);
         }
 
         .gr-rail__row:first-child .gr-rail__cell:first-child::before {
@@ -101,7 +101,7 @@
         .gr-rail__row--gap .gr-rail__cell:first-child::before {
             width: 0;
             background: none;
-            border-left: 1px dashed var(--w-color-grey-400);
+            border-left: 1px dashed var(--w-color-icon-secondary);
         }
 
         .gr-rail__n,
@@ -109,7 +109,7 @@
         .gr-rail__e,
         .gr-rail__w {
             position: absolute;
-            background: var(--w-color-grey-400);
+            background: var(--w-color-icon-secondary);
         }
 
         .gr-rail__n,
@@ -148,7 +148,7 @@
         .gr-rail__s.gr-rail__seg--dashed {
             width: 0;
             background: none;
-            border-left: 2px dashed var(--w-color-grey-400);
+            border-left: 2px dashed var(--w-color-icon-secondary);
         }
 
         .gr-rail__dot {
@@ -172,7 +172,7 @@
 
         .gr-rail__dot--unreadable {
             background: var(--w-color-surface-page);
-            border: 2px solid var(--w-color-grey-400);
+            border: 2px solid var(--w-color-icon-secondary);
         }
 
         .gr-rail__dot--group {
@@ -186,8 +186,8 @@
             width: 18px;
             height: 18px;
             background: var(--w-color-surface-page);
-            border: 2px solid var(--w-color-grey-400);
-            color: var(--w-color-grey-600);
+            border: 2px solid var(--w-color-icon-secondary);
+            color: var(--w-color-text-context);
             font-size: 13px;
             font-weight: 700;
             line-height: 14px;
@@ -195,7 +195,7 @@
         }
 
         .gr-rail__repeat {
-            border: 1px dashed var(--w-color-grey-200);
+            border: 1px dashed var(--w-color-border-furniture-more-contrast);
         }
 
         .gr-rail__body {
@@ -253,7 +253,7 @@
 
         .gr-rail__card summary::before {
             content: "▸";
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__card details[open] > summary::before {
@@ -264,21 +264,21 @@
             margin-left: auto;
             padding: 0 0.4em;
             border-radius: 3px;
-            background: var(--w-color-grey-50);
+            background: var(--w-color-surface-header);
             font-family: monospace;
             font-size: 0.75em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__summary {
             flex-basis: 100%;
             font-size: 0.85em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__meta {
             font-size: 0.8em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__links {
@@ -292,7 +292,7 @@
         .gr-rail__counts,
         .gr-rail__span {
             font-size: 0.85em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__span {
@@ -310,7 +310,7 @@
             width: 10em;
             height: 6px;
             border-radius: 3px;
-            background: var(--w-color-grey-100);
+            background: var(--w-color-border-furniture);
         }
 
         .gr-rail__bar {
@@ -319,7 +319,7 @@
             bottom: 0;
             min-width: 3px;
             border-radius: 3px;
-            background: var(--w-color-grey-400);
+            background: var(--w-color-icon-secondary);
         }
 
         .gr-rail__members {
@@ -328,7 +328,7 @@
             overflow-y: auto;
             margin: 0.5em 0 0.2em 0.3em;
             padding: 0 0 0 0.8em;
-            border-left: 2px dotted var(--w-color-grey-200);
+            border-left: 2px dotted var(--w-color-border-furniture-more-contrast);
         }
 
         /* A repeat's pages share one scroll box, so paging grows one list, not a stack of them. */
@@ -383,7 +383,7 @@
             flex: none;
             min-width: 6em;
             font-family: monospace;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gr-rail__member-summary {
@@ -411,7 +411,7 @@
             padding: 10px 0;
             font-size: 0.8em;
             font-style: italic;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         {% for row in layout.rows %}{% if row.group %}

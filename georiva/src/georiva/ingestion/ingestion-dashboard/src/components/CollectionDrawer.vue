@@ -543,7 +543,7 @@ function fileDir(path) {
 .drawer-title {
   font-size: 18px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--w-color-text-label);
 }
 
 .drawer-meta {
@@ -558,21 +558,21 @@ function fileDir(path) {
   gap: 5px;
   font-size: 12px;
   font-weight: 500;
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--w-color-text-meta);
+  background: var(--w-color-surface-header);
   padding: 3px 8px;
   border-radius: 4px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--w-color-border-furniture);
 }
 
 .drawer-body {
   font-family: 'Inter', -apple-system, sans-serif;
-  color: #334155;
+  color: var(--w-color-text-context);
 }
 
 .tab-bar {
   display: flex;
-  border-bottom: 2px solid #e2e8f0;
+  border-bottom: 2px solid var(--w-color-border-furniture);
   margin-bottom: 16px;
 }
 
@@ -587,24 +587,24 @@ function fileDir(path) {
   margin-bottom: -2px;
   font-size: 13px;
   font-weight: 500;
-  color: #64748b;
+  color: var(--w-color-text-meta);
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
 
 .tab-btn:hover {
-  color: #0f172a;
+  color: var(--w-color-text-label);
 }
 
 .tab-btn.active {
-  color: #0f172a;
-  border-bottom-color: #0f172a;
+  color: var(--w-color-text-label);
+  border-bottom-color: var(--w-color-text-label);
   font-weight: 600;
 }
 
 .tab-count {
-  background: #e2e8f0;
-  color: #475569;
+  background: var(--w-color-border-furniture);
+  color: var(--w-color-text-context);
   font-size: 11px;
   font-weight: 600;
   padding: 1px 6px;
@@ -612,13 +612,13 @@ function fileDir(path) {
 }
 
 .tab-btn.active .tab-count {
-  background: #0f172a;
-  color: #fff;
+  background: var(--w-color-primary);
+  color: var(--w-color-white);
 }
 
 .tab-count--active {
-  background: #dbeafe !important;
-  color: #1d4ed8 !important;
+  background: color-mix(in srgb, var(--w-color-info-100) 15%, transparent) !important;
+  color: var(--w-color-text-status-label) !important;
 }
 
 .tab-content {
@@ -630,12 +630,12 @@ function fileDir(path) {
 .loading-state, .error-state, .empty-state {
   padding: 32px;
   text-align: center;
-  color: #94a3b8;
+  color: var(--w-color-text-meta);
   font-size: 14px;
 }
 
 .error-state {
-  color: #dc2626;
+  color: var(--w-color-text-error);
 }
 
 .section-label {
@@ -643,7 +643,7 @@ function fileDir(path) {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #94a3b8;
+  color: var(--w-color-text-meta);
   padding: 4px 0 2px;
 }
 
@@ -652,8 +652,8 @@ function fileDir(path) {
 }
 
 .run-row, .log-row {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--w-color-surface-header);
+  border: 1px solid var(--w-color-border-furniture);
   border-radius: 6px;
   padding: 12px 14px;
   display: flex;
@@ -662,12 +662,12 @@ function fileDir(path) {
 }
 
 .log-row--active {
-  border-color: #bfdbfe;
-  background: #eff6ff;
+  border-color: color-mix(in srgb, var(--w-color-info-100) 35%, transparent);
+  background: color-mix(in srgb, var(--w-color-info-100) 10%, transparent);
 }
 
 .run-row:hover, .log-row:hover {
-  border-color: #cbd5e1;
+  border-color: var(--w-color-border-field-default);
 }
 
 .run-row__top, .log-row__top {
@@ -702,27 +702,27 @@ function fileDir(path) {
   text-transform: capitalize;
 }
 
-.status-pill.success { background: #dcfce7; color: #15803d; }
-.status-pill.warning { background: #fef3c7; color: #b45309; }
-.status-pill.danger  { background: #fee2e2; color: #b91c1c; }
-.status-pill.info    { background: #dbeafe; color: #1d4ed8; }
-.status-pill.neutral { background: #f1f5f9; color: #64748b; }
+.status-pill.success { background: color-mix(in srgb, var(--w-color-positive-100) 15%, transparent); color: var(--w-color-positive-100); }
+.status-pill.warning { background: color-mix(in srgb, var(--w-color-warning-100) 20%, transparent); color: var(--w-color-text-context); }
+.status-pill.danger  { background: color-mix(in srgb, var(--w-color-critical-200) 15%, transparent); color: var(--w-color-text-error); }
+.status-pill.info    { background: color-mix(in srgb, var(--w-color-info-100) 15%, transparent); color: var(--w-color-text-status-label); }
+.status-pill.neutral { background: var(--w-color-surface-header); color: var(--w-color-text-meta); }
 
 .run-time {
   font-size: 13px;
   font-weight: 500;
-  color: #0f172a;
+  color: var(--w-color-text-label);
 }
 
 .run-date {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--w-color-text-meta);
   font-family: 'SF Mono', 'Roboto Mono', monospace;
 }
 
 .run-duration, .run-feed {
   font-size: 12px;
-  color: #64748b;
+  color: var(--w-color-text-meta);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -731,8 +731,8 @@ function fileDir(path) {
 .retry-badge {
   font-size: 11px;
   font-weight: 600;
-  background: #fef3c7;
-  color: #b45309;
+  background: color-mix(in srgb, var(--w-color-warning-100) 20%, transparent);
+  color: var(--w-color-text-context);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -753,27 +753,27 @@ function fileDir(path) {
   border-radius: 4px;
 }
 
-.count-chip.fetched { background: #dcfce7; color: #166534; }
-.count-chip.skipped { background: #f1f5f9; color: #475569; }
-.count-chip.failed  { background: #fee2e2; color: #b91c1c; }
-.count-chip.bytes   { background: #ede9fe; color: #6d28d9; }
+.count-chip.fetched { background: color-mix(in srgb, var(--w-color-positive-100) 15%, transparent); color: var(--w-color-positive-100); }
+.count-chip.skipped { background: var(--w-color-surface-header); color: var(--w-color-text-context); }
+.count-chip.failed  { background: color-mix(in srgb, var(--w-color-critical-200) 15%, transparent); color: var(--w-color-text-error); }
+.count-chip.bytes   { background: color-mix(in srgb, var(--w-color-text-meta) 15%, transparent); color: var(--w-color-text-context); }
 
 .log-filepath {
   font-size: 12px;
-  color: #334155;
+  color: var(--w-color-text-context);
   font-family: 'SF Mono', 'Roboto Mono', monospace;
   display: flex;
   align-items: center;
   gap: 6px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--w-color-surface-page);
+  border: 1px solid var(--w-color-border-furniture);
   border-radius: 4px;
   padding: 4px 8px;
   overflow: hidden;
 }
 
 .log-filepath__dir {
-  color: #94a3b8;
+  color: var(--w-color-text-meta);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -790,8 +790,8 @@ function fileDir(path) {
   gap: 6px;
   font-size: 12px;
   font-weight: 500;
-  color: #b91c1c;
-  background: #fee2e2;
+  color: var(--w-color-text-error);
+  background: color-mix(in srgb, var(--w-color-critical-200) 15%, transparent);
   border: none;
   border-radius: 4px;
   padding: 3px 8px;
@@ -799,7 +799,7 @@ function fileDir(path) {
   transition: background 0.1s;
 }
 
-.error-toggle:hover { background: #fecaca; }
+.error-toggle:hover { background: color-mix(in srgb, var(--w-color-critical-200) 30%, transparent); }
 
 .error-list {
   margin-top: 6px;
@@ -811,12 +811,12 @@ function fileDir(path) {
 .error-item {
   font-size: 12px;
   font-family: 'SF Mono', 'Roboto Mono', monospace;
-  background: #fff;
-  border: 1px solid #fecaca;
-  border-left: 3px solid #dc2626;
+  background: var(--w-color-surface-page);
+  border: 1px solid color-mix(in srgb, var(--w-color-critical-200) 35%, transparent);
+  border-left: 3px solid var(--w-color-critical-200);
   border-radius: 4px;
   padding: 6px 10px;
-  color: #7f1d1d;
+  color: var(--w-color-text-error);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -830,25 +830,25 @@ function fileDir(path) {
 .progress-bar-wrap {
   width: 100%;
   height: 6px;
-  background: #e2e8f0;
+  background: var(--w-color-border-furniture);
   border-radius: 3px;
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: #3b82f6;
+  background: var(--w-color-info-100);
   border-radius: 3px;
   transition: width 0.4s ease;
 }
 
 .progress-label {
   font-size: 11px;
-  color: #64748b;
+  color: var(--w-color-text-meta);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.progress-state { color: #94a3b8; }
+.progress-state { color: var(--w-color-text-meta); }
 </style>

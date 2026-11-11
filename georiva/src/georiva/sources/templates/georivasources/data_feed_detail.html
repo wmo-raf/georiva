@@ -6,7 +6,7 @@
 {% block extra_css %}
     <style>
         .gfeed-card {
-            background: var(--w-color-white);
+            background: var(--w-color-surface-page);
             border-radius: 8px;
             box-shadow: 0 1px 4px rgba(0, 0, 0, .08), 0 4px 16px rgba(0, 0, 0, .06);
             overflow: hidden;
@@ -19,7 +19,7 @@
             justify-content: space-between;
             padding: 0.85em 1.25em;
             border-bottom: 1px solid var(--w-color-border-furniture);
-            background: var(--w-color-grey-50);
+            background: var(--w-color-surface-header);
         }
 
         .gfeed-card__title {
@@ -27,7 +27,7 @@
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             margin: 0;
         }
 
@@ -45,7 +45,7 @@
 
         .gfeed-meta {
             margin-left: auto;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.875em;
             display: flex;
             align-items: center;
@@ -68,7 +68,7 @@
         .gfeed-card__explainer {
             margin: 0.25em 0 0;
             font-size: 0.78em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gfeed-activity-card__body {
@@ -123,7 +123,7 @@
 
         .gfeed-stat__label {
             font-size: 0.75em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             margin-top: 0.3em;
             text-transform: uppercase;
             letter-spacing: 0.05em;
@@ -181,14 +181,14 @@
         }
 
         .gfeed-defn-badge--disabled {
-            background: var(--w-color-grey-100, #f5f5f5);
-            color: var(--w-color-grey-400);
+            background: color-mix(in srgb, var(--w-color-text-meta) 15%, transparent);
+            color: var(--w-color-text-meta);
             border: 1px solid var(--w-color-border-furniture);
         }
 
         .gfeed-defn-meta {
             font-size: 0.8em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
 
         .gfeed-defn-config {
@@ -217,7 +217,7 @@
 
         .gfeed-empty-state {
             padding: 1.5em;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.9em;
             text-align: center;
         }
@@ -250,7 +250,7 @@
         }
 
         .gfeed-dot--default {
-            background: var(--w-color-grey-400);
+            background: var(--w-color-icon-secondary);
         }
 
         .gfeed-status-active {
@@ -258,7 +258,7 @@
         }
 
         .gfeed-status-inactive {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
         }
     </style>
     {% include "georivasources/includes/product_chain_styles.html" %}

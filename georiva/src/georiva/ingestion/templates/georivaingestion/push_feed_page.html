@@ -7,14 +7,14 @@
 <style>
     .mup-form { max-width: 48em; }
     .mup-field { margin-bottom: 1.25em; }
-    .mup-help { color: var(--w-color-grey-400); font-size: 0.9em; margin-top: 0.3em; }
+    .mup-help { color: var(--w-color-text-meta); font-size: 0.9em; margin-top: 0.3em; }
     .mup-meta {
         margin-bottom: 1.5em; padding: 0.6em 0.9em;
         border: 1px solid var(--w-color-border-furniture);
-        border-radius: 4px; background: var(--w-color-grey-50);
+        border-radius: 4px; background: var(--w-color-surface-header);
         font-size: 0.9em; line-height: 1.7;
     }
-    .mup-meta-label { color: var(--w-color-grey-400); }
+    .mup-meta-label { color: var(--w-color-text-meta); }
     .mup-actions { display: flex; gap: 1em; margin-top: 1.5em; align-items: center; }
     .mup-collections { margin: 0.4em 0 0 0; padding-left: 1.3em; line-height: 1.9; }
     .mup-collections li { color: var(--w-color-text-label); }
@@ -54,7 +54,7 @@
     .mup-row-status {
         font-size: 0.8em; padding: 0.15em 0.5em;
         border-radius: 3px; white-space: nowrap;
-        background: var(--w-color-grey-100);
+        background: color-mix(in srgb, var(--w-color-text-meta) 15%, transparent);
         color: var(--w-color-text-label);
     }
     .mup-row-status--uploading { background: var(--w-color-info-100); color: var(--w-color-white); }
@@ -65,7 +65,7 @@
     .mup-log {
         display: none; max-width: 48em; margin-top: 1.5em;
         border: 1px solid var(--w-color-border-furniture);
-        border-radius: 4px; background: var(--w-color-grey-50);
+        border-radius: 4px; background: var(--w-color-surface-header);
     }
     .mup-log--visible { display: block; }
     .mup-log-header {
@@ -88,7 +88,7 @@
         list-style: none; margin: 0; padding: 0.4em 1em 0.6em;
         font-size: 0.88em; line-height: 1.9; color: var(--w-color-text-label);
     }
-    .mup-log-steps li::before { content: "›  "; color: var(--w-color-grey-400); }
+    .mup-log-steps li::before { content: "›  "; color: var(--w-color-text-meta); }
     .mup-log-summary { padding: 0.5em 1em 0.8em; font-size: 0.88em; }
     .mup-log-summary--success { color: var(--w-color-positive-100); font-weight: 600; }
     .mup-log-summary--error   { color: var(--w-color-critical-200); }

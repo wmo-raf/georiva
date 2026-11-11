@@ -69,7 +69,7 @@
         .vs-preview-labels {
             display: flex;
             justify-content: space-between;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.85em;
             margin-bottom: 0.75rem;
         }
@@ -139,15 +139,15 @@
         .vs-ramp-option-swatch--none {
             background: repeating-linear-gradient(
                 45deg,
-                var(--w-color-grey-100) 0 4px,
-                var(--w-color-white) 4px 8px
+                var(--w-color-border-furniture) 0 4px,
+                var(--w-color-surface-page) 4px 8px
             );
         }
 
         .vs-ramp-group {
             margin: 0.5rem 0 0.15rem;
             padding-inline: 0.75rem;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.75em;
             font-weight: 700;
             text-transform: uppercase;
@@ -167,7 +167,7 @@
 
         .vs-stops-table th {
             text-align: left;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-weight: 600;
             padding: 0.25rem 0.5rem;
         }
@@ -438,7 +438,7 @@
         }
 
         .vs-map-toolbar label {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-weight: 600;
         }
 
@@ -448,7 +448,7 @@
         }
 
         .vs-map-meta {
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.85em;
             margin: 0.75rem 0 0;
         }
@@ -486,6 +486,9 @@
             gap: 0.25rem;
             padding: 0.25rem;
             border-radius: 6px;
+            /* Fixed colours on purpose (#577): this floats on the map, which looks
+               the same in either theme, so it stays dark by design. Same for the
+               veil and spinner below. */
             background: rgb(20 20 25 / 0.7);
             color: #fff;
             z-index: 2;
@@ -569,7 +572,7 @@
             border: 1px solid var(--w-color-border-furniture);
             border-radius: 4px;
             padding: 0.75rem 1rem;
-            color: var(--w-color-grey-400);
+            color: var(--w-color-text-meta);
             font-size: 0.9em;
         }
 

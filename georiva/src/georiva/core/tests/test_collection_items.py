@@ -75,7 +75,7 @@ class CollectionItemsIngestionBadgeTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "w-text-grey-400")
+        self.assertContains(response, "w-text-text-meta")
 
     def test_multiple_items_from_same_source_file_all_show_status(self):
         _make_item(self.collection, "mybucket:models/surface/multi.grib", t=datetime(2024, 1, 1, tzinfo=UTC))
