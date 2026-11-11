@@ -80,7 +80,7 @@ jobs:
           --health-retries 12
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The dev image ships no source — compose bind-mounts it, and so do we
       # below. Building as the runner's own user keeps that mount writable.
@@ -90,7 +90,7 @@ jobs:
           echo "uid=$(id -u)" >> "$GITHUB_OUTPUT"
           echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # The expensive layer is keyed on georiva/uv.lock alone, so a source-only
       # change re-runs nothing more than the cheap project-level sync.
@@ -110,7 +110,7 @@ jobs:
       # failed cache export should cost the next run some time, not fail this
       # one.
       - name: Build dev image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: dev
@@ -128,7 +128,7 @@ jobs:
       # One shard proves it builds; the others would prove the same thing again.
       - name: Build prod image
         if: matrix.shard == 0
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: prod
@@ -194,14 +194,14 @@ jobs:
     # No services and no GDAL image: the suite drives the app at the HTTP
     # boundary with Redis and Django faked and storage pointed at a tmpdir.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
 
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
         with:
           just-version: "1.58.0"
 
@@ -218,14 +218,14 @@ jobs:
     # one most likely to be the only thing red, which is why it reports on its
     # own rather than behind a test failure.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
 
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
         with:
           just-version: "1.58.0"
 
@@ -244,7 +244,7 @@ jobs:
     # servers run. Both are rendered by compose and diffed, less the
     # differences deploy/ is meant to have; the script lists those.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check deploy/docker-compose.yml against docker-compose.yml
         run: .github/scripts/check-compose-drift.sh
@@ -287,11 +287,11 @@ jobs:
               STAC_BROWSER_VERSION=v5.0.0
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -301,7 +301,7 @@ jobs:
       # release, so deploy.sh can hand one name to both git and compose. No
       # `latest`: a server pins an exact version.
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/wmo-raf/${{ matrix.image.name }}
           flavor: latest=false
@@ -315,7 +315,7 @@ jobs:
       # directories to. That makes these layers differ from the test jobs'
       # (built as the runner's uid), hence a cache scope per image.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           target: ${{ matrix.image.target }}
