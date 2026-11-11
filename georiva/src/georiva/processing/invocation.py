@@ -77,7 +77,7 @@ def _revival_context(run_rec, sweep: str):
     the sweep, with that event as the cause. Only a run with no prior event starts
     a fresh chain — and the engine, which never resolves tenancy, leaves it unowned.
     """
-    from georiva.events.context import EventContext, new_context
+    from georiva.events.context import context_after, new_context
 
     from .models import DerivationAttemptFinished
 
@@ -85,9 +85,7 @@ def _revival_context(run_rec, sweep: str):
     actor = f"sweep:{sweep}"
     if last is None:
         return new_context(actor=actor, organisation_id=_organisation_for_origin(run_rec.origin))
-    return EventContext(
-        correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id, caused_by=last.pk
-    )
+    return context_after(last, actor=actor)
 
 
 def _dispatch_unit(

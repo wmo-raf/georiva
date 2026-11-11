@@ -775,46 +775,65 @@ class FetchRun(models.Model):
         return starting_correlation(continuing=continuing)
 
     @classmethod
-    def begin(cls, **fields) -> "FetchRun":
+    def begin(cls, *, data_feed, **fields) -> "FetchRun":
         """Create a running run and record ``FetchRunStarted`` with it, atomically (#498).
 
         The start is what a file landing mid-fetch points at: until the run finishes
-        there is no other event in its chain to name as the cause. A resumed run is
-        caused by the end of the run it retries; otherwise by whatever the active
-        chain names, when the run continues that chain.
+        there is no other event in its chain to name as the cause.
         """
         from django.db import transaction
 
-        from georiva.events.context import current_context, new_context, use_context
+        from georiva.events.context import current_context, use_context
 
         active = current_context()
         with transaction.atomic():
-            run = cls.objects.create(status=cls.Status.RUNNING, **fields)
-            feed = run.data_feed
-            context = new_context(
-                actor=active.actor if active else "celery",
-                organisation_id=feed.catalog.organisation_id,
-                correlation_id=run.correlation_id,
-                caused_by=run._start_cause(active),
-            )
-            with use_context(context):
+            run = cls.objects.create(data_feed=data_feed, status=cls.Status.RUNNING, **fields)
+            continued = active.caused_by if active and active.correlation_id == run.correlation_id else None
+            with use_context(run._own_context(caused_by=run._retried_run_end() or continued)):
                 record(
                     FetchRunStarted,
                     fetch_run=run,
-                    data_feed=feed,
-                    feed_name=feed.name,
-                    catalog_slug=feed.catalog.slug,
+                    data_feed=data_feed,
+                    feed_name=data_feed.name,
+                    catalog_slug=data_feed.catalog.slug,
                     collection_slug=run.collection.slug if run.collection_id else "",
                     retry_number=run.resume_generation(),
                 )
         return run
 
-    def _start_cause(self, active):
-        if self.resumed_from_id:
-            previous = FetchRunFinished.objects.filter(fetch_run_id=self.resumed_from_id).order_by("-occurred_at")
-            return previous.values_list("pk", flat=True).first()
-        if active is not None and active.correlation_id == self.correlation_id:
-            return active.caused_by
+    def _own_context(self, *, caused_by):
+        """This run's own chain, whoever is acting on it — a sweep finishing a dead
+        run speaks in the run's story, not its own."""
+        from georiva.events.context import current_context, new_context
+
+        active = current_context()
+        return new_context(
+            actor=active.actor if active else "celery",
+            organisation_id=self.data_feed.catalog.organisation_id,
+            correlation_id=self.correlation_id,
+            caused_by=caused_by,
+        )
+
+    def _retried_run_end(self):
+        """The event that ended the run this one retries, if it is a retry: its cause."""
+        if not self.resumed_from_id:
+            return None
+        ended = FetchRunFinished.objects.filter(fetch_run_id=self.resumed_from_id).order_by("-occurred_at")
+        return ended.values_list("pk", flat=True).first()
+
+    def file_cause(self):
+        """The event a file this run stored hangs from: its start (#498).
+
+        The run is usually still going when its files land, so its finish does not
+        exist yet; pointing every file at the start keeps them siblings however
+        they race the finish. A run from before starts were recorded falls back to
+        its finish, and to nothing while it is still running.
+        """
+        for model in (FetchRunStarted, FetchRunFinished):
+            events = model.objects.filter(fetch_run=self).order_by("-occurred_at")
+            cause = events.values_list("pk", flat=True).first()
+            if cause is not None:
+                return cause
         return None
 
     #: Terminal statuses that are a Domain event, and the outcome each records.
@@ -830,7 +849,7 @@ class FetchRun(models.Model):
         from django.db import transaction
         from django.utils import timezone
 
-        from georiva.events.context import current_context, new_context, use_context
+        from georiva.events.context import use_context
 
         self.status = status
         self.finished_at = timezone.now()
@@ -844,16 +863,10 @@ class FetchRun(models.Model):
             self.save(update_fields=fields)
             return
 
-        # The event belongs to this run's own chain, whoever finishes it — a
-        # sweep interrupting a dead run speaks in the run's story, not its own.
-        active = current_context()
+        # Caused by the run's start; a run never started (one not attempted) by the
+        # end of the run it retries, if any.
         started = FetchRunStarted.objects.filter(fetch_run=self).values_list("pk", flat=True).first()
-        context = new_context(
-            actor=active.actor if active else "celery",
-            organisation_id=self.data_feed.catalog.organisation_id,
-            correlation_id=self.correlation_id,
-            caused_by=started,
-        )
+        context = self._own_context(caused_by=started or self._retried_run_end())
         with use_context(context), transaction.atomic():
             self.save(update_fields=fields)
             record(

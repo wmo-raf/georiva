@@ -151,6 +151,16 @@ class FetchRunStartedTests(TestCase):
         self.assertFalse(FetchRunStarted.objects.exists())
         self.assertEqual(FetchRunFinished.objects.get().outcome, "failed")
 
+    def test_a_retry_that_was_never_attempted_still_follows_the_run_it_retries(self):
+        first = FetchRun.begin(data_feed=self.feed)
+        first.mark_interrupted("worker died")
+        loader = Loader(data_source=MagicMock(), collection=self.collection, data_feed=self.feed, resumed_from=first)
+
+        loader.record_not_attempted("source unavailable")
+
+        retry_end = FetchRunFinished.objects.exclude(fetch_run=first).get()
+        self.assertEqual(retry_end.caused_by_id, FetchRunFinished.objects.get(fetch_run=first).pk)
+
     def test_a_loader_run_records_its_start(self):
         loader = Loader(data_source=MagicMock(), collection=self.collection, data_feed=self.feed)
         loader.data_source.generate_requests_for_collection.return_value = []
@@ -236,6 +246,20 @@ class FetchToIngestionChainTests(TestCase):
         (context,) = _notify(KEY)
 
         self.assertEqual(context.correlation_id, second.correlation_id)
+
+    def test_an_uploaded_file_is_caused_by_its_delivery(self):
+        from georiva.ingestion.chains import context_for_arrival
+        from georiva.ingestion.models import Delivery, DeliveryReceived, PushFeed
+
+        catalog = Catalog.objects.create(organisation=self.kenya, name="WRF", slug="wrf", file_format="netcdf")
+        push_feed = PushFeed.objects.create(catalog=catalog, name="Uploads", valid_time_format="CONTENT")
+        key = "kenya/wrf/rain.nc"
+        delivery = Delivery.receive(push_feed=push_feed, filename="rain.nc", file_path=key)
+
+        context = context_for_arrival(key, actor="system:bucket")
+
+        self.assertEqual(context.correlation_id, delivery.correlation_id)
+        self.assertEqual(context.caused_by, DeliveryReceived.objects.get().pk)
 
     def _planned_in_a_later_run(self, key=KEY, **fields):
         with event_context(actor="celery", organisation_id=self.kenya.pk):

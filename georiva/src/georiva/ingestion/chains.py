@@ -12,7 +12,7 @@ only when two fetches of one key are in flight at once, which the file-ingestion
 lock largely prevents.
 """
 
-from georiva.events.context import EventContext, new_context
+from georiva.events.context import EventContext, context_after, new_context
 from georiva.ingestion.models import organisation_id_for_key
 
 
@@ -28,9 +28,7 @@ def context_for_revival(bucket: str, file_path: str, sweep: str) -> EventContext
     actor = f"sweep:{sweep}"
     last = FileIngestionFinished.objects.filter(bucket=bucket, file_path=file_path).order_by("-occurred_at").first()
     if last is not None:
-        return EventContext(
-            correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id, caused_by=last.pk
-        )
+        return context_after(last, actor=actor)
     return context_for_arrival(file_path, actor=actor)
 
 
@@ -57,10 +55,14 @@ def _adopt_latest(file_path: str, actor: str) -> EventContext | None:
         return fetch
     if fetch is not None and not _upload_is_newer(upload, file_path):
         return fetch
+    from georiva.ingestion.models import DeliveryReceived
+
+    received = DeliveryReceived.objects.filter(delivery=upload).order_by("-occurred_at")
     return new_context(
         actor=upload.actor if upload.sent_by_id or upload.push_sender_id else actor,
         organisation_id=upload.push_feed.catalog.organisation_id,
         correlation_id=upload.correlation_id,
+        caused_by=received.values_list("pk", flat=True).first(),
     )
 
 
@@ -100,22 +102,5 @@ def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:
         actor=actor,
         organisation_id=run.data_feed.catalog.organisation_id,
         correlation_id=run.correlation_id,
-        caused_by=_fetch_cause(run),
+        caused_by=run.file_cause(),
     )
-
-
-def _fetch_cause(run):
-    """The event a file the run stored hangs from: the run's start (#498).
-
-    The fetch is usually still going when its files land, so its finish does not
-    exist yet; pointing every file at the start keeps them siblings however they
-    race the finish. A run from before starts were recorded falls back to its
-    finish, and to nothing while it is still running.
-    """
-    from georiva.sources.models import FetchRunFinished, FetchRunStarted
-
-    for model in (FetchRunStarted, FetchRunFinished):
-        cause = model.objects.filter(fetch_run=run).order_by("-occurred_at").values_list("pk", flat=True).first()
-        if cause is not None:
-            return cause
-    return None
