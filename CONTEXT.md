@@ -50,6 +50,12 @@ per (output, input) edge, tagged with recipe id/version and an input hash. Item-
 `staging` data app, written by the engine. Cross-tier and descriptive provenance — **not** an execution plan.
 _Avoid_: provenance link, lineage record (as model names), derived_from (as a model name)
 
+**Retraction**:
+The engine withdrawing a derived Published `Item` because its unit is no longer ready — typically because an input was
+deleted. The item is deleted (its files follow, ADR 0032), the `DerivationRun` parks as `not_ready`, and the attempt
+records outcome `retracted`. A derived item exists only while its unit is ready (ADR 0041).
+_Avoid_: unpublish, invalidate (invalidation re-runs a unit; retraction is one possible result of that re-run)
+
 ### Derivation engine
 
 **Derivation Engine**:
