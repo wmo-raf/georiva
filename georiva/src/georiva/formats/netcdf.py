@@ -299,8 +299,8 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         if np.nanmax(lons) > 180:
             lons = np.where(lons > 180, lons - 360, lons)
 
-        lat_res = self._compute_resolution(lats, axis=0)
-        lon_res = self._compute_resolution(lons, axis=-1)
+        lat_res = self._compute_resolution(lats)
+        lon_res = self._compute_resolution(lons)
 
         bounds = (
             float(np.nanmin(lons) - lon_res / 2),
@@ -335,13 +335,17 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
     # 0.03 (~270 m) and passes.
     _SPACING_TOLERANCE_CELLS = 0.1
 
+    _REGULAR_GRIDS_ONLY = (
+        "Only regular grids can be placed — reproject the file onto a regular "
+        "latitude-longitude grid before ingesting it."
+    )
+
     @classmethod
     def _require_regular_grid(cls, lats: np.ndarray, lat_name: str, lons: np.ndarray, lon_name: str) -> None:
         if lats.ndim != 1 or lons.ndim != 1:
             raise UnsupportedGridError(
                 f"The grid is curvilinear: '{lat_name}' and '{lon_name}' are {lats.ndim}D/{lons.ndim}D "
-                "coordinates, not 1D axes. Only regular grids can be placed — reproject the "
-                "file onto a regular latitude-longitude grid before ingesting it."
+                f"coordinates, not 1D axes. {cls._REGULAR_GRIDS_ONLY}"
             )
         cls._require_even_spacing(lats, lat_name)
         cls._require_even_spacing(lons, lon_name)
@@ -349,27 +353,29 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
     @classmethod
     def _require_even_spacing(cls, coords: np.ndarray, name: str) -> None:
         coords = coords.astype(np.float64)
+        if not np.isfinite(coords).all():
+            raise UnsupportedGridError(
+                f"The grid's '{name}' axis has missing (NaN or infinite) coordinates, so its "
+                f"cells cannot be placed. {cls._REGULAR_GRIDS_ONLY}"
+            )
         if coords.size < 3:
             return
         cell = (coords[-1] - coords[0]) / (coords.size - 1)
         even = np.linspace(coords[0], coords[-1], coords.size)
-        drift = float(np.nanmax(np.abs(coords - even))) / abs(cell) if cell else np.inf
+        drift = float(np.max(np.abs(coords - even))) / abs(cell) if cell else np.inf
         if drift > cls._SPACING_TOLERANCE_CELLS:
             raise UnsupportedGridError(
                 f"The grid's '{name}' axis is not evenly spaced: its coordinates drift up to "
                 f"{drift:.2f} cells from an even spacing (tolerance "
                 f"{cls._SPACING_TOLERANCE_CELLS} cells), so placing it by one resolution would "
-                "misplace the data. Only regular grids can be placed — reproject the file onto "
-                "a regular latitude-longitude grid before ingesting it."
+                f"misplace the data. {cls._REGULAR_GRIDS_ONLY}"
             )
 
     @staticmethod
-    def _compute_resolution(coords: np.ndarray, axis: int) -> float:
-        try:
-            if coords.ndim == 1 and coords.size > 1:
-                return float(np.nanmedian(np.abs(np.diff(coords))))
-        except Exception:
-            pass
+    def _compute_resolution(coords: np.ndarray) -> float:
+        """Spacing of a 1D axis already checked by _require_even_spacing."""
+        if coords.size > 1:
+            return float(np.median(np.abs(np.diff(coords))))
         return 1.0
 
     @staticmethod

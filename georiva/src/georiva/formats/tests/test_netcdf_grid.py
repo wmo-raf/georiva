@@ -8,6 +8,7 @@ refuses it with a reason instead of stretching it into a box (#543).
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -115,6 +116,13 @@ class NetCDFGridTests(SimpleTestCase):
         with self.assertRaisesRegex(UnsupportedGridError, "lon.*not evenly spaced"):
             self._metadata(self._rectilinear(np.arange(-10, 10.01, 0.5), lons))
 
+    def test_missing_coordinate_values_are_refused(self):
+        lats = np.arange(-10, 10.01, 0.5)
+        lats[-1] = np.nan
+
+        with self.assertRaisesRegex(UnsupportedGridError, "lat.*missing"):
+            self._metadata(self._rectilinear(lats, np.arange(20, 40.01, 0.5)))
+
     def test_refusal_reaches_the_ingestion_failure_record(self):
         lats = np.concatenate([np.arange(-10, 0, 0.5), np.arange(0, 10.01, 1.0)])
         path = self._rectilinear(lats, np.arange(20, 40.01, 0.5))
@@ -130,31 +138,28 @@ class NetCDFGridTests(SimpleTestCase):
 def _ingest(path: Path, plugin: NetCDFFormatPlugin):
     """Run one file through IngestionService with the real plugin reading *path*.
 
-    Everything past the handler's first plugin call (catalog lookup, storage,
-    item writing) is stubbed: the point is that the plugin's refusal travels
-    out of process_timestamp into the result the failure record is built from.
+    The real IngestionHandler and VariableExtractor run; only what surrounds
+    them (catalog and collection lookup, storage) is stubbed. The point is that
+    the plugin's refusal travels out of process_timestamp into the result the
+    failure record is built from.
     """
+    primary = SimpleNamespace(block_type="primary", value={"source_name": "t2m"})
+    variable = SimpleNamespace(slug="t2m", is_active=True, sources=[primary])
     collection = MagicMock(slug="t2m-collection")
-    collection.variables.all.return_value = [MagicMock(is_active=True)]
+    collection.variables.all.return_value = [variable]
     catalog = MagicMock(clip_mode="none")
-
-    def process_timestamp(*, local_path, timestamp, **_):
-        plugin.get_metadata_for_variable(local_path, "t2m", timestamp=timestamp)
-        raise AssertionError("the plugin should have refused the grid")
 
     sfm = MagicMock()
     sfm.download_to_temp.return_value.__enter__.return_value = path
     with (
         patch("georiva.ingestion.service.format_registry") as registry,
         patch("georiva.ingestion.service.storage"),
-        patch("georiva.ingestion.service.IngestionHandler") as handler_cls,
         patch("georiva.ingestion.service.resolve_org_catalog", return_value=(catalog, None)),
         patch("georiva.ingestion.service.FileIngestion"),
         patch.object(IngestionService, "_resolve_collections", return_value=[collection]),
         patch.object(IngestionService, "_get_first_variable_name", return_value="t2m"),
     ):
         registry.get.return_value = plugin
-        handler_cls.return_value.process_timestamp.side_effect = process_timestamp
         service = IngestionService()
         service._source_file_manager = sfm
         return service.process_file("org/cat/t2m-collection/2026/01/01/grid.nc")

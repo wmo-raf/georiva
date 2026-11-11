@@ -140,7 +140,10 @@ Handles NetCDF files (.nc, .nc4) using xarray.
 **Variable identity:** NetCDF variables are uniquely identified by name — no special key needed. Just pass the variable name string.
 
 **Format-specific behavior:**
-- Supports both rectilinear grids (1D lat/lon) and curvilinear grids (2D lat/lon arrays).
+- Places regular grids only: 1D lat/lon axes with even spacing (within 0.1 of a cell, so float jitter passes). A
+  curvilinear grid (2D lat/lon, e.g. WRF on Lambert) or an unevenly spaced axis (e.g. WRF on Mercator) is refused with
+  `UnsupportedGridError` (from `formats/base.py`, a `ValueError`) naming the problem, which fails the ingestion with
+  that reason rather than publishing the data in the wrong place.
 - Detects CRS from dataset attributes or `spatial_ref` variable (not hardcoded to EPSG:4326 like GRIB).
 - Handles `_FillValue` replacement: both from `encoding["_FillValue"]` and `attrs["_FillValue"]`.
 
