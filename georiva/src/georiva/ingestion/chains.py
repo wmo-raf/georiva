@@ -20,15 +20,17 @@ def context_for_revival(bucket: str, file_path: str, sweep: str) -> EventContext
     """The context a sweep reviving ``file_path`` should act under.
 
     It reuses the Correlation and organisation of the file's most recent event, as
-    the sweep and with no Caused-by, so a recovery does not split one story in two.
-    A file with no prior event is handled as a fresh arrival would be.
+    the sweep and with that event as the cause, so a recovery does not split one
+    story in two. A file with no prior event is handled as a fresh arrival would be.
     """
     from georiva.ingestion.models import FileIngestionFinished
 
     actor = f"sweep:{sweep}"
     last = FileIngestionFinished.objects.filter(bucket=bucket, file_path=file_path).order_by("-occurred_at").first()
     if last is not None:
-        return EventContext(correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id)
+        return EventContext(
+            correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id, caused_by=last.pk
+        )
     return context_for_arrival(file_path, actor=actor)
 
 
@@ -83,7 +85,6 @@ def _upload_is_newer(upload, file_path: str) -> bool:
 
 
 def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:
-    from georiva.sources.models import FetchRunFinished
 
     fetched = (
         _reached_rows(file_path)
@@ -95,12 +96,26 @@ def _adopt_fetch(file_path: str, actor: str) -> EventContext | None:
     if fetched is None:
         return None
     run = fetched.fetch_run
-    # The fetch may still be running when its file lands, in which case there is no
-    # event to point at yet — the chain is still the same chain.
-    finished = FetchRunFinished.objects.filter(fetch_run=run).order_by("-occurred_at").first()
     return new_context(
         actor=actor,
         organisation_id=run.data_feed.catalog.organisation_id,
         correlation_id=run.correlation_id,
-        caused_by=finished.pk if finished else None,
+        caused_by=_fetch_cause(run),
     )
+
+
+def _fetch_cause(run):
+    """The event a file the run stored hangs from: the run's start (#498).
+
+    The fetch is usually still going when its files land, so its finish does not
+    exist yet; pointing every file at the start keeps them siblings however they
+    race the finish. A run from before starts were recorded falls back to its
+    finish, and to nothing while it is still running.
+    """
+    from georiva.sources.models import FetchRunFinished, FetchRunStarted
+
+    for model in (FetchRunStarted, FetchRunFinished):
+        cause = model.objects.filter(fetch_run=run).order_by("-occurred_at").values_list("pk", flat=True).first()
+        if cause is not None:
+            return cause
+    return None

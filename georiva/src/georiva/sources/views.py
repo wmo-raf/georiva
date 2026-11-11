@@ -1999,7 +1999,7 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
         run_liveness_display,
         with_live_counters,
     )
-    from georiva.sources.models import FetchedFile, FetchRun, FetchRunFinished
+    from georiva.sources.models import FetchedFile, FetchRun, FetchRunFinished, FetchRunStarted
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
     run = with_live_counters(get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed))
@@ -2062,7 +2062,9 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
         "runs_url": runs_url,
         "liveness": liveness,
         "retry": retry_display(run),
-        "history": build_history(request, [(FetchRunFinished, {"fetch_run": run})]),
+        "history": build_history(
+            request, [(FetchRunStarted, {"fetch_run": run}), (FetchRunFinished, {"fetch_run": run})]
+        ),
     }
     return render(request, "georivasources/data_feed_fetch_run_detail.html", context)
 

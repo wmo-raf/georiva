@@ -57,6 +57,17 @@ class DerivationSweepTests(TestCase):
         self.assertEqual(latest.actor, "sweep:derivations")
         self.assertEqual(latest.attempt_number, 2)
 
+    def test_a_revival_is_caused_by_the_runs_last_attempt_and_causes_the_next(self):
+        _, run = self._run_with_history(DerivationRun.Status.COMPLETED, input_hash="STALE")
+        first = DerivationAttemptFinished.objects.get()
+
+        sweep_stale_units(dispatch=False, sweep="derivations")
+
+        intervention = SweepIntervened.objects.get()
+        self.assertEqual(intervention.caused_by_id, first.pk)
+        latest = DerivationAttemptFinished.objects.exclude(pk=first.pk).get()
+        self.assertEqual(latest.caused_by_id, intervention.pk)
+
     def test_a_stale_running_reclaim_is_recorded(self):
         ctx, _ = self._run_with_history(
             DerivationRun.Status.RUNNING,

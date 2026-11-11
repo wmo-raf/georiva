@@ -74,8 +74,8 @@ def _revival_context(run_rec, sweep: str):
     """A sweep reviving a run speaks in that run's own story (ADR 0030).
 
     It reuses the Correlation and organisation of the run's most recent event, as
-    the sweep, with no Caused-by. Only a run with no prior event starts a fresh
-    chain — and the engine, which never resolves tenancy, leaves it unowned.
+    the sweep, with that event as the cause. Only a run with no prior event starts
+    a fresh chain — and the engine, which never resolves tenancy, leaves it unowned.
     """
     from georiva.events.context import EventContext, new_context
 
@@ -85,7 +85,9 @@ def _revival_context(run_rec, sweep: str):
     actor = f"sweep:{sweep}"
     if last is None:
         return new_context(actor=actor, organisation_id=_organisation_for_origin(run_rec.origin))
-    return EventContext(correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id)
+    return EventContext(
+        correlation_id=last.correlation_id, actor=actor, organisation_id=last.organisation_id, caused_by=last.pk
+    )
 
 
 def _dispatch_unit(
@@ -97,14 +99,15 @@ def _dispatch_unit(
 
     Called by a sweep (``sweep`` names it, ``run_rec`` is the run it is reviving),
     it also records ``SweepIntervened`` and dispatches inside the revived chain, so
-    the unit's next attempt carries the sweep's Actor and the run's Correlation."""
+    the unit's next attempt carries the sweep's Actor and the run's Correlation, and
+    is caused by the intervention."""
     if sweep and run_rec is not None:
-        from georiva.events.context import use_context
+        from georiva.events.context import caused_by, use_context
         from georiva.events.models import SweepIntervened
         from georiva.events.recording import record
 
         with use_context(_revival_context(run_rec, sweep)):
-            record(
+            intervention = record(
                 SweepIntervened,
                 sweep_name=sweep,
                 reason=why,
@@ -112,7 +115,8 @@ def _dispatch_unit(
                 target_id=run_rec.pk,
                 target_label=str(run_rec),
             )
-            _dispatch_unit(recipe_type, unit, dispatch=dispatch, reason=reason)
+            with caused_by(intervention):
+                _dispatch_unit(recipe_type, unit, dispatch=dispatch, reason=reason)
         return
     if dispatch:
         from .tasks import run_unit_task

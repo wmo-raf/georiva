@@ -381,10 +381,9 @@ class Loader:
         retry_after = None
 
         if self.data_feed:
-            fetch_run = FetchRun.objects.create(
+            fetch_run = FetchRun.begin(
                 data_feed=self.data_feed,
                 collection=self.collection,
-                status="running",
                 resumed_from=self.resumed_from,
             )
             began_at = fetch_run.started_at

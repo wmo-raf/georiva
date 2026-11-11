@@ -52,8 +52,26 @@ class IngestionSweepTests(TestCase):
         self.assertEqual(intervention.correlation_id, ctx.correlation_id)
         self.assertEqual(intervention.organisation_id, self.kenya.pk)
         self.assertEqual(intervention.actor, "sweep:unprocessed")
-        self.assertIsNone(intervention.caused_by_id)
         self.assertEqual((context.correlation_id, context.actor), (ctx.correlation_id, "sweep:unprocessed"))
+
+    def test_a_revival_is_caused_by_the_files_last_event_and_causes_the_redispatch(self):
+        self._failed_file()
+
+        (context,) = _sweep()
+
+        intervention = SweepIntervened.objects.get()
+        self.assertEqual(intervention.caused_by_id, FileIngestionFinished.objects.get().pk)
+        self.assertEqual(context.caused_by, intervention.pk)
+
+    def test_a_stale_lock_reset_is_caused_by_the_files_last_event(self):
+        self._failed_file()
+        FileIngestion.objects.update(
+            status=FileIngestion.Status.PROCESSING, locked_at=dj_timezone.now() - timedelta(hours=2)
+        )
+
+        FileIngestion.reset_stale_locks(sweep="unprocessed")
+
+        self.assertEqual(SweepIntervened.objects.get().caused_by_id, FileIngestionFinished.objects.get().pk)
 
     def test_an_untracked_file_found_in_the_bucket_is_recorded(self):
         found = [UnprocessedFile(bucket=BucketType.SOURCES, file_path=KEY, reason="untracked")]
