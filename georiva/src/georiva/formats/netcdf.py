@@ -9,7 +9,11 @@ Design:
 - NetCDF variables are uniquely identified by name — no key indirection needed.
 - open_variable() is the primary interface: context manager, lazy DataArray.
 - extract_variable() and get_metadata_for_variable() are inherited from BaseFormatPlugin.
-- Supports rectilinear and curvilinear grids, CRS detection, and fill-value handling.
+- Places regular grids only: 1D coordinate axes with even spacing. A curvilinear
+  grid (2D lat/lon, e.g. WRF on Lambert) or an unevenly spaced axis (e.g. WRF on
+  Mercator) cannot be described by bounds plus one resolution, so it is refused
+  with UnsupportedGridError rather than stretched into a box and misplaced.
+- CRS detection and fill-value handling.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import xarray as xr
 
 from georiva.utils.path import PathLike
 
-from .base import BaseFormatPlugin, ExtractedVariable, VariableInfo
+from .base import BaseFormatPlugin, ExtractedVariable, UnsupportedGridError, VariableInfo
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +284,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         return y_dim, x_dim
 
     def _spatial_info(self, var, ds: xr.Dataset) -> tuple[tuple[float, ...], tuple[float, float], str]:
-        """Returns (bounds, resolution, crs). Supports rectilinear and curvilinear grids."""
+        """Returns (bounds, resolution, crs). Refuses grids that are not regular."""
         lat_name, lon_name = self._find_lat_lon_coords(var)
 
         if lat_name is None or lon_name is None:
@@ -288,6 +292,9 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
 
         lats = np.array(var.coords[lat_name].values)
         lons = np.array(var.coords[lon_name].values)
+
+        # Before the 0..360 wrap below, which breaks a global axis's monotonicity.
+        self._require_regular_grid(lats, lat_name, lons, lon_name)
 
         if np.nanmax(lons) > 180:
             lons = np.where(lons > 180, lons - 360, lons)
@@ -321,13 +328,46 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
                     lon_name = name
         return lat_name, lon_name
 
+    # How far, in cells, any coordinate may sit from the evenly spaced axis
+    # running between the axis's two ends. Float32 jitter and decimal-rounded
+    # coordinates stay under 0.01 of a cell. A 9 km Mercator grid drifts ~1 cell
+    # over -12..15 deg and ~3.6 over -35..-20; a +-5 deg equatorial strip drifts
+    # 0.03 (~270 m) and passes.
+    _SPACING_TOLERANCE_CELLS = 0.1
+
+    @classmethod
+    def _require_regular_grid(cls, lats: np.ndarray, lat_name: str, lons: np.ndarray, lon_name: str) -> None:
+        if lats.ndim != 1 or lons.ndim != 1:
+            raise UnsupportedGridError(
+                f"The grid is curvilinear: '{lat_name}' and '{lon_name}' are {lats.ndim}D/{lons.ndim}D "
+                "coordinates, not 1D axes. Only regular grids can be placed — reproject the "
+                "file onto a regular latitude-longitude grid before ingesting it."
+            )
+        cls._require_even_spacing(lats, lat_name)
+        cls._require_even_spacing(lons, lon_name)
+
+    @classmethod
+    def _require_even_spacing(cls, coords: np.ndarray, name: str) -> None:
+        coords = coords.astype(np.float64)
+        if coords.size < 3:
+            return
+        cell = (coords[-1] - coords[0]) / (coords.size - 1)
+        even = np.linspace(coords[0], coords[-1], coords.size)
+        drift = float(np.nanmax(np.abs(coords - even))) / abs(cell) if cell else np.inf
+        if drift > cls._SPACING_TOLERANCE_CELLS:
+            raise UnsupportedGridError(
+                f"The grid's '{name}' axis is not evenly spaced: its coordinates drift up to "
+                f"{drift:.2f} cells from an even spacing (tolerance "
+                f"{cls._SPACING_TOLERANCE_CELLS} cells), so placing it by one resolution would "
+                "misplace the data. Only regular grids can be placed — reproject the file onto "
+                "a regular latitude-longitude grid before ingesting it."
+            )
+
     @staticmethod
     def _compute_resolution(coords: np.ndarray, axis: int) -> float:
         try:
             if coords.ndim == 1 and coords.size > 1:
                 return float(np.nanmedian(np.abs(np.diff(coords))))
-            elif coords.ndim == 2 and coords.shape[abs(axis)] > 1:
-                return float(np.nanmedian(np.abs(np.diff(coords, axis=axis))))
         except Exception:
             pass
         return 1.0
