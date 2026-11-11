@@ -60,6 +60,13 @@ class ApiKeyPanelTests(TestCase):
 
         self.assertEqual(list(response.context["keys"]), [])
 
+    def test_revoke_is_the_styleguides_destructive_button(self):
+        ApiKey.objects.mint(user=self.owner, name="mine")
+
+        response = self.client.get(reverse("api_keys"))
+
+        self.assertContains(response, 'class="button button-small no"')
+
     def test_revoking_a_key_retires_it(self):
         key, _ = ApiKey.objects.mint(user=self.owner, name="lost phone")
 

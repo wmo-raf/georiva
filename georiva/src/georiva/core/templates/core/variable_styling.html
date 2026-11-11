@@ -236,16 +236,6 @@
             margin: 0;
         }
 
-        .vs-inline-button {
-            background: none;
-            border: none;
-            padding: 0;
-            color: var(--w-color-secondary);
-            cursor: pointer;
-            text-decoration: underline;
-            font-size: 0.85em;
-        }
-
         .vs-actions {
             display: flex;
             gap: 0.75rem;
@@ -260,6 +250,7 @@
          * spelled out.
          */
         .vs-apply-ramp[hidden],
+        #vs-add-stop[hidden],
         .vs-range-hint[hidden],
         .vs-unsaved[hidden] {
             display: none;
@@ -833,14 +824,14 @@
                             <td><input type="text" class="vs-class-color"></td>
                             <td><input type="color" class="vs-stop-picker" aria-label="{% trans 'Pick color' %}"></td>
                             <td class="vs-class-actions">
-                                <button type="button" class="vs-inline-button vs-class-transparent">{% trans "Transparent" %}</button>
-                                <button type="button" class="vs-inline-button vs-class-add">{% trans "Add class" %}</button>
-                                <button type="button" class="vs-inline-button vs-class-remove">{% trans "Remove" %}</button>
+                                <button type="button" class="button button-small button-secondary vs-class-transparent">{% trans "Transparent" %}</button>
+                                <button type="button" class="button button-small button-secondary vs-class-add">{% trans "Add class" %}</button>
+                                <button type="button" class="button button-small no vs-class-remove">{% trans "Remove" %}</button>
                             </td>
                         </tr>
                     </template>
                     <div class="vs-stop-tools">
-                        <button type="button" class="vs-inline-button" id="vs-add-stop">{% trans "Add stop" %}</button>
+                        <button type="button" class="button button-small button-secondary" id="vs-add-stop">{% trans "Add stop" %}</button>
                         {% comment %}
                             Reversal lives here rather than in the ramp menu,
                             where QGIS puts it. There the ramp is the live
@@ -849,10 +840,10 @@
                             reverses hand-tuned stops and pinned thresholds
                             too, not only freshly generated ones.
                         {% endcomment %}
-                        <button type="button" class="vs-inline-button" id="vs-reverse-stops">
+                        <button type="button" class="button button-small button-secondary" id="vs-reverse-stops">
                             {% trans "Reverse colors" %}
                         </button>
-                        <button type="button" class="vs-inline-button" id="vs-json-toggle"
+                        <button type="button" class="button button-small button-secondary" id="vs-json-toggle"
                                 aria-expanded="false" aria-controls="vs-json-panel">
                             {% trans "Edit as JSON" %}
                         </button>
@@ -888,10 +879,10 @@
                             data-decreasing="{% trans 'Stop {n}{at}: value is lower than the previous stop.' %}"></p>
                         </div>
                         <div class="vs-stop-tools">
-                            <button type="button" class="vs-inline-button" id="vs-json-apply">
+                            <button type="button" class="button button-small button-secondary" id="vs-json-apply">
                                 {% trans "Apply JSON" %}
                             </button>
-                            <button type="button" class="vs-inline-button" id="vs-json-copy">
+                            <button type="button" class="button button-small button-secondary" id="vs-json-copy">
                                 {% trans "Copy" %}
                             </button>
                             <span class="vs-json-status" id="vs-json-status" role="status" aria-live="polite"
@@ -1006,7 +997,7 @@
                                             {% csrf_token %}
                                             <input type="hidden" name="action" value="promote">
                                             <input type="hidden" name="style_slug" value="{{ style.slug }}">
-                                            <button type="submit" class="vs-inline-button">
+                                            <button type="submit" class="button button-small button-secondary">
                                                 {% trans "Make default" %}
                                             </button>
                                         </form>
@@ -1016,7 +1007,7 @@
                                         {% csrf_token %}
                                         <input type="hidden" name="action" value="delete-style">
                                         <input type="hidden" name="style_slug" value="{{ style.slug }}">
-                                        <button type="submit" class="vs-inline-button">
+                                        <button type="submit" class="button button-small no">
                                             {% trans "Delete" %}
                                         </button>
                                     </form>
