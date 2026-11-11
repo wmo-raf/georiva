@@ -8,8 +8,6 @@ refuses it with a reason instead of stretching it into a box (#543).
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import xarray as xr
@@ -17,7 +15,7 @@ from django.test import SimpleTestCase
 
 from georiva.formats.base import UnsupportedGridError
 from georiva.formats.netcdf import NetCDFFormatPlugin
-from georiva.ingestion.service import IngestionService
+from georiva.formats.tests.ingest import ingest_file
 
 TIME = datetime(2026, 1, 1)
 
@@ -199,6 +197,13 @@ class NetCDFGridTests(SimpleTestCase):
 
         self.assertEqual(meta["bounds"], (-170.25, -10.25, -109.75, 10.25))
 
+    def test_regional_grid_starting_at_180_shifts_west_whole(self):
+        path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(180, 250.01, 0.5))
+
+        meta = self._metadata(path)
+
+        self.assertEqual(meta["bounds"], (-180.25, -10.25, -109.75, 10.25))
+
     def test_regional_grid_crossing_the_antimeridian_is_refused(self):
         path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(170, 200.01, 0.5))
 
@@ -208,40 +213,10 @@ class NetCDFGridTests(SimpleTestCase):
     def test_refusal_reaches_the_ingestion_failure_record(self):
         lats = np.concatenate([np.arange(-10, 0, 0.5), np.arange(0, 10.01, 1.0)])
         path = self._rectilinear(lats, np.arange(20, 40.01, 0.5))
-        result = _ingest(path, self.plugin)
+        result = ingest_file(path, self.plugin, "t2m")
 
         self.assertFalse(result.success)
         self.assertTrue(
             any("not evenly spaced" in e for e in result.errors),
             result.errors,
         )
-
-
-def _ingest(path: Path, plugin: NetCDFFormatPlugin):
-    """Run one file through IngestionService with the real plugin reading *path*.
-
-    The real IngestionHandler and VariableExtractor run; only what surrounds
-    them (catalog and collection lookup, storage) is stubbed. The point is that
-    the plugin's refusal travels out of process_timestamp into the result the
-    failure record is built from.
-    """
-    primary = SimpleNamespace(block_type="primary", value={"source_name": "t2m"})
-    variable = SimpleNamespace(slug="t2m", is_active=True, sources=[primary])
-    collection = MagicMock(slug="t2m-collection")
-    collection.variables.all.return_value = [variable]
-    catalog = MagicMock(clip_mode="none")
-
-    sfm = MagicMock()
-    sfm.download_to_temp.return_value.__enter__.return_value = path
-    with (
-        patch("georiva.ingestion.service.format_registry") as registry,
-        patch("georiva.ingestion.service.storage"),
-        patch("georiva.ingestion.service.resolve_org_catalog", return_value=(catalog, None)),
-        patch("georiva.ingestion.service.FileIngestion"),
-        patch.object(IngestionService, "_resolve_collections", return_value=[collection]),
-        patch.object(IngestionService, "_get_first_variable_name", return_value="t2m"),
-    ):
-        registry.get.return_value = plugin
-        service = IngestionService()
-        service._source_file_manager = sfm
-        return service.process_file("org/cat/t2m-collection/2026/01/01/grid.nc")
