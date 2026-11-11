@@ -1,0 +1,56 @@
+# One grouped PR per ecosystem per week, instead of one PR per package per
+# advisory. Ungrouped, every uv bump rewrites georiva/uv.lock and each merge
+# conflicts the rest of the queue.
+#
+# Version updates are capped at patch/minor: a major bump is a decision, not a
+# chore. Security updates are grouped too but uncapped — a fix that only
+# exists in a new major still gets proposed.
+#
+# titiler-app/requirements.txt is not listed: it is unpinned, so there is
+# nothing for Dependabot to bump until it is pinned.
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /georiva
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      python-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directories:
+      - /georiva/src/georiva/ingestion/ingestion-dashboard
+      - /georiva/src/georiva/config/datetime-selector
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      npm-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
