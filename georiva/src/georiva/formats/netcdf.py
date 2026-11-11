@@ -33,7 +33,7 @@ from rasterio.errors import CRSError
 from georiva.utils.path import PathLike
 
 from .base import BaseFormatPlugin, ExtractedVariable, UnsupportedGridError, VariableInfo
-from .grid import REGULAR_GRIDS_ONLY, recentre_longitudes, require_even_spacing
+from .grid import REPROJECT_ADVICE, recentre_longitudes, require_even_spacing
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +325,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
             raise UnsupportedGridError(
                 f"The grid has no latitude/longitude coordinates the NetCDF handler recognises "
                 f"(found coordinates: {', '.join(map(str, var.coords)) or 'none'}), so its cells "
-                f"cannot be placed. {REGULAR_GRIDS_ONLY}"
+                f"cannot be placed. {REPROJECT_ADVICE}"
             )
         return lat_name, lon_name
 
@@ -375,7 +375,7 @@ class NetCDFFormatPlugin(BaseFormatPlugin):
         if lats.ndim != 1 or lons.ndim != 1:
             raise UnsupportedGridError(
                 f"The grid is curvilinear: '{lat_name}' and '{lon_name}' are {lats.ndim}D/{lons.ndim}D "
-                f"coordinates, not 1D axes. {REGULAR_GRIDS_ONLY}"
+                f"coordinates, not 1D axes. {REPROJECT_ADVICE}"
             )
         require_even_spacing(lats, lat_name)
         require_even_spacing(lons, lon_name)

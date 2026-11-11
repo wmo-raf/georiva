@@ -365,13 +365,16 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 x_dim = d
         return y_dim, x_dim
 
+    # Grid types whose x axis is a 1D longitude in degrees. Projected types
+    # (lambert, polar_stereographic, ...) carry 2D lat/lon and are left alone.
+    _LAT_LON_GRID_TYPES = {"regular_ll", "regular_gg"}
+
     def _longitude_axis(self, var) -> str | None:
         """The 1D longitude dimension coordinate of a regular lat-lon grid, if it has one."""
+        if var.attrs.get("GRIB_gridType") not in self._LAT_LON_GRID_TYPES:
+            return None
         _, x_dim = self._spatial_dims(var)
         if x_dim is None or x_dim not in var.coords or var.coords[x_dim].ndim != 1:
-            return None
-        lons = var.coords[x_dim].values
-        if lons.size == 0 or lons.min() < -180 or lons.max() > 360:
             return None
         return x_dim
 

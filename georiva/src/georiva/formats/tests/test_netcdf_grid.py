@@ -197,6 +197,13 @@ class NetCDFGridTests(SimpleTestCase):
 
         self.assertEqual(meta["bounds"], (-170.25, -10.25, -109.75, 10.25))
 
+    def test_regional_grid_starting_at_180_shifts_west_whole(self):
+        path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(180, 250.01, 0.5))
+
+        meta = self._metadata(path)
+
+        self.assertEqual(meta["bounds"], (-180.25, -10.25, -109.75, 10.25))
+
     def test_regional_grid_crossing_the_antimeridian_is_refused(self):
         path = self._rectilinear(np.arange(-10, 10.01, 0.5), np.arange(170, 200.01, 0.5))
 

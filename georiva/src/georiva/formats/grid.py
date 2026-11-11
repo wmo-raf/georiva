@@ -18,7 +18,7 @@ from .base import UnsupportedGridError
 # and ~3.6 over -35..-20; a +-5 deg equatorial strip drifts 0.03 (~270 m) and passes.
 SPACING_TOLERANCE_CELLS = 0.1
 
-REGULAR_GRIDS_ONLY = (
+REPROJECT_ADVICE = (
     "Only regular grids can be placed — reproject the file onto a regular latitude-longitude grid before ingesting it."
 )
 
@@ -29,7 +29,7 @@ def require_even_spacing(coords: np.ndarray, name: str) -> None:
     if not np.isfinite(coords).all():
         raise UnsupportedGridError(
             f"The grid's '{name}' axis has missing (NaN or infinite) coordinates, so its "
-            f"cells cannot be placed. {REGULAR_GRIDS_ONLY}"
+            f"cells cannot be placed. {REPROJECT_ADVICE}"
         )
     if coords.size < 3:
         return
@@ -41,7 +41,7 @@ def require_even_spacing(coords: np.ndarray, name: str) -> None:
             f"The grid's '{name}' axis is not evenly spaced: its coordinates drift up to "
             f"{drift:.2f} cells from an even spacing (tolerance "
             f"{SPACING_TOLERANCE_CELLS} cells), so placing it by one resolution would "
-            f"misplace the data. {REGULAR_GRIDS_ONLY}"
+            f"misplace the data. {REPROJECT_ADVICE}"
         )
 
 
@@ -50,14 +50,21 @@ def recentre_longitudes(var, lon_name: str):
 
     Wrapping the coordinate values alone would leave the columns in their stored
     order, so a global grid starting at Greenwich would be placed 180 degrees
-    off; the columns are reordered with it. A regional grid that straddles 180
-    splits in two under -180..180 and is refused. Run it on the whole grid,
-    before any window is cut from it.
+    off; the columns are reordered with it. A global grid that repeats its seam
+    column (0..360 inclusive) loses the repeat, and a grid lying wholly at or
+    east of 180 moves west whole, so its 180 column is -180. A regional grid
+    that straddles 180 splits in two under -180..180 and is refused. Run it on
+    the whole grid, before any window is cut from it.
     """
     lons = np.asarray(var.coords[lon_name].values, dtype=np.float64)
     if lons.max() <= 180:
         return var
-    wrapped = np.where(lons > 180, lons - 360, lons)
+    dim = var.coords[lon_name].dims[0]
+    repeat = np.isclose(lons, lons.min() + 360)
+    if repeat.any():
+        var = var.isel({dim: np.flatnonzero(~repeat)})
+        lons = lons[~repeat]
+    wrapped = lons - 360 if lons.min() >= 180 else np.where(lons > 180, lons - 360, lons)
     order = np.argsort(wrapped, kind="stable")
     try:
         require_even_spacing(wrapped[order], lon_name)
@@ -67,7 +74,6 @@ def recentre_longitudes(var, lon_name: str):
             "degrees east) without covering the globe, so it splits in two under -180..180. "
             "Split the file at 180 degrees, or reproject it onto -180..180, before ingesting it."
         ) from None
-    dim = var.coords[lon_name].dims[0]
     var = var.assign_coords({lon_name: (dim, wrapped, var.coords[lon_name].attrs)})
     if (order != np.arange(order.size)).any():
         var = var.isel({dim: order})

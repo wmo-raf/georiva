@@ -26,8 +26,11 @@ class GRIBLongitudeTests(SimpleTestCase):
 
     def _grib(self, first_lon: float, last_lon: float, step: float = 1.0) -> Path:
         """A regular lat-lon GRIB2 over 2N..2S whose values are each cell's longitude."""
-        ni = int(round((last_lon - first_lon) / step)) + 1
+        span = (last_lon - first_lon) % 360 or (360 if last_lon != first_lon else 0)
+        ni = int(round(span / step)) + 1
         lons = first_lon + step * np.arange(ni)
+        lons = np.where(lons >= 360, lons - 360, lons)
+        lons = np.where(lons > 180, lons - 360, lons) if first_lon > last_lon else lons
         values = np.broadcast_to(lons, (5, ni)).astype(np.float64)
         handle = eccodes.codes_grib_new_from_samples("regular_ll_sfc_grib2")
         try:
@@ -86,6 +89,27 @@ class GRIBLongitudeTests(SimpleTestCase):
             self.plugin.clear_cache()
 
         self.assertEqual((west, first_column), (-179.5, 181.0))
+
+    def test_regional_grid_starting_at_180_shifts_west_whole(self):
+        extracted = self._extract(self._grib(180, 250))
+
+        self.assertEqual(extracted.bounds, (-180.5, -2.5, -109.5, 2.5))
+        self.assertEqual(extracted.data[0, 0], 180.0)
+        self.assertEqual(extracted.data[0, -1], 250.0)
+
+    def test_global_grid_repeating_its_seam_column_drops_the_repeat(self):
+        # 0..360 inclusive: the 360 column is the 0 column again.
+        extracted = self._extract(self._grib(0, 360))
+
+        self.assertEqual(extracted.width, 360)
+        self.assertEqual(extracted.bounds, (-179.5, -2.5, 180.5, 2.5))
+        self.assertEqual(extracted.data[0, 0], 181.0)
+
+    def test_grid_crossing_greenwich_stored_from_340_is_unchanged(self):
+        extracted = self._extract(self._grib(340, 55))
+
+        self.assertEqual(extracted.bounds, (-20.5, -2.5, 55.5, 2.5))
+        self.assertEqual(extracted.data[0, 0], -20.0)
 
     def test_regional_grid_straddling_180_is_refused(self):
         with self.assertRaisesRegex(UnsupportedGridError, "antimeridian"):
