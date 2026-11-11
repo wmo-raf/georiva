@@ -12,6 +12,8 @@ Design:
 - cfgrib internals (filter_by_keys) stay internal — callers never see them.
 - open_variable() is the primary interface: context manager, lazy DataArray.
 - extract_variable() and get_metadata_for_variable() are inherited from BaseFormatPlugin.
+- A 0..360 longitude axis is laid out west to east from -180, columns and all;
+  a regional grid straddling 180 is refused with UnsupportedGridError.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ import xarray as xr
 from georiva.utils.path import PathLike
 
 from .base import BaseFormatPlugin, VariableInfo
+from .grid import recentre_longitudes
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +184,12 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 var = var.isel({time_dim: 0})
 
             valid_time = self._resolve_valid_time(var, ds)
+
+            # Lay 0..360 longitudes out west to east on the whole grid, before
+            # any window is cut from it (#616).
+            lon_axis = self._longitude_axis(var)
+            if lon_axis is not None:
+                var = recentre_longitudes(var, lon_axis)
 
             # Orientation check
             y_dim, x_dim = self._spatial_dims(var)
@@ -356,6 +365,16 @@ class GRIBFormatPlugin(BaseFormatPlugin):
                 x_dim = d
         return y_dim, x_dim
 
+    def _longitude_axis(self, var) -> str | None:
+        """The 1D longitude dimension coordinate of a regular lat-lon grid, if it has one."""
+        _, x_dim = self._spatial_dims(var)
+        if x_dim is None or x_dim not in var.coords or var.coords[x_dim].ndim != 1:
+            return None
+        lons = var.coords[x_dim].values
+        if lons.size == 0 or lons.min() < -180 or lons.max() > 360:
+            return None
+        return x_dim
+
     def _spatial_info(self, var) -> tuple[tuple[float, ...], tuple[float, float]]:
         """Returns (bounds, resolution). Bounds = (west, south, east, north)."""
         y_dim, x_dim = self._spatial_dims(var)
@@ -376,9 +395,6 @@ class GRIBFormatPlugin(BaseFormatPlugin):
 
         lat_res = abs(float(lats[1] - lats[0])) if len(lats) > 1 else 1.0
         lon_res = abs(float(lons[1] - lons[0])) if len(lons) > 1 else 1.0
-
-        if np.nanmax(lons) > 180:
-            lons = np.where(lons > 180, lons - 360, lons)
 
         bounds = (
             float(np.nanmin(lons) - lon_res / 2),

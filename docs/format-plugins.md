@@ -109,6 +109,11 @@ class VariableKey:
 
 **Fallback:** If no key is provided, the plugin searches all GRIB datasets by variable name or GRIB shortName. This is slower and potentially ambiguous.
 
+**Longitudes:** a 0..360 longitude axis (common for ERA5 and other global GRIB products) is laid out from -180 to 180,
+reordering the columns with the coordinates, so a global grid is not placed 180 degrees off and a window is cut from
+the recentred grid. A regional 0..360 grid that straddles 180 is refused with `UnsupportedGridError`. The NetCDF handler
+does the same through the shared helpers in `formats/grid.py`.
+
 **Usage:**
 
 ```python
