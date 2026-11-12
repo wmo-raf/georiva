@@ -151,3 +151,31 @@ class AbstractAsset(models.Model):
 
     class Meta:
         abstract = True
+
+
+class HarvestProvenance(models.Model):
+    """The durable mark on a harvested row naming the Harvest feed that created it (ADR 0042 §7).
+
+    Set once, when a harvest creates the row, and never rewritten: it survives
+    Materialization as history, and it survives the feed. There is deliberately no
+    database constraint and no cascade — deleting a feed leaves its rows with
+    Provenance pointing nowhere, and they are then nobody's. So read
+    ``harvested_by_id``; following the relation may find no feed.
+
+    Published tier only. Null on every row a harvest did not create, and a row
+    without it is in no Mirror's Jurisdiction, wherever its href points.
+    """
+
+    harvested_by = models.ForeignKey(
+        "georivasources.DataFeed",
+        null=True,
+        blank=True,
+        editable=False,
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+        related_name="+",
+        help_text=_("The harvest feed that created this row, if one did."),
+    )
+
+    class Meta:
+        abstract = True

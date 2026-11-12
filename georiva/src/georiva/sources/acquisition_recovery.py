@@ -172,14 +172,14 @@ def dispatch_due_retries(now=None) -> int:
 
 
 def dispatch_retry(run) -> str:
-    """Enqueue a system LoaderJob that retries `run`, scoped to its collection.
+    """Enqueue the retry of `run` the way its feed retries: for a file feed, a
+    system LoaderJob scoped to the run's collection; for a harvest, its own task.
 
     Returns RETRY_QUEUED on success, or why it was skipped: the run already has
     a retry (a run, or a job not yet started), or the enqueue failed. Whether a
     newer run exists for the feed is deliberately not asked — the schedule and a
     retry are independent (#480).
     """
-    from task_ferry.handler import JobHandler
     from task_ferry.models import JOB_STATES_PENDING_OR_RUNNING
 
     from georiva.ingestion.models import LoaderJob
@@ -192,13 +192,7 @@ def dispatch_retry(run) -> str:
         return RETRY_ALREADY_UNDER_WAY
 
     try:
-        JobHandler.create_and_start(
-            None,  # system job: exempt from the per-user max_count quota
-            "data_source_load",
-            data_feed_id=run.data_feed_id,
-            collection_id=run.collection_id,
-            resume_of_run_id=run.pk,
-        )
+        run.data_feed.get_real_instance().enqueue_retry(run)
     except Exception:
         logger.exception("FetchRun %d: failed to enqueue its retry", run.pk)
         return RETRY_ENQUEUE_FAILED

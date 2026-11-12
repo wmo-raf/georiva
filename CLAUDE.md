@@ -59,6 +59,12 @@ georiva/src/georiva/          # Main Django application
 │   ├── registry.py           # LoaderProfileViewSetRegistry
 │   ├── product_service.py    # Provision DerivedProducts, pin bindings (ADR 0010)
 │   └── derivation_invocation.py  # Product-driven dispatch: arriving input → recipe run
+├── harvest/                  # Harvest — indexes an Upstream STAC catalog as rows whose assets point upstream (ADR 0042)
+│   ├── models.py             # HarvestFeed (a DataFeed species) + VariableMapping
+│   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient
+│   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address (ADR 0042 §9)
+│   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows
+│   └── testing.py            # FakeUpstream — the one fake a harvest test needs
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)
 ├── processing/               # Derivation engine — the write-side counterpart of the Loader (ADR 0005)
 │   ├── engine.py             # Generic run loop: enumerate → resolve → readiness → compute → register
@@ -178,7 +184,7 @@ Defined in `api/urls.py`:
   the admitted set is closed and asserted in `ingestion/tests/test_queue_routing.py`. Derived work something
   waits on (derivation units, publishes) goes to `georiva-processing`; per-asset bookkeeping nothing waits on
   (zonal stats, virtual-Zarr manifests) to `georiva-bookkeeping`, which has its own worker so a fan-out cannot sit
-  in front of a publish (ADR 0037); sweeps, cleanup and scheduling to `georiva-default`. Declare the queue on the task and dispatch with `delay(...)` — never
+  in front of a publish (ADR 0037); sweeps, cleanup, scheduling and harvests (ADR 0042 §11) to `georiva-default`. Declare the queue on the task and dispatch with `delay(...)` — never
   `apply_async(queue=...)`, which silently overrides the declaration
 - **Celery retries**: ingestion tasks use `max_retries=0` (recovery via the `sweep_unprocessed` periodic task); some
   newer tasks (e.g. `zonal_stats`) use bounded `max_retries`

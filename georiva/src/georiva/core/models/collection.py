@@ -10,7 +10,7 @@ from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel, Objec
 
 from georiva.core.widget import ConditionalCheckbox
 
-from .base import AbstractCollection
+from .base import AbstractCollection, HarvestProvenance
 
 ADM_LEVEL_CHOICES = [
     (1, "Level 1"),
@@ -109,7 +109,7 @@ class CollectionQuerySet(models.QuerySet):
         return self.servable().filter(visibility__in=visible_visibilities(request))
 
 
-class Collection(AbstractCollection, TimeStampedModel, ClusterableModel):
+class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, ClusterableModel):
     """
     Groups one or more Variables.
 
