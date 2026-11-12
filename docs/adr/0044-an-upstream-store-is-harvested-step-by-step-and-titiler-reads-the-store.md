@@ -8,6 +8,9 @@ accepted — see wmo-raf/georiva#605 (its second wave). Extends
 with the Zarr serving path" out of scope. Uses [ADR-0026](0026-a-model-run-is-a-first-class-ingestion-record.md)'s closed-run rule.
 Revises ADR 0043 §9 for stores only.
 
+Amended after a second real store was read (ECMWF AIFS Single, virtual): §11 now says which kinds of place a store's
+data may be pinned in, and what happens when an operator confirms some and not others. Nothing is reversed.
+
 ## Context
 
 Some Upstreams publish no items at all. dynamical.org's catalog is static JSON with 43 collections, each one a single
@@ -91,6 +94,17 @@ the store, and Titiler draws maps by reading the store itself.**
     the reader discards the container configuration inside the repository and builds its own from the pins:
     anonymous, the public endpoint, those prefixes only. A chunk pointing anywhere else fails to read.
 
+    **The kinds of place are a closed list: an `s3://` bucket or a `gs://` bucket.** Each is read anonymously at its
+    provider's public endpoint and no further than the bucket. A store declaring any other kind is refused by the
+    survey, the kind named; a kind is added when its public endpoint is known and anonymous reading has been seen
+    to work. A chunk location is handed to the store's reader as a prefix and is never translated to an `https`
+    host, unlike a COG's Pinned location (ADR 0042 §9): the reader refuses a chunk outside its prefixes by itself.
+
+    **Each declared place is confirmed separately, and the sample read of §12 is the proof.** It runs with the
+    confirmed places only. A chosen field that needs a declined place stops the wizard, naming the place; the
+    operator confirms it or drops the field. A declined place no sample read needed is allowed, and the review says
+    that data kept there will not draw.
+
 12. **The survey proves the store decodes.** A store naming a codec we cannot decode is refused, the codec named.
     Otherwise the wizard reads one field of the newest closed run per chosen array, to estimate the Variable's value
     range and to prove the store is readable without credentials. Core therefore carries the decoder too.
@@ -111,6 +125,9 @@ the store, and Titiler draws maps by reading the store itself.**
 - The first tile after new data arrives pays a reopen, in each worker separately. An animation across a run reads
   every field of it once. Both are what pointing costs.
 - The cache is memory: its size times 8 MB or so, times the tile server's workers, on machines that are often small.
+- A store declares where its data *may* live, not where each run's does, and finding out means walking every
+  reference. So a run older or newer than the sampled one can keep its data in a place the operator declined. Its
+  tiles are errors, never blanks, and say to re-check the Upstream.
 - When an Upstream publishes a store under a new address (a version bump), tiles keep reading the old repository, or
   fail, until an operator re-checks the Upstream. When it moves its source files to another bucket, tiles fail until
   the same re-check confirms the new one.
@@ -145,5 +162,9 @@ the store, and Titiler draws maps by reading the store itself.**
   that commits several times a minute may expire snapshots, and a pinned one could vanish between harvests.
 - **Trust the repository's own container configuration.** The allowlist would guard the address of the store while
   the store's configuration chose where its reader goes next.
+- **Pin `s3://` buckets only.** ECMWF AIFS Single's virtual store declares an S3 and a Google bucket and, in every
+  field sampled, keeps its data in the Google one; it reads anonymously with what is already installed.
+- **One question for all of a store's declared places, or pinning silently what the sample read used.** The first
+  pins a place on the store's say-so; the second pins one nobody agreed to.
 - **Offer every read plane on every shape.** One map of a series-shaped archive can be gigabytes through the tile
   server.
