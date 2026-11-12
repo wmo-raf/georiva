@@ -19,8 +19,9 @@ Meteorological Services.
 - **API**: Django REST Framework + drf-spectacular (OpenAPI)
 - **Frontend**: STAC Browser (Radiant Earth), Vue.js for dashboards
 - **Container**: Docker Compose (16 services), Nginx reverse proxy + tile auth gateway (`georiva-web-proxy`)
-- **Package Manager**: uv — core is a standalone project (`georiva/pyproject.toml` + `georiva/uv.lock`); repo-root
-  `pyproject.toml` is a dev workspace overlay that ties in plugins
+- **Package Manager**: uv — core is a standalone project (`georiva/pyproject.toml` + `georiva/uv.lock`), and so is
+  the tile server (`titiler-app/pyproject.toml` + `titiler-app/uv.lock`); repo-root `pyproject.toml` is a dev
+  workspace overlay that ties in plugins
 - **Python**: 3.12+
 
 ## Project Structure
@@ -195,7 +196,8 @@ Defined in `api/urls.py`:
   slug (`_forti`, not `forti`), so it can never shadow a tenant's prefix — but it is not a tenancy boundary, and
   whatever answers requests from it owns that check (ADR 0027)
 - **Dependencies**: managed with uv; core deps in `georiva/pyproject.toml` + `georiva/uv.lock` (no
-  `requirements.txt`). Add via `just uv-add "..."`; `uv sync --all-packages` builds the local dev env
+  `requirements.txt`). Add via `just uv-add "..."`; `uv sync --all-packages` builds the local dev env. Titiler's
+  deps are a separate lock: `cd titiler-app && uv add "pkg==x.y"`, commit both files, run `just titiler-test`
 - **Source plugins**: flat PEP 621 packages (repo root = package, code under `src/<module>/`; no
   `setup.py`/`requirements/`). For dev, cloned into `dev-plugins/` (gitignored); discovery derives the Django app
   name from the package under `src/`, not the folder name
