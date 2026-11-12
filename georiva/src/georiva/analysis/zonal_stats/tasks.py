@@ -76,16 +76,10 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         return
 
     try:
+        # Opening is reading now (by range, ADR 0043 §7), so an unopenable COG
+        # surfaces here as a RasterioError and takes the not-computable path
+        # below, while an I/O failure on the way is retried.
         band = read_band(asset.location)
-    except Exception as exc:
-        logger.error(
-            "compute_boundary_zonal_stats: failed to read COG %s: %s",
-            asset.href,
-            exc,
-        )
-        raise self.retry(exc=exc) from exc
-
-    try:
         for level, boundaries in boundaries_by_level.items():
             stats_rows = compute_stats_from_band(band, boundaries)
 
@@ -107,7 +101,7 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         logger.exception("compute_boundary_zonal_stats: asset %d is not computable", asset_id)
         raise
     except (OSError, OperationalError, InterfaceError) as exc:
-        # Transient: a DB blip or I/O hiccup.  Once retries are exhausted
+        # Transient: a DB blip, or an I/O hiccup reading MinIO or upstream.  Once retries are exhausted
         # sweep_missing_boundary_stats picks the asset up.
         logger.warning("compute_boundary_zonal_stats: asset %d failed (will retry): %s", asset_id, exc)
         raise self.retry(exc=exc) from exc

@@ -11,6 +11,7 @@ from georiva.geoprocessing.zonal import zonal_stats_from_array
 
 if TYPE_CHECKING:
     from adminboundarymanager.models import AdminBoundary
+    from affine import Affine
 
     from georiva.core.models import Item, Variable
     from georiva.core.storage.asset_location import AssetLocation
@@ -66,7 +67,7 @@ class Band:
     """Band 1 of an asset, nodata as NaN, with the georeferencing to cut it by."""
 
     data: np.ndarray
-    transform: object
+    transform: Affine
     crs: str
 
 

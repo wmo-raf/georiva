@@ -92,6 +92,11 @@ Access via import: `from georiva.core.storage import storage`
   Django. Both are conventional restatements of `Catalog.storage_prefix`; a change to the grammar must touch all
   three. See ADR 0013
 - Bucket configuration from Django settings (`GEORIVA_BUCKETS` in `config/settings/base.py`)
+- **Where an asset's bytes are** (ADR 0043): an `Asset.href` is a bucket key or, for a Remote asset (ADR 0042),
+  an upstream URL. `core/storage/asset_location.py` is the only place that tells them apart — read it through
+  `asset.location` (`is_remote`, `key`, `public_url()`, `open_raster()`) or filter with `local_q()` / `remote_q()`;
+  never test the href string yourself. Whole-asset readers open by range (`Bucket.open_raster`, an fsspec opener
+  for GDAL), never `read_bytes`
 
 ## 5. Service Layer Pattern
 

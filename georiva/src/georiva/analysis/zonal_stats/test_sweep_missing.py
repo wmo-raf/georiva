@@ -162,13 +162,17 @@ class ComputeRetryTests(TestCase):
         Asset.objects.filter(pk=tree["asset"].pk).update(format=Asset.Format.COG)
         cls.asset = tree["asset"]
 
-    def run_task(self, failure):
+    def run_task(self, failure, *, reading=False):
+        """Run the task with ``failure`` raised while computing — or, with
+        ``reading``, while opening and reading the COG (ADR 0043 §7)."""
         from celery.exceptions import Retry
 
         service = "georiva.analysis.zonal_stats.service"
+        read = {"side_effect": failure} if reading else {"return_value": mock.Mock()}
+        compute = {"return_value": []} if reading else {"side_effect": failure}
         with (
-            mock.patch(f"{service}.read_band", return_value=mock.Mock()),
-            mock.patch(f"{service}.compute_stats_from_band", side_effect=failure),
+            mock.patch(f"{service}.read_band", **read),
+            mock.patch(f"{service}.compute_stats_from_band", **compute),
             mock.patch.object(tasks.compute_boundary_zonal_stats, "retry", side_effect=Retry()) as retry,
         ):
             try:
@@ -191,3 +195,14 @@ class ComputeRetryTests(TestCase):
         retried, raised = self.run_task(RasterioIOError("not a tiff"))
         self.assertFalse(retried)
         self.assertIsInstance(raised, RasterioIOError)
+
+    def test_a_cog_that_cannot_be_opened_is_not_retried(self):
+        from rasterio.errors import RasterioIOError
+
+        retried, raised = self.run_task(RasterioIOError("not a tiff"), reading=True)
+        self.assertFalse(retried)
+        self.assertIsInstance(raised, RasterioIOError)
+
+    def test_an_io_failure_while_reading_is_retried(self):
+        retried, _ = self.run_task(ConnectionResetError("upstream reset"), reading=True)
+        self.assertTrue(retried)
