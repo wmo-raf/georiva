@@ -110,6 +110,36 @@ test *args:
       -e "REDIS_URL=redis://georiva-redis:6379/15" \
       georiva georiva test --keepdb {{ args }}
 
+# Django tests for a git worktree, run from inside that worktree.
+#
+# `just test` execs into the running georiva container, which mounts the main
+# checkout: from a worktree it would test the wrong code. This starts a one-off
+# container from the main checkout's stack (the only place .env, dev-plugins/
+# and the compose override exist) with THIS worktree's code mounted instead.
+#
+# The slot (1-9) keeps runs apart: slot N has its own test database
+# (test_<db>_wtN) and its own Redis database (15 - N), so it can run alongside
+# `just test` and alongside other slots. Two worktrees must not share a slot.
+# A slot's first run builds its database from migrations and is slow.
+# e.g. `just test-worktree 1 georiva.stac.tests -v 2`
+[no-cd]
+test-worktree slot *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{ slot }}" =~ ^[1-9]$ ]] || { echo "slot must be 1-9, got '{{ slot }}'" >&2; exit 2; }
+    worktree=$(git rev-parse --show-toplevel)
+    main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+    [ -f "$main/.env" ] || { echo "no .env in the main checkout at $main" >&2; exit 2; }
+    cd "$main"
+    eval "$(grep -E '^GEORIVA_DB_(USER|PASSWORD|NAME)=' .env)"
+    files=(-f docker-compose.yml -f docker-compose.dev.yml)
+    [ -f docker-compose.override.yml ] && files+=(-f docker-compose.override.yml)
+    docker compose "${files[@]}" run --rm --no-deps -T \
+      -v "$worktree/georiva:/georiva/app" \
+      -e "DATABASE_URL=timescalegis://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-db:5432/${GEORIVA_DB_NAME}_wt{{ slot }}" \
+      -e "REDIS_URL=redis://georiva-redis:6379/$((15 - {{ slot }}))" \
+      georiva manage test --keepdb --noinput {{ args }}
+
 # Titiler tests run on the host (the image ships no tests): pytest at the HTTP
 # boundary with Redis, Django and storage faked, see titiler-app/tests/.
 # e.g. `just titiler-test tests/test_wmts_kvp_gettile.py -v`
