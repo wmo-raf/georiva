@@ -6,6 +6,12 @@ Published rows whose assets point upstream. No pixel is read and no file is
 fetched: the run is a `FetchRun` with no `FetchedFile` rows, and its counts are
 its own.
 
+The Upstream is items of COGs, or an Upstream store (ADR 0044). Which, is asked
+in one place — `_listed` — and answered as the same list either way: a store's
+Held steps become items, each carrying a Store asset per array held there.
+Every run in the window is asked about on every harvest: closing a run, and
+not asking a closed one again (ADR 0044 §6), comes with its model-run record.
+
 A completed harvest is also a Mirror of the feed's window (ADR 0042 §6): what
 is gone upstream loses its rows here, and what changed upstream is re-synced.
 Both happen only once the whole window has been listed, and only within the
@@ -28,12 +34,26 @@ from georiva.core.storage.asset_location import remote_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
 from .asset_hosts import AssetHostAllowlist, PinnedBuckets
-from .upstream import UpstreamCatalogClient, UpstreamItem, UpstreamUnreachable, in_window
+from .survey import store_fields, store_media_type
+from .upstream import (
+    UpstreamAsset,
+    UpstreamCatalogClient,
+    UpstreamItem,
+    UpstreamUnreachable,
+    Window,
+    in_window,
+)
 
 logger = logging.getLogger(__name__)
 
 #: What a harvested asset is taken to be when the Upstream does not say (wave 1 is COGs).
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
+
+#: What a Store asset is taken to be when the collection gives its store no media type.
+STORE_MEDIA_TYPE = "application/vnd+zarr"
+
+#: `Asset.media_type`'s column width.
+MAX_MEDIA_TYPE_LENGTH = 100
 
 #: `Asset.checksum`'s column width. A longer upstream checksum is left out, not cut short.
 MAX_CHECKSUM_LENGTH = 64
@@ -107,9 +127,11 @@ def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from
 
 
 def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
+    reach = _Reach.of(feed)
+    variables = feed.mapped_variables(collection)
     described, undescribed = _description(feed, upstream)
     try:
-        listed = list(upstream.list_items(feed.upstream_collection_id, feed.window))
+        listed = _listed(feed, upstream, described, reach.window, list(variables))
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
     # An empty window is believed only of a collection something vouched for.
@@ -124,7 +146,6 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     if described is not None:
         _describe(collection, described, feed)
 
-    variables = feed.mapped_variables(collection)
     allowlist = AssetHostAllowlist(
         feed.allowed_asset_hosts,
         allow_http=feed.allow_http,
@@ -134,14 +155,13 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     # Each asset is located before anything looks at it: the href that is judged,
     # compared and stored is the one a reader will open (ADR 0042 §9).
     pins = PinnedBuckets(feed.pinned_buckets)
-    items = [
-        _located(item, pins) for item in listed if item.datetime is not None and in_window(item.datetime, feed.window)
-    ]
-    indexed = _Index(collection)
-    jurisdiction = _Jurisdiction(feed, collection)
+    items = [_located(item, pins) for item in listed if reach.covers(item)]
+    indexed = _Index(collection, reach)
+    jurisdiction = _Jurisdiction(feed, collection, reach)
     created_items = []
-    # What the Upstream still has: the times of its items, and the places —
-    # a time and a Variable — its mapped assets fill.
+    # What the Upstream still has: the times of its items — each a run, where it
+    # has runs, and a valid time — and the places, a time and a Variable, its
+    # mapped assets fill.
     upstream_times, upstream_places = set(), set()
     # The places in the Jurisdiction this run has already compared with the Upstream.
     judged = set()
@@ -154,13 +174,14 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
         return bool(refusal)
 
     for item in items:
-        upstream_times.add(item.datetime)
+        at = (item.reference_time, item.datetime)
+        upstream_times.add(at)
         admitted = []
         for key, variable in variables.items():
             asset = item.assets.get(key)
             if asset is None:
                 continue
-            place = (item.datetime, variable.pk)
+            place = (*at, variable.pk)
             upstream_places.add(place)
 
             mine = jurisdiction.assets.get(place)
@@ -170,10 +191,10 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
                 if place in judged:
                     continue
                 judged.add(place)
-                if mine.is_current(item) or refused(key, asset, item):
+                if mine.is_current(item, asset) or refused(key, asset, item):
                     continue
                 result.updated += jurisdiction.resync(mine, asset, item)
-            elif not indexed.has_asset(item.datetime, variable) and not refused(key, asset, item):
+            elif not indexed.has_asset(at, variable) and not refused(key, asset, item):
                 admitted.append((variable, asset))
 
         # An item none of whose assets we index is not indexed either.
@@ -183,8 +204,8 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
         with transaction.atomic():
             row, created = indexed.item_for(item, feed)
             for variable, asset in admitted:
-                result.indexed += _create_asset(row, variable, asset, item, feed)
-                indexed.note_asset(item.datetime, variable)
+                result.indexed += _create_asset(row, variable, asset, item, feed, reach.format)
+                indexed.note_asset(at, variable)
         if created:
             created_items.append(row)
 
@@ -218,6 +239,104 @@ def _description(feed, upstream):
     return described, None
 
 
+def _listed(feed, upstream, described, window: Window, mapped: list[str]) -> list[UpstreamItem]:
+    """What the Upstream has in `window`, as items with their assets: the one
+    place a harvest asks which shape its Upstream is (ADR 0044 §1).
+
+    A store has no items. It is asked which steps it holds for the mapped
+    arrays, and each Held step is an item: at its valid time, of its run where
+    the store has runs, with a Store asset — the store's address and the
+    array's path — for each array held there. A step that is in the store's
+    coordinates and not held is not in the answer, and gets no row (§6).
+    """
+    if not feed.is_store:
+        return list(upstream.list_items(feed.upstream_collection_id, window))
+
+    # Which of an array's axes is its run, its step or its time is the
+    # collection's to say, so a store whose collection is not described cannot be listed.
+    if described is None or described.cube is None:
+        raise RunStopped(
+            f"source unavailable — upstream does not describe the data store of collection "
+            f"{feed.upstream_collection_id!r}"
+        )
+    if not feed.store_href:
+        raise RunStopped("source unavailable — the feed names no upstream store to read")
+    fields = store_fields(described.cube, mapped)
+    missing = sorted(set(mapped) - {field.path for field in fields})
+    if missing:
+        # Believed, this would read as "every step of it was deleted". An array
+        # that is truly gone is the operator's to unmap.
+        raise RunStopped(
+            f"source unavailable — upstream no longer describes as a map: {', '.join(repr(path) for path in missing)}"
+        )
+    held = upstream.list_held_steps(feed.store_href, fields, window) if fields else []
+    media_type = store_media_type(described)
+    if not media_type or len(media_type) > MAX_MEDIA_TYPE_LENGTH:
+        # One too long for its column is left out, not cut short, like a checksum.
+        media_type = STORE_MEDIA_TYPE
+    return [
+        UpstreamItem(
+            id="/".join(f"{when:%Y%m%dT%H%M%S}" for when in (step.reference_time, step.time) if when),
+            datetime=step.time,
+            reference_time=step.reference_time,
+            bbox=described.bbox,
+            assets={
+                path: UpstreamAsset(href=feed.store_href, media_type=media_type, array=path)
+                for path in sorted(step.arrays)
+            },
+        )
+        for step in held
+    ]
+
+
+@dataclass(frozen=True)
+class _Reach:
+    """What one harvest reads and judges: the kind of asset its feed writes,
+    and the feed's window as it stood when the harvest began — a Rolling
+    window moves, and one harvest must list and judge by the same one."""
+
+    window: Window
+    format: str
+    #: Whether rows carry a run: a store's may, and a COG harvest's never do.
+    is_store: bool = False
+    #: Whether the window rolls: then what has aged out of it is the Mirror's too (ADR 0044 §7).
+    rolls: bool = False
+
+    @classmethod
+    def of(cls, feed) -> _Reach:
+        from georiva.core.models import Asset
+
+        return cls(
+            window=feed.window,
+            format=Asset.Format.ZARR if feed.is_store else Asset.Format.COG,
+            is_store=feed.is_store,
+            rolls=bool(feed.is_store and feed.rolling_window_days),
+        )
+
+    def covers(self, item: UpstreamItem) -> bool:
+        """Whether an upstream item is in the window: by its run's time where it
+        has a run, so a run inside keeps every step however far ahead."""
+        return item.datetime is not None and self.covers_step(item.reference_time, item.datetime)
+
+    def covers_step(self, run, when) -> bool:
+        return in_window(run or when, self.window)
+
+    def written_q(self, prefix: str = "") -> Q:
+        """The item rows a harvest of this kind could have written, at any time."""
+        return Q() if self.is_store else Q(**{f"{prefix}reference_time__isnull": True})
+
+    def judged_q(self, prefix: str = "") -> Q:
+        """The item rows the Mirror judges: those in the window and, under a
+        Rolling window, those that were in it once and have aged out."""
+        start, end = self.window
+        window = (None if self.rolls else start, end)
+        on_time = Q(**{f"{prefix}reference_time__isnull": True}) & _window_q(window, f"{prefix}time")
+        if not self.is_store:
+            return on_time
+        on_run = Q(**{f"{prefix}reference_time__isnull": False}) & _window_q(window, f"{prefix}reference_time")
+        return on_time | on_run
+
+
 def _located(item: UpstreamItem, pins: PinnedBuckets) -> UpstreamItem:
     """`item` with every asset's href as it may be stored here."""
     return replace(
@@ -230,27 +349,28 @@ class _Index:
     """What the collection already holds, read once: a second harvest of an
     unchanged window asks the database nothing per item."""
 
-    def __init__(self, collection):
+    def __init__(self, collection, reach: _Reach):
         from georiva.core.models import Asset
 
         self.collection = collection
-        # A harvested item is an observation at a valid time: no reference time.
+        # An item of COGs is an observation at a valid time: no reference time.
         self._assets = set(
             Asset.objects.filter(
-                item__collection=collection, item__reference_time__isnull=True, format=Asset.Format.COG
-            ).values_list("item__time", "variable_id")
+                reach.written_q("item__"), item__collection=collection, format=reach.format
+            ).values_list("item__reference_time", "item__time", "variable_id")
         )
 
-    def has_asset(self, when, variable) -> bool:
-        """Whether an asset for `variable` is already there at `when` — a harvested
-        one, a Materialized one, or one that was never ours. None is created over;
-        only one in the Mirror's Jurisdiction is ever written again."""
-        return (when, variable.pk) in self._assets
+    def has_asset(self, at, variable) -> bool:
+        """Whether an asset for `variable` is already there at `at` — a run, or
+        none, and a valid time. A harvested one, a Materialized one, or one that
+        was never ours: none is created over; only one in the Mirror's
+        Jurisdiction is ever written again."""
+        return (*at, variable.pk) in self._assets
 
-    def note_asset(self, when, variable) -> None:
+    def note_asset(self, at, variable) -> None:
         """Two upstream items at one time share an item row here; the first to
         bring a Variable's asset has it."""
-        self._assets.add((when, variable.pk))
+        self._assets.add((*at, variable.pk))
 
     def item_for(self, item: UpstreamItem, feed):
         """The item row at this upstream item's time, created with the feed's
@@ -260,7 +380,7 @@ class _Index:
         row, created = Item.objects.get_or_create(
             collection=self.collection,
             time=item.datetime,
-            reference_time=None,
+            reference_time=item.reference_time,
             defaults={
                 "bounds": item.bbox,
                 "geometry": item.geometry,
@@ -276,11 +396,19 @@ class _Mine:
 
     pk: int
     extra_fields: dict
+    href: str = ""
+    store_array: str = ""
 
-    def is_current(self, item: UpstreamItem) -> bool:
+    def is_current(self, item: UpstreamItem, asset: UpstreamAsset) -> bool:
         """Whether the upstream item's `updated` is the one this asset was last
         written from. An Upstream that changes an item and not its `updated`
-        is not re-synced (ADR 0042, consequences)."""
+        is not re-synced (ADR 0042, consequences).
+
+        A step of a store has no `updated`. Its Store asset says where the
+        store is and which array it means, and is current while both still hold:
+        a store the feed now names at another address is followed there."""
+        if asset.array:
+            return (self.href, self.store_array) == (asset.href, asset.array)
         return self.extra_fields.get(UPSTREAM_UPDATED) == _updated_stamp(item)
 
 
@@ -294,22 +422,18 @@ class _Jurisdiction:
     deleting them. A row Materialized since the read is no longer the Mirror's.
     """
 
-    def __init__(self, feed, collection):
-        from georiva.core.models import Asset
-
+    def __init__(self, feed, collection, reach: _Reach):
         self.feed = feed
         self.collection = collection
-        #: By place: the asset's time and its Variable's pk.
+        self.reach = reach
+        #: By place: the asset's run, or none, its valid time and its Variable's pk.
         self.assets = {
-            (when, variable_pk): _Mine(pk, extra_fields)
-            for pk, when, variable_pk, extra_fields in self._rows()
-            .filter(
-                _window_q(feed.window, "item__time"),
-                item__collection=collection,
-                item__reference_time__isnull=True,
-                format=Asset.Format.COG,
+            (run, when, variable_pk): _Mine(pk, extra_fields, href, store_array)
+            for pk, run, when, variable_pk, extra_fields, href, store_array in self._rows()
+            .filter(reach.judged_q("item__"), item__collection=collection, format=reach.format)
+            .values_list(
+                "pk", "item__reference_time", "item__time", "variable_id", "extra_fields", "href", "store_array"
             )
-            .values_list("pk", "item__time", "variable_id", "extra_fields")
         }
 
     def _rows(self):
@@ -334,15 +458,21 @@ class _Jurisdiction:
 
         An asset is gone when the Upstream has no item at its time, or has one
         that no longer carries the asset its (still `mapped`) Variable is
-        indexed from. Call it only with a window that was listed whole.
+        indexed from. For a store that is a step no longer held, and — nothing
+        being listed of a run outside the window — every step of a run that has
+        aged out of a Rolling one. Call it only with a window that was listed whole.
         """
         from georiva.core.models import Asset
 
-        pks = [
-            mine.pk
-            for (when, variable_pk), mine in self.assets.items()
-            if when not in upstream_times or (variable_pk in mapped and (when, variable_pk) not in upstream_places)
-        ]
+        def gone(at, variable_pk) -> bool:
+            if variable_pk in mapped:
+                return at not in upstream_times or (*at, variable_pk) not in upstream_places
+            # A Variable no longer mapped is not asked about. Of items, the
+            # Upstream still says whether its time is there; a store is asked
+            # only about mapped arrays, so its row stays until its run ages out.
+            return not self.reach.covers_step(*at) if self.reach.is_store else at not in upstream_times
+
+        pks = [mine.pk for (*at, variable_pk), mine in self.assets.items() if gone(tuple(at), variable_pk)]
         removed = 0
         for start in range(0, len(pks), REMOVAL_BATCH):
             with transaction.atomic():
@@ -366,10 +496,9 @@ class _Jurisdiction:
         from georiva.core.models import Asset, Item
 
         empty = Item.objects.filter(
-            _window_q(self.feed.window, "time"),
+            self.reach.judged_q(),
             ~Exists(Asset.objects.filter(item=OuterRef("pk"))),
             collection=self.collection,
-            reference_time__isnull=True,
             harvested_by_id=self.feed.pk,
         )
         with transaction.atomic():
@@ -406,6 +535,8 @@ def _lifted(asset, item: UpstreamItem, *, kept: dict | None = None) -> dict:
     return {
         "href": asset.href,
         "media_type": asset.media_type or COG_MEDIA_TYPE,
+        # What a Store asset's slice is of; empty for any other (ADR 0044 §3).
+        "store_array": asset.array,
         "file_size": asset.file_size,
         "checksum": asset.checksum if len(asset.checksum) <= MAX_CHECKSUM_LENGTH else "",
         "bands": asset.bands or 1,
@@ -418,15 +549,16 @@ def _lifted(asset, item: UpstreamItem, *, kept: dict | None = None) -> dict:
     }
 
 
-def _create_asset(row, variable, asset, item: UpstreamItem, feed) -> int:
-    """Index one Remote asset. Returns how many rows that created: 1, or 0 when
-    another asset took its place since the collection was read."""
+def _create_asset(row, variable, asset, item: UpstreamItem, feed, format: str) -> int:
+    """Index one Remote asset — of a store, a Store asset — in `format`. Returns
+    how many rows that created: 1, or 0 when another asset took its place since
+    the collection was read."""
     from georiva.core.models import Asset
 
     _, created = Asset.objects.get_or_create(
         item=row,
         variable=variable,
-        format=Asset.Format.COG,
+        format=format,
         defaults={**_lifted(asset, item), "roles": [Asset.Role.DATA], "harvested_by": feed},
     )
     return int(created)

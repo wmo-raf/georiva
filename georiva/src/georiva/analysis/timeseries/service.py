@@ -48,6 +48,11 @@ class RemoteRangeTooLarge(Exception):
     """
 
 
+class NotOfferedOverStore(Exception):
+    """Raised when a Variable's data is Store assets: a time series is not read
+    from an Upstream store (ADR 0044, out of scope). Its message is for the caller."""
+
+
 class TimeseriesService:
     """
     Extracts time series data from virtual Zarr manifests.
@@ -211,7 +216,19 @@ class TimeseriesService:
         missing manifest the error it has always been. A Variable that does have
         Remote assets and nothing of either kind in the range answers empty.
         """
-        from georiva.core.storage.asset_location import remote_q
+        from georiva.core.models import Asset
+        from georiva.core.storage.asset_location import remote_q, store_q
+
+        # Asked first: a Variable of Store assets has no virtual store either,
+        # and would otherwise answer as a manifest that is not ready.
+        if (
+            not self._assets(variable, None, None).exists()
+            and Asset.objects.filter(store_q(), variable=variable).exists()
+        ):
+            raise NotOfferedOverStore(
+                "Time series are not available for this collection yet: its data is read from an upstream "
+                "data store, which serves maps only."
+            )
 
         remote = self._remote_assets(variable, time_start, time_end)
         has_remote = bool(remote) or self._assets(variable, None, None).filter(remote_q()).exists()

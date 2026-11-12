@@ -13,8 +13,8 @@ then offers the store's fields in place of images, asks about each place its
 data lives in turn, and reads one map of each chosen field with the places
 confirmed and no others: that read is where a Variable's value range comes
 from and the proof that the store can be read at all (§11, §12). Step 5 gives
-a forecast store a Rolling window (§7). Its first harvest is not started: a
-store's harvest is not built yet.
+a forecast store a Rolling window (§7). Its first harvest starts as it is
+saved, like any other feed's; the operator is told its maps cannot be drawn yet.
 
 What an operator reads here is in their words: no "STAC", "S3" or "COG", and
 of a store no "Zarr", "chunk" or "codec".
@@ -689,19 +689,19 @@ def harvest_wizard_step5(request):
                 messages.error(request, error)
         else:
             request.session.pop(_SESSION_KEY, None)
+            # The first harvest, so the operator's next look at the feed shows data.
+            transaction.on_commit(feed.run_now)
             if feed.is_store:
-                # No first harvest: listing what a store holds is not built yet (ADR 0044 §6).
+                # Its steps are listed from now on; drawing them is the tile server's to learn (ADR 0044 §9).
                 messages.success(
                     request,
                     _(
-                        "“%(name)s” is set up. GeoRiva cannot list what a data store holds yet, so its maps "
-                        "will appear once that is in place. Nothing is being copied."
+                        "“%(name)s” is set up. GeoRiva is now listing what the data store holds; nothing is being "
+                        "copied. Its maps cannot be drawn yet: that is still being built."
                     )
                     % {"name": feed.name},
                 )
             else:
-                # The first harvest, so the operator's next look at the feed shows data.
-                transaction.on_commit(feed.run_now)
                 messages.success(
                     request,
                     _("“%(name)s” is set up. GeoRiva is now listing what the catalog has; nothing is being copied.")

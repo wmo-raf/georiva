@@ -18,6 +18,9 @@ def mark_manifest_stale_on_cog_save(sender, instance: Asset, created: bool, **kw
 
     The manifest is keyed on Variable (OneToOneField), so no collection
     lookup is needed — variable carries its collection via ParentalKey.
+
+    A Store asset (ADR 0044) is not a COG and gets no manifest: its href is
+    already a store, and not one of ours to build references over.
     """
     if instance.format != Asset.Format.COG:
         return

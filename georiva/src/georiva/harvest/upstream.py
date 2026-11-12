@@ -18,7 +18,7 @@ import re
 import socket
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
@@ -154,6 +154,21 @@ class FieldSample:
 
 
 @dataclass(frozen=True)
+class HeldStep:
+    """One step an Upstream store holds data for: a valid time, of a run where
+    the store has runs, and the arrays held there. A store allocates its
+    coordinates ahead of its data, so a step can be listed and not yet held;
+    such a step is not one of these (ADR 0044 §6)."""
+
+    #: The step's valid time: for a forecast, its run's time plus its lead time.
+    time: datetime
+    #: The run it is a step of; `None` for an analysis store, which has no runs.
+    reference_time: datetime | None = None
+    #: The arrays that hold data at this step, by their full path in the store.
+    arrays: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class UpstreamStatistics:
     """Display statistics an Upstream publishes for an asset's band. Any may be missing."""
 
@@ -179,6 +194,8 @@ class UpstreamAsset:
     chunk_locations: tuple[str, ...] = ()
     #: Those of them it says are served at an address of its own, not their provider's public one.
     chunk_endpoints: tuple[str, ...] = ()
+    #: For a Store asset: the array's full path in the store its href names.
+    array: str = ""
 
 
 @dataclass(frozen=True)
@@ -190,6 +207,8 @@ class UpstreamItem:
     geometry: dict | None = None
     updated: datetime | None = None
     assets: dict[str, UpstreamAsset] = field(default_factory=dict)
+    #: The run it is a step of. Only a forecast store's steps have one.
+    reference_time: datetime | None = None
 
 
 def in_window(when: datetime, window: Window) -> bool:
@@ -206,6 +225,13 @@ class UpstreamCatalogClient(Protocol):
 
     def list_items(self, collection_id: str, window: Window) -> Iterable[UpstreamItem]:
         """The collection's items, with their assets, whose time is in `window`."""
+
+    def list_held_steps(self, href: str, fields: list[StoreField], window: Window) -> Iterable[HeldStep]:
+        """The steps the Upstream store at `href` holds for any of `fields`,
+        each with the fields held there. `window` is on run time for a field
+        that has runs — a run inside it gives every step it holds, however far
+        ahead — and on valid time for one that has none. Nothing is decoded and
+        no data is followed anywhere (ADR 0044 §6)."""
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
@@ -689,6 +715,10 @@ def open_store(storage, chunk_locations: Mapping[str, str], *, branch: str = "ma
     return open_repository(storage, chunk_locations).readonly_session(branch).store
 
 
+#: How many chunk keys a store is asked about at once.
+HELD_BATCH = 1024
+
+
 def _held(store, array, path: str, cells: list[tuple[int, ...]]) -> list[bool]:
     """Whether the store holds data for each of `cells` of `array`: asked of
     the store by key, with nothing decoded and nowhere followed."""
@@ -696,7 +726,11 @@ def _held(store, array, path: str, cells: list[tuple[int, ...]]) -> list[bool]:
 
     async def ask():
         keys = [f"{path}/{array.metadata.encode_chunk_key(cell)}" for cell in cells]
-        return await asyncio.gather(*(store.exists(key) for key in keys))
+        held = []
+        # A window of a forecast is thousands of keys: asked a batch at a time.
+        for start in range(0, len(keys), HELD_BATCH):
+            held += await asyncio.gather(*(store.exists(key) for key in keys[start : start + HELD_BATCH]))
+        return held
 
     return list(asyncio.run(ask()))
 
@@ -817,6 +851,166 @@ def sample_store(
     }
 
 
+# ── Which steps a store holds ───────────────────────────────────────────────
+
+#: Seconds listing a window's Held steps may take in all. It runs in a task,
+#: not a request: opening was measured at up to ~17 s cold and an array's first
+#: open at up to ~24 s, and a feed may map several.
+STEPS_TIMEOUT = 300
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+class _StoreMisdescribed(Exception):
+    """The store is not laid out as the harvest was told. Its message is for the run."""
+
+
+def _coordinate(store, path: str, name: str, known: dict):
+    """The values of the coordinate a dimension of the array at `path` is
+    measured on, as numpy dates or lengths of time. It sits beside the array
+    or at the store's root, under the dimension's own name."""
+    import numpy as np
+    import zarr
+    from xarray.coding.times import decode_cf_datetime, decode_cf_timedelta
+
+    group = path.rpartition("/")[0]
+    for at in dict.fromkeys([f"{group}/{name}" if group else name, name]):
+        if at in known:
+            return known[at]
+        try:
+            coordinate = zarr.open_array(store, path=at, mode="r")
+        except (FileNotFoundError, KeyError, zarr.errors.ArrayNotFoundError):
+            continue
+        values = np.asarray(coordinate[:])
+        if values.dtype.kind not in "Mm":
+            # As xarray writes times: whole numbers, with what they count in their attributes.
+            units = str(coordinate.attrs.get("units") or "")
+            if " since " in units:
+                values = np.asarray(decode_cf_datetime(values, units, coordinate.attrs.get("calendar")))
+            elif units:
+                values = np.asarray(decode_cf_timedelta(values, units))
+        if values.dtype.kind not in "Mm" or values.ndim != 1:
+            raise _StoreMisdescribed(f"its “{name}” is not a list of times")
+        known[at] = values
+        return values
+    raise _StoreMisdescribed(f"it has no “{name}” to say when its steps are")
+
+
+def _moment(value) -> datetime | None:
+    """A numpy date as an aware `datetime`; `None` for one that is no date."""
+    import numpy as np
+
+    if np.isnat(value):
+        return None
+    # Whole microseconds added to the epoch: a float of seconds would round them.
+    return _EPOCH + timedelta(microseconds=int(value.astype("datetime64[us]").astype("int64")))
+
+
+def _field_steps(store, field: StoreField, window: Window, known: dict) -> list[tuple[datetime | None, datetime]]:
+    """`(run, valid time)` of every step in `window` that the store holds for one field."""
+    import numpy as np
+    import zarr
+
+    array = zarr.open_array(store, path=field.path, mode="r")
+    names = getattr(array.metadata, "dimension_names", None)
+    if len(field.axes) != array.ndim or not names or len(names) != array.ndim:
+        raise _StoreMisdescribed(f"“{field.path}” is not laid out as its collection says")
+    measured = {
+        part: _coordinate(store, field.path, str(name), known)
+        for part, name in zip(field.axes, names, strict=True)
+        if part in ("run", "step", "time")
+    }
+    for part, values in measured.items():
+        if len(values) != array.shape[field.axes.index(part)]:
+            raise _StoreMisdescribed(f"“{field.path}” is not laid out as its collection says")
+        # A step is asked about by its chunk, which is its own only while a chunk
+        # is one step: a store laid out otherwise would read as holding nothing.
+        if array.chunks[field.axes.index(part)] != 1:
+            raise _StoreMisdescribed(f"“{field.path}” no longer keeps one map per time step")
+
+    def cell(**at):
+        return tuple(at.get(part, 0) for part in field.axes)
+
+    if "time" in measured:
+        if measured["time"].dtype.kind != "M":
+            raise _StoreMisdescribed(f"“{field.path}” has time steps that are not dates")
+        times = [(index, _moment(value)) for index, value in enumerate(measured["time"])]
+        asked = [(index, None, when) for index, when in times if when is not None and in_window(when, window)]
+        cells = [cell(time=index) for index, _run, _when in asked]
+    else:
+        runs, leads = measured.get("run"), measured.get("step")
+        if runs is None or leads is None or runs.dtype.kind != "M" or leads.dtype.kind != "m":
+            raise _StoreMisdescribed(f"“{field.path}” is not a forecast of runs and steps ahead")
+        asked, cells = [], []
+        for run_index, run_value in enumerate(runs):
+            run = _moment(run_value)
+            if run is None or not in_window(run, window):
+                continue
+            for step_index, lead in enumerate(leads):
+                when = None if np.isnat(lead) else _moment(run_value + lead)
+                if when is not None:
+                    asked.append((step_index, run, when))
+                    cells.append(cell(run=run_index, step=step_index))
+    if not cells:
+        return []
+    held = _held(store, array, field.path, cells)
+    return [(run, when) for (_index, run, when), there in zip(asked, held, strict=True) if there]
+
+
+def read_held_steps(storage, fields: list[StoreField], window: Window, *, branch: str = "main") -> list[HeldStep]:
+    """The Held steps of `fields` in `window`, from the repository in `storage`.
+
+    The repository is opened as it stands, with nowhere authorised: whether a
+    step is held is asked of the store by key, and a key is not data.
+    """
+    import icechunk
+
+    store = icechunk.Repository.open(storage).readonly_session(branch).store
+    found: dict[tuple[datetime | None, datetime], set[str]] = {}
+    known: dict = {}
+    for field_ in fields:
+        for step in _field_steps(store, field_, window, known):
+            found.setdefault(step, set()).add(field_.path)
+    return [
+        HeldStep(time=when, reference_time=run, arrays=frozenset(paths))
+        for (run, when), paths in sorted(found.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
+    ]
+
+
+def list_held_steps(
+    href: str, fields: list[StoreField], window: Window, *, timeout: float = STEPS_TIMEOUT
+) -> list[HeldStep]:
+    """The Held steps of `fields` in `window`, from the store at `href`.
+
+    Unlike a probe, this is a harvest's question, and a store that cannot
+    answer it whole has not answered: whatever goes wrong raises
+    `UpstreamUnreachable`, in words a run may show; the library's own are logged.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as TimedOut
+
+    def read():
+        import icechunk
+
+        storage = icechunk.http_storage(href, opts={"timeout": "30s", "connect_timeout": "5s"})
+        return read_held_steps(storage, fields, window)
+
+    # Its own thread, so a store that stops answering costs the wait and no more.
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-steps")
+    try:
+        return pool.submit(read).result(timeout=timeout)
+    except TimedOut as late:
+        raise UpstreamUnreachable(f"upstream store did not answer within {int(timeout)} seconds") from late
+    except _StoreMisdescribed as misdescribed:
+        raise UpstreamUnreachable(f"upstream store could not be listed: {misdescribed}") from misdescribed
+    except Exception as exc:  # whatever the store or its library raises, the window was not listed
+        logger.warning("Upstream store at %s could not be listed: %s", href, exc)
+        raise UpstreamUnreachable("upstream store could not be opened and listed") from exc
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
 # ── The real client ─────────────────────────────────────────────────────────
 
 
@@ -914,6 +1108,9 @@ class StacApiClient:
             for payload in page.get("features") or []:
                 if isinstance(payload, dict):
                     yield parse_item(payload, base_url=page_url)
+
+    def list_held_steps(self, href: str, fields: list[StoreField], window: Window) -> list[HeldStep]:
+        return list_held_steps(href, fields, window)
 
     def resolve_host(self, host: str) -> list[str]:
         try:

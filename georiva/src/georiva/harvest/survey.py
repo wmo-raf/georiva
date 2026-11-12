@@ -21,6 +21,7 @@ it reads one page of a listing and stops.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -39,6 +40,7 @@ from .asset_hosts import (
 from .upstream import (
     CubeArray,
     CubeDimension,
+    StoreField,
     UpstreamAsset,
     UpstreamCatalogClient,
     UpstreamCollection,
@@ -543,6 +545,20 @@ def _store_arrays(cube: UpstreamCube) -> list[SurveyedArray]:
             for array in found
         ]
     return found
+
+
+def store_fields(cube: UpstreamCube, paths: Iterable[str]) -> list[StoreField]:
+    """Each of `paths` that is still a field a Variable can be mapped from, with
+    which of its axes is which: what a harvest asks a store about. A path the
+    cube no longer offers is left out."""
+    offered = {array.path: array for array in _store_arrays(cube) if array.offered}
+    return [StoreField(path, tuple(offered[path].axes)) for path in paths if path in offered]
+
+
+def store_media_type(described: UpstreamCollection) -> str:
+    """The media type the collection gives the store a feed reads; empty when it gives none."""
+    asset = _store_asset(described)
+    return asset.media_type if asset is not None else ""
 
 
 def _horizontal(cube: UpstreamCube) -> dict[str, str]:

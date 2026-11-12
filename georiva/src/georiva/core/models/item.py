@@ -184,6 +184,18 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
         related_name="assets",
     )
 
+    # Kept beside the harvest Provenance, and like it outlives the feed (ADR 0044 §3).
+    store_array = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=_(
+            "For a Store asset: the full path, in the upstream store its href names, of the array it is a "
+            "slice of. Which slice is its item's reference time and valid time."
+        ),
+    )
+
     class Meta:
         ordering = ["sort_order"]
         constraints = [
@@ -256,7 +268,7 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
         """Where this asset's bytes are: our bucket, or upstream (ADR 0043 §1)."""
         from georiva.core.storage.asset_location import AssetLocation
 
-        return AssetLocation(self.href)
+        return AssetLocation(self.href, self.format)
 
     @cached_property
     def url(self) -> str:

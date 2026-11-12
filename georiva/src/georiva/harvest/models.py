@@ -306,9 +306,6 @@ class HarvestFeed(DataFeed):
     def run_now(self, collection=None, *, user=None, async_run: bool = True):
         """Harvest now. A harvest is not a LoaderJob: there are no files to show
         progress for, and it does not belong on the ingestion queue (ADR 0042 §11)."""
-        if self.is_store:
-            # Listing what a store holds is not built yet (ADR 0044 §6): there is nothing to run.
-            return []
         if async_run:
             from .tasks import run_harvest
 
