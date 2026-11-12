@@ -15,10 +15,7 @@ but not *whether storage was asked*, and that is the entire distinction under
 test. The last class comes back to the HTTP boundary for what is visible there.
 """
 
-import http.server
 import json
-import threading
-import uuid
 
 import pytest
 from app import config, vsicurl
@@ -33,120 +30,9 @@ from tests.conftest import (
     ORG,
     TILE_CONFIG,
     VARIABLE,
-    cog_bytes,
 )
 
 TIME = "2026-03-23T12:00:00Z"
-
-
-class ObjectStore:
-    """An HTTP object store that can be made to fail, and counts what it is asked.
-
-    The counting is the point of several tests below: "GDAL never asked" and
-    "GDAL asked again" are the two states this whole change is about, and
-    neither is visible in a response body.
-    """
-
-    def __init__(self, port):
-        self._port = port
-        self._objects: dict[str, bytes] = {}
-        #: Per path, either a status to keep answering or a queue of statuses
-        #: to answer once each.
-        self._failures: dict[str, int | list[int]] = {}
-        self.requests: list[str] = []
-
-    # -- what a test arranges ------------------------------------------------
-
-    def url_for(self, path: str) -> str:
-        return f"http://127.0.0.1:{self._port}/{path}"
-
-    def unique_path(self) -> str:
-        """A path no earlier test can have taught GDAL anything about.
-
-        GDAL's caches are per *process*, not per test, so a path reused across
-        tests would carry the previous test's verdict into this one.
-        """
-        return f"georiva-assets/{ORG}/{CATALOG}/{COLLECTION}/{VARIABLE}/2026/03/23/{uuid.uuid4().hex}.tif"
-
-    def write(self, path: str) -> None:
-        """The COG lands."""
-        self._objects[path] = cog_bytes()
-
-    def fail(self, path: str, status: int, times: int | None = None) -> None:
-        """Answer ``status`` for the next ``times`` requests, or until recovery."""
-        self._failures[path] = [status] * times if times is not None else status
-
-    def recovers(self, path: str) -> None:
-        """Whatever was wrong with ``path`` stops being wrong."""
-        self._failures.pop(path, None)
-
-    # -- what the store answers ----------------------------------------------
-
-    def answer(self, path: str, byte_range: str | None) -> tuple[int, bytes, str | None]:
-        """``(status, body, content_range)`` for one request, recording it."""
-        self.requests.append(path)
-
-        pending = self._failures.get(path)
-        if isinstance(pending, int):
-            return pending, b"", None
-        if pending:
-            return pending.pop(0), b"", None
-        if pending is not None:
-            del self._failures[path]
-
-        body = self._objects.get(path)
-        if body is None:
-            return 404, b"", None
-        if not (byte_range or "").startswith("bytes="):
-            return 200, body, None
-
-        start, _, end = byte_range[len("bytes=") :].partition("-")
-        first = int(start)
-        last = min(int(end) if end else len(body) - 1, len(body) - 1)
-        return 206, body[first : last + 1], f"bytes {first}-{last}/{len(body)}"
-
-
-@pytest.fixture
-def store():
-    """A running object store, torn down with the test that raised it."""
-    holder = {}
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        # GDAL's curl speaks 1.1 and keeps connections alive; the stdlib
-        # default of 1.0 makes it re-dial for every range read.
-        protocol_version = "HTTP/1.1"
-
-        def log_message(self, *args):
-            pass
-
-        def _respond(self, with_body: bool):
-            status, body, content_range = holder["store"].answer(
-                self.path.lstrip("/"),
-                self.headers.get("Range"),
-            )
-            self.send_response(status)
-            self.send_header("Accept-Ranges", "bytes")
-            self.send_header("Content-Length", str(len(body)))
-            if content_range:
-                self.send_header("Content-Range", content_range)
-            self.end_headers()
-            if with_body:
-                self.wfile.write(body)
-
-        def do_GET(self):
-            self._respond(with_body=True)
-
-        def do_HEAD(self):
-            self._respond(with_body=False)
-
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    holder["store"] = ObjectStore(server.server_address[1])
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        yield holder["store"]
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 class TestWhatGdalRemembers:

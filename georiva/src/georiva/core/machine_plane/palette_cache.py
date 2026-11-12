@@ -228,8 +228,10 @@ def prune_style(style) -> None:
         )
 
 
-def prune_stale_keys(live_keys) -> int:
-    """Delete every palette key not in ``live_keys``. Returns the count removed.
+def prune_stale_keys(live_keys, prefix: str = PALETTE_KEY_PREFIX) -> int:
+    """Delete every key under ``prefix`` not in ``live_keys``. Returns the count removed.
+
+    The palette keys by default; ``remote_assets`` sweeps its own prefix with it.
 
     Titiler reads these keys directly, so nothing else ever expires them: a key
     written under a slug that has since been renamed, or for a variable since
@@ -246,12 +248,12 @@ def prune_stale_keys(live_keys) -> int:
 
     try:
         redis_conn = get_redis_connection("default")
-        stale = [key for key in redis_conn.scan_iter(match=f"{PALETTE_KEY_PREFIX}:*") if _as_text(key) not in live_keys]
+        stale = [key for key in redis_conn.scan_iter(match=f"{prefix}:*") if _as_text(key) not in live_keys]
         if stale:
             redis_conn.delete(*stale)
         return len(stale)
     except Exception as e:
-        logger.warning("Failed to prune stale palette cache keys: %s", e)
+        logger.warning("Failed to prune stale %s keys: %s", prefix, e)
         return 0
 
 
@@ -260,8 +262,14 @@ def _as_text(key) -> str:
 
 
 def warm_all() -> None:
-    """Warm all active Variables. Called on Django startup."""
+    """Warm all active Variables. Called on Django startup.
+
+    Also publishes where each Variable's Remote assets are: the other half of
+    what Titiler reads from Redis rather than from Django (``remote_assets``).
+    """
     from georiva.core.models import Variable
+
+    from .remote_assets import publish_all
 
     qs = (
         Variable.objects.filter(is_active=True)
@@ -284,3 +292,5 @@ def warm_all() -> None:
         len(live_keys),
         pruned,
     )
+
+    publish_all()

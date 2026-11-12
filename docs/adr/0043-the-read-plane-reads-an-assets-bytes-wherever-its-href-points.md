@@ -32,7 +32,9 @@ range-reading upstream bytes on demand.**
 
 3. **Titiler is handed the href and range-reads it.** Tile auth is unchanged: nginx `auth_request` decides, Titiler
    holds no secret and makes no decision. That is why upstreams are anonymous-only: a credentialed upstream would put
-   a secret in the tile server.
+   a secret in the tile server. The href reaches Titiler the way rendering config does: Django publishes it to
+   Redis for collections of every tier, and the tile-config callback answers for one timestep on a miss, for
+   `public` collections only (ADR 0015's reason: that callback carries nobody's credential).
 
 4. **The STAC API exposes the upstream href as the asset's href**, so a consumer's own cloud-native tools read the
    same bytes directly.

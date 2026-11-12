@@ -23,6 +23,7 @@ from django.db import transaction
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
+from georiva.core.machine_plane.remote_assets import publish_variable
 from georiva.core.storage.asset_location import remote_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
@@ -180,6 +181,11 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     # Last, and only here: the window was listed whole and indexed (ADR 0042 §6).
     mapped = {variable.pk for variable in variables.values()}
     result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped)
+
+    # A re-sync rewrites hrefs without saving a row, so the tile server is told
+    # once, here, where the window's Remote assets now are (ADR 0043 §3).
+    for variable in variables.values():
+        publish_variable(variable)
 
 
 class _Index:

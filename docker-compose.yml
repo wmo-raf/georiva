@@ -41,6 +41,11 @@ x-backend-variables: &backend-variables
   GEORIVA_FETCH_RUN_MAX_SECONDS: ${GEORIVA_FETCH_RUN_MAX_SECONDS:-7200}
   GEORIVA_FETCH_RUN_MAX_RETRIES: ${GEORIVA_FETCH_RUN_MAX_RETRIES:-4}
   GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS: ${GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS:-300}
+  GEORIVA_TIMESERIES_MAX_REMOTE_ASSETS: ${GEORIVA_TIMESERIES_MAX_REMOTE_ASSETS:-366}
+  # Timeseries and zonal statistics range-read Remote assets from their upstream
+  # (ADR 0043); these bound how long one such read waits.
+  GDAL_HTTP_CONNECTTIMEOUT: ${GDAL_HTTP_CONNECTTIMEOUT:-5}
+  GDAL_HTTP_TIMEOUT: ${GDAL_HTTP_TIMEOUT:-30}
   GEORIVA_TASK_CONTEXT_MODE: ${GEORIVA_TASK_CONTEXT_MODE:-strict}
   MIGRATE_ON_STARTUP: ${MIGRATE_ON_STARTUP:-true}
   COLLECT_STATICFILES_ON_STARTUP: ${COLLECT_STATICFILES_ON_STARTUP:-true}
@@ -335,6 +340,13 @@ services:
       TTL_ROOT_PATH: ${TTL_ROOT_PATH:-/titiler}
       GDAL_CACHEMAX: ${GDAL_CACHEMAX:-512}
       CPL_VSIL_CURL_CACHE_SIZE: ${CPL_VSIL_CURL_CACHE_SIZE:-67108864}
+      # Remote assets are range-read from their upstream (ADR 0043). These bound
+      # how long one tile waits on a slow or absent upstream, and trim the
+      # round trips of a first view. There is no byte cache: measure first.
+      GDAL_HTTP_CONNECTTIMEOUT: ${GDAL_HTTP_CONNECTTIMEOUT:-5}
+      GDAL_HTTP_TIMEOUT: ${GDAL_HTTP_TIMEOUT:-30}
+      GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: ${GDAL_HTTP_MERGE_CONSECUTIVE_RANGES:-YES}
+      GDAL_INGESTED_BYTES_AT_OPEN: ${GDAL_INGESTED_BYTES_AT_OPEN:-32768}
 
   georiva-stac-browser:
     # Built from our own context so the catalog URL can be a function of the

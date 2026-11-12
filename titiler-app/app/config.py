@@ -18,4 +18,10 @@ DJANGO_BASE_URL = os.getenv("DJANGO_BASE_URL", "http://georiva:8000")
 TTL_ROOT_PATH = os.getenv("TTL_ROOT_PATH", "/titiler")
 
 PALETTE_KEY_PREFIX = "georiva:palette"
+
+#: Where Django publishes each Variable's Remote assets: one hash per variable,
+#: timestep → upstream href, plus a marker field saying the hash is its whole
+#: word. Spelled to match ``georiva/core/machine_plane/remote_assets.py``.
+REMOTE_ASSETS_KEY_PREFIX = "georiva:remote-assets"
+REMOTE_ASSETS_PUBLISHED_FIELD = "published"
 PATH_RE = re.compile(r"^[\w/.-]+\.tif$")
