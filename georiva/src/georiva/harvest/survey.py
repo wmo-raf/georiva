@@ -4,9 +4,10 @@ The Upstream survey: what is learnt about an Upstream before a feed exists (ADR 
 An operator gives the Harvest Feed Wizard a catalog's address and nothing they
 must already know. The survey finds the rest: which collections the catalog
 has, how the chosen one's items are organised (its **shape**), which raster
-assets they carry, and where those files live. Only one shape can be harvested
-— one COG per time step per asset key — and for any other the survey says why,
-in words an operator can act on.
+assets they carry, and where those files live. Two shapes are accepted — one
+COG per time step per asset key, and a map-shaped Upstream store whose codecs
+we can decode (ADR 0044 §5, §12) — and for any other the survey says why, in
+words an operator can act on.
 
 It reads through the Upstream catalog client and writes nothing. It also never
 opens an address the Asset host allowlist would refuse: a file's place is
@@ -26,10 +27,13 @@ from urllib.parse import urlsplit
 
 from .asset_hosts import AssetHostAllowlist, PinnedBuckets, is_bucket_name, public_bucket_host, s3_bucket_of
 from .upstream import (
+    CubeArray,
     UpstreamAsset,
     UpstreamCatalogClient,
     UpstreamCollection,
+    UpstreamCube,
     UpstreamUnreachable,
+    can_decode,
 )
 
 #: How many of a collection's items are looked at to learn its shape.
@@ -47,10 +51,20 @@ _STORE_TYPES = ("zarr", "icechunk", "netcdf", "hdf", "grib")
 
 
 class Shape(StrEnum):
-    """How a collection's items are organised. Only the first can be harvested."""
+    """How a collection is organised. The first can be harvested; the second is
+    accepted, and the wizard cannot yet set a feed up from it."""
 
     ONE_COG_PER_TIME = "one-cog-per-time"
+    #: An Upstream store whose chunks are each one whole field at one step.
+    MAP_STORE = "map-shaped-store"
+    #: An Upstream store whose chunks each span many steps over a small area.
+    SERIES_STORE = "series-shaped-store"
+    #: An Upstream store naming a codec nobody installed here.
+    UNDECODABLE_STORE = "undecodable-store"
+    #: An Upstream store whose shape its collection does not say.
+    UNREADABLE_STORE = "unreadable-store"
     TILED = "tiled"
+    #: A store whose collection describes no cube: nothing can be learnt of it.
     STORE = "store"
     NEEDS_ACCOUNT = "needs-account"
     NO_API = "no-api"
@@ -67,9 +81,14 @@ _REASONS = {
         "GeoRiva can only show collections that publish one file per time step."
     ),
     Shape.STORE: (
-        "This collection is published as one data store (Zarr, NetCDF or similar) rather than "
-        "one image file per time step. GeoRiva can't show those yet."
+        "This collection is published as one data store rather than one image file per time step, "
+        "and it does not describe what the store holds. GeoRiva can't show it."
     ),
+    Shape.SERIES_STORE: (
+        "This collection is laid out for charting one place over time, not for drawing maps. GeoRiva cannot use it yet."
+    ),
+    Shape.UNDECODABLE_STORE: "This collection's data is packed in a way GeoRiva cannot unpack",
+    Shape.UNREADABLE_STORE: "GeoRiva could not work out how this collection's data is laid out",
     Shape.NEEDS_ACCOUNT: (
         "This collection's files could not be read. They may need an account, or sit somewhere "
         "GeoRiva is not allowed to read from."
@@ -85,7 +104,7 @@ _REASONS = {
 
 
 def reason_for(shape: Shape) -> str:
-    """Why a collection of `shape` cannot be harvested, for an operator; empty for the shape that can."""
+    """Why a collection of `shape` cannot be harvested, for an operator; empty for a shape that is accepted."""
     return _REASONS.get(shape, "")
 
 
@@ -145,16 +164,40 @@ class SurveyedAsset:
 
 
 @dataclass(frozen=True)
+class SurveyedStore:
+    """An Upstream store, as far as the survey got with it."""
+
+    #: The `https` address it was, or would have been, opened at.
+    href: str
+    #: How many of its arrays are fields on its grid: the ones its shape was read from.
+    fields: int = 0
+    #: Every codec its arrays name; empty when it was never opened.
+    codecs: list[str] = field(default_factory=list)
+    #: Where a virtual store declares its chunks live, as the collection spells
+    #: them. Proposed for confirmation when a feed is set up, not before.
+    chunk_locations: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class CollectionSurvey:
     shape: Shape
     reason: str = ""
     items_sampled: int = 0
     assets: list[SurveyedAsset] = field(default_factory=list)
     locations: list[FileLocation] = field(default_factory=list)
+    #: Set when the collection is an Upstream store, whatever the verdict on it.
+    store: SurveyedStore | None = None
 
     @property
     def harvestable(self) -> bool:
+        """Whether a feed can be set up from it today: the wizard goes on only for this."""
         return self.shape is Shape.ONE_COG_PER_TIME
+
+    @property
+    def accepted(self) -> bool:
+        """Whether GeoRiva can show it: harvestable, or a store it can draw
+        maps from and cannot yet set a feed up for."""
+        return self.shape in (Shape.ONE_COG_PER_TIME, Shape.MAP_STORE)
 
     @property
     def proposed_locations(self) -> list[FileLocation]:
@@ -176,14 +219,14 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
     """The collections an Upstream offers. Raises `UpstreamUnreachable` when its
     root cannot be read at all."""
     root = upstream.describe_root()
-    if not root.is_api:
-        # The address may be one collection's own document: that one is what it offers.
-        return CatalogSurvey(has_api=False, collections=[root.own] if root.own else [])
+    if not root.is_api and root.own:
+        # The address is one collection's own document: that one is what it offers.
+        return CatalogSurvey(has_api=False, collections=[root.own])
     try:
-        return CatalogSurvey(has_api=True, collections=list(upstream.list_collections()))
+        return CatalogSurvey(has_api=root.is_api, collections=list(upstream.list_collections()))
     except UpstreamUnreachable:
         # Its collections do not answer; its root still links to each of them.
-        return CatalogSurvey(has_api=True, collections=list(root.children), described=False)
+        return CatalogSurvey(has_api=root.is_api, collections=list(root.children), described=False)
 
 
 # ── One collection ──────────────────────────────────────────────────────────
@@ -196,9 +239,13 @@ def survey_collection(upstream: UpstreamCatalogClient, catalog_url: str, collect
     items cannot be listed; everything about its files is reported, not raised.
     """
     if not upstream.describe_root().is_api:
-        # Two things are wrong at once with a store in a catalog of plain files,
-        # and the store is the one an operator can do nothing about.
-        stored = any(_is_store(asset) for asset in _described_assets(upstream, collection_id))
+        # A catalog of plain files cannot list items by time, so only a store in it can be read at all.
+        described = upstream.describe_collection(collection_id)
+        if described is not None and (found := _survey_store(upstream, catalog_url, described)):
+            return found
+        # Two things are wrong at once with a store that describes nothing, in a
+        # catalog of plain files, and the store is the one an operator can do nothing about.
+        stored = described is not None and any(_is_store(asset) for asset in described.assets.values())
         return _verdict(Shape.STORE if stored else Shape.NO_API)
 
     items = list(islice(upstream.list_items(collection_id, (None, None)), SAMPLE_ITEMS))
@@ -206,8 +253,11 @@ def survey_collection(upstream: UpstreamCatalogClient, catalog_url: str, collect
 
     rasters = {key for item in items for key, asset in item.assets.items() if _is_raster(asset)}
     if not rasters:
+        described = upstream.describe_collection(collection_id)
+        if described is not None and (found := _survey_store(upstream, catalog_url, described, sampled)):
+            return found
         stores = [asset for item in items for asset in item.assets.values()]
-        stores += list(_described_assets(upstream, collection_id))
+        stores += list(described.assets.values()) if described else []
         if any(_is_store(asset) for asset in stores):
             return _verdict(Shape.STORE, sampled)
         return _verdict(Shape.NO_RASTERS if items else Shape.EMPTY, sampled)
@@ -249,12 +299,6 @@ def _verdict(shape: Shape, sampled: int = 0) -> CollectionSurvey:
     return CollectionSurvey(shape, _REASONS[shape], sampled)
 
 
-def _described_assets(upstream, collection_id):
-    """The assets the collection itself carries, when the Upstream will describe it."""
-    described = upstream.describe_collection(collection_id)
-    return described.assets.values() if described else []
-
-
 def _path(asset: UpstreamAsset) -> str:
     return urlsplit(asset.href).path.rstrip("/").lower()
 
@@ -269,6 +313,129 @@ def _is_raster(asset: UpstreamAsset) -> bool:
 def _is_store(asset: UpstreamAsset) -> bool:
     media_type = asset.media_type.lower()
     return any(kind in media_type for kind in _STORE_TYPES) or _path(asset).endswith(_STORE_SUFFIXES)
+
+
+# ── An Upstream store ───────────────────────────────────────────────────────
+
+#: Names a time-like dimension goes by where the collection does not call it temporal.
+_STEP_NAMES = frozenset(
+    {
+        "time",
+        "init_time",
+        "lead_time",
+        "valid_time",
+        "step",
+        "forecast_period",
+        "reference_time",
+        "forecast_reference_time",
+    }
+)
+_HORIZONTAL_NAMES = {"x": "x", "lon": "x", "longitude": "x", "y": "y", "lat": "y", "latitude": "y"}
+
+
+def _store_asset(described: UpstreamCollection) -> UpstreamAsset | None:
+    """The asset an Upstream store is opened at: the `https` one where the
+    collection publishes the same store at an `s3://` address too."""
+    stores = [asset for asset in described.assets.values() if asset.href and _is_store(asset)]
+    stores.sort(key=lambda asset: urlsplit(asset.href).scheme.lower() != "https")
+    return stores[0] if stores else None
+
+
+def _survey_store(
+    upstream: UpstreamCatalogClient, catalog_url: str, described: UpstreamCollection, sampled: int = 0
+) -> CollectionSurvey | None:
+    """The verdict on `described` as an Upstream store, or `None` when it is
+    not one: a store asset on the collection itself, and a cube described.
+
+    The Store shape is read from what the collection publishes, and costs
+    nothing; the store is opened only once that says map-shaped, to learn
+    whether every codec its arrays name is one we can decode.
+    """
+    asset, cube = _store_asset(described), described.cube
+    if asset is None or cube is None:
+        return None
+    # Every store asset's declaration counts: the `s3://` twin often carries what the `https` one leaves out.
+    declared = sorted({place for other in described.assets.values() for place in other.chunk_locations})
+    places = _Places(upstream, catalog_url)
+    location, href = places.of(asset.href)
+
+    def verdict(shape, reason, *, readable=False, problem="", **store):
+        here = FileLocation(location.host, location.bucket, location.own, readable, location.problem or problem)
+        said = SurveyedStore(href=href, chunk_locations=declared, **store)
+        return CollectionSurvey(shape, reason, sampled, locations=[here], store=said)
+
+    layout, fields, missing = _store_shape(cube)
+    if missing:
+        return verdict(Shape.UNREADABLE_STORE, f"{_REASONS[Shape.UNREADABLE_STORE]}: {missing}.", fields=fields)
+    if layout is Shape.SERIES_STORE:
+        return verdict(Shape.SERIES_STORE, _REASONS[Shape.SERIES_STORE], fields=fields)
+    if location.problem:
+        # Judged as a harvest will judge it, and never opened anywhere that judgement refuses.
+        return verdict(Shape.NEEDS_ACCOUNT, f"{_REASONS[Shape.NEEDS_ACCOUNT]} ({location.problem})", fields=fields)
+
+    probe = upstream.describe_store(href)
+    if not probe.readable:
+        problem = probe.problem or "it could not be opened"
+        reason = f"{_REASONS[Shape.NEEDS_ACCOUNT]} ({problem})"
+        return verdict(Shape.NEEDS_ACCOUNT, reason, problem=problem, fields=fields)
+    named = list(dict.fromkeys(codec for codecs in probe.codecs.values() for codec in codecs))
+    unknown = [codec for codec in named if not can_decode(codec)]
+    if unknown:
+        reason = f"{_REASONS[Shape.UNDECODABLE_STORE]}: {', '.join(f'“{codec}”' for codec in unknown)}."
+        return verdict(Shape.UNDECODABLE_STORE, reason, readable=True, fields=fields, codecs=named)
+    return verdict(Shape.MAP_STORE, "", readable=True, fields=fields, codecs=named)
+
+
+def _store_shape(cube: UpstreamCube) -> tuple[Shape | None, int, str]:
+    """`(shape, how many fields it was read from, what was missing)` for a
+    store, from its collection's published chunking alone.
+
+    A field is an array on the horizontal grid. Map-shaped: every field's
+    chunk covers the whole grid and one step of each time-like dimension.
+    Series-shaped: some field's chunk spans more than one step. What is
+    missing is said in an operator's words, and leaves the shape unknown.
+    """
+    horizontal = {
+        name: dimension.axis if dimension.axis in ("x", "y") else _HORIZONTAL_NAMES.get(name.lower(), "")
+        for name, dimension in cube.dimensions.items()
+        if dimension.kind in ("spatial", "")
+    }
+    across = {name for name, axis in horizontal.items() if axis}
+    if {horizontal[name] for name in across} != {"x", "y"}:
+        return None, 0, "the collection does not describe a grid with a width and a height"
+    fields = [array for array in cube.arrays.values() if len(across & set(array.dimensions)) == 2]
+    if not fields:
+        return None, 0, "the collection lists no fields on its grid"
+
+    shapes = set()
+    for array in fields:
+        layout, missing = _field_shape(array, cube, across)
+        if missing:
+            return None, len(fields), missing
+        shapes.add(layout)
+    if Shape.SERIES_STORE in shapes:
+        return Shape.SERIES_STORE, len(fields), ""
+    if shapes != {Shape.MAP_STORE}:
+        return None, len(fields), "its fields are stored as many small tiles, which GeoRiva cannot read yet"
+    return Shape.MAP_STORE, len(fields), ""
+
+
+def _field_shape(array: CubeArray, cube: UpstreamCube, across: set[str]) -> tuple[Shape | None, str]:
+    """One field's shape, or what its description is missing. `None` with
+    nothing missing is a field cut into tiles within a single step."""
+    if array.chunks is None or len(array.chunks) != len(array.dimensions):
+        return None, f"the collection does not say how “{array.path}” is divided up"
+    whole = True
+    for name, span in zip(array.dimensions, array.chunks, strict=True):
+        dimension = cube.dimensions.get(name)
+        if name in across:
+            if dimension.size is None:
+                return None, f"the collection does not give the size of its grid along “{name}”"
+            whole = whole and span >= dimension.size
+        elif (dimension is not None and dimension.kind == "temporal") or name.lower() in _STEP_NAMES:
+            if span > 1:
+                return Shape.SERIES_STORE, ""
+    return (Shape.MAP_STORE if whole else None), ""
 
 
 def _samples(items, rasters):

@@ -1,5 +1,6 @@
 """
-The real Upstream catalog client reads an anonymous STAC API, and nothing else.
+The real Upstream catalog client reads an anonymous STAC API, or a catalog of
+plain files, and nothing else.
 
 The HTTP session is canned: these tests are about what the client asks for,
 what it makes of the answers, and where it refuses to go. No test reaches a
@@ -12,10 +13,13 @@ import requests
 from django.test import SimpleTestCase
 
 from georiva.harvest.upstream import (
+    CubeArray,
+    CubeDimension,
     StacApiClient,
     UpstreamStatistics,
     UpstreamUnreachable,
     parse_asset,
+    parse_collection,
     parse_item,
 )
 
@@ -289,3 +293,197 @@ class StacApiClientTests(SimpleTestCase):
                 client = self.client_over({f"{API}/collections": answer})
                 with self.assertRaises(UpstreamUnreachable):
                     list(client.list_collections())
+
+
+STATIC = "https://stac.upstream.example/catalog.json"
+GFS = "https://stac.upstream.example/noaa-gfs-forecast-virtual/collection.json"
+CHIRPS = "https://stac.upstream.example/chirps.json"
+STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
+
+#: A collection as dynamical.org publishes a virtual store (shortened): no items, one cube.
+GFS_COLLECTION = {
+    "type": "Collection",
+    "stac_version": "1.1.0",
+    "id": "noaa-gfs-forecast-virtual",
+    "title": "NOAA GFS forecast (virtual)",
+    "extent": {"spatial": {"bbox": [[-180, -90, 180, 90]]}},
+    "assets": {
+        "icechunk": {
+            "href": "s3://dynamical-noaa-gfs/noaa-gfs-forecast-virtual/v0.1.0.icechunk/",
+            "type": "application/x-icechunk",
+            "xarray:storage_options": {"anon": True},
+            "icechunk:virtual_chunk_containers": [
+                {"url_prefix": "s3://noaa-gfs-bdp-pds/", "credentials": {"type": "s3", "anonymous": True}}
+            ],
+        },
+        "icechunk-https": {"href": STORE, "type": "application/x-icechunk"},
+    },
+    "cube:dimensions": {
+        "init_time": {"type": "temporal", "extent": ["2021-05-01T00:00:00Z", None]},
+        "lead_time": {"type": "temporal", "unit": "seconds", "size": 209},
+        "latitude": {"type": "spatial", "axis": "y", "extent": [-90, 90], "size": 721},
+        "longitude": {"type": "spatial", "axis": "x", "extent": [-180, 179.75], "size": 1440},
+    },
+    "cube:variables": {
+        "temperature_2m": {
+            "type": "data",
+            "dimensions": ["init_time", "lead_time", "latitude", "longitude"],
+            "chunks": [1, 1, 721, 1440],
+            "unit": "degree_Celsius",
+            "long_name": "2 metre temperature",
+        },
+        "valid_time": {"type": "auxiliary", "dimensions": ["init_time", "lead_time"]},
+    },
+}
+
+
+class PlainFilesCatalogTests(SimpleTestCase):
+    """A catalog with no API: its collections are what its root links to (ADR 0044 §1)."""
+
+    def client_over(self, pages, url=STATIC):
+        self.session = _Session(pages)
+        return StacApiClient(url, session=self.session)
+
+    def catalog(self, **more):
+        return {
+            STATIC: {
+                "type": "Catalog",
+                "id": "dynamical",
+                "links": [
+                    {"rel": "self", "href": STATIC},
+                    {"rel": "child", "href": "./noaa-gfs-forecast-virtual/collection.json", "title": "GFS"},
+                    {"rel": "child", "href": "./chirps.json"},
+                ],
+            },
+            GFS: GFS_COLLECTION,
+            CHIRPS: {"type": "Collection", "id": "chirps", "title": "CHIRPS"},
+            **more,
+        }
+
+    def asked(self):
+        return [url for url, _ in self.session.calls]
+
+    def test_its_collections_are_listed_from_the_roots_links_each_described_by_its_own_document(self):
+        client = self.client_over(self.catalog())
+
+        collections = list(client.list_collections())
+
+        self.assertEqual(
+            [(c.id, c.title) for c in collections],
+            [("noaa-gfs-forecast-virtual", "NOAA GFS forecast (virtual)"), ("chirps", "CHIRPS")],
+        )
+        self.assertEqual(collections[0].bbox, [-180.0, -90.0, 180.0, 90.0])
+        self.assertEqual(self.asked(), [STATIC, STATIC, GFS, CHIRPS], "no listing an API would have is asked for")
+
+    def test_it_is_listed_the_same_once_its_root_has_been_read_whatever_its_address(self):
+        # Served at a folder: nothing in the address says "file" until the root is read.
+        folder = "https://stac.upstream.example/catalog"
+        pages = self.catalog()
+        pages[folder] = pages.pop(STATIC)
+        client = self.client_over(pages, url=folder)
+
+        self.assertFalse(client.describe_root().is_api)
+
+        self.assertEqual([c.id for c in client.list_collections()], ["noaa-gfs-forecast-virtual", "chirps"])
+
+    def test_a_collection_that_will_not_describe_itself_is_still_offered_by_its_link(self):
+        client = self.client_over(self.catalog(**{GFS: _Response({}, status_code=404)}))
+
+        collections = list(client.list_collections())
+
+        offered = [(c.id, c.title) for c in collections]
+        self.assertEqual(offered, [("noaa-gfs-forecast-virtual", "GFS"), ("chirps", "CHIRPS")])
+
+    def test_a_collection_keeps_the_id_it_was_offered_by(self):
+        pages = self.catalog()
+        pages[CHIRPS] = {"type": "Collection", "id": "CHIRPS-v2", "title": "CHIRPS"}
+        client = self.client_over(pages)
+
+        self.assertEqual([c.id for c in client.list_collections()][1], "chirps")
+        self.assertEqual(client.describe_collection("chirps").id, "chirps")
+
+    def test_a_link_to_another_host_is_never_followed(self):
+        pages = self.catalog()
+        pages[STATIC]["links"].append({"rel": "child", "href": "http://169.254.169.254/latest/collection.json"})
+        client = self.client_over(pages)
+
+        collections = list(client.list_collections())
+
+        self.assertEqual(collections[-1].id, "latest")
+        self.assertNotIn("http://169.254.169.254/latest/collection.json", self.asked())
+
+    def test_a_link_that_leads_to_another_catalog_is_not_taken_for_a_collection(self):
+        pages = self.catalog()
+        pages[CHIRPS] = {"type": "Catalog", "id": "chirps", "links": []}
+        client = self.client_over(pages)
+
+        self.assertIsNone(client.describe_collection("chirps"))
+
+    def test_an_address_that_is_one_collections_own_document_lists_that_collection(self):
+        client = self.client_over({GFS: GFS_COLLECTION}, url=GFS)
+
+        self.assertEqual([c.id for c in client.list_collections()], ["noaa-gfs-forecast-virtual"])
+
+    def test_one_collection_is_described_with_its_store_and_its_cube(self):
+        client = self.client_over(self.catalog())
+
+        described = client.describe_collection("noaa-gfs-forecast-virtual")
+
+        self.assertEqual(described.assets["icechunk-https"].href, STORE)
+        self.assertEqual(described.assets["icechunk"].chunk_locations, ("s3://noaa-gfs-bdp-pds/",))
+        self.assertEqual(described.assets["icechunk-https"].chunk_locations, ())
+        self.assertEqual(
+            described.cube.dimensions["latitude"], CubeDimension("latitude", kind="spatial", axis="y", size=721)
+        )
+        self.assertIsNone(described.cube.dimensions["init_time"].size)
+        self.assertEqual(
+            described.cube.arrays["temperature_2m"],
+            CubeArray(
+                "temperature_2m",
+                dimensions=("init_time", "lead_time", "latitude", "longitude"),
+                chunks=(1, 1, 721, 1440),
+                title="2 metre temperature",
+                unit="degree_Celsius",
+            ),
+        )
+        self.assertIsNone(described.cube.arrays["valid_time"].chunks)
+
+    def test_a_stores_address_given_relative_to_its_collection_is_resolved(self):
+        pages = self.catalog()
+        store = {"href": "./v1.icechunk", "type": "application/x-icechunk"}
+        pages[GFS] = {**GFS_COLLECTION, "assets": {"store": store}}
+        client = self.client_over(pages)
+
+        described = client.describe_collection("noaa-gfs-forecast-virtual")
+
+        self.assertEqual(
+            described.assets["store"].href, "https://stac.upstream.example/noaa-gfs-forecast-virtual/v1.icechunk"
+        )
+
+    def test_a_collection_that_describes_no_cube_has_none(self):
+        self.assertIsNone(parse_collection({"id": "chirps"}).cube)
+
+    def test_a_cube_described_badly_is_kept_as_far_as_it_goes(self):
+        cube = parse_collection(
+            {
+                "id": "x",
+                "cube:dimensions": {"time": {"type": "temporal", "values": ["a", "b", "c"]}, "bad": "nonsense"},
+                "cube:variables": {
+                    "t": {"dimensions": ["time"], "chunks": [1, "many"]},
+                    "u": {"dimensions": "time", "chunks": [True]},
+                    "bad": 7,
+                },
+            }
+        ).cube
+
+        self.assertEqual(cube.dimensions.keys(), {"time"})
+        self.assertEqual(cube.dimensions["time"].size, 3)
+        self.assertEqual((cube.arrays["t"].dimensions, cube.arrays["t"].chunks), (("time",), None))
+        self.assertEqual((cube.arrays["u"].dimensions, cube.arrays["u"].chunks), ((), None))
+
+    def test_an_api_is_asked_for_its_collections_directly_as_before(self):
+        api = "https://stac.upstream.example/api"
+        client = self.client_over({f"{api}/collections": {"collections": [{"id": "a"}]}}, url=api)
+
+        self.assertEqual([c.id for c in client.list_collections()], ["a"])
+        self.assertEqual(self.asked(), [f"{api}/collections"])

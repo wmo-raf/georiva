@@ -65,11 +65,13 @@ georiva/src/georiva/          # Main Django application
 │   ├── wizard_views.py       # Harvest Feed Wizard (address → collection → verdict → images and files → save) + Re-check upstream
 │   ├── setup.py              # Provisions catalog, feed, collection, Variables and mapping together or not at all
 │   ├── forms.py              # The admin form, edit-only: window, cadence, mapping rows (keys the survey saw)
-│   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient
+│   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient (an API, or a
+│   │                         #   catalog of plain files) and the probe that opens an Upstream store (ADR 0044)
 │   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address; pinned s3:// buckets (ADR 0042 §9)
-│   ├── survey.py             # Upstream survey: a collection's shape, raster assets and file locations, before a feed exists
+│   ├── survey.py             # Upstream survey: a collection's shape, raster assets and file locations, before a feed exists;
+│   │                         #   the verdict on an Upstream store (map-shaped and decodable, or why not)
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows
-│   └── testing.py            # FakeUpstream — the one fake a harvest test needs
+│   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream store
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)
 ├── processing/               # Derivation engine — the write-side counterpart of the Loader (ADR 0005)
 │   ├── engine.py             # Generic run loop: enumerate → resolve → readiness → compute → register

@@ -29,6 +29,31 @@
             </a>
             <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
         </div>
+    {% elif survey.accepted %}
+        {# An Upstream store GeoRiva can draw maps from. The verdict is all there is yet. #}
+        <div class="hwiz-panel">
+            <div class="hwiz-panel__header">
+                {% blocktrans with title=session.collection_title %}GeoRiva can draw maps from “{{ title }}”{% endblocktrans %}
+            </div>
+            <div class="hwiz-panel__body">
+                <p>
+                    {% trans "It is published as one data store, laid out one whole map per time step. GeoRiva can draw maps straight from the provider's store, without copying it." %}
+                </p>
+                <p>
+                    {% blocktrans count counter=survey.store.fields %}It holds one kind of map.{% plural %}It holds {{ counter }} kinds of map.{% endblocktrans %}
+                    {% blocktrans count counter=hosts|length %}It is kept at:{% plural %}It is kept at:{% endblocktrans %}
+                    {% for host in hosts %}<strong>{{ host }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+                    {% trans "It can be read without an account." %}
+                </p>
+                <p class="hwiz-note">
+                    {% trans "GeoRiva cannot set up a feed from a data store yet, so this is as far as it goes for now. Nothing has been saved. You can choose another collection of this catalog, or try another catalog." %}
+                </p>
+            </div>
+        </div>
+        <div class="hwiz-actions">
+            <a href="{% url 'harvest_wizard_step2' %}" class="button">{% trans "Choose another collection" %}</a>
+            <a href="{% url 'harvest_wizard_step1' %}" class="button button-secondary">{% trans "Try another catalog" %}</a>
+        </div>
     {% else %}
         <div class="hwiz-panel">
             <div class="hwiz-panel__header">
