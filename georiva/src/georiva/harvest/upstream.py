@@ -136,8 +136,10 @@ def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
     band = bands[0] if bands and isinstance(bands[0], dict) else {}
     stats = band.get("statistics")
     size = payload.get("file:size")
+    href = str(payload.get("href") or "")
     return UpstreamAsset(
-        href=urljoin(base_url, str(payload.get("href") or "")),
+        # An asset with no href stays without one: joined to the page it would name the page.
+        href=urljoin(base_url, href) if href else "",
         media_type=str(payload.get("type") or ""),
         file_size=size if isinstance(size, int) and not isinstance(size, bool) else None,
         checksum=str(payload.get("file:checksum") or ""),
@@ -180,7 +182,7 @@ def _rfc3339(when: datetime) -> str:
     return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _origin(url: str) -> tuple[str, str | None, int | None]:
+def _scheme_host_port(url: str) -> tuple[str, str | None, int | None]:
     parts = urlsplit(url)
     return (parts.scheme, parts.hostname, parts.port)
 
@@ -189,8 +191,8 @@ class StacApiClient:
     """An anonymous STAC API, read over HTTP.
 
     The operator chose the catalog's host, and that is the only host this
-    client talks to: redirects are not followed and a `next` link that leaves
-    the catalog's origin is refused, so the Upstream's content never decides
+    client talks to: redirects are not followed and a `next` link to any other
+    scheme, host or port is refused, so the Upstream's content never decides
     where our servers connect (ADR 0042 §9).
     """
 
@@ -246,7 +248,7 @@ class StacApiClient:
         for link in page.get("links") or []:
             if isinstance(link, dict) and link.get("rel") == "next" and link.get("href"):
                 target = urljoin(current, str(link["href"]))
-                if _origin(target) != _origin(self.url):
+                if _scheme_host_port(target) != _scheme_host_port(self.url):
                     raise UpstreamUnreachable(f"upstream catalog's next page is on another host: {target}")
                 return target
         return None

@@ -15,9 +15,26 @@ import ipaddress
 from collections.abc import Callable, Iterable
 from urllib.parse import urlsplit
 
+from georiva.core.storage.asset_location import AssetLocation
+
 #: `Asset.href`'s column width: a longer href cannot be stored whole, and a
 #: truncated one names something else.
 MAX_HREF_LENGTH = 500
+
+
+#: NAT64's well-known prefix: an IPv6 address here reaches the IPv4 address in its last 32 bits.
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _reached(ip):
+    """The addresses a connection to `ip` can end at: itself, and any IPv4
+    address an IPv6 one is only a wrapping for."""
+    if ip.version == 4:
+        return [ip]
+    wrapped = [ip.ipv4_mapped, ip.sixtofour]
+    if ip in _NAT64:
+        wrapped.append(ipaddress.ip_address(int(ip) & 0xFFFFFFFF))
+    return [ip, *(inner for inner in wrapped if inner is not None)]
 
 
 def _is_public(address: str) -> bool:
@@ -25,11 +42,8 @@ def _is_public(address: str) -> bool:
         ip = ipaddress.ip_address(address)
     except ValueError:
         return False
-    # An IPv4 address written as IPv6 is judged as the IPv4 address it reaches.
-    if ip.version == 6 and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
     # Not global covers private, loopback, link-local, shared (CGNAT), reserved and unspecified.
-    return ip.is_global and not ip.is_multicast
+    return all(reached.is_global and not reached.is_multicast for reached in _reached(ip))
 
 
 class AssetHostAllowlist:
@@ -45,11 +59,20 @@ class AssetHostAllowlist:
         """Why `href` may not be stored, or `None` if it may."""
         if len(href) > MAX_HREF_LENGTH:
             return f"href is longer than {MAX_HREF_LENGTH} characters"
+        # What is judged must be what is stored and later opened: a parser that
+        # forgives stray whitespace or a backslash would pass a string that the
+        # next reader of it takes for something else.
+        if any(char.isspace() or not char.isprintable() or char == "\\" for char in href):
+            return "href contains whitespace, a control character or a backslash"
+        if not AssetLocation(href).is_remote:
+            return "href is not a URL"
         try:
             parts = urlsplit(href)
             host = (parts.hostname or "").lower().rstrip(".")
         except ValueError:
             return "href is not a URL"
+        if "@" in parts.netloc:
+            return "href carries credentials"
         if parts.scheme != "https" and not (parts.scheme == "http" and self.allow_http):
             return f"scheme {parts.scheme or 'missing'!r} is not allowed"
         if not host:

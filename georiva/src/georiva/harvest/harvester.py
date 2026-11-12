@@ -71,7 +71,9 @@ def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from
     so a retry harvests the same window again (ADR 0042 §5).
 
     An Upstream that cannot be read ends the run FAILED and due its retry, with
-    no row written: the whole window is listed before anything is indexed.
+    no item or asset written: the whole window is listed before anything is
+    indexed. The feed's own Collection is its setup, not the Upstream's
+    content, and is there from the first run however that run ends.
     """
     upstream = upstream or feed.upstream_client()
     collection = feed.ensure_collection()

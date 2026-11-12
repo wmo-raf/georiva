@@ -164,8 +164,9 @@ class HarvestProvenanceTests(HarvestFeedMixin, TestCase):
         # The feed row alone: DataFeed.delete() would take its catalog with it.
         type(self.feed).objects.filter(pk=feed_pk).delete()
 
-        self.assertEqual(Asset.objects.get().harvested_by_id, feed_pk)
-        self.assertEqual(Item.objects.get().harvested_by_id, feed_pk)
+        for row in (Collection.objects.get(), Item.objects.get(), Asset.objects.get()):
+            with self.subTest(row=type(row).__name__):
+                self.assertEqual(row.harvested_by_id, feed_pk)
 
     def test_a_row_the_harvest_did_not_create_gains_no_provenance(self):
         self.map_variable("rainfall")
@@ -270,6 +271,35 @@ class AssetHostAllowlistTests(HarvestFeedMixin, TestCase):
 
         for host, what in hosts.items():
             with self.subTest(what):
+                FetchRun.objects.all().delete()
+                self.upstream.items = self.upstream.items[:1]
+                result = self._harvest_href(f"https://{host}/chirps/2.tif")
+                self.assertEqual((result.rejected, Asset.objects.count()), (1, 1))
+
+    def test_an_href_a_forgiving_parser_would_read_differently_is_rejected(self):
+        hrefs = {
+            "leading whitespace": f" {ASSET_HOST}/chirps/2.tif",
+            "an embedded newline": f"{ASSET_HOST}/chirps/\n2.tif",
+            "credentials before the host": "https://user:secret@stac.upstream.example/chirps/2.tif",
+            "a backslash hiding another host": "https://internal.example\\@stac.upstream.example/chirps/2.tif",
+            "no href at all": "",
+            "a bare path": "chirps/2.tif",
+        }
+        for what, href in hrefs.items():
+            with self.subTest(what):
+                FetchRun.objects.all().delete()
+                self.upstream.items = self.upstream.items[:1]
+                result = self._harvest_href(href)
+                self.assertEqual((result.rejected, Asset.objects.count()), (1, 1))
+
+    def test_an_ipv6_address_that_only_wraps_a_private_ipv4_one_is_rejected(self):
+        self.feed.asset_hosts = ["nat64.elsewhere.example", "sixtofour.elsewhere.example"]
+        self.feed.save()
+        self.upstream.addresses["nat64.elsewhere.example"] = ["64:ff9b::a00:1"]
+        self.upstream.addresses["sixtofour.elsewhere.example"] = ["2002:c0a8:101::1"]
+
+        for host in self.feed.asset_hosts:
+            with self.subTest(host):
                 FetchRun.objects.all().delete()
                 self.upstream.items = self.upstream.items[:1]
                 result = self._harvest_href(f"https://{host}/chirps/2.tif")
@@ -385,6 +415,7 @@ class HarvestRunTests(HarvestFeedMixin, TestCase):
         self.assertEqual(run.retry_due_at, run.finished_at + timedelta(minutes=5))
         self.assertIsNotNone(result.source_unavailable)
         self.assertFalse(Item.objects.exists())
+        self.assertFalse(Asset.objects.exists())
         self.assertFalse(FetchedFile.objects.exists())
 
     def test_an_upstream_without_the_feeds_collection_fails_the_run(self):

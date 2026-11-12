@@ -114,6 +114,9 @@ class ParseTests(SimpleTestCase):
         self.assertEqual(asset.statistics, UpstreamStatistics())
         self.assertIsNone(asset.nodata)
 
+    def test_an_asset_with_no_href_is_not_given_the_pages(self):
+        self.assertEqual(parse_asset({"type": "image/tiff"}, base_url=f"{API}/collections/c/items").href, "")
+
     def test_a_relative_href_is_resolved_against_the_page_it_came_from(self):
         asset = parse_asset({"href": "../data/a.tif"}, base_url=f"{API}/collections/c/items")
 
