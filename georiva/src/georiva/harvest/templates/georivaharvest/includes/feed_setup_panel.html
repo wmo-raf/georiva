@@ -9,6 +9,9 @@
     <div class="gfeed-card">
         <div class="gfeed-card__header">
             <h3 class="gfeed-card__title">{% trans "Upstream" %}</h3>
+            {% if feed.recheck_url %}
+                <a class="button button-small button-secondary" href="{{ feed.recheck_url }}">{% trans "Re-check upstream" %}</a>
+            {% endif %}
         </div>
         <table class="listing">
             <tbody>

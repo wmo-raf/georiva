@@ -84,6 +84,11 @@ _REASONS = {
 }
 
 
+def reason_for(shape: Shape) -> str:
+    """Why a collection of `shape` cannot be harvested, for an operator; empty for the shape that can."""
+    return _REASONS.get(shape, "")
+
+
 @dataclass(frozen=True)
 class CatalogSurvey:
     """What an Upstream's root offers to choose from."""

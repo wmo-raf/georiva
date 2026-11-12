@@ -54,8 +54,25 @@ class ProbeRasterTests(SimpleTestCase):
 
         self.assertTrue(probe.readable)
         self.assertEqual((probe.tiled, probe.overviews, probe.crs), (True, True, "EPSG:4326"))
-        self.assertAlmostEqual(probe.value_min, 5.0, delta=5)
-        self.assertAlmostEqual(probe.value_max, 250.0, delta=5)
+        # The range most values lie in — the 2nd to the 98th percentile — not the extremes.
+        self.assertAlmostEqual(probe.value_min, 9.9, delta=1)
+        self.assertAlmostEqual(probe.value_max, 245.1, delta=1)
+
+    def test_one_extreme_value_does_not_stretch_the_range(self):
+        values = np.linspace(0.0, 100.0, 512 * 512, dtype="float32").reshape(512, 512)
+        values[0, 0] = 9000.0
+
+        probe = probe_raster(self.write("storm.tif", cog=True, values=values), estimate_range=True)
+
+        self.assertLess(probe.value_max, 110)
+
+    def test_a_file_of_one_value_keeps_its_true_extremes(self):
+        values = np.zeros((512, 512), dtype="float32")
+        values[:4] = 7.0
+
+        probe = probe_raster(self.write("flat.tif", cog=True, values=values), estimate_range=True)
+
+        self.assertEqual((probe.value_min, probe.value_max), (0.0, 7.0))
 
     def test_no_pixel_is_read_unless_a_range_is_asked_for(self):
         probe = probe_raster(self.write("cog.tif", cog=True), estimate_range=False)

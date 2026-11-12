@@ -28,6 +28,18 @@ class AddDataFrontDoorTests(TestCase):
         self.assertIn("automatically", html.lower())
         self.assertIn("sent to GeoRiva", html)
 
+    def test_front_door_offers_data_that_stays_where_it_is_published(self):
+        html = self.client.get(reverse("add_data")).content.decode()
+        self.assertIn(reverse("harvest_wizard_step1"), html)
+        self.assertIn("without copying it", html)
+
+    def test_front_door_has_no_word_a_data_manager_must_look_up(self):
+        html = self.client.get(reverse("add_data")).content.decode()
+        body = html[html.index("How does this data arrive?") :]
+        body = body[: body.index("</main>")] if "</main>" in body else body
+        for jargon in ("STAC", "S3", "plugin", "config"):
+            self.assertNotIn(jargon, body)
+
     def test_front_door_requires_admin_access(self):
         self.client.logout()
         response = self.client.get(reverse("add_data"))

@@ -1054,7 +1054,10 @@ def data_feed_add_select(request):
         model_name = cls._meta.model_name
         has_wizard = bool(cls.get_collection_definitions())
 
-        if has_wizard:
+        if cls.setup_url_name:
+            has_wizard = True
+            url = reverse(cls.setup_url_name)
+        elif has_wizard:
             url = reverse("wizard_step1_catalog", kwargs={"model_name": model_name})
         else:
             viewset = data_feed_viewset_registry.get(model_name)

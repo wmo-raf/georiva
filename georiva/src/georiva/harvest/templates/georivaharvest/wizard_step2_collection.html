@@ -1,0 +1,61 @@
+{% extends "georivaharvest/wizard_base.html" %}
+{% load i18n wagtailadmin_tags %}
+{% block titletag %}{% trans "Show data from an online catalog — Collection" %}{% endblock %}
+{% block wizard_content %}
+    <p class="hwiz-lead">
+        {% blocktrans count counter=collections|length with address=session.upstream_url %}The catalog at {{ address }} holds one collection.{% plural %}The catalog at {{ address }} holds {{ counter }} collections. Choose the one to show.{% endblocktrans %}
+    </p>
+    {% if not session.described %}
+        <p class="hwiz-note">
+            {% trans "This catalog gives only the short names of its collections, so they are listed here without titles." %}
+        </p>
+    {% endif %}
+    <form method="post" action="">
+        {% csrf_token %}
+        {% if collections|length > 12 %}
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="hwiz-filter">{% trans "Find a collection" %}</label>
+                <input type="search" id="hwiz-filter" class="w-field__input"
+                       placeholder="{% trans 'Type part of its name, e.g. rainfall' %}">
+            </div>
+        {% endif %}
+        <div class="w-field__wrapper hwiz-field">
+            <label class="w-field__label" for="collection_id">{% trans "Collection" %} <sup>*</sup></label>
+            <select name="collection_id" id="collection_id" class="w-field__input" size="12" required>
+                {% for collection in collections %}
+                    <option value="{{ collection.id }}"
+                            {% if collection.id == session.collection_id or collections|length == 1 %}selected{% endif %}>
+                        {% if collection.title and collection.title != collection.id %}{{ collection.title }} ({{ collection.id }}){% else %}{{ collection.id }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            <p class="w-field__help-text">
+                {% trans "GeoRiva will look at a few of its entries to see how it is organised. This can take a few seconds." %}
+            </p>
+        </div>
+        <div class="hwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                {% icon name="arrow-right" wrapped=1 %}
+                {% trans "Next: look at this collection" %}
+            </button>
+            <a href="{% url 'harvest_wizard_step1' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const filter = document.getElementById('hwiz-filter');
+            const select = document.getElementById('collection_id');
+            if (!filter || !select) return;
+            filter.addEventListener('input', function () {
+                const wanted = this.value.trim().toLowerCase();
+                for (const option of select.options) {
+                    option.hidden = wanted !== '' && !option.textContent.toLowerCase().includes(wanted);
+                }
+            });
+        });
+    </script>
+{% endblock %}

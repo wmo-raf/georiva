@@ -66,6 +66,12 @@ class HarvestFeed(DataFeed):
             "bucket is not indexed."
         ),
     )
+    surveyed_assets = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Surveyed assets"),
+        help_text=_('The raster asset keys the Upstream survey last saw, each as {"key": …, "title": …}.'),
+    )
     allow_http = models.BooleanField(
         default=False,
         verbose_name=_("Allow plain http assets"),
@@ -73,6 +79,9 @@ class HarvestFeed(DataFeed):
     )
 
     run_task_name = "georiva.harvest.tasks.run_harvest"
+
+    # Created by the Harvest Feed Wizard and nowhere else (ADR 0042 §2).
+    setup_url_name = "harvest_wizard_step1"
 
     # A harvest writes rows, not objects: its runs have no files to count or list.
     fetches_files = False
@@ -83,7 +92,8 @@ class HarvestFeed(DataFeed):
     panels = [
         *DataFeed.base_panels,
         MultiFieldPanel(
-            [FieldPanel("upstream_url"), FieldPanel("upstream_collection_id")],
+            # Fixed once the feed exists: another catalog or collection is another feed.
+            [FieldPanel("upstream_url", read_only=True), FieldPanel("upstream_collection_id", read_only=True)],
             heading=_("Upstream"),
         ),
         MultiFieldPanel(
@@ -94,16 +104,11 @@ class HarvestFeed(DataFeed):
             "variable_mappings",
             heading=_("Variable mapping"),
             label=_("Mapped asset key"),
-            help_text=_(
-                "Only mapped asset keys are indexed. Variables are curated in the feed's collection, "
-                "which is created when the feed is first saved."
-            ),
+            help_text=_("Only mapped asset keys are indexed. Variables are curated in the feed's collection."),
             panels=[FieldPanel("asset_key"), FieldPanel("variable")],
         ),
-        MultiFieldPanel(
-            [FieldPanel("asset_hosts"), FieldPanel("pinned_buckets"), FieldPanel("allow_http")],
-            heading=_("Asset host allowlist"),
-        ),
+        # Where its files are read from is not edited here: it is confirmed, on
+        # the feed's page, from what a re-check of the Upstream proposes.
     ]
 
     class Meta:
@@ -127,6 +132,30 @@ class HarvestFeed(DataFeed):
         from .upstream import StacApiClient
 
         return StacApiClient(self.upstream_url)
+
+    def survey_client(self):
+        """The client an Upstream survey reads through: it looks at one small page of a listing."""
+        from .survey import SAMPLE_ITEMS
+        from .upstream import StacApiClient
+
+        return StacApiClient(self.upstream_url, page_size=SAMPLE_ITEMS)
+
+    @property
+    def surveyed_asset_keys(self) -> list[tuple[str, str]]:
+        """`(key, label)` for each raster asset key the Upstream survey last saw."""
+        found = []
+        for asset in self.surveyed_assets or []:
+            key = str(asset.get("key") or "") if isinstance(asset, dict) else ""
+            if key:
+                title = str(asset.get("title") or "")
+                found.append((key, f"{key} — {title}" if title and title != key else key))
+        return found
+
+    @property
+    def recheck_url(self):
+        from django.urls import reverse
+
+        return reverse("harvest_recheck_upstream", kwargs={"pk": self.pk}) if self.pk else None
 
     @property
     def collection(self):

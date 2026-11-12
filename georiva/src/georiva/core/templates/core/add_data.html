@@ -83,5 +83,15 @@
                 {% trans "The files are sent to you, or you upload them yourself, for example local model output or gridded station data. A sample file helps set everything up." %}
             </p>
         </a>
+
+        <a class="add-data-card" href="{{ harvest_url }}">
+            <h2 class="add-data-card-title">
+                {% icon name="globe" %}
+                {% trans "Already published in an online catalog" %}
+            </h2>
+            <p class="add-data-card-text">
+                {% trans "The data stays where its provider publishes it, and GeoRiva shows it without copying it. Nothing is downloaded, so it takes no space here. You give the catalog's address and GeoRiva works out the rest." %}
+            </p>
+        </a>
     </div>
 {% endblock %}

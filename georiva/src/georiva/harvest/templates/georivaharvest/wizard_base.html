@@ -1,0 +1,138 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    The Harvest Feed Wizard's frame: the step pills, and the few shapes its
+    steps share. Each step fills `wizard_content`.
+{% endcomment %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .hwiz-progress {
+            display: flex;
+            align-items: center;
+            gap: 0.4em;
+            margin-bottom: 1.5em;
+            font-size: 0.85em;
+            flex-wrap: wrap;
+        }
+
+        .hwiz-step {
+            padding: 0.3em 0.75em;
+            border-radius: 999px;
+            font-weight: 600;
+            border: 1px solid;
+        }
+
+        .hwiz-step--done {
+            background: color-mix(in srgb, var(--w-color-positive-100) 12%, transparent);
+            color: var(--w-color-positive-100);
+            border-color: color-mix(in srgb, var(--w-color-positive-100) 35%, transparent);
+        }
+
+        .hwiz-step--active {
+            background: var(--w-color-info-100);
+            /* White text on a filled colour that does not flip with the theme. */
+            color: var(--w-color-white);
+            border-color: var(--w-color-info-100);
+        }
+
+        .hwiz-step--pending {
+            background: transparent;
+            color: var(--w-color-text-meta);
+            border-color: var(--w-color-border-furniture);
+        }
+
+        .hwiz-sep {
+            color: var(--w-color-text-meta);
+            user-select: none;
+        }
+
+        .hwiz-lead {
+            max-width: 46rem;
+            margin: 0 0 1.25em;
+            color: var(--w-color-text-label);
+            line-height: 1.5;
+        }
+
+        .hwiz-note {
+            max-width: 46rem;
+            color: var(--w-color-text-meta);
+            line-height: 1.5;
+        }
+
+        .hwiz-field {
+            max-width: 46rem;
+            margin-bottom: 1.25em;
+        }
+
+        .hwiz-actions {
+            display: flex;
+            gap: 1em;
+            margin-top: 1.5em;
+        }
+
+        .hwiz-panel {
+            max-width: 60rem;
+            margin-bottom: 1.5em;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+
+        .hwiz-panel__header {
+            padding: 0.75em 1em;
+            background: var(--w-color-surface-header);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            font-weight: 700;
+            color: var(--w-color-text-label);
+        }
+
+        .hwiz-panel__body {
+            padding: 1em;
+            background: var(--w-color-surface-page);
+        }
+
+        .hwiz-panel__body > :last-child {
+            margin-bottom: 0;
+        }
+
+        .hwiz-check {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6em;
+            margin-bottom: 0.75em;
+            line-height: 1.5;
+        }
+
+        .hwiz-warning {
+            color: var(--w-color-warning-100);
+        }
+
+        .hwiz-problem {
+            color: var(--w-color-critical-200);
+        }
+
+        .hwiz-number {
+            width: 8em;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <div class="hwiz-progress">
+        {% for label in step_labels %}
+            {% with forloop.counter as n %}
+                {% if n < step %}
+                    <span class="hwiz-step hwiz-step--done">{{ n }}. {{ label }}</span>
+                {% elif n == step %}
+                    <span class="hwiz-step hwiz-step--active">{{ n }}. {{ label }}</span>
+                {% else %}
+                    <span class="hwiz-step hwiz-step--pending">{{ n }}. {{ label }}</span>
+                {% endif %}
+                {% if not forloop.last %}<span class="hwiz-sep">→</span>{% endif %}
+            {% endwith %}
+        {% endfor %}
+    </div>
+    {% block wizard_content %}{% endblock %}
+{% endblock %}

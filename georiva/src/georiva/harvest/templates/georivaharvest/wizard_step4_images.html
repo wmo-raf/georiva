@@ -1,0 +1,97 @@
+{% extends "georivaharvest/wizard_base.html" %}
+{% load i18n l10n wagtailadmin_tags %}
+{% block titletag %}{% trans "Show data from an online catalog — Images and files" %}{% endblock %}
+{% block wizard_content %}
+    <form method="post" action="">
+        {% csrf_token %}
+        <div class="hwiz-panel">
+            <div class="hwiz-panel__header">{% trans "What to show" %}</div>
+            <div class="hwiz-panel__body">
+                <p class="hwiz-note">
+                    {% trans "Each kind of image becomes something people can pick on your maps. The lowest and highest values set how it is coloured; they were worked out from one of the provider's files and you can change them now or later." %}
+                </p>
+                <table class="listing">
+                    <thead>
+                    <tr>
+                        <th>{% trans "Show" %}</th>
+                        <th>{% trans "Name" %}</th>
+                        <th>{% trans "Unit" %}</th>
+                        <th>{% trans "Lowest value" %}</th>
+                        <th>{% trans "Highest value" %}</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            {% if row.readable %}
+                                <td>
+                                    <input type="checkbox" name="use_{{ row.index }}" id="use_{{ row.index }}"
+                                           aria-label="{% blocktrans with key=row.key %}Show {{ key }}{% endblocktrans %}"
+                                           {% if row.use %}checked{% endif %}>
+                                </td>
+                                <td>
+                                    <input type="text" name="name_{{ row.index }}" class="w-field__input"
+                                           value="{{ row.name }}" aria-label="{% trans 'Name' %}">
+                                    {% if row.warning %}<div class="hwiz-warning">{{ row.warning }}</div>{% endif %}
+                                </td>
+                                <td>
+                                    <select name="unit_{{ row.index }}" class="w-field__input" aria-label="{% trans 'Unit' %}">
+                                        <option value="">— {% trans "Choose" %} —</option>
+                                        {% for unit in units %}
+                                            <option value="{{ unit.pk }}" {% if unit.pk == row.unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td>
+                                    <input type="number" step="any" name="low_{{ row.index }}" class="w-field__input hwiz-number"
+                                           value="{{ row.low|default_if_none:''|unlocalize }}" aria-label="{% trans 'Lowest value' %}">
+                                </td>
+                                <td>
+                                    <input type="number" step="any" name="high_{{ row.index }}" class="w-field__input hwiz-number"
+                                           value="{{ row.high|default_if_none:''|unlocalize }}" aria-label="{% trans 'Highest value' %}">
+                                </td>
+                            {% else %}
+                                <td></td>
+                                <td colspan="4">
+                                    {{ row.title|default:row.key }}
+                                    <div class="hwiz-problem">
+                                        {% blocktrans with why=row.problem %}This one cannot be shown: its file could not be read ({{ why }}).{% endblocktrans %}
+                                    </div>
+                                </td>
+                            {% endif %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if locations %}
+            <div class="hwiz-panel">
+                <div class="hwiz-panel__header">{% trans "Where the files are read from" %}</div>
+                <div class="hwiz-panel__body">
+                    {% for location in locations %}
+                        <label class="hwiz-check" for="allow_{{ location.index }}">
+                            <input type="checkbox" name="allow_{{ location.index }}" id="allow_{{ location.index }}"
+                                   {% if location.allowed %}checked{% endif %}>
+                            <span>
+                                {% blocktrans with host=location.host %}This catalog keeps its files at <strong>{{ host }}</strong>, and they can be read without an account. Allow this feed to read from there?{% endblocktrans %}
+                            </span>
+                        </label>
+                    {% endfor %}
+                    <p class="hwiz-note">
+                        {% trans "GeoRiva will read this feed's files from the places you allow and from nowhere else. If the provider later moves them, the feed's page will ask you again." %}
+                    </p>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="hwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                {% icon name="arrow-right" wrapped=1 %}
+                {% trans "Next: schedule and save" %}
+            </button>
+            <a href="{% url 'harvest_wizard_step3' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+{% endblock %}
