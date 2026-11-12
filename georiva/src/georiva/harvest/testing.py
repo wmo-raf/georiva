@@ -32,6 +32,8 @@ class FakeUpstream:
         self.addresses: dict[str, list[str]] = {}
         self.unreachable: str | None = None
         self.ignores_window = False
+        #: How many items a listing yields before the Upstream stops answering.
+        self.fails_after: int | None = None
         #: The windows `list_items` was asked for, in order.
         self.windows_asked: list[Window] = []
         #: The hosts `resolve_host` was asked about, in order.
@@ -52,6 +54,10 @@ class FakeUpstream:
         self.items.append(item)
         return item
 
+    def drop_item(self, when: datetime) -> None:
+        """The Upstream no longer has an item at `when`."""
+        self.items = [item for item in self.items if item.datetime != when]
+
     def _answer(self):
         if self.unreachable:
             raise UpstreamUnreachable(self.unreachable)
@@ -66,8 +72,15 @@ class FakeUpstream:
         if collection_id != self.collection_id:
             return []
         if self.ignores_window:
-            return list(self.items)
-        return [item for item in self.items if item.datetime is not None and in_window(item.datetime, window)]
+            found = list(self.items)
+        else:
+            found = [item for item in self.items if item.datetime is not None and in_window(item.datetime, window)]
+        return found if self.fails_after is None else self._break_after(found, self.fails_after)
+
+    @staticmethod
+    def _break_after(items, count):
+        yield from items[:count]
+        raise UpstreamUnreachable("upstream catalog unreachable: connection reset mid-listing")
 
     def resolve_host(self, host: str) -> list[str]:
         self.hosts_resolved.append(host)
