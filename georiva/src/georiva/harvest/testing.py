@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from .upstream import (
+    AssetProbe,
     UpstreamAsset,
     UpstreamCollection,
     UpstreamItem,
+    UpstreamRoot,
     UpstreamUnreachable,
     Window,
     in_window,
@@ -42,10 +45,25 @@ class FakeUpstream:
         #: The hosts `resolve_host` was asked about, in order.
         self.hosts_resolved: list[str] = []
 
+        # What only the Upstream survey asks.
+        #: False for a catalog of plain files, which cannot be asked for items by time.
+        self.is_api = True
+        #: True when the address given is one collection's own document, not a catalog's root.
+        self.is_collection_document = False
+        #: The region of each public bucket; one not here has none that can be found.
+        self.regions: dict[str, str] = {}
+        self.regions_asked: list[str] = []
+        #: What opening a file shows, by href; one not here is a sound COG ranging 0–100.
+        self.probes: dict[str, AssetProbe] = {}
+        #: A message for an Upstream none of whose files can be read.
+        self.unreadable: str | None = None
+        #: The files opened, in order, each with whether a value range was asked for.
+        self.probed: list[tuple[str, bool]] = []
+
     def add_item(self, when: datetime, assets: dict[str, UpstreamAsset | str], **fields) -> UpstreamItem:
         """Add an item at `when`. An asset given as a string is its href."""
         item = UpstreamItem(
-            id=fields.pop("id", f"item-{when:%Y%m%dT%H%M%S}"),
+            id=fields.pop("id", None) or f"item-{when:%Y%m%dT%H%M%S}",
             datetime=when,
             bbox=fields.pop("bbox", [33.0, -5.0, 42.0, 5.0]),
             assets={
@@ -79,7 +97,12 @@ class FakeUpstream:
         if self.ignores_window:
             found = list(self.items)
         else:
-            found = [item for item in self.items if item.datetime is not None and in_window(item.datetime, window)]
+            # Asked for no window, it gives all it has, an item with no usable time included.
+            found = [
+                item
+                for item in self.items
+                if window == (None, None) or (item.datetime is not None and in_window(item.datetime, window))
+            ]
         return found if self.fails_after is None else self._break_after(found, self.fails_after)
 
     @staticmethod
@@ -90,3 +113,30 @@ class FakeUpstream:
     def resolve_host(self, host: str) -> list[str]:
         self.hosts_resolved.append(host)
         return self.addresses.get(host, [PUBLIC_ADDRESS])
+
+    def describe_root(self) -> UpstreamRoot:
+        self._answer()
+        return UpstreamRoot(
+            is_api=self.is_api,
+            children=[UpstreamCollection(id=c.id) for c in self.collections],
+            own=self.collections[0] if self.is_collection_document else None,
+        )
+
+    def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
+        self._answer()
+        if self.collections_unreachable:
+            return None
+        return next((c for c in self.collections if c.id == collection_id), None)
+
+    def bucket_region(self, bucket: str) -> str | None:
+        self.regions_asked.append(bucket)
+        return self.regions.get(bucket)
+
+    def probe_asset(self, href: str, *, estimate_range: bool) -> AssetProbe:
+        self.probed.append((href, estimate_range))
+        if self.unreadable:
+            return AssetProbe(readable=False, problem=self.unreadable)
+        probe = self.probes.get(href) or AssetProbe(
+            readable=True, tiled=True, overviews=True, crs="EPSG:4326", value_min=0.0, value_max=100.0
+        )
+        return probe if estimate_range else replace(probe, value_min=None, value_max=None)

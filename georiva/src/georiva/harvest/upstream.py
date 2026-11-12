@@ -17,7 +17,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 #: A window: `(start, end)`, both inclusive, either `None` for unbounded.
 Window = tuple[datetime | None, datetime | None]
@@ -35,6 +35,39 @@ class UpstreamCollection:
     title: str = ""
     description: str = ""
     bbox: list[float] | None = None
+    #: Assets the collection itself carries, beside its items': a whole-collection store, typically.
+    assets: dict[str, UpstreamAsset] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class UpstreamRoot:
+    """What an Upstream's root address says of it."""
+
+    #: Whether it can be asked for a collection's items by time; a catalog of plain files cannot.
+    is_api: bool
+    #: The collections its root links to, by id (and title, where the link gives one).
+    children: list[UpstreamCollection] = field(default_factory=list)
+    #: Where each of those is described, by id.
+    child_hrefs: dict[str, str] = field(default_factory=dict)
+    #: The collection the address itself is, when it is one's own document and not a catalog's root.
+    own: UpstreamCollection | None = None
+
+
+@dataclass(frozen=True)
+class AssetProbe:
+    """What opening one asset's file showed. Nothing here is stored: a probe
+    informs the Upstream survey and no one else."""
+
+    readable: bool
+    #: Why it could not be read; empty when it could.
+    problem: str = ""
+    #: Internally tiled, and with overviews: together, what makes range reads cheap.
+    tiled: bool = False
+    overviews: bool = False
+    crs: str = ""
+    #: The value range of its coarsest overview, when one was asked for and could be read cheaply.
+    value_min: float | None = None
+    value_max: float | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +84,8 @@ class UpstreamStatistics:
 class UpstreamAsset:
     href: str
     media_type: str = ""
+    title: str = ""
+    unit: str = ""
     file_size: int | None = None
     checksum: str = ""
     bands: int | None = None
@@ -87,6 +122,21 @@ class UpstreamCatalogClient(Protocol):
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
+
+    # What only the Upstream survey asks, before a feed exists.
+
+    def describe_root(self) -> UpstreamRoot:
+        """What the Upstream's root address says of it."""
+
+    def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
+        """The Upstream's own description of one collection; `None` when it has
+        none to give. Raises only when the root itself cannot be read."""
+
+    def bucket_region(self, bucket: str) -> str | None:
+        """The region a public `s3://` bucket lives in; `None` when that cannot be found. Never raises."""
+
+    def probe_asset(self, href: str, *, estimate_range: bool) -> AssetProbe:
+        """Open the file at `href` by range and say what it is. Never raises."""
 
 
 # ── STAC JSON → what a harvest reads ────────────────────────────────────────
@@ -125,7 +175,52 @@ def parse_collection(payload: dict) -> UpstreamCollection:
         title=str(payload.get("title") or ""),
         description=str(payload.get("description") or ""),
         bbox=_flat_bbox(bboxes[0]) if bboxes else None,
+        assets=_parse_assets(payload.get("assets")),
     )
+
+
+def _parse_assets(assets, *, base_url: str = "") -> dict[str, UpstreamAsset]:
+    if not isinstance(assets, dict):
+        return {}
+    return {str(key): parse_asset(asset, base_url=base_url) for key, asset in assets.items() if isinstance(asset, dict)}
+
+
+def parse_root(payload: dict, *, base_url: str = "") -> UpstreamRoot:
+    """A catalog's landing page. One that declares what it conforms to, or links
+    to its collections or its search, can be asked for items by time; a catalog
+    of plain files only links to more files."""
+    links = [link for link in payload.get("links") or [] if isinstance(link, dict) and link.get("href")]
+    is_api = bool(payload.get("conformsTo")) or any(link.get("rel") in ("data", "search") for link in links)
+    children, child_hrefs = [], {}
+    for link in links:
+        if link.get("rel") != "child":
+            continue
+        href = urljoin(base_url, str(link["href"]))
+        child_id = _child_id(urlsplit(href).path, is_api=is_api)
+        if child_id and child_id not in child_hrefs:
+            children.append(UpstreamCollection(id=child_id, title=str(link.get("title") or "")))
+            child_hrefs[child_id] = href
+    return UpstreamRoot(
+        is_api=is_api,
+        children=children,
+        child_hrefs=child_hrefs,
+        own=parse_collection(payload) if payload.get("type") == "Collection" else None,
+    )
+
+
+def _child_id(path: str, *, is_api: bool) -> str | None:
+    """The id of the collection a root's child link leads to, read from its
+    address. An API keeps its collections under `/collections/`, and any other
+    child there is a sub-catalog; a catalog of plain files names a collection
+    by its folder (`…/chirps/collection.json`) or its file (`…/chirps.json`)."""
+    parent, _, last = path.rstrip("/").rpartition("/")
+    if parent.endswith("/collections"):
+        return unquote(last) or None
+    if is_api:
+        return None
+    if last.lower() in ("collection.json", "catalog.json"):
+        last = parent.rpartition("/")[2]
+    return unquote(last.removesuffix(".json")) or None
 
 
 def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
@@ -141,6 +236,8 @@ def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
         # An asset with no href stays without one: joined to the page it would name the page.
         href=urljoin(base_url, href) if href else "",
         media_type=str(payload.get("type") or ""),
+        title=str(payload.get("title") or ""),
+        unit=str(band.get("unit") or ""),
         file_size=size if isinstance(size, int) and not isinstance(size, bool) else None,
         checksum=str(payload.get("file:checksum") or ""),
         bands=len(bands) or None,
@@ -169,10 +266,58 @@ def parse_item(payload: dict, *, base_url: str = "") -> UpstreamItem:
         bbox=_flat_bbox(payload.get("bbox")),
         geometry=payload.get("geometry") if isinstance(payload.get("geometry"), dict) else None,
         updated=_parse_time(properties.get("updated")),
-        assets={
-            str(key): parse_asset(asset, base_url=base_url) for key, asset in assets.items() if isinstance(asset, dict)
-        },
+        assets=_parse_assets(assets, base_url=base_url),
     )
+
+
+# ── Opening one file ────────────────────────────────────────────────────────
+
+#: Seconds one request of a probe may take. A probe runs inside a web request.
+PROBE_TIMEOUT = 10
+
+#: The most pixels a probe reads to estimate a value range.
+PROBE_MAX_POINTS = 1_000_000
+
+
+def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIMEOUT) -> AssetProbe:
+    """Open the raster at `path` — a URL, read by range — and say what it is.
+
+    Opening reads the file's header and nothing else. A value range is read
+    only when asked for, from the coarsest overview, and only when that is
+    small enough to be cheap: a file with no overviews is not read whole to
+    learn its range. Whatever goes wrong is the probe's answer, not an error.
+    """
+    import numpy as np
+    import rasterio
+    from rasterio.errors import RasterioError
+
+    options = {
+        "GDAL_HTTP_TIMEOUT": timeout,
+        "GDAL_HTTP_CONNECTTIMEOUT": min(timeout, 5),
+        "GDAL_HTTP_MAX_RETRY": 0,
+        "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+    }
+    try:
+        with rasterio.Env(**options), rasterio.open(path) as src:
+            factors = src.overviews(1) if src.count else []
+            low = high = None
+            if estimate_range and src.count:
+                factor = max(factors, default=1)
+                shape = (max(1, src.height // factor), max(1, src.width // factor))
+                if shape[0] * shape[1] <= PROBE_MAX_POINTS:
+                    values = np.ma.masked_invalid(src.read(1, out_shape=shape, masked=True))
+                    if values.count():
+                        low, high = float(values.min()), float(values.max())
+            return AssetProbe(
+                readable=True,
+                tiled=bool(src.profile.get("tiled")),
+                overviews=bool(factors),
+                crs=src.crs.to_string() if src.crs else "",
+                value_min=low,
+                value_max=high,
+            )
+    except (RasterioError, OSError, ValueError) as exc:
+        return AssetProbe(readable=False, problem=str(exc)[:300] or type(exc).__name__)
 
 
 # ── The real client ─────────────────────────────────────────────────────────
@@ -240,6 +385,47 @@ class StacApiClient:
         except OSError:
             return []
         return sorted({info[4][0] for info in found})
+
+    def describe_root(self) -> UpstreamRoot:
+        page, url = self._get(self.url, None)
+        return parse_root(page, base_url=url)
+
+    def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
+        root = self.describe_root()
+        if root.own is not None and root.own.id == collection_id:
+            return root.own
+        href = root.child_hrefs.get(collection_id)
+        if href is None and root.is_api:
+            href = f"{self.url}/collections/{quote(collection_id, safe='')}"
+        # A child link is the Upstream's content: followed only to the operator's own host.
+        if href is None or not self._is_ours(href):
+            return None
+        try:
+            page, _ = self._get(href, None)
+        except UpstreamUnreachable:
+            return None
+        return parse_collection(page)
+
+    def bucket_region(self, bucket: str) -> str | None:
+        """Asked of S3 itself, which names a bucket's region on any answer. This
+        is the one address here that is not the operator's: it is S3's, and
+        only a bucket's bare name is ever put into it."""
+        import requests
+
+        from .asset_hosts import is_bucket_name
+
+        if not is_bucket_name(bucket):
+            return None
+        try:
+            response = self.session.get(
+                f"https://{bucket}.s3.amazonaws.com/", timeout=self.timeout, allow_redirects=False
+            )
+        except requests.RequestException:
+            return None
+        return response.headers.get("x-amz-bucket-region") or None
+
+    def probe_asset(self, href: str, *, estimate_range: bool) -> AssetProbe:
+        return probe_raster(href, estimate_range=estimate_range)
 
     def _pages(self, url: str, params: dict | None = None) -> Iterator[tuple[dict, str]]:
         """Each page of a paged listing with the URL it came from, following `next` links."""
