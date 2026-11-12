@@ -6,19 +6,24 @@ Published rows whose assets point upstream. No pixel is read and no file is
 fetched: the run is a `FetchRun` with no `FetchedFile` rows, and its counts are
 its own.
 
-This is the create half. A harvest adds what is missing and leaves every row
-that already exists exactly as it is; removing what is gone upstream and
-re-syncing what changed is the Mirror's work, within its Jurisdiction.
+A completed harvest is also a Mirror of the feed's window (ADR 0042 §6): what
+is gone upstream loses its rows here, and what changed upstream is re-synced.
+Both happen only once the whole window has been listed, and only within the
+Mirror's Jurisdiction (§7) — the assets that bear this feed's Provenance and
+are still Remote. Every other row is left exactly as it is.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC
 
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Exists, F, OuterRef, Q
+from django.utils import timezone
 
+from georiva.core.storage.asset_location import remote_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
 from .asset_hosts import AssetHostAllowlist
@@ -31,6 +36,13 @@ COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 #: `Asset.checksum`'s column width. A longer upstream checksum is left out, not cut short.
 MAX_CHECKSUM_LENGTH = 64
+
+#: Where a harvested asset keeps its upstream item's `updated`, in `extra_fields`:
+#: what the next harvest compares to tell whether the item changed (ADR 0042 §6).
+UPSTREAM_UPDATED = "upstream_updated"
+
+#: Rows removed per statement when a window loses many at once.
+REMOVAL_BATCH = 500
 
 
 @dataclass
@@ -71,8 +83,9 @@ def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from
     so a retry harvests the same window again (ADR 0042 §5).
 
     An Upstream that cannot be read ends the run FAILED and due its retry, with
-    no item or asset written: the whole window is listed before anything is
-    indexed. The feed's own Collection is its setup, not the Upstream's
+    no item or asset written, rewritten or removed: the whole window is listed
+    before any row is touched, so an outage never reads as "everything was
+    deleted". The feed's own Collection is its setup, not the Upstream's
     content, and is there from the first run however that run ends.
     """
     upstream = upstream or feed.upstream_client()
@@ -104,9 +117,6 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     _describe(collection, described, feed)
 
     variables = feed.mapped_variables(collection)
-    if not variables:
-        return
-
     allowlist = AssetHostAllowlist(
         feed.allowed_asset_hosts,
         allow_http=feed.allow_http,
@@ -115,20 +125,43 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     # The Upstream is asked for the window and is not trusted to have kept to it.
     items = [item for item in listed if item.datetime is not None and in_window(item.datetime, feed.window)]
     indexed = _Index(collection)
+    jurisdiction = _Jurisdiction(feed, collection)
     created_items = []
+    # What the Upstream still has: the times of its items, and the places —
+    # a time and a Variable — its mapped assets fill.
+    upstream_times, upstream_places = set(), set()
+    # The places in the Jurisdiction this run has already compared with the Upstream.
+    judged = set()
+
+    def refused(key, asset, item) -> bool:
+        refusal = allowlist.refusal(asset.href)
+        if refusal:
+            result.rejected += 1
+            logger.warning("Harvest %s: rejected asset %r of item %s — %s", feed.name, key, item.id, refusal)
+        return bool(refusal)
 
     for item in items:
+        upstream_times.add(item.datetime)
         admitted = []
         for key, variable in variables.items():
             asset = item.assets.get(key)
-            if asset is None or indexed.has_asset(item.datetime, variable):
+            if asset is None:
                 continue
-            refusal = allowlist.refusal(asset.href)
-            if refusal:
-                result.rejected += 1
-                logger.warning("Harvest %s: rejected asset %r of item %s — %s", feed.name, key, item.id, refusal)
-                continue
-            admitted.append((variable, asset))
+            place = (item.datetime, variable.pk)
+            upstream_places.add(place)
+
+            mine = jurisdiction.assets.get(place)
+            if mine is not None:
+                # In the Jurisdiction: re-synced when the item changed upstream, else not written.
+                # Of two upstream items at one time, the first listed speaks for the place.
+                if place in judged:
+                    continue
+                judged.add(place)
+                if mine.is_current(item) or refused(key, asset, item):
+                    continue
+                result.updated += jurisdiction.resync(mine, asset, item)
+            elif not indexed.has_asset(item.datetime, variable) and not refused(key, asset, item):
+                admitted.append((variable, asset))
 
         # An item none of whose assets we index is not indexed either.
         if not admitted:
@@ -137,12 +170,16 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
         with transaction.atomic():
             row, created = indexed.item_for(item, feed)
             for variable, asset in admitted:
-                result.indexed += _create_asset(row, variable, asset, feed)
+                result.indexed += _create_asset(row, variable, asset, item, feed)
                 indexed.note_asset(item.datetime, variable)
         if created:
             created_items.append(row)
 
     _extend_collection(collection, created_items)
+
+    # Last, and only here: the window was listed whole and indexed (ADR 0042 §6).
+    mapped = {variable.pk for variable in variables.values()}
+    result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped)
 
 
 class _Index:
@@ -162,7 +199,8 @@ class _Index:
 
     def has_asset(self, when, variable) -> bool:
         """Whether an asset for `variable` is already there at `when` — a harvested
-        one, a Materialized one, or one that was never ours. All are left alone."""
+        one, a Materialized one, or one that was never ours. None is created over;
+        only one in the Mirror's Jurisdiction is ever written again."""
         return (when, variable.pk) in self._assets
 
     def note_asset(self, when, variable) -> None:
@@ -188,31 +226,164 @@ class _Index:
         return row, created
 
 
-def _create_asset(row, variable, asset, feed) -> int:
+@dataclass
+class _Mine:
+    """One asset in the Jurisdiction, as it stood when the harvest began."""
+
+    pk: int
+    extra_fields: dict
+
+    def is_current(self, item: UpstreamItem) -> bool:
+        """Whether the upstream item's `updated` is the one this asset was last
+        written from. An Upstream that changes an item and not its `updated`
+        is not re-synced (ADR 0042, consequences)."""
+        return self.extra_fields.get(UPSTREAM_UPDATED) == _updated_stamp(item)
+
+
+class _Jurisdiction:
+    """The feed's Jurisdiction within its window: the assets its Mirror may
+    rewrite or remove (ADR 0042 §7).
+
+    Mine, and still Remote — both, always. The two conditions pick the rows
+    read here, once, and are applied again when a row is written: a rewrite is
+    one guarded statement, and a removal locks the rows that still pass before
+    deleting them. A row Materialized since the read is no longer the Mirror's.
+    """
+
+    def __init__(self, feed, collection):
+        from georiva.core.models import Asset
+
+        self.feed = feed
+        self.collection = collection
+        #: By place: the asset's time and its Variable's pk.
+        self.assets = {
+            (when, variable_pk): _Mine(pk, extra_fields)
+            for pk, when, variable_pk, extra_fields in self._rows()
+            .filter(
+                _window_q(feed.window, "item__time"),
+                item__collection=collection,
+                item__reference_time__isnull=True,
+                format=Asset.Format.COG,
+            )
+            .values_list("pk", "item__time", "variable_id", "extra_fields")
+        }
+
+    def _rows(self):
+        """Mine, and still Remote: the test every read, rewrite and delete goes through."""
+        from georiva.core.models import Asset
+
+        return Asset.objects.filter(remote_q(), harvested_by_id=self.feed.pk)
+
+    def resync(self, mine: _Mine, asset, item: UpstreamItem) -> int:
+        """Rewrite one asset from what the Upstream now says of it. Returns how
+        many rows that rewrote: 1, or 0 when it left the Jurisdiction meanwhile."""
+        return (
+            self._rows()
+            .filter(pk=mine.pk)
+            .update(**_lifted(asset, item, kept=mine.extra_fields), modified=timezone.now())
+        )
+
+    def remove_gone(self, upstream_times: set, upstream_places: set, mapped: set) -> int:
+        """Remove the assets that are gone upstream, and then every item of this
+        feed's in the window that is left with no asset of any kind. Returns how
+        many assets went.
+
+        An asset is gone when the Upstream has no item at its time, or has one
+        that no longer carries the asset its (still `mapped`) Variable is
+        indexed from. Call it only with a window that was listed whole.
+        """
+        from georiva.core.models import Asset
+
+        pks = [
+            mine.pk
+            for (when, variable_pk), mine in self.assets.items()
+            if when not in upstream_times or (variable_pk in mapped and (when, variable_pk) not in upstream_places)
+        ]
+        removed = 0
+        for start in range(0, len(pks), REMOVAL_BATCH):
+            with transaction.atomic():
+                # Locked as they are judged: a Materialize under way either lands
+                # first and the row is no longer here, or waits and finds it gone.
+                still_mine = list(
+                    self._rows()
+                    .filter(pk__in=pks[start : start + REMOVAL_BATCH])
+                    .select_for_update(of=("self",))
+                    .values_list("pk", flat=True)
+                )
+                _, by_model = Asset.objects.filter(pk__in=still_mine).delete()
+            removed += by_model.get(Asset._meta.label, 0)
+
+        self._remove_empty_items()
+        return removed
+
+    def _remove_empty_items(self) -> None:
+        """An Item goes when it bears the feed's Provenance and no asset of any
+        kind is left on it (ADR 0042 §7)."""
+        from georiva.core.models import Asset, Item
+
+        empty = Item.objects.filter(
+            _window_q(self.feed.window, "time"),
+            ~Exists(Asset.objects.filter(item=OuterRef("pk"))),
+            collection=self.collection,
+            reference_time__isnull=True,
+            harvested_by_id=self.feed.pk,
+        )
+        with transaction.atomic():
+            locked = list(empty.select_for_update(of=("self",)).values_list("pk", flat=True))
+            # Emptiness is asked again by the delete itself, so an asset that
+            # arrived while the items were being locked keeps its item.
+            empty.filter(pk__in=locked).delete()
+
+
+def _window_q(window, field: str) -> Q:
+    start, end = window
+    q = Q()
+    if start is not None:
+        q &= Q(**{f"{field}__gte": start})
+    if end is not None:
+        q &= Q(**{f"{field}__lte": end})
+    return q
+
+
+def _updated_stamp(item: UpstreamItem) -> str | None:
+    return item.updated.astimezone(UTC).isoformat() if item.updated else None
+
+
+def _lifted(asset, item: UpstreamItem, *, kept: dict | None = None) -> dict:
+    """The fields of an `Asset` a harvest takes from the Upstream: written at
+    creation, and written again whole on a re-sync. `kept` is the `extra_fields`
+    the row already has; what the harvest did not put there stays."""
+    stats = asset.statistics
+    extra = {key: value for key, value in (kept or {}).items() if key not in ("nodata", UPSTREAM_UPDATED)}
+    if asset.nodata is not None:
+        extra["nodata"] = asset.nodata
+    if item.updated is not None:
+        extra[UPSTREAM_UPDATED] = _updated_stamp(item)
+    return {
+        "href": asset.href,
+        "media_type": asset.media_type or COG_MEDIA_TYPE,
+        "file_size": asset.file_size,
+        "checksum": asset.checksum if len(asset.checksum) <= MAX_CHECKSUM_LENGTH else "",
+        "bands": asset.bands or 1,
+        # Lifted from upstream metadata or left null; nothing reads pixels (ADR 0042 §10).
+        "stats_min": stats.minimum if stats else None,
+        "stats_max": stats.maximum if stats else None,
+        "stats_mean": stats.mean if stats else None,
+        "stats_std": stats.stddev if stats else None,
+        "extra_fields": extra,
+    }
+
+
+def _create_asset(row, variable, asset, item: UpstreamItem, feed) -> int:
     """Index one Remote asset. Returns how many rows that created: 1, or 0 when
     another asset took its place since the collection was read."""
     from georiva.core.models import Asset
 
-    stats = asset.statistics
     _, created = Asset.objects.get_or_create(
         item=row,
         variable=variable,
         format=Asset.Format.COG,
-        defaults={
-            "href": asset.href,
-            "media_type": asset.media_type or COG_MEDIA_TYPE,
-            "roles": [Asset.Role.DATA],
-            "file_size": asset.file_size,
-            "checksum": asset.checksum if len(asset.checksum) <= MAX_CHECKSUM_LENGTH else "",
-            "bands": asset.bands or 1,
-            # Lifted from upstream metadata or left null; nothing reads pixels (ADR 0042 §10).
-            "stats_min": stats.minimum if stats else None,
-            "stats_max": stats.maximum if stats else None,
-            "stats_mean": stats.mean if stats else None,
-            "stats_std": stats.stddev if stats else None,
-            "extra_fields": {"nodata": asset.nodata} if asset.nodata is not None else {},
-            "harvested_by": feed,
-        },
+        defaults={**_lifted(asset, item), "roles": [Asset.Role.DATA], "harvested_by": feed},
     )
     return int(created)
 
