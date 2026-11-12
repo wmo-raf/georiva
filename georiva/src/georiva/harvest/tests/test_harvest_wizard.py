@@ -6,6 +6,7 @@ Driven through the wizard's own pages, as an operator signed in to an
 organisation's admin. The only fake is the Upstream.
 """
 
+import re
 from datetime import UTC, datetime
 from unittest import mock
 
@@ -38,6 +39,13 @@ def month(n: int) -> datetime:
 
 def step(n: int) -> str:
     return reverse(f"harvest_wizard_step{n}")
+
+
+def wizard_copy(page) -> str:
+    """The wizard's own part of a page, without its CSRF tokens: 64 random
+    letters and digits, which sooner or later spell any short word ("S3")."""
+    html = page.content.decode()
+    return re.sub(r"\b[A-Za-z0-9]{64}\b", "", html[html.index("hwiz-progress") :])
 
 
 class WizardMixin:
@@ -190,8 +198,7 @@ class WizardSetsUpAFeedTests(WizardMixin, TestCase):
         pages.append(self.client.get(step(5)))
 
         for number, page in enumerate(pages, start=1):
-            html = page.content.decode()
-            body = html[html.index("hwiz-progress") :]
+            body = wizard_copy(page)
             for jargon in ("STAC", "S3", "s3://", "COG", "bucket", "allowlist", "asset"):
                 # The example address on step 1 is a real catalog's, and spells its own path.
                 self.assertNotIn(jargon, body.replace("explorer.digitalearth.africa/stac", ""), f"step {number}")
@@ -480,8 +487,7 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
                 pages.append(self.client.get(step(3)))
 
                 for page in pages:
-                    html = page.content.decode()
-                    body = html[html.index("hwiz-progress") :].replace("acme_wavelet", "")
+                    body = wizard_copy(page).replace("acme_wavelet", "")
                     for jargon in ("Zarr", "zarr", "Icechunk", "icechunk", "chunk", "codec", "STAC", "S3", "s3://"):
                         self.assertNotIn(jargon, body)
 
@@ -489,10 +495,10 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
         self.store()
         self.upstream.store_unreadable = "it did not open for a reader with no account"
 
-        html = self.reach_verdict().content.decode()
+        body = wizard_copy(self.reach_verdict())
 
         for jargon in ("Zarr", "Icechunk", "icechunk", "chunk", "codec"):
-            self.assertNotIn(jargon, html[html.index("hwiz-progress") :])
+            self.assertNotIn(jargon, body)
 
 
 class WizardConfirmsWhereFilesAreTests(WizardMixin, TestCase):
