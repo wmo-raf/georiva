@@ -217,6 +217,8 @@ def sweep_missing_boundary_stats() -> None:
         if not levels:
             continue
 
+        # COGs only, which leaves Store assets out: zonal statistics are not
+        # computed over an upstream store (ADR 0044, out of scope).
         assets = Asset.objects.filter(
             item__collection=collection,
             format=Asset.Format.COG,

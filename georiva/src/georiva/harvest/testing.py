@@ -10,6 +10,7 @@ from .upstream import (
     CubeArray,
     CubeDimension,
     FieldSample,
+    HeldStep,
     StoreField,
     StoreProbe,
     UpstreamAsset,
@@ -98,6 +99,12 @@ class FakeUpstream:
         self.field_problems: dict[str, str] = {}
         #: The samples asked for, in order: the store, the arrays, and the places the read may follow.
         self.samples_asked: list[tuple[str, list[StoreField], dict[str, str]]] = []
+        #: What the store holds: by array path, each `(run, valid time)` — `run` is `None` where there are no runs.
+        self.held: dict[str, set[tuple[datetime | None, datetime]]] = {}
+        #: A message for a store that describes itself and cannot be listed.
+        self.store_unreachable: str | None = None
+        #: The listings of Held steps asked for, in order: the store, the arrays, and the window.
+        self.steps_asked: list[tuple[str, list[str], Window]] = []
 
     def become_store(
         self,
@@ -167,6 +174,14 @@ class FakeUpstream:
         self.items.append(item)
         return item
 
+    def hold(self, path: str, when: datetime, *, run: datetime | None = None) -> None:
+        """The store holds data for the array at `path` at valid time `when`, of `run` where it has runs."""
+        self.held.setdefault(path, set()).add((run, when))
+
+    def release(self, path: str, when: datetime, *, run: datetime | None = None) -> None:
+        """The store no longer holds that step of that array."""
+        self.held.get(path, set()).discard((run, when))
+
     def drop_item(self, when: datetime) -> None:
         """The Upstream no longer has an item at `when`."""
         self.items = [item for item in self.items if item.datetime != when]
@@ -196,6 +211,24 @@ class FakeUpstream:
                 if window == (None, None) or (item.datetime is not None and in_window(item.datetime, window))
             ]
         return found if self.fails_after is None else self._break_after(found, self.fails_after)
+
+    def list_held_steps(self, href: str, fields: list[StoreField], window: Window) -> list[HeldStep]:
+        self._answer()
+        self.steps_asked.append((href, [field.path for field in fields], window))
+        if self.store_unreachable:
+            raise UpstreamUnreachable(self.store_unreachable)
+        if href not in self.stores:
+            raise UpstreamUnreachable("there is no store at that address")
+        steps: dict[tuple[datetime | None, datetime], set[str]] = {}
+        for field in fields:
+            for run, when in self.held.get(field.path, ()):
+                # On run time where there are runs, as the real one: a run inside keeps every step.
+                if self.ignores_window or in_window(run or when, window):
+                    steps.setdefault((run, when), set()).add(field.path)
+        return [
+            HeldStep(time=when, reference_time=run, arrays=frozenset(paths))
+            for (run, when), paths in sorted(steps.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
+        ]
 
     @staticmethod
     def _break_after(items, count):

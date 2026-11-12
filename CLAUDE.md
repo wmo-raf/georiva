@@ -67,15 +67,19 @@ georiva/src/georiva/          # Main Django application
 │   ├── setup.py              # Provisions catalog, feed, collection, Variables and mapping together or not at all
 │   ├── forms.py              # The admin form, edit-only: window, cadence, mapping rows (keys the survey saw)
 │   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient (an API, or a
-│   │                         #   catalog of plain files), the probe that opens an Upstream store, and `open_repository`:
-│   │                         #   a store's data is followed into the confirmed places only (ADR 0044 §11)
+│   │                         #   catalog of plain files), the probe that opens an Upstream store, `open_repository`:
+│   │                         #   a store's data is followed into the confirmed places only (ADR 0044 §11), and
+│   │                         #   `list_held_steps`: which steps of the runs in a window a store holds, asked by key
 │   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address; pinned s3:// buckets (ADR 0042 §9);
 │   │                         #   `chunk_place`: the kinds of place a store's data may be pinned in (ADR 0044 §11)
 │   ├── survey.py             # Upstream survey: a collection's shape, raster assets and file locations, before a feed exists;
 │   │                         #   the verdict on an Upstream store (map-shaped and decodable, or why not) and which of
 │   │                         #   its arrays can become Variables
-│   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows
-│   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream store
+│   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows. `_listed` is the one
+│   │                         #   place it asks which shape its Upstream is: a store's Held steps become items, each
+│   │                         #   with a Store asset (`format=ZARR`, `store_array`) per array held there (ADR 0044 §6)
+│   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream
+│                             #   store, and `hold` / `release` say which steps it holds
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)
 ├── processing/               # Derivation engine — the write-side counterpart of the Loader (ADR 0005)
 │   ├── engine.py             # Generic run loop: enumerate → resolve → readiness → compute → register

@@ -38,12 +38,6 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
         logger.warning("run_harvest: harvest feed %s has no catalog to harvest into", data_feed_id)
         return None
 
-    if feed.is_store:
-        # A store is harvested step by step (ADR 0044 §6), and that loop is not
-        # built yet. Listing its items instead would fail on every schedule.
-        logger.info("run_harvest: harvest feed %s points at an upstream store — nothing to run yet", data_feed_id)
-        return None
-
     # A paused feed's schedule does not fire; a retry or an operator's own run still may.
     if scheduled and resume_of_run_id is None and not feed.is_active:
         return None

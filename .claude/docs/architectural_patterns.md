@@ -97,6 +97,11 @@ Access via import: `from georiva.core.storage import storage`
   `asset.location` (`is_remote`, `key`, `public_url()`, `open_raster()`) or filter with `local_q()` / `remote_q()`;
   never test the href string yourself. Whole-asset readers open by range (`Bucket.open_raster`, an fsspec opener
   for GDAL), never `read_bytes`
+- **A Store asset** (ADR 0044 §3) is a Remote asset whose href is a whole Upstream store: `format=ZARR`, the same
+  href on every asset of the collection, the array's path in `Asset.store_array`, and the slice in its Item's
+  reference time and valid time. Ask `asset.location.is_store` or filter with `store_q()`; `open_raster()` refuses
+  one. Readers that select `format=COG` (zonal statistics, virtual-Zarr manifests, the Remote-asset hash) leave
+  Store assets out by that alone, and a time series over one answers 501
 - **Where Titiler finds a Remote asset** (ADR 0043 §3): Titiler derives a local COG's URL from the request path and
   consults no row, so a Remote asset's href is published to it. `core/machine_plane/remote_assets.py` writes one
   Redis hash per Variable (timestep → href, plus a `published` marker), for every visibility tier; the tile-config

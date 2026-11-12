@@ -12,15 +12,13 @@ from unittest import mock
 from django.test import TestCase
 from django.utils import timezone
 
-from georiva.core.models import Catalog, Collection, Unit, Variable
+from georiva.core.models import Asset, Catalog, Collection, Unit, Variable
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
-from georiva.harvest.tasks import run_harvest
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import StoreField
 from georiva.organisations.testing import make_organisation
 from georiva.sources.models import FetchRun
 
-from .support import HarvestFeedMixin
 from .test_harvest_wizard import WizardMixin, step, wizard_copy
 
 STATIC = "https://stac.upstream.example/catalog.json"
@@ -192,16 +190,35 @@ class WizardSetsUpAStoreFeedTests(StoreWizardMixin, TestCase):
         self.assertEqual(feed.window_start.isoformat(), "2024-01-01T00:00:00+00:00")
         self.assertEqual(feed.window, (feed.window_start, None))
 
-    def test_no_harvest_is_started_for_a_store_and_the_operator_is_told(self):
+    def test_the_first_harvest_starts_as_the_feed_is_saved_and_the_operator_is_told(self):
         self.reach_fields()
         self.choose_temperature()
 
         response = self.save_store()
 
-        self.run_now.assert_not_called()
-        self.assertFalse(FetchRun.objects.exists())
+        self.run_now.assert_called_once_with()
         page = self.client.get(response.url)
-        self.assertContains(page, "cannot list what a data store holds yet")
+        self.assertContains(page, "is now listing what the data store holds")
+        self.assertContains(page, "maps cannot be drawn yet")
+
+    def test_the_feed_it_saves_harvests(self):
+        self.reach_fields()
+        self.choose_temperature()
+        self.save_store()
+        feed = HarvestFeed.objects.get()
+        run = timezone.now().replace(minute=0, second=0, microsecond=0) - timedelta(hours=6)
+        self.upstream.hold("temperature_2m", run + timedelta(hours=3), run=run)
+        self.upstream.hold("wind_u_10m", run, run=run)  # offered, and not chosen
+
+        from georiva.harvest.harvester import harvest
+
+        result = harvest(feed, upstream=self.upstream)
+
+        self.assertEqual((result.indexed, result.rejected), (1, 0))
+        self.assertEqual(FetchRun.objects.get().status, FetchRun.Status.COMPLETED)
+        asset = Asset.objects.get()
+        self.assertEqual((asset.href, asset.store_array), (STORE, "temperature_2m"))
+        self.assertEqual((asset.item.reference_time, asset.item.time), (run, run + timedelta(hours=3)))
 
     def test_the_feed_remembers_the_arrays_the_survey_offered(self):
         self.reach_fields()
@@ -602,28 +619,3 @@ class WizardSavesAStoreFeedTogetherOrNotAtAllTests(StoreWizardMixin, TestCase):
         self.assertEqual(page.context["details"], [])
         self.assertFalse(page.context["places"][0]["allowed"])
         self.assertRedirects(self.client.get(step(5)), step(4))
-
-
-class StoreFeedsDoNotHarvestYetTests(HarvestFeedMixin, TestCase):
-    """A store is harvested step by step (ADR 0044 §6), and that is not built:
-    until it is, a store feed's schedule and its "run now" do nothing at all."""
-
-    def setUp(self):
-        super().setUp()
-        HarvestFeed.objects.filter(pk=self.feed.pk).update(upstream_shape=UpstreamShape.STORE, store_href=STORE)
-        self.feed.refresh_from_db()
-
-    def test_its_schedule_fires_into_nothing(self):
-        with mock.patch("georiva.harvest.harvester.harvest") as harvested:
-            self.assertIsNone(run_harvest(self.feed.pk))
-
-        harvested.assert_not_called()
-        self.assertFalse(FetchRun.objects.exists())
-
-    def test_running_it_now_dispatches_nothing(self):
-        with mock.patch.object(run_harvest, "delay") as dispatched:
-            self.assertEqual(self.feed.run_now(), [])
-            self.assertEqual(self.feed.run_now(async_run=False), [])
-
-        dispatched.assert_not_called()
-        self.assertFalse(FetchRun.objects.exists())

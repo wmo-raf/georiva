@@ -22,11 +22,12 @@ from django.utils import timezone
 from rasterio.transform import from_origin
 
 from georiva.core.models import Asset, Collection, Item
-from georiva.core.storage.asset_location import AssetLocation, local_q, remote_q
+from georiva.core.storage.asset_location import AssetLocation, local_q, remote_q, store_q
 from georiva.core.tests.test_asset_deletion import DELAY, AssetsBucketTestCase
 from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
 
 UPSTREAM = "https://data.upstream.example/chirps/2026/03/01/chirps-v2.0.2026.03.01.tif"
+STORE = "https://data.upstream.example/gfs/v0.1.0.icechunk"
 
 
 def add_remote_asset(tree, href=UPSTREAM):
@@ -69,6 +70,29 @@ class AssetLocationTests(SimpleTestCase):
         opened.assert_called_once_with(UPSTREAM)
 
 
+class StoreAssetLocationTests(SimpleTestCase):
+    """A Store asset: Remote, and an Upstream store rather than a file (ADR 0044 §3)."""
+
+    def test_a_remote_zarr_is_a_store_and_still_remote(self):
+        location = AssetLocation(STORE, Asset.Format.ZARR)
+
+        self.assertTrue(location.is_remote)
+        self.assertTrue(location.is_store)
+        self.assertEqual(location.public_url(), STORE)
+
+    def test_a_remote_cog_and_a_local_zarr_are_not_stores(self):
+        self.assertFalse(AssetLocation(UPSTREAM, Asset.Format.COG).is_store)
+        self.assertFalse(AssetLocation("kenya/gfs/t2m/2026/03/01/t2m.zarr", Asset.Format.ZARR).is_store)
+        # An href alone does not say: without the row's format it is taken for a file.
+        self.assertFalse(AssetLocation(STORE).is_store)
+
+    def test_a_store_is_not_opened_as_a_raster(self):
+        with mock.patch("rasterio.open") as opened, self.assertRaisesRegex(ValueError, "not a raster file"):
+            AssetLocation(STORE, Asset.Format.ZARR).open_raster()
+
+        opened.assert_not_called()
+
+
 class AssetLocationQueryTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -82,6 +106,16 @@ class AssetLocationQueryTests(TestCase):
 
     def test_a_related_path_can_be_prefixed(self):
         self.assertEqual(list(Item.objects.filter(remote_q("assets__"))), [self.remote.item])
+
+    def test_the_database_tells_a_store_asset_from_a_remote_file(self):
+        item = Item.objects.create(collection=self.tree["collection"], time=datetime(2026, 3, 3, tzinfo=UTC))
+        store = Asset.objects.create(item=item, variable=self.tree["variable"], href=STORE, format=Asset.Format.ZARR)
+
+        self.assertEqual(list(Asset.objects.filter(store_q())), [store])
+        self.assertEqual(list(Item.objects.filter(store_q("assets__"))), [item])
+        self.assertEqual(set(Asset.objects.filter(remote_q())), {self.remote, store})
+        self.assertTrue(store.location.is_store)
+        self.assertFalse(self.remote.location.is_store)
 
     def test_an_asset_answers_through_the_seam(self):
         self.assertTrue(self.remote.location.is_remote)

@@ -111,6 +111,12 @@ class STACAssetSerializer(serializers.Serializer):
         else:
             data["href"] = instance.url
 
+        # A Store asset's href is a whole store. The array is named beside it,
+        # and the slice is the Item's own datetime and forecast reference time,
+        # so a consumer's tools can open the same field (ADR 0044 §3).
+        if instance.location.is_store:
+            data["georiva:array"] = instance.store_array
+
         # Raster extension for data assets
         if instance.is_data:
             raster_bands = [
