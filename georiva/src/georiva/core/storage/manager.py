@@ -144,6 +144,21 @@ class Bucket:
     def open(self, path: str, mode: str = "rb") -> BinaryIO:
         return self.storage.open(path, mode)
 
+    def open_raster(self, path: str):
+        """Open a raster object with rasterio for range reads, without downloading it.
+
+        ``self.open`` will not do: django-storages' S3 file spools the whole
+        object to a temporary file on first read. GDAL is handed an fsspec
+        filesystem instead, which serves each block it asks for as one ranged
+        request (a seek and read on a local file).
+        """
+        import fsspec
+        import rasterio
+
+        if self.is_local:
+            return rasterio.open(self.storage.path(path), opener=fsspec.filesystem("file"))
+        return rasterio.open(f"{self.bucket_name}/{path}", opener=storage.get_zarr_fs())
+
     def delete(self, path: str) -> bool:
         """Delete a file. Returns True if it existed."""
         if self.exists(path):

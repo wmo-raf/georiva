@@ -99,7 +99,8 @@ class Command(BaseCommand):
             for asset in cogs:
                 label = f"{collection.slug}/{asset.variable.slug} @ {item.time:%Y-%m-%d}"
                 try:
-                    data, bounds, crs = _read_cog(asset.href)
+                    # Derived outputs are always local (ADR 0042 §12); `key` refuses a remote one.
+                    data, bounds, crs = _read_cog(asset.location.key)
                     if clipper is not None:
                         data, bounds = materializer.clip_array(data, bounds, clipper)
 

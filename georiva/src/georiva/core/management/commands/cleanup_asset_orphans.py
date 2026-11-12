@@ -37,6 +37,7 @@ from georiva.core.storage.asset_cleanup import (
     deletion_verdict,
     select_orphan_objects,
 )
+from georiva.core.storage.asset_location import local_q
 
 
 class Command(BaseCommand):
@@ -102,7 +103,9 @@ class Command(BaseCommand):
             # The cutoff is when the live set was read: an object written after
             # it may belong to a row that set does not hold yet.
             scanned_at = timezone.now()
-            live = set(Asset.objects.filter(href__startswith=f"{prefix}/").values_list("href", flat=True))
+            # Remote hrefs are upstream URLs, never keys here: neither live nor
+            # orphaned (ADR 0043 §8).
+            live = set(Asset.objects.filter(local_q(), href__startswith=f"{prefix}/").values_list("href", flat=True))
             listing = storage.assets.list_files(prefix, recursive=True)
             modified = {f["path"]: f.get("modified") for f in listing}
             objects = list(modified)

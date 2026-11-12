@@ -13,6 +13,7 @@ from django_celery_beat.models import IntervalSchedule
 
 from georiva.config.celery import app
 from georiva.core.models import Asset, Item
+from georiva.core.storage.asset_location import local_q
 from georiva.events.tasks import EntryTask, ReadSideTask
 from georiva.utils.periodic import PeriodicSpec, register_periodic_tasks
 from georiva.virtual_zarr.classify import BuildMode, SourceRow, classify
@@ -175,7 +176,10 @@ def _collect_rows(
 
     cog_prefetch = Prefetch(
         "assets",
+        # Remote assets are left out (ADR 0042 §11): a Mixed collection's
+        # virtual store covers only its local window.
         queryset=Asset.objects.filter(
+            local_q(),
             variable=variable,
             format=Asset.Format.COG,
         ).only("href", "item_id", "modified"),
@@ -193,6 +197,7 @@ def _collect_rows(
     # ingesting elsewhere cannot park the variable as NO_DATA.
     latest_ref = (
         items_qs.filter(
+            local_q("assets__"),
             reference_time__isnull=False,
             assets__variable=variable,
             assets__format=Asset.Format.COG,
@@ -224,7 +229,7 @@ def _collect_rows(
         rows.append(
             SourceRow(
                 time=item.time,
-                url=config.url_for(asset.href),
+                url=config.url_for(asset.location.key),
                 modified=asset.modified,
             )
         )
