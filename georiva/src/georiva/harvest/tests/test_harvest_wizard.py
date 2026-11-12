@@ -170,6 +170,16 @@ class WizardSetsUpAFeedTests(WizardMixin, TestCase):
         self.assertEqual((row["low"], row["high"]), (0.0, 300.0))
         self.assertTrue(row["use"])
 
+    def test_the_catalog_short_name_offered_is_one_the_form_accepts(self):
+        # An upstream id often has underscores; a catalog's short name has none.
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+        self.reach_step(5)
+
+        form = self.client.get(step(5)).context["form"]
+
+        self.assertEqual(form["new_catalog_name"], "rainfall_chirps_monthly")
+        self.assertEqual(form["new_catalog_slug"], "rainfall-chirps-monthly")
+
     def test_no_page_uses_a_word_an_operator_must_look_up(self):
         pages = [self.client.get(step(1))]
         self.give_address()

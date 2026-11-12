@@ -21,7 +21,7 @@
         {% endif %}
         <div class="w-field__wrapper hwiz-field">
             <label class="w-field__label" for="collection_id">{% trans "Collection" %} <sup>*</sup></label>
-            <select name="collection_id" id="collection_id" class="w-field__input" size="12" required>
+            <select name="collection_id" id="collection_id" class="w-field__input hwiz-list" size="12" required>
                 {% for collection in collections %}
                     <option value="{{ collection.id }}"
                             {% if collection.id == session.collection_id or collections|length == 1 %}selected{% endif %}>

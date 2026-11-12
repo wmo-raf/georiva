@@ -113,8 +113,27 @@
             color: var(--w-color-critical-200);
         }
 
+        /* Fixed widths: in a table of form fields the browser otherwise gives the
+           select all the room and squeezes the rest. */
         .hwiz-number {
-            width: 8em;
+            width: 7em;
+            min-width: 7em;
+        }
+
+        .hwiz-name {
+            width: 14em;
+            min-width: 10em;
+        }
+
+        .hwiz-unit {
+            width: 13em;
+            min-width: 0;
+        }
+
+        /* A list that is open on the page is not a dropdown: no arrow over its first row. */
+        .hwiz-list {
+            background-image: none;
+            height: auto;
         }
     </style>
 {% endblock %}

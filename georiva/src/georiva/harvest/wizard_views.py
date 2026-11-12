@@ -376,7 +376,8 @@ def harvest_wizard_step5(request):
         "catalog_mode": "create",
         "catalog_id": None,
         "new_catalog_name": title,
-        "new_catalog_slug": slugify(title),
+        # A catalog's short name is letters, digits and hyphens; an upstream id often has underscores.
+        "new_catalog_slug": slugify(title).replace("_", "-"),
         "feed_name": title,
         "window_start": "",
         "window_end": "",

@@ -30,12 +30,12 @@
                                            {% if row.use %}checked{% endif %}>
                                 </td>
                                 <td>
-                                    <input type="text" name="name_{{ row.index }}" class="w-field__input"
+                                    <input type="text" name="name_{{ row.index }}" class="w-field__input hwiz-name"
                                            value="{{ row.name }}" aria-label="{% trans 'Name' %}">
                                     {% if row.warning %}<div class="hwiz-warning">{{ row.warning }}</div>{% endif %}
                                 </td>
                                 <td>
-                                    <select name="unit_{{ row.index }}" class="w-field__input" aria-label="{% trans 'Unit' %}">
+                                    <select name="unit_{{ row.index }}" class="w-field__input hwiz-unit" aria-label="{% trans 'Unit' %}">
                                         <option value="">— {% trans "Choose" %} —</option>
                                         {% for unit in units %}
                                             <option value="{{ unit.pk }}" {% if unit.pk == row.unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
