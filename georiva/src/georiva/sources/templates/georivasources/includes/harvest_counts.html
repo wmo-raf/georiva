@@ -1,0 +1,5 @@
+{% load i18n %}
+{% comment %}
+    A harvest run's own counts, in assets (ADR 0042 §4), where a fetch run shows file counts.
+{% endcomment %}
+{% if run.status == "running" %}{% trans "counted when the run ends" %}{% else %}{% blocktrans with indexed=run.harvest_indexed updated=run.harvest_updated removed=run.harvest_removed rejected=run.harvest_rejected %}{{ indexed }} indexed · {{ updated }} updated · {{ removed }} removed · {{ rejected }} rejected{% endblocktrans %}{% endif %}

@@ -306,8 +306,8 @@
         <div class="gfeed-card">
             <div class="gfeed-card__header">
                 <div>
-                    <h3 class="gfeed-card__title">{% trans "Acquisition Activity" %}</h3>
-                    <p class="gfeed-card__explainer">{% trans "Fetch runs pulling files from the source into storage." %}</p>
+                    <h3 class="gfeed-card__title">{{ run_words.activity }}</h3>
+                    <p class="gfeed-card__explainer">{{ run_words.explainer }}</p>
                 </div>
                 <a class="button button-small button-secondary"
                    href="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">{% trans "View all" %}</a>
@@ -339,11 +339,27 @@
                             </span>
                             <span class="gfeed-activity-card__row">
                                 <span class="gfeed-meta">
-                                    {% blocktrans with requested=last.files_requested failed=last.files_failed %}
-                                        {{ requested }} requested · {{ failed }} failed
-                                    {% endblocktrans %}
+                                    {% if real_feed.fetches_files %}
+                                        {% blocktrans with requested=last.files_requested failed=last.files_failed %}
+                                            {{ requested }} requested · {{ failed }} failed
+                                        {% endblocktrans %}
+                                    {% else %}
+                                        {% include "georivasources/includes/harvest_counts.html" with run=last %}
+                                    {% endif %}
                                 </span>
                             </span>
+                            {% if last.stopped_early %}
+                                <span class="gfeed-activity-card__row">
+                                    <span class="gfeed-meta">
+                                        {% blocktrans with reason=last.stopped_early|truncatechars:160 %}Stopped early: {{ reason }}{% endblocktrans %}
+                                    </span>
+                                </span>
+                            {% endif %}
+                            {% if acquisition_summary.retry.own %}
+                                <span class="gfeed-activity-card__row">
+                                    <span class="gfeed-meta">{{ acquisition_summary.retry.own.text }}</span>
+                                </span>
+                            {% endif %}
                         </a>
                     {% else %}
                         <span class="gfeed-meta">{% trans "No runs yet." %}</span>
@@ -352,6 +368,8 @@
             </div>
         </div>
 
+        {# A feed that fetches no files has none to ingest. #}
+        {% if real_feed.fetches_files %}
         <div class="gfeed-card">
             <div class="gfeed-card__header">
                 <div>
@@ -373,9 +391,13 @@
                 </div>
             </div>
         </div>
+        {% endif %}
     </div>
 
-    {# ── Collections card #}
+    {# ── What the feed brings in: its own panel, or the Collections card #}
+    {% if real_feed.setup_panel_template %}
+        {% include real_feed.setup_panel_template with feed=real_feed %}
+    {% else %}
     <div class="gfeed-card">
         <div class="gfeed-card__header">
             <h3 class="gfeed-card__title">
@@ -470,6 +492,7 @@
             </p>
         {% endif %}
     </div>
+    {% endif %}
 
     {# ── Derived products chain panel #}
     {% if product_stage_lanes or product_orphans %}

@@ -139,6 +139,16 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     #: and with it its own queue (ADR 0025).
     run_task_name = "georiva.sources.tasks.run_data_feed_loader"
 
+    #: Whether a run of this feed fetches files. One that fetches none (a
+    #: harvest, ADR 0042 §4) has no `FetchedFile` rows, and the dashboard and run
+    #: pages show its own counts where they would show file counts.
+    fetches_files = True
+
+    #: The dashboard panel showing what this feed is set up to bring in. A feed
+    #: whose collections are not definition-driven names its own template, which
+    #: is rendered with `feed` (the real instance) in place of the Collections card.
+    setup_panel_template = None
+
     def enqueue_retry(self, run):
         """Enqueue the retry of `run`, one of this feed's ended runs: a system
         LoaderJob scoped to the run's collection."""
@@ -902,6 +912,10 @@ class FetchRun(models.Model):
         # end of the run it retries, if any.
         started = FetchRunStarted.objects.filter(fetch_run=self).values_list("pk", flat=True).first()
         context = self._own_context(caused_by=started or self._retried_run_end())
+        # A run that fetched no files says what it counted instead (ADR 0042 §4).
+        harvest_counts = {}
+        if not self.data_feed.get_real_instance().fetches_files:
+            harvest_counts = {name: getattr(self, name) for name in FetchRunFinished.HARVEST_COUNTS}
         with use_context(context), transaction.atomic():
             self.save(update_fields=fields)
             record(
@@ -916,6 +930,7 @@ class FetchRun(models.Model):
                 files_skipped=self.files_skipped,
                 files_failed=self.files_failed,
                 error=self.error_message,
+                **harvest_counts,
             )
 
     @property
@@ -1161,7 +1176,15 @@ class FetchRunFinished(DomainEvent):
     files_fetched = models.IntegerField(default=0)
     files_skipped = models.IntegerField(default=0)
     files_failed = models.IntegerField(default=0)
+    # A harvest run's own counts, in assets (ADR 0042 §4). Null on the event of a
+    # run that fetched files: it is these being set that says the run was a harvest.
+    harvest_indexed = models.IntegerField(null=True, blank=True)
+    harvest_updated = models.IntegerField(null=True, blank=True)
+    harvest_removed = models.IntegerField(null=True, blank=True)
+    harvest_rejected = models.IntegerField(null=True, blank=True)
     error = models.TextField(blank=True, default="")
+
+    HARVEST_COUNTS = ("harvest_indexed", "harvest_updated", "harvest_removed", "harvest_rejected")
 
     class Meta(DomainEvent.Meta):
         indexes = [models.Index(fields=["fetch_run", "-occurred_at"], name="idx_fetchfin_run")]
@@ -1189,8 +1212,26 @@ class FetchRunFinished(DomainEvent):
     def outcome_class(self):
         return "ok" if self.outcome == self.Outcome.COMPLETED else "failed"
 
+    def snapshot_items(self):
+        """A harvest fetched no files, so its event does not list four zeros for them."""
+        items = super().snapshot_items()
+        if self.harvest_indexed is None:
+            return items
+        files = {
+            self._meta.get_field(name).verbose_name.capitalize()
+            for name in ("files_requested", "files_fetched", "files_skipped", "files_failed")
+        }
+        return [(label, value) for label, value in items if label not in files]
+
     def summary(self):
-        text = (
-            f"{self.feed_name}: {self.files_fetched} fetched, {self.files_skipped} skipped, {self.files_failed} failed"
-        )
+        if self.harvest_indexed is not None:
+            text = (
+                f"{self.feed_name}: {self.harvest_indexed} indexed, {self.harvest_updated} updated, "
+                f"{self.harvest_removed} removed, {self.harvest_rejected} rejected"
+            )
+        else:
+            text = (
+                f"{self.feed_name}: {self.files_fetched} fetched, "
+                f"{self.files_skipped} skipped, {self.files_failed} failed"
+            )
         return f"{text} — {self.error.splitlines()[0]}" if self.error else text

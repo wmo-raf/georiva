@@ -1,7 +1,7 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% trans "Recover fetch run" %} — {{ feed.name }}{% endblock %}
+{% block titletag %}{{ run_words.recover }} — {{ feed.name }}{% endblock %}
 
 {% block extra_css %}
     <style>
@@ -75,7 +75,7 @@
 
 {% block main_content %}
     <div class="frr-warning-box">
-        {% if liveness %}
+        {% if liveness and real_feed.fetches_files %}
             <p class="frr-verdict frr-verdict--{{ liveness.verdict }}">
                 {% if liveness.verdict == "stuck" %}
                     {% blocktrans with silence=liveness.silence_display median=liveness.median_display %}This run looks stuck — no file activity for {{ silence }}, while a typical file takes {{ median }}.{% endblocktrans %}
@@ -91,12 +91,21 @@
         <p class="frr-warning-title">
             {% trans "Only recover this run if you are sure its stuck." %}
         </p>
-        <p class="frr-warning-intro">
-            {% trans "If the run is actually still in progress, recovering will start a duplicate fetch that races it. Files already stored are skipped by the resume, but anything in flight may be downloaded twice." %}
-        </p>
-        <p class="frr-warning-intro">
-            {% trans "Recovering marks this run as interrupted, records its unfinished file as failed, and queues a fresh fetch for this feed that picks up where the run left off." %}
-        </p>
+        {% if real_feed.fetches_files %}
+            <p class="frr-warning-intro">
+                {% trans "If the run is actually still in progress, recovering will start a duplicate fetch that races it. Files already stored are skipped by the resume, but anything in flight may be downloaded twice." %}
+            </p>
+            <p class="frr-warning-intro">
+                {% trans "Recovering marks this run as interrupted, records its unfinished file as failed, and queues a fresh fetch for this feed that picks up where the run left off." %}
+            </p>
+        {% else %}
+            <p class="frr-warning-intro">
+                {% trans "If the run is actually still in progress, recovering will start a duplicate harvest that races it. Assets already indexed are left as they are." %}
+            </p>
+            <p class="frr-warning-intro">
+                {% trans "Recovering marks this run as interrupted and queues a fresh harvest of the same window." %}
+            </p>
+        {% endif %}
     </div>
 
     <table class="frr-facts">
@@ -109,14 +118,17 @@
             <th>{% trans "Started" %}</th>
             <td>{{ run.started_at }} ({{ run.started_at|timesince }} {% trans "ago" %})</td>
         </tr>
-        <tr>
-            <th>{% trans "Progress so far" %}</th>
-            <td>
-                {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
-                    {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
-                {% endblocktrans %}
-            </td>
-        </tr>
+        {# A harvest's counts are written when it ends: a running one has no progress to show. #}
+        {% if real_feed.fetches_files %}
+            <tr>
+                <th>{% trans "Progress so far" %}</th>
+                <td>
+                    {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
+                        {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
+                    {% endblocktrans %}
+                </td>
+            </tr>
+        {% endif %}
         </tbody>
     </table>
 
