@@ -1,7 +1,7 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags events_tags %}
 
-{% block titletag %}{% blocktrans with label=feed.name %}Fetch run — {{ label }}{% endblocktrans %}{% endblock %}
+{% block titletag %}{{ run_words.run }} — {{ feed.name }}{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
@@ -274,18 +274,32 @@
             <th>{% trans "Duration" %}</th>
             <td class="gaqd-meta">{% if duration is not None %}{{ duration|floatformat:1 }}s{% else %}—{% endif %}</td>
         </tr>
-        <tr>
-            <th>{% trans "Files" %}</th>
-            <td>
-                {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
-                    {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
-                {% endblocktrans %}
-            </td>
-        </tr>
-        <tr>
-            <th>{% trans "Bytes" %}</th>
-            <td>{{ run.bytes_transferred|filesizeformat }}</td>
-        </tr>
+        {% if real_feed.fetches_files %}
+            <tr>
+                <th>{% trans "Files" %}</th>
+                <td>
+                    {% blocktrans with requested=run.files_requested fetched=run.files_fetched skipped=run.files_skipped failed=run.files_failed %}
+                        {{ requested }} requested · {{ fetched }} fetched · {{ skipped }} skipped · {{ failed }} failed
+                    {% endblocktrans %}
+                </td>
+            </tr>
+            <tr>
+                <th>{% trans "Bytes" %}</th>
+                <td>{{ run.bytes_transferred|filesizeformat }}</td>
+            </tr>
+        {% else %}
+            <tr>
+                <th>{% trans "Assets" %}</th>
+                <td>
+                    {% include "georivasources/includes/harvest_counts.html" with run=run %}
+                    {% if run.harvest_rejected %}
+                        <div class="gaqd-meta">
+                            {% trans "Rejected assets were not indexed: their link is not https, names a host outside the asset host allowlist, or resolves to a private address." %}
+                        </div>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endif %}
         <tr>
             <th>{% trans "Error" %}</th>
             <td>
@@ -299,6 +313,8 @@
         </tbody>
     </table>
 
+    {# A harvest fetches no files: there is no table to show, not an empty one. #}
+    {% if real_feed.fetches_files %}
     <h2 class="gaqd-section-title">{% trans "Files" %}</h2>
     {% if files %}
         <form method="post"
@@ -370,8 +386,25 @@
     {% else %}
         <p class="gaqd-empty">{% trans "No file records for this run." %}</p>
     {% endif %}
+    {% endif %}
 
-    {% if run.status == "running" and liveness %}
+    {% if run.status == "running" and not real_feed.fetches_files %}
+        {# No file activity to judge a harvest by: only how long it has run. #}
+        <div class="gaqd-recover">
+            <div class="gaqd-liveness gaqd-liveness--unknown">
+                <ul class="gaqd-liveness-facts">
+                    <li>{% blocktrans with elapsed=liveness.elapsed_display %}Running for {{ elapsed }}{% endblocktrans %}</li>
+                </ul>
+            </div>
+            <p class="gaqd-recover-hint">
+                {% trans "If you believe the worker is dead, recovering will mark this run as interrupted and queue a fresh harvest of the same window — but recovering a live run starts a duplicate racing it." %}
+            </p>
+            <a class="button no"
+               href="{% url 'data_feed_fetch_run_recover' feed_pk=feed.pk run_pk=run.pk %}">
+                {% trans "Recover stale run…" %}
+            </a>
+        </div>
+    {% elif run.status == "running" and liveness %}
         <div class="gaqd-recover">
             <div class="gaqd-liveness gaqd-liveness--{{ liveness.verdict }}">
                 <p class="gaqd-liveness-headline">
@@ -414,7 +447,7 @@
         </div>
     {% endif %}
 
-    <p class="gaqd-back"><a href="{{ runs_url }}">← {% trans "Back to Acquisition Activity" %}</a></p>
+    <p class="gaqd-back"><a href="{{ runs_url }}">← {% blocktrans with activity=run_words.activity %}Back to {{ activity }}{% endblocktrans %}</a></p>
 
     {% history_panel history %}
 

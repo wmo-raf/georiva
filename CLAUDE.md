@@ -61,6 +61,7 @@ georiva/src/georiva/          # Main Django application
 │   └── derivation_invocation.py  # Product-driven dispatch: arriving input → recipe run
 ├── harvest/                  # Harvest — indexes an Upstream STAC catalog as rows whose assets point upstream (ADR 0042)
 │   ├── models.py             # HarvestFeed (a DataFeed species) + VariableMapping
+│   ├── forms.py              # The admin form: reachability check, one feed per catalog, mapping rows
 │   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient
 │   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address (ADR 0042 §9)
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows

@@ -43,6 +43,30 @@ def _humanize_minutes(minutes):
     return _("%(n)d min") % {"n": minutes}
 
 
+def _run_words(real_feed):
+    """What a feed's runs are called on its pages. A harvest is a phase of its
+    own, not a fetch (ADR 0042), so its pages do not call it one."""
+    if real_feed.fetches_files:
+        return {
+            "activity": _("Acquisition Activity"),
+            "explainer": _("Fetch runs pulling files from the source into storage."),
+            "run": _("Fetch run"),
+            "run_now": _("Fetch now"),
+            "started": _("Fetch started for '%s'."),
+            "no_runs": _("No fetch runs yet for this feed."),
+            "recover": _("Recover fetch run"),
+        }
+    return {
+        "activity": _("Harvest Activity"),
+        "explainer": _("Harvest runs indexing the upstream catalog as items whose assets point upstream."),
+        "run": _("Harvest run"),
+        "run_now": _("Harvest now"),
+        "started": _("Harvest started for '%s'."),
+        "no_runs": _("No harvest runs yet for this feed."),
+        "recover": _("Recover harvest run"),
+    }
+
+
 class DataFeedButtonsColumn(ButtonsColumnMixin, TitleColumn):
     def get_buttons(self, instance, parent_context):
         buttons = []
@@ -128,13 +152,17 @@ class DataFeedIndexView(OrgScopedViewMixin, IndexView):
         queries.
         """
         health = Health.from_rank(feed.health_rank)
-        source_label = str(feed.get_real_instance_class()._meta.verbose_name)
+        feed_class = feed.get_real_instance_class() or DataFeed
+        source_label = str(feed_class._meta.verbose_name)
         return {
             "feed": feed,
             "health": health,
             "detail_url": reverse("data_feed_detail", kwargs={"pk": feed.pk}),
             "runs_url": reverse("data_feed_fetch_runs", kwargs={"feed_pk": feed.pk}),
-            "ingestions_url": reverse("data_feed_ingestions", kwargs={"feed_pk": feed.pk}),
+            # A feed that fetches no files has none to ingest, and no page of them.
+            "ingestions_url": (
+                reverse("data_feed_ingestions", kwargs={"feed_pk": feed.pk}) if feed_class.fetches_files else None
+            ),
             "chain_url": reverse("derived_product_chain", kwargs={"feed_pk": feed.pk}),
             "edit_url": feed.edit_url,
             "delete_url": feed.delete_url,
@@ -295,10 +323,16 @@ def data_feed_detail(request, pk):
 
     # Activity stat cards (PRD #217 follow-up): pure summaries — actions
     # (Fetch now, checks, retries) live on the linked activity pages.
-    from georiva.sources.acquisition_tracking import feed_fetch_runs
+    from georiva.sources.acquisition_tracking import feed_fetch_runs, retry_display
 
     runs = feed_fetch_runs(feed)
-    acquisition_summary = {"total_runs": runs.count(), "last_run": runs.first()}
+    last_run = runs.first()
+    acquisition_summary = {
+        "total_runs": runs.count(),
+        "last_run": last_run,
+        # Why the last run stopped is on the card; so is where its retry stands.
+        "retry": retry_display(last_run) if last_run else None,
+    }
 
     from georiva.ingestion.ingestion_tracking import feed_ingestion_status_counts
     from georiva.ingestion.models import FileIngestion
@@ -368,6 +402,7 @@ def data_feed_detail(request, pk):
         "ingestion_counts": ingestion_counts,
         "ingestion_count_rows": ingestion_count_rows,
         "feed_type_name": type(real_feed)._meta.verbose_name,
+        "run_words": _run_words(real_feed),
         "header_title": feed.name,
         "header_icon": "file-import",
     }
@@ -678,6 +713,11 @@ def data_feed_edit(request, pk):
     feed = get_org_object_or_404(request, DataFeed, pk=pk)
     real_feed = feed.get_real_instance()
     real_cls = type(real_feed)
+
+    # This page lays out plain fields. A feed whose form has an inline table
+    # (a harvest feed's Variable mapping) is edited on its viewset's form.
+    if _has_inline_panels(real_cls) and real_feed.edit_url:
+        return redirect(real_feed.edit_url)
 
     form_cls = _global_config_form_class(real_cls, include_base=True)
 
@@ -1069,6 +1109,19 @@ def _wizard_breadcrumbs(model_name, verbose_name, current_label):
         {"url": reverse("wizard_step1_catalog", kwargs={"model_name": model_name}), "label": verbose_name},
         {"url": None, "label": current_label},
     ]
+
+
+def _has_inline_panels(model_cls):
+    """Whether the feed's form holds rows of a related model, not only its own fields."""
+    from wagtail.admin.panels import InlinePanel, PanelGroup
+
+    def holds_inline(panels):
+        return any(
+            isinstance(panel, InlinePanel) or (isinstance(panel, PanelGroup) and holds_inline(panel.children))
+            for panel in panels
+        )
+
+    return holds_inline(model_cls.panels)
 
 
 def _global_config_form_class(model_cls, include_base=False):
@@ -1840,24 +1893,26 @@ def data_feed_fetch_runs(request, feed_pk):
     from georiva.sources.models import FetchRun
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    real_feed = feed.get_real_instance()
+    run_words = _run_words(real_feed)
+
+    if request.method == "POST" and request.POST.get("action") == "fetch_now":
+        real_feed.run_now(user=request.user)
+        messages.success(request, run_words["started"] % feed.name)
+        return redirect("data_feed_fetch_runs", feed_pk=feed.pk)
 
     # Synchronous, ephemeral dry run (PRD #217): results render on this POST
     # response and are never persisted. Re-POSTing on refresh is harmless —
-    # the check is read-only.
-    if request.method == "POST" and request.POST.get("action") == "fetch_now":
-        feed.run_now(user=request.user)
-        messages.success(request, _("Fetch started for '%s'.") % feed.name)
-        return redirect("data_feed_fetch_runs", feed_pk=feed.pk)
-
+    # the check is read-only. A feed that fetches no files has none to check for.
     check_results = None
-    if request.method == "POST" and request.POST.get("action") == "check_new_files":
+    if request.method == "POST" and request.POST.get("action") == "check_new_files" and real_feed.fetches_files:
         check_results = [
             {
                 **entry,
                 "new_count": sum(1 for c in entry["candidates"] if not c.exists),
                 "existing_count": sum(1 for c in entry["candidates"] if c.exists),
             }
-            for entry in feed.get_real_instance().check_new_files()
+            for entry in real_feed.check_new_files()
         ]
 
     status = request.GET.get("status") or None
@@ -1872,11 +1927,13 @@ def data_feed_fetch_runs(request, feed_pk):
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
-            {"url": None, "label": _("Acquisition Activity")},
+            {"url": None, "label": run_words["activity"]},
         ],
-        "header_title": _("Acquisition Activity — %s") % feed.name,
+        "header_title": f"{run_words['activity']} — {feed.name}",
         "header_icon": "download",
         "feed": feed,
+        "real_feed": real_feed,
+        "run_words": run_words,
         "rows": rows,
         "page": page,
         "statuses": FetchRun.Status.choices,
@@ -2002,6 +2059,8 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
     from georiva.sources.models import FetchedFile, FetchRun, FetchRunFinished, FetchRunStarted
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    real_feed = feed.get_real_instance()
+    run_words = _run_words(real_feed)
     run = with_live_counters(get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed))
     liveness = run_liveness_display(run)
 
@@ -2050,12 +2109,14 @@ def data_feed_fetch_run_detail(request, feed_pk, run_pk):
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": reverse_lazy("data_feed_list"), "label": _("Pull feeds")},
             {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
-            {"url": runs_url, "label": _("Acquisition Activity")},
+            {"url": runs_url, "label": run_words["activity"]},
             {"url": None, "label": _("Run")},
         ],
-        "header_title": _("Fetch run — %s") % feed.name,
+        "header_title": f"{run_words['run']} — {feed.name}",
         "header_icon": "download",
         "feed": feed,
+        "real_feed": real_feed,
+        "run_words": run_words,
         "run": run,
         "duration": run_duration_seconds(run),
         "files": files,
@@ -2092,6 +2153,8 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
     from georiva.sources.models import FetchRun
 
     feed = get_org_object_or_404(request, DataFeed, pk=feed_pk)
+    real_feed = feed.get_real_instance()
+    run_words = _run_words(real_feed)
     run = get_org_object_or_404(request, FetchRun, pk=run_pk, data_feed=feed)
     detail_url = reverse(
         "data_feed_fetch_run_detail",
@@ -2122,9 +2185,10 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
                 request,
                 _(
                     "Run marked as interrupted — retry not queued: "
-                    "the retry cap was reached. Use “Fetch now” on the "
+                    "the retry cap was reached. Use “%s” on the "
                     "feed to retry manually."
-                ),
+                )
+                % run_words["run_now"],
             )
         else:
             messages.error(
@@ -2142,9 +2206,11 @@ def data_feed_fetch_run_recover(request, feed_pk, run_pk):
             {"url": detail_url, "label": _("Run")},
             {"url": None, "label": _("Recover")},
         ],
-        "header_title": _("Recover fetch run — %s") % feed.name,
+        "header_title": f"{run_words['recover']} — {feed.name}",
         "header_icon": "download",
         "feed": feed,
+        "real_feed": real_feed,
+        "run_words": run_words,
         "run": run,
         "cancel_url": detail_url,
         "liveness": run_liveness_display(run),

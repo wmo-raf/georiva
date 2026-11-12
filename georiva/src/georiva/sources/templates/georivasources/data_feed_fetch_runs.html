@@ -1,7 +1,7 @@
 {% extends "wagtailadmin/generic/base.html" %}
 {% load i18n wagtailadmin_tags %}
 
-{% block titletag %}{% blocktrans with label=feed.name %}Acquisition Activity — {{ label }}{% endblocktrans %}{% endblock %}
+{% block titletag %}{{ run_words.activity }} — {{ feed.name }}{% endblock %}
 
 {% block extra_css %}
     {{ block.super }}
@@ -167,15 +167,17 @@
 
 {% block main_content %}
     <div class="gaq-actions">
-        <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="check_new_files">
-            <button class="button button-secondary" type="submit">{% trans "Check for new files" %}</button>
-        </form>
+        {% if real_feed.fetches_files %}
+            <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="check_new_files">
+                <button class="button button-secondary" type="submit">{% trans "Check for new files" %}</button>
+            </form>
+        {% endif %}
         <form method="post" action="{% url 'data_feed_fetch_runs' feed_pk=feed.pk %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="fetch_now">
-            <button class="button" type="submit">{% trans "Fetch now" %}</button>
+            <button class="button" type="submit">{{ run_words.run_now }}</button>
         </form>
     </div>
 
@@ -231,11 +233,19 @@
                     <th>{% trans "Started" %}</th>
                     <th>{% trans "Finished" %}</th>
                     <th>{% trans "Duration" %}</th>
-                    <th class="gaq-num">{% trans "Requested" %}</th>
-                    <th class="gaq-num">{% trans "Fetched" %}</th>
-                    <th class="gaq-num">{% trans "Skipped" %}</th>
-                    <th class="gaq-num">{% trans "Failed" %}</th>
-                    <th class="gaq-num">{% trans "Bytes" %}</th>
+                    {% if real_feed.fetches_files %}
+                        <th class="gaq-num">{% trans "Requested" %}</th>
+                        <th class="gaq-num">{% trans "Fetched" %}</th>
+                        <th class="gaq-num">{% trans "Skipped" %}</th>
+                        <th class="gaq-num">{% trans "Failed" %}</th>
+                        <th class="gaq-num">{% trans "Bytes" %}</th>
+                    {% else %}
+                        {# A harvest's own counts, in assets (ADR 0042). #}
+                        <th class="gaq-num">{% trans "Indexed" %}</th>
+                        <th class="gaq-num">{% trans "Updated" %}</th>
+                        <th class="gaq-num">{% trans "Removed" %}</th>
+                        <th class="gaq-num">{% trans "Rejected" %}</th>
+                    {% endif %}
                     <th>{% trans "Error" %}</th>
                 </tr>
             </thead>
@@ -252,11 +262,18 @@
                         <td class="gaq-meta">
                             {% if row.duration is not None %}{{ row.duration|floatformat:1 }}s{% else %}—{% endif %}
                         </td>
-                        <td class="gaq-num">{{ row.run.files_requested }}</td>
-                        <td class="gaq-num">{{ row.run.files_fetched }}</td>
-                        <td class="gaq-num">{{ row.run.files_skipped }}</td>
-                        <td class="gaq-num">{{ row.run.files_failed }}</td>
-                        <td class="gaq-num">{{ row.run.bytes_transferred|filesizeformat }}</td>
+                        {% if real_feed.fetches_files %}
+                            <td class="gaq-num">{{ row.run.files_requested }}</td>
+                            <td class="gaq-num">{{ row.run.files_fetched }}</td>
+                            <td class="gaq-num">{{ row.run.files_skipped }}</td>
+                            <td class="gaq-num">{{ row.run.files_failed }}</td>
+                            <td class="gaq-num">{{ row.run.bytes_transferred|filesizeformat }}</td>
+                        {% else %}
+                            <td class="gaq-num">{{ row.run.harvest_indexed }}</td>
+                            <td class="gaq-num">{{ row.run.harvest_updated }}</td>
+                            <td class="gaq-num">{{ row.run.harvest_removed }}</td>
+                            <td class="gaq-num">{{ row.run.harvest_rejected }}</td>
+                        {% endif %}
                         <td>
                             {% if row.run.error_message %}
                                 <div class="gaq-error">{{ row.run.error_message|truncatechars:200 }}</div>
@@ -281,6 +298,6 @@
             </div>
         {% endif %}
     {% else %}
-        <p class="gaq-empty">{% trans "No fetch runs yet for this feed." %}</p>
+        <p class="gaq-empty">{{ run_words.no_runs }}</p>
     {% endif %}
 {% endblock %}

@@ -1,0 +1,88 @@
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    What a Harvest feed is set up to index, on its dashboard in place of the
+    Collections card: its Upstream, window, Variable mapping and Asset host
+    allowlist (ADR 0042 §2). Rendered with `feed`, the HarvestFeed itself.
+    Styled by the dashboard's own gfeed-* classes and Wagtail's listing table.
+{% endcomment %}
+{% with collection=feed.collection mappings=feed.mapping_rows %}
+    <div class="gfeed-card">
+        <div class="gfeed-card__header">
+            <h3 class="gfeed-card__title">{% trans "Upstream" %}</h3>
+        </div>
+        <table class="listing">
+            <tbody>
+            <tr>
+                <th scope="row">{% trans "Upstream catalog" %}</th>
+                <td>{{ feed.upstream_url }}</td>
+            </tr>
+            <tr>
+                <th scope="row">{% trans "Upstream collection" %}</th>
+                <td>{{ feed.upstream_collection_id }}</td>
+            </tr>
+            <tr>
+                <th scope="row">{% trans "Time window" %}</th>
+                <td>
+                    {% if feed.window_start %}{{ feed.window_start }}{% else %}{% trans "the upstream's beginning" %}{% endif %}
+                    →
+                    {% if feed.window_end %}{{ feed.window_end }}{% else %}{% trans "open" %}{% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th scope="row">{% trans "Asset host allowlist" %}</th>
+                <td>
+                    {{ feed.sorted_asset_hosts|join:", " }}
+                    {% if feed.allow_http %}· {% trans "plain http allowed" %}{% endif %}
+                </td>
+            </tr>
+            <tr>
+                <th scope="row">{% trans "Harvests into" %}</th>
+                <td>
+                    {% if collection %}
+                        {% if feed.collection_edit_url %}
+                            <a href="{{ feed.collection_edit_url }}">{{ collection.name }}</a>
+                        {% else %}
+                            {{ collection.name }}
+                        {% endif %}
+                    {% else %}
+                        {% trans "No collection yet — it is created when the feed is saved or first harvests." %}
+                    {% endif %}
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="gfeed-card">
+        <div class="gfeed-card__header">
+            <h3 class="gfeed-card__title">
+                {% trans "Variable mapping" %}&nbsp;({{ mappings|length }})
+            </h3>
+            {% if feed.edit_url %}
+                <a class="button button-small button-secondary" href="{{ feed.edit_url }}">{% trans "Edit mapping" %}</a>
+            {% endif %}
+        </div>
+        {% if mappings %}
+            <table class="listing">
+                <thead>
+                <tr>
+                    <th>{% trans "Upstream asset key" %}</th>
+                    <th>{% trans "Variable" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for mapping in mappings %}
+                    <tr>
+                        <td>{{ mapping.asset_key }}</td>
+                        <td>{{ mapping.variable.name }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="gfeed-empty-state">
+                {% trans "No asset key is mapped, so a harvest indexes nothing. Add Variables to the feed's collection, then map upstream asset keys to them." %}
+            </p>
+        {% endif %}
+    </div>
+{% endwith %}

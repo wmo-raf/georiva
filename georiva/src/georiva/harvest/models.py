@@ -14,8 +14,11 @@ from django.db import models
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
+from wagtail.admin.panels import FieldPanel, InlinePanel, MultiFieldPanel
 
 from georiva.sources.models import DataFeed, DataFeedCollectionLink
+
+from .forms import HarvestFeedForm
 
 
 class HarvestFeed(DataFeed):
@@ -61,6 +64,38 @@ class HarvestFeed(DataFeed):
 
     run_task_name = "georiva.harvest.tasks.run_harvest"
 
+    # A harvest writes rows, not objects: its runs have no files to count or list.
+    fetches_files = False
+    setup_panel_template = "georivaharvest/includes/feed_setup_panel.html"
+
+    base_form_class = HarvestFeedForm
+
+    panels = [
+        *DataFeed.base_panels,
+        MultiFieldPanel(
+            [FieldPanel("upstream_url"), FieldPanel("upstream_collection_id")],
+            heading=_("Upstream"),
+        ),
+        MultiFieldPanel(
+            [FieldPanel("window_start"), FieldPanel("window_end")],
+            heading=_("Time window"),
+        ),
+        InlinePanel(
+            "variable_mappings",
+            heading=_("Variable mapping"),
+            label=_("Mapped asset key"),
+            help_text=_(
+                "Only mapped asset keys are indexed. Variables are curated in the feed's collection, "
+                "which is created when the feed is first saved."
+            ),
+            panels=[FieldPanel("asset_key"), FieldPanel("variable")],
+        ),
+        MultiFieldPanel(
+            [FieldPanel("asset_hosts"), FieldPanel("allow_http")],
+            heading=_("Asset host allowlist"),
+        ),
+    ]
+
     class Meta:
         verbose_name = _("Harvest feed")
         verbose_name_plural = _("Harvest feeds")
@@ -88,6 +123,33 @@ class HarvestFeed(DataFeed):
         link = self.collection_links.select_related("collection").first()
         return link.collection if link else None
 
+    @property
+    def collection_edit_url(self):
+        """Where the feed's collection, and with it its Variables, is curated."""
+        from django.urls import reverse
+
+        from georiva.core.views.viewsets import CollectionViewSet
+
+        collection = self.collection
+        if collection is None:
+            return None
+        return reverse(CollectionViewSet().get_url_name("edit"), kwargs={"pk": collection.pk})
+
+    @property
+    def sorted_asset_hosts(self) -> list[str]:
+        return sorted(self.allowed_asset_hosts)
+
+    @property
+    def mapping_rows(self):
+        """The Variable mapping's rows with their Variables, for display."""
+        return list(self.variable_mappings.select_related("variable"))
+
+    @property
+    def collection_slug(self) -> str:
+        """The slug of the collection this feed harvests into when it has none yet:
+        one already in its catalog under this slug is taken, else one is created."""
+        return slugify(self.upstream_collection_id)[:100] or "harvest"
+
     def ensure_collection(self):
         """The Collection this feed harvests into, created in the feed's catalog —
         with the feed's Provenance — if it has none yet.
@@ -103,10 +165,9 @@ class HarvestFeed(DataFeed):
         if self.catalog_id is None:
             raise ValueError(f"Harvest feed {self.pk} has no catalog to harvest into.")
 
-        slug = slugify(self.upstream_collection_id)[:100] or "harvest"
         collection, _created = Collection.objects.get_or_create(
             catalog_id=self.catalog_id,
-            slug=slug,
+            slug=self.collection_slug,
             defaults={"name": self.upstream_collection_id[:200], "harvested_by": self},
         )
         DataFeedCollectionLink.objects.get_or_create(data_feed=self, collection=collection)

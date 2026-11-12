@@ -13,11 +13,19 @@ class DataFeedSuccessUrlMixin:
         return reverse("data_feed_list")
 
 
-class DataFeedCreateView(DataFeedSuccessUrlMixin, generic.CreateView):
+class DataFeedDashboardUrlMixin:
+    """A saved feed lands on its dashboard: where what it is set up with, and
+    what is still missing from that, can be seen."""
+
+    def get_success_url(self):
+        return reverse("data_feed_detail", kwargs={"pk": self.object.pk})
+
+
+class DataFeedCreateView(DataFeedDashboardUrlMixin, generic.CreateView):
     pass
 
 
-class DataFeedEditView(DataFeedSuccessUrlMixin, generic.EditView):
+class DataFeedEditView(DataFeedDashboardUrlMixin, generic.EditView):
     pass
 
 

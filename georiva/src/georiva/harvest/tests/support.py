@@ -21,8 +21,8 @@ def rain_href(n: int) -> str:
 
 
 class HarvestFeedMixin:
-    """A feed over a fake Upstream, created the way a test must until the admin
-    can: directly. `self.upstream` is the only thing here that is not real."""
+    """A feed over a fake Upstream, created directly rather than through the
+    admin's form. `self.upstream` is the only thing here that is not real."""
 
     def make_feed(self, organisation=None, **fields):
         catalog = Catalog.objects.create(
