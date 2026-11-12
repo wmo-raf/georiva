@@ -7,6 +7,10 @@ accepted — see wmo-raf/georiva#605. Builds on [ADR-0031](0031-fetch-runs-stop-
 [ADR-0025](0025-the-ingestion-queue-admits-only-fetch-and-extraction.md) / [ADR-0037](0037-bookkeeping-has-its-own-queue-and-worker.md)
 (queues). Its read-side counterpart is [ADR-0043](0043-the-read-plane-reads-an-assets-bytes-wherever-its-href-points.md).
 
+Amended after the first real Upstream was tried (Digital Earth Africa's CHIRPS): §2 and §9 now say how a feed is set
+up and how a redirect and an `s3://` href are treated. Nothing is reversed: the Upstream still proposes and a person
+still decides.
+
 ## Context
 
 GeoRiva serves cloud-natively but acquires like a download portal: nothing is visible until its bytes are in MinIO.
@@ -27,6 +31,16 @@ never copied.**
    one feed" (ADR 0034) stands. Its configuration: upstream catalog location, upstream collection id, time window,
    cadence, an explicit **variable mapping** (upstream asset key → curated `Variable`), and an **asset host
    allowlist**. Only anonymously readable upstreams; saving the feed checks unauthenticated reachability.
+
+   **The operator is guided, not asked.** A harvest feed is created by a wizard that takes the Upstream's root
+   address and nothing else an operator must already know. It **surveys** the Upstream: which collections it has,
+   how the chosen one's items are organised, which raster assets they carry and where those files live. It proceeds
+   only for the shape a harvest can index — one COG per time step per asset key — and names the reason for any
+   other (many items at one time, a Zarr or NetCDF store, files that need an account, a catalog with no API): no
+   feed is created for those. The Variables are created by the wizard from a **sample item**: unit, nodata and
+   title lifted from its metadata, and a value range lifted from upstream statistics or else estimated from the
+   sample asset's coarsest overview. That read is also the proof that the file is a COG readable without
+   credentials. Upstream collection and catalog are fixed once the feed exists; the rest is edited on the feed.
 
 3. **Operator-mapped variables only.** An upstream asset key with no mapping is not indexed, silently. Extending the
    mapping and harvesting again indexes it; nothing is lost by skipping it first.
@@ -64,6 +78,24 @@ never copied.**
    since APIs often serve assets from another bucket host), and must not resolve to a private, loopback or link-local
    address. A failing asset is skipped and counted as rejected on the run; it does not fail the harvest.
 
+   Two refinements keep that rule while admitting real Upstreams:
+
+   - **A redirect is followed only to where the operator already pointed.** The catalog client follows a redirect
+     whose target has the scheme, host and port of the catalog address the operator entered, up to a small number
+     of hops — the rule a `next` link already obeys. Any other redirect is a `source` failure naming the target.
+   - **An `s3://` href is translated, by a translation a person confirmed.** Catalogs commonly name a public
+     bucket by `s3://bucket/key`, which is not an address we may open: inside our deployment `s3://` means our own
+     object store, with our credentials. The survey works out the bucket's public `https` host, checks that it
+     answers an anonymous range read, and proposes it in plain words; on the operator's yes the feed **pins** the
+     bucket → host translation and the host joins the allowlist. A harvest translates with pinned translations
+     only, then judges and stores the `https` form, so every reader downstream sees an ordinary Remote asset
+     (ADR 0043 unchanged). An `s3://` href whose bucket is not pinned is rejected and counted, like any href on a
+     host not allowed. The same survey proposes any other `https` host the assets live on; the operator types no
+     host.
+
+   The Upstream's content therefore proposes hosts only while a person is present to agree, never during a
+   harvest.
+
 10. **Display stats are lifted, never computed on read.** From upstream metadata (`raster:bands` statistics or
     equivalent) when present, else null. The mapped `Variable`'s style bounds guarantee rendering without them.
     Zonal backfill may fill them in as a side effect; nothing may depend on that.
@@ -90,6 +122,10 @@ never copied.**
 - An upstream that reprocesses an item without changing `updated` is not re-synced.
 - Deleting a harvest feed leaves its rows with provenance pointing nowhere: they are then nobody's, and only an
   operator removes them.
+- An Upstream that moves its files to another bucket or host has every asset rejected from then on, until an
+  operator re-checks the Upstream on the feed and confirms the new location. The run's rejected count is the signal.
+- The wizard makes an outbound raster read from the web process, once per sampled asset. It is bounded by a short
+  timeout, and a failure is a message on the wizard step, not a feed.
 
 ## Out of scope
 

@@ -406,7 +406,35 @@ _Avoid_: fetch, sync, import, federation (for this phase)
 **Harvest feed**:
 A pull feed (`DataFeed`) of the harvesting kind: an Upstream collection, a time window, a cadence, a Variable mapping
 and an Asset host allowlist. Still the catalog's one Feed. Its runs are `FetchRun`s with no `FetchedFile` rows.
+Created by the Harvest Feed Wizard only; its Upstream and upstream collection are fixed from then on.
 _Avoid_: harvester profile, remote feed, STAC source
+
+**Harvest Feed Wizard**:
+The multi-step Wagtail admin flow that creates a Harvest feed from an Upstream's root address: (1) the address,
+(2) pick a collection, (3) the Upstream survey's verdict, (4) pick raster assets as Variables and confirm where the
+files live, (5) window, cadence, review and save. Provisioning is atomic and creates the Catalog, Collection,
+Variables, Variable mapping and feed together. Parallel to the New Push Feed Wizard; reached from the Add Data Front
+Door.
+_Avoid_: STAC wizard, remote wizard, import wizard
+
+**Upstream survey**:
+What the Harvest Feed Wizard learns about an Upstream collection before a feed exists: how its items are organised
+(the **shape**), which raster asset keys they carry, and where the files live. Only the shape "one COG per time step
+per asset key" can be harvested; the survey names the reason for any other. Re-run from the feed's page by
+"Re-check upstream".
+_Avoid_: probe, discovery, crawl, validation
+
+**Sample item**:
+An upstream item the Upstream survey reads to prefill Variables — title, unit, nodata, and a value range lifted from
+upstream statistics or estimated from its asset's coarsest overview. The Harvest counterpart of the Sample File.
+Never indexed by the survey.
+_Avoid_: test item, preview item
+
+**Pinned location**:
+A place an Upstream's files live that an operator confirmed for one Harvest feed: an `https` host, or an `s3://`
+bucket with the public `https` host its hrefs are translated to at harvest time. Proposed by the Upstream survey,
+never typed. An asset anywhere else is rejected.
+_Avoid_: bucket mapping, rewrite rule, trusted bucket
 
 **Variable mapping**:
 A Harvest feed's explicit table of upstream asset key → curated `Variable`. An unmapped key is not indexed.
@@ -442,8 +470,9 @@ the same feed. The asset becomes local and leaves the Mirror's Jurisdiction.
 _Avoid_: hydrate (in code), cache, download, mirror (for copying bytes)
 
 **Asset host allowlist**:
-The hosts a Harvest feed's asset hrefs may name; by default the Upstream catalog's own. An asset elsewhere, not on
-`https`, or resolving to a private address is **rejected**: skipped and counted on the run.
+The hosts a Harvest feed's asset hrefs may name: the Upstream catalog's own and the feed's Pinned locations. An
+asset elsewhere, not on `https` after translation, or resolving to a private address is **rejected**: skipped and
+counted on the run.
 _Avoid_: trusted hosts, CORS list
 
 **Upstream catalog client**:
@@ -461,9 +490,10 @@ _Avoid_: data submenu, sources menu
 
 **Add Data Front Door**:
 The single entry point for defining new data, at the top of the Data Menu. One screen asking "How does this data
-arrive?" with two cards — "Fetched automatically from a provider" (routes to the DataFeed setup wizard) and "Sent to
-GeoRiva" (routes to the New Push Feed Wizard). Copy uses the data manager's language; "plugin" and "config" never
-appear on it.
+arrive?" with three cards — "Fetched automatically from a provider" (routes to the DataFeed setup wizard), "Sent to
+GeoRiva" (routes to the New Push Feed Wizard) and "Already published in an online catalog", shown without being
+copied (routes to the Harvest Feed Wizard). Copy uses the data manager's language; "plugin", "config", "STAC" and
+"S3" never appear on it.
 _Avoid_: add data wizard, data entry screen
 
 **New Push Feed Wizard**:
