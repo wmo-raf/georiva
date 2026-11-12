@@ -9,6 +9,8 @@ from .upstream import (
     AssetProbe,
     CubeArray,
     CubeDimension,
+    FieldSample,
+    StoreField,
     StoreProbe,
     UpstreamAsset,
     UpstreamCollection,
@@ -88,6 +90,14 @@ class FakeUpstream:
         self.store_unreadable: str | None = None
         #: The stores opened, in order.
         self.stores_opened: list[str] = []
+        #: The range a sample of each array shows, by path; one not here ranges 0–100.
+        self.field_ranges: dict[str, tuple[float, float]] = {}
+        #: The declared place each array's data is in, by path; one not here needs none.
+        self.field_places: dict[str, str] = {}
+        #: Why a sample of an array cannot be read, by path.
+        self.field_problems: dict[str, str] = {}
+        #: The samples asked for, in order: the store, the arrays, and the places the read may follow.
+        self.samples_asked: list[tuple[str, list[StoreField], dict[str, str]]] = []
 
     def become_store(
         self,
@@ -97,6 +107,7 @@ class FakeUpstream:
         *,
         codecs: dict[str, tuple[str, ...]] | None = None,
         chunk_locations: tuple[str, ...] = (),
+        chunk_endpoints: tuple[str, ...] = (),
         s3_href: str = "",
         media_type: str = "application/x-icechunk",
         described: bool = True,
@@ -105,12 +116,21 @@ class FakeUpstream:
 
         `dimensions` gives each dimension's size (or a whole `CubeDimension`).
         `arrays` gives each array, by path, as `(dimensions, chunks)`; `chunks`
-        may be `None` for one the collection does not describe. `codecs` names
+        may be `None` for one the collection does not describe. A third member,
+        a dict, is what the collection says of it: `title`, `unit`,
+        `description`. `codecs` names
         the codecs of any array that does not use `PLAIN_CODECS`. `s3_href` is
         the same store's `s3://` address, when the collection publishes both;
+        `chunk_endpoints` are the declared places said to be served at an
+        address of their own;
         `described=False` leaves the cube out of the collection.
         """
-        asset = UpstreamAsset(href=href, media_type=media_type, chunk_locations=tuple(chunk_locations))
+        asset = UpstreamAsset(
+            href=href,
+            media_type=media_type,
+            chunk_locations=tuple(chunk_locations),
+            chunk_endpoints=tuple(chunk_endpoints),
+        )
         assets = {"icechunk-https": asset}
         if s3_href:
             # First, as dynamical.org lists it: the survey must still choose the `https` one.
@@ -121,8 +141,8 @@ class FakeUpstream:
                 for name, size in dimensions.items()
             },
             arrays={
-                path: CubeArray(path, tuple(named), None if chunks is None else tuple(chunks))
-                for path, (named, chunks) in arrays.items()
+                path: CubeArray(path, tuple(named), None if chunks is None else tuple(chunks), **dict(*said))
+                for path, (named, chunks, *said) in arrays.items()
             },
         )
         self.collections = [
@@ -220,3 +240,21 @@ class FakeUpstream:
         if href not in self.stores:
             return StoreProbe(readable=False, problem="there is no store at that address")
         return StoreProbe(readable=True, codecs=dict(self.stores[href]))
+
+    def sample_store(
+        self, href: str, fields: list[StoreField], chunk_locations: dict[str, str]
+    ) -> dict[str, FieldSample]:
+        self.samples_asked.append((href, list(fields), dict(chunk_locations)))
+        samples = {}
+        for field in fields:
+            place = self.field_places.get(field.path)
+            if field.path in self.field_problems:
+                samples[field.path] = FieldSample(readable=False, problem=self.field_problems[field.path])
+            elif place and place not in chunk_locations:
+                # As the real reader finds it: by being refused the address of one file there.
+                problem = "it could not be read by a reader with no account"
+                samples[field.path] = FieldSample(readable=False, problem=problem, elsewhere=f"{place}a/file.grib2")
+            else:
+                low, high = self.field_ranges.get(field.path, (0.0, 100.0))
+                samples[field.path] = FieldSample(readable=True, value_min=low, value_max=high)
+        return samples

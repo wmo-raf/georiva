@@ -52,11 +52,11 @@
 {% block main_content %}
     <form method="post" action="">
         {% csrf_token %}
-        {% if not found.harvestable %}
+        {% if not fits %}
             <div class="hrc-panel">
                 <div class="hrc-panel__header">{% trans "The catalog no longer fits" %}</div>
                 <div class="hrc-panel__body">
-                    <p>{{ found.reason }}</p>
+                    <p>{{ reason }}</p>
                     <p class="hrc-note">{% trans "Nothing was changed on this feed." %}</p>
                 </div>
             </div>
@@ -81,13 +81,14 @@
                 <div class="hrc-panel__body">
                     <p>
                         {% for asset in readable %}<strong>{{ asset.title|default:asset.key }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
+                        {% for array in offered %}<strong>{{ array.title|default:array.path }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
                     </p>
                     <p class="hrc-note">{% trans "After saving, these are the ones the feed's mapping offers." %}</p>
                 </div>
             </div>
         {% endif %}
         <div class="hrc-actions">
-            {% if found.harvestable %}
+            {% if fits %}
                 <button type="submit" class="button">{% trans "Save" %}</button>
             {% endif %}
             <a href="{% url 'data_feed_detail' feed.pk %}" class="button button-secondary">{% trans "Back to the feed" %}</a>

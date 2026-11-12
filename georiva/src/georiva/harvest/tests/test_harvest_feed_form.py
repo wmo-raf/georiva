@@ -14,7 +14,7 @@ from django.urls import reverse
 from wagtail.test.utils.form_data import inline_formset, nested_form_data
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
-from georiva.harvest.models import HarvestFeed, VariableMapping
+from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
 from georiva.harvest.testing import FakeUpstream
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.registry import data_feed_viewset_registry
@@ -191,6 +191,12 @@ class EditHarvestFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
 
         self.assertFalse(hasattr(formset.empty_form.fields["asset_key"].widget, "choices"))
 
+    def test_a_feed_with_a_fixed_window_is_not_offered_a_rolling_one(self):
+        fields = self.client.get(form_url("edit", pk=self.feed.pk)).context["form"].fields
+
+        self.assertIn("window_start", fields)
+        self.assertNotIn("rolling_window_days", fields)
+
     def test_a_window_that_ends_before_it_starts_is_refused(self):
         response = self.edit(window_start="2026-03-01 00:00", window_end="2026-01-01 00:00")
 
@@ -216,3 +222,111 @@ class EditHarvestFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
         response = self.client.get(reverse("data_feed_edit", kwargs={"pk": self.feed.pk}))
 
         self.assertRedirects(response, form_url("edit", pk=self.feed.pk))
+
+
+STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
+GFS = "s3://noaa-gfs-bdp-pds/"
+
+
+class EditStoreFeedTests(HarvestFeedAdminMixin, HarvestFeedMixin, TestCase):
+    """A feed over a forecast Upstream store, as the wizard saves one (ADR 0044 §1, §7)."""
+
+    def make_feed(self, organisation=None, **fields):
+        return super().make_feed(
+            organisation,
+            upstream_shape=UpstreamShape.STORE,
+            store_href=STORE,
+            rolling_window_days=3,
+            pinned_chunk_locations={GFS: "us-east-1"},
+            surveyed_assets=[{"key": "temperature_2m", "title": "2 metre temperature"}, {"key": "wind_u_10m"}],
+            **fields,
+        )
+
+    def setUp(self):
+        super().setUp()
+        self.collection = self.feed.ensure_collection()
+        self.temperature = self.make_variable(self.collection, slug="temperature_2m")
+
+    def edit(self, mappings=(), **fields):
+        fields.setdefault("rolling_window_days", "3")
+        return self.client.post(form_url("edit", pk=self.feed.pk), self.posted(mappings, **fields))
+
+    def form(self):
+        return self.client.get(form_url("edit", pk=self.feed.pk)).context["form"]
+
+    def test_the_rolling_window_and_the_cadence_can_be_changed(self):
+        response = self.edit(rolling_window_days="7", interval_minutes="360")
+
+        self.assertRedirects(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
+        self.feed.refresh_from_db()
+        self.assertEqual((self.feed.rolling_window_days, self.feed.interval_minutes), (7, 360))
+
+    def test_it_has_no_fixed_window_to_edit(self):
+        fields = self.form().fields
+
+        self.assertIn("rolling_window_days", fields)
+        self.assertNotIn("window_start", fields)
+        self.assertNotIn("window_end", fields)
+
+        self.edit(window_start="2026-01-01 00:00", window_end="2026-02-01 00:00")
+        self.feed.refresh_from_db()
+        self.assertEqual((self.feed.window_start, self.feed.window_end), (None, None))
+
+    def test_a_rolling_window_cannot_be_emptied_or_be_no_days_at_all(self):
+        for days in ("", "0", "5000"):
+            with self.subTest(days=days):
+                response = self.edit(rolling_window_days=days)
+
+                self.assertEqual(response.status_code, 200)
+                self.feed.refresh_from_db()
+                self.assertEqual(self.feed.rolling_window_days, 3)
+
+    def test_its_shape_upstream_store_and_where_its_data_is_read_from_cannot_be_changed_here(self):
+        response = self.edit(
+            upstream_shape=UpstreamShape.ITEMS,
+            upstream_url="https://another.example/catalog.json",
+            upstream_collection_id="era5",
+            store_href="https://evil.example/store",
+            pinned_chunk_locations='{"s3://georiva-assets/": ""}',
+        )
+
+        self.assertRedirects(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
+        self.feed.refresh_from_db()
+        self.assertEqual((self.feed.upstream_shape, self.feed.store_href), (UpstreamShape.STORE, STORE))
+        self.assertEqual((self.feed.upstream_url, self.feed.upstream_collection_id), (UPSTREAM_URL, "chirps-daily"))
+        self.assertEqual(self.feed.pinned_chunk_locations, {GFS: "us-east-1"})
+        fields = self.form().fields
+        fixed = ("upstream_shape", "upstream_url", "upstream_collection_id", "store_href", "pinned_chunk_locations")
+        for name in fixed:
+            self.assertNotIn(name, fields)
+
+    def test_the_shape_is_shown_and_is_not_a_field(self):
+        page = self.client.get(form_url("edit", pk=self.feed.pk))
+
+        self.assertContains(page, "One data store, laid out a whole map per time step")
+
+    def test_the_mapping_offers_the_array_paths_the_survey_saw(self):
+        row = self.form().formsets["variable_mappings"].empty_form.fields["asset_key"]
+
+        self.assertEqual([value for value, _label in row.widget.choices], ["", "temperature_2m", "wind_u_10m"])
+        self.assertEqual(dict(row.widget.choices)["temperature_2m"], "temperature_2m — 2 metre temperature")
+        self.assertEqual(str(row.label), "Array in the store")
+
+    def test_an_array_is_mapped_by_its_path(self):
+        self.edit([{"asset_key": "temperature_2m", "variable": self.temperature.pk}])
+
+        self.assertEqual(self.feed.mapped_variables(self.collection), {"temperature_2m": self.temperature})
+
+    def test_an_array_the_survey_did_not_offer_cannot_be_mapped_by_posting_its_path(self):
+        response = self.edit([{"asset_key": "pressure_level/temperature", "variable": self.temperature.pk}])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("not an array the upstream store offers", self.errors(response))
+        self.assertFalse(VariableMapping.objects.exists())
+
+    def test_the_feeds_page_says_what_it_points_at(self):
+        page = self.client.get(reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
+
+        self.assertContains(page, STORE)
+        self.assertContains(page, "Rolling: runs from the last 3 days")
+        self.assertContains(page, GFS)

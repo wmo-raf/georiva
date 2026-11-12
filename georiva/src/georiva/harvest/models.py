@@ -6,11 +6,14 @@ its runs are `FetchRun`s on the shared run spine. What it does in a run is its
 own: it copies an Upstream's index into Published rows and fetches no file.
 """
 
+from datetime import timedelta
 from urllib.parse import urlsplit
 
 from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 from modelcluster.fields import ParentalKey
@@ -20,10 +23,28 @@ from georiva.sources.models import DataFeed, DataFeedCollectionLink
 
 from .forms import HarvestFeedForm
 
+#: How many days of runs a forecast store's feed keeps unless told otherwise (ADR 0044 §7).
+DEFAULT_ROLLING_WINDOW_DAYS = 3
+
+#: The longest Rolling window a feed may be given: a year of runs.
+MAX_ROLLING_WINDOW_DAYS = 366
+
+
+class UpstreamShape(models.TextChoices):
+    """The shape of Upstream collection a feed was created for. The values are
+    the Upstream survey's own, for the two shapes it goes on from."""
+
+    ITEMS = "one-cog-per-time", _("One image file per time step")
+    STORE = "map-shaped-store", _("One data store, laid out a whole map per time step")
+
 
 class HarvestFeed(DataFeed):
     """An Upstream collection, a time window, a cadence (`interval_minutes`), a
-    Variable mapping (`variable_mappings`) and an Asset host allowlist."""
+    Variable mapping (`variable_mappings`) and an Asset host allowlist.
+
+    The collection is items of COGs, or an Upstream store (ADR 0044 §1): which,
+    the feed records as `upstream_shape`, and it is fixed from then on, like
+    the Upstream itself."""
 
     upstream_url = models.URLField(
         max_length=500,
@@ -36,6 +57,23 @@ class HarvestFeed(DataFeed):
         help_text=_("The id of the upstream collection this feed harvests."),
     )
 
+    upstream_shape = models.CharField(
+        max_length=40,
+        choices=UpstreamShape.choices,
+        default=UpstreamShape.ITEMS,
+        verbose_name=_("How the upstream collection is published"),
+        help_text=_("What the feed was set up for. Another shape is another feed."),
+    )
+    store_href = models.URLField(
+        max_length=500,
+        blank=True,
+        verbose_name=_("Upstream store"),
+        help_text=_(
+            "For a feed over an upstream store: the store's https address, as the upstream published it when "
+            "the feed was set up or last re-checked."
+        ),
+    )
+
     window_start = models.DateTimeField(
         null=True,
         blank=True,
@@ -45,6 +83,17 @@ class HarvestFeed(DataFeed):
         null=True,
         blank=True,
         help_text=_("Only upstream items at or before this time are indexed. Blank: no end, the window stays open."),
+    )
+
+    rolling_window_days = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(MAX_ROLLING_WINDOW_DAYS)],
+        verbose_name=_("Keep runs from the last (days)"),
+        help_text=_(
+            "For a forecast store: only runs started in the last this many days are indexed, and older ones are "
+            "dropped as time passes. A run inside the window keeps all its steps, however far ahead they reach."
+        ),
     )
 
     asset_hosts = ArrayField(
@@ -66,11 +115,24 @@ class HarvestFeed(DataFeed):
             "bucket is not indexed."
         ),
     )
+    pinned_chunk_locations = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Pinned chunk locations"),
+        help_text=_(
+            "For an upstream store whose data lives in its producer's files: each s3:// or gs:// place an "
+            "operator confirmed, exactly as the store declares it, with its region where it has one, as "
+            '{"s3://bucket/": "us-east-1", "gs://bucket/": ""}. Data anywhere else is not read.'
+        ),
+    )
     surveyed_assets = models.JSONField(
         default=list,
         blank=True,
         verbose_name=_("Surveyed assets"),
-        help_text=_('The raster asset keys the Upstream survey last saw, each as {"key": …, "title": …}.'),
+        help_text=_(
+            "The raster asset keys the Upstream survey last saw — for an upstream store, the paths of the "
+            'arrays it offered — each as {"key": …, "title": …}.'
+        ),
     )
     allow_http = models.BooleanField(
         default=False,
@@ -92,19 +154,27 @@ class HarvestFeed(DataFeed):
     panels = [
         *DataFeed.base_panels,
         MultiFieldPanel(
-            # Fixed once the feed exists: another catalog or collection is another feed.
-            [FieldPanel("upstream_url", read_only=True), FieldPanel("upstream_collection_id", read_only=True)],
+            # Fixed once the feed exists: another catalog, collection or shape is another feed.
+            [
+                FieldPanel("upstream_url", read_only=True),
+                FieldPanel("upstream_collection_id", read_only=True),
+                FieldPanel("upstream_shape", read_only=True),
+            ],
             heading=_("Upstream"),
         ),
         MultiFieldPanel(
-            [FieldPanel("window_start"), FieldPanel("window_end")],
+            # The form keeps the fixed window or the Rolling one, whichever the feed has.
+            [FieldPanel("window_start"), FieldPanel("window_end"), FieldPanel("rolling_window_days")],
             heading=_("Time window"),
         ),
         InlinePanel(
             "variable_mappings",
             heading=_("Variable mapping"),
             label=_("Mapped asset key"),
-            help_text=_("Only mapped asset keys are indexed. Variables are curated in the feed's collection."),
+            help_text=_(
+                "Only mapped asset keys — for an upstream store, mapped arrays — are indexed. Variables are "
+                "curated in the feed's collection."
+            ),
             panels=[FieldPanel("asset_key"), FieldPanel("variable")],
         ),
         # Where its files are read from is not edited here: it is confirmed, on
@@ -118,7 +188,16 @@ class HarvestFeed(DataFeed):
     # ── Configuration, as a harvest reads it ────────────────────────────────
 
     @property
+    def is_store(self) -> bool:
+        """Whether this feed points at an Upstream store rather than at items of COGs."""
+        return self.upstream_shape == UpstreamShape.STORE
+
+    @property
     def window(self):
+        """The fixed window, or — for a forecast store — the Rolling window as
+        it stands now: runs started in the last `rolling_window_days` days."""
+        if self.rolling_window_days:
+            return (timezone.now() - timedelta(days=self.rolling_window_days), None)
         return (self.window_start, self.window_end)
 
     @property
@@ -227,6 +306,9 @@ class HarvestFeed(DataFeed):
     def run_now(self, collection=None, *, user=None, async_run: bool = True):
         """Harvest now. A harvest is not a LoaderJob: there are no files to show
         progress for, and it does not belong on the ingestion queue (ADR 0042 §11)."""
+        if self.is_store:
+            # Listing what a store holds is not built yet (ADR 0044 §6): there is nothing to run.
+            return []
         if async_run:
             from .tasks import run_harvest
 
@@ -253,7 +335,10 @@ class VariableMapping(models.Model):
     asset_key = models.CharField(
         max_length=255,
         verbose_name=_("Upstream asset key"),
-        help_text=_("The key of the asset in the upstream's items, exactly as the upstream spells it."),
+        help_text=_(
+            "The key of the asset in the upstream's items, exactly as the upstream spells it. For an upstream "
+            "store: the array's full path in the store."
+        ),
     )
     variable = models.ForeignKey(
         "georivacore.Variable",

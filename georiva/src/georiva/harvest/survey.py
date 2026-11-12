@@ -6,8 +6,10 @@ must already know. The survey finds the rest: which collections the catalog
 has, how the chosen one's items are organised (its **shape**), which raster
 assets they carry, and where those files live. Two shapes are accepted — one
 COG per time step per asset key, and a map-shaped Upstream store whose codecs
-we can decode (ADR 0044 §5, §12) — and for any other the survey says why, in
-words an operator can act on.
+we can decode and whose data lives in places of a kind we can read (ADR 0044
+§5, §11, §12) — and for any other the survey says why, in words an operator
+can act on. Of an accepted store it also says which arrays can become
+Variables, and why each of the others cannot (§8).
 
 It reads through the Upstream catalog client and writes nothing. It also never
 opens an address the Asset host allowlist would refuse: a file's place is
@@ -25,9 +27,18 @@ from enum import StrEnum
 from itertools import islice
 from urllib.parse import urlsplit
 
-from .asset_hosts import AssetHostAllowlist, PinnedBuckets, is_bucket_name, public_bucket_host, s3_bucket_of
+from .asset_hosts import (
+    AssetHostAllowlist,
+    PinnedBuckets,
+    chunk_place,
+    is_bucket_name,
+    is_region_name,
+    public_bucket_host,
+    s3_bucket_of,
+)
 from .upstream import (
     CubeArray,
+    CubeDimension,
     UpstreamAsset,
     UpstreamCatalogClient,
     UpstreamCollection,
@@ -51,8 +62,7 @@ _STORE_TYPES = ("zarr", "icechunk", "netcdf", "hdf", "grib")
 
 
 class Shape(StrEnum):
-    """How a collection is organised. The first can be harvested; the second is
-    accepted, and the wizard cannot yet set a feed up from it."""
+    """How a collection is organised. A feed can be set up from the first two."""
 
     ONE_COG_PER_TIME = "one-cog-per-time"
     #: An Upstream store whose chunks are each one whole field at one step.
@@ -63,6 +73,10 @@ class Shape(StrEnum):
     UNDECODABLE_STORE = "undecodable-store"
     #: An Upstream store whose shape its collection does not say.
     UNREADABLE_STORE = "unreadable-store"
+    #: An Upstream store declaring that its data lives in a kind of place we do not read from.
+    STORE_KEPT_ELSEWHERE = "store-kept-elsewhere"
+    #: A map-shaped Upstream store none of whose arrays is a plain field on a latitude/longitude grid.
+    UNMAPPABLE_STORE = "unmappable-store"
     TILED = "tiled"
     #: A store whose collection describes no cube: nothing can be learnt of it.
     STORE = "store"
@@ -89,6 +103,10 @@ _REASONS = {
     ),
     Shape.UNDECODABLE_STORE: "This collection's data is packed in a way GeoRiva cannot unpack",
     Shape.UNREADABLE_STORE: "GeoRiva could not work out how this collection's data is laid out",
+    Shape.STORE_KEPT_ELSEWHERE: "Some of this collection's data is kept somewhere GeoRiva cannot read from yet",
+    Shape.UNMAPPABLE_STORE: (
+        "This collection is laid out for drawing maps, but GeoRiva cannot show any of what it holds yet."
+    ),
     Shape.NEEDS_ACCOUNT: (
         "This collection's files could not be read. They may need an account, or sit somewhere "
         "GeoRiva is not allowed to read from."
@@ -164,6 +182,27 @@ class SurveyedAsset:
 
 
 @dataclass(frozen=True)
+class SurveyedArray:
+    """One array of an Upstream store that is a field on its grid: offered to
+    become a Variable, or listed with why it cannot (ADR 0044 §8)."""
+
+    #: Its full path in the store: the Variable mapping's key.
+    path: str
+    title: str = ""
+    unit: str = ""
+    description: str = ""
+    #: Each of its axes' part, in its own order — "run" and "step", or "time",
+    #: then "y" and "x"; empty for an array that is not offered.
+    axes: list[str] = field(default_factory=list)
+    #: Why it cannot become a Variable, for an operator; empty when it can.
+    reason: str = ""
+
+    @property
+    def offered(self) -> bool:
+        return not self.reason
+
+
+@dataclass(frozen=True)
 class SurveyedStore:
     """An Upstream store, as far as the survey got with it."""
 
@@ -176,6 +215,20 @@ class SurveyedStore:
     #: Where a virtual store declares its chunks live, as the collection spells
     #: them. Proposed for confirmation when a feed is set up, not before.
     chunk_locations: list[str] = field(default_factory=list)
+    #: The region of each of those that needs one to be read, where it could be
+    #: found. One that needs a region and has none here cannot be read from.
+    chunk_regions: dict[str, str] = field(default_factory=dict)
+    #: Its fields, offered or not; empty unless the store was accepted.
+    arrays: list[SurveyedArray] = field(default_factory=list)
+
+    @property
+    def offered(self) -> list[SurveyedArray]:
+        return [array for array in self.arrays if array.offered]
+
+    @property
+    def has_runs(self) -> bool:
+        """Whether it is a forecast store: its window rolls on run time (ADR 0044 §7)."""
+        return any("run" in array.axes for array in self.arrays)
 
 
 @dataclass(frozen=True)
@@ -190,14 +243,13 @@ class CollectionSurvey:
 
     @property
     def harvestable(self) -> bool:
-        """Whether a feed can be set up from it today: the wizard goes on only for this."""
-        return self.shape is Shape.ONE_COG_PER_TIME
+        """Whether a feed can be set up from it: the wizard goes on only for this."""
+        return self.shape in (Shape.ONE_COG_PER_TIME, Shape.MAP_STORE)
 
     @property
     def accepted(self) -> bool:
-        """Whether GeoRiva can show it: harvestable, or a store it can draw
-        maps from and cannot yet set a feed up for."""
-        return self.shape in (Shape.ONE_COG_PER_TIME, Shape.MAP_STORE)
+        """Whether GeoRiva can show it."""
+        return self.harvestable
 
     @property
     def proposed_locations(self) -> list[FileLocation]:
@@ -355,7 +407,7 @@ def _survey_store(
     if asset is None or cube is None:
         return None
     # Every store asset's declaration counts: the `s3://` twin often carries what the `https` one leaves out.
-    declared = sorted({place for other in described.assets.values() for place in other.chunk_locations})
+    declared = sorted({_as_prefix(place) for other in described.assets.values() for place in other.chunk_locations})
     places = _Places(upstream, catalog_url)
     location, href = places.of(asset.href)
 
@@ -372,6 +424,12 @@ def _survey_store(
     if location.problem:
         # Judged as a harvest will judge it, and never opened anywhere that judgement refuses.
         return verdict(Shape.NEEDS_ACCOUNT, f"{_REASONS[Shape.NEEDS_ACCOUNT]} ({location.problem})", fields=fields)
+    # Every asset's word counts here too: one twin may say what the other leaves out.
+    own_endpoint = {_as_prefix(place) for other in described.assets.values() for place in other.chunk_endpoints}
+    elsewhere = list(dict.fromkeys(_kind_of_place(place, place in own_endpoint) for place in declared))
+    if any(elsewhere):
+        kinds = ", ".join(kind for kind in elsewhere if kind)
+        return verdict(Shape.STORE_KEPT_ELSEWHERE, f"{_REASONS[Shape.STORE_KEPT_ELSEWHERE]}: {kinds}.", fields=fields)
 
     probe = upstream.describe_store(href)
     if not probe.readable:
@@ -383,7 +441,170 @@ def _survey_store(
     if unknown:
         reason = f"{_REASONS[Shape.UNDECODABLE_STORE]}: {', '.join(f'“{codec}”' for codec in unknown)}."
         return verdict(Shape.UNDECODABLE_STORE, reason, readable=True, fields=fields, codecs=named)
-    return verdict(Shape.MAP_STORE, "", readable=True, fields=fields, codecs=named)
+    arrays = _store_arrays(cube)
+    if not any(array.offered for array in arrays):
+        why = "; ".join(dict.fromkeys(array.reason for array in arrays))
+        reason = f"{_REASONS[Shape.UNMAPPABLE_STORE]} {why}"
+        return verdict(Shape.UNMAPPABLE_STORE, reason, readable=True, fields=fields, codecs=named)
+    regions = _chunk_regions(upstream, declared)
+    return verdict(
+        Shape.MAP_STORE, "", readable=True, fields=fields, codecs=named, arrays=arrays, chunk_regions=regions
+    )
+
+
+#: What an operator is told a place GeoRiva does not read from is, by how its address begins.
+_OTHER_PLACES = {
+    "az": "Microsoft Azure storage",
+    "azure": "Microsoft Azure storage",
+    "abfs": "Microsoft Azure storage",
+    "abfss": "Microsoft Azure storage",
+    "http": "a plain web address",
+    "https": "a plain web address",
+    "file": "a folder on the provider's own computer",
+}
+
+
+def _as_prefix(declared: str) -> str:
+    """A declared place as the prefix it is: a bucket or folder spelled without
+    its closing slash names the same place, and only the slashed spelling is
+    one a store's reader takes."""
+    return f"{declared}/" if chunk_place(f"{declared}/") and not declared.endswith("/") else declared
+
+
+def _kind_of_place(declared: str, own_endpoint: bool) -> str:
+    """What kind of place `declared` is, in an operator's words, when it is
+    one a store's data cannot be pinned in; empty when it can (ADR 0044 §11)."""
+    if own_endpoint:
+        return f"a storage service at an address of its own (“{declared}”)"
+    if chunk_place(declared) is not None:
+        return ""
+    scheme = declared.partition("://")[0].lower() if "://" in declared else ""
+    return f"{_OTHER_PLACES.get(scheme, 'a kind of storage GeoRiva does not know')} (“{declared}”)"
+
+
+def _chunk_regions(upstream: UpstreamCatalogClient, declared: list[str]) -> dict[str, str]:
+    """The region of each declared place that is read by region, where S3
+    itself would say it. The repository's own word for it is never used."""
+    regions = {}
+    for place in declared:
+        named = chunk_place(place)
+        if named is None or named.kind != "s3":
+            continue
+        region = upstream.bucket_region(named.bucket)
+        # Only a bare region name is ever handed to a reader, whatever answered for the bucket.
+        if region and is_region_name(region):
+            regions[place] = region
+    return regions
+
+
+# ── Which of a store's arrays can become Variables ──────────────────────────
+
+_GEOGRAPHIC_NAMES = frozenset({"lat", "latitude", "lon", "longitude"})
+_GEOGRAPHIC_SYSTEMS = ("4326", "crs84", "wgs84", "wgs 84")
+#: Names the dimension that says which run a forecast field is of.
+_RUN_NAMES = frozenset({"init_time", "reference_time", "forecast_reference_time", "run", "run_time"})
+#: What a dimension that is neither time nor the grid is taken for, by a word in its name.
+_OTHER_DIMENSIONS = (
+    (("level", "height", "pressure", "depth", "altitude", "layer"), "It has levels."),
+    (("ensemble", "member", "realization", "realisation"), "It has ensemble members."),
+    (("statistic", "quantile", "percentile"), "It holds statistics, not one map per time step."),
+)
+
+
+def _store_arrays(cube: UpstreamCube) -> list[SurveyedArray]:
+    """Every field of a map-shaped store: those whose dimensions are exactly
+    run, step, latitude and longitude — or time, latitude and longitude — to
+    be offered, and each other with its reason (ADR 0044 §8). A store's
+    coordinates, which are on no grid, are not fields and are not listed."""
+    horizontal = _horizontal(cube)
+    found = []
+    for array in cube.arrays.values():
+        if len(horizontal.keys() & set(array.dimensions)) != 2:
+            continue
+        axes, reason = _axes(array, cube, horizontal)
+        found.append(
+            SurveyedArray(
+                path=array.path,
+                title=array.title,
+                unit=array.unit,
+                description=array.description,
+                axes=[] if reason else axes,
+                reason=reason,
+            )
+        )
+    # One store, one window: where a forecast's fields and plain time steps sit together, the forecast's are offered.
+    if any("run" in array.axes for array in found):
+        found = [
+            array
+            if "time" not in array.axes
+            else SurveyedArray(
+                array.path, array.title, array.unit, array.description, reason="It is not part of the forecast."
+            )
+            for array in found
+        ]
+    return found
+
+
+def _horizontal(cube: UpstreamCube) -> dict[str, str]:
+    """Each horizontal dimension of a cube with its axis, "x" or "y"."""
+    found = {}
+    for name, dimension in cube.dimensions.items():
+        if dimension.kind not in ("spatial", ""):
+            continue
+        axis = dimension.axis if dimension.axis in ("x", "y") else _HORIZONTAL_NAMES.get(name.lower(), "")
+        if axis:
+            found[name] = axis
+    return found
+
+
+def _is_geographic(dimension: CubeDimension) -> bool:
+    system = dimension.reference_system.lower()
+    if system:
+        return any(known in system for known in _GEOGRAPHIC_SYSTEMS)
+    return dimension.name.lower() in _GEOGRAPHIC_NAMES
+
+
+def _axes(array: CubeArray, cube: UpstreamCube, horizontal: dict[str, str]) -> tuple[list[str], str]:
+    """`(each axis's part, "")` for an array that can become a Variable, or
+    `([], why not)` in an operator's words."""
+    axes, times = [], []
+    for position, name in enumerate(array.dimensions):
+        dimension = cube.dimensions.get(name)
+        if name in horizontal:
+            if not _is_geographic(dimension):
+                return [], "It is on a projected grid."
+            axes.append(horizontal[name])
+        elif (dimension is not None and dimension.kind == "temporal") or name.lower() in _STEP_NAMES:
+            times.append(position)
+            axes.append("time")
+        else:
+            lowered = name.lower()
+            known = next((why for words, why in _OTHER_DIMENSIONS if any(word in lowered for word in words)), None)
+            return [], known or f"It is divided up in a way GeoRiva does not know (“{name}”)."
+    if not times:
+        return [], "It has no time steps."
+    if len(times) > 2:
+        return [], "It has more kinds of time step than GeoRiva can show."
+    if len(times) == 2:
+        run = _run_axis(array, cube, times)
+        for position in times:
+            axes[position] = "run" if position == run else "step"
+    return axes, ""
+
+
+def _run_axis(array: CubeArray, cube: UpstreamCube, times: list[int]) -> int:
+    """Which of a forecast field's two time-like axes says the run: the one
+    named for it, else the one that is a date where the other is a length of
+    time, else the first."""
+    named = [position for position in times if array.dimensions[position].lower() in _RUN_NAMES]
+    if len(named) == 1:
+        return named[0]
+    dated = [
+        position
+        for position in times
+        if (dimension := cube.dimensions.get(array.dimensions[position])) is not None and dimension.kind == "temporal"
+    ]
+    return dated[0] if len(dated) == 1 else times[0]
 
 
 def _store_shape(cube: UpstreamCube) -> tuple[Shape | None, int, str]:
@@ -395,13 +616,9 @@ def _store_shape(cube: UpstreamCube) -> tuple[Shape | None, int, str]:
     Series-shaped: some field's chunk spans more than one step. What is
     missing is said in an operator's words, and leaves the shape unknown.
     """
-    horizontal = {
-        name: dimension.axis if dimension.axis in ("x", "y") else _HORIZONTAL_NAMES.get(name.lower(), "")
-        for name, dimension in cube.dimensions.items()
-        if dimension.kind in ("spatial", "")
-    }
-    across = {name for name, axis in horizontal.items() if axis}
-    if {horizontal[name] for name in across} != {"x", "y"}:
+    horizontal = _horizontal(cube)
+    across = set(horizontal)
+    if set(horizontal.values()) != {"x", "y"}:
         return None, 0, "the collection does not describe a grid with a width and a height"
     fields = [array for array in cube.arrays.values() if len(across & set(array.dimensions)) == 2]
     if not fields:

@@ -430,7 +430,8 @@ _Avoid_: harvester profile, remote feed, STAC source
 **Harvest Feed Wizard**:
 The multi-step Wagtail admin flow that creates a Harvest feed from an Upstream's root address: (1) the address,
 (2) pick a collection, (3) the Upstream survey's verdict, (4) pick raster assets as Variables and confirm where the
-files live, (5) window, cadence, review and save. Provisioning is atomic and creates the Catalog, Collection,
+files live — for an Upstream store, pick arrays, confirm each place its data lives, and read one field of each with
+those places only — (5) window (a Rolling window for a forecast store), cadence, review and save. Provisioning is atomic and creates the Catalog, Collection,
 Variables, Variable mapping and feed together. Parallel to the New Push Feed Wizard; reached from the Add Data Front
 Door.
 _Avoid_: STAC wizard, remote wizard, import wizard
@@ -510,8 +511,8 @@ _Avoid_: trusted hosts, CORS list
 
 **Upstream catalog client**:
 The one seam through which a Harvest sees an Upstream (list collections; list items with assets in a window; for an
-Upstream store, describe its arrays and list the Held steps in a window). All remoteness lives behind it, and it is
-the only thing faked in tests.
+Upstream store, describe its arrays, read one field of it through a feed's Pinned locations alone, and list the
+Held steps in a window). All remoteness lives behind it, and it is the only thing faked in tests.
 _Avoid_: STAC client (generic), harvester client
 
 ### Push feed setup

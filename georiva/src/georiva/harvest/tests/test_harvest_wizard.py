@@ -352,7 +352,8 @@ RUN_STEP_GRID = ("init_time", "lead_time", "latitude", "longitude")
 
 class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
     """An Upstream like stac.dynamical.org: plain files, no API, and every
-    collection one store (ADR 0044 §1, §5, §12). The wizard stops at the verdict."""
+    collection one store (ADR 0044 §1, §5, §12). The verdict on each; where the
+    wizard goes from an accepting one is `test_harvest_wizard_store`."""
 
     def setUp(self):
         super().setUp()
@@ -417,16 +418,6 @@ class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
         self.assertContains(page, STORE_HOST)
         self.assertNotContains(page, "GeoRiva cannot show")
         self.assertEqual(self.upstream.stores_opened, [STORE], "opened once, at its https address")
-
-    def test_the_wizard_does_not_go_past_an_accepted_store_and_says_so(self):
-        self.store()
-
-        page = self.reach_verdict()
-
-        self.assertContains(page, "GeoRiva cannot set up a feed from a data store yet")
-        self.assertContains(page, "Nothing has been saved")
-        self.assert_no_way_on(page)
-        self.assert_nothing_was_made()
 
     def test_a_series_shaped_store_is_refused_with_its_reason_and_creates_nothing(self):
         self.store(chunks=(1, 105, 121, 121))
@@ -765,6 +756,36 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
         self.assertContains(response, "no longer fits")
         self.feed.refresh_from_db()
         self.assertEqual(self.feed.pinned_buckets, {})
+
+    def test_an_upstream_that_became_a_store_no_longer_fits_a_feed_set_up_for_image_files(self):
+        self.upstream.is_api = False
+        self.upstream.become_store(
+            STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))}, chunk_locations=()
+        )
+
+        shown = self.client.get(self.url)
+        self.client.post(self.url, {"allow": f"|{STORE_HOST}"})
+
+        self.assertContains(shown, "no longer fits")
+        self.assertContains(shown, "no longer published the way it was")
+        self.feed.refresh_from_db()
+        self.assertEqual((self.feed.asset_hosts, self.feed.surveyed_assets), ([], []))
+
+    def test_a_store_feeds_recheck_refreshes_the_arrays_its_mapping_offers(self):
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(upstream_shape="map-shaped-store", store_href=STORE)
+        self.upstream.is_api = False
+        self.upstream.become_store(
+            STORE,
+            FORECAST,
+            {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)), "wind_u_10m": (RUN_STEP_GRID, (1, 1, 721, 1440))},
+        )
+
+        shown = self.client.get(self.url)
+        self.client.post(self.url, {})
+
+        self.assertContains(shown, "temperature_2m")
+        self.feed.refresh_from_db()
+        self.assertEqual([seen["key"] for seen in self.feed.surveyed_assets], ["temperature_2m", "wind_u_10m"])
 
     def test_an_unreachable_upstream_sends_the_operator_back_with_why(self):
         self.upstream.unreachable = "upstream catalog unreachable: timed out"

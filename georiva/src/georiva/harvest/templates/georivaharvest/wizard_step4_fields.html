@@ -1,0 +1,238 @@
+{% extends "georivaharvest/wizard_base.html" %}
+{% load i18n l10n wagtailadmin_tags %}
+{% comment %}
+    Step 4 for an Upstream store (ADR 0044 §8, §11, §12): pick which of its
+    fields to show, and confirm each place its data lives. A field's name,
+    unit and value range appear once it is ticked and one map of it has been
+    read, so a store with hundreds of fields is a searchable list, not one
+    long form.
+{% endcomment %}
+{% block titletag %}{% trans "Show data from an online catalog — Maps and places" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .hwiz-search {
+            max-width: 24rem;
+            margin-bottom: 0.75em;
+        }
+
+        /* Hundreds of rows scroll inside the panel, so the places below stay in reach. */
+        .hwiz-scroll {
+            max-height: 26rem;
+            overflow-y: auto;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 0.25rem;
+        }
+
+        .hwiz-pick {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6em;
+            padding: 0.45em 0.75em;
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            line-height: 1.4;
+        }
+
+        /* The class sets a display of its own, which would otherwise undo `hidden`. */
+        .hwiz-pick[hidden] {
+            display: none;
+        }
+
+        .hwiz-pick:last-child {
+            border-bottom: 0;
+        }
+
+        .hwiz-pick__meta {
+            color: var(--w-color-text-meta);
+            font-size: 0.9em;
+        }
+
+        .hwiz-about {
+            width: 100%;
+        }
+
+        /* A field's two rows read as one: no rule between them. */
+        .hwiz-detail > td {
+            border-bottom: 0;
+        }
+
+        .hwiz-unoffered {
+            margin-top: 1em;
+        }
+
+        .hwiz-unoffered summary {
+            cursor: pointer;
+            color: var(--w-color-text-label);
+        }
+    </style>
+{% endblock %}
+
+{% block wizard_content %}
+    <form method="post" action="">
+        {% csrf_token %}
+        <div class="hwiz-panel">
+            <div class="hwiz-panel__header">{% trans "What to show" %}</div>
+            <div class="hwiz-panel__body">
+                <p class="hwiz-note">
+                    {% trans "Each kind of map you tick becomes something people can pick on your maps. Tick the ones you want, then continue: GeoRiva reads one map of each to work out how to colour it." %}
+                </p>
+                <input type="search" id="hwiz-search" class="w-field__input hwiz-search"
+                       placeholder="{% trans 'Search by name' %}" aria-label="{% trans 'Search by name' %}">
+                <div class="hwiz-scroll" id="hwiz-picker">
+                    {% for row in rows %}
+                        <label class="hwiz-pick" for="use_{{ row.index }}"
+                               data-search="{{ row.label|lower }} {{ row.path|lower }}">
+                            <input type="checkbox" name="use_{{ row.index }}" id="use_{{ row.index }}"
+                                   {% if row.use %}checked{% endif %}>
+                            <span>
+                                {{ row.label }}
+                                <span class="hwiz-pick__meta">
+                                    {% if row.label != row.path %}· {{ row.path }}{% endif %}
+                                    {% if row.unit %}· {{ row.unit }}{% endif %}
+                                </span>
+                            </span>
+                        </label>
+                    {% endfor %}
+                </div>
+                {% if unoffered %}
+                    <details class="hwiz-unoffered">
+                        <summary>
+                            {% blocktrans count counter=unoffered|length %}One more kind of map that GeoRiva cannot show yet{% plural %}{{ counter }} more kinds of map that GeoRiva cannot show yet{% endblocktrans %}
+                        </summary>
+                        <table class="listing">
+                            <thead>
+                            <tr>
+                                <th>{% trans "Name" %}</th>
+                                <th>{% trans "Why not" %}</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {% for array in unoffered %}
+                                <tr data-search="{{ array.title|lower }} {{ array.path|lower }}">
+                                    <td>{{ array.title|default:array.path }}</td>
+                                    <td>{{ array.reason }}</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </details>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if details %}
+            <div class="hwiz-panel">
+                <div class="hwiz-panel__header">{% trans "How each one appears" %}</div>
+                <div class="hwiz-panel__body">
+                    <p class="hwiz-note">
+                        {% trans "The lowest and highest values set how a map is coloured; they were worked out from one of the provider's maps and you can change them now or later." %}
+                    </p>
+                    <table class="listing">
+                        <thead>
+                        <tr>
+                            <th>{% trans "Name" %}</th>
+                            <th>{% trans "Unit" %}</th>
+                            <th>{% trans "Lowest value" %}</th>
+                            <th>{% trans "Highest value" %}</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in details %}
+                            <tr class="hwiz-detail">
+                                <td>
+                                    <input type="text" name="name_{{ row.index }}" class="w-field__input hwiz-name"
+                                           value="{{ row.name }}" aria-label="{% trans 'Name' %}">
+                                </td>
+                                <td>
+                                    <select name="unit_{{ row.index }}" class="w-field__input hwiz-unit" aria-label="{% trans 'Unit' %}">
+                                        <option value="">— {% trans "Choose" %} —</option>
+                                        {% for unit in units %}
+                                            <option value="{{ unit.pk }}" {% if unit.pk == row.unit_id %}selected{% endif %}>{{ unit.name }} ({{ unit.symbol }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td>
+                                    <input type="number" step="any" name="low_{{ row.index }}" class="w-field__input hwiz-number"
+                                           value="{{ row.low|default_if_none:''|unlocalize }}" aria-label="{% trans 'Lowest value' %}">
+                                </td>
+                                <td>
+                                    <input type="number" step="any" name="high_{{ row.index }}" class="w-field__input hwiz-number"
+                                           value="{{ row.high|default_if_none:''|unlocalize }}" aria-label="{% trans 'Highest value' %}">
+                                </td>
+                            </tr>
+                            <tr>
+                                <td colspan="4">
+                                    <input type="text" name="about_{{ row.index }}" class="w-field__input hwiz-about"
+                                           value="{{ row.about }}" placeholder="{% trans 'Description (optional)' %}"
+                                           aria-label="{% blocktrans with name=row.label %}Description of {{ name }}{% endblocktrans %}">
+                                </td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="hwiz-panel">
+            <div class="hwiz-panel__header">{% trans "Where the data is read from" %}</div>
+            <div class="hwiz-panel__body">
+                {% if own.proposed %}
+                    <label class="hwiz-check" for="allow_store">
+                        <input type="checkbox" name="allow_store" id="allow_store" {% if own.allowed %}checked{% endif %}>
+                        <span>
+                            {% blocktrans with host=own.host %}This collection is kept at <strong>{{ host }}</strong>, and it can be read without an account. Allow this feed to read from there?{% endblocktrans %}
+                        </span>
+                    </label>
+                {% endif %}
+                {% for place in places %}
+                    {% if place.usable %}
+                        <label class="hwiz-check" for="allow_{{ place.index }}">
+                            <input type="checkbox" name="allow_{{ place.index }}" id="allow_{{ place.index }}"
+                                   {% if place.allowed %}checked{% endif %}>
+                            <span>
+                                {% blocktrans with name=place.name cloud=place.cloud %}It says its maps are made from the provider's files at <strong>{{ name }}</strong>, on {{ cloud }}. Allow this feed to read from there?{% endblocktrans %}
+                            </span>
+                        </label>
+                    {% else %}
+                        <p class="hwiz-warning">
+                            {% blocktrans with name=place.name cloud=place.cloud %}It says some of its maps are made from the provider's files at <strong>{{ name }}</strong>, on {{ cloud }}, which GeoRiva could not find. Maps kept there cannot be shown.{% endblocktrans %}
+                        </p>
+                    {% endif %}
+                {% endfor %}
+                <p class="hwiz-note">
+                    {% trans "GeoRiva will read this feed's data from the places you allow and from nowhere else, whatever the provider's store says. You need not allow every place: GeoRiva reads one map of each kind you chose and tells you if it needed a place you left out." %}
+                </p>
+            </div>
+        </div>
+
+        <div class="hwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                {% icon name="arrow-right" wrapped=1 %}
+                {% trans "Continue" %}
+            </button>
+            <a href="{% url 'harvest_wizard_step3' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const search = document.getElementById('hwiz-search');
+            if (!search) return;
+            const rows = document.querySelectorAll('[data-search]');
+
+            search.addEventListener('input', function () {
+                const wanted = this.value.trim().toLowerCase();
+                rows.forEach(function (row) {
+                    const box = row.querySelector('input[type="checkbox"]');
+                    // A ticked row stays in sight: what is chosen is never hidden by a search.
+                    row.hidden = Boolean(wanted) && !row.dataset.search.includes(wanted) && !(box && box.checked);
+                });
+            });
+        });
+    </script>
+{% endblock %}

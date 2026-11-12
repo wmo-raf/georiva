@@ -14,8 +14,9 @@ catalog of plain files whose collections are Upstream stores (ADR 0044 §1).
 from __future__ import annotations
 
 import logging
+import re
 import socket
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol
@@ -44,6 +45,8 @@ class CubeDimension:
     axis: str = ""
     #: How many steps it has; `None` when the collection does not say.
     size: int | None = None
+    #: The grid a horizontal dimension is measured on, as the collection spells it; empty when it does not say.
+    reference_system: str = ""
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,8 @@ class CubeArray:
     chunks: tuple[int, ...] | None = None
     title: str = ""
     unit: str = ""
+    #: What the publisher says of it beyond its name; empty when it says nothing.
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,6 +128,32 @@ class StoreProbe:
 
 
 @dataclass(frozen=True)
+class StoreField:
+    """One array of an Upstream store to read a sample of, and which of its axes is which."""
+
+    path: str
+    #: Each axis's part, in the array's own order: "run" and "step" for a
+    #: forecast, "time" for an analysis, then "y" and "x".
+    axes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FieldSample:
+    """What reading one field of an Upstream store showed. Nothing here is
+    stored: a sample informs the Harvest Feed Wizard and no one else."""
+
+    readable: bool
+    #: Why it could not be read, in words an operator may be shown; empty when it could.
+    problem: str = ""
+    #: The address of the data this field needed and the reader was not allowed
+    #: to follow, as the store spells it; empty when that is not what stopped it.
+    elsewhere: str = ""
+    #: The range most of the field's values lie in (`RANGE_PERCENTILES`).
+    value_min: float | None = None
+    value_max: float | None = None
+
+
+@dataclass(frozen=True)
 class UpstreamStatistics:
     """Display statistics an Upstream publishes for an asset's band. Any may be missing."""
 
@@ -146,6 +177,8 @@ class UpstreamAsset:
     statistics: UpstreamStatistics | None = None
     #: For a virtual Upstream store: the places it declares its chunks live in, as it spells them.
     chunk_locations: tuple[str, ...] = ()
+    #: Those of them it says are served at an address of its own, not their provider's public one.
+    chunk_endpoints: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -194,6 +227,14 @@ class UpstreamCatalogClient(Protocol):
 
     def describe_store(self, href: str) -> StoreProbe:
         """Open the Upstream store at `href` and say which codecs its arrays name. Never raises."""
+
+    def sample_store(
+        self, href: str, fields: list[StoreField], chunk_locations: dict[str, str]
+    ) -> dict[str, FieldSample]:
+        """Read one field of the newest closed run of each of `fields` from the
+        store at `href`, following its data into `chunk_locations` — each
+        confirmed place with its region — and nowhere else (ADR 0044 §11, §12).
+        One sample per field, by path. Never raises."""
 
 
 # ── STAC JSON → what a harvest reads ────────────────────────────────────────
@@ -261,6 +302,7 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
             kind=str(dimension.get("type") or "").lower(),
             axis=str(dimension.get("axis") or "").lower(),
             size=size,
+            reference_system=_reference_system(dimension.get("reference_system")),
         )
     arrays = {}
     for path, variable in (variables if isinstance(variables, dict) else {}).items():
@@ -274,8 +316,20 @@ def parse_cube(payload: dict) -> UpstreamCube | None:
             chunks=None if None in whole else tuple(whole),
             title=str(variable.get("long_name") or variable.get("description") or ""),
             unit=str(variable.get("unit") or ""),
+            description=str(variable.get("comment") or ""),
         )
     return UpstreamCube(dimensions=found, arrays=arrays)
+
+
+def _reference_system(value) -> str:
+    """A dimension's reference system as one short string: an EPSG code or a
+    name as given. A whole definition (PROJJSON, WKT) is not kept: that it is
+    there at all says the grid is not plain latitude and longitude."""
+    if isinstance(value, bool) or value is None:
+        return ""
+    if isinstance(value, int):
+        return f"EPSG:{value}"
+    return value.strip()[:100] if isinstance(value, str) else "defined"
 
 
 def _parse_assets(assets, *, base_url: str = "") -> dict[str, UpstreamAsset]:
@@ -332,6 +386,11 @@ def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
     size = payload.get("file:size")
     href = str(payload.get("href") or "")
     containers = payload.get("icechunk:virtual_chunk_containers")
+    declared = [
+        container
+        for container in (containers if isinstance(containers, list) else [])
+        if isinstance(container, dict) and container.get("url_prefix")
+    ]
     return UpstreamAsset(
         # An asset with no href stays without one: joined to the page it would name the page.
         href=urljoin(base_url, href) if href else "",
@@ -352,12 +411,20 @@ def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
             if isinstance(stats, dict)
             else None
         ),
-        chunk_locations=tuple(
-            str(container["url_prefix"])
-            for container in (containers if isinstance(containers, list) else [])
-            if isinstance(container, dict) and container.get("url_prefix")
-        ),
+        chunk_locations=tuple(str(container["url_prefix"]) for container in declared),
+        chunk_endpoints=tuple(str(container["url_prefix"]) for container in declared if _names_endpoint(container)),
     )
+
+
+def _names_endpoint(declared) -> bool:
+    """Whether a declared chunk container says where it is served, at any depth:
+    its provider's public endpoint is the only one a reader here will use."""
+    if isinstance(declared, dict):
+        return any(
+            (str(key).lower() in ("endpoint", "endpoint_url") and bool(value)) or _names_endpoint(value)
+            for key, value in declared.items()
+        )
+    return isinstance(declared, list) and any(_names_endpoint(value) for value in declared)
 
 
 def parse_item(payload: dict, *, base_url: str = "") -> UpstreamItem:
@@ -387,6 +454,21 @@ PROBE_MAX_POINTS = 1_000_000
 RANGE_PERCENTILES = (2, 98)
 
 
+def display_range(values) -> tuple[float | None, float | None]:
+    """The range most of `values` lie in, or `(None, None)` when none of them is a number.
+
+    A display range, not the extremes: one storm's maximum would wash out every map."""
+    import numpy as np
+
+    values = np.ma.masked_invalid(values).compressed()
+    if not values.size:
+        return None, None
+    low, high = (float(v) for v in np.percentile(values, RANGE_PERCENTILES))
+    if low == high:
+        low, high = float(values.min()), float(values.max())
+    return low, high
+
+
 def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIMEOUT) -> AssetProbe:
     """Open the raster at `path` — a URL, read by range — and say what it is.
 
@@ -413,12 +495,7 @@ def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIME
                 factor = max(factors, default=1)
                 shape = (max(1, src.height // factor), max(1, src.width // factor))
                 if shape[0] * shape[1] <= PROBE_MAX_POINTS:
-                    values = np.ma.masked_invalid(src.read(1, out_shape=shape, masked=True)).compressed()
-                    if values.size:
-                        # A display range, not the extremes: one storm's maximum would wash out every map.
-                        low, high = (float(v) for v in np.percentile(values, RANGE_PERCENTILES))
-                        if low == high:
-                            low, high = float(values.min()), float(values.max())
+                    low, high = display_range(np.ma.masked_invalid(src.read(1, out_shape=shape, masked=True)))
             return AssetProbe(
                 readable=True,
                 tiled=bool(src.profile.get("tiled")),
@@ -550,6 +627,194 @@ def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
         return StoreProbe(readable=False, problem="it did not open for a reader with no account")
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+
+
+# ── Reading one field of a store ────────────────────────────────────────────
+
+#: Seconds reading a sample of every chosen field may take in all. Opening was
+#: measured at up to ~17 s cold, and one field at 0.4–3.4 s.
+SAMPLE_TIMEOUT = 60
+
+#: How many of a store's newest runs are asked whether they are closed.
+RUNS_IN_REACH = 8
+
+#: How many of an analysis store's newest time steps are asked whether they hold data.
+TIMES_IN_REACH = 64
+
+#: An address in what the store's library says of a read it would not make.
+_ADDRESS = re.compile(r"[a-z][a-z0-9+.-]*://[^\s()'\"]+", re.IGNORECASE)
+
+
+def open_repository(storage, chunk_locations: Mapping[str, str]):
+    """Open the repository in `storage` to read its data, following it only
+    into `chunk_locations`: each confirmed place, as the store declares it,
+    with its region (ADR 0044 §11).
+
+    The container configuration inside the repository is discarded and one is
+    built from those places alone — anonymous, the provider's public endpoint,
+    those prefixes only — so a chunk pointing anywhere else fails to read,
+    whatever the repository says of where its chunks live. Everything else the
+    repository says of itself is kept: it names no address, and a large
+    store's own caching is what makes it quick to open (GFS's first array took
+    24 s with it and 112 s without).
+    """
+    import icechunk
+
+    from .asset_hosts import chunk_place
+
+    # As it stands first, with nowhere authorised: that reads its settings and none of its data.
+    repository = icechunk.Repository.open(storage)
+    config = repository.config
+    config.clear_virtual_chunk_containers()
+    credentials = {}
+    for prefix, region in chunk_locations.items():
+        place = chunk_place(prefix)
+        if place is None:
+            continue
+        if place.kind == "s3":
+            reader = icechunk.s3_store(region=region or None, anonymous=True)
+            credentials[prefix] = icechunk.s3_anonymous_credentials()
+        else:
+            reader = icechunk.gcs_store()
+            credentials[prefix] = icechunk.gcs_credentials(anonymous=True)
+        config.set_virtual_chunk_container(icechunk.VirtualChunkContainer(prefix, reader))
+    return repository.reopen(
+        config=config,
+        authorize_virtual_chunk_access=icechunk.containers_credentials(credentials) if credentials else None,
+    )
+
+
+def open_store(storage, chunk_locations: Mapping[str, str], *, branch: str = "main"):
+    """The store of `open_repository`'s repository, read-only, at the tip of `branch`."""
+    return open_repository(storage, chunk_locations).readonly_session(branch).store
+
+
+def _held(store, array, path: str, cells: list[tuple[int, ...]]) -> list[bool]:
+    """Whether the store holds data for each of `cells` of `array`: asked of
+    the store by key, with nothing decoded and nowhere followed."""
+    import asyncio
+
+    async def ask():
+        keys = [f"{path}/{array.metadata.encode_chunk_key(cell)}" for cell in cells]
+        return await asyncio.gather(*(store.exists(key) for key in keys))
+
+    return list(asyncio.run(ask()))
+
+
+def _newest_whole(store, array, field: StoreField) -> tuple[dict[str, int] | None, str]:
+    """Where the field to sample is — `{"run": …, "step": …}` or `{"time": …}`
+    — or why there is none. A forecast's is the middle step of its newest
+    closed run. Coordinates are allocated ahead of data, so the newest run is
+    rarely it.
+
+    A run is closed for this array when it holds every step expected of it,
+    and what is expected is asked of the store, not assumed: the steps that
+    some run in reach holds. A field the model writes no first step for (an
+    average over the hours before) is then whole without one, and a run still
+    arriving is not whole beside an older one that has all its steps.
+    """
+    sizes = dict(zip(field.axes, array.shape, strict=True))
+
+    def cell(**at):
+        return tuple(at.get(part, 0) for part in field.axes)
+
+    if "time" in sizes:
+        newest = range(sizes["time"] - 1, max(-1, sizes["time"] - 1 - TIMES_IN_REACH), -1)
+        held = _held(store, array, field.path, [cell(time=time) for time in newest])
+        for time, there in zip(newest, held, strict=True):
+            if there:
+                return {"time": time}, ""
+        return None, "none of its newest time steps holds any data yet"
+
+    runs = range(sizes["run"] - 1, max(-1, sizes["run"] - 1 - RUNS_IN_REACH), -1)
+    steps = range(sizes["step"])
+    # One question for every run in reach: asked together, they cost little more than one run's.
+    held = iter(_held(store, array, field.path, [cell(run=run, step=step) for run in runs for step in steps]))
+    holds = {run: {step for step in steps if next(held)} for run in runs}
+    expected = set().union(*holds.values())
+    if not expected:
+        return None, f"none of its newest {RUNS_IN_REACH} forecasts holds any data yet"
+    for run in runs:
+        if holds[run] == expected:
+            return {"run": run, "step": sorted(expected)[len(expected) // 2]}, ""
+    return None, f"none of its newest {RUNS_IN_REACH} forecasts has arrived in full yet"
+
+
+def _sample(store, field: StoreField) -> FieldSample:
+    import zarr
+
+    array = zarr.open_array(store, path=field.path, mode="r")
+    if len(field.axes) != array.ndim:
+        return FieldSample(readable=False, problem="it is not laid out as its collection says")
+    at, missing = _newest_whole(store, array, field)
+    if at is None:
+        return FieldSample(readable=False, problem=missing)
+    low, high = display_range(array[tuple(at.get(part, slice(None)) for part in field.axes)])
+    if low is None:
+        return FieldSample(readable=False, problem="the map that was read holds no values")
+    return FieldSample(readable=True, value_min=low, value_max=high)
+
+
+def read_field_samples(
+    storage, fields: list[StoreField], chunk_locations: Mapping[str, str], *, into: dict | None = None
+) -> dict[str, FieldSample]:
+    """A sample of each of `fields` from the repository in `storage`, by path.
+
+    Raises when the repository itself does not open; what goes wrong with one
+    field is that field's answer. `into` is filled as each field is read, so a
+    caller that stops waiting keeps what was read by then.
+    """
+    found = {} if into is None else into
+    store = open_store(storage, chunk_locations)
+    for field_ in fields:
+        try:
+            found[field_.path] = _sample(store, field_)
+        except Exception as exc:  # whatever the store or its library raises is an answer
+            logger.warning("Upstream store field %s could not be read: %s", field_.path, exc)
+            said = str(exc)
+            # Only a read the store's reader refused to follow names where it would have gone.
+            address = _ADDRESS.search(said) if "virtual chunk" in said else None
+            found[field_.path] = FieldSample(
+                readable=False,
+                problem="it could not be read by a reader with no account",
+                elsewhere=address.group(0) if address else "",
+            )
+    return found
+
+
+def sample_store(
+    href: str, fields: list[StoreField], chunk_locations: Mapping[str, str], *, timeout: float = SAMPLE_TIMEOUT
+) -> dict[str, FieldSample]:
+    """Read a sample of each of `fields` from the store at `href`, following
+    its data into `chunk_locations` only. Whatever goes wrong is an answer, in
+    words an operator may be shown; the library's own are logged."""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as TimedOut
+
+    found: dict[str, FieldSample] = {}
+
+    def read():
+        import icechunk
+
+        each = f"{max(1, int(min(timeout, 20)))}s"
+        storage = icechunk.http_storage(href, opts={"timeout": each, "connect_timeout": "5s"})
+        read_field_samples(storage, fields, chunk_locations, into=found)
+
+    problem = f"it did not answer within {int(timeout)} seconds"
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-sample")
+    try:
+        pool.submit(read).result(timeout=timeout)
+    except TimedOut:
+        pass
+    except Exception as exc:  # the store did not open at all
+        logger.warning("Upstream store at %s did not open: %s", href, exc)
+        problem = "the data store did not open for a reader with no account"
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    read_by_now = dict(found)
+    return {
+        field_.path: read_by_now.get(field_.path) or FieldSample(readable=False, problem=problem) for field_ in fields
+    }
 
 
 # ── The real client ─────────────────────────────────────────────────────────
@@ -695,6 +960,11 @@ class StacApiClient:
 
     def describe_store(self, href: str) -> StoreProbe:
         return probe_store(href)
+
+    def sample_store(
+        self, href: str, fields: list[StoreField], chunk_locations: dict[str, str]
+    ) -> dict[str, FieldSample]:
+        return sample_store(href, fields, chunk_locations)
 
     def _pages(self, url: str, params: dict | None = None) -> Iterator[tuple[dict, str]]:
         """Each page of a paged listing with the URL it came from, following `next` links."""

@@ -19,6 +19,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
 from georiva.core.storage.asset_location import AssetLocation
@@ -66,6 +67,10 @@ def is_bucket_name(bucket: str) -> bool:
     return bool(_BUCKET_NAME.fullmatch(bucket))
 
 
+def is_region_name(region: str) -> bool:
+    return bool(_REGION_NAME.fullmatch(region or ""))
+
+
 def s3_bucket_of(href: str) -> str | None:
     """The bucket an `s3://` href names, as the Upstream spelled it; `None` for any other href."""
     return href[len(_S3) :].partition("/")[0] if _is_s3(href) else None
@@ -77,6 +82,43 @@ def public_bucket_host(bucket: str, region: str) -> str | None:
     if not is_bucket_name(bucket) or not _REGION_NAME.fullmatch(region or ""):
         return None
     return f"{bucket}.s3.{region}.amazonaws.com"
+
+
+# ── Where a virtual Upstream store's data lives ─────────────────────────────
+
+#: A Google bucket's name: dots and underscores are allowed in it, and it is never built into a host.
+_GS_BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
+
+#: The kinds of place a store's data may be pinned in, each with what names a
+#: bucket of that kind. A closed list (ADR 0044 §11): a kind is added when its
+#: public endpoint is known and anonymous reading has been seen to work.
+_CHUNK_PLACE_KINDS = {"s3": _BUCKET_NAME, "gs": _GS_BUCKET_NAME}
+
+
+@dataclass(frozen=True)
+class ChunkPlace:
+    """A place a virtual Upstream store declares its data lives in, of a kind
+    that can be pinned. It is handed to the store's reader as a prefix, as
+    declared, and is never translated to an `https` host: the reader refuses a
+    chunk outside its prefixes by itself (ADR 0044 §11)."""
+
+    kind: str
+    bucket: str
+
+
+def chunk_place(prefix: str) -> ChunkPlace | None:
+    """The place `prefix` names — an `s3://` or a `gs://` bucket, or a folder
+    of one — or `None` for anything else, which is never pinned. A prefix ends
+    in a slash: without one it would also match its bucket's longer-named
+    neighbours, and a store's reader will not take it."""
+    scheme, separator, rest = prefix.partition("://")
+    bucket_name = _CHUNK_PLACE_KINDS.get(scheme)
+    bucket = rest.partition("/")[0]
+    if not separator or bucket_name is None or not bucket_name.fullmatch(bucket) or not prefix.endswith("/"):
+        return None
+    if any(char.isspace() or not char.isprintable() or char == "\\" for char in prefix):
+        return None
+    return ChunkPlace(kind=scheme, bucket=bucket)
 
 
 def _is_s3(href: str) -> bool:
