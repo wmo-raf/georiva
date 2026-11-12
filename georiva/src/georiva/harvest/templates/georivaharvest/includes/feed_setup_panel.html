@@ -24,11 +24,25 @@
                 <td>{{ feed.upstream_collection_id }}</td>
             </tr>
             <tr>
+                <th scope="row">{% trans "Published as" %}</th>
+                <td>{{ feed.get_upstream_shape_display }}</td>
+            </tr>
+            {% if feed.store_href %}
+                <tr>
+                    <th scope="row">{% trans "Upstream store" %}</th>
+                    <td>{{ feed.store_href }}</td>
+                </tr>
+            {% endif %}
+            <tr>
                 <th scope="row">{% trans "Time window" %}</th>
                 <td>
-                    {% if feed.window_start %}{{ feed.window_start }}{% else %}{% trans "the upstream's beginning" %}{% endif %}
-                    →
-                    {% if feed.window_end %}{{ feed.window_end }}{% else %}{% trans "open" %}{% endif %}
+                    {% if feed.rolling_window_days %}
+                        {% blocktrans count days=feed.rolling_window_days %}Rolling: runs from the last day{% plural %}Rolling: runs from the last {{ days }} days{% endblocktrans %}
+                    {% else %}
+                        {% if feed.window_start %}{{ feed.window_start }}{% else %}{% trans "the upstream's beginning" %}{% endif %}
+                        →
+                        {% if feed.window_end %}{{ feed.window_end }}{% else %}{% trans "open" %}{% endif %}
+                    {% endif %}
                 </td>
             </tr>
             <tr>
@@ -44,6 +58,16 @@
                     <td>
                         {% for bucket, host in feed.pinned_buckets.items %}
                             s3://{{ bucket }} → {{ host }}{% if not forloop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </td>
+                </tr>
+            {% endif %}
+            {% if feed.pinned_chunk_locations %}
+                <tr>
+                    <th scope="row">{% trans "Pinned chunk locations" %}</th>
+                    <td>
+                        {% for place in feed.pinned_chunk_locations %}
+                            {{ place }}{% if not forloop.last %}<br>{% endif %}
                         {% endfor %}
                     </td>
                 </tr>
@@ -79,7 +103,7 @@
             <table class="listing">
                 <thead>
                 <tr>
-                    <th>{% trans "Upstream asset key" %}</th>
+                    <th>{% if feed.is_store %}{% trans "Array in the store" %}{% else %}{% trans "Upstream asset key" %}{% endif %}</th>
                     <th>{% trans "Variable" %}</th>
                 </tr>
                 </thead>

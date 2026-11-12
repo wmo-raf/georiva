@@ -3,7 +3,8 @@ Setting a Harvest feed up: everything the Harvest Feed Wizard saves, together or
 
 One call creates the Catalog (or takes an unclaimed one), the feed with its
 Pinned locations, the collection it harvests into, a Variable per chosen asset
-and the Variable mapping. A Variable that is already there is taken as it is:
+— or, for an Upstream store, per chosen array (ADR 0044 §8) — and the Variable
+mapping. A Variable that is already there is taken as it is:
 what an operator has hand-tuned is never overwritten.
 """
 
@@ -23,11 +24,13 @@ class SetupRefused(Exception):
 
 @dataclass(frozen=True)
 class PlannedVariable:
+    #: The upstream asset key, or for an Upstream store the array's full path in it.
     asset_key: str
     name: str
     unit_id: int
     value_min: float
     value_max: float
+    description: str = ""
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,11 @@ class FeedPlan:
     pinned_buckets: dict[str, str] = field(default_factory=dict)
     asset_hosts: list[str] = field(default_factory=list)
     surveyed_assets: list[dict] = field(default_factory=list)
+    #: What follows is an Upstream store's alone (ADR 0044): its address, the
+    #: Rolling window of a forecast store, and the places its data is read from.
+    store_href: str = ""
+    rolling_window_days: int | None = None
+    pinned_chunk_locations: dict[str, str] = field(default_factory=dict)
 
 
 def provision_harvest_feed(organisation, plan: FeedPlan):
@@ -53,7 +61,7 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
     `SetupRefused` — having saved nothing — when it cannot."""
     from georiva.core.models import Variable
 
-    from .models import HarvestFeed, VariableMapping
+    from .models import HarvestFeed, UpstreamShape, VariableMapping
 
     if not plan.variables:
         raise SetupRefused(_("Choose at least one kind of image to show."))
@@ -74,6 +82,10 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                 pinned_buckets=dict(plan.pinned_buckets),
                 asset_hosts=list(plan.asset_hosts),
                 surveyed_assets=list(plan.surveyed_assets),
+                upstream_shape=UpstreamShape.STORE if plan.store_href else UpstreamShape.ITEMS,
+                store_href=plan.store_href,
+                rolling_window_days=plan.rolling_window_days,
+                pinned_chunk_locations=dict(plan.pinned_chunk_locations),
             )
             collection = feed.ensure_collection()
             for slug, planned in zip(slugs, plan.variables, strict=True):
@@ -86,6 +98,7 @@ def provision_harvest_feed(organisation, plan: FeedPlan):
                         "unit_id": planned.unit_id,
                         "value_min": planned.value_min,
                         "value_max": planned.value_max,
+                        "description": planned.description,
                     },
                 )
                 VariableMapping.objects.create(feed=feed, asset_key=planned.asset_key, variable=variable)
@@ -109,7 +122,7 @@ def _catalog(organisation, plan: FeedPlan):
             organisation=organisation,
             name=plan.new_catalog_name,
             slug=slug,
-            file_format=Catalog.FileFormat.GEOTIFF,
+            file_format=Catalog.FileFormat.ZARR if plan.store_href else Catalog.FileFormat.GEOTIFF,
         )
 
     # Scoped at the point of use: a wizard session outlives a move to another organisation's host.

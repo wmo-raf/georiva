@@ -62,14 +62,18 @@ georiva/src/georiva/          # Main Django application
 │   └── derivation_invocation.py  # Product-driven dispatch: arriving input → recipe run
 ├── harvest/                  # Harvest — indexes an Upstream STAC catalog as rows whose assets point upstream (ADR 0042)
 │   ├── models.py             # HarvestFeed (a DataFeed species) + VariableMapping
-│   ├── wizard_views.py       # Harvest Feed Wizard (address → collection → verdict → images and files → save) + Re-check upstream
+│   ├── wizard_views.py       # Harvest Feed Wizard (address → collection → verdict → images and files → save) + Re-check upstream;
+│   │                         #   for an Upstream store, step 4 picks arrays and confirms each place its data lives (ADR 0044)
 │   ├── setup.py              # Provisions catalog, feed, collection, Variables and mapping together or not at all
 │   ├── forms.py              # The admin form, edit-only: window, cadence, mapping rows (keys the survey saw)
 │   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient (an API, or a
-│   │                         #   catalog of plain files) and the probe that opens an Upstream store (ADR 0044)
-│   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address; pinned s3:// buckets (ADR 0042 §9)
+│   │                         #   catalog of plain files), the probe that opens an Upstream store, and `open_repository`:
+│   │                         #   a store's data is followed into the confirmed places only (ADR 0044 §11)
+│   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address; pinned s3:// buckets (ADR 0042 §9);
+│   │                         #   `chunk_place`: the kinds of place a store's data may be pinned in (ADR 0044 §11)
 │   ├── survey.py             # Upstream survey: a collection's shape, raster assets and file locations, before a feed exists;
-│   │                         #   the verdict on an Upstream store (map-shaped and decodable, or why not)
+│   │                         #   the verdict on an Upstream store (map-shaped and decodable, or why not) and which of
+│   │                         #   its arrays can become Variables
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows
 │   └── testing.py            # FakeUpstream — the one fake a harvest test needs; `become_store` makes it an Upstream store
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)

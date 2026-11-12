@@ -14,11 +14,26 @@
             </p>
             {% if confirmed %}
                 <p>
-                    {% trans "Files read from:" %}
+                    {% if store %}{% trans "Kept at:" %}{% else %}{% trans "Files read from:" %}{% endif %}
                     {% for location in confirmed %}<strong>{{ location.host }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
                 </p>
             {% endif %}
-            <p class="hwiz-note">{% trans "Nothing is copied: GeoRiva keeps a list of what the catalog has and reads the provider's files when someone looks at them." %}</p>
+            {% if places %}
+                <p>
+                    {% trans "Its data is read from:" %}
+                    {% for place in places %}<strong>{{ place.name }}</strong> ({{ place.cloud }}){% if not forloop.last %}, {% endif %}{% endfor %}.
+                </p>
+            {% endif %}
+            {% for place in declined_places %}
+                <p class="hwiz-warning">
+                    {% blocktrans with name=place.name %}This feed will not read from <strong>{{ name }}</strong>. Any data the provider keeps there will not draw: its maps will show an error instead.{% endblocktrans %}
+                </p>
+            {% endfor %}
+            {% if store %}
+                <p class="hwiz-note">{% trans "Nothing is copied: GeoRiva keeps a list of the time steps the store holds and reads the provider's data when someone looks at a map. The map GeoRiva read to check this was one of many: an older or newer forecast may keep its data somewhere else, and its maps would then show an error until you check the catalog again from the feed's page." %}</p>
+            {% else %}
+                <p class="hwiz-note">{% trans "Nothing is copied: GeoRiva keeps a list of what the catalog has and reads the provider's files when someone looks at them." %}</p>
+            {% endif %}
         </div>
     </div>
 
@@ -70,16 +85,25 @@
             </div>
         {% endif %}
 
-        <div class="w-field__wrapper hwiz-field">
-            <label class="w-field__label" for="window_start">{% trans "Show data from" %}</label>
-            <input type="date" name="window_start" id="window_start" class="w-field__input" value="{{ form.window_start }}">
-            <p class="w-field__help-text">{% trans "Leave empty to show everything the catalog has, from its beginning." %}</p>
-        </div>
-        <div class="w-field__wrapper hwiz-field">
-            <label class="w-field__label" for="window_end">{% trans "Until" %}</label>
-            <input type="date" name="window_end" id="window_end" class="w-field__input" value="{{ form.window_end }}">
-            <p class="w-field__help-text">{% trans "Leave empty to keep following the catalog as it adds new data." %}</p>
-        </div>
+        {% if rolling %}
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="rolling_window_days">{% trans "Keep forecasts from the last (days)" %} <sup>*</sup></label>
+                <input type="number" name="rolling_window_days" id="rolling_window_days" class="w-field__input hwiz-number"
+                       min="1" max="{{ max_rolling_days }}" step="1" value="{{ form.rolling_window_days }}" required>
+                <p class="w-field__help-text">{% trans "Forecasts started in the last this many days are shown, each with all its time steps however far ahead they reach. Older forecasts drop off the list as new ones arrive." %}</p>
+            </div>
+        {% else %}
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="window_start">{% trans "Show data from" %}</label>
+                <input type="date" name="window_start" id="window_start" class="w-field__input" value="{{ form.window_start }}">
+                <p class="w-field__help-text">{% trans "Leave empty to show everything the catalog has, from its beginning." %}</p>
+            </div>
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="window_end">{% trans "Until" %}</label>
+                <input type="date" name="window_end" id="window_end" class="w-field__input" value="{{ form.window_end }}">
+                <p class="w-field__help-text">{% trans "Leave empty to keep following the catalog as it adds new data." %}</p>
+            </div>
+        {% endif %}
         <div class="w-field__wrapper hwiz-field">
             <label class="w-field__label" for="interval_minutes">{% trans "Look for new data" %}</label>
             <select name="interval_minutes" id="interval_minutes" class="w-field__input">
@@ -92,7 +116,7 @@
         <div class="hwiz-actions">
             <button type="submit" class="button bicolor button--icon">
                 {% icon name="tick" wrapped=1 %}
-                {% trans "Save and start" %}
+                {% if store %}{% trans "Save" %}{% else %}{% trans "Save and start" %}{% endif %}
             </button>
             <a href="{% url 'harvest_wizard_step4' %}" class="button button-secondary">{% trans "Back" %}</a>
         </div>

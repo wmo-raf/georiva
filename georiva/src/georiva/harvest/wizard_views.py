@@ -6,11 +6,18 @@ Five steps: the catalog's address; pick a collection; what the Upstream survey
 found; choose which images to show and confirm where their files are read
 from; schedule and save. The survey does the knowing — collection ids, asset
 keys, hosts and buckets are found, never typed — and the wizard stops at step 3
-for a collection that cannot be harvested, saying why. It stops there too for
-an Upstream store it accepts: the verdict is given, and setting a feed up from
-a store is not built yet (ADR 0044 §1).
+for a collection that cannot be harvested, saying why.
 
-What an operator reads here is in their words: no "STAC", "S3" or "COG".
+The same five steps set a feed up from an Upstream store (ADR 0044 §1). Step 4
+then offers the store's fields in place of images, asks about each place its
+data lives in turn, and reads one map of each chosen field with the places
+confirmed and no others: that read is where a Variable's value range comes
+from and the proof that the store can be read at all (§11, §12). Step 5 gives
+a forecast store a Rolling window (§7). Its first harvest is not started: a
+store's harvest is not built yet.
+
+What an operator reads here is in their words: no "STAC", "S3" or "COG", and
+of a store no "Zarr", "chunk" or "codec".
 """
 
 from dataclasses import asdict
@@ -29,9 +36,11 @@ from django.utils.translation import gettext as _
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
 
+from .asset_hosts import chunk_place
+from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
 from .survey import Shape, reason_for, survey_catalog, survey_collection
-from .upstream import UpstreamUnreachable
+from .upstream import StoreField, UpstreamUnreachable
 
 _SESSION_KEY = "georiva_harvest_wizard"
 
@@ -53,8 +62,11 @@ CADENCES = [
 DEFAULT_CADENCE = 1440
 
 
-def _chrome(step):
-    label = STEP_LABELS[step - 1]
+def _chrome(step, *, store=False):
+    labels = list(STEP_LABELS)
+    if store:
+        labels[3] = _("Maps and places")
+    label = labels[step - 1]
     return {
         "breadcrumbs_items": [
             {"url": reverse("wagtailadmin_home"), "label": _("Home")},
@@ -64,7 +76,7 @@ def _chrome(step):
         "header_title": _("Show data from an online catalog — %s") % label,
         "header_icon": "globe",
         "step": step,
-        "step_labels": STEP_LABELS,
+        "step_labels": labels,
     }
 
 
@@ -151,7 +163,7 @@ def harvest_wizard_step2(request):
                 messages.error(request, _unreadable(why))
             else:
                 # What was chosen for another collection does not carry over.
-                for stale in ("chosen", "confirmed"):
+                for stale in ("chosen", "confirmed", "samples", "chunk_places", "declined_places"):
                     session.pop(stale, None)
                 session.update(
                     {
@@ -172,12 +184,14 @@ def harvest_wizard_step2(request):
 
 def _as_session(found) -> dict:
     """A collection's survey as the session keeps it between steps."""
+    store = None
+    if found.store:
+        store = {**asdict(found.store), "has_runs": found.store.has_runs}
+        store["arrays"] = [{**asdict(array), "offered": array.offered} for array in found.store.arrays]
     return {
         "shape": found.shape.value,
         "harvestable": found.harvestable,
-        # Accepted and not harvestable: a store GeoRiva can draw maps from, with no feed to set up yet.
-        "accepted": found.accepted,
-        "store": asdict(found.store) if found.store else None,
+        "store": store,
         "reason": found.reason,
         "items_sampled": found.items_sampled,
         "assets": [asdict(asset) for asset in found.assets],
@@ -203,7 +217,8 @@ def harvest_wizard_step3(request):
             "survey": survey,
             "readable": [asset for asset in survey["assets"] if asset["readable"]],
             "hosts": sorted({location["host"] for location in survey["locations"] if location["readable"]}),
-            **_chrome(3),
+            "offered": len(_offered(survey["store"])) if survey["store"] else 0,
+            **_chrome(3, store=bool(survey["store"])),
         },
     )
 
@@ -219,6 +234,8 @@ def harvest_wizard_step4(request):
     survey = session.get("survey")
     if not survey or not survey["harvestable"]:
         return redirect("harvest_wizard_step3" if survey else "harvest_wizard_step1")
+    if survey["store"]:
+        return _step4_store(request, session)
 
     proposed = [location for location in survey["locations"] if location["proposed"]]
     posted = request.POST if request.method == "POST" else None
@@ -361,6 +378,272 @@ def _unconfirmed(chosen: list[dict], survey: dict, confirmed: list[dict]) -> lis
     ]
 
 
+# ── Step 4, for an Upstream store: choose fields, confirm where its data is ──
+
+#: How many fields one message names before it says how many more there are.
+_NAMED_IN_A_MESSAGE = 5
+
+
+def _offered(store: dict) -> list[dict]:
+    """The store's arrays that can become Variables, each with its place in the survey's list."""
+    return [{**array, "index": index} for index, array in enumerate(store["arrays"]) if array["offered"]]
+
+
+def _chunk_places(store: dict) -> list[dict]:
+    """Each place the store declares its data lives in, as an operator is asked
+    about it: named by its own name, never by an address (ADR 0044 §11)."""
+    clouds = {"s3": _("Amazon's cloud storage"), "gs": _("Google's cloud storage")}
+    places = []
+    for index, declared in enumerate(store["chunk_locations"]):
+        place = chunk_place(declared)
+        region = store["chunk_regions"].get(declared, "")
+        places.append(
+            {
+                "index": index,
+                "declared": declared,
+                "name": declared.partition("://")[2].rstrip("/"),
+                "cloud": clouds.get(place.kind if place else "", ""),
+                "region": region,
+                # A place read by region can be read only once its region was found.
+                "usable": place is not None and (place.kind != "s3" or bool(region)),
+            }
+        )
+    return places
+
+
+def _step4_store(request, session):
+    from georiva.core.models import Unit
+
+    survey = session["survey"]
+    store = survey["store"]
+    own = survey["locations"][0]
+    places = _chunk_places(store)
+    offered = _offered(store)
+    posted = request.POST if request.method == "POST" else None
+
+    if posted is not None:
+        ticked = [array for array in offered if posted.get(f"use_{array['index']}")]
+        allowed = [place for place in places if place["usable"] and posted.get(f"allow_{place['index']}")]
+        errors, unseen = [], False
+        if not ticked:
+            errors.append(_("Choose at least one kind of map to show."))
+        if own["proposed"] and not posted.get("allow_store"):
+            errors.append(
+                _("“%(host)s” is where this collection is kept. Allow this feed to read from it, or nothing is shown.")
+                % {"host": own["host"]}
+            )
+        if not errors:
+            errors = _read_samples(session, ticked, allowed, places)
+            # What was read is kept whatever comes next: the next try reads only what it lacks.
+            _save(request, session)
+        if not errors:
+            chosen, errors, unseen = _chosen_fields(ticked, posted, session["samples"])
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+        elif unseen:
+            messages.info(
+                request,
+                _(
+                    "GeoRiva read one map of each kind you chose, from the provider's newest complete data, and "
+                    "worked out the values below from it. Check them, then continue."
+                ),
+            )
+        else:
+            session.update(
+                {
+                    "chosen": chosen,
+                    "confirmed": [own] if own["proposed"] else [],
+                    "chunk_places": {place["declared"]: place["region"] for place in allowed},
+                    "declined_places": [place for place in places if place not in allowed],
+                }
+            )
+            _save(request, session)
+            return redirect("harvest_wizard_step5")
+
+    earlier = {field["key"]: field for field in session.get("chosen") or []}
+    rows = _field_rows(offered, earlier, session.get("samples", {}), posted)
+    return render(
+        request,
+        "georivaharvest/wizard_step4_fields.html",
+        {
+            "session": session,
+            "rows": rows,
+            "details": [row for row in rows if row["detailed"]],
+            "unoffered": [array for array in store["arrays"] if not array["offered"]],
+            "own": {
+                **own,
+                "allowed": bool(posted.get("allow_store")) if posted is not None else bool(session.get("confirmed")),
+            },
+            "places": [
+                {
+                    **place,
+                    "allowed": bool(posted.get(f"allow_{place['index']}"))
+                    if posted is not None
+                    else place["declared"] in session.get("chunk_places", {}),
+                }
+                for place in places
+            ],
+            "units": Unit.objects.order_by("name"),
+            **_chrome(4, store=True),
+        },
+    )
+
+
+def _read_samples(session: dict, ticked: list[dict], allowed: list[dict], places: list[dict]) -> list[str]:
+    """Read one map of each ticked field that has no sample yet, following the
+    store's data into the places allowed and nowhere else, and keep what was
+    read in the session. Returns what went wrong, for the operator.
+
+    A sample stands for as long as every place it was read with is still
+    allowed: taking a place away reads again without it (ADR 0044 §11).
+    """
+    store = session["survey"]["store"]
+    following = {place["declared"]: place["region"] for place in allowed}
+    samples = session.setdefault("samples", {})
+    wanted = [
+        array
+        for array in ticked
+        if array["path"] not in samples or not set(samples[array["path"]]["places"]) <= set(following)
+    ]
+    if not wanted:
+        return []
+
+    read = _client(session["upstream_url"]).sample_store(
+        store["href"], [StoreField(array["path"], tuple(array["axes"])) for array in wanted], following
+    )
+    elsewhere: dict[str, list[str]] = {}
+    errors = []
+    for array in wanted:
+        sample, name = read.get(array["path"]), array["title"] or array["path"]
+        if sample is not None and sample.readable:
+            samples[array["path"]] = {"low": sample.value_min, "high": sample.value_max, "places": sorted(following)}
+            continue
+        samples.pop(array["path"], None)
+        if sample is not None and sample.elsewhere:
+            elsewhere.setdefault(_where(sample.elsewhere, places), []).append(name)
+        else:
+            why = sample.problem if sample is not None else _("it was not read")
+            errors.append(_("“%(name)s” could not be read: %(why)s.") % {"name": name, "why": why})
+    by_name = {place["declared"]: place for place in places}
+    for where, names in elsewhere.items():
+        said = {"names": _named(names), "place": by_name[where]["name"] if where in by_name else where}
+        if where not in by_name:
+            errors.append(
+                _(
+                    "%(names)s: the data is kept somewhere this collection does not mention (%(place)s), so "
+                    "GeoRiva will not read it. Leave it out."
+                )
+                % said
+            )
+        elif by_name[where]["usable"]:
+            errors.append(
+                _(
+                    "%(names)s: the data is kept at “%(place)s”, which you have not allowed this feed to read "
+                    "from. Allow it, or leave it out."
+                )
+                % said
+            )
+        else:
+            errors.append(
+                _("%(names)s: the data is kept at “%(place)s”, which GeoRiva could not find. Leave it out.") % said
+            )
+    return errors
+
+
+def _where(address: str, places: list[dict]) -> str:
+    """The declared place the data at `address` is in, or — when it is in none
+    of them — the address cut back to the place it names."""
+    for place in places:
+        if address.startswith(place["declared"]):
+            return place["declared"]
+    scheme, _separator, rest = address.partition("://")
+    return f"{scheme}://{rest.partition('/')[0]}/"
+
+
+def _named(names: list[str]) -> str:
+    """A few names, quoted, and how many more there are."""
+    said = ", ".join(f"“{name}”" for name in names[:_NAMED_IN_A_MESSAGE])
+    more = len(names) - _NAMED_IN_A_MESSAGE
+    return said if more <= 0 else _("%(names)s and %(count)d more") % {"names": said, "count": more}
+
+
+def _field_rows(offered: list[dict], earlier: dict, samples: dict, posted) -> list[dict]:
+    """One row per field on offer. A field that is chosen and has been read
+    also carries what its Variable will be — name, unit, description and value
+    range: what was posted wins, then what was chosen on an earlier visit,
+    then what the collection says of it and the map that was read shows."""
+    rows = []
+    for array in offered:
+        index = array["index"]
+        use = bool(posted.get(f"use_{index}")) if posted is not None else array["path"] in earlier
+        row = {**array, "use": use, "label": array["title"] or array["path"], "detailed": False}
+        sample = samples.get(array["path"])
+        if use and sample:
+            low, high = _nice_bounds(sample["low"], sample["high"])
+            row.update(
+                detailed=True,
+                name=row["label"],
+                unit_id=_resolve_unit(array["unit"])["unit_id"],
+                low=low,
+                high=high,
+                about=array["description"],
+            )
+            if array["path"] in earlier:
+                field = earlier[array["path"]]
+                row.update(
+                    name=field["name"],
+                    unit_id=field["unit_id"],
+                    low=field["value_min"],
+                    high=field["value_max"],
+                    about=field["description"],
+                )
+            if posted is not None and f"name_{index}" in posted:
+                row.update(
+                    name=posted.get(f"name_{index}", ""),
+                    unit_id=_whole(posted.get(f"unit_{index}")),
+                    low=posted.get(f"low_{index}", ""),
+                    high=posted.get(f"high_{index}", ""),
+                    about=posted.get(f"about_{index}", ""),
+                )
+        rows.append(row)
+    return rows
+
+
+def _chosen_fields(ticked: list[dict], posted, samples: dict) -> tuple[list[dict], list[str], bool]:
+    """`(the fields chosen, what is wrong with any of them, whether one has
+    not been put to the operator yet)`. A field ticked for the first time comes
+    back with nothing typed for it: its values are shown before they are taken."""
+    from georiva.core.models import Unit
+
+    if any(f"name_{array['index']}" not in posted for array in ticked):
+        return [], [], True
+    chosen, errors = [], []
+    for array in ticked:
+        index = array["index"]
+        name = posted.get(f"name_{index}", "").strip() or array["title"] or array["path"]
+        unit_id = _whole(posted.get(f"unit_{index}"))
+        low, high = _number(posted.get(f"low_{index}")), _number(posted.get(f"high_{index}"))
+        if unit_id is None or not Unit.objects.filter(pk=unit_id).exists():
+            errors.append(_("Choose a unit for “%(name)s”.") % {"name": name})
+        if low is None or high is None or low >= high:
+            errors.append(
+                _("Give “%(name)s” a lowest and a highest value to colour by, the lowest first.") % {"name": name}
+            )
+        chosen.append(
+            {
+                "key": array["path"],
+                "title": array["title"],
+                "name": name,
+                "unit_id": unit_id,
+                "value_min": low,
+                "value_max": high,
+                "description": posted.get(f"about_{index}", "").strip(),
+            }
+        )
+    return chosen, errors, False
+
+
 # ── Step 5: schedule and save ───────────────────────────────────────────────
 
 
@@ -377,6 +660,9 @@ def harvest_wizard_step5(request):
         organisation=organisation, data_feed__isnull=True, push_feed__isnull=True
     ).order_by("name")
     title = session["collection_title"]
+    store = session["survey"]["store"]
+    # A forecast store's window rolls on run time; any other feed's is fixed (ADR 0044 §7).
+    rolling = bool(store) and store["has_runs"]
     form = {
         "catalog_mode": "create",
         "catalog_id": None,
@@ -386,6 +672,7 @@ def harvest_wizard_step5(request):
         "feed_name": title,
         "window_start": "",
         "window_end": "",
+        "rolling_window_days": str(DEFAULT_ROLLING_WINDOW_DAYS),
         "interval_minutes": DEFAULT_CADENCE,
     }
 
@@ -402,13 +689,24 @@ def harvest_wizard_step5(request):
                 messages.error(request, error)
         else:
             request.session.pop(_SESSION_KEY, None)
-            # The first harvest, so the operator's next look at the feed shows data.
-            transaction.on_commit(feed.run_now)
-            messages.success(
-                request,
-                _("“%(name)s” is set up. GeoRiva is now listing what the catalog has; nothing is being copied.")
-                % {"name": feed.name},
-            )
+            if feed.is_store:
+                # No first harvest: listing what a store holds is not built yet (ADR 0044 §6).
+                messages.success(
+                    request,
+                    _(
+                        "“%(name)s” is set up. GeoRiva cannot list what a data store holds yet, so its maps "
+                        "will appear once that is in place. Nothing is being copied."
+                    )
+                    % {"name": feed.name},
+                )
+            else:
+                # The first harvest, so the operator's next look at the feed shows data.
+                transaction.on_commit(feed.run_now)
+                messages.success(
+                    request,
+                    _("“%(name)s” is set up. GeoRiva is now listing what the catalog has; nothing is being copied.")
+                    % {"name": feed.name},
+                )
             return redirect("data_feed_detail", pk=feed.pk)
 
     return render(
@@ -421,7 +719,14 @@ def harvest_wizard_step5(request):
             "cadences": CADENCES,
             "chosen": session["chosen"],
             "confirmed": session.get("confirmed", []),
-            **_chrome(5),
+            "store": store,
+            "rolling": rolling,
+            "max_rolling_days": MAX_ROLLING_WINDOW_DAYS,
+            "places": [place for place in _chunk_places(store) if place["declared"] in session.get("chunk_places", {})]
+            if store
+            else [],
+            "declined_places": session.get("declined_places", []) if store else [],
+            **_chrome(5, store=bool(store)),
         },
     )
 
@@ -438,15 +743,26 @@ def _day(value: str) -> tuple[datetime | None, bool]:
 
 
 def _plan(form: dict, session: dict) -> tuple[FeedPlan | None, list[str]]:
+    store = session["survey"]["store"]
+    rolling = bool(store) and store["has_runs"]
     errors = []
     if not form["feed_name"]:
         errors.append(_("Please give this feed a name."))
-    start, start_ok = _day(form["window_start"])
-    end, end_ok = _day(form["window_end"])
-    if not (start_ok and end_ok):
-        errors.append(_("Please give dates as a day, month and year."))
-    elif start and end and end < start:
-        errors.append(_("The last date is before the first."))
+    start = end = days = None
+    if rolling:
+        days = _whole(form["rolling_window_days"])
+        if days is None or not 1 <= days <= MAX_ROLLING_WINDOW_DAYS:
+            errors.append(
+                _("Please say how many days of forecasts to keep: a whole number from 1 to %(most)d.")
+                % {"most": MAX_ROLLING_WINDOW_DAYS}
+            )
+    else:
+        start, start_ok = _day(form["window_start"])
+        end, end_ok = _day(form["window_end"])
+        if not (start_ok and end_ok):
+            errors.append(_("Please give dates as a day, month and year."))
+        elif start and end and end < start:
+            errors.append(_("The last date is before the first."))
     interval = _whole(form["interval_minutes"])
     if interval not in dict(CADENCES):
         errors.append(_("Please choose how often to look for new data."))
@@ -457,6 +773,8 @@ def _plan(form: dict, session: dict) -> tuple[FeedPlan | None, list[str]]:
         return None, errors
 
     confirmed = session.get("confirmed", [])
+    if store:
+        return _store_plan(form, session, interval, catalog_id, start, end, days), []
     used = {(image["host"], image["bucket"]) for image in session["chosen"]}
     return (
         FeedPlan(
@@ -494,6 +812,52 @@ def _plan(form: dict, session: dict) -> tuple[FeedPlan | None, list[str]]:
     )
 
 
+def _store_plan(form: dict, session: dict, interval, catalog_id, start, end, days) -> FeedPlan:
+    """The plan for a feed over an Upstream store: its Variables are mapped
+    from arrays by their full path, and its Pinned locations are the store's
+    own place and each place its data lives that the operator confirmed."""
+    store, confirmed = session["survey"]["store"], session.get("confirmed", [])
+    return FeedPlan(
+        name=form["feed_name"],
+        upstream_url=session["upstream_url"],
+        upstream_collection_id=session["collection_id"],
+        variables=[
+            PlannedVariable(
+                asset_key=field["key"],
+                name=field["name"],
+                unit_id=field["unit_id"],
+                value_min=field["value_min"],
+                value_max=field["value_max"],
+                description=field["description"],
+            )
+            for field in session["chosen"]
+        ],
+        interval_minutes=interval,
+        window_start=start,
+        window_end=end,
+        catalog_id=catalog_id,
+        new_catalog_name=form["new_catalog_name"],
+        new_catalog_slug=form["new_catalog_slug"],
+        pinned_buckets={location["bucket"]: location["host"] for location in confirmed if location["bucket"]},
+        asset_hosts=sorted(location["host"] for location in confirmed if not location["bucket"]),
+        surveyed_assets=_seen_arrays(store["arrays"]),
+        store_href=store["href"],
+        rolling_window_days=days,
+        pinned_chunk_locations=dict(session.get("chunk_places", {})),
+    )
+
+
+def _seen_arrays(arrays) -> list[dict]:
+    """The arrays of a store a survey offered, as a feed remembers them: by
+    path, where an items feed remembers asset keys."""
+    seen = []
+    for array in arrays:
+        array = array if isinstance(array, dict) else {**asdict(array), "offered": array.offered}
+        if array["offered"]:
+            seen.append({"key": array["path"], "title": array["title"]})
+    return seen
+
+
 def _seen(assets) -> list[dict]:
     """The readable raster asset keys a survey saw, as a feed remembers them."""
     seen = []
@@ -519,6 +883,8 @@ def harvest_recheck_upstream(request, pk):
         messages.error(request, _unreadable(why))
         return redirect("data_feed_detail", pk=feed.pk)
 
+    # Still the shape the feed was set up for: a feed's shape is fixed (ADR 0044 §1).
+    fits = found.harvestable and found.shape.value == feed.upstream_shape
     allowed = feed.allowed_asset_hosts
     new = [
         location
@@ -527,13 +893,14 @@ def harvest_recheck_upstream(request, pk):
         if location.bucket or location.host not in allowed
     ]
 
-    if request.method == "POST" and found.harvestable:
+    if request.method == "POST" and fits:
         # By place, not by position: the Upstream is asked again on the way in.
         ticked = set(request.POST.getlist("allow"))
         buckets, hosts = found.pins([location for location in new if f"{location.bucket}|{location.host}" in ticked])
         feed.pinned_buckets = {**feed.pinned_buckets, **buckets}
         feed.asset_hosts = sorted({*feed.asset_hosts, *hosts})
-        feed.surveyed_assets = _seen(found.assets)
+        # Where a store's own data has moved to is confirmed elsewhere; what it offers is refreshed here.
+        feed.surveyed_assets = _seen_arrays(found.store.arrays) if feed.is_store else _seen(found.assets)
         feed.save()
         if buckets or hosts:
             messages.success(request, _("GeoRiva may now read this feed's files from the places you allowed."))
@@ -547,8 +914,12 @@ def harvest_recheck_upstream(request, pk):
         {
             "feed": feed,
             "found": found,
+            "fits": fits,
+            "reason": found.reason
+            or _("This collection is no longer published the way it was when this feed was set up."),
             "new": [{"value": f"{location.bucket}|{location.host}", "host": location.host} for location in new],
             "readable": [asset for asset in found.assets if asset.readable],
+            "offered": found.store.offered if found.store else [],
             "breadcrumbs_items": [
                 {"url": reverse("wagtailadmin_home"), "label": _("Home")},
                 {"url": reverse("data_feed_list"), "label": _("Pull feeds")},

@@ -336,10 +336,197 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual(self.upstream.stores_opened, [STORE])
         self.assertEqual((found.store.href, found.store.fields), (STORE, 2))
 
-    def test_an_accepted_store_is_not_yet_something_a_feed_can_be_set_up_from(self):
+    def test_a_feed_can_be_set_up_from_an_accepted_store(self):
         self.map_shaped()
 
-        self.assertFalse(self.survey().harvestable)
+        self.assertTrue(self.survey().harvestable)
+
+    # Which of its arrays can become Variables (ADR 0044 §8).
+
+    def test_plain_fields_are_offered_with_what_the_collection_says_of_them(self):
+        said = {"title": "2 metre temperature", "unit": "degree_Celsius", "description": "Air temperature."}
+        self.map_shaped(
+            arrays={
+                "temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440), said),
+                "wind_u_10m": (RUN_STEP_GRID, (1, 1, 721, 1440)),
+                **BESIDE,
+            }
+        )
+
+        store = self.survey().store
+
+        self.assertEqual([array.path for array in store.offered], ["temperature_2m", "wind_u_10m"])
+        first = store.offered[0]
+        self.assertEqual(
+            (first.title, first.unit, first.description), ("2 metre temperature", "degree_Celsius", "Air temperature.")
+        )
+        self.assertEqual(first.axes, ["run", "step", "y", "x"])
+        self.assertTrue(store.has_runs)
+
+    def test_a_stores_coordinates_are_not_listed_as_fields(self):
+        self.map_shaped()
+
+        self.assertEqual({array.path for array in self.survey().store.arrays}, {"temperature_2m", "wind_u_10m"})
+
+    def test_an_array_with_anything_beyond_time_and_the_grid_is_listed_with_its_reason_and_not_offered(self):
+        dimensions = {
+            **FORECAST,
+            "pressure_level": 13,
+            "ensemble_member": 31,
+            "statistic": 4,
+            "tile": 6,
+            "x": CubeDimension("x", kind="spatial", axis="x", size=1799, reference_system="EPSG:3857"),
+            "y": CubeDimension("y", kind="spatial", axis="y", size=1059, reference_system="EPSG:3857"),
+        }
+
+        def beyond(name, size):
+            return (("init_time", "lead_time", name, "latitude", "longitude"), (1, 1, size, 721, 1440))
+
+        self.upstream.become_store(
+            STORE,
+            dimensions,
+            {
+                "temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)),
+                "pressure_level/temperature": beyond("pressure_level", 1),
+                "temperature_2m_members": beyond("ensemble_member", 1),
+                "temperature_2m_spread": beyond("statistic", 1),
+                "temperature_2m_tiles": beyond("tile", 1),
+                "temperature_2m_projected": (("init_time", "lead_time", "y", "x"), (1, 1, 1059, 1799)),
+                "orography": (("latitude", "longitude"), (721, 1440)),
+            },
+        )
+
+        store = self.survey().store
+        reasons = {array.path: array.reason for array in store.arrays}
+
+        self.assertEqual([array.path for array in store.offered], ["temperature_2m"])
+        self.assertEqual(reasons["pressure_level/temperature"], "It has levels.")
+        self.assertEqual(reasons["temperature_2m_members"], "It has ensemble members.")
+        self.assertIn("statistics", reasons["temperature_2m_spread"])
+        self.assertIn("“tile”", reasons["temperature_2m_tiles"])
+        self.assertEqual(reasons["temperature_2m_projected"], "It is on a projected grid.")
+        self.assertEqual(reasons["orography"], "It has no time steps.")
+        for reason in reasons.values():
+            self.assert_plain(reason)
+        self.assertTrue(all(array.axes == [] for array in store.arrays if not array.offered))
+
+    def test_an_analysis_stores_fields_have_one_time_and_no_runs(self):
+        self.upstream.become_store(
+            STORE,
+            {"time": None, "latitude": 2000, "longitude": 7200},
+            {"precipitation": (("time", "latitude", "longitude"), (1, 2000, 7200))},
+        )
+
+        store = self.survey().store
+
+        self.assertEqual(store.offered[0].axes, ["time", "y", "x"])
+        self.assertFalse(store.has_runs)
+
+    def test_which_axis_is_the_run_is_read_from_what_the_collection_says_not_from_their_order(self):
+        dimensions = {
+            "step": CubeDimension("step", kind="other", size=61),
+            "issued": CubeDimension("issued", kind="temporal"),
+            "latitude": 721,
+            "longitude": 1440,
+        }
+        self.upstream.become_store(
+            STORE, dimensions, {"t2m": (("step", "issued", "latitude", "longitude"), (1, 1, 721, 1440))}
+        )
+
+        self.assertEqual(self.survey().store.offered[0].axes, ["step", "run", "y", "x"])
+
+    def test_a_fields_of_plain_time_steps_beside_a_forecasts_is_not_offered(self):
+        self.upstream.become_store(
+            STORE,
+            {**FORECAST, "time": None},
+            {
+                "temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)),
+                "analysis": (("time", "latitude", "longitude"), (1, 721, 1440)),
+            },
+        )
+
+        store = self.survey().store
+
+        self.assertEqual([array.path for array in store.offered], ["temperature_2m"])
+        self.assertIn("not part of the forecast", store.arrays[1].reason)
+
+    def test_a_store_none_of_whose_fields_can_be_shown_is_refused_with_why(self):
+        self.upstream.become_store(
+            STORE,
+            {**FORECAST, "pressure_level": 13},
+            {
+                "temperature": (
+                    ("init_time", "lead_time", "pressure_level", "latitude", "longitude"),
+                    (1, 1, 1, 721, 1440),
+                )
+            },
+        )
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.UNMAPPABLE_STORE)
+        self.assertFalse(found.harvestable)
+        self.assertIn("It has levels.", found.reason)
+        self.assert_plain(found.reason)
+
+    # Where its data lives (ADR 0044 §11).
+
+    def test_a_google_bucket_is_a_place_its_data_may_live_as_an_amazon_one_is(self):
+        self.upstream.regions["ecmwf-forecasts"] = "eu-central-1"
+        self.map_shaped(chunk_locations=("s3://ecmwf-forecasts/", "gs://ecmwf-open-data/"))
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.MAP_STORE)
+        self.assertEqual(found.store.chunk_locations, ["gs://ecmwf-open-data/", "s3://ecmwf-forecasts/"])
+        self.assertEqual(found.store.chunk_regions, {"s3://ecmwf-forecasts/": "eu-central-1"})
+        self.assertEqual(self.upstream.regions_asked, ["ecmwf-forecasts"], "only an Amazon bucket has a region to ask")
+
+    def test_a_place_declared_without_its_closing_slash_is_the_same_place(self):
+        self.upstream.regions["noaa-gfs-bdp-pds"] = "us-east-1"
+        self.map_shaped(chunk_locations=("s3://noaa-gfs-bdp-pds",))
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.MAP_STORE)
+        self.assertEqual(found.store.chunk_locations, [GRIB_BUCKET])
+        self.assertEqual(found.store.chunk_regions, {GRIB_BUCKET: "us-east-1"})
+
+    def test_a_region_that_is_not_a_regions_name_is_not_taken_from_whatever_answered(self):
+        self.upstream.regions["noaa-gfs-bdp-pds"] = "us-east-1.evil.example"
+        self.map_shaped(chunk_locations=(GRIB_BUCKET,))
+
+        self.assertEqual(self.survey().store.chunk_regions, {})
+
+    def test_a_store_declaring_any_other_kind_of_place_is_refused_the_kind_named_and_never_opened(self):
+        kinds = {
+            "az://forecasts/": "Microsoft Azure storage",
+            "http://data.example/grib/": "a plain web address",
+            "https://data.example/grib/": "a plain web address",
+            "file:///srv/grib/": "a folder on the provider's own computer",
+            "ftp://data.example/": "a kind of storage GeoRiva does not know",
+        }
+        for declared, kind in kinds.items():
+            with self.subTest(declared=declared):
+                self.upstream.stores_opened = []
+                self.map_shaped(chunk_locations=(GRIB_BUCKET, declared))
+
+                found = self.survey()
+
+                self.assertEqual(found.shape, Shape.STORE_KEPT_ELSEWHERE)
+                self.assertFalse(found.harvestable)
+                self.assertIn(kind, found.reason)
+                self.assertIn(declared, found.reason)
+                self.assertEqual(self.upstream.stores_opened, [], "a verdict, before anything is opened")
+                self.assert_plain(found.reason, but=declared)
+
+    def test_a_place_served_at_an_address_of_its_own_is_refused_too(self):
+        self.map_shaped(chunk_locations=(GRIB_BUCKET,), chunk_endpoints=(GRIB_BUCKET,))
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.STORE_KEPT_ELSEWHERE)
+        self.assertIn("at an address of its own", found.reason)
 
     def test_a_store_naming_the_grib_codec_core_carries_is_accepted(self):
         # The check is against what is installed here, and gribberish is in core's lock.
