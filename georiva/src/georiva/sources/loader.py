@@ -18,6 +18,7 @@ from django.utils import timezone
 
 from georiva.core.storage import storage
 from georiva.sources.fetch.base import FailureScope, FetchResult, FileRequest
+from georiva.sources.fetch_run_spine import RunResult, RunStopped, record_not_attempted, run_tracked
 
 
 @dataclass
@@ -31,11 +32,8 @@ class CandidateFile:
 
 
 @dataclass
-class LoaderRunResult:
+class LoaderRunResult(RunResult):
     """Result of a complete loader run."""
-
-    started_at: datetime = field(default_factory=timezone.now)
-    finished_at: datetime | None = None
 
     # Counts
     files_requested: int = 0
@@ -46,18 +44,11 @@ class LoaderRunResult:
     bytes_transferred: int = 0
 
     # Details
-    errors: list[str] = field(default_factory=list)
     fetch_results: list = field(default_factory=list)
     stored_paths: list[str] = field(default_factory=list)  # storage paths of successfully fetched files
 
     # Context
     run_time: datetime | None = None  # For forecasts: which model run
-
-    # Why the run stopped before walking its plan, if it did (#478)
-    stop_reason: str | None = None
-    # Set when it stopped because the source cannot serve us: the feed's other
-    # collections are then not attempted in the same tick.
-    source_unavailable: str | None = None
 
     @property
     def success(self) -> bool:
@@ -81,20 +72,13 @@ class LoaderRunResult:
             return "partial"
         return "failed"
 
-    @property
-    def duration_seconds(self) -> float:
-        if self.finished_at:
-            return (self.finished_at - self.started_at).total_seconds()
-        return 0.0
-
-    def finish(self):
-        self.finished_at = timezone.now()
-
-    def add_error(self, error: str):
-        self.errors.append(error)
-        # Keep only last 50 errors
-        if len(self.errors) > 50:
-            self.errors = self.errors[-50:]
+    def counters(self) -> dict[str, int]:
+        return {
+            "files_fetched": self.files_fetched,
+            "files_skipped": self.files_skipped,
+            "files_failed": self.files_failed,
+            "bytes_transferred": self.bytes_transferred,
+        }
 
     def summary(self) -> str:
         return (
@@ -131,13 +115,16 @@ def _format_duration(seconds: float) -> str:
     return f"{seconds:g}s"
 
 
-class _RunStopped(Exception):
-    """Raised inside a run when the source cannot serve it: the run ends early,
-    FAILED, for `reason` (#478)."""
+@dataclass
+class _PlanWalk:
+    """One run's walk through its plan: what it has come to so far, and the row
+    it is on."""
 
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
+    result: LoaderRunResult
+    # The row being fetched right now; failed when the run is settled if it
+    # stopped under it. Tracked rather than swept by status: a queued result
+    # also leaves its row FETCHING, and that is not a failure.
+    in_flight: object | None = None
 
 
 def plan_from_earlier_run(earlier, collection):
@@ -246,16 +233,16 @@ class Loader:
     @staticmethod
     def _check_stop(fetch_result, consecutive_transient: int, threshold: int) -> int:
         """The consecutive-TRANSIENT count after this failed fetch, or raise
-        _RunStopped when the source has shown it cannot serve the run: on a
+        RunStopped when the source has shown it cannot serve the run: on a
         SOURCE failure, or at `threshold` TRANSIENT failures in a row (#478)."""
         scope = fetch_result.failure_scope or FailureScope.TRANSIENT
         if scope == FailureScope.SOURCE:
-            raise _RunStopped(f"source unavailable — {fetch_result.error}")
+            raise RunStopped(f"source unavailable — {fetch_result.error}")
         if scope != FailureScope.TRANSIENT:
             return 0
         consecutive_transient += 1
         if consecutive_transient >= threshold:
-            raise _RunStopped(f"{consecutive_transient} consecutive transient failures — {fetch_result.error}")
+            raise RunStopped(f"{consecutive_transient} consecutive transient failures — {fetch_result.error}")
         return consecutive_transient
 
     def _one_request_per_path(self, requests) -> list:
@@ -329,22 +316,14 @@ class Loader:
         the plan, which may itself call it — the feed short-circuit after a
         sibling collection's run found the source unavailable (#478).
         """
-        from georiva.sources.models import FetchRun
-
-        result = LoaderRunResult(stop_reason=reason)
-        result.add_error(reason)
-        result.finish()
-        if self.data_feed:
-            fetch_run = FetchRun.objects.create(
-                data_feed=self.data_feed,
-                collection=self.collection,
-                status="running",
-                resumed_from=self.resumed_from,
-            )
-            fetch_run.mark_failed(error=reason)
-            self.data_feed._update_run_stats(result, self.collection, started_at=fetch_run.started_at)
-        self.logger.info(f"Not attempted: {reason}")
-        return result
+        return record_not_attempted(
+            LoaderRunResult(),
+            reason,
+            data_feed=self.data_feed,
+            collection=self.collection,
+            resumed_from=self.resumed_from,
+            logger=self.logger,
+        )
 
     def run(
         self,
@@ -364,241 +343,213 @@ class Loader:
         Returns:
             LoaderRunResult with statistics and details
         """
-        from georiva.sources.models import FetchedFile, FetchRun
+        plan_walk = _PlanWalk(LoaderRunResult())
+        result = run_tracked(
+            lambda fetch_run: self._walk_plan(
+                fetch_run, plan_walk, dry_run=dry_run, max_files=max_files, skip_existing=skip_existing
+            ),
+            result=plan_walk.result,
+            data_feed=self.data_feed,
+            collection=self.collection,
+            resumed_from=self.resumed_from,
+            settle=lambda fetch_run, stop_reason: self._settle_plan(fetch_run, plan_walk, stop_reason),
+            logger=self.logger,
+        )
+        self.logger.info(result.summary())
+        return result
 
-        result = LoaderRunResult()
-        fetch_run = None
-        stop_reason = None
-        # The row being fetched right now; failed in `finally` if the run stops
-        # under it. Tracked rather than swept by status: a queued result also
-        # leaves its row FETCHING, and that is not a failure.
-        in_flight = None
+    def _walk_plan(self, fetch_run, walk: _PlanWalk, *, dry_run: bool, max_files: int | None, skip_existing: bool):
+        """The file loop: plan the run, persist the plan, then fetch each
+        request the run does not already hold. Runs inside `fetch_run`, whose
+        lifecycle is the spine's; raises RunStopped when the source cannot
+        serve it (#478)."""
+        from georiva.sources.models import FetchedFile
+
+        result = walk.result
         consecutive_transient = 0
         breaker_threshold = settings.GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD
         run_max_seconds = settings.GEORIVA_FETCH_RUN_MAX_SECONDS
         run_started = self.clock()
-        began_at = timezone.now()
-        retry_after = None
 
-        if self.data_feed:
-            fetch_run = FetchRun.begin(
-                data_feed=self.data_feed,
-                collection=self.collection,
-                resumed_from=self.resumed_from,
-            )
-            began_at = fetch_run.started_at
+        self.logger.info(f"Starting loader run for {self.collection.name}")
 
+        # Connect and generate requests from the data source. Either failing
+        # means the source cannot serve this run (a plugin's run detection
+        # failing on DNS, say), not that there was nothing to fetch.
         try:
-            self.logger.info(f"Starting loader run for {self.collection.name}")
+            self.fetch_strategy.connect()
+            self.logger.debug("Fetch strategy connected")
+            generated = plan_requests(self.data_source, self.collection, self.resumed_from)
+        except Exception as e:
+            self.logger.exception(f"Could not plan the run: {e}")
+            raise RunStopped(f"{type(e).__name__}: {e}") from e
+        requests = self._one_request_per_path(generated)
+        result.files_requested = len(requests)
 
-            # Connect and generate requests from the data source. Either failing
-            # means the source cannot serve this run (a plugin's run detection
-            # failing on DNS, say), not that there was nothing to fetch.
-            try:
-                self.fetch_strategy.connect()
-                self.logger.debug("Fetch strategy connected")
-                generated = plan_requests(self.data_source, self.collection, self.resumed_from)
-            except Exception as e:
-                self.logger.exception(f"Could not plan the run: {e}")
-                raise _RunStopped(f"{type(e).__name__}: {e}") from e
-            requests = self._one_request_per_path(generated)
-            result.files_requested = len(requests)
+        # Persist the request count up front — the finish-time summary never
+        # comes if the worker dies, and the run page should be able to say
+        # "7 of 320" for a run that is live or was interrupted.
+        if fetch_run:
+            fetch_run.files_requested = len(requests)
+            fetch_run.save(update_fields=["files_requested"])
 
-            # Persist the request count up front — the finish-time summary never
-            # comes if the worker dies, and the run page should be able to say
-            # "7 of 320" for a run that is live or was interrupted.
-            if fetch_run:
-                fetch_run.files_requested = len(requests)
-                fetch_run.save(update_fields=["files_requested"])
+        if not requests:
+            self.logger.warning("No file requests generated")
+            return
 
-            if not requests:
-                self.logger.warning("No file requests generated")
-                result.finish()
-                return result
+        # Extract run time from first request (for forecasts)
+        if requests[0].reference_time:
+            result.run_time = requests[0].reference_time
+            self.logger.info(f"Processing forecast run: {result.run_time.isoformat()}")
 
-            # Extract run time from first request (for forecasts)
-            if requests[0].reference_time:
-                result.run_time = requests[0].reference_time
-                self.logger.info(f"Processing forecast run: {result.run_time.isoformat()}")
+        self.logger.info(f"Generated {len(requests)} file requests")
 
-            self.logger.info(f"Generated {len(requests)} file requests")
+        if dry_run:
+            self.logger.info("Dry run - skipping fetch")
+            for req in requests:
+                self.logger.debug(f"  Would fetch: {req.filename}")
+            return
 
-            if dry_run:
-                self.logger.info("Dry run - skipping fetch")
-                for req in requests:
-                    self.logger.debug(f"  Would fetch: {req.filename}")
-                result.finish()
-                return result
+        # Persist the whole plan before anything is fetched: one PENDING row
+        # per request, in request order, so the run page can show what is
+        # left and a run that stops still says which requests it meant (#474).
+        rows = self._create_plan_rows(fetch_run, requests) if fetch_run else [None] * len(requests)
 
-            # Persist the whole plan before anything is fetched: one PENDING row
-            # per request, in request order, so the run page can show what is
-            # left and a run that stops still says which requests it meant (#474).
-            rows = self._create_plan_rows(fetch_run, requests) if fetch_run else [None] * len(requests)
+        # Filter already-fetched files; copy from another collection if available
+        to_fetch = []
+        considered = 0
+        for request, ff in zip(requests, rows, strict=True):
+            considered += 1
+            storage_path = self._get_storage_path(request)
 
-            # Filter already-fetched files; copy from another collection if available
-            to_fetch = []
-            considered = 0
-            for request, ff in zip(requests, rows, strict=True):
-                considered += 1
-                storage_path = self._get_storage_path(request)
+            if skip_existing and self._already_exists(request):
+                result.files_skipped += 1
+                self.logger.debug(f"Skipping (exists): {request.filename}")
+                if ff:
+                    ff.mark_skipped(reason="already exists")
+                continue
 
-                if skip_existing and self._already_exists(request):
-                    result.files_skipped += 1
-                    self.logger.debug(f"Skipping (exists): {request.filename}")
+            if skip_existing:
+                existing_path = self._find_existing_catalog_path(request)
+                if existing_path:
+                    dest_path = storage_path
+                    # The record is FETCHING *before* the object lands: the copy raises
+                    # a Bucket notification, and the consumer finds this file's chain by
+                    # looking up its FetchedFile. A record written afterwards can lose
+                    # that race and leave the ingestion without its fetch.
                     if ff:
-                        ff.mark_skipped(reason="already exists")
+                        ff.mark_fetching()
+                        walk.in_flight = ff
+                    try:
+                        self._tier_bucket.copy(existing_path, dest_path)
+                        # Counted only once its row says so: a row that cannot be
+                        # marked goes to the re-download, which counts it there.
+                        if ff:
+                            ff.mark_stored(bytes_transferred=0)
+                        result.files_fetched += 1
+                        result.stored_paths.append(dest_path)
+                        self.logger.info(f"Copied (no re-download): {existing_path} → {dest_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Copy failed, will re-download: {e}")
+                        # The re-download below walks this same row again.
+                        to_fetch.append((request, ff))
+                    walk.in_flight = None
                     continue
 
-                if skip_existing:
-                    existing_path = self._find_existing_catalog_path(request)
-                    if existing_path:
-                        dest_path = storage_path
-                        # The record is FETCHING *before* the object lands: the copy raises
-                        # a Bucket notification, and the consumer finds this file's chain by
-                        # looking up its FetchedFile. A record written afterwards can lose
-                        # that race and leave the ingestion without its fetch.
-                        if ff:
-                            ff.mark_fetching()
-                            in_flight = ff
-                        try:
-                            self._tier_bucket.copy(existing_path, dest_path)
-                            # Counted only once its row says so: a row that cannot be
-                            # marked goes to the re-download, which counts it there.
-                            if ff:
-                                ff.mark_stored(bytes_transferred=0)
-                            result.files_fetched += 1
-                            result.stored_paths.append(dest_path)
-                            self.logger.info(f"Copied (no re-download): {existing_path} → {dest_path}")
-                        except Exception as e:
-                            self.logger.warning(f"Copy failed, will re-download: {e}")
-                            # The re-download below walks this same row again.
-                            to_fetch.append((request, ff))
-                        in_flight = None
-                        continue
+            to_fetch.append((request, ff))
 
-                to_fetch.append((request, ff))
+            if max_files and len(to_fetch) >= max_files:
+                self.logger.info(f"Reached max_files limit ({max_files})")
+                break
 
-                if max_files and len(to_fetch) >= max_files:
-                    self.logger.info(f"Reached max_files limit ({max_files})")
-                    break
+        if fetch_run and considered < len(requests):
+            # max_files cut the plan short: drop the rows the run will never
+            # reach, so requested = fetched + skipped + failed still holds.
+            FetchedFile.objects.filter(pk__in=[ff.pk for ff in rows[considered:]]).delete()
+            result.files_requested = considered
+            fetch_run.files_requested = considered
+            fetch_run.save(update_fields=["files_requested"])
 
-            if fetch_run and considered < len(requests):
-                # max_files cut the plan short: drop the rows the run will never
-                # reach, so requested = fetched + skipped + failed still holds.
-                FetchedFile.objects.filter(pk__in=[ff.pk for ff in rows[considered:]]).delete()
-                result.files_requested = considered
-                fetch_run.files_requested = considered
-                fetch_run.save(update_fields=["files_requested"])
+        self.logger.info(f"{len(to_fetch)} to fetch, {result.files_skipped} skipped")
 
-            self.logger.info(f"{len(to_fetch)} to fetch, {result.files_skipped} skipped")
+        # Fetch files
+        for i, (request, ff) in enumerate(to_fetch, 1):
+            # Checked between files only: a file in progress has its own limit.
+            if self.clock() - run_started >= run_max_seconds:
+                raise RunStopped(f"run exceeded its time limit ({_format_duration(run_max_seconds)})")
 
-            # Fetch files
-            for i, (request, ff) in enumerate(to_fetch, 1):
-                # Checked between files only: a file in progress has its own limit.
-                if self.clock() - run_started >= run_max_seconds:
-                    raise _RunStopped(f"run exceeded its time limit ({_format_duration(run_max_seconds)})")
+            self.logger.info(f"[{i}/{len(to_fetch)}] Fetching {request.filename}")
 
-                self.logger.info(f"[{i}/{len(to_fetch)}] Fetching {request.filename}")
+            if ff:
+                ff.mark_fetching()
+                walk.in_flight = ff
 
+            fetch_result = self._fetch_and_store(request)
+            result.fetch_results.append(fetch_result)
+
+            if fetch_result.success:
+                # Mark the row first: if that raises, settling fails it as
+                # interrupted, and it must not also be counted as fetched.
                 if ff:
-                    ff.mark_fetching()
-                    in_flight = ff
+                    ff.mark_stored(bytes_transferred=fetch_result.bytes_transferred or 0)
+                walk.in_flight = None
+                result.files_fetched += 1
+                result.bytes_transferred += fetch_result.bytes_transferred
+                result.stored_paths.append(self._get_storage_path(request))
 
-                fetch_result = self._fetch_and_store(request)
-                result.fetch_results.append(fetch_result)
+                # Callback
+                if self.on_file_fetched:
+                    try:
+                        self.on_file_fetched(request, fetch_result)
+                    except Exception as e:
+                        self.logger.warning(f"on_file_fetched callback error: {e}")
+                consecutive_transient = 0
 
-                if fetch_result.success:
-                    # Mark the row first: if that raises, `finally` fails it as
-                    # interrupted, and it must not also be counted as fetched.
-                    if ff:
-                        ff.mark_stored(bytes_transferred=fetch_result.bytes_transferred or 0)
-                    in_flight = None
-                    result.files_fetched += 1
-                    result.bytes_transferred += fetch_result.bytes_transferred
-                    result.stored_paths.append(self._get_storage_path(request))
+            elif fetch_result.status == "queued":
+                result.files_queued += 1
+            else:
+                result.files_failed += 1
+                if fetch_result.retry_after:
+                    result.retry_after = max(result.retry_after or 0, fetch_result.retry_after)
+                if fetch_result.error:
+                    result.add_error(f"{request.filename}: {fetch_result.error}")
+                if ff:
+                    ff.mark_failed(error=fetch_result.error or "", scope=fetch_result.failure_scope)
+                # Settled before the check: a stop must not fail this row twice.
+                walk.in_flight = None
+                consecutive_transient = self._check_stop(fetch_result, consecutive_transient, breaker_threshold)
+            walk.in_flight = None
 
-                    # Callback
-                    if self.on_file_fetched:
-                        try:
-                            self.on_file_fetched(request, fetch_result)
-                        except Exception as e:
-                            self.logger.warning(f"on_file_fetched callback error: {e}")
-                    consecutive_transient = 0
+    def _settle_plan(self, fetch_run, walk: _PlanWalk, stop_reason: str | None):
+        """Let go of the source and leave no plan row unsettled, once the walk
+        has ended however it ended."""
+        from georiva.sources.models import FetchedFile
 
-                elif fetch_result.status == "queued":
-                    result.files_queued += 1
-                else:
-                    result.files_failed += 1
-                    if fetch_result.retry_after:
-                        retry_after = max(retry_after or 0, fetch_result.retry_after)
-                    if fetch_result.error:
-                        result.add_error(f"{request.filename}: {fetch_result.error}")
-                    if ff:
-                        ff.mark_failed(error=fetch_result.error or "", scope=fetch_result.failure_scope)
-                    # Settled before the check: a stop must not fail this row twice.
-                    in_flight = None
-                    consecutive_transient = self._check_stop(fetch_result, consecutive_transient, breaker_threshold)
-                in_flight = None
-
-        except _RunStopped as stop:
-            self.logger.warning(f"Loader run stopped: {stop.reason}")
-            result.add_error(stop.reason)
-            stop_reason = result.source_unavailable = stop.reason
-
+        result = walk.result
+        try:
+            self.fetch_strategy.disconnect()
         except Exception as e:
-            self.logger.exception(f"Loader run failed: {e}")
-            result.add_error(str(e))
-            stop_reason = f"{type(e).__name__}: {e}"
+            self.logger.warning(f"Error disconnecting: {e}")
 
-        finally:
-            # Cleanup
-            try:
-                self.fetch_strategy.disconnect()
-            except Exception as e:
-                self.logger.warning(f"Error disconnecting: {e}")
+        self._cleanup_temp()
 
-            self._cleanup_temp()
-            result.stop_reason = stop_reason
-            result.finish()
-
-            if fetch_run:
-                # No row stays Waiting once its run has ended, nor Fetching under a
-                # run that stopped: a request the run never reached, or was in the
-                # middle of, is a failure, and retryable like any other.
-                reason = stop_reason or "the run ended"
-                if in_flight:
-                    in_flight.mark_failed(
-                        error=f"interrupted: the run stopped while fetching ({reason})",
-                        scope=FailureScope.TRANSIENT,
-                    )
-                    result.files_failed += 1
-                result.files_failed += fetch_run.fetched_files.filter(status=FetchedFile.Status.PENDING).update(
-                    status=FetchedFile.Status.FAILED,
-                    error=f"not attempted: the run stopped ({reason})",
-                    failure_scope=FailureScope.NOT_ATTEMPTED,
-                    completed_at=timezone.now(),
+        if fetch_run:
+            # No row stays Waiting once its run has ended, nor Fetching under a
+            # run that stopped: a request the run never reached, or was in the
+            # middle of, is a failure, and retryable like any other.
+            reason = stop_reason or "the run ended"
+            if walk.in_flight:
+                walk.in_flight.mark_failed(
+                    error=f"interrupted: the run stopped while fetching ({reason})",
+                    scope=FailureScope.TRANSIENT,
                 )
-                counters = {
-                    "files_fetched": result.files_fetched,
-                    "files_skipped": result.files_skipped,
-                    "files_failed": result.files_failed,
-                    "bytes_transferred": result.bytes_transferred,
-                }
-                # A run that walked its whole plan completed, however many files
-                # failed; one that stopped before the end failed (#478).
-                if stop_reason:
-                    fetch_run.mark_failed(
-                        error=f"{FetchRun.STOPPED_PREFIX}{stop_reason}", retry_after=retry_after, **counters
-                    )
-                else:
-                    fetch_run.mark_completed(retry_after=retry_after, **counters)
-
-            if self.data_feed:
-                self.data_feed._update_run_stats(result, self.collection, started_at=began_at)
-
-            self.logger.info(result.summary())
-
-        return result
+                result.files_failed += 1
+            result.files_failed += fetch_run.fetched_files.filter(status=FetchedFile.Status.PENDING).update(
+                status=FetchedFile.Status.FAILED,
+                error=f"not attempted: the run stopped ({reason})",
+                failure_scope=FailureScope.NOT_ATTEMPTED,
+                completed_at=timezone.now(),
+            )
 
     # =========================================================================
     # File Operations

@@ -264,8 +264,10 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
         self.last_run_status = result.status
         self.last_run_message = "; ".join(result.errors[:3]) if result.errors else ""
         self.total_runs += 1
-        self.total_files_fetched += result.files_fetched
-        self.total_bytes_transferred += result.bytes_transferred
+        # A loop that fetches no files (a harvest, ADR 0042) reports neither.
+        counters = result.counters()
+        self.total_files_fetched += counters.get("files_fetched", 0)
+        self.total_bytes_transferred += counters.get("bytes_transferred", 0)
 
         if result.success:
             self.last_success_at = self.last_run_at

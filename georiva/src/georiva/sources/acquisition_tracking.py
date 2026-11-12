@@ -3,8 +3,9 @@ Acquisition run-tracking (PRD #217).
 
 The read-side query module for the feed-scoped Acquisition Activity pages —
 the acquisition analogue of derivation_tracking: query logic lives here,
-the views stay dumb. Runs are collection-agnostic (ADR-0003): per-file
-collection context is encoded in FetchedFile.file_path, not on the run.
+the views stay dumb. A run is one collection's share of a feed execution and
+carries a `collection` FK; it is null on runs that predate the field or whose
+collection was since deleted, and FetchedFile.file_path then still names it.
 """
 
 from __future__ import annotations

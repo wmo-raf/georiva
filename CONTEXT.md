@@ -226,8 +226,11 @@ _Avoid_: forecast_hour (in new code), timestep (for lead time)
 **FetchRun**:
 The record of one collection's share of an automated DataFeed execution. Created at the start of the run — before any
 files are fetched — to enable real-time monitoring. One `FetchRun` per `(feed execution, collection)`: `LoaderJobType`
-loops the feed's collections and `Loader.run()` creates a `FetchRun` for each. It carries no collection FK, so the
-collection is recovered from `FetchedFile.file_path`'s third segment.
+loops the feed's collections and `Loader.run()` runs each inside its own `FetchRun`. The run's lifecycle (begin, stop,
+finish, retry, events) belongs to the run-tracking spine, not to the loop that runs inside it: the Loader's file loop
+today, a Harvest's later (ADR 0042). It carries a `collection` FK, which scopes its retry; the FK is null on runs that
+predate it or whose collection was since deleted, and the collection is then recovered from `FetchedFile.file_path`'s
+third segment.
 Status: `running → completed / failed / cancelled / interrupted` (`interrupted`: crash recovery found the worker gone
 mid-run). `completed` means the run walked its whole plan, however many files failed; `failed` means it **stopped
 early** — on a `source` failure, on `GEORIVA_FETCH_CIRCUIT_BREAKER_THRESHOLD` consecutive `transient` ones, or on an

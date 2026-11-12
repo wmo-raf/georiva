@@ -55,6 +55,7 @@ georiva/src/georiva/          # Main Django application
 ├── sources/                  # Data source plugin framework
 │   ├── source.py             # DataSource protocol + BaseDataSource ABC
 │   ├── loader.py             # Loader orchestrates fetch → store
+│   ├── fetch_run_spine.py    # FetchRun lifecycle around a pluggable loop (ADR 0031/0042)
 │   ├── registry.py           # LoaderProfileViewSetRegistry
 │   ├── product_service.py    # Provision DerivedProducts, pin bindings (ADR 0010)
 │   └── derivation_invocation.py  # Product-driven dispatch: arriving input → recipe run
