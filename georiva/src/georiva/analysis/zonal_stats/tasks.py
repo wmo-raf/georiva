@@ -32,22 +32,23 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
     1. Load the Asset, Item, Variable, and Collection.
     2. Check collection.boundary_stats_level — exit early if not set.
     3. Resolve AdminBoundary queryset for the configured level.
-    4. Download COG bytes from MinIO.
-    5. Compute stats via compute_stats_from_cog_bytes().
+    4. Read band 1, opening the COG by range where it lives — our bucket or
+       upstream (ADR 0043 §7).
+    5. Compute stats via compute_stats_from_band(), once per level.
     6. Persist via persist_stats().
 
-    Retries up to 3 times on transient failures (network, MinIO timeout).
+    Retries up to 3 times on transient failures (network, MinIO or upstream timeout).
     """
     from django.db import InterfaceError, OperationalError
     from rasterio.errors import RasterioError
 
     from georiva.core.models import Asset
-    from georiva.core.storage import storage
 
     from .service import (
-        compute_stats_from_cog_bytes,
+        compute_stats_from_band,
         get_boundaries_for_collection,
         persist_stats,
+        read_band,
     )
 
     try:
@@ -75,7 +76,7 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
         return
 
     try:
-        cog_bytes = storage.assets.read_bytes(asset.href)
+        band = read_band(asset.location)
     except Exception as exc:
         logger.error(
             "compute_boundary_zonal_stats: failed to read COG %s: %s",
@@ -86,7 +87,7 @@ def compute_boundary_zonal_stats(self, asset_id: int) -> None:
 
     try:
         for level, boundaries in boundaries_by_level.items():
-            stats_rows = compute_stats_from_cog_bytes(cog_bytes, boundaries)
+            stats_rows = compute_stats_from_band(band, boundaries)
 
             count = persist_stats(
                 item=asset.item,

@@ -1,7 +1,7 @@
 """Published asset objects follow their rows out, on commit (ADR 0032).
 
-The platform wrote every object an ``Asset.href`` names in the assets bucket,
-so deleting the row deletes the object — but only once the delete has
+The platform wrote every object a local ``Asset.href`` names in the assets
+bucket, so deleting the row deletes the object — but only once the delete has
 committed, and never from inside the request that deleted it:
 
 1. ``on_asset_deleted`` (an ``Asset`` ``post_delete`` receiver) adds the href to
@@ -14,6 +14,9 @@ committed, and never from inside the request that deleted it:
 3. ``delete_objects`` (the task body) re-checks every key against
    ``deletion_verdict`` before deleting it: a key a live Asset names again, or
    an object rewritten since the commit, is spared.
+
+A Remote asset (ADR 0042) names no object of ours, so deleting its row deletes
+nothing anywhere (ADR 0043 §8).
 
 Whatever this misses — a chunk that exhausted its retries, a key spared by the
 margin that turns out to be an orphan after all — is what
@@ -70,7 +73,9 @@ def _pending_for(using: str) -> _PendingDeletions:
 
 
 def on_asset_deleted(sender, instance, using, **kwargs):
-    if not instance.href:
+    # A Remote asset's bytes are upstream's, not ours: its row goes alone
+    # (ADR 0043 §8).
+    if not instance.href or instance.location.is_remote:
         return
     pending = _pending_for(using)
     first = not pending.hrefs

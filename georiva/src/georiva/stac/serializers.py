@@ -103,8 +103,10 @@ class STACAssetSerializer(serializers.Serializer):
         data = super().to_representation(instance)
         request = self.context.get("request")
 
-        # Build absolute href
-        if request and not data["href"].startswith("http"):
+        # A Remote asset's href is served exactly as stored, so a consumer's own
+        # tools read the upstream bytes directly (ADR 0043 §4); a local one is
+        # made absolute.
+        if request and not instance.location.is_remote:
             data["href"] = get_full_url_by_request(request, instance.url)
         else:
             data["href"] = instance.url

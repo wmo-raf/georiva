@@ -251,12 +251,17 @@ class Asset(AbstractAsset, TimeStampedModel, Orderable):
     # =========================================================================
     # URL Generation
     # =========================================================================
+    @property
+    def location(self):
+        """Where this asset's bytes are: our bucket, or upstream (ADR 0043 §1)."""
+        from georiva.core.storage.asset_location import AssetLocation
+
+        return AssetLocation(self.href)
+
     @cached_property
     def url(self) -> str:
-        """Get public URL to this asset."""
-        from georiva.core.storage import storage
-
-        return storage.assets.url(self.href)
+        """Public URL to this asset — the upstream href itself for a Remote asset."""
+        return self.location.public_url()
 
     @property
     def preview_url(self) -> str:

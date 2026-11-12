@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import io
 import json
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-import rasterio
 
 from georiva.geoprocessing.zonal import zonal_stats_from_array
 
@@ -14,6 +13,7 @@ if TYPE_CHECKING:
     from adminboundarymanager.models import AdminBoundary
 
     from georiva.core.models import Item, Variable
+    from georiva.core.storage.asset_location import AssetLocation
 
 logger = logging.getLogger(__name__)
 
@@ -61,17 +61,23 @@ def compute_stats_from_array(
     return rows
 
 
-def compute_stats_from_cog_bytes(
-    cog_bytes: bytes,
-    boundaries: list[AdminBoundary],
-) -> list[dict]:
-    """
-    Compute zonal statistics from raw COG bytes (used by backfill task).
+@dataclass(frozen=True)
+class Band:
+    """Band 1 of an asset, nodata as NaN, with the georeferencing to cut it by."""
 
-    Reads band 1 from the COG, replaces nodata with NaN, then delegates
-    to compute_stats_from_array which handles the single-MemoryFile pattern.
+    data: np.ndarray
+    transform: object
+    crs: str
+
+
+def read_band(location: AssetLocation) -> Band:
+    """Read band 1 of the asset at ``location``, opening it by range (ADR 0043 §7).
+
+    Local or remote, the COG is never pulled into memory as bytes first: GDAL
+    reads its blocks where they are. Read once per asset however many boundary
+    levels are computed from it.
     """
-    with rasterio.open(io.BytesIO(cog_bytes)) as src:
+    with location.open_raster() as src:
         data = src.read(1).astype(np.float32)
         transform = src.transform
         crs = src.crs.to_wkt() if src.crs else "EPSG:4326"
@@ -80,8 +86,12 @@ def compute_stats_from_cog_bytes(
             data[data == src.nodata] = np.nan
 
     data[~np.isfinite(data)] = np.nan
+    return Band(data=data, transform=transform, crs=crs)
 
-    return compute_stats_from_array(data, transform, crs, boundaries)
+
+def compute_stats_from_band(band: Band, boundaries: list[AdminBoundary]) -> list[dict]:
+    """Zonal statistics of every boundary against one band read by :func:`read_band`."""
+    return compute_stats_from_array(band.data, band.transform, band.crs, boundaries)
 
 
 # ---------------------------------------------------------------------------

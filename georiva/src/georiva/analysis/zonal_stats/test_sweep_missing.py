@@ -165,10 +165,10 @@ class ComputeRetryTests(TestCase):
     def run_task(self, failure):
         from celery.exceptions import Retry
 
-        service = "georiva.analysis.zonal_stats.service.compute_stats_from_cog_bytes"
+        service = "georiva.analysis.zonal_stats.service"
         with (
-            mock.patch("georiva.core.storage.storage.assets.read_bytes", return_value=b""),
-            mock.patch(service, side_effect=failure),
+            mock.patch(f"{service}.read_band", return_value=mock.Mock()),
+            mock.patch(f"{service}.compute_stats_from_band", side_effect=failure),
             mock.patch.object(tasks.compute_boundary_zonal_stats, "retry", side_effect=Retry()) as retry,
         ):
             try:

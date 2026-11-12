@@ -93,3 +93,46 @@ class CollectRowsTests(TestCase):
         self._item(6)
 
         self.assertEqual(len(self._collect()), 2)
+
+
+class RemoteAssetsAreSkippedTests(TestCase):
+    """Virtual Zarr manifests skip Remote assets (ADR 0042 §11, ADR 0043)."""
+
+    UPSTREAM = "https://data.upstream.example/chirps/{}.tif"
+
+    @classmethod
+    def setUpTestData(cls):
+        org = provision_organisation(name="Kenya Met", slug="kenya")
+        cls.collection = build_collection(org, slug="mixed")
+        cls.variable = add_variable(cls.collection, slug="rain")
+        cls.manifest = VirtualZarrManifest.objects.create(variable=cls.variable)
+
+    def _item(self, hours, href, ref_hours=None):
+        item = Item.objects.create(
+            collection=self.collection,
+            time=T0 + timedelta(hours=hours),
+            reference_time=None if ref_hours is None else T0 + timedelta(hours=ref_hours),
+        )
+        Asset.objects.create(item=item, variable=self.variable, format=Asset.Format.COG, href=href)
+
+    def _collect(self):
+        config = mock.Mock()
+        config.url_for.side_effect = lambda href: f"http://minio/{href}"
+        return _collect_rows(self.manifest, config)
+
+    def test_a_mixed_collection_indexes_only_its_local_window(self):
+        self._item(0, self.UPSTREAM.format(0))
+        self._item(6, "kenya/mixed/rain/6.tif")
+
+        rows, skipped = self._collect()
+
+        self.assertEqual([r.url for r in rows], ["http://minio/kenya/mixed/rain/6.tif"])
+        self.assertEqual(skipped, 1)
+
+    def test_a_newer_run_held_only_upstream_does_not_displace_the_local_one(self):
+        self._item(0, "kenya/mixed/rain/0.tif", ref_hours=0)
+        self._item(6, self.UPSTREAM.format(6), ref_hours=6)
+
+        rows, _ = self._collect()
+
+        self.assertEqual([r.time for r in rows], [T0])

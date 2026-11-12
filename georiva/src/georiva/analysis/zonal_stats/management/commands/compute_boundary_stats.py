@@ -70,13 +70,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from georiva.analysis.zonal_stats.service import (
-            compute_stats_from_cog_bytes,
+            compute_stats_from_band,
             get_boundaries_for_collection,
             persist_stats,
+            read_band,
         )
         from georiva.analysis.zonal_stats.tasks import compute_boundary_zonal_stats
         from georiva.core.models import Asset
-        from georiva.core.storage import storage
 
         collections = self._resolve_collections(options)
 
@@ -122,10 +122,10 @@ class Command(BaseCommand):
                         t0 = time.perf_counter()
                         try:
                             with transaction.atomic():
-                                cog_bytes = storage.assets.read_bytes(asset.href)
+                                band = read_band(asset.location)
                                 total_written_asset = 0
                                 for boundaries in boundaries_by_level.values():
-                                    stats_rows = compute_stats_from_cog_bytes(cog_bytes, boundaries)
+                                    stats_rows = compute_stats_from_band(band, boundaries)
                                     written = persist_stats(
                                         item=asset.item,
                                         variable=asset.variable,
