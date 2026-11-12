@@ -11,10 +11,11 @@ from datetime import UTC, datetime
 
 from django.test import SimpleTestCase
 
-from georiva.harvest.survey import Shape, survey_catalog, survey_collection
+from georiva.harvest.survey import Shape, reason_for, survey_catalog, survey_collection
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import (
     AssetProbe,
+    CubeDimension,
     UpstreamAsset,
     UpstreamCollection,
     UpstreamStatistics,
@@ -67,8 +68,30 @@ class CatalogSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertEqual([c.id for c in found.collections], ["chirps"])
         self.assertFalse(found.described, "ids only: there are no titles or extents to show")
 
-    def test_a_catalog_with_no_api_offers_nothing_and_says_so(self):
+    def test_a_catalog_with_no_api_offers_the_collections_its_root_links_to(self):
+        # stac.dynamical.org/catalog.json: plain files, and 43 collections a link away each.
         self.upstream.is_api = False
+        self.upstream.collections.append(UpstreamCollection(id="noaa-gfs-forecast", title="NOAA GFS forecast"))
+
+        found = survey_catalog(self.upstream)
+
+        self.assertFalse(found.has_api)
+        offered = [(c.id, c.title) for c in found.collections]
+        self.assertEqual(offered, [("chirps", "CHIRPS monthly rainfall"), ("noaa-gfs-forecast", "NOAA GFS forecast")])
+        self.assertTrue(found.described)
+
+    def test_a_catalog_with_no_api_that_will_not_describe_its_collections_offers_them_by_id(self):
+        self.upstream.is_api = False
+        self.upstream.collections_unreachable = BROKEN
+
+        found = survey_catalog(self.upstream)
+
+        self.assertEqual([c.id for c in found.collections], ["chirps"])
+        self.assertFalse(found.described)
+
+    def test_a_catalog_with_no_api_and_no_collections_offers_nothing_and_says_so(self):
+        self.upstream.is_api = False
+        self.upstream.collections = []
 
         found = survey_catalog(self.upstream)
 
@@ -182,6 +205,18 @@ class ShapeTests(SurveyMixin, SimpleTestCase):
 
         self.assertEqual((found.shape, found.harvestable), (Shape.NO_API, False))
 
+    def test_a_collection_of_plain_item_files_in_a_catalog_with_no_api_still_cannot(self):
+        # The items are there to be had; without an API they cannot be asked for by time.
+        self.upstream.is_api = False
+        self.add_days(lambda n: f"{OWN}/{n}.tif")
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.accepted), (Shape.NO_API, False))
+        self.assertIn("cannot be searched by time", found.reason)
+        self.assertEqual(self.upstream.windows_asked, [], "its items are never listed")
+        self.assertEqual((self.upstream.probed, self.upstream.stores_opened), ([], []))
+
     def test_a_store_in_a_catalog_with_no_api_is_called_a_store(self):
         # Both are true of it; "one data store" is the one that tells an operator what they have.
         self.upstream.is_api = False
@@ -201,6 +236,7 @@ class ShapeTests(SurveyMixin, SimpleTestCase):
 
         self.assertEqual((found.shape, found.harvestable), (Shape.STORE, False))
         self.assertIn("data store", found.reason)
+        self.assertEqual(self.upstream.stores_opened, [], "a store that describes no cube is not opened")
 
     def test_a_collection_with_no_items_cannot(self):
         found = self.survey()
@@ -243,6 +279,288 @@ class ShapeTests(SurveyMixin, SimpleTestCase):
 
         self.assertLess(found.items_sampled, 28)
         self.assertEqual(len(self.upstream.probed), 1, "one Sample item per asset key")
+
+
+STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
+STORE_S3 = "s3://dynamical-noaa-gfs/noaa-gfs-forecast-virtual/v0.1.0.icechunk/"
+STORE_HOST = "dynamical-noaa-gfs.s3.us-west-2.amazonaws.com"
+GRIB_BUCKET = "s3://noaa-gfs-bdp-pds/"
+FORECAST = {"init_time": None, "lead_time": 209, "latitude": 721, "longitude": 1440}
+RUN_STEP_GRID = ("init_time", "lead_time", "latitude", "longitude")
+#: What the store carries beside its fields: coordinates, and what it says of each run.
+BESIDE = {
+    "init_time": (("init_time",), (1024,)),
+    "valid_time": (("init_time", "lead_time"), (1024, 209)),
+    "expected_forecast_length": (("init_time",), (1024,)),
+    "spatial_ref": ((), ()),
+}
+#: The words that are the store's makers', never an operator's.
+STORE_JARGON = ("Zarr", "zarr", "Icechunk", "icechunk", "chunk", "codec")
+
+
+class StoreSurveyTests(SurveyMixin, SimpleTestCase):
+    """An Upstream store: one collection, one cube, no items (ADR 0044 §1, §5, §12)."""
+
+    def setUp(self):
+        super().setUp()
+        self.upstream.is_api = False
+
+    def map_shaped(self, **kwargs):
+        """GFS as dynamical.org's virtual store publishes it: one whole field a chunk."""
+        arrays = {
+            "temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)),
+            "wind_u_10m": (RUN_STEP_GRID, (1, 1, 721, 1440)),
+            **BESIDE,
+        }
+        self.upstream.become_store(STORE, FORECAST, kwargs.pop("arrays", arrays), **kwargs)
+
+    def series_shaped(self):
+        """The same model rewritten for a place over time: 105 steps over a 30° square."""
+        arrays = {"temperature_2m": (RUN_STEP_GRID, (1, 105, 121, 121)), **BESIDE}
+        self.upstream.become_store(STORE, FORECAST, arrays)
+
+    def assert_plain(self, reason, *, but=()):
+        for jargon in (*STORE_JARGON, "STAC", "S3", "COG", "API"):
+            self.assertNotIn(jargon, reason if not but else reason.replace(but, ""))
+
+    # Accepted.
+
+    def test_a_map_shaped_store_whose_codecs_decode_is_accepted(self):
+        self.map_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.MAP_STORE)
+        self.assertTrue(found.accepted)
+        self.assertEqual(found.reason, "")
+        self.assertEqual(self.upstream.stores_opened, [STORE])
+        self.assertEqual((found.store.href, found.store.fields), (STORE, 2))
+
+    def test_an_accepted_store_is_not_yet_something_a_feed_can_be_set_up_from(self):
+        self.map_shaped()
+
+        self.assertFalse(self.survey().harvestable)
+
+    def test_a_store_naming_the_grib_codec_core_carries_is_accepted(self):
+        # The check is against what is installed here, and gribberish is in core's lock.
+        self.map_shaped(codecs={name: ("scale_offset", "gribberish") for name in ("temperature_2m", "wind_u_10m")})
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.MAP_STORE)
+        self.assertEqual(found.store.codecs, ["scale_offset", "gribberish", "bytes", "zstd"])
+
+    def test_an_analysis_store_with_one_time_is_map_shaped_too(self):
+        self.upstream.become_store(
+            STORE,
+            {"time": None, "latitude": 721, "longitude": 1440},
+            {"precipitation": (("time", "latitude", "longitude"), (1, 721, 1440))},
+        )
+
+        self.assertEqual(self.survey().shape, Shape.MAP_STORE)
+
+    def test_a_store_behind_an_api_is_surveyed_as_a_store_too(self):
+        self.upstream.is_api = True
+        self.map_shaped()
+
+        self.assertEqual(self.survey().shape, Shape.MAP_STORE)
+
+    def test_the_https_address_is_the_one_opened_where_the_store_is_published_twice(self):
+        self.map_shaped(s3_href=STORE_S3)
+
+        found = self.survey()
+
+        self.assertEqual(self.upstream.stores_opened, [STORE])
+        self.assertEqual(found.store.href, STORE)
+        self.assertEqual(self.upstream.regions_asked, [], "the s3 twin is never asked about")
+
+    def test_where_the_store_lives_is_reported_as_a_place_that_was_read(self):
+        self.map_shaped()
+
+        (location,) = self.survey().locations
+
+        self.assertEqual((location.host, location.readable, location.problem), (STORE_HOST, True, ""))
+
+    def test_the_places_a_virtual_store_says_its_data_lives_in_are_carried(self):
+        self.map_shaped(chunk_locations=(GRIB_BUCKET,))
+
+        self.assertEqual(self.survey().store.chunk_locations, [GRIB_BUCKET])
+
+    def test_surveying_a_store_lists_no_items_and_opens_no_file(self):
+        self.map_shaped()
+
+        self.survey()
+
+        self.assertEqual((self.upstream.windows_asked, self.upstream.probed), ([], []))
+
+    # Refused: its shape.
+
+    def test_a_series_shaped_store_is_refused_with_its_reason(self):
+        self.series_shaped()
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.accepted, found.harvestable), (Shape.SERIES_STORE, False, False))
+        self.assertIn("charting one place over time", found.reason)
+        self.assertIn("not for drawing maps", found.reason)
+        self.assertIn("cannot use it yet", found.reason)
+        self.assert_plain(found.reason)
+
+    def test_a_series_shaped_store_is_never_opened(self):
+        self.series_shaped()
+
+        self.survey()
+
+        self.assertEqual(self.upstream.stores_opened, [], "its published layout already said no")
+
+    def test_many_times_in_one_piece_is_series_shaped_whatever_the_ground_it_covers(self):
+        self.upstream.become_store(
+            STORE,
+            {"time": None, "latitude": 2000, "longitude": 7200},
+            {"precipitation": (("time", "latitude", "longitude"), (365, 60, 60))},
+        )
+
+        self.assertEqual(self.survey().shape, Shape.SERIES_STORE)
+
+    def test_one_series_shaped_field_makes_the_store_series_shaped(self):
+        self.map_shaped(
+            arrays={
+                "temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)),
+                "precipitation_surface": (RUN_STEP_GRID, (1, 105, 121, 121)),
+            }
+        )
+
+        self.assertEqual(self.survey().shape, Shape.SERIES_STORE)
+
+    def test_a_step_dimension_is_known_by_its_name_where_the_collection_does_not_call_it_temporal(self):
+        dimensions = {**FORECAST, "lead_time": CubeDimension("lead_time", kind="other", size=209)}
+        self.upstream.become_store(STORE, dimensions, {"temperature_2m": (RUN_STEP_GRID, (1, 105, 121, 121))})
+
+        self.assertEqual(self.survey().shape, Shape.SERIES_STORE)
+
+    def test_arrays_that_are_not_fields_do_not_decide_the_shape(self):
+        # `valid_time` holds every step of every run in one piece, and is no field.
+        self.map_shaped()
+
+        self.assertEqual(self.survey().shape, Shape.MAP_STORE)
+
+    # Refused: what it is packed with.
+
+    def test_a_store_naming_an_unknown_codec_is_refused_and_the_codec_is_named(self):
+        self.map_shaped(codecs={"wind_u_10m": ("bytes", "acme_wavelet")})
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.accepted), (Shape.UNDECODABLE_STORE, False))
+        self.assertIn("“acme_wavelet”", found.reason)
+        self.assertNotIn("bytes", found.reason, "only what cannot be decoded is named")
+        self.assert_plain(found.reason, but="acme_wavelet")
+
+    def test_every_codec_that_cannot_be_decoded_is_named_once(self):
+        self.map_shaped(codecs={"temperature_2m": ("acme_wavelet",), "wind_u_10m": ("acme_wavelet", "other_codec")})
+
+        reason = self.survey().reason
+
+        self.assertEqual(reason.count("acme_wavelet"), 1)
+        self.assertIn("“other_codec”", reason)
+
+    def test_an_array_that_is_no_field_still_has_to_decode(self):
+        self.map_shaped(codecs={"valid_time": ("acme_wavelet",)})
+
+        self.assertEqual(self.survey().shape, Shape.UNDECODABLE_STORE)
+
+    # Refused: it cannot be read, or cannot be told.
+
+    def test_a_store_that_does_not_open_is_refused_as_any_upstream_that_needs_an_account(self):
+        self.map_shaped()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.accepted), (Shape.NEEDS_ACCOUNT, False))
+        self.assertIn("may need an account", found.reason)
+        self.assertIn("it did not open", found.reason)
+        (location,) = found.locations
+        self.assertFalse(location.readable)
+        self.assertEqual(found.proposed_locations, [])
+
+    def test_a_store_at_a_private_address_is_refused_and_never_opened(self):
+        self.upstream.addresses[STORE_HOST] = ["10.0.0.7"]
+        self.map_shaped()
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.NEEDS_ACCOUNT)
+        self.assertEqual(self.upstream.stores_opened, [])
+
+    def test_a_store_published_over_plain_http_is_never_opened(self):
+        self.upstream.become_store(
+            STORE.replace("https://", "http://"), FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))}
+        )
+
+        self.assertEqual(self.survey().shape, Shape.NEEDS_ACCOUNT)
+        self.assertEqual(self.upstream.stores_opened, [])
+
+    def test_a_store_published_only_by_s3_is_opened_at_the_public_host_of_its_bucket(self):
+        self.upstream.regions["dynamical-noaa-gfs"] = "us-west-2"
+        self.upstream.become_store(STORE_S3, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))})
+        self.upstream.stores[f"{STORE}/"] = self.upstream.stores.pop(STORE_S3)
+
+        found = self.survey()
+
+        self.assertEqual(self.upstream.stores_opened, [f"{STORE}/"])
+        self.assertEqual(found.shape, Shape.MAP_STORE)
+
+    def test_a_store_whose_layout_the_collection_does_not_give_is_unreadable_and_says_what_is_missing(self):
+        cases = {
+            "how “temperature_2m” is divided up": (FORECAST, {"temperature_2m": (RUN_STEP_GRID, None)}),
+            "how “wind_u_10m” is divided up": (
+                FORECAST,
+                {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)), "wind_u_10m": (RUN_STEP_GRID, (1, 721, 1440))},
+            ),
+            "the size of its grid along “latitude”": (
+                {**FORECAST, "latitude": None},
+                {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))},
+            ),
+            "lists no fields on its grid": (FORECAST, dict(BESIDE)),
+            "a grid with a width and a height": (
+                {"init_time": None, "lead_time": 209, "station": 500},
+                {"temperature_2m": (("init_time", "lead_time", "station"), (1, 1, 500))},
+            ),
+        }
+        for missing, (dimensions, arrays) in cases.items():
+            with self.subTest(missing=missing):
+                self.upstream.stores_opened = []
+                self.upstream.become_store(STORE, dimensions, arrays)
+
+                found = self.survey()
+
+                self.assertEqual((found.shape, found.accepted), (Shape.UNREADABLE_STORE, False))
+                self.assertIn(missing, found.reason)
+                self.assert_plain(found.reason)
+                self.assertEqual(self.upstream.stores_opened, [])
+
+    def test_fields_cut_into_tiles_within_one_step_are_neither_shape(self):
+        self.upstream.become_store(STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 256, 256))})
+
+        found = self.survey()
+
+        self.assertEqual(found.shape, Shape.UNREADABLE_STORE)
+        self.assertIn("small tiles", found.reason)
+
+    def test_a_store_that_describes_no_cube_is_refused_as_before(self):
+        self.map_shaped(described=False)
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.accepted), (Shape.STORE, False))
+        self.assertEqual(self.upstream.stores_opened, [])
+
+    def test_no_reason_given_for_a_store_uses_its_makers_words(self):
+        for shape in (Shape.STORE, Shape.SERIES_STORE, Shape.UNDECODABLE_STORE, Shape.UNREADABLE_STORE):
+            with self.subTest(shape=shape):
+                self.assertTrue(reason_for(shape))
+                self.assert_plain(reason_for(shape))
 
 
 class AssetTests(SurveyMixin, SimpleTestCase):

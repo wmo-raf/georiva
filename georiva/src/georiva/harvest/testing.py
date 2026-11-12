@@ -7,8 +7,12 @@ from datetime import datetime
 
 from .upstream import (
     AssetProbe,
+    CubeArray,
+    CubeDimension,
+    StoreProbe,
     UpstreamAsset,
     UpstreamCollection,
+    UpstreamCube,
     UpstreamItem,
     UpstreamRoot,
     UpstreamUnreachable,
@@ -20,8 +24,25 @@ from .upstream import (
 PUBLIC_ADDRESS = "93.184.216.34"
 
 
+#: The codecs a store's arrays name unless a test says otherwise: ones every install decodes.
+PLAIN_CODECS = ("bytes", "zstd")
+
+
+def cube_dimension(name: str, size: int | None) -> CubeDimension:
+    """A cube dimension as a publisher would describe one of that name."""
+    if name in ("latitude", "y"):
+        return CubeDimension(name, kind="spatial", axis="y", size=size)
+    if name in ("longitude", "x"):
+        return CubeDimension(name, kind="spatial", axis="x", size=size)
+    return CubeDimension(name, kind="temporal" if name.endswith("time") else "other", size=size)
+
+
 class FakeUpstream:
     """An Upstream catalog client over canned collections and items.
+
+    It can also stand for an Upstream store (`become_store`): a collection with
+    no items, whose one asset is a store with arrays, dimensions, chunking,
+    codecs and declared chunk locations.
 
     Honest by default: it answers `list_items` with the window it was asked
     for. Set `ignores_window` for an Upstream that returns everything it has,
@@ -59,6 +80,57 @@ class FakeUpstream:
         self.unreadable: str | None = None
         #: The files opened, in order, each with whether a value range was asked for.
         self.probed: list[tuple[str, bool]] = []
+
+        # What only an Upstream store answers.
+        #: The codecs each store's arrays name, by the store's address and the array's path.
+        self.stores: dict[str, dict[str, tuple[str, ...]]] = {}
+        #: A message for a store that cannot be opened.
+        self.store_unreadable: str | None = None
+        #: The stores opened, in order.
+        self.stores_opened: list[str] = []
+
+    def become_store(
+        self,
+        href: str,
+        dimensions: dict[str, int | None | CubeDimension],
+        arrays: dict[str, tuple],
+        *,
+        codecs: dict[str, tuple[str, ...]] | None = None,
+        chunk_locations: tuple[str, ...] = (),
+        s3_href: str = "",
+        media_type: str = "application/x-icechunk",
+        described: bool = True,
+    ) -> None:
+        """Make the collection an Upstream store at `href`.
+
+        `dimensions` gives each dimension's size (or a whole `CubeDimension`).
+        `arrays` gives each array, by path, as `(dimensions, chunks)`; `chunks`
+        may be `None` for one the collection does not describe. `codecs` names
+        the codecs of any array that does not use `PLAIN_CODECS`. `s3_href` is
+        the same store's `s3://` address, when the collection publishes both;
+        `described=False` leaves the cube out of the collection.
+        """
+        asset = UpstreamAsset(href=href, media_type=media_type, chunk_locations=tuple(chunk_locations))
+        assets = {"icechunk-https": asset}
+        if s3_href:
+            # First, as dynamical.org lists it: the survey must still choose the `https` one.
+            assets = {"icechunk": replace(asset, href=s3_href), **assets}
+        cube = UpstreamCube(
+            dimensions={
+                name: size if isinstance(size, CubeDimension) else cube_dimension(name, size)
+                for name, size in dimensions.items()
+            },
+            arrays={
+                path: CubeArray(path, tuple(named), None if chunks is None else tuple(chunks))
+                for path, (named, chunks) in arrays.items()
+            },
+        )
+        self.collections = [
+            replace(c, assets=assets, cube=cube if described else None) if c.id == self.collection_id else c
+            for c in self.collections
+        ]
+        self.items = []
+        self.stores[href] = {path: (codecs or {}).get(path, PLAIN_CODECS) for path in arrays}
 
     def add_item(self, when: datetime, assets: dict[str, UpstreamAsset | str], **fields) -> UpstreamItem:
         """Add an item at `when`. An asset given as a string is its href."""
@@ -140,3 +212,11 @@ class FakeUpstream:
             readable=True, tiled=True, overviews=True, crs="EPSG:4326", value_min=0.0, value_max=100.0
         )
         return probe if estimate_range else replace(probe, value_min=None, value_max=None)
+
+    def describe_store(self, href: str) -> StoreProbe:
+        self.stores_opened.append(href)
+        if self.store_unreadable:
+            return StoreProbe(readable=False, problem=self.store_unreadable)
+        if href not in self.stores:
+            return StoreProbe(readable=False, problem="there is no store at that address")
+        return StoreProbe(readable=True, codecs=dict(self.stores[href]))

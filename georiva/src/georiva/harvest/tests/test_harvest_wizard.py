@@ -6,6 +6,7 @@ Driven through the wizard's own pages, as an operator signed in to an
 organisation's admin. The only fake is the Upstream.
 """
 
+import re
 from datetime import UTC, datetime
 from unittest import mock
 
@@ -38,6 +39,13 @@ def month(n: int) -> datetime:
 
 def step(n: int) -> str:
     return reverse(f"harvest_wizard_step{n}")
+
+
+def wizard_copy(page) -> str:
+    """The wizard's own part of a page, without its CSRF tokens: 64 random
+    letters and digits, which sooner or later spell any short word ("S3")."""
+    html = page.content.decode()
+    return re.sub(r"\b[A-Za-z0-9]{64}\b", "", html[html.index("hwiz-progress") :])
 
 
 class WizardMixin:
@@ -190,8 +198,7 @@ class WizardSetsUpAFeedTests(WizardMixin, TestCase):
         pages.append(self.client.get(step(5)))
 
         for number, page in enumerate(pages, start=1):
-            html = page.content.decode()
-            body = html[html.index("hwiz-progress") :]
+            body = wizard_copy(page)
             for jargon in ("STAC", "S3", "s3://", "COG", "bucket", "allowlist", "asset"):
                 # The example address on step 1 is a real catalog's, and spells its own path.
                 self.assertNotIn(jargon, body.replace("explorer.digitalearth.africa/stac", ""), f"step {number}")
@@ -253,12 +260,26 @@ class WizardStopsWhereItMustTests(WizardMixin, TestCase):
         self.assertIn("answered 401", self.errors(response))
         self.assertIn("without an account", self.errors(response))
 
-    def test_a_catalog_of_plain_files_is_refused_in_plain_words(self):
+    def test_a_catalog_of_plain_files_that_links_to_no_collection_is_refused_in_plain_words(self):
         self.upstream.is_api = False
+        self.upstream.collections = []
 
         response = self.give_address()
 
         self.assertIn("cannot be searched by time", self.errors(response))
+
+    def test_a_collection_of_plain_item_files_in_a_catalog_of_plain_files_ends_at_step_three(self):
+        # Its collections are offered now; one that is items and no store is refused as it always was.
+        self.upstream.is_api = False
+
+        self.assertRedirects(self.give_address("https://stac.upstream.example/catalog.json"), step(2))
+        self.assertRedirects(self.pick_collection(), step(3))
+
+        found = self.client.get(step(3))
+        self.assertContains(found, "GeoRiva cannot show")
+        self.assertContains(found, "cannot be searched by time")
+        self.assertRedirects(self.client.get(step(4)), step(3))
+        self.assertFalse(HarvestFeed.objects.exists())
 
     def test_a_collection_the_catalog_does_not_have_cannot_be_picked(self):
         self.give_address()
@@ -320,6 +341,164 @@ class WizardStopsWhereItMustTests(WizardMixin, TestCase):
         self.give_address("https://another.example/api")
 
         self.assertRedirects(self.client.get(step(5)), step(1))
+
+
+STATIC = "https://stac.upstream.example/catalog.json"
+STORE = "https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
+STORE_HOST = "dynamical-noaa-gfs.s3.us-west-2.amazonaws.com"
+FORECAST = {"init_time": None, "lead_time": 209, "latitude": 721, "longitude": 1440}
+RUN_STEP_GRID = ("init_time", "lead_time", "latitude", "longitude")
+
+
+class WizardGivesAVerdictOnAStoreTests(WizardMixin, TestCase):
+    """An Upstream like stac.dynamical.org: plain files, no API, and every
+    collection one store (ADR 0044 §1, §5, §12). The wizard stops at the verdict."""
+
+    def setUp(self):
+        super().setUp()
+        self.upstream = FakeUpstream("noaa-gfs-forecast-virtual", title="NOAA GFS forecast")
+        self.upstream.is_api = False
+        by_place = UpstreamCollection(id="noaa-gfs-forecast", title="NOAA GFS forecast, by place")
+        self.upstream.collections.append(by_place)
+
+    def store(self, chunks=(1, 1, 721, 1440), **kwargs):
+        arrays = {
+            "temperature_2m": (RUN_STEP_GRID, chunks),
+            "wind_u_10m": (RUN_STEP_GRID, chunks),
+            "init_time": (("init_time",), (1024,)),
+        }
+        gribberish = {name: ("scale_offset", "gribberish") for name in ("temperature_2m", "wind_u_10m")}
+        self.upstream.become_store(
+            STORE,
+            FORECAST,
+            arrays,
+            codecs=kwargs.pop("codecs", gribberish),
+            chunk_locations=("s3://noaa-gfs-bdp-pds/",),
+            s3_href="s3://dynamical-noaa-gfs/noaa-gfs-forecast-virtual/v0.1.0.icechunk/",
+            **kwargs,
+        )
+
+    def reach_verdict(self):
+        self.assertRedirects(self.give_address(STATIC), step(2))
+        self.assertRedirects(self.pick_collection("noaa-gfs-forecast-virtual"), step(3))
+        return self.client.get(step(3))
+
+    def assert_nothing_was_made(self):
+        self.assertFalse(HarvestFeed.objects.exists())
+        self.assertFalse(Catalog.objects.exists())
+        self.assertFalse(Collection.objects.exists())
+        self.run_now.assert_not_called()
+
+    def assert_no_way_on(self, page):
+        self.assertNotContains(page, step(4))
+        self.assertRedirects(self.client.get(step(4)), step(3))
+        self.assertRedirects(self.choose_images(), step(3))
+        self.assertRedirects(self.client.get(step(5)), step(4), fetch_redirect_response=False)
+        self.assertRedirects(self.save(), step(4), fetch_redirect_response=False)
+
+    def test_a_catalog_with_no_api_lists_its_collections_in_step_two(self):
+        self.store()
+
+        self.assertRedirects(self.give_address(STATIC), step(2))
+
+        page = self.client.get(step(2))
+        self.assertContains(page, "holds 2 collections")
+        self.assertContains(page, "NOAA GFS forecast (noaa-gfs-forecast-virtual)")
+        self.assertContains(page, "NOAA GFS forecast, by place (noaa-gfs-forecast)")
+
+    def test_a_map_shaped_store_that_decodes_gets_an_accepting_verdict(self):
+        self.store()
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "GeoRiva can draw maps from “NOAA GFS forecast”")
+        self.assertContains(page, "without copying it")
+        self.assertContains(page, "It holds 2 kinds of map.")
+        self.assertContains(page, STORE_HOST)
+        self.assertNotContains(page, "GeoRiva cannot show")
+        self.assertEqual(self.upstream.stores_opened, [STORE], "opened once, at its https address")
+
+    def test_the_wizard_does_not_go_past_an_accepted_store_and_says_so(self):
+        self.store()
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "GeoRiva cannot set up a feed from a data store yet")
+        self.assertContains(page, "Nothing has been saved")
+        self.assert_no_way_on(page)
+        self.assert_nothing_was_made()
+
+    def test_a_series_shaped_store_is_refused_with_its_reason_and_creates_nothing(self):
+        self.store(chunks=(1, 105, 121, 121))
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "GeoRiva cannot show “NOAA GFS forecast”")
+        self.assertContains(page, "laid out for charting one place over time, not for drawing maps")
+        self.assertContains(page, "GeoRiva cannot use it yet")
+        self.assertNotContains(page, "GeoRiva can draw maps")
+        self.assert_no_way_on(page)
+        self.assert_nothing_was_made()
+        self.assertEqual(self.upstream.stores_opened, [])
+
+    def test_a_store_naming_an_unknown_codec_is_refused_and_the_codec_is_named(self):
+        self.store(codecs={"temperature_2m": ("scale_offset", "acme_wavelet")})
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "GeoRiva cannot show")
+        self.assertContains(page, "packed in a way GeoRiva cannot unpack: “acme_wavelet”")
+        self.assert_no_way_on(page)
+        self.assert_nothing_was_made()
+
+    def test_a_store_that_cannot_be_reached_is_refused_as_any_upstream_is(self):
+        self.store()
+        self.upstream.store_unreadable = "it did not answer within 45 seconds"
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "GeoRiva cannot show")
+        self.assertContains(page, "They may need an account")
+        self.assertContains(page, "it did not answer within 45 seconds")
+        self.assert_nothing_was_made()
+
+    def test_a_store_whose_layout_is_not_published_says_what_is_missing(self):
+        self.store(chunks=None)
+
+        page = self.reach_verdict()
+
+        self.assertContains(page, "could not work out how this collection&#x27;s data is laid out")
+        self.assertContains(page, "how “temperature_2m” is divided up")
+
+    def test_no_page_about_a_store_uses_its_makers_words(self):
+        verdicts = {
+            "accepted": {},
+            "series-shaped": {"chunks": (1, 105, 121, 121)},
+            "undecodable": {"codecs": {"temperature_2m": ("acme_wavelet",)}},
+            "undescribed layout": {"chunks": None},
+            "no cube": {"described": False},
+        }
+        for verdict, shape in verdicts.items():
+            with self.subTest(verdict=verdict):
+                self.store(**shape)
+                self.give_address(STATIC)
+                pages = [self.client.get(step(2))]
+                self.pick_collection("noaa-gfs-forecast-virtual")
+                pages.append(self.client.get(step(3)))
+
+                for page in pages:
+                    body = wizard_copy(page).replace("acme_wavelet", "")
+                    for jargon in ("Zarr", "zarr", "Icechunk", "icechunk", "chunk", "codec", "STAC", "S3", "s3://"):
+                        self.assertNotIn(jargon, body)
+
+    def test_a_store_that_is_unreadable_too_keeps_its_makers_words_out(self):
+        self.store()
+        self.upstream.store_unreadable = "it did not open for a reader with no account"
+
+        body = wizard_copy(self.reach_verdict())
+
+        for jargon in ("Zarr", "Icechunk", "icechunk", "chunk", "codec"):
+            self.assertNotIn(jargon, body)
 
 
 class WizardConfirmsWhereFilesAreTests(WizardMixin, TestCase):

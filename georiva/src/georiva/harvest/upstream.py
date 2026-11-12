@@ -7,17 +7,21 @@ window, and what address an asset host resolves to. All remoteness lives behind
 it, so it is the only thing faked in tests (ADR 0042 §13), and the harvest itself
 never opens a socket.
 
-`StacApiClient` is the real one: an anonymous STAC API (ADR 0042 §2).
+`StacApiClient` is the real one: an anonymous STAC API (ADR 0042 §2), or a
+catalog of plain files whose collections are Upstream stores (ADR 0044 §1).
 """
 
 from __future__ import annotations
 
+import logging
 import socket
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
+
+logger = logging.getLogger(__name__)
 
 #: A window: `(start, end)`, both inclusive, either `None` for unbounded.
 Window = tuple[datetime | None, datetime | None]
@@ -30,6 +34,39 @@ class UpstreamUnreachable(Exception):
 
 
 @dataclass(frozen=True)
+class CubeDimension:
+    """One dimension of a collection's cube, as the collection describes it."""
+
+    name: str
+    #: The datacube extension's `type`: "temporal", "spatial", or whatever else the publisher wrote.
+    kind: str = ""
+    #: "x" or "y" for a horizontal dimension; empty for any other.
+    axis: str = ""
+    #: How many steps it has; `None` when the collection does not say.
+    size: int | None = None
+
+
+@dataclass(frozen=True)
+class CubeArray:
+    """One array of a collection's cube, by its path in the store."""
+
+    path: str
+    dimensions: tuple[str, ...] = ()
+    #: How many steps of each dimension one chunk spans; `None` when the collection does not say.
+    chunks: tuple[int, ...] | None = None
+    title: str = ""
+    unit: str = ""
+
+
+@dataclass(frozen=True)
+class UpstreamCube:
+    """A collection's own description of the cube its store holds (`cube:dimensions`, `cube:variables`)."""
+
+    dimensions: dict[str, CubeDimension] = field(default_factory=dict)
+    arrays: dict[str, CubeArray] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class UpstreamCollection:
     id: str
     title: str = ""
@@ -37,6 +74,8 @@ class UpstreamCollection:
     bbox: list[float] | None = None
     #: Assets the collection itself carries, beside its items': a whole-collection store, typically.
     assets: dict[str, UpstreamAsset] = field(default_factory=dict)
+    #: The cube an Upstream store's collection describes; `None` when it describes none.
+    cube: UpstreamCube | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +111,18 @@ class AssetProbe:
 
 
 @dataclass(frozen=True)
+class StoreProbe:
+    """What opening an Upstream store showed of its arrays. Only their metadata
+    is read: no data, and so nothing of where a virtual store's chunks live."""
+
+    readable: bool
+    #: Why it could not be opened; empty when it could.
+    problem: str = ""
+    #: The codecs each array names, by the array's path in the store, in the order it names them.
+    codecs: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class UpstreamStatistics:
     """Display statistics an Upstream publishes for an asset's band. Any may be missing."""
 
@@ -93,6 +144,8 @@ class UpstreamAsset:
     nodata: float | None = None
     #: From upstream metadata only (ADR 0042 §10); `None` when it publishes none.
     statistics: UpstreamStatistics | None = None
+    #: For a virtual Upstream store: the places it declares its chunks live in, as it spells them.
+    chunk_locations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -116,7 +169,7 @@ class UpstreamCatalogClient(Protocol):
     when the Upstream cannot answer."""
 
     def list_collections(self) -> Iterable[UpstreamCollection]:
-        """Every collection the Upstream has."""
+        """Every collection the Upstream has, whether its root is an API or a catalog of plain files."""
 
     def list_items(self, collection_id: str, window: Window) -> Iterable[UpstreamItem]:
         """The collection's items, with their assets, whose time is in `window`."""
@@ -138,6 +191,9 @@ class UpstreamCatalogClient(Protocol):
 
     def probe_asset(self, href: str, *, estimate_range: bool) -> AssetProbe:
         """Open the file at `href` by range and say what it is. Never raises."""
+
+    def describe_store(self, href: str) -> StoreProbe:
+        """Open the Upstream store at `href` and say which codecs its arrays name. Never raises."""
 
 
 # ── STAC JSON → what a harvest reads ────────────────────────────────────────
@@ -169,15 +225,57 @@ def _flat_bbox(bbox) -> list[float] | None:
     return None if None in numbers else numbers
 
 
-def parse_collection(payload: dict) -> UpstreamCollection:
+def parse_collection(payload: dict, *, base_url: str = "") -> UpstreamCollection:
     bboxes = ((payload.get("extent") or {}).get("spatial") or {}).get("bbox") or []
     return UpstreamCollection(
         id=str(payload.get("id", "")),
         title=str(payload.get("title") or ""),
         description=str(payload.get("description") or ""),
         bbox=_flat_bbox(bboxes[0]) if bboxes else None,
-        assets=_parse_assets(payload.get("assets")),
+        assets=_parse_assets(payload.get("assets"), base_url=base_url),
+        cube=parse_cube(payload),
     )
+
+
+def _whole(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def parse_cube(payload: dict) -> UpstreamCube | None:
+    """The cube a collection describes with the datacube extension; `None` when
+    it describes neither dimensions nor variables. What is described badly is
+    kept as far as it goes: saying what is missing is the survey's to do."""
+    dimensions, variables = payload.get("cube:dimensions"), payload.get("cube:variables")
+    if not isinstance(dimensions, dict) and not isinstance(variables, dict):
+        return None
+    found = {}
+    for name, dimension in (dimensions if isinstance(dimensions, dict) else {}).items():
+        if not isinstance(dimension, dict):
+            continue
+        size = _whole(dimension.get("size"))
+        values = dimension.get("values")
+        if size is None and isinstance(values, list):
+            size = len(values)
+        found[str(name)] = CubeDimension(
+            name=str(name),
+            kind=str(dimension.get("type") or "").lower(),
+            axis=str(dimension.get("axis") or "").lower(),
+            size=size,
+        )
+    arrays = {}
+    for path, variable in (variables if isinstance(variables, dict) else {}).items():
+        if not isinstance(variable, dict):
+            continue
+        named, chunks = variable.get("dimensions"), variable.get("chunks")
+        whole = [_whole(n) for n in chunks] if isinstance(chunks, list) else [None]
+        arrays[str(path)] = CubeArray(
+            path=str(path),
+            dimensions=tuple(str(n) for n in named) if isinstance(named, list) else (),
+            chunks=None if None in whole else tuple(whole),
+            title=str(variable.get("long_name") or variable.get("description") or ""),
+            unit=str(variable.get("unit") or ""),
+        )
+    return UpstreamCube(dimensions=found, arrays=arrays)
 
 
 def _parse_assets(assets, *, base_url: str = "") -> dict[str, UpstreamAsset]:
@@ -205,7 +303,7 @@ def parse_root(payload: dict, *, base_url: str = "") -> UpstreamRoot:
         is_api=is_api,
         children=children,
         child_hrefs=child_hrefs,
-        own=parse_collection(payload) if payload.get("type") == "Collection" else None,
+        own=parse_collection(payload, base_url=base_url) if payload.get("type") == "Collection" else None,
     )
 
 
@@ -233,6 +331,7 @@ def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
     stats = band.get("statistics")
     size = payload.get("file:size")
     href = str(payload.get("href") or "")
+    containers = payload.get("icechunk:virtual_chunk_containers")
     return UpstreamAsset(
         # An asset with no href stays without one: joined to the page it would name the page.
         href=urljoin(base_url, href) if href else "",
@@ -252,6 +351,11 @@ def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
             )
             if isinstance(stats, dict)
             else None
+        ),
+        chunk_locations=tuple(
+            str(container["url_prefix"])
+            for container in (containers if isinstance(containers, list) else [])
+            if isinstance(container, dict) and container.get("url_prefix")
         ),
     )
 
@@ -327,6 +431,127 @@ def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIME
         return AssetProbe(readable=False, problem=str(exc)[:300] or type(exc).__name__)
 
 
+# ── Opening one store ───────────────────────────────────────────────────────
+
+#: Seconds opening a store and reading its arrays' metadata may take in all. A
+#: cold open was measured at several seconds, and one probe in three lost its connection.
+STORE_TIMEOUT = 45
+
+#: The most arrays of a store that are asked about at once.
+STORE_CONCURRENCY = 32
+
+
+def codec_names(codecs) -> tuple[str, ...]:
+    """Every codec an array's metadata names, in order and once each, those a
+    codec wraps included: a sharded array's inner codecs decode its data too."""
+    names: list[str] = []
+
+    def walk(listed):
+        for codec in listed if isinstance(listed, list) else []:
+            if isinstance(codec, str):
+                codec = {"name": codec}
+            if not isinstance(codec, dict):
+                continue
+            name = str(codec.get("name") or "")
+            if name and name not in names:
+                names.append(name)
+            configuration = codec.get("configuration")
+            if isinstance(configuration, dict):
+                walk(configuration.get("codecs"))
+                walk(configuration.get("index_codecs"))
+
+    walk(codecs)
+    return tuple(names)
+
+
+def can_decode(codec: str) -> bool:
+    """Whether a codec of that name is registered here. Nothing about any one
+    publisher: a codec nobody installed is refused by name, without new code."""
+    from zarr.registry import get_codec_class
+
+    try:
+        get_codec_class(codec)
+    except Exception:  # zarr raises KeyError today and names its own error for it elsewhere
+        return False
+    return True
+
+
+async def _array_codecs(store) -> dict[str, tuple[str, ...]]:
+    """The codecs of every array under a store's root, by path.
+
+    Read from each node's own metadata document, never by opening the array:
+    opening one whose codec is not installed raises, and what it names is the
+    thing to be learnt. Groups are walked by listing; no chunk is touched.
+    """
+    import asyncio
+    import json
+
+    from zarr.core.buffer import default_buffer_prototype
+
+    prototype = default_buffer_prototype()
+    gate = asyncio.Semaphore(STORE_CONCURRENCY)
+    found: dict[str, tuple[str, ...]] = {}
+
+    async def visit(path: str):
+        async with gate:
+            document = await store.get(f"{path}/zarr.json" if path else "zarr.json", prototype)
+            if document is None:
+                return
+            node = json.loads(document.to_bytes())
+            if not isinstance(node, dict):
+                return
+            if node.get("node_type") == "array":
+                found[path] = codec_names(node.get("codecs"))
+                return
+            children = [name async for name in store.list_dir(f"{path}/" if path else "")]
+        await asyncio.gather(
+            *(visit(f"{path}/{name}" if path else name) for name in children if name and name != "zarr.json")
+        )
+
+    await visit("")
+    return found
+
+
+def read_store_codecs(storage, *, branch: str = "main") -> dict[str, tuple[str, ...]]:
+    """Open the repository in `storage` read-only and name its arrays' codecs.
+
+    No virtual chunk access is authorised: metadata needs none, and where a
+    store's chunks may be read from is an operator's to confirm (ADR 0044 §11).
+    """
+    import asyncio
+
+    import icechunk
+
+    repository = icechunk.Repository.open(storage)
+    return asyncio.run(_array_codecs(repository.readonly_session(branch).store))
+
+
+def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
+    """Open the store at `href` over `https` and say which codecs its arrays
+    name. Whatever goes wrong is the probe's answer, not an error, and it is
+    said in words an operator may be shown; the library's own are logged."""
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as TimedOut
+
+    def read():
+        import icechunk
+
+        each = f"{max(1, int(min(timeout, 20)))}s"
+        return read_store_codecs(icechunk.http_storage(href, opts={"timeout": each, "connect_timeout": "5s"}))
+
+    # Its own thread, so a store that stops answering costs the wait and no more.
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-probe")
+    try:
+        return StoreProbe(readable=True, codecs=pool.submit(read).result(timeout=timeout))
+    except TimedOut:
+        return StoreProbe(readable=False, problem=f"it did not answer within {int(timeout)} seconds")
+    except Exception as exc:  # whatever the store or its library raises is an answer, never a crash
+        logger.warning("Upstream store at %s did not open: %s", href, exc)
+        return StoreProbe(readable=False, problem="it did not open for a reader with no account")
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
 # ── The real client ─────────────────────────────────────────────────────────
 
 
@@ -344,7 +569,7 @@ _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
 
 class StacApiClient:
-    """An anonymous STAC API, read over HTTP.
+    """An anonymous STAC API, or a catalog of plain files, read over HTTP.
 
     The operator chose the catalog's host, and that is the only host this
     client talks to: a redirect or a `next` link to any other scheme, host or
@@ -361,6 +586,8 @@ class StacApiClient:
         self.timeout = timeout
         self.page_size = page_size
         self._session = session
+        #: Whether the root, once read, turned out to be a catalog of plain files.
+        self._plain_files: bool | None = None
 
     @property
     def session(self):
@@ -371,10 +598,47 @@ class StacApiClient:
         return self._session
 
     def list_collections(self) -> Iterator[UpstreamCollection]:
-        for page, _ in self._pages(f"{self.url}/collections"):
+        if self._is_plain_files():
+            yield from self._linked_collections(self.describe_root())
+            return
+        for page, page_url in self._pages(f"{self.url}/collections"):
             for payload in page.get("collections") or []:
                 if isinstance(payload, dict):
-                    yield parse_collection(payload)
+                    yield parse_collection(payload, base_url=page_url)
+
+    def _is_plain_files(self) -> bool:
+        """Whether the Upstream is a catalog of plain files, with no listing to
+        ask. Known once its root has been read; before that, only an address
+        that names a file is worth reading the root for — an API is asked for
+        its collections directly, with no request it was not sent before."""
+        if self._plain_files is None and urlsplit(self.url).path.lower().endswith(".json"):
+            self.describe_root()
+        return bool(self._plain_files)
+
+    def _linked_collections(self, root: UpstreamRoot) -> Iterator[UpstreamCollection]:
+        """A catalog of plain files has no listing: its collections are what
+        its root links to, each described by its own document. One that will
+        not describe itself is still offered, by the id and title of its link."""
+        if root.own is not None:
+            yield root.own
+            return
+        for child in root.children:
+            yield self._follow(root.child_hrefs.get(child.id), child.id) or child
+
+    def _follow(self, href: str | None, collection_id: str) -> UpstreamCollection | None:
+        """The collection document at `href`, when it is on the operator's own
+        host, answers, and is a collection: a child link is the Upstream's content."""
+        if href is None or not self._is_ours(href):
+            return None
+        try:
+            page, url = self._get(href, None)
+        except UpstreamUnreachable:
+            return None
+        if page.get("type") not in (None, "Collection"):
+            return None
+        described = parse_collection(page, base_url=url)
+        # The id the root's link gave is the one the operator was offered and picks by.
+        return replace(described, id=collection_id)
 
     def list_items(self, collection_id: str, window: Window) -> Iterator[UpstreamItem]:
         params = {"limit": self.page_size}
@@ -395,7 +659,9 @@ class StacApiClient:
 
     def describe_root(self) -> UpstreamRoot:
         page, url = self._get(self.url, None)
-        return parse_root(page, base_url=url)
+        root = parse_root(page, base_url=url)
+        self._plain_files = not root.is_api
+        return root
 
     def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
         root = self.describe_root()
@@ -404,14 +670,7 @@ class StacApiClient:
         href = root.child_hrefs.get(collection_id)
         if href is None and root.is_api:
             href = f"{self.url}/collections/{quote(collection_id, safe='')}"
-        # A child link is the Upstream's content: followed only to the operator's own host.
-        if href is None or not self._is_ours(href):
-            return None
-        try:
-            page, _ = self._get(href, None)
-        except UpstreamUnreachable:
-            return None
-        return parse_collection(page)
+        return self._follow(href, collection_id)
 
     def bucket_region(self, bucket: str) -> str | None:
         """Asked of S3 itself, which names a bucket's region on any answer. This
@@ -433,6 +692,9 @@ class StacApiClient:
 
     def probe_asset(self, href: str, *, estimate_range: bool) -> AssetProbe:
         return probe_raster(href, estimate_range=estimate_range)
+
+    def describe_store(self, href: str) -> StoreProbe:
+        return probe_store(href)
 
     def _pages(self, url: str, params: dict | None = None) -> Iterator[tuple[dict, str]]:
         """Each page of a paged listing with the URL it came from, following `next` links."""

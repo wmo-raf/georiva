@@ -6,7 +6,9 @@ Five steps: the catalog's address; pick a collection; what the Upstream survey
 found; choose which images to show and confirm where their files are read
 from; schedule and save. The survey does the knowing — collection ids, asset
 keys, hosts and buckets are found, never typed — and the wizard stops at step 3
-for a collection that cannot be harvested, saying why.
+for a collection that cannot be harvested, saying why. It stops there too for
+an Upstream store it accepts: the verdict is given, and setting a feed up from
+a store is not built yet (ADR 0044 §1).
 
 What an operator reads here is in their words: no "STAC", "S3" or "COG".
 """
@@ -173,6 +175,9 @@ def _as_session(found) -> dict:
     return {
         "shape": found.shape.value,
         "harvestable": found.harvestable,
+        # Accepted and not harvestable: a store GeoRiva can draw maps from, with no feed to set up yet.
+        "accepted": found.accepted,
+        "store": asdict(found.store) if found.store else None,
         "reason": found.reason,
         "items_sampled": found.items_sampled,
         "assets": [asdict(asset) for asset in found.assets],
