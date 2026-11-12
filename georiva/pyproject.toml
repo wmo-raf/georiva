@@ -61,7 +61,7 @@ dependencies = [
     # Held below 2.50: eckitlib 2.5 bundles a second libproj that breaks pyproj (#625)
     "eccodeslib>=2.47.3.22,<2.50",
     "icechunk==2.1.2",
-    "gribberish[zarr]>=1.9.0",
+    "gribberish[zarr]==1.9.0",
 ]
 
 [project.scripts]

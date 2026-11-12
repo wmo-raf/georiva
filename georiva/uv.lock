@@ -1596,7 +1596,7 @@ requires-dist = [
     { name = "drf-spectacular" },
     { name = "eccodeslib", specifier = ">=2.47.3.22,<2.50" },
     { name = "fsspec", specifier = ">=2024.6.0" },
-    { name = "gribberish", extras = ["zarr"], specifier = ">=1.9.0" },
+    { name = "gribberish", extras = ["zarr"], specifier = "==1.9.0" },
     { name = "gunicorn", specifier = "==26.0.0" },
     { name = "icechunk", specifier = "==2.1.2" },
     { name = "minio", specifier = "==7.2.20" },
