@@ -16,10 +16,10 @@ from wagtail.models import Orderable
 
 from georiva.core.utils import iso_utc_z
 
-from .base import AbstractAsset, AbstractSpatialItem
+from .base import AbstractAsset, AbstractSpatialItem, HarvestProvenance
 
 
-class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableModel):
+class Item(AbstractSpatialItem, HarvestProvenance, TimescaleModel, TimeStampedModel, ClusterableModel):
     """
     A single spatiotemporal entry in a Collection.
 
@@ -157,7 +157,7 @@ class Item(AbstractSpatialItem, TimescaleModel, TimeStampedModel, ClusterableMod
         return self.time.strftime(fmt)
 
 
-class Asset(AbstractAsset, TimeStampedModel, Orderable):
+class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
     """
     A stored data file for a specific Variable within an Item.
 

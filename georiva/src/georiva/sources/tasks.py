@@ -166,9 +166,11 @@ def run_data_feed_loader(self, data_feed_id):
 def create_or_update_data_feed_periodic_task(data_feed):
     """Create/update one PeriodicTask per DataFeed (not per collection)."""
     name = f"georiva.sources.tasks.run_data_feed_loader:{data_feed.pk}"
+    # The feed's own species decides which task its schedule fires.
+    data_feed = data_feed.get_real_instance()
 
     options = {
-        "task": run_data_feed_loader.name,
+        "task": data_feed.run_task_name,
         "enabled": False,
         "args": json.dumps([data_feed.pk]),
         "interval": None,

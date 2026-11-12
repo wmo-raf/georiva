@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     "georiva.wmts",
     "georiva.visualization",
     "georiva.sources",
+    "georiva.harvest",
     "georiva.organisations",
     "georiva.accounts",
     # pages

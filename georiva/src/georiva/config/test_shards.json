@@ -46,6 +46,7 @@
     ],
     [
       "georiva.sources",
+      "georiva.harvest",
       "georiva.processing",
       "georiva.geoprocessing",
       "georiva.accounts",

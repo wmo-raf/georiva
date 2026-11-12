@@ -134,6 +134,24 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     def data_source_cls(self):
         return None
 
+    #: The Celery task the feed's schedule fires, with the feed's pk. A feed
+    #: whose loop is not the Loader's (a harvest, ADR 0042 §4) names its own —
+    #: and with it its own queue (ADR 0025).
+    run_task_name = "georiva.sources.tasks.run_data_feed_loader"
+
+    def enqueue_retry(self, run):
+        """Enqueue the retry of `run`, one of this feed's ended runs: a system
+        LoaderJob scoped to the run's collection."""
+        from task_ferry.handler import JobHandler
+
+        JobHandler.create_and_start(
+            None,  # system job: exempt from the per-user max_count quota
+            "data_source_load",
+            data_feed_id=self.pk,
+            collection_id=run.collection_id,
+            resume_of_run_id=run.pk,
+        )
+
     @classmethod
     def get_wizard_defaults(cls) -> dict:
         """
@@ -761,6 +779,21 @@ class FetchRun(models.Model):
     bytes_transferred = models.BigIntegerField(default=0)
     error_message = models.TextField(blank=True)
 
+    # A harvest run's own counts, in assets (ADR 0042 §4). It has no files, so
+    # the file counters above stay zero for it and these stay zero for a fetch.
+    # The database holds the default too: a worker still on the previous release
+    # keeps writing runs while this column arrives.
+    harvest_indexed = models.IntegerField(default=0, db_default=0, help_text="Remote assets this harvest created.")
+    harvest_updated = models.IntegerField(default=0, db_default=0, help_text="Remote assets this harvest re-synced.")
+    harvest_removed = models.IntegerField(
+        default=0, db_default=0, help_text="Remote assets this harvest removed as gone upstream."
+    )
+    harvest_rejected = models.IntegerField(
+        default=0,
+        db_default=0,
+        help_text="Upstream assets skipped because their href failed the asset host allowlist.",
+    )
+
     class Meta:
         ordering = ["-started_at"]
 
@@ -922,15 +955,10 @@ class FetchRun(models.Model):
         """The run that retried this one, if any."""
         return self.resumes.order_by("pk").first()
 
-    def mark_completed(self, files_fetched=0, files_skipped=0, files_failed=0, bytes_transferred=0, retry_after=None):
-        self._finish(
-            self.Status.COMPLETED,
-            retry_after=retry_after,
-            files_fetched=files_fetched,
-            files_skipped=files_skipped,
-            files_failed=files_failed,
-            bytes_transferred=bytes_transferred,
-        )
+    def mark_completed(self, retry_after=None, **counters):
+        """Complete the run. `counters` are the counter fields its loop owns: the
+        file counters for a fetch, the `harvest_*` counts for a harvest."""
+        self._finish(self.Status.COMPLETED, retry_after=retry_after, **counters)
 
     def mark_failed(self, error="", retry_after=None, **counters):
         """Fail the run; `counters` as for mark_completed, for a run that got part way."""
