@@ -174,6 +174,7 @@ class RunTrackedTests(TestCase):
 
         finished = FetchRunFinished.objects.get()
         self.assertEqual((finished.outcome, finished.error), ("failed", "Stopped: ValueError: boom"))
+        self.assertEqual(finished.caused_by_id, FetchRunStarted.objects.get().pk)
 
     # ── what the loop reports of itself ─────────────────────────────────────
 

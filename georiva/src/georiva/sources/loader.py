@@ -343,16 +343,16 @@ class Loader:
         Returns:
             LoaderRunResult with statistics and details
         """
-        walk = _PlanWalk(LoaderRunResult())
+        plan_walk = _PlanWalk(LoaderRunResult())
         result = run_tracked(
             lambda fetch_run: self._walk_plan(
-                fetch_run, walk, dry_run=dry_run, max_files=max_files, skip_existing=skip_existing
+                fetch_run, plan_walk, dry_run=dry_run, max_files=max_files, skip_existing=skip_existing
             ),
-            result=walk.result,
+            result=plan_walk.result,
             data_feed=self.data_feed,
             collection=self.collection,
             resumed_from=self.resumed_from,
-            settle=lambda fetch_run, stop_reason: self._settle_plan(fetch_run, walk, stop_reason),
+            settle=lambda fetch_run, stop_reason: self._settle_plan(fetch_run, plan_walk, stop_reason),
             logger=self.logger,
         )
         self.logger.info(result.summary())
