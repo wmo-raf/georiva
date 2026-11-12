@@ -64,7 +64,8 @@ georiva/src/georiva/          # Main Django application
 │   ├── models.py             # HarvestFeed (a DataFeed species) + VariableMapping
 │   ├── forms.py              # The admin form: reachability check, one feed per catalog, mapping rows
 │   ├── upstream.py           # Upstream catalog client seam — the only place remoteness lives; StacApiClient
-│   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address (ADR 0042 §9)
+│   ├── asset_hosts.py        # Asset host allowlist: https, allowed host, public address; pinned s3:// buckets (ADR 0042 §9)
+│   ├── survey.py             # Upstream survey: a collection's shape, raster assets and file locations, before a feed exists
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows
 │   └── testing.py            # FakeUpstream — the one fake a harvest test needs
 ├── staging/                  # Staging tier — source-grained STAC models + DerivationLink (ADR 0004)

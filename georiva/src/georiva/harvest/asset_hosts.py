@@ -17,6 +17,7 @@ bucket, and the translation is what is judged and stored.
 from __future__ import annotations
 
 import ipaddress
+import re
 from collections.abc import Callable, Iterable, Mapping
 from urllib.parse import quote, urlsplit
 
@@ -52,6 +53,30 @@ def _is_public(address: str) -> bool:
 
 
 _S3 = "s3://"
+
+#: A bucket's bare name, as it can stand as the first label of a host: no dot,
+#: so it can neither leave S3's own domain nor break its certificate.
+_BUCKET_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]")
+
+#: A region's name, as it can stand as one label of a host.
+_REGION_NAME = re.compile(r"[a-z]{2}(-[a-z0-9]+){2,4}")
+
+
+def is_bucket_name(bucket: str) -> bool:
+    return bool(_BUCKET_NAME.fullmatch(bucket))
+
+
+def s3_bucket_of(href: str) -> str | None:
+    """The bucket an `s3://` href names, as the Upstream spelled it; `None` for any other href."""
+    return href[len(_S3) :].partition("/")[0] if _is_s3(href) else None
+
+
+def public_bucket_host(bucket: str, region: str) -> str | None:
+    """The public `https` host a bucket's files are read at, or `None` when the
+    bucket or the region is not a name that can safely be built into one."""
+    if not is_bucket_name(bucket) or not _REGION_NAME.fullmatch(region or ""):
+        return None
+    return f"{bucket}.s3.{region}.amazonaws.com"
 
 
 def _is_s3(href: str) -> bool:
