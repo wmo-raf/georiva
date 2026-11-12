@@ -35,13 +35,25 @@ USER $UID:$GID
 
 WORKDIR /app
 
-COPY --chown=$UID:$GID ./requirements.txt /app/requirements.txt
+# uv — pinned, the same release core's image uses
+COPY --from=ghcr.io/astral-sh/uv:0.11.25 /uv /usr/local/bin/uv
+
+# The venv uses the image's own Python 3.12, and uv
+# installs exactly uv.lock into it: no resolution at build time, so two builds
+# of one commit serve tiles from the same rio-tiler / titiler.core (#621).
 RUN python3 -m venv /app/venv
 
-ENV PATH="/app/venv/bin:$PATH"
+ENV PATH="/app/venv/bin:$PATH" \
+    UV_CACHE_DIR=/tmp/ttl_uv_cache \
+    UV_PROJECT_ENVIRONMENT=/app/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0
 
-ENV PIP_CACHE_DIR=/tmp/ttl_pip_cache
-RUN --mount=type=cache,mode=777,target=$PIP_CACHE_DIR,uid=$UID,gid=$GID . /app/venv/bin/activate && pip3 install -r /app/requirements.txt
+RUN --mount=type=cache,mode=777,target=$UV_CACHE_DIR,uid=$UID,gid=$GID \
+    --mount=type=bind,source=uv.lock,target=/app/uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=/app/pyproject.toml \
+    uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=$UID:$GID ./app ./app
 COPY --chown=$UID:$GID ./docker-entrypoint.sh /app/docker-entrypoint.sh

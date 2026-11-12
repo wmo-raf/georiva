@@ -114,7 +114,7 @@ test *args:
 # boundary with Redis, Django and storage faked, see titiler-app/tests/.
 # e.g. `just titiler-test tests/test_wmts_kvp_gettile.py -v`
 titiler-test *args:
-    cd titiler-app && uv run --no-project --with-requirements requirements-dev.txt pytest {{ args }}
+    cd titiler-app && uv run --frozen pytest {{ args }}
 
 # ======================
 # Core dependencies (uv, on the host, not in Docker)

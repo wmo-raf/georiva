@@ -6,13 +6,15 @@
 # chore. Security updates are grouped too but uncapped — a fix that only
 # exists in a new major still gets proposed.
 #
-# titiler-app/requirements.txt is not listed: it is unpinned, so there is
-# nothing for Dependabot to bump until it is pinned.
+# titiler-app is its own uv project (own pyproject.toml + uv.lock, #621), so it
+# rides in the uv entry's `directories` and shares its groups and caps.
 version: 2
 
 updates:
   - package-ecosystem: uv
-    directory: /georiva
+    directories:
+      - /georiva
+      - /titiler-app
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
