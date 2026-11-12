@@ -398,6 +398,23 @@ An external STAC catalog or API whose holdings a harvest feed indexes, and the o
 Anonymously readable, always (ADR 0042).
 _Avoid_: remote source, provider, origin
 
+**Upstream store**:
+An Upstream collection published as one data cube rather than as items: every run, step and variable in a single
+store (ADR 0044). A **virtual** upstream store holds no pixels of its own; its chunks are references into the
+producer's original files. Not our own Virtual Zarr, which is a manifest we build over our own assets.
+_Avoid_: dataset, cube, Zarr source, remote Zarr
+
+**Store shape**:
+What an Upstream store's chunking makes cheap. **Map-shaped**: a chunk is one whole field at one step.
+**Series-shaped**: a chunk is a small area over many steps. The shape decides which read planes the collection
+offers; only map-shaped stores are harvested.
+_Avoid_: time-optimised / map-optimised (the Upstream's words), store type, layout
+
+**Held step**:
+A step of a run for which an Upstream store actually holds data for a given array. A store allocates its
+coordinates ahead of its data, so a step can be listed and not yet held. Only a held step gets a row.
+_Avoid_: available step, present timestep, filled chunk
+
 **Harvest**:
 Copying an Upstream's index, never its pixels, into Published rows whose assets point upstream. A pipeline phase of
 its own beside Fetch and Ingestion: it writes rows, not objects (ADR 0042).
@@ -406,7 +423,8 @@ _Avoid_: fetch, sync, import, federation (for this phase)
 **Harvest feed**:
 A pull feed (`DataFeed`) of the harvesting kind: an Upstream collection, a time window, a cadence, a Variable mapping
 and an Asset host allowlist. Still the catalog's one Feed. Its runs are `FetchRun`s with no `FetchedFile` rows.
-Created by the Harvest Feed Wizard only; its Upstream and upstream collection are fixed from then on.
+Created by the Harvest Feed Wizard only; its Upstream, upstream collection and the shape it was created for (items
+of COGs, or an Upstream store) are fixed from then on.
 _Avoid_: harvester profile, remote feed, STAC source
 
 **Harvest Feed Wizard**:
@@ -419,31 +437,39 @@ _Avoid_: STAC wizard, remote wizard, import wizard
 
 **Upstream survey**:
 What the Harvest Feed Wizard learns about an Upstream collection before a feed exists: how its items are organised
-(the **shape**), which raster asset keys they carry, and where the files live. Only the shape "one COG per time step
-per asset key" can be harvested; the survey names the reason for any other. Re-run from the feed's page by
-"Re-check upstream".
+(the **shape**), which raster asset keys they carry, and where the files live. Two shapes can be harvested: "one COG
+per time step per asset key", and a map-shaped Upstream store whose codecs we can decode. The survey names the
+reason for any other. Re-run from the feed's page by "Re-check upstream".
 _Avoid_: probe, discovery, crawl, validation
 
 **Sample item**:
 An upstream item the Upstream survey reads to prefill Variables — title, unit, nodata, and a value range lifted from
 upstream statistics or estimated from its asset's coarsest overview. The Harvest counterpart of the Sample File.
-Never indexed by the survey.
+Never indexed by the survey. For an Upstream store, which has no items, the survey reads one field of the newest
+closed run per chosen array instead.
 _Avoid_: test item, preview item
 
 **Pinned location**:
 A place an Upstream's files live that an operator confirmed for one Harvest feed: an `https` host, or an `s3://`
 bucket with the public `https` host its hrefs are translated to at harvest time. Proposed by the Upstream survey,
-never typed. An asset anywhere else is rejected.
+never typed. An asset anywhere else is rejected. For a virtual Upstream store, the buckets its chunks point into are
+Pinned locations too, and a chunk anywhere else is not read.
 _Avoid_: bucket mapping, rewrite rule, trusted bucket
 
 **Variable mapping**:
-A Harvest feed's explicit table of upstream asset key → curated `Variable`. An unmapped key is not indexed.
+A Harvest feed's explicit table of upstream name → curated `Variable`: an asset key, or for an Upstream store the
+array's path in the store. An unmapped name is not indexed.
 _Avoid_: asset mapping, auto-discovery, band mapping
 
 **Remote asset**:
 A Published `Asset` whose `href` is an Upstream URL rather than a key in our storage. Served on every read plane by
 range-reading upstream (ADR 0043). Its statistics may be null.
 _Avoid_: virtual asset, external asset, linked asset
+
+**Store asset**:
+A Remote asset whose `href` is an Upstream store. Every asset of the collection carries the same href; which slice
+one means is its Item's reference time and valid time, and the array it was mapped from (ADR 0044).
+_Avoid_: Zarr asset (that is a format), slice asset, chunk asset
 
 **Mixed collection**:
 A Collection holding both local and Remote assets, typically a local hot window over a remote deep archive. A
@@ -452,8 +478,14 @@ _Avoid_: hybrid collection, partially hydrated collection
 
 **Mirror**:
 What a completed Harvest is to its feed's window: authoritative. Items gone upstream lose their rows here; items
-whose upstream `updated` changed are re-synced. Acts only after the whole window was listed.
+whose upstream `updated` changed are re-synced. Acts only after the whole window was listed. Under a Rolling window
+it also removes the rows of runs that have aged out.
 _Avoid_: sync (as a noun), reconcile
+
+**Rolling window**:
+A Harvest feed's window over a forecast Upstream store: runs initialised in the last *N* days, moving forward on its
+own. It is on run time, so a run inside it keeps all its steps however far ahead their valid times reach.
+_Avoid_: retention, keep-runs, sliding window
 
 **Jurisdiction**:
 The rows a Mirror may delete or rewrite: assets bearing its own feed's **Provenance** that are still Remote. Both
@@ -476,8 +508,9 @@ counted on the run.
 _Avoid_: trusted hosts, CORS list
 
 **Upstream catalog client**:
-The one seam through which a Harvest sees an Upstream (list collections; list items with assets in a window). All
-remoteness lives behind it, and it is the only thing faked in tests.
+The one seam through which a Harvest sees an Upstream (list collections; list items with assets in a window; for an
+Upstream store, describe its arrays and list the Held steps in a window). All remoteness lives behind it, and it is
+the only thing faked in tests.
 _Avoid_: STAC client (generic), harvester client
 
 ### Push feed setup

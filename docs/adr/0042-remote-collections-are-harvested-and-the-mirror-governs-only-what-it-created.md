@@ -134,6 +134,8 @@ never copied.**
 ## Out of scope
 
 - Virtualized NWP archives (GRIB/NetCDF → virtual Zarr) and native Zarr upstreams: wave 2, with the Zarr serving path.
+  Decided since, for map-shaped stores, in
+  [ADR-0044](0044-an-upstream-store-is-harvested-step-by-step-and-titiler-reads-the-store.md).
 - Credentialed upstreams of any kind (static keys, requester-pays, SAS/OAuth token vending).
 - An instance-wide catalog tier.
 
