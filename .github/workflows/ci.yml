@@ -9,6 +9,10 @@ name: CI
 #
 # Pushes to main and release tags (v*) also publish the images servers run —
 # see the publish job at the bottom, which waits for every check above it.
+#
+# A pull request that changes only documentation (docs/** and *.md) skips the
+# two test suites — see the changes job. Pushes always run everything: main's
+# run is what publishes images and writes the cache, whatever the commit held.
 on:
   pull_request:
     branches: [main]
@@ -28,10 +32,36 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tests: ${{ steps.detect.outputs.tests }}
+
+    # On a pull request the checkout is the merge commit, whose first parent is
+    # the base: that diff is exactly what the PR changes. Any other event, and
+    # any failure to work it out, answers "true" — the safe direction.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - id: detect
+        run: |
+          tests=true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            tests=$(git diff --name-only HEAD^1 HEAD | .github/scripts/changes-need-tests.sh) || tests=true
+          fi
+          echo "tests=$tests" >> "$GITHUB_OUTPUT"
+          echo "run the test suites: $tests"
+
   django:
     name: Django tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: changes
+    if: needs.changes.outputs.tests == 'true'
 
     # Each matrix entry is a separate job, so each gets its own Postgres and
     # Redis below. That is the reason the split is by job rather than by
@@ -186,10 +216,31 @@ jobs:
             -v "$PWD/georiva:/georiva/app" \
             georiva:dev manage test --noinput --verbosity 2 ${{ steps.labels.outputs.labels }}
 
+  # Branch protection requires "Django tests (shard 0..2)" by name. A matrix job
+  # skipped by its `if` never expands its matrix, so it reports none of those
+  # names and the PR would wait on them forever. This reports them instead, on
+  # exactly the PRs where the real job is skipped. The shard list must match
+  # the django job's.
+  django-docs-only:
+    name: Django tests (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: changes
+    if: needs.changes.outputs.tests == 'false'
+    strategy:
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - run: echo "Only documentation changed; the Django suite was not run."
+
+  # Not a matrix, so a skip reports under its own name and satisfies the
+  # required check without a stand-in.
   titiler:
     name: Titiler tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.tests == 'true'
 
     # No services and no GDAL image: the suite drives the app at the HTTP
     # boundary with Redis and Django faked and storage pointed at a tmpdir.
