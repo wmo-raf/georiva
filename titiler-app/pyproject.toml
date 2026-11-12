@@ -1,0 +1,31 @@
+# The tile server's dependencies, locked in uv.lock (#621). A standalone uv
+# project like core (georiva/pyproject.toml): the image installs exactly the
+# lock (`uv sync --frozen`), and Dependabot's uv ecosystem watches both files.
+#
+# Direct dependencies are pinned exactly, as core's are; the lock pins the rest.
+# Not a package — `app/` is copied into the image and run from /app.
+[project]
+name = "georiva-titiler-app"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.143.0",
+    "uvicorn[standard]==0.54.0",
+    "gunicorn==26.2.0",
+    "titiler.core==2.4.0",
+    # Both arrive with titiler.core; named here because the WMTS shim imports
+    # them directly — the tile grid it reads an identify pixel off, and the
+    # out-of-footprint error it answers that click with (#363).
+    "morecantile==7.1.0",
+    "rio-tiler==9.4.12",
+    "redis==8.1.0",
+    "httpx==0.28.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+]
+
+[tool.uv]
+package = false

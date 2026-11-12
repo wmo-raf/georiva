@@ -70,6 +70,10 @@ For local (non-Docker) work — IDE autocomplete, type-checking, running tests o
 at the repo root creates one virtualenv with core and every plugin checked out under `dev-plugins/` installed editable.
 See the [Plugin Installation Guide](plugins/installation.md#local-development) for the plugin dev workflow.
 
+The tile server (`titiler-app/`) is a second, separate uv project with its own `titiler-app/pyproject.toml` and
+`titiler-app/uv.lock`; its image installs exactly that lock. Change its dependencies from inside that directory
+(`cd titiler-app && uv add "some-package==1.2"`), commit both files, and check tiles with `just titiler-test`.
+
 ### Common management commands
 
 `georiva` inside the container is an alias for `python manage.py`. Useful commands:
