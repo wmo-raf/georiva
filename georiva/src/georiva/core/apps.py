@@ -8,7 +8,10 @@ logger = logging.getLogger(__name__)
 
 def on_variable_save(sender, instance, **kwargs):
     from georiva.core.machine_plane.palette_cache import warm_variable
+    from georiva.core.machine_plane.remote_assets import publish_variable
 
+    # The hash first: Titiler reads it on every tile of a variable it can render.
+    publish_variable(instance)
     warm_variable(instance)
 
 
@@ -21,6 +24,7 @@ def on_catalog_save(sender, instance, **kwargs):
     with no variables yet has nothing to warm.
     """
     from georiva.core.machine_plane.palette_cache import warm_variable
+    from georiva.core.machine_plane.remote_assets import publish_variable
 
     from .models import Variable
 
@@ -30,6 +34,8 @@ def on_catalog_save(sender, instance, **kwargs):
         .prefetch_related("styles")
     )
     for variable in variables:
+        # A renamed catalog renames both keys; the hash moves with the palette.
+        publish_variable(variable)
         warm_variable(variable)
 
 
@@ -73,8 +79,23 @@ def on_variable_delete(sender, instance, **kwargs):
     """A deleted variable's render config must not outlive it until the next
     sweep — the old missing-delete-signal gap."""
     from georiva.core.machine_plane.palette_cache import prune_variable
+    from georiva.core.machine_plane.remote_assets import withdraw_variable
 
     prune_variable(instance)
+    withdraw_variable(instance)
+
+
+def on_asset_save(sender, instance, **kwargs):
+    """Keep Titiler's word on where a Remote asset is current (ADR 0043 §3)."""
+    from georiva.core.machine_plane.remote_assets import publish_asset
+
+    publish_asset(instance)
+
+
+def on_asset_delete(sender, instance, **kwargs):
+    from georiva.core.machine_plane.remote_assets import withdraw_asset
+
+    withdraw_asset(instance)
 
 
 def on_item_delete(sender, instance, **kwargs):
@@ -213,4 +234,6 @@ class CoreConfig(AppConfig):
         from .storage.asset_deletion import on_asset_deleted
 
         post_delete.connect(on_asset_deleted, sender=Asset)
+        post_save.connect(on_asset_save, sender=Asset)
+        post_delete.connect(on_asset_delete, sender=Asset)
         post_delete.connect(on_item_delete, sender=Item)

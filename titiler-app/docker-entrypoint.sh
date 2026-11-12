@@ -33,6 +33,13 @@ GDAL TUNING (via environment variables):
   GDAL_DISABLE_READDIR_ON_OPEN  Sidecar lookup on open (app pins EMPTY_DIR; see
                                 app/reader.py before overriding it)
 
+REMOTE ASSETS (range-read from their upstream, ADR 0043; no byte cache):
+  GDAL_HTTP_CONNECTTIMEOUT            Seconds to wait for a connection (compose: 5)
+  GDAL_HTTP_TIMEOUT                   Seconds one HTTP request may take (compose: 30)
+  GDAL_HTTP_MERGE_CONSECUTIVE_RANGES  Fetch adjacent blocks in one request (compose: YES)
+  GDAL_INGESTED_BYTES_AT_OPEN         Bytes read on open, to take a COG's header in
+                                      one request (compose: 32768)
+
   help : Show this message
 """
 }

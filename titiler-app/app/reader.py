@@ -1,11 +1,13 @@
 """How this service opens a COG, and what it makes of a failure to open one.
 
 Every raster route here — the tile factory's, the encoded texture, the point
-read GetFeatureInfo goes through — reaches storage by opening a URL this
-service built from the request path (see ``dependencies.build_cog_url``). No
-Asset row is consulted on the way, so a client is free to ask for a timestep
-that has not landed yet, and clients do: a viewer prefetches the next step, a
-verification script follows a STAC link the instant it appears.
+read GetFeatureInfo goes through — reaches its bytes by opening a URL
+``dependencies.resolve_cog_url`` gave it. For an asset in our storage that URL
+is built from the request path, and no Asset row is consulted on the way, so a
+client is free to ask for a timestep that has not landed yet, and clients do: a
+viewer prefetches the next step, a verification script follows a STAC link the
+instant it appears. For a Remote asset it is the upstream's own URL, read by
+range exactly as ours is (ADR 0043).
 
 That is a fine thing to answer *not yet* to. What it must not do is make the
 answer permanent, which is what happens when GDAL is left to cache the failed

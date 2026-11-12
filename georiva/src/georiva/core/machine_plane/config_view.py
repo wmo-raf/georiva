@@ -46,6 +46,15 @@ than anything more talkative for the same reason the org mismatch above is:
 which styles a variable carries is nobody's business but a caller who can
 already see it.
 
+``?time=<iso>[&reftime=<iso>]`` names one timestep, and is how Titiler learns
+where a **Remote asset** is (ADR 0043 §3). A local COG's address it derives from
+the path; an upstream one only the Asset row knows. The answer then carries
+``remote_href`` when the asset at that timestep is Remote, and omits it when it
+is local or absent — which Titiler reads the same way, as "derive it yourself".
+This is the miss path: ordinarily Titiler reads the href from the Redis hash
+``remote_assets`` publishes, for collections of every tier. The row is read and
+nothing is written; no statistics are computed (ADR 0043 §5).
+
 Returns the Redis palette cache's payload structure plus a ``styles`` index —
 discovery rides this endpoint rather than a new one (ADR 0023), so a client
 holding a tile-config response can build a style picker from it. The index
@@ -54,13 +63,18 @@ index-free, being Titiler's rendering config and nothing more:
   With a style: {"vmin", "vmax", "scale_type", "colormap": {0-255 entries},
                  "styles": [{"slug", "title", "is_default"}, ...]}
   Without one:  {"vmin", "vmax", "scale_type", "styles": []}
+  At a Remote timestep, also: {"remote_href": "https://…"}
 """
 
+from datetime import UTC
+
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from georiva.core.machine_plane.palette_cache import build_variable_payload
+from georiva.core.machine_plane.remote_assets import remote_href
 from georiva.core.models import Collection, Variable
 
 
@@ -106,8 +120,32 @@ class TileConfigView(APIView):
             if style is None:
                 return Response(status=status.HTTP_404_NOT_FOUND)
 
+        try:
+            time = _timestamp(request.query_params.get("time"))
+            reference_time = _timestamp(request.query_params.get("reftime"))
+        except ValueError:
+            return Response(
+                {"detail": "time and reftime must be ISO 8601 datetimes."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         payload = build_variable_payload(variable, style)
+        if time is not None:
+            href = remote_href(variable, time, reference_time)
+            if href is not None:
+                payload["remote_href"] = href
         payload["styles"] = [
             {"slug": s.slug, "title": s.name, "is_default": s.is_default} for s in variable.styles.all()
         ]
         return Response(payload)
+
+
+def _timestamp(value):
+    """An ISO 8601 query value as an aware datetime, ``None`` when absent. A
+    value with no offset is UTC, as it is on the tile routes this serves."""
+    if not value:
+        return None
+    parsed = parse_datetime(value)
+    if parsed is None:
+        raise ValueError(value)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)

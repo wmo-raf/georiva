@@ -530,6 +530,12 @@ CACHES = {
 # newest run is never far behind. 0 switches the cache off entirely.
 GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS = env.int("GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS", default=300)
 
+# The most Remote assets one timeseries request may read (ADR 0043). Each
+# remote timestep is its own upstream range read, made while the caller waits,
+# so a request over a deep remote archive is asked to narrow its time range
+# rather than left to hold a web worker for the length of the archive.
+GEORIVA_TIMESERIES_MAX_REMOTE_ASSETS = env.int("GEORIVA_TIMESERIES_MAX_REMOTE_ASSETS", default=366)
+
 CELERY_BROKER_URL = REDIS_URL
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"

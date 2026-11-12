@@ -36,7 +36,8 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   manager.py (Bucket + StorageManager singleton),
 │   │                         #   path_resolution.py, filename.py, asset_cleanup.py
 │   ├── machine_plane/        # Where the tenant travels in the address (ADR 0013/0015)
-│   │                         #   addresses.py, auth_view.py, config_view.py, palette_cache.py
+│   │                         #   addresses.py, auth_view.py, config_view.py, palette_cache.py,
+│   │                         #   remote_assets.py (where Titiler finds a Remote asset, ADR 0043)
 │   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
 │   │                         #   definitions.py, chain.py
 │   ├── views/                # Wagtail admin surface: admin.py, viewsets.py,
@@ -73,14 +74,15 @@ georiva/src/georiva/          # Main Django application
 │   ├── registry.py           # RecipeRegistry (decorator-based registration)
 │   └── recipes/              # climatology.py, promotion.py
 ├── geoprocessing/            # Pure compute library — no Django, no storage, no request layer
-│                             #   algebra.py, calendar.py, regrid.py, temporal.py, zonal.py
+│                             #   algebra.py, calendar.py, regrid.py, sampling.py, temporal.py, zonal.py
 ├── organisations/            # Multi-tenancy (ADR 0011–0018)
 │   ├── ownership.py          # scope_rows / belongs_to_active_org — the tenancy choke point
 │   ├── access.py             # may_see_private, require_active_org
 │   └── pages.py              # Closes Wagtail's own pk-taking page views (ADR 0016)
 ├── stac/                     # STAC API (views, serializers, URLs)
 ├── edr/                      # EDR API — metadata plane only (data queries not yet implemented)
-├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry)
+├── analysis/                 # Analysis modules: timeseries/ + zonal_stats/ (no operator registry);
+│                             #   timeseries reads Remote assets by range beside the virtual store (ADR 0043)
 ├── wmts/                     # WMTS capabilities (per-org); GetTile lives in titiler-app/app/wmts.py
 ├── virtual_zarr/             # Per-Variable virtual Zarr (kerchunk / Icechunk) manifests over COG assets
 ├── visualization/            # Wagtail admin hooks (views are a stub; viz via tile-config/Titiler/Martin)

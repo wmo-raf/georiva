@@ -7,9 +7,9 @@ way to them.
 
 This module is the one place that tells the two apart. Everything that reads an
 ``Asset.href`` — the public URL, the STAC serializer, zonal statistics, virtual
-Zarr (and through it timeseries), the delete that follows a row out and the
-orphan sweep — asks it, rather than looking at the string itself. The tile-config
-handoff to Titiler reads no href yet; when it does, it asks here too (#638).
+Zarr, timeseries, the handoff of a Remote asset's href to Titiler
+(``machine_plane.remote_assets``), the delete that follows a row out and the
+orphan sweep — asks it, rather than looking at the string itself.
 ``StagingAsset`` hrefs are always keys on the staging bucket and are not its
 concern. "Still points upstream" in
 ADR 0042's jurisdiction rule is :attr:`AssetLocation.is_remote`, not a second

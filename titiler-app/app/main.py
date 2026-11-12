@@ -20,8 +20,8 @@ from app.dependencies import (
     SemanticPathParams,
     SemanticRescale,
     SemanticTileConfig,
-    build_cog_url,
     parse_iso_datetime,
+    resolve_cog_url,
     resolve_tile_config,
 )
 from app.middleware import PreviewCacheMiddleware, RequestLoggingMiddleware
@@ -193,7 +193,7 @@ def vector_preview(
     configs, images = [], []
     for variable in (u_variable, v_variable):
         configs.append(resolve_tile_config(org_slug, catalog_slug, collection_slug, variable))
-        src_path = build_cog_url(org_slug, catalog_slug, collection_slug, variable, time_dt, reftime_dt)
+        src_path = resolve_cog_url(org_slug, catalog_slug, collection_slug, variable, time_dt, reftime_dt)
         with ResilientReader(src_path) as src:
             images.append(src.preview(max_size=max_size))
     u_img, v_img = images

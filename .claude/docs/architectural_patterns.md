@@ -97,6 +97,13 @@ Access via import: `from georiva.core.storage import storage`
   `asset.location` (`is_remote`, `key`, `public_url()`, `open_raster()`) or filter with `local_q()` / `remote_q()`;
   never test the href string yourself. Whole-asset readers open by range (`Bucket.open_raster`, an fsspec opener
   for GDAL), never `read_bytes`
+- **Where Titiler finds a Remote asset** (ADR 0043 §3): Titiler derives a local COG's URL from the request path and
+  consults no row, so a Remote asset's href is published to it. `core/machine_plane/remote_assets.py` writes one
+  Redis hash per Variable (timestep → href, plus a `published` marker), for every visibility tier; the tile-config
+  callback answers `?time=` with `remote_href` as the miss path, `public`-only. A harvest republishes its mapped
+  Variables at the end of a run; an `Asset` save or delete updates its one field. Anything else that rewrites
+  hrefs with `.update()` must call `publish_variable`. Timeseries read Remote assets directly
+  (`geoprocessing/sampling.py`), since the virtual store covers local assets only
 
 ## 5. Service Layer Pattern
 

@@ -18,6 +18,8 @@ from app.config import (
     PALETTE_KEY_PREFIX,
     PATH_RE,
     REDIS_URL,
+    REMOTE_ASSETS_KEY_PREFIX,
+    REMOTE_ASSETS_PUBLISHED_FIELD,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,8 +38,14 @@ def _fetch_config_from_django(
     collection: str,
     variable: str,
     style: str | None = None,
+    time: str | None = None,
+    reftime: str | None = None,
 ) -> tuple[int | None, dict | None]:
     """Fetch rendering config from Django internal API on Redis miss.
+
+    ``time`` (and ``reftime``) name one timestep; Django then adds
+    ``remote_href`` to its answer when that timestep's asset is Remote (see
+    :func:`remote_asset_href`).
 
     The org segment is forwarded, not resolved: this service is dialled on an
     internal container name that belongs to no organisation, so Django cannot
@@ -49,8 +57,9 @@ def _fetch_config_from_django(
     could not be reached at all, and the payload only ever accompanies a 200.
     """
     url = f"{DJANGO_BASE_URL}/api/tile-config/{org}/{catalog}/{collection}/{variable}/"
+    params = {name: value for name, value in (("style", style), ("time", time), ("reftime", reftime)) if value}
     try:
-        resp = httpx.get(url, params={"style": style} if style else None, timeout=5.0)
+        resp = httpx.get(url, params=params or None, timeout=5.0)
         if resp.status_code == 200:
             return resp.status_code, resp.json()
         logger.warning(
@@ -136,6 +145,85 @@ def build_cog_url(
         raise HTTPException(status_code=400, detail=f"Invalid constructed path: {dataset_path}")
 
     return f"{MINIO_HOST}/{MINIO_BUCKET_NAME}/{dataset_path}"
+
+
+#: How a timestep is spelled in a remote-assets hash field. Django writes the
+#: same spelling (``remote_assets.timestep_field``).
+_TIMESTEP_STAMP = "%Y%m%dT%H%M%S"
+
+
+def remote_asset_href(
+    org: str,
+    catalog: str,
+    collection: str,
+    variable: str,
+    time_dt: datetime,
+    reftime_dt: datetime | None,
+) -> str | None:
+    """The upstream URL of this timestep's asset if it is a Remote asset, else ``None``.
+
+    A Remote asset's bytes were never copied into our storage (ADR 0042): they
+    are wherever the upstream put them, and no path grammar leads there. Only
+    Django knows the address, and it says so in Redis, for every tier, the way
+    it says how a variable renders. Resolution order: Redis, then Django.
+
+    Redis settles nearly every request. A hash carrying the published marker is
+    Django's whole word on the variable, so a timestep missing from it is not
+    Remote and Django is not asked. Only a hash with no marker (Redis was
+    flushed, or the variable was never warmed) falls back to the tile-config
+    callback, which answers for ``public`` collections.
+
+    Which organisation, and whether the caller may see it, is not decided here:
+    nginx asked Django before this request arrived (ADR 0015). The one thing
+    checked is that the address is an http(s) URL, because it is about to be
+    handed to GDAL, which would as readily open a local path.
+    """
+    field = time_dt.strftime(_TIMESTEP_STAMP)
+    if reftime_dt is not None:
+        field = f"{field}/{reftime_dt.strftime(_TIMESTEP_STAMP)}"
+    key = f"{REMOTE_ASSETS_KEY_PREFIX}:{org}:{catalog}:{collection}:{variable}"
+
+    href, published = redis_client.hmget(key, [field, REMOTE_ASSETS_PUBLISHED_FIELD])
+    if href is None and not published:
+        _, config = _fetch_config_from_django(
+            org,
+            catalog,
+            collection,
+            variable,
+            time=_iso_utc(time_dt),
+            reftime=_iso_utc(reftime_dt) if reftime_dt is not None else None,
+        )
+        href = (config or {}).get("remote_href")
+
+    if href is None:
+        return None
+    if not href.startswith(("https://", "http://")):
+        logger.error("Refusing a remote asset address that is not an http(s) URL: %s", href)
+        raise HTTPException(status_code=502, detail="The remote asset's address is not an http(s) URL.")
+    return href
+
+
+def resolve_cog_url(
+    org: str,
+    catalog: str,
+    collection: str,
+    variable: str,
+    time_dt: datetime,
+    reftime_dt: datetime | None,
+) -> str:
+    """Where this timestep's COG is read from: upstream if its asset is Remote,
+    else the address in our storage that the path spells (ADR 0043 §3).
+
+    The one function every raster route resolves its dataset through, so a
+    Mixed collection is served timestep by timestep from wherever each one is.
+    """
+    return remote_asset_href(org, catalog, collection, variable, time_dt, reftime_dt) or build_cog_url(
+        org, catalog, collection, variable, time_dt, reftime_dt
+    )
+
+
+def _iso_utc(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def parse_iso_datetime(value: str, param_name: str) -> datetime:
@@ -236,7 +324,7 @@ def SemanticPathParams(
     """Resolve the COG URL from semantic path params and time query params."""
     time_dt = parse_iso_datetime(time, "time")
     reftime_dt = parse_iso_datetime(reftime, "reftime") if reftime else None
-    url = build_cog_url(org_slug, catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
+    url = resolve_cog_url(org_slug, catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
     logger.debug("Resolved COG URL: %s", url)
     return url
 

@@ -30,7 +30,7 @@ from .serializers import (
     PointRequestSerializer,
     PointResponseSerializer,
 )
-from .service import ManifestNotReady, TimeseriesService
+from .service import ManifestNotReady, RemoteRangeTooLarge, TimeseriesService
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,11 @@ class PointTimeseriesView(APIView):
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except RemoteRangeTooLarge as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as exc:
             logger.exception(
@@ -163,6 +168,11 @@ class AreaTimeseriesView(APIView):
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except RemoteRangeTooLarge as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
         except ValueError as exc:
             return Response(
