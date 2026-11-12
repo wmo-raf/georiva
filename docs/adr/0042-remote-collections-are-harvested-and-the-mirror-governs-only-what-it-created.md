@@ -61,6 +61,10 @@ never copied.**
    **Removal happens only after the whole window was listed successfully.** A listing that fails part-way removes
    nothing, so an upstream outage can never read as "everything was deleted".
 
+   The collection's own description (title, extent) is read best-effort: a catalog whose collection pages do not
+   answer while its item listing does is still harvested. But an empty listing is believed only of a collection the
+   upstream described in that run. Neither described nor listed, the run is a `source` failure and removes nothing.
+
 7. **Jurisdiction is explicit: mine, and still remote.** Every harvested row carries durable provenance naming the
    feed that created it, set at creation. The mirror may delete or rewrite exactly the assets that (a) bear its own
    feed's provenance **and** (b) still have a remote href; both are checked. It is never inferred from the href alone:

@@ -7,13 +7,18 @@ harvest stores one it must be on `https` (plain `http` only where the operator
 allowed it), name a host the feed allows, and resolve only to public addresses
 (ADR 0042 §9). This check at harvest time is the guarantee; nothing downstream
 repeats it.
+
+An Upstream that names a public bucket by `s3://bucket/key` is not naming an
+address we may open: inside our deployment `s3://` is our own object store. Such
+an href is first translated to the public `https` host a person pinned for that
+bucket, and the translation is what is judged and stored.
 """
 
 from __future__ import annotations
 
 import ipaddress
-from collections.abc import Callable, Iterable
-from urllib.parse import urlsplit
+from collections.abc import Callable, Iterable, Mapping
+from urllib.parse import quote, urlsplit
 
 from georiva.core.storage.asset_location import AssetLocation
 
@@ -46,6 +51,34 @@ def _is_public(address: str) -> bool:
     return all(reached.is_global and not reached.is_multicast for reached in _reached(ip))
 
 
+_S3 = "s3://"
+
+
+def _is_s3(href: str) -> bool:
+    return href[: len(_S3)].lower() == _S3
+
+
+class PinnedBuckets:
+    """A feed's Pinned locations of the bucket kind: `s3://` bucket → the public
+    `https` host its files are read at."""
+
+    def __init__(self, hosts_by_bucket: Mapping[str, str]):
+        self._hosts = {bucket.lower(): host for bucket, host in hosts_by_bucket.items() if bucket and host}
+
+    def locate(self, href: str) -> str:
+        """`href` as it may be stored: an `s3://` href in a pinned bucket as its
+        `https` address, any other href untouched. An `s3://` href that comes
+        back as it went in names nowhere pinned, and the allowlist refuses it."""
+        if not _is_s3(href):
+            return href
+        bucket, _, key = href[len(_S3) :].partition("/")
+        host = self._hosts.get(bucket.lower())
+        if host is None or not key:
+            return href
+        # An s3 href spells the key raw; a URL spells it escaped.
+        return f"https://{host}/{quote(key, safe='/=')}"
+
+
 class AssetHostAllowlist:
     """Says whether one feed may store an asset href, and if not, why."""
 
@@ -64,6 +97,8 @@ class AssetHostAllowlist:
         # next reader of it takes for something else.
         if any(char.isspace() or not char.isprintable() or char == "\\" for char in href):
             return "href contains whitespace, a control character or a backslash"
+        if _is_s3(href):
+            return "href names an s3 bucket, or nothing in one, that is not a pinned location of this feed"
         if not AssetLocation(href).is_remote:
             return "href is not a URL"
         try:

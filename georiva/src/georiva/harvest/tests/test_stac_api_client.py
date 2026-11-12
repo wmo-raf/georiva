@@ -23,9 +23,10 @@ API = "https://stac.upstream.example/api"
 
 
 class _Response:
-    def __init__(self, payload, status_code=200):
+    def __init__(self, payload, status_code=200, headers=None):
         self._payload = payload
         self.status_code = status_code
+        self.headers = headers or {}
 
     def json(self):
         if isinstance(self._payload, Exception):
@@ -46,6 +47,10 @@ class _Session:
         if isinstance(answer, Exception):
             raise answer
         return answer if isinstance(answer, _Response) else _Response(answer)
+
+
+def redirect(to, status_code=302):
+    return _Response({}, status_code=status_code, headers={"Location": to})
 
 
 def feature(item_id, when, **assets):
@@ -172,12 +177,81 @@ class StacApiClientTests(SimpleTestCase):
 
         self.assertEqual(self.session.calls[0][1]["params"], {"limit": 2})
 
-    def test_redirects_are_never_followed(self):
+    def test_the_session_is_never_left_to_follow_a_redirect_itself(self):
+        client = self.client_over({f"{API}/collections": {"collections": []}})
+
+        list(client.list_collections())
+
+        self.assertIs(self.session.calls[0][1]["allow_redirects"], False)
+
+    def test_a_redirect_to_the_catalogs_own_host_is_followed(self):
+        # Digital Earth Africa answers an items listing with a redirect to its search.
+        search = f"{API}/search?collection=chirps&limit=2&datetime=2026-03-01T00:00:00Z/.."
+        client = self.client_over(
+            {
+                f"{API}/collections/chirps/items": redirect(search),
+                search: {"features": [feature("a", "2026-03-01T00:00:00Z")]},
+            }
+        )
+
+        items = list(client.list_items("chirps", (datetime(2026, 3, 1, tzinfo=UTC), None)))
+
+        self.assertEqual([item.id for item in items], ["a"])
+        # The redirect's own address carries the window; ours is not sent a second time.
+        self.assertIsNone(self.session.calls[1][1]["params"])
+
+    def test_a_listing_pages_on_from_where_a_redirect_landed(self):
+        search = f"{API}/search?collection=chirps"
+        client = self.client_over(
+            {
+                f"{API}/collections/chirps/items": redirect("/api/search?collection=chirps", status_code=307),
+                search: {
+                    "features": [feature("a", "2026-03-01T00:00:00Z", rainfall={"href": "a.tif"})],
+                    "links": [{"rel": "next", "href": "?collection=chirps&page=2"}],
+                },
+                f"{API}/search?collection=chirps&page=2": {"features": [feature("b", "2026-03-02T00:00:00Z")]},
+            }
+        )
+
+        items = list(client.list_items("chirps", (None, None)))
+
+        self.assertEqual([item.id for item in items], ["a", "b"])
+        self.assertEqual(items[0].assets["rainfall"].href, f"{API}/a.tif")
+
+    def test_a_redirect_to_another_host_scheme_or_port_is_refused(self):
+        elsewhere = (
+            "http://169.254.169.254/latest/meta-data",
+            "https://other.example/api/collections",
+            "http://stac.upstream.example/api/collections",
+            "https://stac.upstream.example:8443/api/collections",
+        )
+        for target in elsewhere:
+            with self.subTest(target=target):
+                client = self.client_over({f"{API}/collections": redirect(target)})
+
+                with self.assertRaisesMessage(UpstreamUnreachable, target):
+                    list(client.list_collections())
+                self.assertEqual(len(self.session.calls), 1)
+
+    def test_a_redirect_that_names_no_target_is_unreachable(self):
         client = self.client_over({f"{API}/collections": _Response({}, status_code=302)})
 
-        with self.assertRaises(UpstreamUnreachable):
+        with self.assertRaisesMessage(UpstreamUnreachable, "302"):
             list(client.list_collections())
-        self.assertIs(self.session.calls[0][1]["allow_redirects"], False)
+
+    def test_a_chain_of_redirects_is_followed_only_so_far(self):
+        hops = {f"{API}/hop/{n}": redirect(f"{API}/hop/{n + 1}") for n in range(20)}
+        client = self.client_over({f"{API}/collections": redirect(f"{API}/hop/0"), **hops})
+
+        with self.assertRaisesMessage(UpstreamUnreachable, "redirect"):
+            list(client.list_collections())
+        self.assertLessEqual(len(self.session.calls), 6)
+
+    def test_a_redirect_back_to_where_it_came_from_is_refused(self):
+        client = self.client_over({f"{API}/collections": redirect(f"{API}/collections")})
+
+        with self.assertRaisesMessage(UpstreamUnreachable, "redirect"):
+            list(client.list_collections())
 
     def test_a_next_page_on_another_host_is_refused(self):
         client = self.client_over(

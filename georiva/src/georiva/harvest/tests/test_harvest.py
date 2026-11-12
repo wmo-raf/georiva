@@ -424,6 +424,38 @@ class HarvestRunTests(HarvestFeedMixin, TestCase):
         self.assertEqual(FetchRun.objects.get().status, FetchRun.Status.FAILED)
         self.assertIn("upstream has no collection 'chirps-daily'", result.stop_reason)
 
+    def test_a_collection_the_upstream_cannot_describe_is_harvested_from_its_items(self):
+        # Digital Earth Africa answers its collections with an error page, and its items soundly.
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+
+        result = self.harvest()
+
+        self.assertEqual((FetchRun.objects.get().status, result.indexed), (FetchRun.Status.COMPLETED, 2))
+        # Nothing was read to describe it with, so it keeps the name it was created under.
+        self.assertEqual(self.feed.collection.name, "chirps-daily")
+
+    def test_a_collection_neither_described_nor_listed_is_a_failure_and_never_an_empty_window(self):
+        self.harvest()
+        # Nothing now says the collection is still there: not its description, not one item.
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+        self.upstream.items = []
+
+        result = self.harvest()
+
+        run = FetchRun.objects.order_by("pk").last()
+        self.assertEqual((run.status, result.removed), (FetchRun.Status.FAILED, 0))
+        self.assertIn("source unavailable", run.stopped_early)
+        self.assertIsNotNone(run.retry_due_at)
+        self.assertEqual(Asset.objects.count(), 2)
+
+    def test_a_described_collection_with_an_empty_window_is_still_an_empty_window(self):
+        self.harvest()
+        self.upstream.items = []
+
+        result = self.harvest()
+
+        self.assertEqual((result.removed, Asset.objects.count()), (2, 0))
+
     def test_a_retry_harvests_the_same_window_again(self):
         self.upstream.unreachable = "upstream catalog unreachable: timed out"
         self.harvest()

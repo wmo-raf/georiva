@@ -6,6 +6,7 @@ Driven through the admin's own add and edit views. The Upstream is the fake.
 """
 
 import json
+from datetime import UTC, datetime
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -110,6 +111,34 @@ class CreateHarvestFeedTests(HarvestFeedAdminMixin, TestCase):
         self.assertIsNone(feed.window_end)
         self.assertEqual(feed.allowed_asset_hosts, {"stac.upstream.example", "bucket.elsewhere.example"})
 
+    def test_a_bucket_is_pinned_to_the_public_host_its_files_are_read_at(self):
+        self.create(pinned_buckets='{"DEAfrica-Input": "DEAfrica-Input.S3.af-south-1.amazonaws.com."}')
+
+        feed = HarvestFeed.objects.get()
+        self.assertEqual(feed.pinned_buckets, {"deafrica-input": "deafrica-input.s3.af-south-1.amazonaws.com"})
+        self.assertIn("deafrica-input.s3.af-south-1.amazonaws.com", feed.allowed_asset_hosts)
+
+    def test_a_feed_saved_with_no_pins_has_none(self):
+        self.create()
+
+        self.assertEqual(HarvestFeed.objects.get().pinned_buckets, {})
+
+    def test_a_pin_that_is_not_a_bucket_and_a_host_name_is_refused(self):
+        refused = (
+            '{"bucket": "https://bucket.s3.amazonaws.com/data"}',
+            '{"bucket": "georiva-minio:9000"}',
+            '{"s3://bucket": "bucket.s3.amazonaws.com"}',
+            '{"bucket": ""}',
+            '{"bucket": 3}',
+            '["bucket"]',
+        )
+        for pins in refused:
+            with self.subTest(pins=pins):
+                response = self.create(pinned_buckets=pins)
+
+                self.assertIn("pinned_buckets", response.context["form"].errors)
+                self.assertFalse(HarvestFeed.objects.exists())
+
     def test_the_allowlist_defaults_to_the_catalogs_own_host(self):
         self.create()
 
@@ -139,6 +168,22 @@ class CreateHarvestFeedTests(HarvestFeedAdminMixin, TestCase):
         errors = self.errors(response)
         self.assertIn("could not be read without credentials", errors)
         self.assertIn("answered 401", errors)
+
+    def test_an_upstream_that_cannot_describe_its_collections_is_accepted_on_its_items(self):
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+        self.upstream.add_item(datetime(2026, 3, 1, tzinfo=UTC), {"rainfall": "https://stac.upstream.example/a.tif"})
+
+        self.create()
+
+        self.assertTrue(HarvestFeed.objects.exists())
+
+    def test_a_collection_neither_described_nor_listed_is_refused(self):
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+
+        response = self.create()
+
+        self.assertFalse(HarvestFeed.objects.exists())
+        self.assertIn("could not be found", self.errors(response))
 
     def test_an_upstream_without_the_collection_is_refused(self):
         response = self.create(upstream_collection_id="era5-land")

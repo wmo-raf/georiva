@@ -22,7 +22,8 @@ class FakeUpstream:
 
     Honest by default: it answers `list_items` with the window it was asked
     for. Set `ignores_window` for an Upstream that returns everything it has,
-    and `unreachable` to a message for one that cannot be read at all.
+    `unreachable` to a message for one that cannot be read at all, and
+    `collections_unreachable` for one that lists its items and not its collections.
     """
 
     def __init__(self, collection_id: str = "chirps-daily", *, title: str = "", description: str = ""):
@@ -31,6 +32,8 @@ class FakeUpstream:
         self.items: list[UpstreamItem] = []
         self.addresses: dict[str, list[str]] = {}
         self.unreachable: str | None = None
+        #: A message for an Upstream whose collections cannot be read while its items can.
+        self.collections_unreachable: str | None = None
         self.ignores_window = False
         #: How many items a listing yields before the Upstream stops answering.
         self.fails_after: int | None = None
@@ -64,6 +67,8 @@ class FakeUpstream:
 
     def list_collections(self):
         self._answer()
+        if self.collections_unreachable:
+            raise UpstreamUnreachable(self.collections_unreachable)
         return list(self.collections)
 
     def list_items(self, collection_id: str, window: Window):

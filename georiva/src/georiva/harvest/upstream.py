@@ -187,14 +187,22 @@ def _scheme_host_port(url: str) -> tuple[str, str | None, int | None]:
     return (parts.scheme, parts.hostname, parts.port)
 
 
+#: The answers that send a GET elsewhere.
+_REDIRECTS = frozenset({301, 302, 303, 307, 308})
+
+
 class StacApiClient:
     """An anonymous STAC API, read over HTTP.
 
     The operator chose the catalog's host, and that is the only host this
-    client talks to: redirects are not followed and a `next` link to any other
-    scheme, host or port is refused, so the Upstream's content never decides
-    where our servers connect (ADR 0042 §9).
+    client talks to: a redirect or a `next` link to any other scheme, host or
+    port is refused, so the Upstream's content never decides where our servers
+    connect (ADR 0042 §9). A redirect that stays there is followed, a few hops
+    at most: catalogs answer a listing with one to their own search.
     """
+
+    #: How many redirects one request may take before the Upstream is going nowhere.
+    MAX_REDIRECTS = 5
 
     def __init__(self, url: str, *, session=None, timeout: float = 30, page_size: int = 200):
         self.url = url.rstrip("/")
@@ -240,7 +248,10 @@ class StacApiClient:
             if url in seen:
                 raise UpstreamUnreachable(f"upstream catalog pages in a loop at {url}")
             seen.add(url)
-            page = self._get(url, params)
+            # Where the page was found, which a redirect makes another place than
+            # where it was asked for: its links and hrefs are relative to that.
+            page, url = self._get(url, params)
+            seen.add(url)
             yield page, url
             url, params = self._next(page, url), None
 
@@ -248,24 +259,41 @@ class StacApiClient:
         for link in page.get("links") or []:
             if isinstance(link, dict) and link.get("rel") == "next" and link.get("href"):
                 target = urljoin(current, str(link["href"]))
-                if _scheme_host_port(target) != _scheme_host_port(self.url):
+                if not self._is_ours(target):
                     raise UpstreamUnreachable(f"upstream catalog's next page is on another host: {target}")
                 return target
         return None
 
-    def _get(self, url: str, params: dict | None) -> dict:
+    def _is_ours(self, url: str) -> bool:
+        """Whether `url` is on the scheme, host and port the operator pointed this client at."""
+        return _scheme_host_port(url) == _scheme_host_port(self.url)
+
+    def _get(self, url: str, params: dict | None) -> tuple[dict, str]:
+        """The JSON object at `url`, and the URL it was found at once any redirects were followed."""
         import requests
 
-        try:
-            response = self.session.get(
-                url,
-                params=params,
-                timeout=self.timeout,
-                allow_redirects=False,
-                headers={"Accept": "application/geo+json, application/json"},
-            )
-        except requests.RequestException as exc:
-            raise UpstreamUnreachable(f"upstream catalog unreachable: {exc}") from exc
+        for _hop in range(self.MAX_REDIRECTS + 1):
+            try:
+                # Never the session's own redirect handling: each hop is ours to judge.
+                response = self.session.get(
+                    url,
+                    params=params,
+                    timeout=self.timeout,
+                    allow_redirects=False,
+                    headers={"Accept": "application/geo+json, application/json"},
+                )
+            except requests.RequestException as exc:
+                raise UpstreamUnreachable(f"upstream catalog unreachable: {exc}") from exc
+            location = response.headers.get("Location") if response.status_code in _REDIRECTS else None
+            if not location:
+                break
+            target = urljoin(url, str(location))
+            if not self._is_ours(target):
+                raise UpstreamUnreachable(f"upstream catalog redirects to another host: {target}")
+            # A redirect's address is whole: it carries whatever of our query the Upstream kept.
+            url, params = target, None
+        else:
+            raise UpstreamUnreachable(f"upstream catalog keeps redirecting, last to {url}")
         if response.status_code != 200:
             raise UpstreamUnreachable(f"upstream catalog answered {response.status_code} for {url}")
         try:
@@ -274,4 +302,4 @@ class StacApiClient:
             raise UpstreamUnreachable(f"upstream catalog did not answer JSON for {url}") from exc
         if not isinstance(page, dict):
             raise UpstreamUnreachable(f"upstream catalog did not answer a JSON object for {url}")
-        return page
+        return page, url
