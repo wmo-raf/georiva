@@ -29,7 +29,8 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # Held: eckitlib 2.5 bundles a second libproj that breaks pyproj (#625).
+      # Held (core only — titiler-app doesn't depend on them): eckitlib 2.5
+      # bundles a second libproj that breaks pyproj (#625).
       # Also capped in georiva/pyproject.toml; lift both together.
       - dependency-name: eccodeslib
       - dependency-name: eckitlib
