@@ -204,7 +204,7 @@ _Avoid_: copy, publish (as a verb for this), passthrough
 
 **Fetch**:
 Pulling data from an external source into MinIO. The DataFeed/Loader is responsible for this phase.
-_Avoid_: ingest (for this phase)
+_Avoid_: ingest (for this phase), harvest (that copies an index, not bytes — see **Harvest**)
 
 **Ingestion**:
 Processing a file already in MinIO into STAC items and assets. The IngestionService is responsible for this phase.
@@ -387,6 +387,66 @@ A periodic safety-net task that finds files in MinIO that have no corresponding 
 registers them for processing. Sweep is not an acquisition event — it creates `FileIngestion` records directly,
 without a `FetchRun` or `UploadSession`. In `incoming`, what it finds becomes a Delivery marked "found by sweep".
 _Avoid_: sweep arrival, sweep ingestion
+
+### Remote collections
+
+**Upstream**:
+An external STAC catalog or API whose holdings a harvest feed indexes, and the object hosts its assets live on.
+Anonymously readable, always (ADR 0042).
+_Avoid_: remote source, provider, origin
+
+**Harvest**:
+Copying an Upstream's index, never its pixels, into Published rows whose assets point upstream. A pipeline phase of
+its own beside Fetch and Ingestion: it writes rows, not objects (ADR 0042).
+_Avoid_: fetch, sync, import, federation (for this phase)
+
+**Harvest feed**:
+A pull feed (`DataFeed`) of the harvesting kind: an Upstream collection, a time window, a cadence, a Variable mapping
+and an Asset host allowlist. Still the catalog's one Feed. Its runs are `FetchRun`s with no `FetchedFile` rows.
+_Avoid_: harvester profile, remote feed, STAC source
+
+**Variable mapping**:
+A Harvest feed's explicit table of upstream asset key → curated `Variable`. An unmapped key is not indexed.
+_Avoid_: asset mapping, auto-discovery, band mapping
+
+**Remote asset**:
+A Published `Asset` whose `href` is an Upstream URL rather than a key in our storage. Served on every read plane by
+range-reading upstream (ADR 0043). Its statistics may be null.
+_Avoid_: virtual asset, external asset, linked asset
+
+**Mixed collection**:
+A Collection holding both local and Remote assets, typically a local hot window over a remote deep archive. A
+first-class state, not a migration in progress.
+_Avoid_: hybrid collection, partially hydrated collection
+
+**Mirror**:
+What a completed Harvest is to its feed's window: authoritative. Items gone upstream lose their rows here; items
+whose upstream `updated` changed are re-synced. Acts only after the whole window was listed.
+_Avoid_: sync (as a noun), reconcile
+
+**Jurisdiction**:
+The rows a Mirror may delete or rewrite: assets bearing its own feed's **Provenance** that are still Remote. Both
+conditions, always; never inferred from the href alone.
+_Avoid_: ownership (that is the Organisation's), scope
+
+**Provenance** (harvest):
+The durable mark on a harvested row naming the Harvest feed that created it. Survives Materialization as history.
+_Avoid_: source tag, origin, lineage (that is Derivation's)
+
+**Materialize**:
+Fetching a window of a Remote collection's bytes into local storage through the normal Fetch → Ingestion path, on
+the same feed. The asset becomes local and leaves the Mirror's Jurisdiction.
+_Avoid_: hydrate (in code), cache, download, mirror (for copying bytes)
+
+**Asset host allowlist**:
+The hosts a Harvest feed's asset hrefs may name; by default the Upstream catalog's own. An asset elsewhere, not on
+`https`, or resolving to a private address is **rejected**: skipped and counted on the run.
+_Avoid_: trusted hosts, CORS list
+
+**Upstream catalog client**:
+The one seam through which a Harvest sees an Upstream (list collections; list items with assets in a window). All
+remoteness lives behind it, and it is the only thing faked in tests.
+_Avoid_: STAC client (generic), harvester client
 
 ### Push feed setup
 
