@@ -42,8 +42,8 @@ PROBE_WORKERS = 8
 FOOTPRINT_TOLERANCE = 0.01
 
 _RASTER_SUFFIXES = (".tif", ".tiff")
-_STORE_SUFFIXES = (".zarr", ".nc", ".nc4", ".h5", ".hdf5", ".grib", ".grib2")
-_STORE_TYPES = ("zarr", "netcdf", "hdf", "grib")
+_STORE_SUFFIXES = (".zarr", ".icechunk", ".nc", ".nc4", ".h5", ".hdf5", ".grib", ".grib2")
+_STORE_TYPES = ("zarr", "icechunk", "netcdf", "hdf", "grib")
 
 
 class Shape(StrEnum):
@@ -172,7 +172,8 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
     root cannot be read at all."""
     root = upstream.describe_root()
     if not root.is_api:
-        return CatalogSurvey(has_api=False)
+        # The address may be one collection's own document: that one is what it offers.
+        return CatalogSurvey(has_api=False, collections=[root.own] if root.own else [])
     try:
         return CatalogSurvey(has_api=True, collections=list(upstream.list_collections()))
     except UpstreamUnreachable:
@@ -190,7 +191,10 @@ def survey_collection(upstream: UpstreamCatalogClient, catalog_url: str, collect
     items cannot be listed; everything about its files is reported, not raised.
     """
     if not upstream.describe_root().is_api:
-        return _verdict(Shape.NO_API)
+        # Two things are wrong at once with a store in a catalog of plain files,
+        # and the store is the one an operator can do nothing about.
+        stored = any(_is_store(asset) for asset in _described_assets(upstream, collection_id))
+        return _verdict(Shape.STORE if stored else Shape.NO_API)
 
     items = list(islice(upstream.list_items(collection_id, (None, None)), SAMPLE_ITEMS))
     sampled = len(items)
@@ -242,10 +246,7 @@ def _verdict(shape: Shape, sampled: int = 0) -> CollectionSurvey:
 
 def _described_assets(upstream, collection_id):
     """The assets the collection itself carries, when the Upstream will describe it."""
-    try:
-        described = next((c for c in upstream.list_collections() if c.id == collection_id), None)
-    except UpstreamUnreachable:
-        return []
+    described = upstream.describe_collection(collection_id)
     return described.assets.values() if described else []
 
 

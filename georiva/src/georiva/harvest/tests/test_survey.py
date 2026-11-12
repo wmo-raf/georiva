@@ -75,6 +75,16 @@ class CatalogSurveyTests(SurveyMixin, SimpleTestCase):
         self.assertFalse(found.has_api)
         self.assertEqual(found.collections, [])
 
+    def test_an_address_that_is_one_collections_own_document_offers_that_collection(self):
+        # stac.dynamical.org/noaa-gfs-forecast/collection.json: plain files, and the address is the collection.
+        self.upstream.is_api = False
+        self.upstream.is_collection_document = True
+
+        found = survey_catalog(self.upstream)
+
+        self.assertFalse(found.has_api)
+        self.assertEqual([c.id for c in found.collections], ["chirps"])
+
     def test_a_catalog_that_cannot_be_read_at_all_is_unreachable(self):
         self.upstream.unreachable = "upstream catalog answered 401 for https://stac.upstream.example/api"
 
@@ -171,6 +181,26 @@ class ShapeTests(SurveyMixin, SimpleTestCase):
         found = self.survey()
 
         self.assertEqual((found.shape, found.harvestable), (Shape.NO_API, False))
+
+    def test_a_store_in_a_catalog_with_no_api_is_called_a_store(self):
+        # Both are true of it; "one data store" is the one that tells an operator what they have.
+        self.upstream.is_api = False
+        self.upstream.collections = [
+            UpstreamCollection(
+                id="chirps",
+                assets={
+                    "icechunk": UpstreamAsset(
+                        href="https://dynamical-noaa-gfs.s3.us-west-2.amazonaws.com/noaa-gfs-forecast/v0.2.7.icechunk",
+                        media_type="application/x-icechunk",
+                    )
+                },
+            )
+        ]
+
+        found = self.survey()
+
+        self.assertEqual((found.shape, found.harvestable), (Shape.STORE, False))
+        self.assertIn("data store", found.reason)
 
     def test_a_collection_with_no_items_cannot(self):
         found = self.survey()

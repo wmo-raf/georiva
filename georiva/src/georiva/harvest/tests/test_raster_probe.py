@@ -134,7 +134,38 @@ class ParseForTheSurveyTests(SimpleTestCase):
         root = parse_root({"id": "c", "links": [{"rel": "child", "href": "./2020/catalog.json"}]})
 
         self.assertFalse(root.is_api)
-        self.assertEqual(root.children, [])
+        self.assertEqual([c.id for c in root.children], ["2020"])
+        self.assertIsNone(root.own)
+
+    def test_a_catalog_of_plain_files_names_its_collections_by_folder_or_file(self):
+        root = parse_root(
+            {
+                "type": "Catalog",
+                "links": [
+                    {"rel": "child", "href": "https://s.example/noaa-gfs-forecast/collection.json", "title": "GFS"},
+                    {"rel": "child", "href": "./era5.json"},
+                    {"rel": "root", "href": "https://s.example/catalog.json"},
+                ],
+            },
+            base_url="https://s.example/catalog.json",
+        )
+
+        self.assertEqual([(c.id, c.title) for c in root.children], [("noaa-gfs-forecast", "GFS"), ("era5", "")])
+        self.assertEqual(root.child_hrefs["era5"], "https://s.example/era5.json")
+
+    def test_an_address_that_is_a_collections_own_document_is_that_collection(self):
+        root = parse_root(
+            {
+                "type": "Collection",
+                "id": "noaa-gfs-forecast",
+                "assets": {"icechunk": {"href": "https://b.example/gfs.icechunk", "type": "application/x-icechunk"}},
+                "links": [{"rel": "root", "href": "https://s.example/catalog.json"}],
+            }
+        )
+
+        self.assertFalse(root.is_api)
+        self.assertEqual(root.own.id, "noaa-gfs-forecast")
+        self.assertEqual(root.own.assets["icechunk"].media_type, "application/x-icechunk")
 
     def test_a_roots_links_to_its_collections_name_them(self):
         root = parse_root(
@@ -153,6 +184,84 @@ class ParseForTheSurveyTests(SimpleTestCase):
         self.assertEqual(
             [(c.id, c.title) for c in root.children], [("rainfall_chirps_monthly", "CHIRPS monthly"), ("s2 l2a", "")]
         )
+
+
+class _Pages:
+    """Answers each URL from a table, and remembers what it was asked."""
+
+    def __init__(self, pages):
+        self.pages = pages
+        self.asked = []
+
+    def get(self, url, **kwargs):
+        self.asked.append(url)
+        return _Page(self.pages.get(url))
+
+
+class _Page:
+    headers = {}
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.status_code = 200 if payload is not None else 404
+
+    def json(self):
+        return self.payload
+
+
+class DescribeCollectionTests(SimpleTestCase):
+    STATIC = "https://s.example/catalog.json"
+
+    def describe(self, url, pages, collection_id):
+        self.session = _Pages(pages)
+        return StacApiClient(url, session=self.session).describe_collection(collection_id)
+
+    def test_an_api_is_asked_for_the_collection_by_its_id(self):
+        api = "https://s.example/api"
+        found = self.describe(
+            api,
+            {api: {"conformsTo": ["x"]}, f"{api}/collections/s2%20l2a": {"id": "s2 l2a", "title": "Sentinel-2"}},
+            "s2 l2a",
+        )
+
+        self.assertEqual((found.id, found.title), ("s2 l2a", "Sentinel-2"))
+
+    def test_a_catalog_of_plain_files_is_followed_to_the_collections_own_document(self):
+        child = "https://s.example/noaa-gfs-forecast/collection.json"
+        found = self.describe(
+            self.STATIC,
+            {
+                self.STATIC: {"links": [{"rel": "child", "href": child}]},
+                child: {"id": "noaa-gfs-forecast", "assets": {"icechunk": {"href": "https://b.example/gfs.icechunk"}}},
+            },
+            "noaa-gfs-forecast",
+        )
+
+        self.assertIn("icechunk", found.assets)
+
+    def test_a_child_on_another_host_is_never_followed(self):
+        found = self.describe(
+            self.STATIC,
+            {self.STATIC: {"links": [{"rel": "child", "href": "http://169.254.169.254/gfs/collection.json"}]}},
+            "gfs",
+        )
+
+        self.assertIsNone(found)
+        self.assertEqual(self.session.asked, [self.STATIC])
+
+    def test_an_address_that_is_the_collection_describes_it_without_another_request(self):
+        address = "https://s.example/noaa-gfs-forecast/collection.json"
+        pages = {address: {"type": "Collection", "id": "noaa-gfs-forecast"}}
+        found = self.describe(address, pages, "noaa-gfs-forecast")
+
+        self.assertEqual(found.id, "noaa-gfs-forecast")
+        self.assertEqual(self.session.asked, [address])
+
+    def test_a_collection_the_upstream_will_not_describe_has_no_description(self):
+        api = "https://s.example/api"
+
+        self.assertIsNone(self.describe(api, {api: {"conformsTo": ["x"]}}, "chirps"))
+        self.assertIsNone(self.describe(self.STATIC, {self.STATIC: {"links": []}}, "chirps"))
 
 
 class _Answer:

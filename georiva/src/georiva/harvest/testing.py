@@ -48,6 +48,8 @@ class FakeUpstream:
         # What only the Upstream survey asks.
         #: False for a catalog of plain files, which cannot be asked for items by time.
         self.is_api = True
+        #: True when the address given is one collection's own document, not a catalog's root.
+        self.is_collection_document = False
         #: The region of each public bucket; one not here has none that can be found.
         self.regions: dict[str, str] = {}
         self.regions_asked: list[str] = []
@@ -114,7 +116,17 @@ class FakeUpstream:
 
     def describe_root(self) -> UpstreamRoot:
         self._answer()
-        return UpstreamRoot(is_api=self.is_api, children=[UpstreamCollection(id=c.id) for c in self.collections])
+        return UpstreamRoot(
+            is_api=self.is_api,
+            children=[UpstreamCollection(id=c.id) for c in self.collections],
+            own=self.collections[0] if self.is_collection_document else None,
+        )
+
+    def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
+        self._answer()
+        if self.collections_unreachable:
+            return None
+        return next((c for c in self.collections if c.id == collection_id), None)
 
     def bucket_region(self, bucket: str) -> str | None:
         self.regions_asked.append(bucket)

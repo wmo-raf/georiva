@@ -17,7 +17,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 #: A window: `(start, end)`, both inclusive, either `None` for unbounded.
 Window = tuple[datetime | None, datetime | None]
@@ -47,6 +47,10 @@ class UpstreamRoot:
     is_api: bool
     #: The collections its root links to, by id (and title, where the link gives one).
     children: list[UpstreamCollection] = field(default_factory=list)
+    #: Where each of those is described, by id.
+    child_hrefs: dict[str, str] = field(default_factory=dict)
+    #: The collection the address itself is, when it is one's own document and not a catalog's root.
+    own: UpstreamCollection | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +128,10 @@ class UpstreamCatalogClient(Protocol):
     def describe_root(self) -> UpstreamRoot:
         """What the Upstream's root address says of it."""
 
+    def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
+        """The Upstream's own description of one collection; `None` when it has
+        none to give. Raises only when the root itself cannot be read."""
+
     def bucket_region(self, bucket: str) -> str | None:
         """The region a public `s3://` bucket lives in; `None` when that cannot be found. Never raises."""
 
@@ -182,16 +190,37 @@ def parse_root(payload: dict, *, base_url: str = "") -> UpstreamRoot:
     to its collections or its search, can be asked for items by time; a catalog
     of plain files only links to more files."""
     links = [link for link in payload.get("links") or [] if isinstance(link, dict) and link.get("href")]
-    children = []
+    is_api = bool(payload.get("conformsTo")) or any(link.get("rel") in ("data", "search") for link in links)
+    children, child_hrefs = [], {}
     for link in links:
-        path = urlsplit(urljoin(base_url, str(link["href"]))).path.rstrip("/")
-        parent, _, last = path.rpartition("/")
-        if link.get("rel") == "child" and last and parent.endswith("/collections"):
-            children.append(UpstreamCollection(id=unquote(last), title=str(link.get("title") or "")))
+        if link.get("rel") != "child":
+            continue
+        href = urljoin(base_url, str(link["href"]))
+        child_id = _child_id(urlsplit(href).path, is_api=is_api)
+        if child_id and child_id not in child_hrefs:
+            children.append(UpstreamCollection(id=child_id, title=str(link.get("title") or "")))
+            child_hrefs[child_id] = href
     return UpstreamRoot(
-        is_api=bool(payload.get("conformsTo")) or any(link.get("rel") in ("data", "search") for link in links),
+        is_api=is_api,
         children=children,
+        child_hrefs=child_hrefs,
+        own=parse_collection(payload) if payload.get("type") == "Collection" else None,
     )
+
+
+def _child_id(path: str, *, is_api: bool) -> str | None:
+    """The id of the collection a root's child link leads to, read from its
+    address. An API keeps its collections under `/collections/`, and any other
+    child there is a sub-catalog; a catalog of plain files names a collection
+    by its folder (`…/chirps/collection.json`) or its file (`…/chirps.json`)."""
+    parent, _, last = path.rstrip("/").rpartition("/")
+    if parent.endswith("/collections"):
+        return unquote(last) or None
+    if is_api:
+        return None
+    if last.lower() in ("collection.json", "catalog.json"):
+        last = parent.rpartition("/")[2]
+    return unquote(last.removesuffix(".json")) or None
 
 
 def parse_asset(payload: dict, *, base_url: str = "") -> UpstreamAsset:
@@ -360,6 +389,22 @@ class StacApiClient:
     def describe_root(self) -> UpstreamRoot:
         page, url = self._get(self.url, None)
         return parse_root(page, base_url=url)
+
+    def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
+        root = self.describe_root()
+        if root.own is not None and root.own.id == collection_id:
+            return root.own
+        href = root.child_hrefs.get(collection_id)
+        if href is None and root.is_api:
+            href = f"{self.url}/collections/{quote(collection_id, safe='')}"
+        # A child link is the Upstream's content: followed only to the operator's own host.
+        if href is None or not self._is_ours(href):
+            return None
+        try:
+            page, _ = self._get(href, None)
+        except UpstreamUnreachable:
+            return None
+        return parse_collection(page)
 
     def bucket_region(self, bucket: str) -> str | None:
         """Asked of S3 itself, which names a bucket's region on any answer. This
