@@ -9,7 +9,7 @@ name = "georiva-titiler-app"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.143.0",
+    "fastapi==0.162.2",
     "uvicorn[standard]==0.54.0",
     "gunicorn==26.2.0",
     "titiler.core==2.4.0",
@@ -17,7 +17,7 @@ dependencies = [
     # them directly — the tile grid it reads an identify pixel off, and the
     # out-of-footprint error it answers that click with (#363).
     "morecantile==7.1.0",
-    "rio-tiler==9.4.12",
+    "rio-tiler==9.4.13",
     "redis==8.1.0",
     "httpx==0.28.1",
 ]
