@@ -348,5 +348,6 @@ def add_data_select(request):
             "header_icon": "plus",
             "automated_url": reverse("data_feed_add_select"),
             "upload_url": reverse("upload_wizard_step1"),
+            "harvest_url": reverse("harvest_wizard_step1"),
         },
     )

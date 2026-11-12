@@ -296,6 +296,12 @@
                         <div class="gaqd-meta">
                             {% trans "Rejected assets were not indexed: their link is not https, names a host outside the asset host allowlist, or resolves to a private address." %}
                         </div>
+                        {% if feed.recheck_url %}
+                            <div class="gaqd-meta">
+                                {% trans "If the upstream has moved its files, re-check it and confirm where they now are:" %}
+                                <a href="{{ feed.recheck_url }}">{% trans "Re-check upstream" %}</a>
+                            </div>
+                        {% endif %}
                     {% endif %}
                 </td>
             </tr>

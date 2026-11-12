@@ -1,0 +1,26 @@
+{% extends "georivaharvest/wizard_base.html" %}
+{% load i18n wagtailadmin_tags %}
+{% block titletag %}{% trans "Show data from an online catalog — Catalog address" %}{% endblock %}
+{% block wizard_content %}
+    <p class="hwiz-lead">
+        {% trans "Some providers publish their data in an online catalog that others can read directly. GeoRiva can show such data on your site without copying it: nothing is downloaded, so it takes no space here." %}
+    </p>
+    <form method="post" action="">
+        {% csrf_token %}
+        <div class="w-field__wrapper hwiz-field">
+            <label class="w-field__label" for="upstream_url">{% trans "Address of the catalog" %} <sup>*</sup></label>
+            <input type="url" name="upstream_url" id="upstream_url" class="w-field__input" value="{{ address }}"
+                   placeholder="https://explorer.digitalearth.africa/stac" required>
+            <p class="w-field__help-text">
+                {% trans "The web address the provider gives for its catalog. It must be readable without an account. GeoRiva will look at what it holds and guide you from there." %}
+            </p>
+        </div>
+        <div class="hwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                {% icon name="arrow-right" wrapped=1 %}
+                {% trans "Next: look at the catalog" %}
+            </button>
+            <a href="{% url 'add_data' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+{% endblock %}

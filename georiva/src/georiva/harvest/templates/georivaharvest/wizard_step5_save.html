@@ -1,0 +1,128 @@
+{% extends "georivaharvest/wizard_base.html" %}
+{% load i18n wagtailadmin_tags %}
+{% block titletag %}{% trans "Show data from an online catalog — Schedule and save" %}{% endblock %}
+{% block wizard_content %}
+    <div class="hwiz-panel">
+        <div class="hwiz-panel__header">{% trans "What will be set up" %}</div>
+        <div class="hwiz-panel__body">
+            <p>
+                {% blocktrans with title=session.collection_title address=session.upstream_url %}“{{ title }}”, from the catalog at {{ address }}.{% endblocktrans %}
+            </p>
+            <p>
+                {% trans "Shown:" %}
+                {% for image in chosen %}<strong>{{ image.name }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+            </p>
+            {% if confirmed %}
+                <p>
+                    {% trans "Files read from:" %}
+                    {% for location in confirmed %}<strong>{{ location.host }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+                </p>
+            {% endif %}
+            <p class="hwiz-note">{% trans "Nothing is copied: GeoRiva keeps a list of what the catalog has and reads the provider's files when someone looks at them." %}</p>
+        </div>
+    </div>
+
+    <form method="post" action="">
+        {% csrf_token %}
+        <div class="w-field__wrapper hwiz-field">
+            <label class="w-field__label" for="feed_name">{% trans "Name of this feed" %} <sup>*</sup></label>
+            <input type="text" name="feed_name" id="feed_name" class="w-field__input" value="{{ form.feed_name }}" required>
+        </div>
+
+        {% if catalogs %}
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="catalog_mode">{% trans "Catalog on your site" %}</label>
+                <select name="catalog_mode" id="catalog_mode" class="w-field__input">
+                    <option value="create" {% if form.catalog_mode != "select" %}selected{% endif %}>{% trans "Create a new catalog" %}</option>
+                    <option value="select" {% if form.catalog_mode == "select" %}selected{% endif %}>{% trans "Use an existing catalog" %}</option>
+                </select>
+            </div>
+        {% else %}
+            <input type="hidden" name="catalog_mode" value="create">
+        {% endif %}
+
+        <div id="hwiz-create">
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="new_catalog_name">{% trans "Catalog name" %} <sup>*</sup></label>
+                <input type="text" name="new_catalog_name" id="new_catalog_name" class="w-field__input"
+                       value="{{ form.new_catalog_name }}">
+                <p class="w-field__help-text">{% trans "The heading this data appears under on your site." %}</p>
+            </div>
+            <div class="w-field__wrapper hwiz-field">
+                <label class="w-field__label" for="new_catalog_slug">{% trans "Short name" %} <sup>*</sup></label>
+                <input type="text" name="new_catalog_slug" id="new_catalog_slug" class="w-field__input"
+                       value="{{ form.new_catalog_slug }}" pattern="[a-z0-9\-]+">
+                <p class="w-field__help-text">{% trans "Lowercase letters, digits and hyphens. It appears in web addresses and cannot be changed later." %}</p>
+            </div>
+        </div>
+
+        {% if catalogs %}
+            <div id="hwiz-select">
+                <div class="w-field__wrapper hwiz-field">
+                    <label class="w-field__label" for="catalog_id">{% trans "Existing catalog" %}</label>
+                    <select name="catalog_id" id="catalog_id" class="w-field__input">
+                        <option value="">— {% trans "Choose" %} —</option>
+                        {% for catalog in catalogs %}
+                            <option value="{{ catalog.pk }}" {% if form.catalog_id == catalog.pk|stringformat:"s" %}selected{% endif %}>{{ catalog.name }} ({{ catalog.slug }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="w-field__wrapper hwiz-field">
+            <label class="w-field__label" for="window_start">{% trans "Show data from" %}</label>
+            <input type="date" name="window_start" id="window_start" class="w-field__input" value="{{ form.window_start }}">
+            <p class="w-field__help-text">{% trans "Leave empty to show everything the catalog has, from its beginning." %}</p>
+        </div>
+        <div class="w-field__wrapper hwiz-field">
+            <label class="w-field__label" for="window_end">{% trans "Until" %}</label>
+            <input type="date" name="window_end" id="window_end" class="w-field__input" value="{{ form.window_end }}">
+            <p class="w-field__help-text">{% trans "Leave empty to keep following the catalog as it adds new data." %}</p>
+        </div>
+        <div class="w-field__wrapper hwiz-field">
+            <label class="w-field__label" for="interval_minutes">{% trans "Look for new data" %}</label>
+            <select name="interval_minutes" id="interval_minutes" class="w-field__input">
+                {% for minutes, label in cadences %}
+                    <option value="{{ minutes }}" {% if form.interval_minutes|stringformat:"s" == minutes|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="hwiz-actions">
+            <button type="submit" class="button bicolor button--icon">
+                {% icon name="tick" wrapped=1 %}
+                {% trans "Save and start" %}
+            </button>
+            <a href="{% url 'harvest_wizard_step4' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    </form>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const name = document.getElementById('new_catalog_name');
+            const slug = document.getElementById('new_catalog_slug');
+            if (name && slug) {
+                name.addEventListener('input', function () {
+                    slug.value = this.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                });
+            }
+
+            const mode = document.getElementById('catalog_mode');
+            if (!mode) return;
+            const create = document.getElementById('hwiz-create');
+            const select = document.getElementById('hwiz-select');
+
+            function toggle() {
+                if (create) create.hidden = mode.value !== 'create';
+                if (select) select.hidden = mode.value !== 'select';
+            }
+
+            mode.addEventListener('change', toggle);
+            toggle();
+        });
+    </script>
+{% endblock %}

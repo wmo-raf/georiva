@@ -65,7 +65,8 @@ class AssetProbe:
     tiled: bool = False
     overviews: bool = False
     crs: str = ""
-    #: The value range of its coarsest overview, when one was asked for and could be read cheaply.
+    #: The range most of its values lie in (`RANGE_PERCENTILES` of its coarsest
+    #: overview), when one was asked for and could be read cheaply.
     value_min: float | None = None
     value_max: float | None = None
 
@@ -278,6 +279,9 @@ PROBE_TIMEOUT = 10
 #: The most pixels a probe reads to estimate a value range.
 PROBE_MAX_POINTS = 1_000_000
 
+#: The share of a file's values an estimated range spans: its 2nd to its 98th percentile.
+RANGE_PERCENTILES = (2, 98)
+
 
 def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIMEOUT) -> AssetProbe:
     """Open the raster at `path` — a URL, read by range — and say what it is.
@@ -305,9 +309,12 @@ def probe_raster(path: str, *, estimate_range: bool, timeout: float = PROBE_TIME
                 factor = max(factors, default=1)
                 shape = (max(1, src.height // factor), max(1, src.width // factor))
                 if shape[0] * shape[1] <= PROBE_MAX_POINTS:
-                    values = np.ma.masked_invalid(src.read(1, out_shape=shape, masked=True))
-                    if values.count():
-                        low, high = float(values.min()), float(values.max())
+                    values = np.ma.masked_invalid(src.read(1, out_shape=shape, masked=True)).compressed()
+                    if values.size:
+                        # A display range, not the extremes: one storm's maximum would wash out every map.
+                        low, high = (float(v) for v in np.percentile(values, RANGE_PERCENTILES))
+                        if low == high:
+                            low, high = float(values.min()), float(values.max())
             return AssetProbe(
                 readable=True,
                 tiled=bool(src.profile.get("tiled")),

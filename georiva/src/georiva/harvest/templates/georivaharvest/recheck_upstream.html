@@ -1,0 +1,96 @@
+{% extends "wagtailadmin/generic/base.html" %}
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    A feed's Upstream surveyed again: any place its files have moved to is put
+    to the operator, and pinned only on their yes (ADR 0042 §9).
+{% endcomment %}
+{% block titletag %}{% blocktrans with name=feed.name %}Check the catalog again — {{ name }}{% endblocktrans %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .hrc-panel {
+            max-width: 60rem;
+            margin-bottom: 1.5em;
+            border: 1px solid var(--w-color-border-furniture);
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+
+        .hrc-panel__header {
+            padding: 0.75em 1em;
+            background: var(--w-color-surface-header);
+            border-bottom: 1px solid var(--w-color-border-furniture);
+            font-weight: 700;
+            color: var(--w-color-text-label);
+        }
+
+        .hrc-panel__body {
+            padding: 1em;
+            background: var(--w-color-surface-page);
+            line-height: 1.5;
+        }
+
+        .hrc-check {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6em;
+            margin-bottom: 0.75em;
+        }
+
+        .hrc-note {
+            color: var(--w-color-text-meta);
+        }
+
+        .hrc-actions {
+            display: flex;
+            gap: 1em;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <form method="post" action="">
+        {% csrf_token %}
+        {% if not found.harvestable %}
+            <div class="hrc-panel">
+                <div class="hrc-panel__header">{% trans "The catalog no longer fits" %}</div>
+                <div class="hrc-panel__body">
+                    <p>{{ found.reason }}</p>
+                    <p class="hrc-note">{% trans "Nothing was changed on this feed." %}</p>
+                </div>
+            </div>
+        {% else %}
+            <div class="hrc-panel">
+                <div class="hrc-panel__header">{% trans "Where the files are read from" %}</div>
+                <div class="hrc-panel__body">
+                    {% for location in new %}
+                        <label class="hrc-check">
+                            <input type="checkbox" name="allow" value="{{ location.value }}">
+                            <span>
+                                {% blocktrans with host=location.host %}This catalog now keeps files at <strong>{{ host }}</strong>, and they can be read without an account. Allow this feed to read from there?{% endblocktrans %}
+                            </span>
+                        </label>
+                    {% empty %}
+                        <p>{% trans "The catalog's files are where this feed already reads them from. There is nothing to confirm." %}</p>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="hrc-panel">
+                <div class="hrc-panel__header">{% trans "Kinds of image the catalog has" %}</div>
+                <div class="hrc-panel__body">
+                    <p>
+                        {% for asset in readable %}<strong>{{ asset.title|default:asset.key }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
+                    </p>
+                    <p class="hrc-note">{% trans "After saving, these are the ones the feed's mapping offers." %}</p>
+                </div>
+            </div>
+        {% endif %}
+        <div class="hrc-actions">
+            {% if found.harvestable %}
+                <button type="submit" class="button">{% trans "Save" %}</button>
+            {% endif %}
+            <a href="{% url 'data_feed_detail' feed.pk %}" class="button button-secondary">{% trans "Back to the feed" %}</a>
+        </div>
+    </form>
+{% endblock %}

@@ -54,6 +54,10 @@ class DataFeed(PolymorphicModel, TimeStampedModel, ClusterableModel):
     # fail-closed by construction rather than a fallback to some default org.
     ORGANISATION_LOOKUP = "catalog__organisation"
 
+    #: The URL name of the wizard that creates this kind of feed, for a kind
+    #: that is never created through its admin form. `None`: the form creates it.
+    setup_url_name = None
+
     catalog = models.OneToOneField(
         "georivacore.Catalog",
         null=True,

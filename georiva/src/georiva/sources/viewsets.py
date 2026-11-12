@@ -22,7 +22,11 @@ class DataFeedDashboardUrlMixin:
 
 
 class DataFeedCreateView(DataFeedDashboardUrlMixin, generic.CreateView):
-    pass
+    def dispatch(self, request, *args, **kwargs):
+        # A kind of feed with a wizard of its own is created there and nowhere else.
+        if self.model.setup_url_name:
+            return redirect(self.model.setup_url_name)
+        return super().dispatch(request, *args, **kwargs)
 
 
 class DataFeedEditView(DataFeedDashboardUrlMixin, generic.EditView):
