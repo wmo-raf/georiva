@@ -453,7 +453,8 @@ _Avoid_: test item, preview item
 A place an Upstream's files live that an operator confirmed for one Harvest feed: an `https` host, or an `s3://`
 bucket with the public `https` host its hrefs are translated to at harvest time. Proposed by the Upstream survey,
 never typed. An asset anywhere else is rejected. For a virtual Upstream store, the buckets its chunks point into are
-Pinned locations too, and a chunk anywhere else is not read.
+Pinned locations too — an `s3://` or a `gs://` bucket, read as it is and never translated — and a chunk anywhere
+else is not read.
 _Avoid_: bucket mapping, rewrite rule, trusted bucket
 
 **Variable mapping**:
