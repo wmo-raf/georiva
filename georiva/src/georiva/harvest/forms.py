@@ -132,17 +132,32 @@ class HarvestFeedForm(DataFeedForm):
 
         # Through the feed's own client, so this asks what a harvest will ask.
         probe = type(self.instance)(upstream_url=url, upstream_collection_id=collection_id)
+        client = probe.upstream_client()
         try:
-            found = [collection.id for collection in probe.upstream_client().list_collections()]
-        except UpstreamUnreachable as unreachable:
-            self.add_error(
-                "upstream_url",
-                _(
-                    "This upstream catalog could not be read without credentials: %(why)s. "
-                    "A harvest feed needs an upstream that answers anonymously."
+            found = [collection.id for collection in client.list_collections()]
+        except UpstreamUnreachable:
+            # Its collections do not answer; a harvest reads its items, so they are asked.
+            try:
+                listed = next(iter(client.list_items(collection_id, (None, None))), None)
+            except UpstreamUnreachable as unreachable:
+                self.add_error(
+                    "upstream_url",
+                    _(
+                        "This upstream catalog could not be read without credentials: %(why)s. "
+                        "A harvest feed needs an upstream that answers anonymously."
+                    )
+                    % {"why": unreachable},
                 )
-                % {"why": unreachable},
-            )
+                return
+            if listed is None:
+                self.add_error(
+                    "upstream_collection_id",
+                    _(
+                        "The collection “%(id)s” could not be found: "
+                        "the upstream does not describe it and lists no item of it."
+                    )
+                    % {"id": collection_id},
+                )
             return
 
         if collection_id not in found:

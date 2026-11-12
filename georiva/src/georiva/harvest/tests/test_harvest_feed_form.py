@@ -6,6 +6,7 @@ Driven through the admin's own add and edit views. The Upstream is the fake.
 """
 
 import json
+from datetime import UTC, datetime
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -167,6 +168,22 @@ class CreateHarvestFeedTests(HarvestFeedAdminMixin, TestCase):
         errors = self.errors(response)
         self.assertIn("could not be read without credentials", errors)
         self.assertIn("answered 401", errors)
+
+    def test_an_upstream_that_cannot_describe_its_collections_is_accepted_on_its_items(self):
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+        self.upstream.add_item(datetime(2026, 3, 1, tzinfo=UTC), {"rainfall": "https://stac.upstream.example/a.tif"})
+
+        self.create()
+
+        self.assertTrue(HarvestFeed.objects.exists())
+
+    def test_a_collection_neither_described_nor_listed_is_refused(self):
+        self.upstream.collections_unreachable = "upstream catalog did not answer JSON for …/collections"
+
+        response = self.create()
+
+        self.assertFalse(HarvestFeed.objects.exists())
+        self.assertIn("could not be found", self.errors(response))
 
     def test_an_upstream_without_the_collection_is_refused(self):
         response = self.create(upstream_collection_id="era5-land")

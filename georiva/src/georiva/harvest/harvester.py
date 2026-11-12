@@ -107,15 +107,22 @@ def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from
 
 
 def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
+    described, undescribed = _description(feed, upstream)
     try:
-        described = next((c for c in upstream.list_collections() if c.id == feed.upstream_collection_id), None)
-        if described is None:
-            raise RunStopped(f"source unavailable — upstream has no collection {feed.upstream_collection_id!r}")
         listed = list(upstream.list_items(feed.upstream_collection_id, feed.window))
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
+    # An empty window is believed only of a collection something vouched for.
+    # Undescribed and unlisted, it may as well be gone, and the Mirror would
+    # take that for "everything was deleted" (ADR 0042 §6).
+    if described is None and not listed:
+        raise RunStopped(
+            f"source unavailable — upstream neither describes collection {feed.upstream_collection_id!r} "
+            f"nor lists an item of it ({undescribed})"
+        )
 
-    _describe(collection, described, feed)
+    if described is not None:
+        _describe(collection, described, feed)
 
     variables = feed.mapped_variables(collection)
     allowlist = AssetHostAllowlist(
@@ -191,6 +198,24 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     # once, here, where the window's Remote assets now are (ADR 0043 §3).
     for variable in variables.values():
         publish_variable(variable)
+
+
+def _description(feed, upstream):
+    """The Upstream's own description of the feed's collection, and when it has
+    none to give, why: `(described, None)` or `(None, why)`.
+
+    Describing is best effort. A catalog may list a collection's items soundly
+    while its collection pages do not answer, and its items are what a harvest
+    is for. A catalog that does answer and has no such collection is believed.
+    """
+    try:
+        described = next((c for c in upstream.list_collections() if c.id == feed.upstream_collection_id), None)
+    except UpstreamUnreachable as unreachable:
+        logger.warning("Harvest %s: the upstream collection could not be described — %s", feed.name, unreachable)
+        return None, str(unreachable)
+    if described is None:
+        raise RunStopped(f"source unavailable — upstream has no collection {feed.upstream_collection_id!r}")
+    return described, None
 
 
 def _located(item: UpstreamItem, pins: PinnedBuckets) -> UpstreamItem:
