@@ -104,6 +104,7 @@ just shell                         # Shell into app container (`just shell inges
 just migrate                       # Run migrations
 just makemigrations                # Create migrations
 just test georiva.ingestion.tests  # Django tests in the container (extra args pass through)
+just test-worktree 1 georiva.stac.tests  # Django tests from a git worktree, slot 1 (see below)
 just titiler-test                  # Titiler tests, on the host
 
 # Production (plain compose, no just)
@@ -113,6 +114,12 @@ docker compose exec georiva bash
 ```
 
 **Inside container**: `georiva` is the management command (alias for `python manage.py`).
+
+**In a git worktree**: run Django tests with `just test-worktree <slot> <labels>`, never `just test` — that one
+tests the main checkout's code, whatever folder it is run from. Each worktree keeps one slot (1–9) for its lifetime
+and no two share one; if you were not told your slot, ask. `just format`, `just lint` and `just titiler-test` work in
+a worktree as usual. Every other Docker command belongs to the main checkout, and the running app serves its code
+only.
 
 **Docker entry points** (see `docker-entrypoint.sh`):
 
