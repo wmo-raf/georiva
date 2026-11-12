@@ -110,6 +110,34 @@ class CreateHarvestFeedTests(HarvestFeedAdminMixin, TestCase):
         self.assertIsNone(feed.window_end)
         self.assertEqual(feed.allowed_asset_hosts, {"stac.upstream.example", "bucket.elsewhere.example"})
 
+    def test_a_bucket_is_pinned_to_the_public_host_its_files_are_read_at(self):
+        self.create(pinned_buckets='{"DEAfrica-Input": "DEAfrica-Input.S3.af-south-1.amazonaws.com."}')
+
+        feed = HarvestFeed.objects.get()
+        self.assertEqual(feed.pinned_buckets, {"deafrica-input": "deafrica-input.s3.af-south-1.amazonaws.com"})
+        self.assertIn("deafrica-input.s3.af-south-1.amazonaws.com", feed.allowed_asset_hosts)
+
+    def test_a_feed_saved_with_no_pins_has_none(self):
+        self.create()
+
+        self.assertEqual(HarvestFeed.objects.get().pinned_buckets, {})
+
+    def test_a_pin_that_is_not_a_bucket_and_a_host_name_is_refused(self):
+        refused = (
+            '{"bucket": "https://bucket.s3.amazonaws.com/data"}',
+            '{"bucket": "georiva-minio:9000"}',
+            '{"s3://bucket": "bucket.s3.amazonaws.com"}',
+            '{"bucket": ""}',
+            '{"bucket": 3}',
+            '["bucket"]',
+        )
+        for pins in refused:
+            with self.subTest(pins=pins):
+                response = self.create(pinned_buckets=pins)
+
+                self.assertIn("pinned_buckets", response.context["form"].errors)
+                self.assertFalse(HarvestFeed.objects.exists())
+
     def test_the_allowlist_defaults_to_the_catalogs_own_host(self):
         self.create()
 

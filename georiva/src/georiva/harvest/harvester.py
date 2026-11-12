@@ -16,7 +16,7 @@ are still Remote. Every other row is left exactly as it is.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC
 
 from django.db import transaction
@@ -27,7 +27,7 @@ from georiva.core.machine_plane.remote_assets import publish_variable
 from georiva.core.storage.asset_location import remote_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
-from .asset_hosts import AssetHostAllowlist
+from .asset_hosts import AssetHostAllowlist, PinnedBuckets
 from .upstream import UpstreamCatalogClient, UpstreamItem, UpstreamUnreachable, in_window
 
 logger = logging.getLogger(__name__)
@@ -124,7 +124,12 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
         resolve=upstream.resolve_host,
     )
     # The Upstream is asked for the window and is not trusted to have kept to it.
-    items = [item for item in listed if item.datetime is not None and in_window(item.datetime, feed.window)]
+    # Each asset is located before anything looks at it: the href that is judged,
+    # compared and stored is the one a reader will open (ADR 0042 §9).
+    pins = PinnedBuckets(feed.pinned_buckets)
+    items = [
+        _located(item, pins) for item in listed if item.datetime is not None and in_window(item.datetime, feed.window)
+    ]
     indexed = _Index(collection)
     jurisdiction = _Jurisdiction(feed, collection)
     created_items = []
@@ -186,6 +191,14 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     # once, here, where the window's Remote assets now are (ADR 0043 §3).
     for variable in variables.values():
         publish_variable(variable)
+
+
+def _located(item: UpstreamItem, pins: PinnedBuckets) -> UpstreamItem:
+    """`item` with every asset's href as it may be stored here."""
+    return replace(
+        item,
+        assets={key: replace(asset, href=pins.locate(asset.href)) for key, asset in item.assets.items()},
+    )
 
 
 class _Index:

@@ -35,6 +35,16 @@
                     {% if feed.allow_http %}· {% trans "plain http allowed" %}{% endif %}
                 </td>
             </tr>
+            {% if feed.pinned_buckets %}
+                <tr>
+                    <th scope="row">{% trans "Pinned buckets" %}</th>
+                    <td>
+                        {% for bucket, host in feed.pinned_buckets.items %}
+                            s3://{{ bucket }} → {{ host }}{% if not forloop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </td>
+                </tr>
+            {% endif %}
             <tr>
                 <th scope="row">{% trans "Harvests into" %}</th>
                 <td>

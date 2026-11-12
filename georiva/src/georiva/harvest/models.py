@@ -56,6 +56,16 @@ class HarvestFeed(DataFeed):
             "Hosts asset links may name besides the upstream catalog's own. An asset on any other host is not indexed."
         ),
     )
+    pinned_buckets = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Pinned buckets"),
+        help_text=_(
+            "For an upstream that names its files by s3://bucket/…: each bucket and the public https host its "
+            'files are read at, as {"bucket": "bucket.s3.region.amazonaws.com"}. A file in any other '
+            "bucket is not indexed."
+        ),
+    )
     allow_http = models.BooleanField(
         default=False,
         verbose_name=_("Allow plain http assets"),
@@ -91,7 +101,7 @@ class HarvestFeed(DataFeed):
             panels=[FieldPanel("asset_key"), FieldPanel("variable")],
         ),
         MultiFieldPanel(
-            [FieldPanel("asset_hosts"), FieldPanel("allow_http")],
+            [FieldPanel("asset_hosts"), FieldPanel("pinned_buckets"), FieldPanel("allow_http")],
             heading=_("Asset host allowlist"),
         ),
     ]
@@ -108,9 +118,10 @@ class HarvestFeed(DataFeed):
 
     @property
     def allowed_asset_hosts(self) -> set[str]:
-        """The Asset host allowlist: the upstream catalog's own host, and those the operator added."""
+        """The Asset host allowlist: the upstream catalog's own host, those the
+        operator added, and those its pinned buckets are read at."""
         own = urlsplit(self.upstream_url).hostname
-        return {host.lower() for host in [own, *self.asset_hosts] if host}
+        return {host.lower() for host in [own, *self.asset_hosts, *self.pinned_buckets.values()] if host}
 
     def upstream_client(self):
         from .upstream import StacApiClient

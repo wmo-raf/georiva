@@ -22,6 +22,11 @@ MAPPINGS = "variable_mappings"
 SUGGESTED_COLLECTIONS = 10
 
 
+def _is_name(name: str) -> bool:
+    """Whether `name` is a host's or a bucket's name alone: no scheme, port, path, credentials or wildcard."""
+    return not any(char in name for char in "/:@*") and not any(char.isspace() for char in name)
+
+
 class HarvestFeedForm(DataFeedForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -70,7 +75,7 @@ class HarvestFeedForm(DataFeedForm):
             host = raw.strip().lower().rstrip(".")
             if not host:
                 continue
-            if any(char in host for char in "/:@*") or any(char.isspace() for char in host):
+            if not _is_name(host):
                 self.add_error(
                     "asset_hosts",
                     _("“%(host)s” is not a host name. Give the name alone, such as data.example.org.") % {"host": raw},
@@ -79,6 +84,27 @@ class HarvestFeedForm(DataFeedForm):
             if host not in hosts:
                 hosts.append(host)
         return hosts
+
+    def clean_pinned_buckets(self):
+        """Bucket → host, both as they are compared: a bucket's bare name, and a
+        host name held to what an asset host is."""
+        pins = self.cleaned_data.get("pinned_buckets") or {}
+        if not isinstance(pins, dict):
+            self.add_error("pinned_buckets", _('Give the pinned buckets as {"bucket": "host"}.'))
+            return {}
+        cleaned = {}
+        for raw_bucket, raw_host in pins.items():
+            bucket = str(raw_bucket).strip().lower()
+            host = raw_host.strip().lower().rstrip(".") if isinstance(raw_host, str) else ""
+            if not bucket or not _is_name(bucket) or not host or not _is_name(host):
+                self.add_error(
+                    "pinned_buckets",
+                    _("“%(bucket)s” must be a bucket's name, pinned to a host name such as data.example.org.")
+                    % {"bucket": raw_bucket},
+                )
+                continue
+            cleaned[bucket] = host
+        return cleaned
 
     # ── The feed as a whole ─────────────────────────────────────────────────
 
