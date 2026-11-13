@@ -118,6 +118,16 @@ class StoreRunRecordTests(StoreRunsMixin, TestCase):
         self.assertIsNone(self.record())
         self.assertIsNotNone(self.record(newer))
 
+    def test_a_run_an_operator_closed_stays_closed(self):
+        self.hold("temperature_2m", 0)
+        self.harvest()
+        self.record().close(RunIngestion.Closer.MANUAL)
+
+        self.harvest()
+
+        record = self.record()
+        self.assertEqual((record.closed_by, record.revision), (RunIngestion.Closer.MANUAL, 0))
+
     def test_a_failed_harvest_leaves_the_run_records_as_they_were(self):
         self.hold("temperature_2m", 0)
         self.harvest()

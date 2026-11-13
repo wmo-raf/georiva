@@ -39,7 +39,7 @@ def settled_runs(collection, variable_pks: set[int], window_q) -> set[datetime]:
         ).values_list("reference_time", "expected_file_count")
     )
     held = _held_by_variable(collection, closed, variable_pks)
-    return {run for run, expected in closed.items() if all(held.get((run, pk), 0) >= expected for pk in variable_pks)}
+    return {run for run, expected in closed.items() if _whole(held, run, variable_pks, expected)}
 
 
 def keep_runs(collection, variable_pks: set[int], window_q, *, expected: dict[datetime, int], settled: set[datetime]):
@@ -48,30 +48,32 @@ def keep_runs(collection, variable_pks: set[int], window_q, *, expected: dict[da
     `expected` is how many steps the store expects of each run it was asked
     about and holds a step of; `settled` the runs it was not asked about. A
     run in neither — one with a record whose every step is gone upstream — is
-    judged as holding nothing. Call it only once the window was listed whole
-    and its rows written and removed.
+    judged as holding nothing. A run closed on other evidence — by an
+    operator — is theirs, and is left as it is. Call it only once the window
+    was listed whole and its rows written and removed.
     """
+    from georiva.core.models import Item
     from georiva.ingestion.models import RunIngestion
 
-    recorded = set(
-        RunIngestion.objects.filter(window_q, collection=collection).values_list("reference_time", flat=True)
+    records = RunIngestion.objects.filter(window_q, collection=collection)
+    recorded = dict(records.values_list("reference_time", "expected_file_count"))
+    closed_elsewhere = set(
+        records.filter(status=RunIngestion.Status.CLOSED)
+        .exclude(closed_by=RunIngestion.Closer.STORE_HELD)
+        .values_list("reference_time", flat=True)
     )
-    judged = (set(expected) | recorded) - settled
+    judged = (set(expected) | set(recorded)) - settled - closed_elsewhere
     if not judged:
         return
     held = _held_by_variable(collection, judged, variable_pks)
     steps = dict(
-        _items(collection, judged).values("reference_time").annotate(n=Count("pk")).values_list("reference_time", "n")
+        Item.objects.filter(collection=collection, reference_time__in=list(judged))
+        .values("reference_time")
+        .annotate(n=Count("pk"))
+        .values_list("reference_time", "n")
     )
     for run in sorted(judged):
-        known = expected.get(run)
-        if known is None:
-            known = (
-                RunIngestion.objects.filter(collection=collection, reference_time=run)
-                .values_list("expected_file_count", flat=True)
-                .first()
-            )
-        complete = bool(known) and bool(variable_pks) and all(held.get((run, pk), 0) >= known for pk in variable_pks)
+        complete = _whole(held, run, variable_pks, expected.get(run) or recorded.get(run))
         RunIngestion.record_held_steps(
             collection, run, held=steps.get(run, 0), expected=expected.get(run), complete=complete
         )
@@ -89,10 +91,9 @@ def forget_aged_out(collection, start: datetime) -> None:
     ).delete()
 
 
-def _items(collection, runs):
-    from georiva.core.models import Item
-
-    return Item.objects.filter(collection=collection, reference_time__in=list(runs))
+def _whole(held, run, variable_pks, expected) -> bool:
+    """Whether every one of `variable_pks` holds `expected` steps of `run`."""
+    return bool(expected) and bool(variable_pks) and all(held.get((run, pk), 0) >= expected for pk in variable_pks)
 
 
 def _held_by_variable(collection, runs, variable_pks) -> dict[tuple[datetime, int], int]:

@@ -226,7 +226,7 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped, settled)
 
     if reach.is_store:
-        expected = {run: steps for run, steps in expected.items() if reach.covers_step(run, run)}
+        expected = {run: steps for run, steps in expected.items() if reach.covers_run(run)}
         runs.keep_runs(collection, mapped, reach.runs_q(), expected=expected, settled=settled)
         if reach.rolls:
             runs.forget_aged_out(collection, reach.window[0])
@@ -341,6 +341,9 @@ class _Reach:
         """Whether an upstream item is in the window: by its run's time where it
         has a run, so a run inside keeps every step however far ahead."""
         return item.datetime is not None and self.covers_step(item.reference_time, item.datetime)
+
+    def covers_run(self, run) -> bool:
+        return self.covers_step(run, run)
 
     def covers_step(self, run, when) -> bool:
         return in_window(run or when, self.window)
