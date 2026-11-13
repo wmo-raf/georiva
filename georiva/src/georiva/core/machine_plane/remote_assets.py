@@ -42,7 +42,7 @@ from datetime import UTC, datetime
 
 from django.db.models import Q
 
-from georiva.core.storage.asset_location import remote_q, store_q
+from georiva.core.storage.asset_location import AssetLocation, remote_q, store_q
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,11 @@ def store_entry(href: str, array: str, chunk_locations: dict) -> dict:
     return {"store": href, "array": array, "chunk_locations": dict(chunk_locations or {})}
 
 
+def _store_value(href: str, array: str, chunk_locations: dict) -> str:
+    """A Store asset's value in the hash: its :func:`store_entry` as JSON."""
+    return json.dumps(store_entry(href, array, chunk_locations))
+
+
 def _chunk_locations(feed_pks) -> dict[int, dict]:
     """Each harvest feed's Pinned locations for a store's data, by feed.
 
@@ -110,16 +115,12 @@ def _chunk_locations(feed_pks) -> dict[int, dict]:
 def _values(rows) -> dict[tuple, str]:
     """``(variable, field) → the hash value`` for rows of
     ``(variable_id, time, reference_time, format, href, store_array, harvested_by_id)``."""
-    from georiva.core.models import Asset
-
-    rows = list(rows)
-    pins = _chunk_locations(
-        harvested_by for *_, asset_format, _, _, harvested_by in rows if asset_format == Asset.Format.ZARR
-    )
+    rows = [(*row, AssetLocation(row[4], row[3]).is_store) for row in rows]
+    pins = _chunk_locations(row[6] for row in rows if row[7])
     values = {}
-    for variable_pk, time, reference_time, asset_format, href, store_array, harvested_by in rows:
-        if asset_format == Asset.Format.ZARR:
-            href = json.dumps(store_entry(href, store_array, pins.get(harvested_by, {})))
+    for variable_pk, time, reference_time, _, href, store_array, harvested_by, is_store in rows:
+        if is_store:
+            href = _store_value(href, store_array, pins.get(harvested_by, {}))
         values[variable_pk, timestep_field(time, reference_time)] = href
     return values
 
@@ -223,7 +224,7 @@ def publish_asset(asset) -> None:
     location = asset.location
     if location.is_store:
         pins = _chunk_locations([asset.harvested_by_id]).get(asset.harvested_by_id, {})
-        _write_timestep(asset, json.dumps(store_entry(asset.href, asset.store_array, pins)))
+        _write_timestep(asset, _store_value(asset.href, asset.store_array, pins))
     elif asset.format != Asset.Format.COG:
         return
     elif location.is_remote:

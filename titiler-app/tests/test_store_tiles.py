@@ -196,6 +196,14 @@ def upstream_store(tmp_path, producer):
             length=len(body),
             validate_container=False,
         )
+    # The older run's second step names more bytes than its object holds, in the pinned place.
+    root.set_virtual_ref(
+        "temperature_2m/c/0/1/0/0",
+        f"{ECMWF}20260323/00z/step-0.grib2",
+        offset=0,
+        length=1_000_000,
+        validate_container=False,
+    )
     # The older run keeps its data in the declared place the feed did not pin.
     root.set_virtual_ref(
         "temperature_2m/c/0/0/0/0", f"{GFS}gfs.20260322/12/step-0.grib2", offset=0, length=256, validate_container=False
@@ -356,6 +364,14 @@ class TestOnlyPinnedPlacesAreFollowed:
         assert "Re-check the upstream" in detail
         assert response.headers["cache-control"] == "no-store"
 
+    def test_a_broken_object_in_a_pinned_place_is_not_blamed_on_the_pins(self, client, rendering, upstream_store):
+        publish(rendering, {"20260322T180000/20260322T120000": published(upstream_store.href)})
+
+        response = tile(client, time="2026-03-22T18:00:00Z", reftime="2026-03-22T12:00:00Z")
+
+        assert response.status_code == 504
+        assert "not allowed to read" not in response.json()["detail"]
+
     def test_the_repositorys_own_containers_are_never_followed(self, client, rendering, upstream_store):
         # Pinned nowhere: the repository's own config names the place, and still nothing is read from it.
         publish(rendering, {FIELD: published(upstream_store.href, {})})
@@ -456,6 +472,7 @@ class TestFailures:
         response = tile(client)
 
         assert response.status_code == 502
+        assert response.headers["cache-control"] == "no-store"
 
 
 class TestCogsAreUnchanged:

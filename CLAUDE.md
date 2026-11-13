@@ -38,7 +38,7 @@ georiva/src/georiva/          # Main Django application
 │   ├── machine_plane/        # Where the tenant travels in the address (ADR 0013/0015)
 │   │                         #   addresses.py, auth_view.py, config_view.py, palette_cache.py,
 │   │                         #   remote_assets.py (where Titiler finds a Remote asset, ADR 0043, or a Store
-│                         #   asset's store, array and pins, ADR 0044 §9)
+│   │                         #   asset's store, array and pins, ADR 0044 §9)
 │   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
 │   │                         #   definitions.py, chain.py
 │   ├── views/                # Wagtail admin surface: admin.py, viewsets.py,

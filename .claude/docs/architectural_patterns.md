@@ -100,12 +100,19 @@ Access via import: `from georiva.core.storage import storage`
 - **A Store asset** (ADR 0044 §3) is a Remote asset whose href is a whole Upstream store: `format=ZARR`, the same
   href on every asset of the collection, the array's path in `Asset.store_array`, and the slice in its Item's
   reference time and valid time. Ask `asset.location.is_store` or filter with `store_q()`; `open_raster()` refuses
-  one. Readers that select `format=COG` (zonal statistics, virtual-Zarr manifests, the Remote-asset hash) leave
-  Store assets out by that alone, and a time series over one answers 501
+  one. Readers that select `format=COG` (zonal statistics, virtual-Zarr manifests) leave Store assets out by that
+  alone, and a time series over one answers 501
 - **Where Titiler finds a Remote asset** (ADR 0043 §3): Titiler derives a local COG's URL from the request path and
   consults no row, so a Remote asset's href is published to it. `core/machine_plane/remote_assets.py` writes one
   Redis hash per Variable (timestep → href, plus a `published` marker), for every visibility tier; the tile-config
-  callback answers `?time=` with `remote_href` as the miss path, `public`-only. A harvest republishes its mapped
+  callback answers `?time=` with `remote_href` as the miss path, `public`-only. A Store asset's value is instead
+  `store_entry` as JSON — store, array, and the harvesting feed's `pinned_chunk_locations` — answered on the miss
+  path as `remote_store`; Titiler selects the run and step by value among the store's coordinates (ADR 0044 §9)
+- **Titiler reads a store itself** (`titiler-app/app/store.py`, ADR 0044 §9, §11): it discards the repository's own
+  virtual chunk containers and builds anonymous ones for the pinned `s3://`/`gs://` prefixes only. This restates
+  core across the process boundary — `store.open_repository` ↔ `harvest/upstream.open_repository`,
+  `store.place_kind` ↔ `harvest/asset_hosts.chunk_place`, `store._decoded` ↔ `upstream._coordinate`'s time
+  decoding — and a change to one must touch the other; tests on each side assert the container override. A harvest republishes its mapped
   Variables at the end of a run; an `Asset` save or delete updates its one field. Anything else that rewrites
   hrefs with `.update()` must call `publish_variable`. Timeseries read Remote assets directly
   (`geoprocessing/sampling.py`), since the virtual store covers local assets only

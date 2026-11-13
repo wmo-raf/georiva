@@ -163,7 +163,8 @@ _BUCKET_NAMES = {
 #: How a Google bucket is read: its public endpoint, anonymously. Options only
 #: bound how long a read may take; nothing here names an address. A test points
 #: this at a stand-in for the provider, which is the one reason it is a name.
-GCS_OPTIONS = {"timeout": f"{STORE_READ_TIMEOUT}s", "connect_timeout": f"{STORE_CONNECT_TIMEOUT}s"}
+_TIMEOUTS = {"timeout": f"{STORE_READ_TIMEOUT}s", "connect_timeout": f"{STORE_CONNECT_TIMEOUT}s"}
+GCS_OPTIONS = dict(_TIMEOUTS)
 
 
 def place_kind(prefix: str) -> str | None:
@@ -200,7 +201,7 @@ def storage(href: str):
     """The repository at ``href``, read over HTTP with every request bounded."""
     import icechunk
 
-    options = {"timeout": f"{STORE_READ_TIMEOUT}s", "connect_timeout": f"{STORE_CONNECT_TIMEOUT}s"}
+    options = dict(_TIMEOUTS)
     if href.startswith("http://"):
         options["allow_http"] = "true"
     return icechunk.http_storage(href, opts=options)
@@ -446,7 +447,7 @@ def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> Ope
 
     Concurrent first requests wait on one open rather than each paying for
     their own. An open that fails leaves nothing behind, so the next request
-    tries again.
+    tries again. Unbounded itself: :func:`read_field` bounds it with the read.
     """
     key = (href, chunk_locations)
     with _opened.lock:
@@ -458,11 +459,7 @@ def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> Ope
             if key in _opened.stores:
                 return _opened.stores[key]
         logger.info("Opening upstream store %s", href)
-        store = _bounded(
-            lambda: open_repository(storage(href), chunk_locations).readonly_session(BRANCH).store,
-            what="open",
-        )
-        opened = OpenStore(store)
+        opened = OpenStore(open_repository(storage(href), chunk_locations).readonly_session(BRANCH).store)
         with _opened.lock:
             _opened.stores[key] = opened
         return opened
@@ -476,19 +473,34 @@ def forget_all() -> None:
 
 
 def read_field(target: StoreSlice) -> Field:
-    """Decode the field ``target`` names, every upstream read bounded in time."""
-    opened = opened_store(target.store, target.chunk_locations)
-    return _bounded(lambda: opened.field(target.array, target.time, target.reftime), what="read")
+    """Decode the field ``target`` names: opening the store if this process
+    has not yet, and reading the field, within one ``STORE_READ_TIMEOUT``."""
+    return _bounded(
+        lambda: opened_store(target.store, target.chunk_locations).field(target.array, target.time, target.reftime)
+    )
 
 
-def _bounded(call: Callable, *, what: str):
+#: How icechunk says a chunk lies outside every container the reader was given,
+#: or in one it was not authorised for. Other failures that mention virtual
+#: chunks — a truncated or rewritten object in a pinned place — are not this.
+_NOT_FOLLOWED = (
+    "resolves to the url prefix",
+    "no virtual chunk container can handle",
+    "no matching virtual chunk container",
+    "authorize the virtual chunk container",
+)
+
+
+def _bounded(call: Callable):
     """``call()``, in a thread of its own, given ``STORE_READ_TIMEOUT`` seconds.
 
     The library's own timeouts bound each request it makes; this bounds them all
     together, so a store that answers slowly but steadily cannot hold the tile
     longer either. Whatever the library raises becomes a :class:`StoreError`.
+    A call that overruns is abandoned, not stopped: its thread ends when the
+    library's own timeouts end it.
     """
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"store-{what}")
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-read")
     try:
         return pool.submit(call).result(timeout=STORE_READ_TIMEOUT)
     except TimedOut as late:
@@ -497,13 +509,11 @@ def _bounded(call: Callable, *, what: str):
         raise
     except Exception as exc:
         said = str(exc)
-        if "virtual chunk" in said:
+        if any(phrase in said for phrase in _NOT_FOLLOWED):
             logger.warning("Upstream store data outside the pinned places: %s", said.splitlines()[0])
             raise StoreDataNotPinned(NOT_PINNED) from exc
-        logger.warning("Upstream store %s failed: %s", what, said.splitlines()[0] if said else type(exc).__name__)
-        if what == "open":
-            raise StoreUnreachable("The upstream store could not be opened.") from exc
-        raise StoreUnreachable("The upstream store could not be read.") from exc
+        logger.warning("Upstream store read failed: %s", said.splitlines()[0] if said else type(exc).__name__)
+        raise StoreUnreachable("The upstream store could not be opened or read.") from exc
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 

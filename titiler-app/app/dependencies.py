@@ -21,7 +21,7 @@ from app.config import (
     REMOTE_ASSETS_KEY_PREFIX,
     REMOTE_ASSETS_PUBLISHED_FIELD,
 )
-from app.store import StoreError, StoreSlice
+from app.store import StoreSlice
 
 logger = logging.getLogger(__name__)
 
@@ -210,11 +210,8 @@ def remote_source(
         entry = (config or {}).get("remote_store")
 
     if entry is not None:
-        try:
-            return StoreSlice.published(entry if isinstance(entry, dict) else {}, time_dt, reftime_dt)
-        except StoreError as exc:
-            logger.error("Refusing a published store entry for %s: %s", key, exc.detail)
-            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        # A malformed entry raises StoreError, answered by the app's handler like any store failure.
+        return StoreSlice.published(entry if isinstance(entry, dict) else {}, time_dt, reftime_dt)
     if value is None:
         return None
     if not value.startswith(("https://", "http://")):
