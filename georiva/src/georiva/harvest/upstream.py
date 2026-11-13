@@ -166,6 +166,10 @@ class HeldStep:
     reference_time: datetime | None = None
     #: The arrays that hold data at this step, by their full path in the store.
     arrays: frozenset[str] = frozenset()
+    #: How many steps the store expects of its run: the run's lead times, those
+    #: past the store's own expected forecast length for it left out where it
+    #: publishes one. `None` for an analysis store, which has no runs.
+    run_steps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -226,12 +230,15 @@ class UpstreamCatalogClient(Protocol):
     def list_items(self, collection_id: str, window: Window) -> Iterable[UpstreamItem]:
         """The collection's items, with their assets, whose time is in `window`."""
 
-    def list_held_steps(self, href: str, fields: list[StoreField], window: Window) -> Iterable[HeldStep]:
+    def list_held_steps(
+        self, href: str, fields: list[StoreField], window: Window, *, skip_runs: frozenset = frozenset()
+    ) -> Iterable[HeldStep]:
         """The steps the Upstream store at `href` holds for any of `fields`,
         each with the fields held there. `window` is on run time for a field
         that has runs — a run inside it gives every step it holds, however far
-        ahead — and on valid time for one that has none. Nothing is decoded and
-        no data is followed anywhere (ADR 0044 §6)."""
+        ahead — and on valid time for one that has none. The runs in
+        `skip_runs` are not asked about: a closed run is not asked again (ADR
+        0044 §6). Nothing is decoded and no data is followed anywhere."""
 
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
@@ -862,6 +869,10 @@ STEPS_TIMEOUT = 300
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
+#: Where a store says how far ahead it expects each run to reach (dynamical.org's name for it).
+EXPECTED_FORECAST_LENGTH = "expected_forecast_length"
+
+
 class _StoreMisdescribed(Exception):
     """The store is not laid out as the harvest was told. Its message is for the run."""
 
@@ -886,6 +897,7 @@ def _coordinate(store, path: str, name: str, known: dict):
         if values.dtype.kind not in "Mm":
             # As xarray writes times: whole numbers, with what they count in their attributes.
             units = str(coordinate.attrs.get("units") or "")
+            values = _masked(values, coordinate.attrs.get("_FillValue"))
             if " since " in units:
                 values = np.asarray(decode_cf_datetime(values, units, coordinate.attrs.get("calendar")))
             elif units:
@@ -895,6 +907,19 @@ def _coordinate(store, path: str, name: str, known: dict):
         known[at] = values
         return values
     raise _StoreMisdescribed(f"it has no “{name}” to say when its steps are")
+
+
+def _masked(values, fill):
+    """Whole numbers counting time, with the missing ones as NaN: xarray writes
+    a missing time (NaT) as the smallest int64, and a declared fill as itself."""
+    import numpy as np
+
+    if values.dtype.kind not in "iu":
+        return values
+    missing = values == np.iinfo(np.int64).min if values.dtype.kind == "i" else np.zeros(values.shape, bool)
+    if fill is not None:
+        missing |= values == fill
+    return np.where(missing, np.nan, values.astype("f8")) if missing.any() else values
 
 
 def _moment(value) -> datetime | None:
@@ -907,8 +932,34 @@ def _moment(value) -> datetime | None:
     return _EPOCH + timedelta(microseconds=int(value.astype("datetime64[us]").astype("int64")))
 
 
-def _field_steps(store, field: StoreField, window: Window, known: dict) -> list[tuple[datetime | None, datetime]]:
-    """`(run, valid time)` of every step in `window` that the store holds for one field."""
+def _run_lengths(store, path: str, runs, known: dict):
+    """How far ahead the store expects each run to reach, by run index, where it
+    publishes that (`expected_forecast_length`); `None` where it does not."""
+    try:
+        lengths = _coordinate(store, path, EXPECTED_FORECAST_LENGTH, known)
+    except _StoreMisdescribed:
+        return None
+    if lengths.dtype.kind != "m" or len(lengths) != len(runs):
+        return None
+    return lengths
+
+
+def _run_steps(leads, length) -> int:
+    """How many of `leads` a run reaching `length` ahead is expected to have;
+    every one when `length` is unknown."""
+    import numpy as np
+
+    known = [lead for lead in leads if not np.isnat(lead)]
+    if length is None or np.isnat(length):
+        return len(known)
+    return sum(1 for lead in known if lead <= length)
+
+
+def _field_steps(
+    store, field: StoreField, window: Window, known: dict, skip_runs: frozenset = frozenset()
+) -> list[tuple[datetime | None, datetime, int | None]]:
+    """`(run, valid time, steps its run expects)` of every step in `window`
+    that the store holds for one field, of no run in `skip_runs`."""
     import numpy as np
     import zarr
 
@@ -936,30 +987,40 @@ def _field_steps(store, field: StoreField, window: Window, known: dict) -> list[
         if measured["time"].dtype.kind != "M":
             raise _StoreMisdescribed(f"“{field.path}” has time steps that are not dates")
         times = [(index, _moment(value)) for index, value in enumerate(measured["time"])]
-        asked = [(index, None, when) for index, when in times if when is not None and in_window(when, window)]
-        cells = [cell(time=index) for index, _run, _when in asked]
+        asked = [(index, None, when, None) for index, when in times if when is not None and in_window(when, window)]
+        cells = [cell(time=index) for index, *_rest in asked]
     else:
         runs, leads = measured.get("run"), measured.get("step")
         if runs is None or leads is None or runs.dtype.kind != "M" or leads.dtype.kind != "m":
             raise _StoreMisdescribed(f"“{field.path}” is not a forecast of runs and steps ahead")
+        lengths = _run_lengths(store, field.path, runs, known)
         asked, cells = [], []
         for run_index, run_value in enumerate(runs):
             run = _moment(run_value)
-            if run is None or not in_window(run, window):
+            if run is None or not in_window(run, window) or run in skip_runs:
                 continue
+            expected = _run_steps(leads, None if lengths is None else lengths[run_index])
             for step_index, lead in enumerate(leads):
                 when = None if np.isnat(lead) else _moment(run_value + lead)
                 if when is not None:
-                    asked.append((step_index, run, when))
+                    asked.append((step_index, run, when, expected))
                     cells.append(cell(run=run_index, step=step_index))
     if not cells:
         return []
     held = _held(store, array, field.path, cells)
-    return [(run, when) for (_index, run, when), there in zip(asked, held, strict=True) if there]
+    return [(run, when, expected) for (_index, run, when, expected), there in zip(asked, held, strict=True) if there]
 
 
-def read_held_steps(storage, fields: list[StoreField], window: Window, *, branch: str = "main") -> list[HeldStep]:
-    """The Held steps of `fields` in `window`, from the repository in `storage`.
+def read_held_steps(
+    storage,
+    fields: list[StoreField],
+    window: Window,
+    *,
+    skip_runs: frozenset = frozenset(),
+    branch: str = "main",
+) -> list[HeldStep]:
+    """The Held steps of `fields` in `window`, of no run in `skip_runs`, from
+    the repository in `storage`.
 
     The repository is opened as it stands, with nowhere authorised: whether a
     step is held is asked of the store by key, and a key is not data.
@@ -968,18 +1029,27 @@ def read_held_steps(storage, fields: list[StoreField], window: Window, *, branch
 
     store = icechunk.Repository.open(storage).readonly_session(branch).store
     found: dict[tuple[datetime | None, datetime], set[str]] = {}
+    expected: dict[datetime, int] = {}
     known: dict = {}
     for field_ in fields:
-        for step in _field_steps(store, field_, window, known):
-            found.setdefault(step, set()).add(field_.path)
+        for run, when, steps in _field_steps(store, field_, window, known, frozenset(skip_runs)):
+            found.setdefault((run, when), set()).add(field_.path)
+            if run is not None:
+                # The first array to say speaks for the run: arrays beside one another share its lead times.
+                expected.setdefault(run, steps)
     return [
-        HeldStep(time=when, reference_time=run, arrays=frozenset(paths))
+        HeldStep(time=when, reference_time=run, arrays=frozenset(paths), run_steps=expected.get(run))
         for (run, when), paths in sorted(found.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
     ]
 
 
 def list_held_steps(
-    href: str, fields: list[StoreField], window: Window, *, timeout: float = STEPS_TIMEOUT
+    href: str,
+    fields: list[StoreField],
+    window: Window,
+    *,
+    skip_runs: frozenset = frozenset(),
+    timeout: float = STEPS_TIMEOUT,
 ) -> list[HeldStep]:
     """The Held steps of `fields` in `window`, from the store at `href`.
 
@@ -994,7 +1064,7 @@ def list_held_steps(
         import icechunk
 
         storage = icechunk.http_storage(href, opts={"timeout": "30s", "connect_timeout": "5s"})
-        return read_held_steps(storage, fields, window)
+        return read_held_steps(storage, fields, window, skip_runs=skip_runs)
 
     # Its own thread, so a store that stops answering costs the wait and no more.
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="store-steps")
@@ -1109,8 +1179,10 @@ class StacApiClient:
                 if isinstance(payload, dict):
                     yield parse_item(payload, base_url=page_url)
 
-    def list_held_steps(self, href: str, fields: list[StoreField], window: Window) -> list[HeldStep]:
-        return list_held_steps(href, fields, window)
+    def list_held_steps(
+        self, href: str, fields: list[StoreField], window: Window, *, skip_runs: frozenset = frozenset()
+    ) -> list[HeldStep]:
+        return list_held_steps(href, fields, window, skip_runs=skip_runs)
 
     def resolve_host(self, host: str) -> list[str]:
         try:

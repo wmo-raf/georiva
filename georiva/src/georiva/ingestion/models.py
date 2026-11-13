@@ -699,6 +699,9 @@ class RunIngestion(models.Model):
         UPLOAD_SESSION = "upload_session", "Upload session completed"
         QUIET_PERIOD = "quiet_period", "Quiet period"
         MANUAL = "manual", "Closed by an operator"
+        #: A harvested Upstream store holds every step it expects of the run,
+        #: for every mapped Variable (ADR 0044 §6).
+        STORE_HELD = "store_held", "Store holds every expected step"
 
     # =========================================================================
     # Identity
@@ -834,13 +837,7 @@ class RunIngestion(models.Model):
                     reference_time=reference_time,
                     defaults={"last_file_at": completed_at},
                 )
-                reopened = False
-                if not created and run.status == cls.Status.CLOSED:
-                    run.status = cls.Status.OPEN
-                    run.revision += 1
-                    run.closed_at = None
-                    run.closed_by = ""
-                    reopened = True
+                reopened = not created and run._reopen()
 
                 run.file_count = cls._completed_file_count(collection, reference_time)
                 if run.last_file_at is None or completed_at > run.last_file_at:
@@ -857,16 +854,74 @@ class RunIngestion(models.Model):
                     ]
                 )
                 if reopened:
-                    event = record(
-                        RunIngestionReopened,
-                        run=run,
-                        collection_slug=collection.slug,
-                        catalog_slug=collection.catalog.slug,
-                        reference_time=run.reference_time,
-                        revision=run.revision,
-                    )
-                    transaction.on_commit(partial(_emit_run_reopened, run, event))
+                    run._record_reopened()
         return run, reopened
+
+    @classmethod
+    def record_held_steps(cls, collection, reference_time, *, held: int, expected: int | None, complete: bool):
+        """Register what a harvested Upstream store holds of one run (ADR 0044 §6).
+
+        A harvest writes no file, so this is its ``record_file``: ``held`` is how
+        many steps of the run have a row, ``expected`` how many the store
+        expects of it, and ``complete`` whether every one of them is held for
+        every mapped Variable. Opens the row on its first Held step; closes it,
+        as ``store_held``, once complete; reopens it, bumping ``revision``, when
+        a closed run is found no longer complete. Returns the row, or ``None``
+        when nothing of the run is held and it has none.
+
+        ``last_file_at`` stays empty: no file arrives, and a run with holes
+        upstream is not closed by quiet — the quiet-period closer reads that clock.
+        """
+        with ensure_context(actor="system:harvest", organisation_id=collection.catalog.organisation_id):
+            with transaction.atomic():
+                runs = cls.objects.select_for_update()
+                if held:
+                    run, _created = runs.get_or_create(collection=collection, reference_time=reference_time)
+                else:
+                    run = runs.filter(collection=collection, reference_time=reference_time).first()
+                    if run is None:
+                        return None
+                reopened = not complete and run._reopen()
+                run.file_count = held
+                if expected is not None:
+                    run.expected_file_count = expected
+                run.save(
+                    update_fields=[
+                        "status",
+                        "revision",
+                        "closed_at",
+                        "closed_by",
+                        "file_count",
+                        "expected_file_count",
+                        "updated_at",
+                    ]
+                )
+                if reopened:
+                    run._record_reopened()
+        if complete and run.is_open:
+            run.close(cls.Closer.STORE_HELD)
+        return run
+
+    def _reopen(self) -> bool:
+        """Reopen a closed row in hand, at the next revision. Returns whether it was closed."""
+        if self.status != self.Status.CLOSED:
+            return False
+        self.status = self.Status.OPEN
+        self.revision += 1
+        self.closed_at = None
+        self.closed_by = ""
+        return True
+
+    def _record_reopened(self) -> None:
+        event = record(
+            RunIngestionReopened,
+            run=self,
+            collection_slug=self.collection.slug,
+            catalog_slug=self.collection.catalog.slug,
+            reference_time=self.reference_time,
+            revision=self.revision,
+        )
+        transaction.on_commit(partial(_emit_run_reopened, self, event))
 
     def close(self, closer) -> bool:
         """Close this run. Returns False if it was already closed.

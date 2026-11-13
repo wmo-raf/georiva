@@ -130,6 +130,7 @@ class HeldStepsOfAForecastTests(StoreFixture, SimpleTestCase):
                     time=datetime(2026, 3, 1, 15, tzinfo=UTC),
                     reference_time=datetime(2026, 3, 1, 6, tzinfo=UTC),
                     arrays=frozenset({"temperature_2m"}),
+                    run_steps=len(LEADS),
                 )
             ],
         )
@@ -158,6 +159,46 @@ class HeldStepsOfAForecastTests(StoreFixture, SimpleTestCase):
         self.assertEqual(self.steps(window=(RUNS[1], None)), [(run, step) for run in (1, 2) for step in range(4)])
         # Up to the first run: its last step is valid nine hours past the window's end, and is kept.
         self.assertEqual(self.steps(window=(None, RUNS[0])), [(0, step) for step in range(4)])
+
+    def test_a_run_skipped_is_not_asked_about(self):
+        def build(store):
+            self.coordinates(store)
+            self.forecast(store)[:] = 1.0
+
+        self.commit(build)
+
+        held = read_held_steps(self.storage, [TEMPERATURE], EVERYTHING, skip_runs=frozenset({RUNS[0], RUNS[2]}))
+
+        self.assertEqual({step.reference_time for step in held}, {RUNS[1]})
+
+    def test_a_run_expects_every_lead_time_when_the_store_says_no_more(self):
+        def build(store):
+            self.coordinates(store)
+            self.forecast(store)[0, 0] = 1.0
+
+        self.commit(build)
+
+        self.assertEqual([step.run_steps for step in self.held()], [len(LEADS)])
+
+    def test_a_run_expects_no_step_past_the_stores_own_expected_forecast_length(self):
+        def build(store):
+            self.coordinates(store)
+            length = zarr.create_array(
+                store,
+                name="expected_forecast_length",
+                shape=(len(RUNS),),
+                dtype="i8",
+                dimension_names=("init_time",),
+                attributes={"units": "seconds"},
+            )
+            # The first run reaches six hours ahead, the second all the way; the third is not yet said.
+            length[:] = [6 * 3600, 9 * 3600, -(2**63)]
+            self.forecast(store)[:, 0] = 1.0
+
+        self.commit(build)
+
+        expected = dict(zip(RUNS, [3, 4, 4], strict=True))
+        self.assertEqual({step.reference_time: step.run_steps for step in self.held()}, expected)
 
     def test_a_window_holding_no_run_lists_nothing(self):
         def build(store):

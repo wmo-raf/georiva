@@ -313,7 +313,8 @@ class HarvestFeed(DataFeed):
 
         from .harvester import harvest
 
-        return [harvest(self)]
+        # An operator's own run re-checks the whole window, closed runs too (ADR 0044 §6).
+        return [harvest(self, recheck=True)]
 
     def enqueue_retry(self, run):
         from .tasks import run_harvest
