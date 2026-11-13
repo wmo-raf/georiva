@@ -7,8 +7,9 @@ run from one still arriving.
 
 **Complete means closed.** A run is complete when its ``RunIngestion`` row is
 ``closed`` and incomplete while ``open``. The ``closed_by`` field says on what
-evidence: ``declared_set`` and ``upload_session`` are strong claims, ``quiet_period``
-and ``manual`` are weaker. The route reports every closed run as complete and leaves
+evidence: ``declared_set``, ``upload_session`` and ``store_held`` (a harvested
+Upstream store holds every step it expects of the run, ADR 0044 §6) are strong
+claims, ``quiet_period`` and ``manual`` are weaker. The route reports every closed run as complete and leaves
 a client that wants only the strong claims to filter on ``closed_by``.
 
 ``?closed_by=declared_set,upload_session`` narrows ``latest_complete`` to runs closed on

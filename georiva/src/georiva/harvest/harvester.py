@@ -9,8 +9,11 @@ its own.
 The Upstream is items of COGs, or an Upstream store (ADR 0044). Which, is asked
 in one place — `_listed` — and answered as the same list either way: a store's
 Held steps become items, each carrying a Store asset per array held there.
-Every run in the window is asked about on every harvest: closing a run, and
-not asking a closed one again (ADR 0044 §6), comes with its model-run record.
+A store's runs are kept on the model-run record (ADR 0026) by the harvest
+itself, which writes no file (`runs`): a run opens on its first Held step and
+closes once the store holds every step it expects, for every mapped Variable.
+A closed run is not asked about again (ADR 0044 §6) — except by a re-check of
+the whole window, which an operator's own run is.
 
 A completed harvest is also a Mirror of the feed's window (ADR 0042 §6): what
 is gone upstream loses its rows here, and what changed upstream is re-synced.
@@ -33,6 +36,7 @@ from georiva.core.machine_plane.remote_assets import publish_variable
 from georiva.core.storage.asset_location import remote_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
+from . import runs
 from .asset_hosts import AssetHostAllowlist, PinnedBuckets
 from .survey import store_fields, store_media_type
 from .upstream import (
@@ -95,13 +99,17 @@ class HarvestResult(RunResult):
         }
 
 
-def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from=None) -> HarvestResult:
+def harvest(
+    feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from=None, recheck: bool = False
+) -> HarvestResult:
     """
     Harvest `feed`'s window of its Upstream, as one `FetchRun`.
 
     `upstream` is the Upstream catalog client; the feed's own when not given.
     `resumed_from` is the run this one retries: a harvest's plan is its window,
-    so a retry harvests the same window again (ADR 0042 §5).
+    so a retry harvests the same window again (ADR 0042 §5). `recheck` asks a
+    store about every run in the window, closed ones too: how a step gone from
+    a closed run is found, and the run reopened.
 
     An Upstream that cannot be read ends the run FAILED and due its retry, with
     no item or asset written, rewritten or removed: the whole window is listed
@@ -114,7 +122,7 @@ def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from
     result = HarvestResult()
 
     def walk(fetch_run):
-        _index_window(feed, collection, upstream, result)
+        _index_window(feed, collection, upstream, result, recheck=recheck)
 
     return run_tracked(
         walk,
@@ -126,12 +134,15 @@ def harvest(feed, *, upstream: UpstreamCatalogClient | None = None, resumed_from
     )
 
 
-def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
+def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck: bool = False) -> None:
     reach = _Reach.of(feed)
     variables = feed.mapped_variables(collection)
+    mapped = {variable.pk for variable in variables.values()}
+    # The closed runs every mapped Variable holds whole are not asked about again.
+    settled = set() if recheck or not reach.is_store else runs.settled_runs(collection, mapped, reach.runs_q())
     described, undescribed = _description(feed, upstream)
     try:
-        listed = _listed(feed, upstream, described, reach.window, list(variables))
+        listed, expected = _listed(feed, upstream, described, reach.window, list(variables), settled)
     except UpstreamUnreachable as unreachable:
         raise RunStopped(f"source unavailable — {unreachable}") from unreachable
     # An empty window is believed only of a collection something vouched for.
@@ -212,8 +223,13 @@ def _index_window(feed, collection, upstream, result: HarvestResult) -> None:
     _extend_collection(collection, created_items)
 
     # Last, and only here: the window was listed whole and indexed (ADR 0042 §6).
-    mapped = {variable.pk for variable in variables.values()}
-    result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped)
+    result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped, settled)
+
+    if reach.is_store:
+        expected = {run: steps for run, steps in expected.items() if reach.covers_run(run)}
+        runs.keep_runs(collection, mapped, reach.runs_q(), expected=expected, settled=settled)
+        if reach.rolls:
+            runs.forget_aged_out(collection, reach.window[0])
 
     # A re-sync rewrites hrefs without saving a row, so the tile server is told
     # once, here, where the window's Remote assets now are (ADR 0043 §3).
@@ -239,18 +255,22 @@ def _description(feed, upstream):
     return described, None
 
 
-def _listed(feed, upstream, described, window: Window, mapped: list[str]) -> list[UpstreamItem]:
-    """What the Upstream has in `window`, as items with their assets: the one
-    place a harvest asks which shape its Upstream is (ADR 0044 §1).
+def _listed(
+    feed, upstream, described, window: Window, mapped: list[str], settled: set = frozenset()
+) -> tuple[list[UpstreamItem], dict]:
+    """What the Upstream has in `window`, as items with their assets, and how
+    many steps a store expects of each run it holds a step of: the one place a
+    harvest asks which shape its Upstream is (ADR 0044 §1).
 
     A store has no items. It is asked which steps it holds for the mapped
-    arrays, and each Held step is an item: at its valid time, of its run where
-    the store has runs, with a Store asset — the store's address and the
-    array's path — for each array held there. A step that is in the store's
-    coordinates and not held is not in the answer, and gets no row (§6).
+    arrays, of every run but the `settled` ones, and each Held step is an item:
+    at its valid time, of its run where the store has runs, with a Store asset
+    — the store's address and the array's path — for each array held there. A
+    step that is in the store's coordinates and not held is not in the answer,
+    and gets no row (§6).
     """
     if not feed.is_store:
-        return list(upstream.list_items(feed.upstream_collection_id, window))
+        return list(upstream.list_items(feed.upstream_collection_id, window)), {}
 
     # Which of an array's axes is its run, its step or its time is the
     # collection's to say, so a store whose collection is not described cannot be listed.
@@ -269,12 +289,15 @@ def _listed(feed, upstream, described, window: Window, mapped: list[str]) -> lis
         raise RunStopped(
             f"source unavailable — upstream no longer describes as a map: {', '.join(repr(path) for path in missing)}"
         )
-    held = upstream.list_held_steps(feed.store_href, fields, window) if fields else []
+    held = (
+        list(upstream.list_held_steps(feed.store_href, fields, window, skip_runs=frozenset(settled))) if fields else []
+    )
     media_type = store_media_type(described)
     if not media_type or len(media_type) > MAX_MEDIA_TYPE_LENGTH:
         # One too long for its column is left out, not cut short, like a checksum.
         media_type = STORE_MEDIA_TYPE
-    return [
+    expected = {step.reference_time: step.run_steps for step in held if step.reference_time and step.run_steps}
+    items = [
         UpstreamItem(
             id="/".join(f"{when:%Y%m%dT%H%M%S}" for when in (step.reference_time, step.time) if when),
             datetime=step.time,
@@ -287,6 +310,7 @@ def _listed(feed, upstream, described, window: Window, mapped: list[str]) -> lis
         )
         for step in held
     ]
+    return items, expected
 
 
 @dataclass(frozen=True)
@@ -318,8 +342,15 @@ class _Reach:
         has a run, so a run inside keeps every step however far ahead."""
         return item.datetime is not None and self.covers_step(item.reference_time, item.datetime)
 
+    def covers_run(self, run) -> bool:
+        return self.covers_step(run, run)
+
     def covers_step(self, run, when) -> bool:
         return in_window(run or when, self.window)
+
+    def runs_q(self) -> Q:
+        """The runs in the window, by `reference_time`."""
+        return _window_q(self.window, "reference_time")
 
     def written_q(self, prefix: str = "") -> Q:
         """The item rows a harvest of this kind could have written, at any time."""
@@ -451,7 +482,7 @@ class _Jurisdiction:
             .update(**_lifted(asset, item, kept=mine.extra_fields), modified=timezone.now())
         )
 
-    def remove_gone(self, upstream_times: set, upstream_places: set, mapped: set) -> int:
+    def remove_gone(self, upstream_times: set, upstream_places: set, mapped: set, settled: set = frozenset()) -> int:
         """Remove the assets that are gone upstream, and then every item of this
         feed's in the window that is left with no asset of any kind. Returns how
         many assets went.
@@ -460,11 +491,14 @@ class _Jurisdiction:
         that no longer carries the asset its (still `mapped`) Variable is
         indexed from. For a store that is a step no longer held, and — nothing
         being listed of a run outside the window — every step of a run that has
-        aged out of a Rolling one. Call it only with a window that was listed whole.
+        aged out of a Rolling one. A `settled` run was not asked about, and
+        what it holds stands. Call it only with a window that was listed whole.
         """
         from georiva.core.models import Asset
 
         def gone(at, variable_pk) -> bool:
+            if at[0] is not None and at[0] in settled:
+                return False
             if variable_pk in mapped:
                 return at not in upstream_times or (*at, variable_pk) not in upstream_places
             # A Variable no longer mapped is not asked about. Of items, the

@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 )
 def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
     """
-    Harvest one Harvest feed's window.
+    Harvest one Harvest feed's window. `scheduled=False` is an operator's
+    own run, which re-checks every run of a store's window, closed ones too.
 
     On `georiva-default`, never the ingestion queue: a harvest writes rows, and
     no file waits on it (ADR 0042 §11). Not retried by Celery — a harvest that
@@ -53,4 +54,7 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
     # An entry point: the chain this harvest starts belongs to the feed's organisation.
     update_context(organisation_id=feed.catalog.organisation_id)
 
-    return harvest(feed, resumed_from=resumed_from).to_dict()
+    # An operator's own run re-checks a store's closed runs too: how a step gone
+    # from one is found (ADR 0044 §6). A schedule and a retry ask only open ones.
+    recheck = not scheduled and resume_of_run_id is None
+    return harvest(feed, resumed_from=resumed_from, recheck=recheck).to_dict()

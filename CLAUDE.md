@@ -75,6 +75,8 @@ georiva/src/georiva/          # Main Django application
 │   ├── survey.py             # Upstream survey: a collection's shape, raster assets and file locations, before a feed exists;
 │   │                         #   the verdict on an Upstream store (map-shaped and decodable, or why not) and which of
 │   │                         #   its arrays can become Variables
+│   ├── runs.py               # A store harvest's model runs: opened, closed as `store_held`, settled runs not asked
+│   │                         #   again, reopened by a re-check ("Run now"), forgotten once aged out (ADR 0044 §6)
 │   ├── harvester.py          # The harvest loop, on the run-tracking spine; no FetchedFile rows. `_listed` is the one
 │   │                         #   place it asks which shape its Upstream is: a store's Held steps become items, each
 │   │                         #   with a Store asset (`format=ZARR`, `store_array`) per array held there (ADR 0044 §6)

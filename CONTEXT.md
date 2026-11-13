@@ -310,7 +310,10 @@ the same key, bumping `revision`. Closed by whichever signal its arrival route h
 `declared_set` (a pull feed: every key the Loader declared has arrived; a push feed: `files_per_run` accepted
 deliveries for the reference time have ingested — ADR 0034), `upload_session` (every feeding `UploadSession` is closed
 and all its accepted deliveries have ingested), `quiet_period` (the safety net for whatever does not add up, and
-sweeps). Exposes `version` = `ref_epoch_seconds × 100 + revision`. Emits `run_ingestion_closed` /
+sweeps), `store_held` (a harvest of an **Upstream store**, which writes no `FileIngestion` and so opens the run itself
+on its first **Held step**: every step the store expects of the run is held for every mapped Variable; a closed run is
+not asked about again until an operator's "Run now" re-checks the window, and reopens if a step has gone — ADR 0044
+§6). A store's run has no `last_file_at`, so quiet never closes one with holes. Exposes `version` = `ref_epoch_seconds × 100 + revision`. Emits `run_ingestion_closed` /
 `run_ingestion_reopened` from `ingestion/domain_signals.py`.
 _Avoid_: cycle, ModelRun, RunArrival, DataArrival
 

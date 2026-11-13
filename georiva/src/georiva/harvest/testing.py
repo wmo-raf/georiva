@@ -105,6 +105,13 @@ class FakeUpstream:
         self.store_unreachable: str | None = None
         #: The listings of Held steps asked for, in order: the store, the arrays, and the window.
         self.steps_asked: list[tuple[str, list[str], Window]] = []
+        #: The runs each listing looked into, in order: those in its window it was not told to skip.
+        self.runs_asked: list[set[datetime]] = []
+        #: How many steps the store expects of a run, by run; one not here expects `steps_per_run`.
+        self.expected_steps: dict[datetime, int] = {}
+        #: How many steps the store expects of a run it says nothing more of: its step
+        #: dimension's size, when `become_store` is given one named `lead_time`.
+        self.steps_per_run: int | None = None
 
     def become_store(
         self,
@@ -158,6 +165,8 @@ class FakeUpstream:
         ]
         self.items = []
         self.stores[href] = {path: (codecs or {}).get(path, PLAIN_CODECS) for path in arrays}
+        lead = dimensions.get("lead_time")
+        self.steps_per_run = lead.size if isinstance(lead, CubeDimension) else lead
 
     def add_item(self, when: datetime, assets: dict[str, UpstreamAsset | str], **fields) -> UpstreamItem:
         """Add an item at `when`. An asset given as a string is its href."""
@@ -212,7 +221,9 @@ class FakeUpstream:
             ]
         return found if self.fails_after is None else self._break_after(found, self.fails_after)
 
-    def list_held_steps(self, href: str, fields: list[StoreField], window: Window) -> list[HeldStep]:
+    def list_held_steps(
+        self, href: str, fields: list[StoreField], window: Window, *, skip_runs: frozenset = frozenset()
+    ) -> list[HeldStep]:
         self._answer()
         self.steps_asked.append((href, [field.path for field in fields], window))
         if self.store_unreachable:
@@ -220,15 +231,26 @@ class FakeUpstream:
         if href not in self.stores:
             raise UpstreamUnreachable("there is no store at that address")
         steps: dict[tuple[datetime | None, datetime], set[str]] = {}
+        looked_into = set()
         for field in fields:
             for run, when in self.held.get(field.path, ()):
+                if run in skip_runs:
+                    continue
                 # On run time where there are runs, as the real one: a run inside keeps every step.
                 if self.ignores_window or in_window(run or when, window):
                     steps.setdefault((run, when), set()).add(field.path)
+                    if run is not None:
+                        looked_into.add(run)
+        self.runs_asked.append(looked_into)
         return [
-            HeldStep(time=when, reference_time=run, arrays=frozenset(paths))
+            HeldStep(time=when, reference_time=run, arrays=frozenset(paths), run_steps=self._run_steps(run))
             for (run, when), paths in sorted(steps.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
         ]
+
+    def _run_steps(self, run: datetime | None) -> int | None:
+        if run is None:
+            return None
+        return self.expected_steps.get(run, self.steps_per_run)
 
     @staticmethod
     def _break_after(items, count):
