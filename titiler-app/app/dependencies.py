@@ -21,6 +21,7 @@ from app.config import (
     REMOTE_ASSETS_KEY_PREFIX,
     REMOTE_ASSETS_PUBLISHED_FIELD,
 )
+from app.store import StoreError, StoreSlice
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +45,8 @@ def _fetch_config_from_django(
     """Fetch rendering config from Django internal API on Redis miss.
 
     ``time`` (and ``reftime``) name one timestep; Django then adds
-    ``remote_href`` to its answer when that timestep's asset is Remote (see
-    :func:`remote_asset_href`).
+    ``remote_href`` to its answer when that timestep's asset is a Remote COG,
+    or ``remote_store`` when it is a Store asset (see :func:`remote_source`).
 
     The org segment is forwarded, not resolved: this service is dialled on an
     internal container name that belongs to no organisation, so Django cannot
@@ -152,15 +153,19 @@ def build_cog_url(
 _TIMESTEP_STAMP = "%Y%m%dT%H%M%S"
 
 
-def remote_asset_href(
+def remote_source(
     org: str,
     catalog: str,
     collection: str,
     variable: str,
     time_dt: datetime,
     reftime_dt: datetime | None,
-) -> str | None:
-    """The upstream URL of this timestep's asset if it is a Remote asset, else ``None``.
+) -> str | StoreSlice | None:
+    """Where this timestep's asset is read if it is Remote, else ``None``.
+
+    A Remote COG is its upstream URL. A Store asset (ADR 0044 §9) is a
+    :class:`StoreSlice`: the store's address, the array's path, this timestep
+    as its run and step, and the feed's Pinned locations for the store's data.
 
     A Remote asset's bytes were never copied into our storage (ADR 0042): they
     are wherever the upstream put them, and no path grammar leads there. Only
@@ -176,15 +181,23 @@ def remote_asset_href(
     Which organisation, and whether the caller may see it, is not decided here:
     nginx asked Django before this request arrived (ADR 0015). The one thing
     checked is that the address is an http(s) URL, because it is about to be
-    handed to GDAL, which would as readily open a local path.
+    handed to GDAL or to the store reader, either of which would as readily
+    open something else.
     """
     field = time_dt.strftime(_TIMESTEP_STAMP)
     if reftime_dt is not None:
         field = f"{field}/{reftime_dt.strftime(_TIMESTEP_STAMP)}"
     key = f"{REMOTE_ASSETS_KEY_PREFIX}:{org}:{catalog}:{collection}:{variable}"
 
-    href, published = redis_client.hmget(key, [field, REMOTE_ASSETS_PUBLISHED_FIELD])
-    if href is None and not published:
+    value, published = redis_client.hmget(key, [field, REMOTE_ASSETS_PUBLISHED_FIELD])
+    entry = None
+    if value is not None and value.startswith("{"):
+        try:
+            entry = json.loads(value)
+        except ValueError:
+            entry = {}
+        value = None
+    elif value is None and not published:
         _, config = _fetch_config_from_django(
             org,
             catalog,
@@ -193,31 +206,39 @@ def remote_asset_href(
             time=_iso_utc(time_dt),
             reftime=_iso_utc(reftime_dt) if reftime_dt is not None else None,
         )
-        href = (config or {}).get("remote_href")
+        value = (config or {}).get("remote_href")
+        entry = (config or {}).get("remote_store")
 
-    if href is None:
+    if entry is not None:
+        try:
+            return StoreSlice.published(entry if isinstance(entry, dict) else {}, time_dt, reftime_dt)
+        except StoreError as exc:
+            logger.error("Refusing a published store entry for %s: %s", key, exc.detail)
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    if value is None:
         return None
-    if not href.startswith(("https://", "http://")):
-        logger.error("Refusing a remote asset address that is not an http(s) URL: %s", href)
+    if not value.startswith(("https://", "http://")):
+        logger.error("Refusing a remote asset address that is not an http(s) URL: %s", value)
         raise HTTPException(status_code=502, detail="The remote asset's address is not an http(s) URL.")
-    return href
+    return value
 
 
-def resolve_cog_url(
+def resolve_source(
     org: str,
     catalog: str,
     collection: str,
     variable: str,
     time_dt: datetime,
     reftime_dt: datetime | None,
-) -> str:
-    """Where this timestep's COG is read from: upstream if its asset is Remote,
-    else the address in our storage that the path spells (ADR 0043 §3).
+) -> str | StoreSlice:
+    """Where this timestep is read from: upstream if its asset is Remote — a
+    COG's URL, or a field of a store — else the address in our storage that
+    the path spells (ADR 0043 §3, ADR 0044 §9).
 
     The one function every raster route resolves its dataset through, so a
     Mixed collection is served timestep by timestep from wherever each one is.
     """
-    return remote_asset_href(org, catalog, collection, variable, time_dt, reftime_dt) or build_cog_url(
+    return remote_source(org, catalog, collection, variable, time_dt, reftime_dt) or build_cog_url(
         org, catalog, collection, variable, time_dt, reftime_dt
     )
 
@@ -320,13 +341,14 @@ def SemanticPathParams(
     variable_slug: Annotated[str, Path(...)],
     time: str = Query(..., description="Valid time in ISO 8601 UTC (e.g. 2026-03-23T12:00:00Z)"),
     reftime: str | None = Query(None, description="Forecast reference time in ISO 8601 UTC"),
-) -> str:
-    """Resolve the COG URL from semantic path params and time query params."""
+) -> str | StoreSlice:
+    """Resolve what the reader opens — a COG's URL, or a store's field — from
+    semantic path params and time query params."""
     time_dt = parse_iso_datetime(time, "time")
     reftime_dt = parse_iso_datetime(reftime, "reftime") if reftime else None
-    url = resolve_cog_url(org_slug, catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
-    logger.debug("Resolved COG URL: %s", url)
-    return url
+    source = resolve_source(org_slug, catalog_slug, collection_slug, variable_slug, time_dt, reftime_dt)
+    logger.debug("Resolved dataset: %s", source)
+    return source
 
 
 def SemanticColorMap(

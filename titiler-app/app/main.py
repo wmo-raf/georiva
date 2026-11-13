@@ -21,11 +21,12 @@ from app.dependencies import (
     SemanticRescale,
     SemanticTileConfig,
     parse_iso_datetime,
-    resolve_cog_url,
+    resolve_source,
     resolve_tile_config,
 )
 from app.middleware import PreviewCacheMiddleware, RequestLoggingMiddleware
 from app.reader import ResilientReader, is_not_found
+from app.store import StoreError
 from app.wmts import rest_router as wmts_rest_router
 from app.wmts import router as wmts_router
 
@@ -92,6 +93,14 @@ async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> J
         content={"detail": f"Storage read error: {msg}"},
         headers=_NEVER_CACHED,
     )
+
+
+@app.exception_handler(StoreError)
+async def store_error_handler(request: Request, exc: StoreError) -> JSONResponse:
+    """A read from an Upstream store that failed (ADR 0044 §9): its own status
+    and words, never a blank tile, and like a storage failure never cached."""
+    logger.warning("Store read failed (%d): %s | path: %s", exc.status_code, exc.detail, request.url)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=_NEVER_CACHED)
 
 
 app.include_router(
@@ -193,7 +202,7 @@ def vector_preview(
     configs, images = [], []
     for variable in (u_variable, v_variable):
         configs.append(resolve_tile_config(org_slug, catalog_slug, collection_slug, variable))
-        src_path = resolve_cog_url(org_slug, catalog_slug, collection_slug, variable, time_dt, reftime_dt)
+        src_path = resolve_source(org_slug, catalog_slug, collection_slug, variable, time_dt, reftime_dt)
         with ResilientReader(src_path) as src:
             images.append(src.preview(max_size=max_size))
     u_img, v_img = images

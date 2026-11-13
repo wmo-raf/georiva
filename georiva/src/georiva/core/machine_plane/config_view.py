@@ -51,9 +51,12 @@ where a **Remote asset** is (ADR 0043 §3). A local COG's address it derives fro
 the path; an upstream one only the Asset row knows. The answer then carries
 ``remote_href`` when the asset at that timestep is Remote, and omits it when it
 is local or absent — which Titiler reads the same way, as "derive it yourself".
-This is the miss path: ordinarily Titiler reads the href from the Redis hash
-``remote_assets`` publishes, for collections of every tier. The row is read and
-nothing is written; no statistics are computed (ADR 0043 §5).
+At a **Store asset** it carries ``remote_store`` instead: the store, the array
+and the harvesting feed's Pinned locations for the store's data (ADR 0044 §9),
+exactly as ``remote_assets.store_entry`` publishes them. This is the miss path:
+ordinarily Titiler reads either from the Redis hash ``remote_assets`` publishes,
+for collections of every tier. The row is read and nothing is written; no
+statistics are computed (ADR 0043 §5).
 
 Returns the Redis palette cache's payload structure plus a ``styles`` index —
 discovery rides this endpoint rather than a new one (ADR 0023), so a client
@@ -64,6 +67,7 @@ index-free, being Titiler's rendering config and nothing more:
                  "styles": [{"slug", "title", "is_default"}, ...]}
   Without one:  {"vmin", "vmax", "scale_type", "styles": []}
   At a Remote timestep, also: {"remote_href": "https://…"}
+  At a Store asset's, also: {"remote_store": {"store", "array", "chunk_locations"}}
 """
 
 from datetime import UTC
@@ -74,7 +78,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from georiva.core.machine_plane.palette_cache import build_variable_payload
-from georiva.core.machine_plane.remote_assets import remote_href
+from georiva.core.machine_plane.remote_assets import remote_source
 from georiva.core.models import Collection, Variable
 
 
@@ -131,9 +135,11 @@ class TileConfigView(APIView):
 
         payload = build_variable_payload(variable, style)
         if time is not None:
-            href = remote_href(variable, time, reference_time)
-            if href is not None:
-                payload["remote_href"] = href
+            source = remote_source(variable, time, reference_time)
+            if isinstance(source, dict):
+                payload["remote_store"] = source
+            elif source is not None:
+                payload["remote_href"] = source
         payload["styles"] = [
             {"slug": s.slug, "title": s.name, "is_default": s.is_default} for s in variable.styles.all()
         ]

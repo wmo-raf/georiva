@@ -25,3 +25,10 @@ PALETTE_KEY_PREFIX = "georiva:palette"
 REMOTE_ASSETS_KEY_PREFIX = "georiva:remote-assets"
 REMOTE_ASSETS_PUBLISHED_FIELD = "published"
 PATH_RE = re.compile(r"^[\w/.-]+\.tif$")
+
+#: Seconds a read from an Upstream store may take in all — opening it, or
+#: reading one field — and each request it makes on the way (ADR 0044 §9). A
+#: store that does not answer in time is an error for that tile and nothing else.
+STORE_READ_TIMEOUT = float(os.getenv("GEORIVA_STORE_READ_TIMEOUT", "30"))
+#: Seconds a store's host, or the place its data lives, may take to accept a connection.
+STORE_CONNECT_TIMEOUT = float(os.getenv("GEORIVA_STORE_CONNECT_TIMEOUT", "5"))
