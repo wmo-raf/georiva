@@ -138,13 +138,15 @@ def upstream_store(tmp_path, producer):
     class Built:
         folder = os.path.join(tmp_path, "noaa-gfs-forecast-virtual", "v0.1.0.icechunk")
         href = f"{base}/noaa-gfs-forecast-virtual/v0.1.0.icechunk"
+        #: Where the producer keeps the newest run's GRIB.
+        bucket = os.path.join(tmp_path, "ecmwf-open-data", "20260323", "00z")
         requests = handler.requests
 
         def stall(self, seconds):
             handler.stall = seconds
 
     built = Built()
-    bucket = os.path.join(tmp_path, "ecmwf-open-data", "20260323", "00z")
+    bucket = built.bucket
     os.makedirs(bucket)
 
     config = icechunk.RepositoryConfig.default()
@@ -485,14 +487,18 @@ class TestCogsAreUnchanged:
         assert tile(client).status_code == 200
 
 
+def repository(built):
+    """The built repository, opened as its producer opens it: on local disk."""
+    return icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder))
+
+
 def arrive(built, step: int) -> None:
     """The producer commits the newest run's ``step``: its GRIB in the bucket,
     a reference to it in the repository, on the branch Titiler reads."""
-    bucket = os.path.join(os.path.dirname(os.path.dirname(built.folder)), "ecmwf-open-data", "20260323", "00z")
     body = message(grib_values(1, step), latitudes=LATITUDES, longitudes=GRIB_LONGITUDES)
-    with open(os.path.join(bucket, f"step-{step}.grib2"), "wb") as sink:
+    with open(os.path.join(built.bucket, f"step-{step}.grib2"), "wb") as sink:
         sink.write(body)
-    session = icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder)).writable_session("main")
+    session = repository(built).writable_session("main")
     session.store.set_virtual_ref(
         f"temperature_2m/c/1/{step}/0/0",
         f"{ECMWF}20260323/00z/step-{step}.grib2",
@@ -503,10 +509,10 @@ def arrive(built, step: int) -> None:
     session.commit(f"step {step}")
 
 
-def masked(built) -> None:
+def commit_masked_array(built) -> None:
     """A second array, kept natively, whose newest run's second step is held
     and every value of it NaN: a masked field, not a missing one."""
-    session = icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder)).writable_session("main")
+    session = repository(built).writable_session("main")
     array = zarr.create_array(
         session.store,
         name="masked",
@@ -523,8 +529,7 @@ def masked(built) -> None:
 
 def history(built) -> list[str]:
     """The snapshots on the branch Titiler reads, newest first."""
-    repository = icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder))
-    return [snapshot.id for snapshot in repository.ancestry(branch="main")]
+    return [snapshot.id for snapshot in repository(built).ancestry(branch="main")]
 
 
 #: The newest run's third step, which arrives while Titiler has the store open.
@@ -591,7 +596,7 @@ class TestAMissingStepRefreshesTheStore:
     def test_a_held_step_that_is_all_nan_is_drawn_as_it_is_with_no_reopen(
         self, client, rendering, upstream_store, opens
     ):
-        masked(upstream_store)
+        commit_masked_array(upstream_store)
         publish(rendering, {FIELD: published(upstream_store.href, array="masked")})
 
         response = tile(client)
@@ -634,6 +639,40 @@ class TestAMissingStepRefreshesTheStore:
         assert len(results) == 6
         assert all(found.values[2, 4] == grib_values(1, 2)[2, 0] for found in results)
         assert len(opened) == 1
+
+    def test_concurrent_misses_share_one_failed_reopen(self, upstream_store, monkeypatch):
+        entry = json.loads(published(upstream_store.href))
+        reftime = datetime(2026, 3, 23, tzinfo=UTC)
+        store_reader.read_field(store_reader.StoreSlice.published(entry, reftime + timedelta(hours=6), reftime))
+        late = store_reader.StoreSlice.published(entry, reftime + timedelta(hours=12), reftime)
+
+        attempts = []
+
+        def broken(*args):
+            attempts.append(args[1])
+            clock.sleep(0.5)
+            raise OSError("connection reset")
+
+        monkeypatch.setattr(store_reader, "open_repository", broken)
+        together = threading.Barrier(6)
+        failures = []
+
+        def request():
+            together.wait()
+            try:
+                store_reader.read_field(late)
+            except store_reader.StoreError as failed:
+                failures.append(failed)
+
+        threads = [threading.Thread(target=request) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert len(failures) == 6
+        assert all(isinstance(failed, store_reader.StoreUnreachable) for failed in failures)
+        assert len(attempts) == 1
 
     def test_a_failed_reopen_keeps_the_open_store_for_the_steps_it_holds(
         self, client, rendering, upstream_store, monkeypatch
