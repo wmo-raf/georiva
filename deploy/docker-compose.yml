@@ -344,6 +344,10 @@ services:
       GDAL_HTTP_TIMEOUT: ${GDAL_HTTP_TIMEOUT:-30}
       GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: ${GDAL_HTTP_MERGE_CONSECUTIVE_RANGES:-YES}
       GDAL_INGESTED_BYTES_AT_OPEN: ${GDAL_INGESTED_BYTES_AT_OPEN:-32768}
+      # A store-backed Variable is read from its Upstream store (ADR 0044 §9).
+      # Opening the store, or reading one field, may take this long in all.
+      GEORIVA_STORE_READ_TIMEOUT: ${GEORIVA_STORE_READ_TIMEOUT:-30}
+      GEORIVA_STORE_CONNECT_TIMEOUT: ${GEORIVA_STORE_CONNECT_TIMEOUT:-5}
 
   georiva-stac-browser:
     # Built with a GeoRiva config module that derives the catalog URL from the
