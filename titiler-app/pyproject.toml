@@ -9,7 +9,7 @@ name = "georiva-titiler-app"
 version = "0.0.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.143.0",
+    "fastapi==0.162.3",
     "uvicorn[standard]==0.54.0",
     "gunicorn==26.2.0",
     "titiler.core==2.4.0",
@@ -17,16 +17,16 @@ dependencies = [
     # them directly — the tile grid it reads an identify pixel off, and the
     # out-of-footprint error it answers that click with (#363).
     "morecantile==7.1.0",
-    "rio-tiler==9.4.12",
+    "rio-tiler==9.4.13",
     "redis==8.1.0",
     "httpx==0.28.1",
     # The store reader (ADR 0044 §9): opening an Upstream store, reading its
     # arrays, decoding its time coordinates, and the codec a virtual store's
     # GRIB chunks name. Pinned as core pins them; tests on each side keep the
     # two readers in agreement.
-    "icechunk==2.1.2",
-    "zarr==3.2.1",
-    "xarray==2026.4.0",
+    "icechunk==2.3.1",
+    "zarr==3.4.2",
+    "xarray==2026.9.0",
     "gribberish[zarr]==1.9.0",
 ]
 
