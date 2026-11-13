@@ -20,6 +20,14 @@ dependencies = [
     "rio-tiler==9.4.12",
     "redis==8.1.0",
     "httpx==0.28.1",
+    # The store reader (ADR 0044 §9): opening an Upstream store, reading its
+    # arrays, decoding its time coordinates, and the codec a virtual store's
+    # GRIB chunks name. Pinned as core pins them; tests on each side keep the
+    # two readers in agreement.
+    "icechunk==2.1.2",
+    "zarr==3.2.1",
+    "xarray==2026.4.0",
+    "gribberish[zarr]==1.9.0",
 ]
 
 [dependency-groups]

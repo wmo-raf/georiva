@@ -37,7 +37,8 @@ georiva/src/georiva/          # Main Django application
 │   │                         #   path_resolution.py, filename.py, asset_cleanup.py
 │   ├── machine_plane/        # Where the tenant travels in the address (ADR 0013/0015)
 │   │                         #   addresses.py, auth_view.py, config_view.py, palette_cache.py,
-│   │                         #   remote_assets.py (where Titiler finds a Remote asset, ADR 0043)
+│   │                         #   remote_assets.py (where Titiler finds a Remote asset, ADR 0043, or a Store
+│   │                         #   asset's store, array and pins, ADR 0044 §9)
 │   ├── derived_products/     # The derived-product contract (ADR 0008/0009)
 │   │                         #   definitions.py, chain.py
 │   ├── views/                # Wagtail admin surface: admin.py, viewsets.py,
@@ -108,7 +109,8 @@ georiva/src/georiva/          # Main Django application
 
 **Other top-level directories:**
 
-- `titiler-app/` — Custom Titiler tile server (FastAPI)
+- `titiler-app/` — Custom Titiler tile server (FastAPI); `app/store.py` reads a Store asset's field from its
+  Upstream store, following only the feed's pinned places (ADR 0044 §9, §11)
 - `source-plugin-boilerplate/` — Cookiecutter template for new source plugins
 - `docs/` — Architecture docs, plugin guides, data model guide
 - `deploy/` — Nginx config, plugin installation scripts

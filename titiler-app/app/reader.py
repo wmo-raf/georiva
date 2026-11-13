@@ -2,12 +2,14 @@
 
 Every raster route here — the tile factory's, the encoded texture, the point
 read GetFeatureInfo goes through — reaches its bytes by opening a URL
-``dependencies.resolve_cog_url`` gave it. For an asset in our storage that URL
+``dependencies.resolve_source`` gave it. For an asset in our storage that URL
 is built from the request path, and no Asset row is consulted on the way, so a
 client is free to ask for a timestep that has not landed yet, and clients do: a
 viewer prefetches the next step, a verification script follows a STAC link the
 instant it appears. For a Remote asset it is the upstream's own URL, read by
-range exactly as ours is (ADR 0043).
+range exactly as ours is (ADR 0043). For a Store asset it is no URL at all but
+a :class:`app.store.StoreSlice`, and the field it names is decoded from the
+upstream store into memory and read from there (ADR 0044 §9).
 
 That is a fine thing to answer *not yet* to. What it must not do is make the
 answer permanent, which is what happens when GDAL is left to cache the failed
@@ -21,7 +23,7 @@ import logging
 from rasterio.errors import RasterioIOError
 from rio_tiler.io import Reader
 
-from app import vsicurl
+from app import store, vsicurl
 
 # Not merely a setting this module happens to read: no read below is correct
 # without it, because GDAL would otherwise cache a listing of the directory
@@ -79,6 +81,13 @@ class ResilientReader(Reader):
     """
 
     def __attrs_post_init__(self):
+        if isinstance(self.input, store.StoreSlice):
+            # Not a file: the field is read from the store, and what is
+            # tiled is that field held in memory. Nothing for GDAL to cache.
+            self.dataset = self._ctx_stack.enter_context(store.open_field(self.input))
+            super().__attrs_post_init__()
+            return
+
         try:
             super().__attrs_post_init__()
             return

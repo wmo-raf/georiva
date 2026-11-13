@@ -5,13 +5,23 @@ feed's Rolling window, one Store asset per mapped Variable (ADR 0044 §2, §3, �
 The only fake is the Upstream — here one that is a store, told which steps it holds.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from unittest import mock
+from xml.etree import ElementTree as ET
 
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
+from django_redis import get_redis_connection
 
+from georiva.core.machine_plane.palette_cache import warm_all
+from georiva.core.machine_plane.remote_assets import (
+    PUBLISHED_FIELD,
+    REMOTE_ASSETS_KEY_PREFIX,
+    timestep_field,
+    variable_key,
+)
 from georiva.core.models import Asset, Catalog, Collection, Item, Unit, Variable
 from georiva.harvest.harvester import harvest
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
@@ -20,6 +30,7 @@ from georiva.harvest.testing import FakeUpstream
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.models import FetchRun
 from georiva.virtual_zarr.models import VirtualZarrManifest
+from georiva.wmts.testing import NS, IsolatedCapabilitiesCache
 
 from .support import TITILER_DIALS
 
@@ -500,7 +511,7 @@ class StoreReadPlaneTests(StoreFeedMixin, TestCase):
             self.assertIn("not available for this collection yet", response.json()["detail"])
             self.assertNotIn("error", response.json())
 
-    def test_tile_config_answers_without_an_address_to_read(self):
+    def test_tile_config_answers_with_the_store_to_read_and_no_file_address(self):
         url = reverse("tile_config", args=[self.organisation.slug, "gfs", self.collection.slug, "temperature-2m"])
         stamp = self.run.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -508,3 +519,155 @@ class StoreReadPlaneTests(StoreFeedMixin, TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertNotIn("remote_href", response.json())
+        self.assertEqual(
+            response.json()["remote_store"], {"store": STORE, "array": "temperature_2m", "chunk_locations": {}}
+        )
+
+
+class StoreCollectionInWMTSCapabilitiesTests(IsolatedCapabilitiesCache, StoreFeedMixin, TestCase):
+    """A store-backed collection is a layer like any other: its rows decide its times."""
+
+    def setUp(self):
+        super().setUp()
+        dial_org(self.client, self.organisation.slug)
+        self.hold("temperature_2m", 0, 3)
+        self.harvest()
+        self.collection = self.feed.collection
+
+    def layer(self):
+        response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
+        self.assertEqual(response.status_code, 200)
+        layers = {
+            layer.findtext("ows:Identifier", namespaces=NS): layer
+            for layer in ET.fromstring(response.content).findall("wmts:Contents/wmts:Layer", NS)
+        }
+        name = f"gfs:{self.collection.slug}:temperature-2m"
+        self.assertIn(name, layers)
+        return layers[name]
+
+    def test_the_collection_is_listed_and_its_tiles_are_addressed_at_the_collection(self):
+        template = self.layer().find("wmts:ResourceURL", NS).get("template")
+
+        self.assertIn(f"/titiler/{self.organisation.slug}/gfs/{self.collection.slug}/temperature-2m/", template)
+        self.assertNotIn("dynamical", template)
+
+
+class StoreAssetsArePublishedForTitilerTests(StoreFeedMixin, TestCase):
+    """What Titiler reads to draw a Store asset (ADR 0044 §9): the store, the
+    array, and the feed's Pinned locations for its data, per timestep, in the
+    same hash a Remote COG's href is published in, for a collection of any tier."""
+
+    PINS = {"s3://noaa-gfs-bdp-pds/": "us-east-1", "gs://ecmwf-open-data/": ""}
+
+    def setUp(self):
+        super().setUp()
+        self.redis = get_redis_connection("default")
+        self._sweep_redis()
+        self.addCleanup(self._sweep_redis)
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations=self.PINS)
+        self.feed.refresh_from_db()
+        self.hold("temperature_2m", 0, 3)
+        self.harvest()
+        self.collection = self.feed.collection
+
+    def _sweep_redis(self):
+        keys = list(self.redis.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*"))
+        if keys:
+            self.redis.delete(*keys)
+
+    def published(self, variable=None) -> dict:
+        fields = {
+            k.decode(): v.decode() for k, v in self.redis.hgetall(variable_key(variable or self.temperature)).items()
+        }
+        self.assertEqual(fields.pop(PUBLISHED_FIELD, None), "1", "the hash is Django's whole word")
+        return {field: json.loads(value) for field, value in fields.items()}
+
+    def field(self, lead) -> str:
+        return timestep_field(self.run + hours(lead), self.run)
+
+    def entry(self, array="temperature_2m", pins=None):
+        return {"store": STORE, "array": array, "chunk_locations": self.PINS if pins is None else pins}
+
+    def tile_config(self, lead, variable="temperature-2m"):
+        url = reverse("tile_config", args=[self.organisation.slug, "gfs", self.collection.slug, variable])
+        stamp = (self.run + hours(lead)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        reftime = self.run.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return self.client.get(f"{url}?time={stamp}&reftime={reftime}", HTTP_HOST=TITILER_DIALS)
+
+    def test_a_harvest_publishes_each_held_step_as_the_store_its_array_and_the_pins(self):
+        self.assertEqual(self.published(), {self.field(0): self.entry(), self.field(3): self.entry()})
+
+    def test_each_variable_names_its_own_array(self):
+        wind = self.map_variable("wind_u_10m", "wind-u-10m")
+        self.hold("wind_u_10m", 3)
+
+        self.harvest()
+
+        self.assertEqual(self.published(wind), {self.field(3): self.entry("wind_u_10m")})
+
+    def test_a_private_collection_is_published_too(self):
+        Collection.objects.filter(pk=self.collection.pk).update(visibility=Collection.Visibility.PRIVATE)
+        self._sweep_redis()
+
+        warm_all()
+
+        self.assertEqual(self.published(), {self.field(0): self.entry(), self.field(3): self.entry()})
+
+    def test_a_step_no_longer_held_is_withdrawn(self):
+        self.upstream.release("temperature_2m", self.run + hours(3), run=self.run)
+
+        self.harvest()
+
+        self.assertEqual(set(self.published()), {self.field(0)})
+
+    def test_pins_confirmed_later_reach_the_tile_server_with_the_next_harvest(self):
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations={"gs://ecmwf-open-data/": ""})
+
+        self.harvest()
+
+        self.assertEqual(self.published()[self.field(0)]["chunk_locations"], {"gs://ecmwf-open-data/": ""})
+
+    def test_a_store_asset_saved_alone_is_published_at_once(self):
+        Asset.objects.filter(variable=self.temperature).delete()
+        self._sweep_redis()
+        self.redis.hset(variable_key(self.temperature), PUBLISHED_FIELD, "1")
+        item = Item.objects.get(collection=self.collection, time=self.run)
+
+        Asset.objects.create(
+            item=item,
+            variable=self.temperature,
+            format=Asset.Format.ZARR,
+            href=STORE,
+            store_array="temperature_2m",
+            harvested_by=self.feed,
+            roles=[Asset.Role.DATA],
+        )
+
+        self.assertEqual(self.published(), {self.field(0): self.entry()})
+
+    def test_the_rows_of_a_deleted_feed_are_published_with_nowhere_to_follow_their_data(self):
+        self._sweep_redis()
+        HarvestFeed.objects.filter(pk=self.feed.pk).delete()
+
+        warm_all()
+
+        self.assertEqual(self.published()[self.field(0)], self.entry(pins={}))
+
+    def test_tile_config_answers_a_public_collections_store_on_a_miss(self):
+        Collection.objects.filter(pk=self.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+
+        response = self.tile_config(3)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["remote_store"], self.entry())
+        self.assertNotIn("remote_href", response.json())
+
+    def test_tile_config_answers_no_store_at_a_step_with_no_row(self):
+        Collection.objects.filter(pk=self.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+
+        self.assertNotIn("remote_store", self.tile_config(6).json())
+
+    def test_tile_config_still_answers_nothing_for_a_private_collection(self):
+        Collection.objects.filter(pk=self.collection.pk).update(visibility=Collection.Visibility.PRIVATE)
+
+        self.assertEqual(self.tile_config(3).status_code, 404)
