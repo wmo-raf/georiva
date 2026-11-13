@@ -19,6 +19,7 @@ import os
 import threading
 import time as clock
 import urllib.parse
+from datetime import UTC, datetime, timedelta
 
 import icechunk
 import numpy
@@ -482,3 +483,183 @@ class TestCogsAreUnchanged:
         publish(rendering, {"20260323T000000/20260323T000000": published("https://example.org/store.icechunk")})
 
         assert tile(client).status_code == 200
+
+
+def arrive(built, step: int) -> None:
+    """The producer commits the newest run's ``step``: its GRIB in the bucket,
+    a reference to it in the repository, on the branch Titiler reads."""
+    bucket = os.path.join(os.path.dirname(os.path.dirname(built.folder)), "ecmwf-open-data", "20260323", "00z")
+    body = message(grib_values(1, step), latitudes=LATITUDES, longitudes=GRIB_LONGITUDES)
+    with open(os.path.join(bucket, f"step-{step}.grib2"), "wb") as sink:
+        sink.write(body)
+    session = icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder)).writable_session("main")
+    session.store.set_virtual_ref(
+        f"temperature_2m/c/1/{step}/0/0",
+        f"{ECMWF}20260323/00z/step-{step}.grib2",
+        offset=0,
+        length=len(body),
+        validate_container=False,
+    )
+    session.commit(f"step {step}")
+
+
+def masked(built) -> None:
+    """A second array, kept natively, whose newest run's second step is held
+    and every value of it NaN: a masked field, not a missing one."""
+    session = icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder)).writable_session("main")
+    array = zarr.create_array(
+        session.store,
+        name="masked",
+        shape=(2, 3, 5, 8),
+        chunks=(1, 1, 5, 8),
+        dtype="f8",
+        fill_value=numpy.nan,
+        dimension_names=["init_time", "lead_time", "latitude", "longitude"],
+        config={"write_empty_chunks": True},
+    )
+    array[1, 1] = numpy.full((5, 8), numpy.nan)
+    session.commit("masked")
+
+
+def history(built) -> list[str]:
+    """The snapshots on the branch Titiler reads, newest first."""
+    repository = icechunk.Repository.open(icechunk.local_filesystem_storage(built.folder))
+    return [snapshot.id for snapshot in repository.ancestry(branch="main")]
+
+
+#: The newest run's third step, which arrives while Titiler has the store open.
+LATE = "20260323T120000/20260323T000000"
+LATE_TIME = "2026-03-23T12:00:00Z"
+
+
+@pytest.fixture
+def opens(monkeypatch):
+    """Every store opened, by the pins it was opened with."""
+    opened = []
+    real = store_reader.open_repository
+    monkeypatch.setattr(store_reader, "open_repository", lambda *args: opened.append(args[1]) or real(*args))
+    return opened
+
+
+class TestAMissingStepRefreshesTheStore:
+    def test_a_step_that_arrived_after_the_store_was_opened_is_drawn_after_one_reopen(
+        self, client, rendering, upstream_store, opens
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+        arrive(upstream_store, 2)
+
+        response = tile(client, time=LATE_TIME)
+
+        assert response.status_code == 200, response.text
+        assert palette_colours(response.content)
+        assert point(client, 0.5, 0.5, time=LATE_TIME).json()["values"] == [grib_values(1, 2)[2, 0]]
+        assert len(opens) == 2
+
+    def test_the_reopened_store_replaces_the_old_one_for_later_requests(self, client, rendering, upstream_store, opens):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+        arrive(upstream_store, 2)
+        assert tile(client, time=LATE_TIME).status_code == 200
+
+        assert tile(client, time=LATE_TIME).status_code == 200
+        assert tile(client).status_code == 200
+        assert len(opens) == 2
+
+    def test_a_step_still_not_held_after_the_reopen_is_an_error_not_an_image(
+        self, client, rendering, upstream_store, opens
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+
+        response = tile(client, time=LATE_TIME)
+
+        assert response.status_code == 404
+        assert response.headers["content-type"] == "application/json"
+        assert "not available upstream" in response.json()["detail"]
+        assert len(opens) == 2
+
+    def test_requests_for_held_steps_never_reopen(self, client, rendering, upstream_store, opens):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        for _ in range(3):
+            assert tile(client).status_code == 200
+        assert point(client, 10, 10).status_code == 200
+
+        assert len(opens) == 1
+
+    def test_a_held_step_that_is_all_nan_is_drawn_as_it_is_with_no_reopen(
+        self, client, rendering, upstream_store, opens
+    ):
+        masked(upstream_store)
+        publish(rendering, {FIELD: published(upstream_store.href, array="masked")})
+
+        response = tile(client)
+
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "image/png"
+        assert not palette_colours(response.content), "every pixel is nodata"
+        assert len(opens) == 1
+
+    def test_concurrent_misses_cause_one_reopen(self, upstream_store, monkeypatch):
+        entry = json.loads(published(upstream_store.href))
+        reftime = datetime(2026, 3, 23, tzinfo=UTC)
+        held = store_reader.StoreSlice.published(entry, reftime + timedelta(hours=6), reftime)
+        late = store_reader.StoreSlice.published(entry, reftime + timedelta(hours=12), reftime)
+        store_reader.read_field(held)
+        arrive(upstream_store, 2)
+
+        opened = []
+        real = store_reader.open_repository
+
+        def slow(*args):
+            opened.append(args[1])
+            clock.sleep(0.5)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", slow)
+        together = threading.Barrier(6)
+        results = []
+
+        def request():
+            together.wait()
+            results.append(store_reader.read_field(late))
+
+        threads = [threading.Thread(target=request) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert len(results) == 6
+        assert all(found.values[2, 4] == grib_values(1, 2)[2, 0] for found in results)
+        assert len(opened) == 1
+
+    def test_a_failed_reopen_keeps_the_open_store_for_the_steps_it_holds(
+        self, client, rendering, upstream_store, monkeypatch
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+        kept = store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))
+
+        def broken(*args):
+            raise OSError("connection reset")
+
+        monkeypatch.setattr(store_reader, "open_repository", broken)
+
+        failed = tile(client, time=LATE_TIME)
+        assert failed.status_code == 504
+        assert failed.headers["content-type"] == "application/json"
+
+        assert tile(client).status_code == 200
+        assert store_reader.opened_store(upstream_store.href, ((ECMWF, ""),)) is kept
+
+    def test_a_missing_step_marks_nothing_and_writes_nothing(self, client, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        before = dict(rendering.hashes[HASH])
+        snapshots = history(upstream_store)
+
+        assert tile(client, time=LATE_TIME).status_code == 404
+
+        assert rendering.hashes[HASH] == before
+        assert history(upstream_store) == snapshots
