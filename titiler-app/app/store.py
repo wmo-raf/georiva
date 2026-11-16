@@ -29,8 +29,16 @@ raster, and from there renders exactly as a COG does: the same rescale,
 palette and crop. Every upstream read is bounded in time, and a failure is an
 error for the request in hand and nothing else.
 
-A step the open store does not hold is an error, never a blank map. Reopening
-the store to look again is not done here yet (#662).
+**It refreshes on a missing step, and never draws a blank one** (ADR 0044 §10).
+The store is kept open at the snapshot it was opened on, and an Upstream store
+commits several times a minute while a run arrives: a row can name a step that
+came after. In the older snapshot that step is simply empty, and an empty step
+reads back as a field of NaN — so before drawing, the reader asks whether the
+step is *held*, by key, decoding nothing. If not, the branch is reopened once,
+replacing the open store for this process, and asked again; still not held is
+an error saying the step is not available upstream. Concurrent misses share
+one reopen, and a reopen that fails leaves the open store as it was. A field
+that is held and all NaN — a masked variable — is drawn as it is.
 """
 
 from __future__ import annotations
@@ -41,7 +49,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TimedOut
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -132,6 +140,10 @@ class StoreStepMissing(StoreError):
     status_code = 404
 
 
+class StoreStepNotHeld(StoreStepMissing):
+    """The open store does not hold this step: a newer snapshot may (ADR 0044 §10)."""
+
+
 class StoreDataNotPinned(StoreError):
     """The field's data is in a place the feed's pins do not include.
 
@@ -142,6 +154,9 @@ class StoreDataNotPinned(StoreError):
 
     status_code = 502
 
+
+#: A step the open store does not hold; said to a map user once a reopen did not find it either.
+NOT_HELD = "This time step is not available upstream yet."
 
 NOT_PINNED = (
     "This map's data is kept somewhere this feed was not allowed to read. "
@@ -310,7 +325,7 @@ class OpenStore:
 
         cell = tuple(at.get(part, 0) for part in axes)
         if not self._held(f"{path}/{array.metadata.encode_chunk_key(cell)}"):
-            raise StoreStepMissing("This time step is not in the upstream store yet.")
+            raise StoreStepNotHeld(NOT_HELD)
 
         values = np.asarray(array[tuple(at.get(part, slice(None)) for part in axes)])
         if axes.index("x") < axes.index("y"):
@@ -364,7 +379,7 @@ def _axes(names: list[str], measured: list[np.ndarray]) -> list[str]:
 def _index(values: np.ndarray, wanted) -> int:
     found = np.flatnonzero(values == wanted)
     if not len(found):
-        raise StoreStepMissing("This time step is not in the upstream store yet.")
+        raise StoreStepNotHeld(NOT_HELD)
     return int(found[0])
 
 
@@ -436,10 +451,25 @@ def _georeferenced(values: np.ndarray, latitudes: np.ndarray, longitudes: np.nda
 class _Opened:
     stores: dict = field(default_factory=dict)
     locks: dict = field(default_factory=dict)
+    #: The reopen under way for each store, which requests that miss meanwhile wait on.
+    reopens: dict = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 _opened = _Opened()
+
+
+def _key_lock(key) -> threading.Lock:
+    with _opened.lock:
+        return _opened.locks.setdefault(key, threading.Lock())
+
+
+def _open(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> OpenStore:
+    """The store at ``href`` opened at the tip of its branch, and kept for this process."""
+    opened = OpenStore(open_repository(storage(href), chunk_locations).readonly_session(BRANCH).store)
+    with _opened.lock:
+        _opened.stores[(href, chunk_locations)] = opened
+    return opened
 
 
 def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> OpenStore:
@@ -453,16 +483,48 @@ def opened_store(href: str, chunk_locations: tuple[tuple[str, str], ...]) -> Ope
     with _opened.lock:
         if key in _opened.stores:
             return _opened.stores[key]
-        lock = _opened.locks.setdefault(key, threading.Lock())
-    with lock:
+    with _key_lock(key):
         with _opened.lock:
             if key in _opened.stores:
                 return _opened.stores[key]
         logger.info("Opening upstream store %s", href)
-        opened = OpenStore(open_repository(storage(href), chunk_locations).readonly_session(BRANCH).store)
-        with _opened.lock:
-            _opened.stores[key] = opened
+        return _open(href, chunk_locations)
+
+
+def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stale: OpenStore) -> OpenStore:
+    """The store at ``href`` reopened at the tip of its branch, because ``stale``
+    did not hold a step a request asked for.
+
+    The reopened store replaces ``stale`` for every later request in this
+    process. Requests that miss while a reopen is under way share it, whether
+    it succeeds or fails; one that finds ``stale`` already replaced uses the
+    replacement. A reopen that fails leaves ``stale`` open, so the steps it
+    holds still draw.
+    """
+    key = (href, chunk_locations)
+    with _opened.lock:
+        current = _opened.stores.get(key)
+        if current is not None and current is not stale:
+            return current
+        underway = _opened.reopens.get(key)
+        mine = underway is None
+        if mine:
+            underway = _opened.reopens[key] = Future()
+    if not mine:
+        return underway.result()
+    try:
+        logger.info("Reopening upstream store %s: a requested step is not in the snapshot it has open", href)
+        with _key_lock(key):
+            opened = _open(href, chunk_locations)
+    except BaseException as failed:
+        underway.set_exception(failed)
+        raise
+    else:
+        underway.set_result(opened)
         return opened
+    finally:
+        with _opened.lock:
+            _opened.reopens.pop(key, None)
 
 
 def forget_all() -> None:
@@ -470,14 +532,23 @@ def forget_all() -> None:
     with _opened.lock:
         _opened.stores.clear()
         _opened.locks.clear()
+        _opened.reopens.clear()
 
 
 def read_field(target: StoreSlice) -> Field:
     """Decode the field ``target`` names: opening the store if this process
-    has not yet, and reading the field, within one ``STORE_READ_TIMEOUT``."""
-    return _bounded(
-        lambda: opened_store(target.store, target.chunk_locations).field(target.array, target.time, target.reftime)
-    )
+    has not yet, reopening it once if the step is not held, and reading the
+    field, all within one ``STORE_READ_TIMEOUT``."""
+
+    def read() -> Field:
+        opened = opened_store(target.store, target.chunk_locations)
+        try:
+            return opened.field(target.array, target.time, target.reftime)
+        except StoreStepNotHeld:
+            fresher = reopened_store(target.store, target.chunk_locations, stale=opened)
+            return fresher.field(target.array, target.time, target.reftime)
+
+    return _bounded(read)
 
 
 #: How icechunk says a chunk lies outside every container the reader was given,
