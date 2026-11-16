@@ -1,0 +1,16 @@
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    What a page shows while an Upstream survey runs off the request: what it is
+    waiting on and for how long. Pass `heading` and `wait`; the page loads
+    `georivaharvest/survey_wait.css` and `.js`, which makes it look again on its own.
+{% endcomment %}
+<div class="{{ panel }}" role="status" aria-live="polite" data-survey-waiting>
+    <div class="{{ panel }}__header">{{ heading }}</div>
+    <div class="{{ panel }}__body">
+        <p class="gr-survey-wait">{% icon name="spinner" %} {{ wait.waiting_on }}…</p>
+        <p>
+            {% blocktrans count counter=wait.waited %}Waiting for one second so far.{% plural %}Waiting for {{ counter }} seconds so far.{% endblocktrans %}
+            {% trans "Nothing is being changed or copied yet. This page checks again on its own; you can also leave it and come back." %}
+        </p>
+    </div>
+</div>

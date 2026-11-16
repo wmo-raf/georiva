@@ -52,6 +52,8 @@
 {% block main_content %}
     <form method="post" action="">
         {% csrf_token %}
+        {# Saving acts on the survey this page showed, kept under this token (#695). #}
+        <input type="hidden" name="check" value="{{ check }}">
         {% if not fits %}
             <div class="hrc-panel">
                 <div class="hrc-panel__header">{% trans "The catalog no longer fits" %}</div>

@@ -27,7 +27,7 @@ of a store no "Zarr", "chunk" or "codec".
 """
 
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -47,7 +47,7 @@ from . import background_survey
 from .asset_hosts import chunk_place
 from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
-from .survey import Shape, reason_for, survey_catalog, survey_collection
+from .survey import Shape, reason_for, survey_catalog
 from .upstream import StoreField, UpstreamTimedOut, UpstreamUnreachable
 
 _SESSION_KEY = "georiva_harvest_wizard"
@@ -251,48 +251,61 @@ def harvest_wizard_step3(request):
     )
 
 
+@dataclass(frozen=True)
+class _Wait:
+    """Where a survey running off the request has got to, for a page waiting on it."""
+
+    #: What it found, once it has: a `CollectionSurvey`.
+    found: object = None
+    #: What it is waiting on, in an operator's words, while it runs.
+    waiting_on: str = ""
+    #: Why it came to nothing, for the operator; empty unless it did.
+    error: str = ""
+    waited: int = 0
+
+    @property
+    def running(self) -> bool:
+        return self.found is None and not self.error
+
+
+def _wait_for(token: str, since: float) -> _Wait:
+    """Where the survey under `token`, started at `since`, has got to. One that
+    never answered, or was lost, came to nothing once waited on long enough."""
+    answer = background_survey.collect(token)
+    waited = time.time() - since
+    state = answer["state"] if answer else None
+    if state == background_survey.FOUND:
+        return _Wait(found=answer["found"], waited=int(waited))
+    if state == background_survey.CHECKING and waited <= background_survey.GIVE_UP_SECONDS:
+        return _Wait(waiting_on=answer.get("waiting_on", ""), waited=int(waited))
+    if state == background_survey.FAILED:
+        error = _too_slow(answer["why"]) if answer.get("timed_out") else _unreadable(answer["why"])
+    else:
+        # From where the operator sits, it took too long.
+        error = _too_slow(_("GeoRiva stopped waiting after %(seconds)d seconds") % {"seconds": int(waited)})
+    return _Wait(error=error, waited=int(waited))
+
+
 def _collect(request, session: dict):
     """The page to show while a collection's survey runs, or when it came to
     nothing; `None` once it has found something, which is then the survey the
     wizard goes on from."""
     checking = session["checking"]
-    answer = background_survey.collect(checking["token"])
-    waited = time.time() - checking["since"]
-    state = answer["state"] if answer else None
-    if state == background_survey.FOUND:
-        _choose(session, checking["collection_id"], checking["collection_title"], answer["survey"])
+    wait = _wait_for(checking["token"], checking["since"])
+    if wait.found is not None:
+        survey = background_survey.as_session(wait.found)
+        _choose(session, checking["collection_id"], checking["collection_title"], survey)
         _save(request, session)
         return None
-    if state == background_survey.CHECKING and waited <= background_survey.GIVE_UP_SECONDS:
-        return render(
-            request,
-            "georivaharvest/wizard_step3_checking.html",
-            {
-                "session": session,
-                "checking": checking,
-                "waiting_on": answer.get("waiting_on", ""),
-                "waited": int(waited),
-                "failed": False,
-                **_chrome(3),
-            },
-        )
-
-    # It came to nothing: nothing is kept, and trying again starts afresh.
-    session.pop("checking", None)
-    _save(request, session)
-    if state == background_survey.FAILED and not answer.get("timed_out"):
-        messages.error(request, _unreadable(answer["why"]))
-    elif state == background_survey.FAILED:
-        messages.error(request, _too_slow(answer["why"]))
-    else:
-        # Never answered, or lost: from where the operator sits, it took too long.
-        messages.error(
-            request, _too_slow(_("GeoRiva stopped waiting after %(seconds)d seconds") % {"seconds": int(waited)})
-        )
+    if wait.error:
+        # It came to nothing: nothing is kept, and trying again starts afresh.
+        session.pop("checking", None)
+        _save(request, session)
+        messages.error(request, wait.error)
     return render(
         request,
         "georivaharvest/wizard_step3_checking.html",
-        {"session": session, "checking": checking, "failed": True, **_chrome(3)},
+        {"session": session, "checking": checking, "wait": wait, **_chrome(3)},
     )
 
 
@@ -945,23 +958,66 @@ def _seen(assets) -> list[dict]:
 # ── Re-check upstream, on a feed that exists ────────────────────────────────
 
 
+_RECHECK_KEY = "georiva_harvest_recheck"
+
+#: How many re-checks of one feed a session keeps open at once: one per tab, near enough.
+_OPEN_CHECKS = 5
+
+
 def harvest_recheck_upstream(request, pk):
     """Survey a feed's Upstream again and put to the operator what changed.
-    Nothing is taken from it without their yes (ADR 0042 §9)."""
+    Nothing is taken from it without their yes (ADR 0042 §9).
+
+    The survey runs off the request (#695). Opening the page starts one —
+    always afresh — and sends the operator to it by its token (`?check=`);
+    that page waits for it, and reloading it starts nothing. Saving acts on
+    the survey the page showed, kept server-side under the token: the Upstream
+    is not read again, and only what that survey proposed can be taken. A
+    check this session did not open is never saved.
+    """
     from .models import HarvestFeed
 
     feed = get_object_or_404(scoped_queryset(request, HarvestFeed.objects.all()), pk=pk)
-    try:
-        found = survey_collection(feed.survey_client(), feed.upstream_url, feed.upstream_collection_id)
-    except UpstreamUnreachable as why:
-        messages.error(request, _unreadable(why))
-        return redirect("data_feed_detail", pk=feed.pk)
+    here = reverse("harvest_recheck_upstream", kwargs={"pk": feed.pk})
+    checks = request.session.get(_RECHECK_KEY, {})
+    opened = checks.get(str(feed.pk), {})
+    token = request.POST.get("check") or request.GET.get("check")
+
+    if request.method == "GET" and not token:
+        token = background_survey.start(feed.upstream_url, feed.upstream_collection_id)
+        opened = {**opened, token: time.time()}
+        checks[str(feed.pk)] = dict(sorted(opened.items(), key=lambda check: check[1])[-_OPEN_CHECKS:])
+        request.session[_RECHECK_KEY] = checks
+        return redirect(f"{here}?check={token}")
+    if token not in opened:
+        messages.error(request, _("That check of the catalog was not started here. GeoRiva is checking it again."))
+        return redirect(here)
+
+    wait = _wait_for(token, opened[token])
+    if wait.found is None:
+        if request.method == "POST":
+            # Never saved blind: a save acts on a survey the operator was shown.
+            messages.error(
+                request,
+                _("That check of the catalog is no longer kept, so nothing was saved. GeoRiva will check again.")
+                if not wait.running
+                else _("The catalog is still being checked, so nothing was saved yet."),
+            )
+            return redirect(here if not wait.running else f"{here}?check={token}")
+        if wait.error:
+            messages.error(request, wait.error)
+        return render(
+            request,
+            "georivaharvest/recheck_checking.html",
+            {"feed": feed, "wait": wait, "again": here, "check": token, **_recheck_chrome(feed)},
+        )
+    found = wait.found
 
     # Still the shape the feed was set up for: a feed's shape is fixed (ADR 0044 §1).
     fits = found.harvestable and found.shape.value == feed.upstream_shape
     reason = found.reason or _("This collection is no longer published the way it was when this feed was set up.")
     if feed.is_store:
-        return _recheck_store(request, feed, found, fits, reason)
+        return _recheck_store(request, feed, found, fits, reason, token)
 
     allowed = feed.allowed_asset_hosts
     new = [
@@ -972,7 +1028,7 @@ def harvest_recheck_upstream(request, pk):
     ]
 
     if request.method == "POST" and fits:
-        # By place, not by position: the Upstream is asked again on the way in.
+        # By place, not by position, and only those the survey shown proposed.
         ticked = set(request.POST.getlist("allow"))
         buckets, hosts = found.pins([location for location in new if f"{location.bucket}|{location.host}" in ticked])
         feed.pinned_buckets = {**feed.pinned_buckets, **buckets}
@@ -995,6 +1051,7 @@ def harvest_recheck_upstream(request, pk):
             "reason": reason,
             "new": [{"value": f"{location.bucket}|{location.host}", "host": location.host} for location in new],
             "readable": [asset for asset in found.assets if asset.readable],
+            "check": token,
             **_recheck_chrome(feed),
         },
     )
@@ -1013,7 +1070,7 @@ def _recheck_chrome(feed) -> dict:
     }
 
 
-def _recheck_store(request, feed, found, fits: bool, reason: str):
+def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
     """The re-check of a feed over an Upstream store (ADR 0044 §1, §8, §11).
 
     What it can find, each put to the operator separately: arrays newly seen
@@ -1032,7 +1089,7 @@ def _recheck_store(request, feed, found, fits: bool, reason: str):
         return render(
             request,
             "georivaharvest/recheck_store.html",
-            {"feed": feed, "found": found, "fits": False, "reason": reason, **_recheck_chrome(feed)},
+            {"feed": feed, "found": found, "fits": False, "reason": reason, "check": token, **_recheck_chrome(feed)},
         )
 
     store = found.store
@@ -1113,6 +1170,7 @@ def _recheck_store(request, feed, found, fits: bool, reason: str):
             "gone_places": gone_places,
             "moved_to": moved_to,
             "new_host": own_to_pin.host if own_to_pin is not None else "",
+            "check": token,
             **_recheck_chrome(feed),
         },
     )

@@ -141,3 +141,34 @@ class RemoteCollectionMixin(HarvestFeedMixin):
         fields = {k.decode(): v.decode() for k, v in self.redis.hgetall(variable_key(self.variable)).items()}
         fields.pop(PUBLISHED_FIELD, None)
         return fields
+
+
+class RecheckPages:
+    """ "Re-check upstream" as an operator uses it (#695): opening it starts a
+    survey off the request, and saving acts on the survey the page showed.
+
+    The survey runs as it is dispatched, unless a test sets `hold_surveys` to
+    look at the wait. Needs `self.url`, the feed's re-check address.
+    """
+
+    def start_running_surveys_inline(self):
+        from georiva.harvest import background_survey, tasks
+
+        self.surveys_started: list[tuple] = []
+        self.hold_surveys = False
+
+        def dispatch(*args):
+            self.surveys_started.append(args)
+            if not self.hold_surveys:
+                background_survey.run(*args)
+
+        self.enterContext(mock.patch.object(tasks.survey_upstream_collection, "delay", side_effect=dispatch))
+
+    def look(self):
+        """Open the re-check, and follow it to what the survey found."""
+        return self.client.get(self.url, follow=True)
+
+    def answer(self, data):
+        """Open the re-check, then save `data` against the survey it showed."""
+        shown = self.look()
+        return self.client.post(shown.redirect_chain[-1][0], data)

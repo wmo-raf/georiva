@@ -24,7 +24,7 @@ from georiva.ingestion.models import PushFeed
 from georiva.organisations.testing import dial_org, make_organisation
 from georiva.sources.models import FetchRun
 
-from .support import HarvestFeedMixin
+from .support import HarvestFeedMixin, RecheckPages
 
 User = get_user_model()
 
@@ -863,7 +863,7 @@ class WizardSavesTogetherOrNotAtAllTests(WizardMixin, TestCase):
         self.assertEqual(feed.window, (None, None))
 
 
-class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
+class RecheckUpstreamTests(RecheckPages, HarvestFeedMixin, TestCase):
     """A feed that exists, whose Upstream has since moved its files."""
 
     def setUp(self):
@@ -875,23 +875,24 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
             patcher = mock.patch.object(HarvestFeed, method, lambda feed: self.upstream)
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.start_running_surveys_inline()
         self.client.force_login(User.objects.create_superuser("op", "op@test.com", "pw"))
         dial_org(self.client)
         self.url = reverse("harvest_recheck_upstream", kwargs={"pk": self.feed.pk})
 
     def test_a_place_the_feed_does_not_read_from_yet_is_put_to_the_operator(self):
-        response = self.client.get(self.url)
+        response = self.look()
 
         self.assertContains(response, f"now keeps files at <strong>{BUCKET_HOST}</strong>")
         self.feed.refresh_from_db()
         self.assertEqual(self.feed.pinned_buckets, {}, "looking is not agreeing")
 
     def test_it_is_pinned_only_on_their_yes(self):
-        self.client.post(self.url, {})
+        self.answer({})
         self.feed.refresh_from_db()
         self.assertEqual(self.feed.pinned_buckets, {})
 
-        response = self.client.post(self.url, {"allow": f"{BUCKET}|{BUCKET_HOST}"})
+        response = self.answer({"allow": f"{BUCKET}|{BUCKET_HOST}"})
 
         self.assertRedirects(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
         self.feed.refresh_from_db()
@@ -899,7 +900,7 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
         self.assertEqual(self.harvest().rejected, 0)
 
     def test_a_place_the_survey_did_not_propose_cannot_be_pinned_by_posting_it(self):
-        self.client.post(self.url, {"allow": ["georiva-assets|georiva-minio", "|169.254.169.254"]})
+        self.answer({"allow": ["georiva-assets|georiva-minio", "|169.254.169.254"]})
 
         self.feed.refresh_from_db()
         self.assertEqual((self.feed.pinned_buckets, self.feed.asset_hosts), ({}, []))
@@ -908,13 +909,13 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
         self.feed.pinned_buckets = {BUCKET: BUCKET_HOST}
         self.feed.save()
 
-        response = self.client.get(self.url)
+        response = self.look()
 
         self.assertContains(response, "nothing to confirm")
         self.assertEqual(response.context["new"], [])
 
     def test_the_asset_keys_the_mapping_offers_are_refreshed(self):
-        self.client.post(self.url, {})
+        self.answer({})
 
         self.feed.refresh_from_db()
         self.assertEqual(self.feed.surveyed_assets, [{"key": "rainfall", "title": ""}])
@@ -922,8 +923,8 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
     def test_an_upstream_that_no_longer_fits_changes_nothing(self):
         self.upstream.items = []
 
-        response = self.client.get(self.url)
-        self.client.post(self.url, {"allow": f"{BUCKET}|{BUCKET_HOST}"})
+        response = self.look()
+        self.answer({"allow": f"{BUCKET}|{BUCKET_HOST}"})
 
         self.assertContains(response, "no longer fits")
         self.feed.refresh_from_db()
@@ -935,8 +936,8 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
             STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))}, chunk_locations=()
         )
 
-        shown = self.client.get(self.url)
-        self.client.post(self.url, {"allow": f"|{STORE_HOST}"})
+        shown = self.look()
+        self.answer({"allow": f"|{STORE_HOST}"})
 
         self.assertContains(shown, "no longer fits")
         self.assertContains(shown, "no longer published the way it was")
@@ -952,20 +953,21 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
             {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440)), "wind_u_10m": (RUN_STEP_GRID, (1, 1, 721, 1440))},
         )
 
-        shown = self.client.get(self.url)
-        self.client.post(self.url, {"offer_arrays": "1"})
+        shown = self.look()
+        self.answer({"offer_arrays": "1"})
 
         self.assertContains(shown, "temperature_2m")
         self.feed.refresh_from_db()
         self.assertEqual([seen["key"] for seen in self.feed.surveyed_assets], ["temperature_2m", "wind_u_10m"])
 
-    def test_an_unreachable_upstream_sends_the_operator_back_with_why(self):
+    def test_an_unreachable_upstream_says_why_and_offers_to_try_again(self):
         self.upstream.unreachable = "upstream catalog unreachable: timed out"
 
-        response = self.client.get(self.url, follow=True)
+        response = self.look()
 
-        self.assertRedirects(response, reverse("data_feed_detail", kwargs={"pk": self.feed.pk}))
         self.assertIn("timed out", " ".join(str(m) for m in response.context["messages"]))
+        self.assertContains(response, "Try again")
+        self.assertContains(response, f'href="{self.url}"')
 
     def test_another_organisations_feed_cannot_be_rechecked(self):
         theirs = self.make_feed(organisation=make_organisation("elsewhere"))
