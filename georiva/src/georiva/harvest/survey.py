@@ -289,6 +289,7 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
 
 #: What the survey is waiting on, as an operator is told it while they wait.
 #: No word here is one they would have to look up.
+WAITING_TO_START = "Waiting for GeoRiva to start the check: it is busy with other work"
 READING_CATALOG = "Reading the catalog"
 READING_COLLECTION = "Reading what the catalog says of this collection"
 READING_ENTRIES = "Looking at a few of the collection's entries"
@@ -475,7 +476,8 @@ def _survey_store(
     progress(OPENING_STORE)
     probe = upstream.describe_store(href)
     if probe.timed_out:
-        raise UpstreamTimedOut(f"the provider's data store {probe.problem or 'did not answer in time'}")
+        said = (probe.problem or "did not answer in time").removeprefix("it ")
+        raise UpstreamTimedOut(f"the provider's data store {said}")
     if not probe.readable:
         problem = probe.problem or "it could not be opened"
         reason = f"{_REASONS[Shape.NEEDS_ACCOUNT]} ({problem})"

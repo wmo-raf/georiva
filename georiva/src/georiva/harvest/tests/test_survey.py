@@ -333,7 +333,7 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
         with self.assertRaises(UpstreamTimedOut) as raised:
             self.survey()
 
-        self.assertIn("did not answer", str(raised.exception))
+        self.assertEqual(str(raised.exception), "the provider's data store did not answer within 45 seconds")
         self.assert_plain(str(raised.exception))
 
     def test_it_says_what_it_is_waiting_on_before_it_waits(self):

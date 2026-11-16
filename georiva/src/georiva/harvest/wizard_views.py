@@ -183,7 +183,10 @@ def harvest_wizard_step2(request):
         else:
             title = chosen["title"] or collection_id
             known = session.get("surveys", {}).get(collection_id)
-            if known is not None:
+            if session.get("checking", {}).get("collection_id") == collection_id:
+                # Already being surveyed: the wait goes on, and nothing is asked twice.
+                pass
+            elif known is not None:
                 # Surveyed already in this wizard session: not read again.
                 _choose(session, collection_id, title, known)
             else:

@@ -375,7 +375,6 @@ class WizardDoesNotWaitOnTheRequestTests(WizardMixin, TestCase):
 
         waiting = self.client.get(step(3))
         self.assertContains(waiting, "GeoRiva is reading the catalog")
-        self.assertContains(waiting, "Reading the catalog")
         self.assertContains(waiting, "CHIRPS monthly rainfall")
         self.assertNotContains(waiting, step(4))
         self.assertRedirects(self.client.get(step(4)), step(3))
@@ -383,6 +382,26 @@ class WizardDoesNotWaitOnTheRequestTests(WizardMixin, TestCase):
         self.finish_held_surveys()
 
         self.assertContains(self.client.get(step(3)), "GeoRiva can show")
+
+    def test_a_survey_not_yet_started_says_so_and_not_that_it_is_reading(self):
+        self.hold_surveys = True
+        self.give_address()
+        self.pick_collection()
+
+        waiting = self.client.get(step(3))
+
+        self.assertContains(waiting, "Waiting for GeoRiva to start the check")
+        self.assertNotContains(waiting, "Reading the catalog…")
+
+    def test_picking_the_same_collection_while_it_is_checked_starts_no_second_survey(self):
+        self.hold_surveys = True
+        self.give_address()
+        self.pick_collection()
+        self.client.get(step(2))
+
+        self.assertRedirects(self.pick_collection(), step(3))
+
+        self.assertEqual(len(self.surveys_started), 1)
 
     def test_the_wait_names_the_part_of_the_survey_it_has_reached(self):
         self.hold_surveys = True

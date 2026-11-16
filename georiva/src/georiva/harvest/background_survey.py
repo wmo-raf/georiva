@@ -20,8 +20,9 @@ import uuid
 from dataclasses import asdict
 
 from django.core.cache import cache
+from django.utils.translation import gettext as _
 
-from .survey import READING_CATALOG, survey_collection
+from .survey import WAITING_TO_START, survey_collection
 from .upstream import UpstreamTimedOut, UpstreamUnreachable
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ def start(upstream_url: str, collection_id: str) -> str:
     from .tasks import survey_upstream_collection
 
     token = uuid.uuid4().hex
-    _put(token, state=CHECKING, waiting_on=READING_CATALOG)
+    _put(token, state=CHECKING, waiting_on=WAITING_TO_START)
     survey_upstream_collection.delay(token, upstream_url, collection_id)
     return token
 
@@ -81,7 +82,7 @@ def run(token: str, upstream_url: str, collection_id: str) -> None:
         _put(token, state=FAILED, why=str(why), timed_out=False)
     except Exception:  # an answer the survey could not make sense of is still an answer for the operator
         logger.exception("Survey of %s at %s failed", collection_id, upstream_url)
-        _put(token, state=FAILED, why="it answered in a way GeoRiva could not make sense of", timed_out=False)
+        _put(token, state=FAILED, why=_("it answered in a way GeoRiva could not make sense of"), timed_out=False)
     else:
         _put(token, state=FOUND, survey=as_session(found))
 

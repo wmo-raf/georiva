@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from .upstream import (
+    STORE_TIMEOUT,
     AssetProbe,
     CubeArray,
     CubeDimension,
@@ -323,7 +324,8 @@ class FakeUpstream:
     def describe_store(self, href: str) -> StoreProbe:
         self.stores_opened.append(href)
         if self.store_times_out:
-            return StoreProbe(readable=False, problem="it did not answer within 45 seconds", timed_out=True)
+            problem = f"it did not answer within {STORE_TIMEOUT} seconds"
+            return StoreProbe(readable=False, problem=problem, timed_out=True)
         if self.store_unreadable:
             return StoreProbe(readable=False, problem=self.store_unreadable)
         if href not in self.stores:
