@@ -241,6 +241,12 @@ class Asset(AbstractAsset, HarvestProvenance, TimeStampedModel, Orderable):
     def is_zarr(self) -> bool:
         return self.format == self.Format.ZARR
 
+    @property
+    def is_drawable(self) -> bool:
+        """Whether Titiler can draw this asset — a COG or a Store asset (#686).
+        Its queryset half is ``storage.asset_location.drawable_q``."""
+        return self.location.is_drawable
+
     # =========================================================================
     # Extra fields accessors
     # =========================================================================
@@ -349,13 +355,16 @@ class ItemManager(models.Manager):
         items carry no reference time degenerates to the newest valid time,
         which for observations is the same question correctly answered.
 
-        Only items carrying a COG for this variable are candidates: the encoded
-        texture is derived from the COG and nothing else can stand in for it.
+        Only items carrying an asset Titiler can draw for this variable are
+        candidates — a COG, or a Store asset read from its store: the encoded
+        texture is derived from it and nothing else can stand in.
         """
+        from georiva.core.storage.asset_location import drawable_q
+
         candidates = self.filter(
+            drawable_q("assets__"),
             collection_id=variable.collection_id,
             assets__variable=variable,
-            assets__format=Asset.Format.COG,
         )
         latest_ref = (
             candidates.filter(reference_time__isnull=False)
@@ -378,10 +387,12 @@ class ItemManager(models.Manager):
         """
         if direction not in ("prev", "next"):
             raise ValueError(f"direction must be 'prev' or 'next', not {direction!r}")
+        from georiva.core.storage.asset_location import drawable_q
+
         candidates = self.filter(
+            drawable_q("assets__"),
             collection_id=variable.collection_id,
             assets__variable=variable,
-            assets__format=Asset.Format.COG,
         ).distinct()
         if item.reference_time is not None:
             candidates = candidates.filter(reference_time=item.reference_time)

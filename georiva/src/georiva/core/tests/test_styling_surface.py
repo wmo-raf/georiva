@@ -37,6 +37,8 @@ from georiva.organisations.tests.factories import (
     make_user,
 )
 
+STORE = "https://data.upstream.example/gfs/v0.1.0.icechunk"
+
 
 def make_ramp(name="Test ramp", organisation=None, hexes=("#000000", "#ffffff")):
     ramp = ColorRamp.objects.create(name=name, organisation=organisation)
@@ -759,7 +761,9 @@ class PreviewItemChoiceTests(TestCase):
         # never stands in for one.
         cls.tree["item"].delete()
 
-    def _item(self, time, reference_time=None, fmt=Asset.Format.COG, variable=None, bounds=(0, 0, 10, 10)):
+    def _item(
+        self, time, reference_time=None, fmt=Asset.Format.COG, variable=None, bounds=(0, 0, 10, 10), href="x.tif"
+    ):
         item = Item.objects.create(
             collection=self.collection,
             time=time,
@@ -769,7 +773,7 @@ class PreviewItemChoiceTests(TestCase):
         Asset.objects.create(
             item=item,
             variable=variable or self.variable,
-            href="x.tif",
+            href=href,
             format=fmt,
         )
         return item
@@ -808,6 +812,17 @@ class PreviewItemChoiceTests(TestCase):
     def test_a_variable_with_no_items_previews_nothing(self):
         self.assertIsNone(Item.objects.latest_for_variable(self.variable))
 
+    def test_a_store_backed_variable_previews_its_newest_run(self):
+        # Titiler draws a Store asset from its Upstream store (ADR 0044 §9, #686).
+        run = datetime(2026, 3, 2, tzinfo=UTC)
+        analysis = self._item(run, run, fmt=Asset.Format.ZARR, href=STORE)
+        self._item(datetime(2026, 3, 3, tzinfo=UTC), run, fmt=Asset.Format.ZARR, href=STORE)
+        self.assertEqual(Item.objects.latest_for_variable(self.variable), analysis)
+
+    def test_a_zarr_kept_here_is_not_a_candidate(self):
+        self._item(datetime(2026, 3, 3, tzinfo=UTC), fmt=Asset.Format.ZARR, href="kenya/x.zarr")
+        self.assertIsNone(Item.objects.latest_for_variable(self.variable))
+
 
 class PreviewStepTests(TestCase):
     """Stepping the map preview through time (#570).
@@ -823,11 +838,11 @@ class PreviewStepTests(TestCase):
         cls.collection = cls.tree["collection"]
         cls.tree["item"].delete()
 
-    def _item(self, time, reference_time=None, fmt=Asset.Format.COG, variable=None):
+    def _item(self, time, reference_time=None, fmt=Asset.Format.COG, variable=None, href="x.tif"):
         item = Item.objects.create(
             collection=self.collection, time=time, reference_time=reference_time, bounds=[0, 0, 10, 10]
         )
-        Asset.objects.create(item=item, variable=variable or self.variable, href="x.tif", format=fmt)
+        Asset.objects.create(item=item, variable=variable or self.variable, href=href, format=fmt)
         return item
 
     def _step(self, item, direction):
@@ -859,6 +874,13 @@ class PreviewStepTests(TestCase):
     def test_a_feed_without_runs_steps_through_plain_time_order(self):
         a = self._item(datetime(2026, 3, 1, tzinfo=UTC))
         b = self._item(datetime(2026, 3, 2, tzinfo=UTC))
+        self.assertEqual(self._step(a, "next"), b)
+        self.assertEqual(self._step(b, "prev"), a)
+
+    def test_a_store_backed_run_is_stepped_through(self):
+        run = datetime(2026, 3, 1, tzinfo=UTC)
+        a = self._item(datetime(2026, 3, 1, 0, tzinfo=UTC), run, fmt=Asset.Format.ZARR, href=STORE)
+        b = self._item(datetime(2026, 3, 1, 3, tzinfo=UTC), run, fmt=Asset.Format.ZARR, href=STORE)
         self.assertEqual(self._step(a, "next"), b)
         self.assertEqual(self._step(b, "prev"), a)
 

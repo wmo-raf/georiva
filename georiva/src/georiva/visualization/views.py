@@ -23,8 +23,7 @@ def item_preview(request, item_id):
     # current render range (ADR 0021) — no stored visual asset — from the COG,
     # or from the Upstream store a Store asset names (ADR 0044 §9).
     for asset in assets:
-        drawable = asset.is_cog or asset.location.is_store
-        asset.texture_url = titiler_encoded_preview_url(item, asset.variable) if drawable else ""
+        asset.texture_url = titiler_encoded_preview_url(item, asset.variable) if asset.is_drawable else ""
         asset.render_contract = render_contract(asset.variable)
 
     context = {

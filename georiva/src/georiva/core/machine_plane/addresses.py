@@ -196,8 +196,8 @@ def titiler_preview_url(item, variable, style=None) -> str:
     URL then carries the version token that makes a colorized response
     honestly cacheable — an edited style or range, or re-ingested data, is a
     different URL. A bare slug is accepted for callers holding nothing more
-    (the page templatetag): the variable is then read off the item's own COG
-    asset for that slug. Only an item with no such asset goes out untokened,
+    (the page templatetag): the variable is then read off the item's own
+    drawable asset for that slug — its COG or its Store asset. Only an item with no such asset goes out untokened,
     and Titiler declares nothing cacheable for an untokened URL.
     """
     collection = item.collection
@@ -210,11 +210,11 @@ def titiler_preview_url(item, variable, style=None) -> str:
         # gets the token then — a styled-but-untokened URL would undo the
         # honesty the token exists for.
         variable_slug = variable
-        asset = _cog_asset(item, slug=variable_slug)
+        asset = _drawable_asset(item, slug=variable_slug)
         variable = style.variable if style else (asset.variable if asset else None)
     else:
         variable_slug = variable.slug
-        asset = _cog_asset(item, variable_id=variable.pk)
+        asset = _drawable_asset(item, variable_id=variable.pk)
     if style is not None:
         params["style"] = style.slug
     if variable is not None:
@@ -233,13 +233,14 @@ def titiler_preview_url(item, variable, style=None) -> str:
     return f"{root}/preview.webp?{urlencode(params)}"
 
 
-def _cog_asset(item, *, slug=None, variable_id=None):
-    """The item's COG asset for one variable, or ``None``.
+def _drawable_asset(item, *, slug=None, variable_id=None):
+    """The item's asset Titiler draws for one variable — its COG or its Store
+    asset (``Asset.is_drawable``) — or ``None``.
 
     Filtered in Python over ``item.assets.all()`` so a caller that prefetched
     ``assets__variable`` pays no query per item."""
     for asset in item.assets.all():
-        if not asset.is_cog:
+        if not asset.is_drawable:
             continue
         if variable_id is not None and asset.variable_id == variable_id:
             return asset

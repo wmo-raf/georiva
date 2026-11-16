@@ -4,6 +4,7 @@ derivation intermediates, read by the engine but never served.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 
 from adminboundarymanager.models import AdminBoundary
@@ -498,3 +499,99 @@ class CollectionListingItemLinkTests(TestCase):
         self.assertIn("http://kenya.georiva.test/titiler/kenya/wmts", guide)
         self.assertIn("http://kenya.georiva.test/api/wmts/kenya/WMTSCapabilities.xml", guide)
         self.assertIn("Which URL do I use?", guide)
+
+
+STORE = "https://data.upstream.example/gfs/v0.1.0.icechunk"
+
+
+@override_settings(GEORIVA_BASE_DOMAIN="georiva.test", ALLOWED_HOSTS=["*"])
+class StoreBackedCollectionPageTests(TestCase):
+    """A store-backed collection shows on every public surface (#686).
+
+    Titiler draws a Store asset from its Upstream store (ADR 0044 §9), so the
+    pages offer it wherever they offer a COG — but it is not a file, so it is
+    never a download: the item page names its store and array instead.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.organisation = provision_organisation(name="Kenya Met", slug="kenya")
+        from georiva.pages.datasets.models import DatasetsIndexPage
+
+        cls.index = DatasetsIndexPage.objects.descendant_of(cls.organisation.site.root_page).get()
+        tree = make_org_tree(cls.organisation)
+        cls.catalog = tree["catalog"]
+        cls.collection = tree["collection"]
+        cls.variable = tree["variable"]
+        Collection.objects.filter(pk=cls.collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+
+        cls.cog_item = tree["item"]
+        Asset.objects.filter(item=cls.cog_item).update(format=Asset.Format.COG, href="kenya/t2m/2026/03/01/t2m.tif")
+        Item.objects.filter(pk=cls.cog_item.pk).update(bounds=[20.0, -12.0, 52.0, 23.0])
+
+        cls.store_item = Item.objects.create(
+            collection=cls.collection,
+            time=datetime(2025, 11, 16, 6, tzinfo=UTC),
+            reference_time=datetime(2025, 11, 16, tzinfo=UTC),
+            bounds=[-180.0, -90.0, 180.0, 90.0],
+        )
+        Asset.objects.create(
+            item=cls.store_item,
+            variable=cls.variable,
+            href=STORE,
+            format=Asset.Format.ZARR,
+            store_array="temperature_2m",
+        )
+
+    def setUp(self):
+        self.client.defaults["HTTP_HOST"] = "kenya.georiva.test"
+
+    def _collection_url(self):
+        return f"{self.index.url}{self.catalog.slug}/{self.collection.slug}/"
+
+    def _item_page(self, item):
+        response = self.client.get(f"{self._collection_url()}items/{item.pk}/")
+        self.assertEqual(response.status_code, 200)
+        return response.content.decode()
+
+    def _item_config(self, item):
+        body = self._item_page(item)
+        start = body.index('id="grItemConfig"')
+        start = body.index(">", start) + 1
+        return json.loads(body[start : body.index("</script>", start)])
+
+    def test_the_dates_picker_lists_the_store_items_dates(self):
+        response = self.client.get(
+            reverse("datasets:collection-available-dates", args=[self.catalog.slug, self.collection.slug]),
+            {"level": "years", "variable": self.variable.slug},
+        )
+        self.assertEqual(response.json()["values"], [2025, 2026])
+
+    def test_the_listing_shows_both_items_with_tokened_thumbnails(self):
+        body = self.client.get(self._collection_url()).content.decode()
+        for item in (self.cog_item, self.store_item):
+            with self.subTest(item=item.pk):
+                self.assertIn(f"{self._collection_url()}items/{item.pk}/", body)
+                self.assertIn(f"time={item.time_iso.replace(':', '%3A')}", body)
+        thumbnails = re.findall(r'[^"]*/preview\.webp\?[^"]*', body)
+        self.assertEqual(len(thumbnails), 2, thumbnails)
+        for url in thumbnails:
+            # Tokened, so each caches as immutable.
+            self.assertIn("v=", url)
+
+    def test_the_item_page_draws_a_store_asset_and_a_cog(self):
+        for item in (self.cog_item, self.store_item):
+            with self.subTest(item=item.pk):
+                self.assertIn(self.variable.slug, self._item_config(item)["textureUrls"])
+
+    def test_a_store_asset_is_not_a_download_and_names_its_store_and_array(self):
+        body = self._item_page(self.store_item)
+        self.assertNotIn("gr-download-btn", body)
+        self.assertIn(STORE, body)
+        self.assertIn("temperature_2m", body)
+        self.assertIn("read from the provider", body)
+
+    def test_a_cog_is_still_a_download(self):
+        body = self._item_page(self.cog_item)
+        self.assertIn("gr-download-btn", body)
+        self.assertNotIn("read from the provider", body)

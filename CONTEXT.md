@@ -478,6 +478,12 @@ A Remote asset whose `href` is an Upstream store. Every asset of the collection 
 one means is its Item's reference time and valid time, and the array it was mapped from (ADR 0044).
 _Avoid_: Zarr asset (that is a format), slice asset, chunk asset
 
+**Drawable asset**:
+An asset Titiler can draw: a COG, local or Remote, or a Store asset. Every surface that offers a map, a thumbnail or
+a preview offers exactly these; one rule decides it (`AssetLocation.is_drawable` / `drawable_q`, #686). Being
+drawable is not being downloadable: a Store asset is drawn but is not a file.
+_Avoid_: COG asset (when a Store asset is meant too), visual asset (that is a PNG/WebP/JPEG)
+
 **Mixed collection**:
 A Collection holding both local and Remote assets, typically a local hot window over a remote deep archive. A
 first-class state, not a migration in progress.

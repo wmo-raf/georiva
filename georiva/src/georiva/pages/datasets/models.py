@@ -15,6 +15,7 @@ from georiva.core.machine_plane import (
     titiler_encoded_preview_url,
 )
 from georiva.core.models import Asset, Catalog, Collection, Item, visible_visibilities
+from georiva.core.storage.asset_location import drawable_q, store_q
 from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
 from georiva.organisations.access import (
@@ -224,8 +225,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             active_var_slug = variables[0].slug if variables else ""
 
         # --- Variable coverage ---
-        # Check which variables have at least one COG asset in the current
-        # filtered item set. Used to disable variables with no data and to
+        # Check which variables have at least one asset Titiler can draw (a COG
+        # or a Store asset) in the current filtered item set. Used to disable variables with no data and to
         # fall back the active variable if it has no coverage.
         base_items_qs = Item.objects.filter(collection=collection)
         if date_str:
@@ -237,8 +238,8 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
 
         coverage_qs = (
             Asset.objects.filter(
+                drawable_q(),
                 item__in=base_items_qs,
-                format=Asset.Format.COG,
                 variable__is_active=True,
             )
             .values_list("variable__slug", flat=True)
@@ -246,7 +247,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         )
         coverage = set(coverage_qs)
 
-        # Annotate variables with COG coverage flag
+        # Annotate variables with a drawable-coverage flag
         for variable in variables:
             variable.has_coverage = variable.slug in coverage
 
@@ -261,7 +262,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         if not active_group_marked and variable_groups:
             variable_groups[0]["is_active"] = True
 
-        # Fall back active variable to first one with COG coverage
+        # Fall back active variable to first one with drawable coverage
         if not active_var_slug or active_var_slug not in coverage:
             fallback = next((v for v in variables if v.has_coverage), None)
             active_var_slug = fallback.slug if fallback else active_var_slug
@@ -269,11 +270,11 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
         active_variable = next((v for v in variables if v.slug == active_var_slug), None)
 
         # --- Item queryset ---
-        # Only items that have a COG asset for the active variable.
+        # Only items that have an asset Titiler can draw for the active variable.
         items_qs = (
             base_items_qs.filter(
+                drawable_q("assets__"),
                 assets__variable__slug=active_var_slug,
-                assets__format=Asset.Format.COG,
                 assets__variable__is_active=True,
             )
             .distinct()
@@ -281,7 +282,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             # the owning organisation — read from the item rather than from the
             # page context, so the chain is walked once per page, not per card.
             .select_related("collection__catalog__organisation")
-            # The thumbnail's version token reads the item's COG asset.
+            # The thumbnail's version token reads the item's drawable asset.
             .prefetch_related("assets__variable__styles")
             .order_by("time" if collection.is_forecast else "-time")
         )
@@ -341,20 +342,22 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             pk=item_id,
         )
 
-        # COG assets for the map — one per variable
-        cog_assets = list(
-            item.assets.filter(format=Asset.Format.COG, variable__is_active=True)
+        # Assets Titiler draws on the map — a COG or a Store asset, one per variable
+        map_assets = list(
+            item.assets.filter(drawable_q(), variable__is_active=True)
             .select_related("variable", "variable__unit")
             .prefetch_related("variable__styles")
             .order_by("variable__sort_order")
         )
 
-        # Encoded texture URLs by variable — derived on demand by Titiler from
-        # the COG at the variable's current render range (ADR 0021), so a
-        # min/max edit is live on the next request with nothing to regenerate.
-        texture_urls = {a.variable.slug: titiler_encoded_preview_url(item, a.variable) for a in cog_assets}
+        # Encoded texture URLs by variable — derived on demand by Titiler, from
+        # the COG or the Upstream store (ADR 0044 §9), at the variable's current
+        # render range (ADR 0021), so a min/max edit is live on the next request
+        # with nothing to regenerate.
+        texture_urls = {a.variable.slug: titiler_encoded_preview_url(item, a.variable) for a in map_assets}
 
-        # All downloadable assets for the downloads section
+        # All downloadable assets for the downloads section. A Store asset is
+        # not a file — its href is the whole repository — so it is never one.
         downloadable_assets = (
             item.assets.filter(
                 format__in=[
@@ -367,11 +370,19 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
             .order_by("variable__sort_order", "format")
         )
 
+        # Store assets: how to open the field instead of downloading it — the
+        # store address and the array, as STAC exposes them (ADR 0044 §3).
+        store_assets = (
+            item.assets.filter(store_q(), variable__is_active=True)
+            .select_related("variable")
+            .order_by("variable__sort_order")
+        )
+
         # Resolve active variable from ?variable= param
         active_var_slug = request.GET.get("variable", "").strip()
-        cog_slugs = [a.variable.slug for a in cog_assets]
-        if active_var_slug not in cog_slugs:
-            active_var_slug = cog_slugs[0] if cog_slugs else ""
+        map_slugs = [a.variable.slug for a in map_assets]
+        if active_var_slug not in map_slugs:
+            active_var_slug = map_slugs[0] if map_slugs else ""
 
         # Boundary aggregates the viewer can actually be shown, per variable.
         # The control is configuration-gated *and* data-gated: a level appears
@@ -399,18 +410,18 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "value_min": a.variable.value_min,
                 "value_max": a.variable.value_max,
             }
-            for a in cog_assets
+            for a in map_assets
         ]
 
-        # Group COG assets by vertical level for the map panel
-        ungrouped_cog_assets, cog_asset_groups = _group_assets_by_level(cog_assets)
+        # Group map assets by vertical level for the map panel
+        ungrouped_map_assets, map_asset_groups = _group_assets_by_level(map_assets)
         active_group_marked = False
-        for group in cog_asset_groups:
+        for group in map_asset_groups:
             group["is_active"] = active_var_slug in {a.variable.slug for a in group["assets"]}
             if group["is_active"]:
                 active_group_marked = True
-        if not active_group_marked and cog_asset_groups:
-            cog_asset_groups[0]["is_active"] = True
+        if not active_group_marked and map_asset_groups:
+            map_asset_groups[0]["is_active"] = True
 
         # Group downloadable assets by vertical level for the downloads section
         ungrouped_downloads, download_groups = _group_assets_by_level(downloadable_assets)
@@ -431,13 +442,14 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "collection": collection,
                 "item": item,
                 "active_var_slug": active_var_slug,
-                "cog_assets": cog_assets,
+                "map_assets": map_assets,
                 "texture_urls": texture_urls,
-                "ungrouped_cog_assets": ungrouped_cog_assets,
-                "cog_asset_groups": cog_asset_groups,
+                "ungrouped_map_assets": ungrouped_map_assets,
+                "map_asset_groups": map_asset_groups,
                 "map_layers": map_layers,
                 "ungrouped_downloads": ungrouped_downloads,
                 "download_groups": download_groups,
+                "store_assets": store_assets,
                 "prev_item": prev_item,
                 "next_item": next_item,
                 "collection_url": f"{self.url}{catalog.slug}/{collection.slug}/",

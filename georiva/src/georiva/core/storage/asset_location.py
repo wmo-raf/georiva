@@ -21,6 +21,10 @@ Jurisdiction, deletion and the public URL treat it as one. What it cannot be is
 opened as a raster: :attr:`AssetLocation.is_store` and :func:`store_q` are how
 a reader that wants a file learns there is none.
 
+What Titiler *can* do with one is draw it, as it draws a COG.
+:attr:`AssetLocation.is_drawable` and :func:`drawable_q` are the one rule for
+"Titiler can draw this asset", so a next kind of drawable asset changes here.
+
 The test is the URL scheme. Every key we write starts with the owning
 organisation's slug, and a slug cannot contain ``://``; a URL always does,
 straight after its scheme. So the scheme is decisive without a column, and the
@@ -52,10 +56,26 @@ def store_q(prefix: str = "") -> Q:
     return remote_q(prefix) & Q(**{f"{prefix}format": _store_format()})
 
 
+def drawable_q(prefix: str = "") -> Q:
+    """Rows whose asset Titiler can draw: a COG, ours or an upstream's, or a Store asset.
+
+    The database half of :attr:`AssetLocation.is_drawable`; the two must agree."""
+    return Q(**{f"{prefix}format": _cog_format()}) | store_q(prefix)
+
+
 def _store_format() -> str:
+    return _formats().ZARR
+
+
+def _cog_format() -> str:
+    return _formats().COG
+
+
+def _formats():
+    # Late: the models import this module.
     from georiva.core.models.base import AbstractAsset
 
-    return AbstractAsset.Format.ZARR
+    return AbstractAsset.Format
 
 
 def local_q(prefix: str = "") -> Q:
@@ -81,6 +101,13 @@ class AssetLocation:
         """Whether this is a Store asset: its bytes are an Upstream store's, and
         which of them is its item's times and its array, not its href."""
         return self.is_remote and self.format == _store_format()
+
+    @property
+    def is_drawable(self) -> bool:
+        """Whether Titiler can draw this asset: a COG, local or Remote (ADR 0043),
+        or a Store asset, read from its store (ADR 0044 §9). Every surface that
+        offers a map, a thumbnail or a preview asks this, or :func:`drawable_q`."""
+        return self.format == _cog_format() or self.is_store
 
     @property
     def key(self) -> str:
