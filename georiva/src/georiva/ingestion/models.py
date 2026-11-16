@@ -755,9 +755,10 @@ class RunIngestion(models.Model):
         default=dict,
         blank=True,
         help_text=(
-            "For a harvested Upstream store: how many steps of this run each mapped Variable's array is expected "
-            "at, by Variable pk — the run's steps from the array's own first held step on, since an average is "
-            "never held at a run's first step (ADR 0044 §6). A Variable not here expects expected_file_count."
+            "For a harvested Upstream store: the lead times, in seconds, of this run each mapped Variable's array "
+            "is expected at, by Variable pk — the run's expected steps from the array's own first held step on, "
+            "since an average is never held at a run's first step (ADR 0044 §6). A Variable not here is not held "
+            "whole."
         ),
     )
     last_file_at = models.DateTimeField(
@@ -875,17 +876,18 @@ class RunIngestion(models.Model):
         held: int,
         expected: int | None,
         complete: bool,
-        expected_by_variable: dict[int, int] | None = None,
+        expected_by_variable: dict[int, frozenset[timedelta]] | None = None,
     ):
         """Register what a harvested Upstream store holds of one run (ADR 0044 §6).
 
         A harvest writes no file, so this is its ``record_file``: ``held`` is how
         many steps of the run have a row, ``expected`` how many the store
-        expects of it, ``expected_by_variable`` how many it expects of each
-        mapped Variable's array, by Variable pk, and ``complete`` whether every
-        one of them is held for every mapped Variable. Opens the row on its first Held step; closes it,
-        as ``store_held``, once complete; reopens it, bumping ``revision``, when
-        a closed run is found no longer complete. Returns the row, or ``None``
+        expects of it, ``expected_by_variable`` the lead times it expects of
+        each mapped Variable's array, by Variable pk, and ``complete`` whether
+        every one of them is held for every mapped Variable. Opens the row on
+        its first Held step; closes it, as ``store_held``, once complete;
+        reopens it, bumping ``revision``, when a closed run is found no longer
+        complete. Returns the row, or ``None``
         when nothing of the run is held and it has none.
 
         ``last_file_at`` stays empty: no file arrives, and a run with holes
@@ -925,14 +927,22 @@ class RunIngestion(models.Model):
         return run
 
     @staticmethod
-    def encode_expected_by_variable(by_variable: dict[int, int]) -> dict[str, int]:
-        """``expected_steps_by_variable`` as stored: JSON keys are strings."""
-        return {str(pk): n for pk, n in by_variable.items()}
+    def encode_expected_by_variable(by_variable: dict[int, frozenset[timedelta]]) -> dict[str, list[int]]:
+        """``expected_steps_by_variable`` as stored: JSON keys are strings, and
+        each Variable's lead times whole seconds, in order."""
+        return {str(pk): sorted(int(lead.total_seconds()) for lead in leads) for pk, leads in by_variable.items()}
 
     @staticmethod
-    def decode_expected_by_variable(stored: dict | None) -> dict[int, int]:
-        """``expected_steps_by_variable`` as read: Variable pk → steps."""
-        return {int(pk): n for pk, n in (stored or {}).items()}
+    def decode_expected_by_variable(stored: dict | None) -> dict[int, frozenset[timedelta]]:
+        """``expected_steps_by_variable`` as read: Variable pk → lead times. A
+        count recorded before the steps themselves were (#672) says not which
+        steps, so it is left out, and its Variable is not judged whole until
+        the store is asked again."""
+        return {
+            int(pk): frozenset(timedelta(seconds=seconds) for seconds in leads)
+            for pk, leads in (stored or {}).items()
+            if isinstance(leads, list)
+        }
 
     def _reopen(self) -> bool:
         """Reopen a closed row in hand, at the next revision. Returns whether it was closed."""

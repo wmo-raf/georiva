@@ -96,13 +96,20 @@ the store, and Titiler draws maps by reading the store itself.**
    run with such a field mapped would never close and `latest_complete` would never move. The store declares no
    per-array list of steps, so an array is expected at the run's expected steps **from its own first Held step
    on** (wmo-raf/georiva#681). That needs nothing more of the store than the listing already reads, works on a
-   store's first run, and holds for any field that starts late, whatever kind it is. Each mapped Variable's count is
-   kept on the run record, so a closed run is judged again without asking the store. Its limits, accepted:
+   store's first run, and holds for any field that starts late, whatever kind it is.
+
+   **Which steps are held, not how many** (wmo-raf/georiva#672). A run is complete when each mapped Variable has a
+   row at every one of its array's expected lead times. A step the store holds past the run's
+   `expected_forecast_length` still gets a row, but is not expected, so it cannot make up for a missing one — nor can
+   rows left from a longer expected length the store has since cut. Each mapped Variable's expected lead times are
+   kept on the run record, so a closed run is judged again, and settled, without asking the store; a record that
+   kept only a count says not which steps, and its run is asked again. Its limits, accepted:
 
    - a run whose first step arrives after its later ones looks complete early. Stores write a run's steps in lead
      order;
    - an array's first step gone upstream is not noticed by a re-check, which counts from the first step still held;
    - an array a store holds at no step of a run keeps that run open, as before: there is no first step to count from.
+     So does an array held only past the run's expected length: it holds none of the steps the run is expected at.
 
 7. **A forecast store's window rolls, on run time.** The feed keeps runs initialised in the last *N* days (default
    3). The Mirror is authoritative within that window as before, so rows of a run that has aged out are removed by
