@@ -751,6 +751,15 @@ class RunIngestion(models.Model):
         blank=True,
         help_text="Size of the declared expected set, when the arrival route declares one. Null on routes that cannot.",
     )
+    expected_steps_by_variable = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "For a harvested Upstream store: how many steps of this run each mapped Variable's array is expected "
+            "at, by Variable pk — the run's steps from the array's own first held step on, since an average is "
+            "never held at a run's first step (ADR 0044 §6). A Variable not here expects expected_file_count."
+        ),
+    )
     last_file_at = models.DateTimeField(
         null=True,
         blank=True,
@@ -858,13 +867,23 @@ class RunIngestion(models.Model):
         return run, reopened
 
     @classmethod
-    def record_held_steps(cls, collection, reference_time, *, held: int, expected: int | None, complete: bool):
+    def record_held_steps(
+        cls,
+        collection,
+        reference_time,
+        *,
+        held: int,
+        expected: int | None,
+        complete: bool,
+        expected_by_variable: dict[int, int] | None = None,
+    ):
         """Register what a harvested Upstream store holds of one run (ADR 0044 §6).
 
         A harvest writes no file, so this is its ``record_file``: ``held`` is how
         many steps of the run have a row, ``expected`` how many the store
-        expects of it, and ``complete`` whether every one of them is held for
-        every mapped Variable. Opens the row on its first Held step; closes it,
+        expects of it, ``expected_by_variable`` how many it expects of each
+        mapped Variable's array, by Variable pk, and ``complete`` whether every
+        one of them is held for every mapped Variable. Opens the row on its first Held step; closes it,
         as ``store_held``, once complete; reopens it, bumping ``revision``, when
         a closed run is found no longer complete. Returns the row, or ``None``
         when nothing of the run is held and it has none.
@@ -885,6 +904,8 @@ class RunIngestion(models.Model):
                 run.file_count = held
                 if expected is not None:
                     run.expected_file_count = expected
+                if expected_by_variable is not None:
+                    run.expected_steps_by_variable = cls.encode_expected_by_variable(expected_by_variable)
                 run.save(
                     update_fields=[
                         "status",
@@ -893,6 +914,7 @@ class RunIngestion(models.Model):
                         "closed_by",
                         "file_count",
                         "expected_file_count",
+                        "expected_steps_by_variable",
                         "updated_at",
                     ]
                 )
@@ -901,6 +923,16 @@ class RunIngestion(models.Model):
         if complete and run.is_open:
             run.close(cls.Closer.STORE_HELD)
         return run
+
+    @staticmethod
+    def encode_expected_by_variable(by_variable: dict[int, int]) -> dict[str, int]:
+        """``expected_steps_by_variable`` as stored: JSON keys are strings."""
+        return {str(pk): n for pk, n in by_variable.items()}
+
+    @staticmethod
+    def decode_expected_by_variable(stored: dict | None) -> dict[int, int]:
+        """``expected_steps_by_variable`` as read: Variable pk → steps."""
+        return {int(pk): n for pk, n in (stored or {}).items()}
 
     def _reopen(self) -> bool:
         """Reopen a closed row in hand, at the next revision. Returns whether it was closed."""

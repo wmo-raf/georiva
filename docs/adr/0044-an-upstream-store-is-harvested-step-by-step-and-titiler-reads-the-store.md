@@ -94,7 +94,15 @@ the store, and Titiler draws maps by reading the store itself.**
    field defined over the interval before each step — an average, an accumulation, a flux, an extreme — has no
    value at a run's first step, so its array never holds that step. Counting the store's steps for every array, a
    run with such a field mapped would never close and `latest_complete` would never move. The store declares no
-   per-array list of steps; how a harvest learns one is still to decide.
+   per-array list of steps, so an array is expected at the run's expected steps **from its own first Held step
+   on** (wmo-raf/georiva#681). That needs nothing more of the store than the listing already reads, works on a
+   store's first run, and holds for any field that starts late, whatever kind it is. Each mapped Variable's count is
+   kept on the run record, so a closed run is judged again without asking the store. Its limits, accepted:
+
+   - a run whose first step arrives after its later ones looks complete early. Stores write a run's steps in lead
+     order;
+   - an array's first step gone upstream is not noticed by a re-check, which counts from the first step still held;
+   - an array a store holds at no step of a run keeps that run open, as before: there is no first step to count from.
 
 7. **A forecast store's window rolls, on run time.** The feed keeps runs initialised in the last *N* days (default
    3). The Mirror is authoritative within that window as before, so rows of a run that has aged out are removed by

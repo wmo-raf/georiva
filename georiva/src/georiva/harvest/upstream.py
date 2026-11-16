@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import socket
+from bisect import bisect_left
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -170,6 +171,11 @@ class HeldStep:
     #: past the store's own expected forecast length for it left out where it
     #: publishes one. `None` for an analysis store, which has no runs.
     run_steps: int | None = None
+    #: How many steps of its run each of `arrays` is expected at: the run's
+    #: expected steps from the array's own first Held step on. An average,
+    #: accumulation, flux or extreme is never held at a run's first step, and
+    #: the store says so nowhere else (ADR 0044 §6). Empty for an analysis store.
+    array_steps: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -944,22 +950,23 @@ def _run_lengths(store, path: str, runs, known: dict):
     return lengths
 
 
-def _run_steps(leads, length) -> int:
-    """How many of `leads` a run reaching `length` ahead is expected to have;
-    every one when `length` is unknown."""
+def _expected_leads(leads, length) -> list:
+    """The lead times of `leads` a run reaching `length` ahead is expected to
+    have, in order; every one when `length` is unknown."""
     import numpy as np
 
-    known = [lead for lead in leads if not np.isnat(lead)]
+    known = sorted(lead for lead in leads if not np.isnat(lead))
     if length is None or np.isnat(length):
-        return len(known)
-    return sum(1 for lead in known if lead <= length)
+        return known
+    return [lead for lead in known if lead <= length]
 
 
 def _field_steps(
     store, field: StoreField, window: Window, known: dict, skip_runs: frozenset = frozenset()
-) -> list[tuple[datetime | None, datetime, int | None]]:
-    """`(run, valid time, steps its run expects)` of every step in `window`
-    that the store holds for one field, of no run in `skip_runs`."""
+) -> list[tuple[datetime | None, datetime, int | None, int | None]]:
+    """`(run, valid time, steps its run expects, steps it expects from this
+    one on)` of every step in `window` that the store holds for one field, of no
+    run in `skip_runs`. The last two are `None` for a store without runs."""
     import numpy as np
     import zarr
 
@@ -987,7 +994,9 @@ def _field_steps(
         if measured["time"].dtype.kind != "M":
             raise _StoreMisdescribed(f"“{field.path}” has time steps that are not dates")
         times = [(index, _moment(value)) for index, value in enumerate(measured["time"])]
-        asked = [(index, None, when, None) for index, when in times if when is not None and in_window(when, window)]
+        asked = [
+            (index, None, when, None, None) for index, when in times if when is not None and in_window(when, window)
+        ]
         cells = [cell(time=index) for index, *_rest in asked]
     else:
         runs, leads = measured.get("run"), measured.get("step")
@@ -999,16 +1008,17 @@ def _field_steps(
             run = _moment(run_value)
             if run is None or not in_window(run, window) or run in skip_runs:
                 continue
-            expected = _run_steps(leads, None if lengths is None else lengths[run_index])
+            expected = _expected_leads(leads, None if lengths is None else lengths[run_index])
             for step_index, lead in enumerate(leads):
                 when = None if np.isnat(lead) else _moment(run_value + lead)
                 if when is not None:
-                    asked.append((step_index, run, when, expected))
+                    from_here = len(expected) - bisect_left(expected, lead)
+                    asked.append((step_index, run, when, len(expected), from_here))
                     cells.append(cell(run=run_index, step=step_index))
     if not cells:
         return []
     held = _held(store, array, field.path, cells)
-    return [(run, when, expected) for (_index, run, when, expected), there in zip(asked, held, strict=True) if there]
+    return [step for (_index, *step), there in zip(asked, held, strict=True) if there]
 
 
 def read_held_steps(
@@ -1030,15 +1040,24 @@ def read_held_steps(
     store = icechunk.Repository.open(storage).readonly_session(branch).store
     found: dict[tuple[datetime | None, datetime], set[str]] = {}
     expected: dict[datetime, int] = {}
+    by_array: dict[tuple[datetime, str], int] = {}
     known: dict = {}
     for field_ in fields:
-        for run, when, steps in _field_steps(store, field_, window, known, frozenset(skip_runs)):
+        for run, when, steps, from_here in _field_steps(store, field_, window, known, frozenset(skip_runs)):
             found.setdefault((run, when), set()).add(field_.path)
             if run is not None:
                 # The first array to say speaks for the run: arrays beside one another share its lead times.
                 expected.setdefault(run, steps)
+                # An array's first Held step of a run has the most expected steps from it on.
+                by_array[(run, field_.path)] = max(by_array.get((run, field_.path), 0), from_here)
     return [
-        HeldStep(time=when, reference_time=run, arrays=frozenset(paths), run_steps=expected.get(run))
+        HeldStep(
+            time=when,
+            reference_time=run,
+            arrays=frozenset(paths),
+            run_steps=expected.get(run),
+            array_steps={path: by_array[(run, path)] for path in paths} if run is not None else {},
+        )
         for (run, when), paths in sorted(found.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
     ]
 

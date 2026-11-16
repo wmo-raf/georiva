@@ -6,8 +6,10 @@ record of a collection harvested from a forecast store. The harvest keeps it
 itself, from the rows it holds:
 
 - a run opens on its first Held step;
-- it closes, as `store_held`, once every step the store expects of it has a
-  row for every mapped Variable;
+- it closes, as `store_held`, once every mapped Variable has a row for every
+  step its array is expected at — the run's expected steps from the array's
+  own first Held step on, since an average is never held at a run's first
+  step (#681);
 - a closed run that is complete for every Variable mapped now is *settled*:
   the next harvest does not ask the store about it, and its rows stand;
 - a run found no longer complete — a step gone upstream, found by a full
@@ -17,9 +19,20 @@ itself, from the rows it holds:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from django.db.models import Count, Exists, OuterRef
+
+
+@dataclass(frozen=True)
+class Expected:
+    """How many steps the store expects of one run: of the run, and of each
+    mapped Variable whose array it holds a step of, by Variable pk. A Variable
+    not in `by_variable` expects the run's `steps`."""
+
+    steps: int
+    by_variable: dict[int, int] = field(default_factory=dict)
 
 
 def settled_runs(collection, variable_pks: set[int], window_q) -> set[datetime]:
@@ -30,19 +43,21 @@ def settled_runs(collection, variable_pks: set[int], window_q) -> set[datetime]:
 
     if not variable_pks:
         return set()
-    closed = dict(
+    closed = _recorded(
         RunIngestion.objects.filter(
             window_q,
             collection=collection,
             status=RunIngestion.Status.CLOSED,
             expected_file_count__gt=0,
-        ).values_list("reference_time", "expected_file_count")
+        )
     )
     held = _held_by_variable(collection, closed, variable_pks)
     return {run for run, expected in closed.items() if _whole(held, run, variable_pks, expected)}
 
 
-def keep_runs(collection, variable_pks: set[int], window_q, *, expected: dict[datetime, int], settled: set[datetime]):
+def keep_runs(
+    collection, variable_pks: set[int], window_q, *, expected: dict[datetime, Expected], settled: set[datetime]
+):
     """Bring the run records of the window up to the rows a harvest left.
 
     `expected` is how many steps the store expects of each run it was asked
@@ -56,7 +71,7 @@ def keep_runs(collection, variable_pks: set[int], window_q, *, expected: dict[da
     from georiva.ingestion.models import RunIngestion
 
     records = RunIngestion.objects.filter(window_q, collection=collection)
-    recorded = dict(records.values_list("reference_time", "expected_file_count"))
+    recorded = _recorded(records)
     closed_elsewhere = set(
         records.filter(status=RunIngestion.Status.CLOSED)
         .exclude(closed_by=RunIngestion.Closer.STORE_HELD)
@@ -73,9 +88,15 @@ def keep_runs(collection, variable_pks: set[int], window_q, *, expected: dict[da
         .values_list("reference_time", "n")
     )
     for run in sorted(judged):
-        complete = _whole(held, run, variable_pks, expected.get(run) or recorded.get(run))
+        asked = expected.get(run)
+        complete = _whole(held, run, variable_pks, asked or recorded.get(run))
         RunIngestion.record_held_steps(
-            collection, run, held=steps.get(run, 0), expected=expected.get(run), complete=complete
+            collection,
+            run,
+            held=steps.get(run, 0),
+            expected=asked.steps if asked else None,
+            expected_by_variable=asked.by_variable if asked else None,
+            complete=complete,
         )
 
 
@@ -91,9 +112,22 @@ def forget_aged_out(collection, start: datetime) -> None:
     ).delete()
 
 
-def _whole(held, run, variable_pks, expected) -> bool:
-    """Whether every one of `variable_pks` holds `expected` steps of `run`."""
-    return bool(expected) and bool(variable_pks) and all(held.get((run, pk), 0) >= expected for pk in variable_pks)
+def _whole(held, run, variable_pks, expected: Expected | None) -> bool:
+    """Whether every one of `variable_pks` holds every step of `run` it is expected at."""
+    if not expected or not expected.steps or not variable_pks:
+        return False
+    return all(held.get((run, pk), 0) >= expected.by_variable.get(pk, expected.steps) for pk in variable_pks)
+
+
+def _recorded(records) -> dict[datetime, Expected | None]:
+    """What the run records in `records` say the store expected of each run
+    when last asked; `None` for a run it said nothing of."""
+    return {
+        run: Expected(steps, {int(pk): n for pk, n in (by_variable or {}).items()}) if steps else None
+        for run, steps, by_variable in records.values_list(
+            "reference_time", "expected_file_count", "expected_steps_by_variable"
+        )
+    }
 
 
 def _held_by_variable(collection, runs, variable_pks) -> dict[tuple[datetime, int], int]:
