@@ -4,14 +4,14 @@ import redis
 from django.conf import settings
 from django.test import TestCase
 
-from georiva.ingestion.live_updates import CHANNEL
+from georiva.ingestion.testing import use_own_channel
 
 
 class IngestionEventsTestCase(TestCase):
     def setUp(self):
         self.r = redis.from_url(settings.REDIS_URL)
         self.pubsub = self.r.pubsub()
-        self.pubsub.subscribe(CHANNEL)
+        self.pubsub.subscribe(use_own_channel(self))
         for _ in range(20):
             msg = self.pubsub.get_message(timeout=0.1)
             if msg and msg.get("type") == "subscribe":

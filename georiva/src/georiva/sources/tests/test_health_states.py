@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.contenttypes.models import ContentType
-from django.db import connection, models
+from django.db import models
 from django.db.models import Count
 from django.test import TestCase
 from django.utils import timezone
@@ -196,20 +196,11 @@ class PolymorphicHealthTests(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Both the table and the ContentType row must exist *outside* the class
-        # atomic: polymorphic resolves the type per insert, and a row created
-        # inside a test would be rolled back while staying in ContentType's cache.
-        #
-        # The table is deliberately never dropped. StubPluginFeed is declared at
-        # module level, so it stays in the app registry for the whole run; every
-        # later DataFeed deletion has its cascade collector walk this subclass.
-        # Dropping the table would leave the registry pointing at nothing and
-        # break unrelated tests. GeoRivaTestRunner.setup_databases normally builds
-        # the table before any test runs; this stays as an idempotent fallback for
-        # --keepdb and for parallel clones, which are taken before it runs.
-        if StubPluginFeed._meta.db_table not in connection.introspection.table_names():
-            with connection.schema_editor() as editor:
-                editor.create_model(StubPluginFeed)
+        # The table is built by GeoRivaTestRunner.setup_databases, before any
+        # test runs and before the parallel clones are taken. The ContentType
+        # row must also exist *outside* the class atomic: polymorphic resolves
+        # the type per insert, and a row created inside a test would be rolled
+        # back while staying in ContentType's cache.
         # Clear the cache before resolving: an earlier test that touched this
         # subclass (any DataFeed cascade does) may have created the ContentType
         # row inside its own transaction and then rolled back, leaving the cache
