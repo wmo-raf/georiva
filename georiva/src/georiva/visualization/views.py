@@ -19,12 +19,12 @@ def item_preview(request, item_id):
 
     assets = item.assets.all()
 
-    # The map texture is derived on demand by Titiler from the COG at the
-    # variable's current render range (ADR 0021) — no stored visual asset.
+    # The map texture is derived on demand by Titiler at the variable's
+    # current render range (ADR 0021) — no stored visual asset — from the COG,
+    # or from the Upstream store a Store asset names (ADR 0044 §9).
     for asset in assets:
-        asset.texture_url = (
-            titiler_encoded_preview_url(item, asset.variable) if asset.format == asset.Format.COG else ""
-        )
+        drawable = asset.is_cog or asset.location.is_store
+        asset.texture_url = titiler_encoded_preview_url(item, asset.variable) if drawable else ""
         asset.render_contract = render_contract(asset.variable)
 
     context = {

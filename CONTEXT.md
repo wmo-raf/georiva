@@ -415,7 +415,9 @@ _Avoid_: time-optimised / map-optimised (the Upstream's words), store type, layo
 
 **Held step**:
 A step of a run for which an Upstream store actually holds data for a given array. A store allocates its
-coordinates ahead of its data, so a step can be listed and not yet held. Only a held step gets a row.
+coordinates ahead of its data, so a step can be listed and not yet held. Only a held step gets a row. An array
+need not be held at every step of a run: a field defined over the interval before each step (an average, an
+accumulation, a flux, an extreme) is never held at the run's first step.
 _Avoid_: available step, present timestep, filled chunk
 
 **Harvest**:
