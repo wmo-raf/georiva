@@ -1,16 +1,17 @@
 """
-A collection's Upstream survey, run off the request (#667).
+A collection's Upstream survey, run off the request (#667, #695).
 
 Opening a large Upstream store to see what it is packed with downloads its
 whole description first — GFS's took ~16 s cold, and its verdict ~30 s in all —
 which is too close to a web worker's timeout to make inside a request, and no
-concurrency shortens one download. So the Harvest Feed Wizard starts the
-survey here, on `georiva-default`, and its step 3 waits for it, saying what it
-is waiting on.
+concurrency shortens one download. So the Harvest Feed Wizard and "Re-check
+upstream" start the survey here, on `georiva-default`, and wait for it,
+saying what it is waiting on.
 
-What a survey finds is kept in the cache under a token only the operator's
-wizard session holds, and nowhere else: a survey still writes nothing — no
-feed, no row (ADR 0042 §2).
+What a survey finds — the `CollectionSurvey` itself — is kept in the cache
+under a token only the operator's session holds, and nowhere else: a survey
+still writes nothing — no feed, no row (ADR 0042 §2). A re-check saves
+against that same survey, so what is saved is what the operator was shown.
 """
 
 from __future__ import annotations
@@ -60,10 +61,15 @@ def start(upstream_url: str, collection_id: str) -> str:
 
 def collect(token: str) -> dict | None:
     """What the survey under `token` has come to: `state` is `CHECKING` (with
-    `waiting_on`), `FOUND` (with `survey`, as `as_session` gives it) or
+    `waiting_on`), `FOUND` (with `found`, the `CollectionSurvey`) or
     `FAILED` (with `why`, and `timed_out` for a wait worth trying again).
-    `None` when nothing is kept under it: never started, or long gone."""
-    return cache.get(_key(token))
+    `None` when nothing usable is kept under it: never started, long gone, or
+    kept by an older GeoRiva in a shape this one cannot read back."""
+    try:
+        return cache.get(_key(token))
+    except Exception:  # an answer that cannot be read back is a lost one: the operator checks again
+        logger.warning("Survey answer under %s could not be read back", token, exc_info=True)
+        return None
 
 
 def run(token: str, upstream_url: str, collection_id: str) -> None:
@@ -84,7 +90,7 @@ def run(token: str, upstream_url: str, collection_id: str) -> None:
         logger.exception("Survey of %s at %s failed", collection_id, upstream_url)
         _put(token, state=FAILED, why=_("it answered in a way GeoRiva could not make sense of"), timed_out=False)
     else:
-        _put(token, state=FOUND, survey=as_session(found))
+        _put(token, state=FOUND, found=found)
 
 
 def as_session(found) -> dict:

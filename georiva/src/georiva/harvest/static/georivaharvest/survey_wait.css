@@ -1,0 +1,25 @@
+/* The panel a page shows while an Upstream survey runs off the request (#667, #695). */
+.gr-survey-wait {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    font-weight: 600;
+}
+
+.gr-survey-wait .icon {
+    width: 1.25em;
+    height: 1.25em;
+    animation: gr-survey-wait-spin 1s linear infinite;
+}
+
+@keyframes gr-survey-wait-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gr-survey-wait .icon {
+        animation: none;
+    }
+}

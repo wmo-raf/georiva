@@ -1,0 +1,39 @@
+{% extends "georivaharvest/recheck_upstream.html" %}
+{% load i18n static wagtailadmin_tags %}
+{% comment %}
+    "Re-check upstream" while its survey runs off the request (#695), and when
+    it came to nothing. Waiting, the page looks again every few seconds on its
+    own; it never starts a second survey. Trying again opens a new check.
+{% endcomment %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'georivaharvest/survey_wait.css' %}">
+{% endblock %}
+
+{% block main_content %}
+    {% if wait.error %}
+        <div class="hrc-panel">
+            <div class="hrc-panel__header">{% trans "GeoRiva could not finish checking the catalog" %}</div>
+            <div class="hrc-panel__body">
+                <p>{% trans "Nothing on this feed was changed. Its harvests go on as before." %}</p>
+            </div>
+        </div>
+        <div class="hrc-actions">
+            <a href="{{ again }}" class="button bicolor button--icon">{% icon name="rotate" wrapped=1 %}{% trans "Try again" %}</a>
+            <a href="{% url 'data_feed_detail' feed.pk %}" class="button button-secondary">{% trans "Back to the feed" %}</a>
+        </div>
+    {% else %}
+        {% blocktrans asvar heading with name=feed.name %}GeoRiva is reading the catalog to see what has changed for “{{ name }}”{% endblocktrans %}
+        {% include "georivaharvest/includes/survey_wait.html" with panel="hrc-panel" heading=heading wait=wait %}
+        <div class="hrc-actions">
+            <a href="{{ again }}?check={{ check }}" class="button button-secondary">{% trans "Check again now" %}</a>
+            <a href="{% url 'data_feed_detail' feed.pk %}" class="button button-secondary">{% trans "Back to the feed" %}</a>
+        </div>
+    {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script src="{% static 'georivaharvest/survey_wait.js' %}"></script>
+{% endblock %}
