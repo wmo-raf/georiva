@@ -146,7 +146,8 @@ docker compose exec georiva bash
 **Parallel tests**: `just test` and `just test-worktree` run `GEORIVA_TEST_WORKERS` workers (`.env`; unset = half
 the cores). Each worker has its own Postgres clone and Redis database, but Redis pub/sub channels are server-wide —
 a test that publishes or subscribes must use a channel of its own. A test that fails only in parallel is fixed, not
-run serially.
+run serially. Dev Redis runs with 256 databases (`docker-compose.dev.yml`); a Redis started before that needs
+`just up -d georiva-redis` once, or tests fail with "DB index is out of range".
 
 **In a git worktree**: run Django tests with `just test-worktree <slot> <labels>`, never `just test` — that one
 tests the main checkout's code, whatever folder it is run from. Each worktree keeps one slot (1–9) for its lifetime

@@ -18,13 +18,10 @@ from django_redis import get_redis_connection
 from georiva.config.test_runner import (
     REDIS_BLOCK_SIZE,
     check_redis_block,
+    redis_database,
     use_redis_database,
     worker_redis_url,
 )
-
-
-def _database(url):
-    return int(urlsplit(url).path.lstrip("/") or 0)
 
 
 class WorkerRedisUrlTests(SimpleTestCase):
@@ -65,7 +62,7 @@ class UseRedisDatabaseTests(SimpleTestCase):
         # it unless the run has a full block of workers, and the probe key is
         # unique either way. Not this process's own database, or the switch
         # would prove nothing.
-        own = _database(original)
+        own = redis_database(original)
         last = own - own % REDIS_BLOCK_SIZE + REDIS_BLOCK_SIZE - 1
         target = last if last != own else last - 1
         self.other = urlunsplit(urlsplit(original)._replace(path=f"/{target}"))
@@ -81,7 +78,7 @@ class UseRedisDatabaseTests(SimpleTestCase):
         self.assertEqual(settings.REDIS_URL, self.other)
         self.assertEqual(settings.CELERY_BROKER_URL, self.other)
         self.assertEqual(app.conf.broker_url, self.other)
-        db = _database(self.other)
+        db = redis_database(self.other)
         self.assertEqual(get_redis_connection("default").connection_pool.connection_kwargs["db"], db)
         singleton = get_backend(Config(app))
         self.assertEqual(singleton.redis.connection_pool.connection_kwargs["db"], db)
@@ -92,7 +89,7 @@ class UseRedisDatabaseTests(SimpleTestCase):
         self.addCleanup(cache.delete, "parallel-redis-probe")
 
         raw = get_redis_connection("default")
-        self.assertEqual(raw.connection_pool.connection_kwargs["db"], _database(self.other))
+        self.assertEqual(raw.connection_pool.connection_kwargs["db"], redis_database(self.other))
         self.assertTrue(any(b"parallel-redis-probe" in key for key in raw.keys("*parallel-redis-probe*")))
 
 
@@ -102,7 +99,7 @@ class ThisProcessTests(SimpleTestCase):
     def test_cache_and_broker_name_the_same_database(self):
         from georiva.config.celery import app
 
-        db = _database(settings.REDIS_URL)
+        db = redis_database(settings.REDIS_URL)
         self.assertEqual(settings.CACHES["default"]["LOCATION"], settings.REDIS_URL)
         self.assertEqual(get_redis_connection("default").connection_pool.connection_kwargs["db"], db)
         self.assertEqual(app.conf.broker_url, settings.REDIS_URL)

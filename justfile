@@ -107,6 +107,9 @@ workers="${GEORIVA_TEST_WORKERS:-}"
 if [ -z "$workers" ]; then
   workers=$(( $(docker info --format '{{.NCPU}}') / 2 ))
   [ "$workers" -ge 1 ] || workers=1
+  # A run's workers share one block of 16 Redis databases (REDIS_BLOCK_SIZE
+  # in config/test_runner.py; the bases below are multiples of it).
+  [ "$workers" -le 16 ] || workers=16
 fi
 '''
 

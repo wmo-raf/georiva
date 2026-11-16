@@ -31,7 +31,8 @@ TEST_BASE_DOMAIN = "testserver"
 REDIS_BLOCK_SIZE = 16
 
 
-def _redis_database(url):
+def redis_database(url):
+    """The database number a Redis URL names (0 when it names none)."""
     return int(urlsplit(url).path.lstrip("/") or 0)
 
 
@@ -42,13 +43,13 @@ def worker_redis_url(base_url, worker_id):
     parallel one agree on where they live.
     """
     parts = urlsplit(base_url)
-    database = _redis_database(base_url) + worker_id - 1
+    database = redis_database(base_url) + worker_id - 1
     return urlunsplit(parts._replace(path=f"/{database}"))
 
 
 def check_redis_block(base_url, workers):
     """Refuse a worker count that would spill past the base's block of databases."""
-    base = _redis_database(base_url)
+    base = redis_database(base_url)
     if base % REDIS_BLOCK_SIZE + workers > REDIS_BLOCK_SIZE:
         raise ValueError(
             f"{workers} test workers from Redis database {base} would run past its block of "
