@@ -44,6 +44,15 @@ A step still not held after a reopen is remembered for ``STORE_MISS_TTL``
 seconds (#677): a row can offer a step the store has lost, and without this
 each request for it would pay a reopen. A request for a remembered step still
 asks the open store, so one another request's reopen has found is drawn.
+
+**It keeps the fields it decoded** (ADR 0044 §13; #663). A store's chunk is one
+whole field and every tile of a map needs all of it, so each process keeps up
+to ``STORE_FIELD_CACHE_BYTES`` of decoded fields, least recently used out
+first, and concurrent requests for a field not yet kept wait on one read. A
+failed read is not kept: the next request reads again. A held step's field
+does not change, so a reopen keeps them all; a store rewritten upstream may be
+drawn as it was until its fields are evicted. COG tiles are not kept here —
+they range-read only the bytes they need (ADR 0043 §9).
 """
 
 from __future__ import annotations
@@ -53,6 +62,7 @@ import contextlib
 import logging
 import re
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TimedOut
@@ -62,7 +72,7 @@ from time import monotonic
 
 import numpy as np
 
-from app.config import STORE_CONNECT_TIMEOUT, STORE_MISS_TTL, STORE_READ_TIMEOUT
+from app.config import STORE_CONNECT_TIMEOUT, STORE_FIELD_CACHE_BYTES, STORE_MISS_TTL, STORE_READ_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -536,7 +546,8 @@ def reopened_store(href: str, chunk_locations: tuple[tuple[str, str], ...], stal
 
 
 def forget_all() -> None:
-    """Drop every open store. For tests, which open a new local store each."""
+    """Drop every open store and every field kept. For tests, which open a new local store each."""
+    _fields.clear()
     with _opened.lock:
         _opened.stores.clear()
         _opened.locks.clear()
@@ -545,6 +556,11 @@ def forget_all() -> None:
 
 
 def read_field(target: StoreSlice) -> Field:
+    """The field ``target`` names: kept by this process, or decoded now and kept."""
+    return _fields.kept_or_read(target, _decode)
+
+
+def _decode(target: StoreSlice) -> Field:
     """Decode the field ``target`` names: opening the store if this process
     has not yet, reopening it once if the step is not held, and reading the
     field, all within one ``STORE_READ_TIMEOUT``."""
@@ -564,6 +580,85 @@ def read_field(target: StoreSlice) -> Field:
             raise
 
     return _bounded(read)
+
+
+class FieldCache:
+    """Decoded fields, at most ``capacity`` bytes of them, least recently used out first.
+
+    Keyed by the whole :class:`StoreSlice` — store, array, run and step, and the
+    pins too, so a field read under one feed's pins is never handed to a request
+    naming others. A field is kept read-only, since every request shares it. One
+    larger than the whole cache is not kept, rather than emptying it for nothing.
+    """
+
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.size = 0
+        self._kept: OrderedDict[StoreSlice, Field] = OrderedDict()
+        #: The read under way for each field not yet kept, which requests for it meanwhile wait on.
+        self._reads: dict[StoreSlice, Future] = {}
+        self._lock = threading.Lock()
+
+    def get(self, target: StoreSlice) -> Field | None:
+        with self._lock:
+            return self._get(target)
+
+    def _get(self, target: StoreSlice) -> Field | None:
+        found = self._kept.get(target)
+        if found is not None:
+            self._kept.move_to_end(target)
+        return found
+
+    def kept_or_read(self, target: StoreSlice, read: Callable[[StoreSlice], Field]) -> Field:
+        """The field kept for ``target``, or ``read(target)`` kept and returned.
+
+        Concurrent requests for a field not yet kept share one read, whether it
+        succeeds or fails; a failure is not kept, so the next request reads again.
+        """
+        with self._lock:
+            found = self._get(target)
+            if found is not None:
+                return found
+            underway = self._reads.get(target)
+            mine = underway is None
+            if mine:
+                underway = self._reads[target] = Future()
+        if not mine:
+            return underway.result()
+        try:
+            found = read(target)
+        except BaseException as failed:
+            underway.set_exception(failed)
+            raise
+        else:
+            self.put(target, found)
+            underway.set_result(found)
+            return found
+        finally:
+            with self._lock:
+                self._reads.pop(target, None)
+
+    def put(self, target: StoreSlice, found: Field) -> None:
+        found.values.flags.writeable = False
+        cost = found.values.nbytes
+        if cost > self.capacity:
+            return
+        with self._lock:
+            if target in self._kept:
+                self.size -= self._kept.pop(target).values.nbytes
+            while self._kept and self.size + cost > self.capacity:
+                self.size -= self._kept.popitem(last=False)[1].values.nbytes
+            self._kept[target] = found
+            self.size += cost
+
+    def clear(self) -> None:
+        with self._lock:
+            self._kept.clear()
+            self._reads.clear()
+            self.size = 0
+
+
+_fields = FieldCache(STORE_FIELD_CACHE_BYTES)
 
 
 def _forget_expired_misses(now: float) -> None:

@@ -863,3 +863,222 @@ class TestAStepStillMissingIsRemembered:
         from app import config
 
         assert store_reader.STORE_MISS_TTL is config.STORE_MISS_TTL
+
+
+def grib_reads(built, step: int = 1) -> int:
+    """How many times the producer was asked for the newest run's ``step``: one upstream read of that field each."""
+    return sum(1 for path in built.requests if f"step-{step}.grib2" in urllib.parse.unquote(path))
+
+
+def every_tile(client, **query) -> list[int]:
+    """Twenty different tiles of the one field: all of zoom 1 and zoom 2."""
+    statuses = []
+    for zoom in (1, 2):
+        for x in range(2**zoom):
+            for y in range(2**zoom):
+                response = client.get(
+                    f"{ROUTE}/tiles/WebMercatorQuad/{zoom}/{x}/{y}.png",
+                    params={"time": TIME, "reftime": REFTIME, **query},
+                )
+                statuses.append(response.status_code)
+    return statuses
+
+
+def slice_at(href: str, hours: int) -> store_reader.StoreSlice:
+    """The newest run's field ``hours`` into it, of the store at ``href``, as a request for it names it."""
+    reftime = datetime(2026, 3, 23, tzinfo=UTC)
+    entry = json.loads(published(href))
+    return store_reader.StoreSlice.published(entry, reftime + timedelta(hours=hours), reftime)
+
+
+def decoded(megabytes: float) -> store_reader.Field:
+    """A field of about ``megabytes``, for the cache on its own."""
+    values = numpy.zeros((int(megabytes * 2**20 / 8) // 2, 2))
+    return store_reader.Field(values=values, west=-180.0, north=90.0, x_resolution=1.0, y_resolution=1.0)
+
+
+@pytest.fixture
+def cache_of(monkeypatch):
+    """Give the reader a field cache of so many bytes."""
+
+    def sized(size: int) -> store_reader.FieldCache:
+        cache = store_reader.FieldCache(size)
+        monkeypatch.setattr(store_reader, "_fields", cache)
+        return cache
+
+    return sized
+
+
+class TestDecodedFieldsAreKept:
+    """Every tile of a store's map needs the same whole field, so each worker
+    keeps the fields it decoded, bounded, least recently used out first (ADR 0044 §13; #663)."""
+
+    def test_twenty_tiles_of_one_field_read_it_upstream_once(self, client, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        assert every_tile(client) == [200] * 20
+
+        assert grib_reads(upstream_store) == 1
+
+    def test_concurrent_requests_for_an_uncached_field_wait_on_one_read(self, upstream_store, monkeypatch):
+        target = slice_at(upstream_store.href, 6)
+        reads = []
+        real = store_reader.OpenStore.field
+
+        def slow(self, *args):
+            reads.append(args)
+            clock.sleep(0.5)
+            return real(self, *args)
+
+        monkeypatch.setattr(store_reader.OpenStore, "field", slow)
+        together = threading.Barrier(6)
+        results = []
+
+        def request():
+            together.wait()
+            results.append(store_reader.read_field(target))
+
+        threads = [threading.Thread(target=request) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert len(results) == 6
+        assert all(found.values[2, 4] == grib_values(1, 1)[2, 0] for found in results)
+        assert len(reads) == 1
+
+    def test_concurrent_requests_share_one_failed_read_and_the_next_request_reads_again(
+        self, upstream_store, monkeypatch
+    ):
+        target = slice_at(upstream_store.href, 6)
+        attempts = []
+        real = store_reader.OpenStore.field
+
+        def broken(self, *args):
+            attempts.append(args)
+            clock.sleep(0.5)
+            raise OSError("connection reset")
+
+        monkeypatch.setattr(store_reader.OpenStore, "field", broken)
+        together = threading.Barrier(6)
+        failures = []
+
+        def request():
+            together.wait()
+            try:
+                store_reader.read_field(target)
+            except store_reader.StoreError as failed:
+                failures.append(failed)
+
+        threads = [threading.Thread(target=request) for _ in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert len(failures) == 6
+        assert len(attempts) == 1
+
+        monkeypatch.setattr(store_reader.OpenStore, "field", real)
+        assert store_reader.read_field(target).values[2, 4] == grib_values(1, 1)[2, 0]
+
+    def test_a_failed_read_is_retried_on_the_next_tile_not_served_from_the_cache(
+        self, client, rendering, upstream_store, monkeypatch
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        real = store_reader.OpenStore.field
+
+        def broken(self, *args):
+            raise OSError("connection reset")
+
+        monkeypatch.setattr(store_reader.OpenStore, "field", broken)
+        assert tile(client).status_code == 504
+
+        monkeypatch.setattr(store_reader.OpenStore, "field", real)
+        assert tile(client).status_code == 200
+
+    def test_a_step_not_held_is_not_kept(self, client, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client, time=LATE_TIME).status_code == 404
+        arrive(upstream_store, 2)
+        store_reader.forget_all()  # so the miss is not remembered: the field is all that is left to keep it
+
+        assert tile(client, time=LATE_TIME).status_code == 200
+
+    def test_with_the_cache_at_zero_tiles_still_draw_and_each_reads_upstream(
+        self, client, rendering, upstream_store, cache_of
+    ):
+        cache_of(0)
+        publish(rendering, {FIELD: published(upstream_store.href)})
+
+        assert tile(client).status_code == 200
+        assert tile(client).status_code == 200
+
+        assert grib_reads(upstream_store) == 2
+
+    def test_fields_of_other_steps_are_kept_beside_each_other(self, client, rendering, upstream_store):
+        first = "20260323T000000/20260323T000000"
+        publish(rendering, {FIELD: published(upstream_store.href), first: published(upstream_store.href)})
+
+        for _ in range(3):
+            assert tile(client).status_code == 200
+            assert tile(client, time=REFTIME).status_code == 200
+
+        assert grib_reads(upstream_store, 1) == 1
+        assert grib_reads(upstream_store, 0) == 1
+
+    def test_requests_with_other_pins_do_not_share_a_field(self, client, rendering, upstream_store):
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+
+        publish(rendering, {FIELD: published(upstream_store.href, chunk_locations={})})
+        assert tile(client).status_code == 502
+
+    def test_the_cache_never_holds_more_than_its_size_and_drops_the_least_recently_used(self):
+        cache = store_reader.FieldCache(3 * 2**20)
+        one, two, three = (slice_at(f"https://example.org/{n}", 6) for n in "abc")
+
+        cache.put(one, decoded(1))
+        cache.put(two, decoded(1))
+        assert cache.get(one) is not None  # one is now the more recently used
+        cache.put(three, decoded(1.5))
+
+        assert cache.size <= 3 * 2**20
+        assert cache.get(two) is None
+        assert cache.get(one) is not None
+        assert cache.get(three) is not None
+
+    def test_a_field_larger_than_the_cache_is_not_kept_and_evicts_nothing(self):
+        cache = store_reader.FieldCache(2 * 2**20)
+        small, large = (slice_at(f"https://example.org/{n}", 6) for n in "ab")
+        cache.put(small, decoded(1))
+
+        cache.put(large, decoded(3))
+
+        assert cache.get(large) is None
+        assert cache.get(small) is not None
+        assert cache.size <= 2 * 2**20
+
+    def test_a_kept_field_cannot_be_changed_by_a_request(self, upstream_store):
+        found = store_reader.read_field(slice_at(upstream_store.href, 6))
+
+        with pytest.raises(ValueError):
+            found.values[0, 0] = 0
+
+    def test_a_reopen_keeps_the_fields_already_decoded(self, client, rendering, upstream_store, opens):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+        arrive(upstream_store, 2)
+        assert tile(client, time=LATE_TIME).status_code == 200
+
+        assert tile(client).status_code == 200
+
+        assert grib_reads(upstream_store, 1) == 1
+        assert len(opens) == 2
+
+    def test_the_size_is_a_setting(self):
+        from app import config
+
+        assert store_reader.STORE_FIELD_CACHE_BYTES is config.STORE_FIELD_CACHE_BYTES
+        assert store_reader._fields.capacity == config.STORE_FIELD_CACHE_BYTES
