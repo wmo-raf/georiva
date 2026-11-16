@@ -1,1 +1,39 @@
-# Create your tests here.
+"""The item preview page draws what Titiler can draw."""
+
+from datetime import UTC, datetime
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from django.urls import reverse
+
+from georiva.core.models import Asset, Item
+from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
+
+STORE = "https://data.upstream.example/gfs/v0.1.0.icechunk"
+
+
+class ItemPreviewTests(TestCase):
+    def setUp(self):
+        dial_org(self.client)
+        self.tree = make_org_tree(make_organisation())
+        self.client.force_login(get_user_model().objects.create_superuser("root", "r@x.org", "pw"))
+
+    def _preview(self, href, fmt):
+        item = Item.objects.create(
+            collection=self.tree["collection"],
+            time=datetime(2026, 11, 16, 12, tzinfo=UTC),
+            reference_time=datetime(2026, 11, 16, tzinfo=UTC),
+        )
+        Asset.objects.create(item=item, variable=self.tree["variable"], href=href, format=fmt)
+        return self.client.get(reverse("item_preview", args=[item.pk]))
+
+    def test_a_store_asset_is_drawn(self):
+        # Titiler draws a Store asset's map from the store (ADR 0044 §9) — the preview asks it to.
+        response = self._preview(STORE, Asset.Format.ZARR)
+        self.assertContains(response, 'data-visualizable="true"')
+        self.assertContains(response, "encoded-preview.png")
+
+    def test_a_zarr_kept_here_is_not_drawn(self):
+        # A Zarr that is no Upstream store has no tile route to ask.
+        response = self._preview("kenya/gfs/t2m/2026/11/16/t2m.zarr", Asset.Format.ZARR)
+        self.assertContains(response, 'data-visualizable="false"')

@@ -11,6 +11,13 @@ Revises ADR 0043 §9 for stores only.
 Amended after a second real store was read (ECMWF AIFS Single, virtual): §11 now says which kinds of place a store's
 data may be pinned in, and what happens when an operator confirms some and not others. Nothing is reversed.
 
+Amended after the field trial against dynamical.org's GFS store (wmo-raf/georiva#665): §6 now counts a run's expected
+steps per array, because a field defined over the interval before each step is never held at a run's first step;
+the measured costs
+of opening a store are recorded under Context and Consequences; a cache shared across tile server workers is
+decided against, with the numbers, under Out of scope. That last one settles what was left open; nothing else is
+reversed.
+
 ## Context
 
 Some Upstreams publish no items at all. dynamical.org's catalog is static JSON with 43 collections, each one a single
@@ -34,6 +41,19 @@ What was measured against the GFS stores, and shaped the decisions below:
 - Whether a step holds data can be asked of the store directly, without decoding anything.
 - An Icechunk repository carries its own configuration for where virtual chunks live, and that configuration can
   name any endpoint.
+
+Measured in the field trial (#665), from a developer machine rather than an African deployment, against GFS:
+
+- Opening the repository takes 3.5 s. The first array opened on a snapshot then takes 16–26 s, whichever array it
+  is; every later array on that snapshot opens at once. The cost is per snapshot, not per array, and a fresh
+  repository object pays it again. GFS's history is 84,000 snapshots; while a run arrives it commits every 14 s at the median.
+- Snapshots 30 days old still read. The history runs from the repository's first commit straight to one eight weeks
+  before the trial, which suggests older snapshots are expired; §10 does not depend on it.
+- 50 of GFS's 255 plain arrays — averages, accumulations, fluxes, extremes — are never held at a run's first step.
+- Every one of the 255 decodes with the codec the store names; read and decoded directly, a field takes 0.8 s at the
+  median, 2.7 s at worst.
+  In a spot-check of six fields at three points, values match the producer's own GRIB, decoded independently, to the
+  last digit.
 
 Pulling from a store into local COGs is easy and is not this decision. #605 is about pointing.
 
@@ -66,9 +86,15 @@ the store, and Titiler draws maps by reading the store itself.**
    accepting them means a Published collection with no map, which is deferred with them.
 
 6. **A row is written only for a step the store holds.** Each harvest asks, per mapped Variable, which steps of the
-   runs in its window hold data, and writes rows for those alone. A run is closed (ADR 0026) when every step the
-   store expects of it is held for every mapped Variable; a harvest of an open run adds the steps that have arrived
+   runs in its window hold data, and writes rows for those alone. A run is closed (ADR 0026) when every mapped
+   Variable holds every step its array is published at; a harvest of an open run adds the steps that have arrived
    since. Closed runs are not asked again.
+
+   **Expected steps are counted per array, not per store.** A store's step coordinate is the whole forecast, but a
+   field defined over the interval before each step — an average, an accumulation, a flux, an extreme — has no
+   value at a run's first step, so its array never holds that step. Counting the store's steps for every array, a
+   run with such a field mapped would never close and `latest_complete` would never move. The store declares no
+   per-array list of steps; how a harvest learns one is still to decide.
 
 7. **A forecast store's window rolls, on run time.** The feed keeps runs initialised in the last *N* days (default
    3). The Mirror is authoritative within that window as before, so rows of a run that has aged out are removed by
@@ -123,8 +149,12 @@ the store, and Titiler draws maps by reading the store itself.**
 - How to open a store — which pins, the container override — lives in two codebases with separate locks, core and
   the tile server. Tests on each side keep them in agreement.
 - The first tile after new data arrives pays a reopen, in each worker separately. An animation across a run reads
-  every field of it once. Both are what pointing costs.
+  every field of it once. Both are what pointing costs. Measured on GFS: a worker's first tile ever takes 27 s (9 s
+  on AIFS), a reopen on a miss 3.5 s, the first tile of another Variable 3.5 s, the next step of one already shown
+  0.5 s, and a tile of a field already read 0.1 s.
 - The cache is memory: its size times 8 MB or so, times the tile server's workers, on machines that are often small.
+  Each open store costs memory of its own besides, outside the cache's bound: measured with the default 128 MB, a
+  worker went from 155 MB idle to 427 MB after its first field and settled at 570 MB with two stores open.
 - A store declares where its data *may* live, not where each run's does, and finding out means walking every
   reference. So a run older or newer than the sampled one can keep its data in a place the operator declined. Its
   tiles are errors, never blanks, and say to re-check the Upstream.
@@ -141,7 +171,10 @@ the store, and Titiler draws maps by reading the store itself.**
 - Series-shaped stores, and so time series read from a store and a Published collection with no map.
 - Arrays with a level, then ensemble members and projected grids.
 - Time series and zonal statistics over store assets: a time series request says so, and zonal backfill skips them.
-- A cache shared across tile server workers, until it has been measured.
+- A cache shared across tile server workers. Measured, it would save the 0.5 s a worker takes to read a new field
+  (0.8 s at the median when read directly), at most once
+  per worker, and some of the 128 MB each worker spends. It would not touch what a worker pays to open a store
+  (27 s on GFS), which is spent once per process, can be warmed in advance, and cannot be shared.
 - Linking a time-optimised and a map-optimised store into one collection.
 - Credentialed stores, as for any Upstream.
 
