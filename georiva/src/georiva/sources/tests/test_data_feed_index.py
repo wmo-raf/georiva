@@ -265,3 +265,21 @@ class UrlIntegrityTests(DataFeedIndexBase):
     def test_add_feed_affordance_is_present(self):
         response = self.client.get(self.url)
         self.assertContains(response, reverse("data_feed_add_select"))
+
+
+class AddSelectTests(DataFeedIndexBase):
+    def test_a_feed_kind_with_no_viewset_does_not_break_the_page(self):
+        # Viewsets are generated from the DataFeed subclasses installed when the
+        # admin URLs load; a subclass that joins later — the stub plugin feed a
+        # test module declares — has none.
+        from unittest import mock
+
+        from georiva.sources.registry import data_feed_viewset_registry
+        from georiva.sources.tests.test_health_states import StubPluginFeed
+
+        with mock.patch.dict(data_feed_viewset_registry._viewsets):
+            data_feed_viewset_registry._viewsets.pop(StubPluginFeed._meta.model_name, None)
+            response = self.client.get(reverse("data_feed_add_select"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, StubPluginFeed._meta.verbose_name)

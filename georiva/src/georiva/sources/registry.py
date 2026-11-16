@@ -17,9 +17,11 @@ class DataFeedViewSetRegistry:
         logger.info(f"Registered data feed viewset: {viewset_class.type}")
 
     def get(self, model_cls):
-        if model_cls not in self._viewsets:
-            raise ValueError(f"Unknown data feed model: {model_cls}")
-        return self._viewsets[model_cls]
+        """The viewset of a DataFeed model, by model name; `None` for one with
+        none. Viewsets are generated from the subclasses installed when the
+        admin URLs load, so a subclass that joins later has none — and the
+        callers (the add-feed page, `DataFeed.viewset`) are written for that."""
+        return self._viewsets.get(model_cls)
 
 
 data_feed_viewset_registry = DataFeedViewSetRegistry()
