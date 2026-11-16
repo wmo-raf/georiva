@@ -16,9 +16,15 @@
             </p>
         </div>
         <div class="hwiz-actions">
-            <button type="submit" class="button bicolor button--icon">
-                {% icon name="arrow-right" wrapped=1 %}
-                {% trans "Next: look at the catalog" %}
+            {% comment %}
+                Reading a catalog of plain files means reading each collection's own file, which takes a
+                few seconds: the button says so while it waits.
+            {% endcomment %}
+            <button type="submit" class="button button-longrunning" data-controller="w-progress"
+                    data-action="w-progress#activate"
+                    data-w-progress-active-value="{% trans 'Reading the catalog… this can take up to half a minute' %}">
+                {% icon name="spinner" %}
+                <em data-w-progress-target="label">{% if retry %}{% trans "Try again" %}{% else %}{% trans "Next: look at the catalog" %}{% endif %}</em>
             </button>
             <a href="{% url 'add_data' %}" class="button button-secondary">{% trans "Back" %}</a>
         </div>

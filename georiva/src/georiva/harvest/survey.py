@@ -21,7 +21,7 @@ it reads one page of a listing and stops.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -45,6 +45,7 @@ from .upstream import (
     UpstreamCatalogClient,
     UpstreamCollection,
     UpstreamCube,
+    UpstreamTimedOut,
     UpstreamUnreachable,
     can_decode,
 )
@@ -286,29 +287,61 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
 # ── One collection ──────────────────────────────────────────────────────────
 
 
-def survey_collection(upstream: UpstreamCatalogClient, catalog_url: str, collection_id: str) -> CollectionSurvey:
+#: What the survey is waiting on, as an operator is told it while they wait.
+#: No word here is one they would have to look up.
+READING_CATALOG = "Reading the catalog"
+READING_COLLECTION = "Reading what the catalog says of this collection"
+READING_ENTRIES = "Looking at a few of the collection's entries"
+OPENING_FILES = "Opening a few of its image files to check they can be read"
+OPENING_STORE = (
+    "Opening the provider's data store to check GeoRiva can unpack it. A large store can take up to a minute."
+)
+FINDING_PLACES = "Finding where the store's data is kept"
+
+
+def _silent(_text: str) -> None:
+    pass
+
+
+def survey_collection(
+    upstream: UpstreamCatalogClient,
+    catalog_url: str,
+    collection_id: str,
+    *,
+    progress: Callable[[str], None] = _silent,
+) -> CollectionSurvey:
     """How `collection_id` is organised and whether it can be harvested.
 
     Raises `UpstreamUnreachable` when the catalog's root or the collection's
-    items cannot be listed; everything about its files is reported, not raised.
+    items cannot be listed, and `UpstreamTimedOut` when the Upstream did not
+    answer in time — its store included: a wait is worth trying again, and is
+    no verdict. Everything else about its files is reported, not raised.
+
+    `progress` is told, in an operator's words, what it is about to wait on.
     """
+    progress(READING_CATALOG)
     if not upstream.describe_root().is_api:
         # A catalog of plain files cannot list items by time, so only a store in it can be read at all.
+        progress(READING_COLLECTION)
         described = upstream.describe_collection(collection_id)
-        if described is not None and (found := _survey_store(upstream, catalog_url, described)):
+        if described is not None and (found := _survey_store(upstream, catalog_url, described, progress=progress)):
             return found
         # Two things are wrong at once with a store that describes nothing, in a
         # catalog of plain files, and the store is the one an operator can do nothing about.
         stored = described is not None and any(_is_store(asset) for asset in described.assets.values())
         return _verdict(Shape.STORE if stored else Shape.NO_API)
 
+    progress(READING_ENTRIES)
     items = list(islice(upstream.list_items(collection_id, (None, None)), SAMPLE_ITEMS))
     sampled = len(items)
 
     rasters = {key for item in items for key, asset in item.assets.items() if _is_raster(asset)}
     if not rasters:
+        progress(READING_COLLECTION)
         described = upstream.describe_collection(collection_id)
-        if described is not None and (found := _survey_store(upstream, catalog_url, described, sampled)):
+        if described is not None and (
+            found := _survey_store(upstream, catalog_url, described, sampled, progress=progress)
+        ):
             return found
         stores = [asset for item in items for asset in item.assets.values()]
         stores += list(described.assets.values()) if described else []
@@ -325,6 +358,7 @@ def survey_collection(upstream: UpstreamCatalogClient, catalog_url: str, collect
     places = _Places(upstream, catalog_url)
     # Places are worked out one at a time, each once; the files are then opened together.
     located = [(key, asset, *places.of(asset.href)) for key, asset in _samples(items, rasters)]
+    progress(OPENING_FILES)
     with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
         assets = list(pool.map(lambda found: _survey_asset(*found, upstream), located))
     locations = places.locations(assets)
@@ -396,7 +430,12 @@ def _store_asset(described: UpstreamCollection) -> UpstreamAsset | None:
 
 
 def _survey_store(
-    upstream: UpstreamCatalogClient, catalog_url: str, described: UpstreamCollection, sampled: int = 0
+    upstream: UpstreamCatalogClient,
+    catalog_url: str,
+    described: UpstreamCollection,
+    sampled: int = 0,
+    *,
+    progress: Callable[[str], None] = _silent,
 ) -> CollectionSurvey | None:
     """The verdict on `described` as an Upstream store, or `None` when it is
     not one: a store asset on the collection itself, and a cube described.
@@ -433,7 +472,10 @@ def _survey_store(
         kinds = ", ".join(kind for kind in elsewhere if kind)
         return verdict(Shape.STORE_KEPT_ELSEWHERE, f"{_REASONS[Shape.STORE_KEPT_ELSEWHERE]}: {kinds}.", fields=fields)
 
+    progress(OPENING_STORE)
     probe = upstream.describe_store(href)
+    if probe.timed_out:
+        raise UpstreamTimedOut(f"the provider's data store {probe.problem or 'did not answer in time'}")
     if not probe.readable:
         problem = probe.problem or "it could not be opened"
         reason = f"{_REASONS[Shape.NEEDS_ACCOUNT]} ({problem})"
@@ -448,6 +490,7 @@ def _survey_store(
         why = "; ".join(dict.fromkeys(array.reason for array in arrays))
         reason = f"{_REASONS[Shape.UNMAPPABLE_STORE]} {why}"
         return verdict(Shape.UNMAPPABLE_STORE, reason, readable=True, fields=fields, codecs=named)
+    progress(FINDING_PLACES)
     regions = _chunk_regions(upstream, declared)
     return verdict(
         Shape.MAP_STORE, "", readable=True, fields=fields, codecs=named, arrays=arrays, chunk_regions=regions

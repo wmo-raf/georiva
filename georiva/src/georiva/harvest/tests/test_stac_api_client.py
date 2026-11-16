@@ -7,6 +7,8 @@ what it makes of the answers, and where it refuses to go. No test reaches a
 network.
 """
 
+import threading
+import time
 from datetime import UTC, datetime
 
 import requests
@@ -17,6 +19,7 @@ from georiva.harvest.upstream import (
     CubeDimension,
     StacApiClient,
     UpstreamStatistics,
+    UpstreamTimedOut,
     UpstreamUnreachable,
     parse_asset,
     parse_collection,
@@ -294,6 +297,18 @@ class StacApiClientTests(SimpleTestCase):
                 with self.assertRaises(UpstreamUnreachable):
                     list(client.list_collections())
 
+    def test_a_catalog_that_does_not_answer_in_time_says_so_apart_from_one_that_refuses(self):
+        client = self.client_over({f"{API}/collections": requests.Timeout("read timed out")})
+
+        with self.assertRaises(UpstreamTimedOut) as raised:
+            list(client.list_collections())
+
+        self.assertIn("did not answer within 30 seconds", str(raised.exception))
+        for refusal in (requests.ConnectionError("refused"), _Response({}, status_code=401)):
+            with self.subTest(refusal), self.assertRaises(UpstreamUnreachable) as raised:
+                list(self.client_over({f"{API}/collections": refusal}).list_collections())
+            self.assertNotIsInstance(raised.exception, UpstreamTimedOut)
+
 
 STATIC = "https://stac.upstream.example/catalog.json"
 GFS = "https://stac.upstream.example/noaa-gfs-forecast-virtual/collection.json"
@@ -373,7 +388,9 @@ class PlainFilesCatalogTests(SimpleTestCase):
             [("noaa-gfs-forecast-virtual", "NOAA GFS forecast (virtual)"), ("chirps", "CHIRPS")],
         )
         self.assertEqual(collections[0].bbox, [-180.0, -90.0, 180.0, 90.0])
-        self.assertEqual(self.asked(), [STATIC, STATIC, GFS, CHIRPS], "no listing an API would have is asked for")
+        asked = self.asked()
+        self.assertEqual(asked[0], STATIC, "the root is read first, and once")
+        self.assertEqual(sorted(asked[1:]), sorted([GFS, CHIRPS]), "no listing an API would have is asked for")
 
     def test_it_is_listed_the_same_once_its_root_has_been_read_whatever_its_address(self):
         # Served at a folder: nothing in the address says "file" until the root is read.
@@ -480,6 +497,78 @@ class PlainFilesCatalogTests(SimpleTestCase):
         self.assertEqual(cube.dimensions["time"].size, 3)
         self.assertEqual((cube.arrays["t"].dimensions, cube.arrays["t"].chunks), (("time",), None))
         self.assertEqual((cube.arrays["u"].dimensions, cube.arrays["u"].chunks), ((), None))
+
+    def many(self, count):
+        """A catalog of plain files linking to `count` collections, each with its own document."""
+        hrefs = [f"https://stac.upstream.example/c{n}/collection.json" for n in range(count)]
+        pages = {
+            STATIC: {"type": "Catalog", "links": [{"rel": "child", "href": href} for href in hrefs]},
+            **{href: {"type": "Collection", "id": f"c{n}", "title": f"Collection {n}"} for n, href in enumerate(hrefs)},
+        }
+        return pages, hrefs
+
+    def test_collection_documents_are_read_several_at_a_time_and_no_more_than_the_bound(self):
+        pages, _hrefs = self.many(47)
+        lock, in_flight, most = threading.Lock(), [0], [0]
+
+        class Overlapping(_Session):
+            def get(self, url, **kwargs):
+                with lock:
+                    in_flight[0] += 1
+                    most[0] = max(most[0], in_flight[0])
+                try:
+                    if url != STATIC:
+                        time.sleep(0.02)
+                    return super().get(url, **kwargs)
+                finally:
+                    with lock:
+                        in_flight[0] -= 1
+
+        self.session = Overlapping(pages)
+        collections = list(StacApiClient(STATIC, session=self.session).list_collections())
+
+        self.assertEqual([c.title for c in collections], [f"Collection {n}" for n in range(47)], "in the root's order")
+        self.assertGreater(most[0], 1, "not one after another")
+        self.assertLessEqual(most[0], StacApiClient.LISTING_CONCURRENCY)
+
+    def test_one_slow_collection_does_not_hold_up_the_listing_past_its_bound(self):
+        pages, hrefs = self.many(5)
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        class OneSlow(_Session):
+            def get(self, url, **kwargs):
+                if url == hrefs[2]:
+                    release.wait(30)
+                return super().get(url, **kwargs)
+
+        client = StacApiClient(STATIC, session=OneSlow(pages), listing_timeout=0.3)
+        started = time.monotonic()
+        collections = list(client.list_collections())
+
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual([c.id for c in collections], [f"c{n}" for n in range(5)], "the slow one is still offered")
+        self.assertEqual(collections[2].title, "", "by its id alone")
+        self.assertEqual(collections[3].title, "Collection 3", "the others are described")
+
+    def test_a_collection_document_that_breaks_the_reader_leaves_the_others_listed(self):
+        pages, hrefs = self.many(3)
+        pages[hrefs[1]] = _Response(RuntimeError("the reader broke"))
+        client = self.client_over(pages)
+
+        collections = list(client.list_collections())
+
+        offered = [(c.id, c.title) for c in collections]
+        self.assertEqual(offered, [("c0", "Collection 0"), ("c1", ""), ("c2", "Collection 2")])
+
+    def test_one_client_reads_the_root_once(self):
+        client = self.client_over(self.catalog())
+
+        client.describe_root()
+        list(client.list_collections())
+        client.describe_collection("chirps")
+
+        self.assertEqual(self.asked().count(STATIC), 1)
 
     def test_an_api_is_asked_for_its_collections_directly_as_before(self):
         api = "https://stac.upstream.example/api"

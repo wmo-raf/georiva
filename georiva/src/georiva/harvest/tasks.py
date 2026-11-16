@@ -58,3 +58,24 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
     # from one is found (ADR 0044 §6). A schedule and a retry ask only open ones.
     recheck = not scheduled and resume_of_run_id is None
     return harvest(feed, resumed_from=resumed_from, recheck=recheck).to_dict()
+
+
+@app.task(
+    name="georiva.harvest.tasks.survey_upstream_collection",
+    base=EntryTask,
+    queue="georiva-default",
+    bind=True,
+    acks_late=True,
+    max_retries=0,
+)
+def survey_upstream_collection(self, token, upstream_url, collection_id):
+    """
+    Survey one collection of an Upstream for the Harvest Feed Wizard, which
+    waits on `token` for the answer (#667). It writes nothing but that answer,
+    to the cache. Not retried: an operator waiting on it tries again.
+
+    On `georiva-default`: it reads an Upstream, and no file waits on it.
+    """
+    from georiva.harvest.background_survey import run
+
+    run(token, upstream_url, collection_id)

@@ -16,6 +16,7 @@ from django.urls import reverse
 from django_celery_beat.models import PeriodicTask
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
+from georiva.harvest import background_survey, tasks
 from georiva.harvest.models import HarvestFeed, VariableMapping
 from georiva.harvest.testing import FakeUpstream
 from georiva.harvest.upstream import AssetProbe, UpstreamAsset, UpstreamCollection
@@ -67,6 +68,13 @@ class WizardMixin:
             patcher.start()
             self.addCleanup(patcher.stop)
         self.run_now = self.enterContext(mock.patch.object(HarvestFeed, "run_now"))
+        # A collection's survey runs off the request (#667): here, as it is dispatched,
+        # unless a test holds it to look at the wait.
+        self.surveys_started: list[tuple] = []
+        self.hold_surveys = False
+        self.enterContext(
+            mock.patch.object(tasks.survey_upstream_collection, "delay", side_effect=self.dispatch_survey)
+        )
         self.mm, _ = Unit.objects.get_or_create(name="Millimetre", symbol="mm")
 
         self.client.force_login(User.objects.create_superuser("op", "op@test.com", "pw"))
@@ -80,6 +88,15 @@ class WizardMixin:
     @staticmethod
     def https_href(n):
         return f"https://{BUCKET_HOST}/rainfall_chirps_monthly/chirps-v2.0_2026.{n:02d}.tif"
+
+    def dispatch_survey(self, *args):
+        self.surveys_started.append(args)
+        if not self.hold_surveys:
+            background_survey.run(*args)
+
+    def finish_held_surveys(self):
+        for args in self.surveys_started:
+            background_survey.run(*args)
 
     # The steps, each as an operator takes it.
 
@@ -341,6 +358,142 @@ class WizardStopsWhereItMustTests(WizardMixin, TestCase):
         self.give_address("https://another.example/api")
 
         self.assertRedirects(self.client.get(step(5)), step(1))
+
+
+class WizardDoesNotWaitOnTheRequestTests(WizardMixin, TestCase):
+    """A collection's survey runs off the request, and the wizard says what it
+    is waiting on; what a survey found is kept for the wizard session (#667)."""
+
+    def rows(self):
+        return [model.objects.count() for model in (HarvestFeed, Catalog, Collection, Variable, VariableMapping)]
+
+    def test_picking_a_collection_starts_a_survey_and_step_three_says_what_it_waits_on(self):
+        self.hold_surveys = True
+        self.give_address()
+
+        self.assertRedirects(self.pick_collection(), step(3))
+
+        waiting = self.client.get(step(3))
+        self.assertContains(waiting, "GeoRiva is reading the catalog")
+        self.assertContains(waiting, "Reading the catalog")
+        self.assertContains(waiting, "CHIRPS monthly rainfall")
+        self.assertNotContains(waiting, step(4))
+        self.assertRedirects(self.client.get(step(4)), step(3))
+
+        self.finish_held_surveys()
+
+        self.assertContains(self.client.get(step(3)), "GeoRiva can show")
+
+    def test_the_wait_names_the_part_of_the_survey_it_has_reached(self):
+        self.hold_surveys = True
+        self.give_address()
+        self.pick_collection()
+        ((token, *_rest),) = self.surveys_started
+        background_survey._put(token, state=background_survey.CHECKING, waiting_on="Opening the provider's data store")
+
+        self.assertContains(self.client.get(step(3)), "Opening the provider&#x27;s data store")
+
+    def test_reloading_the_wait_starts_no_second_survey(self):
+        self.hold_surveys = True
+        self.give_address()
+        self.pick_collection()
+
+        for _ in range(3):
+            self.client.get(step(3))
+
+        self.assertEqual(len(self.surveys_started), 1)
+
+    def test_a_survey_writes_nothing(self):
+        before = self.rows()
+        self.give_address()
+        self.pick_collection()
+        self.client.get(step(3))
+
+        self.assertEqual(self.rows(), before)
+
+    def test_reloading_or_going_back_a_step_does_not_read_the_upstream_again(self):
+        self.upstream.collections.append(UpstreamCollection(id="rainfall_chirps_daily", title="CHIRPS daily"))
+        self.give_address()
+        self.pick_collection()
+        self.client.get(step(3))
+        read = (self.upstream.roots_read, len(self.upstream.probed), len(self.upstream.windows_asked))
+
+        self.client.get(step(3))
+        self.client.get(step(2))
+        self.give_address()
+        self.assertRedirects(self.pick_collection(), step(3))
+        self.assertContains(self.client.get(step(3)), "GeoRiva can show")
+
+        self.assertEqual((self.upstream.roots_read, len(self.upstream.probed), len(self.upstream.windows_asked)), read)
+        self.assertEqual(len(self.surveys_started), 1)
+
+    def test_a_collection_surveyed_earlier_in_the_session_is_not_surveyed_again(self):
+        self.upstream.collections.append(UpstreamCollection(id="rainfall_chirps_daily", title="CHIRPS daily"))
+        self.give_address()
+        self.pick_collection()
+        self.client.get(step(3))
+        self.pick_collection("rainfall_chirps_daily")
+        self.client.get(step(3))
+
+        self.pick_collection()
+
+        self.assertContains(self.client.get(step(3)), "GeoRiva can show")
+        self.assertEqual(len(self.surveys_started), 2)
+
+    def test_a_survey_that_never_answers_is_given_up_on_with_a_way_to_try_again(self):
+        self.hold_surveys = True
+        self.give_address()
+        self.pick_collection()
+
+        with mock.patch.object(background_survey, "GIVE_UP_SECONDS", -1):
+            page = self.client.get(step(3))
+
+        self.assertIn("took too long", self.errors(page))
+        self.assertContains(page, "Try again")
+        self.assertContains(page, 'name="collection_id" value="rainfall_chirps_monthly"')
+
+    def test_a_timed_out_read_is_a_plain_message_with_a_retry_and_creates_nothing(self):
+        before = self.rows()
+        self.give_address()
+        self.upstream.times_out = "upstream catalog did not answer within 30 seconds"
+        self.pick_collection()
+
+        page = self.client.get(step(3))
+
+        self.assertIn("took too long to answer", self.errors(page))
+        self.assertIn("Nothing was set up", self.errors(page))
+        self.assertContains(page, "Try again")
+        self.assertEqual(self.rows(), before)
+
+        self.upstream.times_out = None
+        self.assertRedirects(self.pick_collection(), step(3))
+        self.assertContains(self.client.get(step(3)), "GeoRiva can show", msg_prefix="tried again, it is read afresh")
+
+    def test_a_store_that_does_not_answer_in_time_is_a_retry_not_a_refusal(self):
+        self.upstream = FakeUpstream("noaa-gfs-forecast-virtual", title="NOAA GFS forecast")
+        self.upstream.is_api = False
+        self.upstream.become_store(STORE, FORECAST, {"temperature_2m": (RUN_STEP_GRID, (1, 1, 721, 1440))})
+        self.upstream.store_times_out = True
+        self.give_address(STATIC)
+        self.pick_collection("noaa-gfs-forecast-virtual")
+
+        page = self.client.get(step(3))
+
+        self.assertIn("took too long to answer", self.errors(page))
+        self.assertNotContains(page, "They may need an account")
+        self.assertContains(page, "Try again")
+        self.assertFalse(HarvestFeed.objects.exists())
+
+    def test_a_catalog_that_does_not_answer_in_time_at_step_one_offers_to_try_again(self):
+        self.upstream.times_out = "upstream catalog did not answer within 30 seconds"
+
+        page = self.give_address()
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("took too long to answer", self.errors(page))
+        self.assertContains(page, "Try again")
+        self.assertContains(page, ADDRESS)
+        self.assertEqual(self.rows()[0], 0)
 
 
 STATIC = "https://stac.upstream.example/catalog.json"

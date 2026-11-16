@@ -16,10 +16,17 @@ from and the proof that the store can be read at all (§11, §12). Step 5 gives
 a forecast store a Rolling window (§7). Its first harvest starts as it is
 saved, like any other feed's; the operator is told its maps cannot be drawn yet.
 
+A collection's survey runs off the request, and step 3 waits for it, saying
+what it is waiting on: opening a large store takes longer than a web request
+should (#667). What a survey learnt is kept for the rest of the wizard
+session, so going back a step or reloading one does not read the Upstream
+again; "Re-check upstream" on a feed always reads afresh.
+
 What an operator reads here is in their words: no "STAC", "S3" or "COG", and
 of a store no "Zarr", "chunk" or "codec".
 """
 
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -36,11 +43,12 @@ from django.utils.translation import gettext as _
 from georiva.ingestion.upload_wizard_views import _nice_bounds, _resolve_unit
 from georiva.organisations.access import require_active_org, scoped_queryset
 
+from . import background_survey
 from .asset_hosts import chunk_place
 from .models import DEFAULT_ROLLING_WINDOW_DAYS, MAX_ROLLING_WINDOW_DAYS
 from .setup import FeedPlan, PlannedVariable, SetupRefused, provision_harvest_feed
 from .survey import Shape, reason_for, survey_catalog, survey_collection
-from .upstream import StoreField, UpstreamUnreachable
+from .upstream import StoreField, UpstreamTimedOut, UpstreamUnreachable
 
 _SESSION_KEY = "georiva_harvest_wizard"
 
@@ -95,8 +103,17 @@ def _client(url: str):
 
 
 def _unreadable(why) -> str:
+    if isinstance(why, UpstreamTimedOut):
+        return _too_slow(why)
     return _(
         "This catalog could not be read: %(why)s. GeoRiva can only show catalogs that can be read without an account."
+    ) % {"why": why}
+
+
+def _too_slow(why) -> str:
+    return _(
+        "The catalog took too long to answer (%(why)s). Nothing was set up. A busy catalog often answers when "
+        "asked again a moment later: try again."
     ) % {"why": why}
 
 
@@ -108,9 +125,13 @@ def harvest_wizard_step1(request):
     session = _session(request)
     address = session.get("upstream_url", "")
 
+    retry = False
     if request.method == "POST":
         address = request.POST.get("upstream_url", "").strip().rstrip("/")
-        error, found = _survey_address(address)
+        if address == session.get("upstream_url") and session.get("collections"):
+            # Read already in this wizard session: what was found there still stands.
+            return redirect("harvest_wizard_step2")
+        error, found, retry = _survey_address(address)
         if error:
             messages.error(request, error)
         else:
@@ -125,21 +146,24 @@ def harvest_wizard_step1(request):
             )
             return redirect("harvest_wizard_step2")
 
-    return render(request, "georivaharvest/wizard_step1_address.html", {"address": address, **_chrome(1)})
+    return render(
+        request, "georivaharvest/wizard_step1_address.html", {"address": address, "retry": retry, **_chrome(1)}
+    )
 
 
 def _survey_address(address: str):
-    """`(error, None)` or `(None, the catalog's survey)` for the address an operator gave."""
+    """`(error, None, whether trying again may help)` or `(None, the catalog's
+    survey, False)` for the address an operator gave."""
     parts = urlsplit(address)
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        return _("Please give the catalog's web address, starting with https://."), None
+        return _("Please give the catalog's web address, starting with https://."), None, False
     try:
         found = survey_catalog(_client(address))
     except UpstreamUnreachable as why:
-        return _unreadable(why), None
+        return _unreadable(why), None, isinstance(why, UpstreamTimedOut)
     if not found.collections:
-        return (reason_for(Shape.NO_API) if not found.has_api else _("This catalog lists no collections.")), None
-    return None, found
+        return (reason_for(Shape.NO_API) if not found.has_api else _("This catalog lists no collections.")), None, False
+    return None, found, False
 
 
 # ── Step 2: pick a collection ───────────────────────────────────────────────
@@ -157,23 +181,22 @@ def harvest_wizard_step2(request):
         if chosen is None:
             messages.error(request, _("Please choose a collection."))
         else:
-            try:
-                found = survey_collection(_client(session["upstream_url"]), session["upstream_url"], collection_id)
-            except UpstreamUnreachable as why:
-                messages.error(request, _unreadable(why))
+            title = chosen["title"] or collection_id
+            known = session.get("surveys", {}).get(collection_id)
+            if known is not None:
+                # Surveyed already in this wizard session: not read again.
+                _choose(session, collection_id, title, known)
             else:
-                # What was chosen for another collection does not carry over.
-                for stale in ("chosen", "confirmed", "samples", "chunk_places", "declined_places"):
-                    session.pop(stale, None)
-                session.update(
-                    {
-                        "collection_id": collection_id,
-                        "collection_title": chosen["title"] or collection_id,
-                        "survey": _as_session(found),
-                    }
-                )
-                _save(request, session)
-                return redirect("harvest_wizard_step3")
+                _forget_choices_unless(session, collection_id)
+                session.pop("survey", None)
+                session["checking"] = {
+                    "token": background_survey.start(session["upstream_url"], collection_id),
+                    "collection_id": collection_id,
+                    "collection_title": title,
+                    "since": time.time(),
+                }
+            _save(request, session)
+            return redirect("harvest_wizard_step3")
 
     return render(
         request,
@@ -182,21 +205,19 @@ def harvest_wizard_step2(request):
     )
 
 
-def _as_session(found) -> dict:
-    """A collection's survey as the session keeps it between steps."""
-    store = None
-    if found.store:
-        store = {**asdict(found.store), "has_runs": found.store.has_runs}
-        store["arrays"] = [{**asdict(array), "offered": array.offered} for array in found.store.arrays]
-    return {
-        "shape": found.shape.value,
-        "harvestable": found.harvestable,
-        "store": store,
-        "reason": found.reason,
-        "items_sampled": found.items_sampled,
-        "assets": [asdict(asset) for asset in found.assets],
-        "locations": [{**asdict(location), "proposed": location.proposed} for location in found.locations],
-    }
+def _forget_choices_unless(session: dict, collection_id: str) -> None:
+    """What was chosen for another collection does not carry over."""
+    if session.get("collection_id") != collection_id:
+        for stale in ("chosen", "confirmed", "samples", "chunk_places", "declined_places"):
+            session.pop(stale, None)
+
+
+def _choose(session: dict, collection_id: str, title: str, survey: dict) -> None:
+    """Make `survey` the one the wizard goes on from."""
+    _forget_choices_unless(session, collection_id)
+    session.pop("checking", None)
+    session.setdefault("surveys", {})[collection_id] = survey
+    session.update({"collection_id": collection_id, "collection_title": title, "survey": survey})
 
 
 # ── Step 3: what the survey found ───────────────────────────────────────────
@@ -205,6 +226,10 @@ def _as_session(found) -> dict:
 def harvest_wizard_step3(request):
     require_active_org(request)
     session = _session(request)
+    if session.get("checking"):
+        waiting = _collect(request, session)
+        if waiting is not None:
+            return waiting
     survey = session.get("survey")
     if not survey:
         return redirect("harvest_wizard_step2" if session.get("collections") else "harvest_wizard_step1")
@@ -223,6 +248,51 @@ def harvest_wizard_step3(request):
     )
 
 
+def _collect(request, session: dict):
+    """The page to show while a collection's survey runs, or when it came to
+    nothing; `None` once it has found something, which is then the survey the
+    wizard goes on from."""
+    checking = session["checking"]
+    answer = background_survey.collect(checking["token"])
+    waited = time.time() - checking["since"]
+    state = answer["state"] if answer else None
+    if state == background_survey.FOUND:
+        _choose(session, checking["collection_id"], checking["collection_title"], answer["survey"])
+        _save(request, session)
+        return None
+    if state == background_survey.CHECKING and waited <= background_survey.GIVE_UP_SECONDS:
+        return render(
+            request,
+            "georivaharvest/wizard_step3_checking.html",
+            {
+                "session": session,
+                "checking": checking,
+                "waiting_on": answer.get("waiting_on", ""),
+                "waited": int(waited),
+                "failed": False,
+                **_chrome(3),
+            },
+        )
+
+    # It came to nothing: nothing is kept, and trying again starts afresh.
+    session.pop("checking", None)
+    _save(request, session)
+    if state == background_survey.FAILED and not answer.get("timed_out"):
+        messages.error(request, _unreadable(answer["why"]))
+    elif state == background_survey.FAILED:
+        messages.error(request, _too_slow(answer["why"]))
+    else:
+        # Never answered, or lost: from where the operator sits, it took too long.
+        messages.error(
+            request, _too_slow(_("GeoRiva stopped waiting after %(seconds)d seconds") % {"seconds": int(waited)})
+        )
+    return render(
+        request,
+        "georivaharvest/wizard_step3_checking.html",
+        {"session": session, "checking": checking, "failed": True, **_chrome(3)},
+    )
+
+
 # ── Step 4: choose images, confirm where their files are ────────────────────
 
 
@@ -233,7 +303,7 @@ def harvest_wizard_step4(request):
     session = _session(request)
     survey = session.get("survey")
     if not survey or not survey["harvestable"]:
-        return redirect("harvest_wizard_step3" if survey else "harvest_wizard_step1")
+        return redirect("harvest_wizard_step3" if survey or session.get("checking") else "harvest_wizard_step1")
     if survey["store"]:
         return _step4_store(request, session)
 
@@ -652,8 +722,9 @@ def harvest_wizard_step5(request):
 
     organisation = require_active_org(request)
     session = _session(request)
-    if not session.get("chosen"):
-        return redirect("harvest_wizard_step4" if session.get("survey") else "harvest_wizard_step1")
+    if not session.get("chosen") or not session.get("survey"):
+        earlier = session.get("survey") or session.get("checking")
+        return redirect("harvest_wizard_step4" if earlier else "harvest_wizard_step1")
 
     # Only unclaimed catalogs of this organisation's: a catalog has one feed (ADR 0034).
     catalogs = Catalog.objects.filter(

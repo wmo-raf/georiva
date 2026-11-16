@@ -19,6 +19,7 @@ from georiva.harvest.upstream import (
     UpstreamAsset,
     UpstreamCollection,
     UpstreamStatistics,
+    UpstreamTimedOut,
     UpstreamUnreachable,
 )
 
@@ -322,6 +323,34 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
     def assert_plain(self, reason, *, but=()):
         for jargon in (*STORE_JARGON, "STAC", "S3", "COG", "API"):
             self.assertNotIn(jargon, reason if not but else reason.replace(but, ""))
+
+    # Waiting on it.
+
+    def test_a_store_that_does_not_answer_in_time_is_a_wait_to_try_again_not_a_verdict(self):
+        self.map_shaped()
+        self.upstream.store_times_out = True
+
+        with self.assertRaises(UpstreamTimedOut) as raised:
+            self.survey()
+
+        self.assertIn("did not answer", str(raised.exception))
+        self.assert_plain(str(raised.exception))
+
+    def test_it_says_what_it_is_waiting_on_before_it_waits(self):
+        self.map_shaped(chunk_locations=("s3://noaa-gfs-bdp-pds/",))
+        self.upstream.regions["noaa-gfs-bdp-pds"] = "us-east-1"
+        said = []
+
+        def progress(text):
+            said.append((text, len(self.upstream.stores_opened)))
+
+        survey_collection(self.upstream, CATALOG, "chirps", progress=progress)
+
+        opening = [opened for text, opened in said if "data store" in text]
+        self.assertTrue(opening, said)
+        self.assertEqual(opening[0], 0, "said before the store is opened, not after")
+        for text, _opened in said:
+            self.assert_plain(text)
 
     # Accepted.
 
@@ -748,6 +777,18 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
             with self.subTest(shape=shape):
                 self.assertTrue(reason_for(shape))
                 self.assert_plain(reason_for(shape))
+
+
+class SurveyProgressTests(SurveyMixin, SimpleTestCase):
+    def test_a_collection_of_images_says_it_is_looking_at_entries_then_files(self):
+        self.add_days(lambda n: f"{OWN}/2026-03-{n:02d}.tif")
+        said = []
+
+        survey_collection(self.upstream, CATALOG, "chirps", progress=said.append)
+
+        self.assertGreaterEqual(len(said), 2)
+        self.assertTrue(any("entries" in text for text in said), said)
+        self.assertTrue(any("files" in text for text in said), said)
 
 
 class AssetTests(SurveyMixin, SimpleTestCase):
