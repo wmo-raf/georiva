@@ -72,6 +72,13 @@ services:
     volumes:
       - ./georiva:/georiva/app
 
+  # 256 databases instead of Redis's 16, for the test runs alone: the stack
+  # lives in 0, `just test` in the block 16-31 (one database per parallel
+  # worker) and `just test-worktree` slot N in 16*(N+1) onwards. Production
+  # keeps the default.
+  georiva-redis:
+    command: redis-server --databases 256
+
   georiva-minio:
     ports:
       - "9000:9000"   # S3 API

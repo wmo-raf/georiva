@@ -98,17 +98,34 @@ migrate:
 makemigrations:
     {{ dc }} exec georiva georiva makemigrations
 
+# How many parallel test workers `just test` and `just test-worktree` start:
+# GEORIVA_TEST_WORKERS from .env, else half the cores Docker has, which leaves
+# the machine usable. `--parallel N` in the args wins (the last one counts), so
+# `just test --parallel 1 ...` is a serial run, for debugging or pdb.
+test_workers := '''
+workers="${GEORIVA_TEST_WORKERS:-}"
+if [ -z "$workers" ]; then
+  workers=$(( $(docker info --format '{{.NCPU}}') / 2 ))
+  [ "$workers" -ge 1 ] || workers=1
+fi
+'''
+
 # Django tests bypass PgBouncer (it cannot CREATE DATABASE) and connect straight
-# to georiva-db with the credentials from .env. They also get their own Redis
-# database (15): the stack's cache and broker live in 0, and a test run that
-# shared it left `testserver` in Wagtail's cached site root URLs and could hand
-# test-enqueued tasks to the live workers.
+# to georiva-db with the credentials from .env. They also keep off Redis
+# database 0, where the stack's cache and broker live: a test run that shared it
+# left `testserver` in Wagtail's cached site root URLs and could hand
+# test-enqueued tasks to the live workers. REDIS_URL names the run's base
+# database, 16; worker k uses 16 + k - 1 (dev Redis has 256 databases, see
+# docker-compose.dev.yml), and each worker gets its own Postgres clone.
 # e.g. `just test georiva.ingestion.tests -v 2`
 test *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ test_workers }}
     {{ dc }} exec \
       -e "DATABASE_URL=timescalegis://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-db:5432/${GEORIVA_DB_NAME}" \
-      -e "REDIS_URL=redis://georiva-redis:6379/15" \
-      georiva georiva test --keepdb {{ args }}
+      -e "REDIS_URL=redis://georiva-redis:6379/16" \
+      georiva georiva test --keepdb --parallel "$workers" {{ args }}
 
 # Django tests for a git worktree, run from inside that worktree.
 #
@@ -118,9 +135,10 @@ test *args:
 # and the compose override exist) with THIS worktree's code mounted instead.
 #
 # The slot (1-9) keeps runs apart: slot N has its own test database
-# (test_<db>_wtN) and its own Redis database (15 - N), so it can run alongside
-# `just test` and alongside other slots. Two worktrees must not share a slot.
-# A slot's first run builds its database from migrations and is slow.
+# (test_<db>_wtN, cloned per worker as test_<db>_wtN_k) and its own block of 16
+# Redis databases from 16 * (N + 1), so it can run alongside `just test` and
+# alongside other slots. Two worktrees must not share a slot. A slot's first
+# run builds its database from migrations and is slow.
 # e.g. `just test-worktree 1 georiva.stac.tests -v 2`
 [no-cd]
 test-worktree slot *args:
@@ -131,14 +149,15 @@ test-worktree slot *args:
     main=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
     [ -f "$main/.env" ] || { echo "no .env in the main checkout at $main" >&2; exit 2; }
     cd "$main"
-    eval "$(grep -E '^GEORIVA_DB_(USER|PASSWORD|NAME)=' .env)"
+    eval "$(grep -E '^GEORIVA_(DB_(USER|PASSWORD|NAME)|TEST_WORKERS)=' .env)"
+    {{ test_workers }}
     files=(-f docker-compose.yml -f docker-compose.dev.yml)
     [ -f docker-compose.override.yml ] && files+=(-f docker-compose.override.yml)
     docker compose "${files[@]}" run --rm --no-deps -T \
       -v "$worktree/georiva:/georiva/app" \
       -e "DATABASE_URL=timescalegis://${GEORIVA_DB_USER}:${GEORIVA_DB_PASSWORD}@georiva-db:5432/${GEORIVA_DB_NAME}_wt{{ slot }}" \
-      -e "REDIS_URL=redis://georiva-redis:6379/$((15 - {{ slot }}))" \
-      georiva manage test --keepdb --noinput {{ args }}
+      -e "REDIS_URL=redis://georiva-redis:6379/$((16 * ({{ slot }} + 1)))" \
+      georiva manage test --keepdb --noinput --parallel "$workers" {{ args }}
 
 # Titiler tests run on the host (the image ships no tests): pytest at the HTTP
 # boundary with Redis, Django and storage faked, see titiler-app/tests/.

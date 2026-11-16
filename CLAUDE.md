@@ -130,7 +130,8 @@ just logs app                      # One service (app, default, ingestion, proce
 just shell                         # Shell into app container (`just shell ingestion` for another)
 just migrate                       # Run migrations
 just makemigrations                # Create migrations
-just test georiva.ingestion.tests  # Django tests in the container (extra args pass through)
+just test georiva.ingestion.tests  # Django tests in the container, in parallel (extra args pass through)
+just test --parallel 1 georiva.ingestion.tests  # serially, e.g. for pdb or a test that fails only in parallel
 just test-worktree 1 georiva.stac.tests  # Django tests from a git worktree, slot 1 (see below)
 just titiler-test                  # Titiler tests, on the host
 
@@ -141,6 +142,11 @@ docker compose exec georiva bash
 ```
 
 **Inside container**: `georiva` is the management command (alias for `python manage.py`).
+
+**Parallel tests**: `just test` and `just test-worktree` run `GEORIVA_TEST_WORKERS` workers (`.env`; unset = half
+the cores). Each worker has its own Postgres clone and Redis database, but Redis pub/sub channels are server-wide —
+a test that publishes or subscribes must use a channel of its own. A test that fails only in parallel is fixed, not
+run serially.
 
 **In a git worktree**: run Django tests with `just test-worktree <slot> <labels>`, never `just test` — that one
 tests the main checkout's code, whatever folder it is run from. Each worktree keeps one slot (1–9) for its lifetime

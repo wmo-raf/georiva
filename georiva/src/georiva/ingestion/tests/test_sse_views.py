@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from georiva.ingestion.sse_views import _INGESTION_EVENT_TYPES, should_forward
+from georiva.ingestion.tests.test_live_updates import use_own_channel
 from georiva.organisations.models import Organisation
 from georiva.organisations.testing import DEFAULT_TEST_ORG_SLUG
 
@@ -191,6 +192,7 @@ class SSELiveEventForwardingTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_superuser("admin2", "admin2@test.com", "pw")
         self.org_slugs = list(Organisation.objects.values_list("slug", flat=True))
+        use_own_channel(self)
 
     async def test_only_this_organisations_event_appears_in_the_stream(self):
         import asyncio

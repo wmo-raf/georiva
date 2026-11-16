@@ -64,10 +64,9 @@ jobs:
     if: needs.changes.outputs.tests == 'true'
 
     # Each matrix entry is a separate job, so each gets its own Postgres and
-    # Redis below. That is the reason the split is by job rather than by
-    # Django's --parallel: parallel workers get a database each but still share
-    # one Redis, and wmts/tests/test_capabilities_cache.py asserts that no test
-    # inherits another's cached document. Shards share nothing.
+    # Redis below; shards share nothing. Within a shard the suite runs with
+    # Django's --parallel as well (see the test step), each worker on its own
+    # database clone and its own Redis database.
     #
     # Which labels a shard runs comes from config/test_shards.json — the same
     # file core/tests/test_shard_partition.py holds to Django's own discovery,
@@ -173,7 +172,7 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/ci.env" <<'EOF'
           DATABASE_URL=timescalegis://georiva:georiva@localhost:5432/georiva
-          REDIS_URL=redis://localhost:6379/0
+          REDIS_URL=redis://localhost:6379/1
           PYTHONDONTWRITEBYTECODE=1
           GEORIVA_LOG_LEVEL=WARNING
           EOF
@@ -203,8 +202,10 @@ jobs:
           echo "labels=$labels" >> "$GITHUB_OUTPUT"
           echo "shard ${{ matrix.shard }}: $labels"
 
-      # Serial *within* a shard. Parallelism here is the matrix above, which
-      # gives each shard its own Redis; --parallel would not.
+      # Parallel within a shard too, one worker per vCPU (4). The runner puts
+      # worker k on Redis database base + k - 1, the base being the one
+      # REDIS_URL names: databases 1-4 here, inside the service's default 16
+      # (a service container's command cannot be overridden to raise it).
       #
       # --noinput is not decoration: on a leftover test database the runner
       # prompts, and with no tty attached that is an EOFError, not a failure
@@ -214,7 +215,7 @@ jobs:
           docker run --rm --network host \
             --env-file "$RUNNER_TEMP/ci.env" \
             -v "$PWD/georiva:/georiva/app" \
-            georiva:dev manage test --noinput --verbosity 2 ${{ steps.labels.outputs.labels }}
+            georiva:dev manage test --noinput --parallel 4 --verbosity 2 ${{ steps.labels.outputs.labels }}
 
   # Branch protection requires "Django tests (shard 0..2)" by name. A matrix job
   # skipped by its `if` never expands its matrix, so it reports none of those

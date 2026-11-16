@@ -1,17 +1,33 @@
 import json
+import uuid
+from unittest import mock
 
 import redis
 from django.conf import settings
 from django.test import TestCase
 
-from georiva.ingestion.live_updates import CHANNEL
+from georiva.ingestion import live_updates
+
+
+def use_own_channel(test):
+    """Publish and listen on a channel only ``test`` uses, and return its name.
+
+    Redis pub/sub ignores the database number: a channel is server-wide, so a
+    parallel test worker on its own database still hears every other worker's
+    events on the real channel.
+    """
+    channel = f"{live_updates.CHANNEL}:test:{uuid.uuid4().hex}"
+    patcher = mock.patch.object(live_updates, "CHANNEL", channel)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return channel
 
 
 class IngestionEventsTestCase(TestCase):
     def setUp(self):
         self.r = redis.from_url(settings.REDIS_URL)
         self.pubsub = self.r.pubsub()
-        self.pubsub.subscribe(CHANNEL)
+        self.pubsub.subscribe(use_own_channel(self))
         for _ in range(20):
             msg = self.pubsub.get_message(timeout=0.1)
             if msg and msg.get("type") == "subscribe":
