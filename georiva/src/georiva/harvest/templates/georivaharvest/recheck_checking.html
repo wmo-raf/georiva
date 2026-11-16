@@ -9,6 +9,10 @@
 {% block extra_css %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'georivaharvest/survey_wait.css' %}">
+    {% if not wait.error %}
+        {# Waiting: look again in a moment, with no script and no static file to load first. #}
+        <meta http-equiv="refresh" content="2">
+    {% endif %}
 {% endblock %}
 
 {% block main_content %}
@@ -31,9 +35,4 @@
             <a href="{% url 'data_feed_detail' feed.pk %}" class="button button-secondary">{% trans "Back to the feed" %}</a>
         </div>
     {% endif %}
-{% endblock %}
-
-{% block extra_js %}
-    {{ block.super }}
-    <script src="{% static 'georivaharvest/survey_wait.js' %}"></script>
 {% endblock %}
