@@ -77,6 +77,14 @@ app.add_middleware(
 _NEVER_CACHED = {"Cache-Control": "no-store"}
 
 
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """Answered by a worker, so the container's healthcheck sees a dead or
+    hung one (#699). Touches no storage, Redis or Django, and is ``async`` so it
+    asks the event loop rather than queueing behind sync tile handlers."""
+    return JSONResponse({"status": "ok"}, headers=_NEVER_CACHED)
+
+
 @app.exception_handler(RasterioIOError)
 async def rasterio_io_error_handler(request: Request, exc: RasterioIOError) -> JSONResponse:
     msg = str(exc)

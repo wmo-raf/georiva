@@ -321,6 +321,14 @@ services:
   georiva-titiler-app:
     image: ghcr.io/wmo-raf/georiva-titiler-app:${GEORIVA_TAG:?set GEORIVA_TAG, or run ./deploy.sh <version>}
     restart: unless-stopped
+    # A worker must answer, not just the port (#699). Compose only marks the
+    # container unhealthy; recovery is gunicorn replacing a dead worker.
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS --max-time 5 http://localhost:$${TTL_PORT:-8000}/healthz > /dev/null || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     environment:
       MINIO_ENDPOINT: "georiva-minio:9000"
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}

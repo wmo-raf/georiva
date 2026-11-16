@@ -16,7 +16,9 @@ GeoRiva TiTiler — available commands:
 SERVICE COMMANDS:
   gunicorn    : Start TiTiler with gunicorn + uvicorn workers (production)
   uvicorn     : Start TiTiler with plain uvicorn (single worker, no process management)
-  uvicorn-dev : Start TiTiler with uvicorn --reload (development, requires source bind mount)
+  uvicorn-dev : Start TiTiler with uvicorn --reload (development, requires source bind mount).
+                A worker killed by a signal (an OOM kill) stops the container, so
+                its restart policy brings it back (app/devserver.py, #699)
 
 OPTIONS (via environment variables):
   TTL_PORT                  Listen port (default: 8000)
@@ -93,7 +95,7 @@ uvicorn)
     ;;
 uvicorn-dev)
     echo "Starting TiTiler (uvicorn --reload) on 0.0.0.0:${TTL_PORT}"
-    exec python -m uvicorn app.main:app \
+    exec python -m app.devserver app.main:app \
         --host 0.0.0.0 \
         --port "$TTL_PORT" \
         --log-level debug \
