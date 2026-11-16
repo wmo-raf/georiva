@@ -39,6 +39,11 @@ replacing the open store for this process, and asked again; still not held is
 an error saying the step is not available upstream. Concurrent misses share
 one reopen, and a reopen that fails leaves the open store as it was. A field
 that is held and all NaN — a masked variable — is drawn as it is.
+
+A step still not held after a reopen is remembered for ``STORE_MISS_TTL``
+seconds (#677): a row can offer a step the store has lost, and without this
+each request for it would pay a reopen. A request for a remembered step still
+asks the open store, so one another request's reopen has found is drawn.
 """
 
 from __future__ import annotations
@@ -53,10 +58,11 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as TimedOut
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from time import monotonic
 
 import numpy as np
 
-from app.config import STORE_CONNECT_TIMEOUT, STORE_READ_TIMEOUT
+from app.config import STORE_CONNECT_TIMEOUT, STORE_MISS_TTL, STORE_READ_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -453,6 +459,8 @@ class _Opened:
     locks: dict = field(default_factory=dict)
     #: The reopen under way for each store, which requests that miss meanwhile wait on.
     reopens: dict = field(default_factory=dict)
+    #: Each step a reopened store still did not hold, and the ``monotonic()`` time it may be looked for again.
+    misses: dict[StoreSlice, float] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -533,6 +541,7 @@ def forget_all() -> None:
         _opened.stores.clear()
         _opened.locks.clear()
         _opened.reopens.clear()
+        _opened.misses.clear()
 
 
 def read_field(target: StoreSlice) -> Field:
@@ -545,10 +554,44 @@ def read_field(target: StoreSlice) -> Field:
         try:
             return opened.field(target.array, target.time, target.reftime)
         except StoreStepNotHeld:
+            if _remembered_missing(target):
+                raise
             fresher = reopened_store(target.store, target.chunk_locations, stale=opened)
+        try:
             return fresher.field(target.array, target.time, target.reftime)
+        except StoreStepNotHeld:
+            _remember_missing(target)
+            raise
 
     return _bounded(read)
+
+
+def _forget_expired_misses(now: float) -> None:
+    """Drop every remembered miss whose time has passed. Called holding ``_opened.lock``."""
+    for expired in [slice_ for slice_, until in _opened.misses.items() if until <= now]:
+        del _opened.misses[expired]
+
+
+def _remembered_missing(target: StoreSlice) -> bool:
+    """Whether a reopen looked for this step less than ``STORE_MISS_TTL`` seconds ago and did not find it."""
+    with _opened.lock:
+        _forget_expired_misses(monotonic())
+        return target in _opened.misses
+
+
+def _remember_missing(target: StoreSlice) -> None:
+    """Remember that a reopened store does not hold this step, warning once per window."""
+    now = monotonic()
+    with _opened.lock:
+        _forget_expired_misses(now)
+        if target in _opened.misses:  # a request that shared this reopen remembered it already
+            return
+        _opened.misses[target] = now + STORE_MISS_TTL
+    logger.warning(
+        "Upstream step %s is not held even after reopening the store; not looking again for %g seconds",
+        target,
+        STORE_MISS_TTL,
+    )
 
 
 #: How icechunk says a chunk lies outside every container the reader was given,
