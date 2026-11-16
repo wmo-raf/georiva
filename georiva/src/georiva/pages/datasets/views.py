@@ -1,6 +1,7 @@
 from django.http import JsonResponse
 
-from georiva.core.models import Asset, Catalog, Collection, Item
+from georiva.core.models import Catalog, Collection, Item
+from georiva.core.storage.asset_location import drawable_q
 from georiva.organisations.access import get_org_object_or_404
 
 
@@ -44,11 +45,11 @@ def collection_available_dates(request, catalog_slug, collection_slug):
     level = request.GET.get("level", "years")
     variable_slug = request.GET.get("variable", "").strip()
 
-    # Items that have a COG asset for the requested variable
+    # Items that have an asset Titiler can draw for the requested variable
     qs = Item.objects.filter(
+        drawable_q("assets__"),
         collection=collection,
         assets__variable__slug=variable_slug,
-        assets__format=Asset.Format.COG,
         assets__variable__is_active=True,
     ).distinct()
 

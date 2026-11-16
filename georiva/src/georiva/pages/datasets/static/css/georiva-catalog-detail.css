@@ -119,6 +119,11 @@
     color: var(--gr-accent-dark);
 }
 
+/* A Store asset's address is a long URL: let it wrap rather than widen the page */
+.gr-store-assets dd {
+    overflow-wrap: anywhere;
+}
+
 .gr-catalog-meta-topics {
     display: flex;
     flex-wrap: wrap;

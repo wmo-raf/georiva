@@ -101,7 +101,7 @@
             <div class="gr-map-shell">
 
                 {# ── Variable panel (left) — styled as sidebar-filter card ── #}
-                {% if cog_assets %}
+                {% if map_assets %}
                     <aside class="gr-map-panel">
                         <div class="gr-sidebar-filter is-open" id="map-filter-variables">
                             <div class="gr-sidebar-filter-header" data-filter-toggle="map-filter-variables">
@@ -111,7 +111,7 @@
                             <div class="gr-sidebar-filter-body">
 
                                 {# Ungrouped (surface) variables — no sub-header #}
-                                {% for asset in ungrouped_cog_assets %}
+                                {% for asset in ungrouped_map_assets %}
                                     <button type="button"
                                             class="gr-map-var-btn {% if asset.variable.slug == active_var_slug %}gr-map-var-btn--active{% endif %}"
                                             data-variable-slug="{{ asset.variable.slug }}"
@@ -126,7 +126,7 @@
                                 {% endfor %}
 
                                 {# Level groups — collapsible sub-cards #}
-                                {% for group in cog_asset_groups %}
+                                {% for group in map_asset_groups %}
                                     <div class="gr-var-group {% if group.is_active %}is-open{% endif %}" id="map-var-group-{{ forloop.counter }}">
                                         <div class="gr-var-group-header" data-filter-toggle="map-var-group-{{ forloop.counter }}">
                                             <span>{{ group.label }}</span>
@@ -434,6 +434,38 @@
                         </div>
                     </div>
                 {% endif %}
+
+            </div>
+        </section>
+    {% endif %}
+
+    {# ── Store assets — read from the provider's store, not downloaded (ADR 0044 §3) ── #}
+    {% if store_assets %}
+        <section class="gr-section">
+            <div class="gr-container">
+
+                <div class="gr-section-header">
+                    <h2 class="gr-section-title">{% trans "Open the data" %}</h2>
+                </div>
+
+                <p class="gr-catalog-header-desc">
+                    {% blocktrans trimmed %}
+                        This data is read from the provider's store, not kept here. Open the store and select the
+                        array below at this item's valid time and forecast reference time.
+                    {% endblocktrans %}
+                </p>
+
+                <dl class="gr-catalog-meta-grid gr-store-assets">
+                    {% for asset in store_assets %}
+                        <div class="gr-catalog-meta-item">
+                            <dt>{{ asset.variable.name }}</dt>
+                            <dd>
+                                <div>{% trans "Store" %}: <span class="gr-mono">{{ asset.href }}</span></div>
+                                <div>{% trans "Array" %}: <span class="gr-mono">{{ asset.store_array }}</span></div>
+                            </dd>
+                        </div>
+                    {% endfor %}
+                </dl>
 
             </div>
         </section>

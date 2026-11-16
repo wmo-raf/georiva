@@ -803,6 +803,23 @@ class StyleSelectorAddressTests(TestCase):
         url = titiler_preview_url(self.tree["item"], "no-such-variable")
         self.assertNotIn("v=", url)
 
+    def test_a_store_asset_tokens_a_slug_only_thumbnail(self):
+        """A Store asset is drawn as a COG is (#686), so its thumbnail caches
+        as one: tokened, and versioned by the Store asset's own row."""
+        Asset.objects.filter(item=self.tree["item"]).update(
+            format=Asset.Format.ZARR, href="https://data.upstream.example/gfs/v0.1.0.icechunk"
+        )
+        item = Item.objects.get(pk=self.tree["item"].pk)
+        url = titiler_preview_url(item, SHARED_SLUG)
+        self.assertIn("v=", url)
+        fresh = Variable.objects.get(pk=self.variable.pk)  # not the class-level, cache-primed row
+        self.assertEqual(url, titiler_preview_url(item, fresh))
+
+    def test_a_zarr_kept_here_leaves_a_slug_only_thumbnail_untokened(self):
+        Asset.objects.filter(item=self.tree["item"]).update(format=Asset.Format.ZARR, href="kenya/x.zarr")
+        item = Item.objects.get(pk=self.tree["item"].pk)
+        self.assertNotIn("v=", titiler_preview_url(item, SHARED_SLUG))
+
     def test_rewriting_the_asset_row_changes_the_preview_url(self):
         """Re-ingested data under the same item and time must not be served
         from an immutable cache entry made for the old pixels."""
