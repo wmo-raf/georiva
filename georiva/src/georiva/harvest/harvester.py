@@ -231,7 +231,11 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     result.removed += jurisdiction.remove_gone(upstream_times, upstream_places, mapped, settled)
 
     if reach.is_store:
-        expected = {run: steps for run, steps in expected.items() if reach.covers_run(run)}
+        expected = {
+            run: runs.Expected(steps, {variables[path].pk: n for path, n in by_array.items() if path in variables})
+            for run, (steps, by_array) in expected.items()
+            if reach.covers_run(run)
+        }
         runs.keep_runs(collection, mapped, reach.runs_q(), expected=expected, settled=settled)
         if reach.rolls:
             runs.forget_aged_out(collection, reach.window[0])
@@ -315,7 +319,12 @@ def _listed(
     if not media_type or len(media_type) > MAX_MEDIA_TYPE_LENGTH:
         # One too long for its column is left out, not cut short, like a checksum.
         media_type = STORE_MEDIA_TYPE
-    expected = {step.reference_time: step.run_steps for step in held if step.reference_time and step.run_steps}
+    # Each run: the steps the store expects of it, and of each array it holds a step of.
+    expected: dict = {}
+    for step in held:
+        if step.reference_time and step.run_steps:
+            _steps, by_array = expected.setdefault(step.reference_time, (step.run_steps, {}))
+            by_array.update(step.array_steps)
     items = [
         UpstreamItem(
             id="/".join(f"{when:%Y%m%dT%H%M%S}" for when in (step.reference_time, step.time) if when),

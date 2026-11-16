@@ -19,7 +19,7 @@ from georiva.ingestion.models import RunIngestion
 from georiva.ingestion.run_closers import close_quiet_runs
 from georiva.organisations.testing import dial_org
 
-from .test_store_harvest import StoreFeedMixin, hours
+from .test_store_harvest import RUN_STEP_GRID, WHOLE_FIELD, StoreFeedMixin, hours
 
 #: How many steps the fake store expects of a run, in the tests below.
 STEPS = 3
@@ -297,3 +297,61 @@ def _parsed(value):
     from django.utils.dateparse import parse_datetime
 
     return parse_datetime(value)
+
+
+#: An average over the hours before each step: never held at a run's first step.
+CLOUD = "total_cloud_cover_atmosphere"
+
+
+class AnArrayNotHeldAtARunsFirstStepTests(StoreRunsMixin, TestCase):
+    """A run closes once each mapped array holds every step it is published at (#681)."""
+
+    arrays = {**StoreFeedMixin.arrays, CLOUD: (RUN_STEP_GRID, WHOLE_FIELD)}
+
+    def setUp(self):
+        super().setUp()
+        self.cloud = self.map_variable(CLOUD, "total-cloud-cover")
+
+    def hold_whole_runs(self, run=None):
+        """Every step of `run` each array is published at: the averaged one has no first step."""
+        self.hold_run("temperature_2m", run=run)
+        self.hold(CLOUD, 3, 6, run=run)
+
+    def test_a_run_whose_every_published_step_has_arrived_closes(self):
+        self.hold_whole_runs()
+
+        self.harvest()
+
+        record = self.record()
+        self.assertTrue(record.is_complete)
+        self.assertEqual(record.closed_by, RunIngestion.Closer.STORE_HELD)
+
+    def test_a_run_missing_a_published_step_of_the_array_stays_open(self):
+        self.hold_run("temperature_2m")
+        self.hold(CLOUD, 3)
+
+        self.harvest()
+
+        self.assertTrue(self.record().is_open)
+
+    def test_the_closed_run_settles_and_is_not_asked_again(self):
+        newer = self.run + hours(6)
+        self.hold_whole_runs()
+        self.hold("temperature_2m", 0, run=newer)
+        self.harvest()
+
+        self.harvest()
+
+        self.assertEqual(self.upstream.runs_asked[-1], {newer})
+        self.assertTrue(self.record().is_complete)
+
+    def test_it_is_latest_complete(self):
+        dial_org(self.client, self.organisation.slug)
+        collection = self.feed.ensure_collection()
+        Collection.objects.filter(pk=collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+        self.hold_whole_runs()
+
+        self.harvest()
+
+        response = self.client.get(reverse("run-list", args=["gfs", collection.slug]))
+        self.assertEqual(response.json()["latest_complete"]["reference_time"], self.run.isoformat())

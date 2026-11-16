@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .upstream import (
     AssetProbe,
@@ -109,6 +109,8 @@ class FakeUpstream:
         self.runs_asked: list[set[datetime]] = []
         #: How many steps the store expects of a run, by run; one not here expects `steps_per_run`.
         self.expected_steps: dict[datetime, int] = {}
+        #: How far apart a run's steps are: its lead times are 0, this, twice this, and so on.
+        self.lead_interval = timedelta(hours=3)
         #: How many steps the store expects of a run it says nothing more of: its step
         #: dimension's size, when `become_store` is given one named `lead_time`.
         self.steps_per_run: int | None = None
@@ -243,7 +245,13 @@ class FakeUpstream:
                         looked_into.add(run)
         self.runs_asked.append(looked_into)
         return [
-            HeldStep(time=when, reference_time=run, arrays=frozenset(paths), run_steps=self._run_steps(run))
+            HeldStep(
+                time=when,
+                reference_time=run,
+                arrays=frozenset(paths),
+                run_steps=self._run_steps(run),
+                array_steps=self._array_steps(run, paths),
+            )
             for (run, when), paths in sorted(steps.items(), key=lambda step: (step[0][0] or step[0][1], step[0][1]))
         ]
 
@@ -251,6 +259,17 @@ class FakeUpstream:
         if run is None:
             return None
         return self.expected_steps.get(run, self.steps_per_run)
+
+    def _array_steps(self, run: datetime | None, paths) -> dict[str, int]:
+        """As the real store answers: an array expects its run's steps from its own first Held step on (#681)."""
+        steps = self._run_steps(run)
+        if steps is None:
+            return {}
+        found = {}
+        for path in paths:
+            first = min(when for held_run, when in self.held[path] if held_run == run)
+            found[path] = steps - (first - run) // self.lead_interval
+        return found
 
     @staticmethod
     def _break_after(items, count):
