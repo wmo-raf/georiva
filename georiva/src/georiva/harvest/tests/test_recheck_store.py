@@ -19,7 +19,7 @@ from django.urls import reverse
 from django_redis import get_redis_connection
 
 from georiva.core.machine_plane.remote_assets import PUBLISHED_FIELD, REMOTE_ASSETS_KEY_PREFIX, variable_key
-from georiva.core.models import Asset, Item
+from georiva.core.models import Asset, Catalog, Item
 from georiva.harvest import background_survey
 from georiva.harvest.models import HarvestFeed
 from georiva.ingestion.models import RunIngestion
@@ -342,6 +342,61 @@ class RecheckWaitsOffTheRequestTests(StoreRecheckMixin, TestCase):
 
         self.assertEqual(self.configuration(), before)
 
+    def test_a_check_opened_for_one_feed_cannot_be_saved_on_another(self):
+        shown = self.look()
+        token = shown.redirect_chain[-1][0].rpartition("check=")[2]
+        other = HarvestFeed.objects.create(
+            name="Another feed",
+            catalog=Catalog.objects.create(
+                organisation=self.feed.catalog.organisation,
+                name="GFS too",
+                slug="gfs-too",
+                file_format=Catalog.FileFormat.GEOTIFF,
+            ),
+            upstream_url=self.feed.upstream_url,
+            upstream_collection_id=self.feed.upstream_collection_id,
+            upstream_shape=self.feed.upstream_shape,
+            store_href=STORE,
+            pinned_chunk_locations={GFS_BUCKET: "us-east-1"},
+        )
+        url = reverse("harvest_recheck_upstream", kwargs={"pk": other.pk})
+
+        refused = self.client.post(f"{url}?check={token}", {"allow_place": MOVED_BUCKET}, follow=True)
+
+        self.assertEqual(HarvestFeed.objects.get(pk=other.pk).pinned_chunk_locations, {GFS_BUCKET: "us-east-1"})
+        self.assertIn("not started here", " ".join(str(message) for message in refused.context["messages"]))
+
+    def test_a_saved_check_cannot_be_saved_again(self):
+        shown = self.look()
+        address = shown.redirect_chain[-1][0]
+        self.client.post(address, {"allow_place": MOVED_BUCKET})
+        # Since then, the place was taken away again.
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations={GFS_BUCKET: "us-east-1"})
+
+        self.client.post(address, {"allow_place": MOVED_BUCKET})
+
+        self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).pinned_chunk_locations, {GFS_BUCKET: "us-east-1"})
+
+    def test_an_older_check_left_open_in_another_tab_is_closed_by_a_save(self):
+        older = self.look().redirect_chain[-1][0]
+        self.answer({"allow_place": MOVED_BUCKET})
+        HarvestFeed.objects.filter(pk=self.feed.pk).update(pinned_chunk_locations={GFS_BUCKET: "us-east-1"})
+
+        self.client.post(older, {"allow_place": MOVED_BUCKET})
+
+        self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).pinned_chunk_locations, {GFS_BUCKET: "us-east-1"})
+
+    def test_a_check_whose_kept_answer_cannot_be_read_is_checked_again_not_an_error(self):
+        shown = self.look()
+        token = shown.redirect_chain[-1][0].rpartition("check=")[2]
+
+        with mock.patch.object(background_survey.cache, "get", side_effect=ValueError("unpickling failed")):
+            page = self.client.get(shown.redirect_chain[-1][0])
+
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Try again")
+        self.assertNotContains(page, token and 'name="allow_place"')
+
     def test_a_survey_that_never_answers_is_given_up_on_with_a_way_to_try_again(self):
         self.hold_surveys = True
         opened = self.client.get(self.url)
@@ -351,6 +406,19 @@ class RecheckWaitsOffTheRequestTests(StoreRecheckMixin, TestCase):
 
         self.assertIn("took too long", " ".join(str(message) for message in page.context["messages"]))
         self.assertContains(page, "Try again")
+        self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).upstream_refusal, "")
+
+
+class StaleRefusalTests(StoreRecheckMixin, TestCase):
+    def test_reloading_an_older_check_does_not_record_its_refusal_again(self):
+        self.publish_store(codecs={"temperature_2m": ("no-such-codec",)})
+        older = self.look().redirect_chain[-1][0]
+        self.publish_store()
+        self.answer({})
+        self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).upstream_refusal, "")
+
+        self.client.get(older)
+
         self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).upstream_refusal, "")
 
 

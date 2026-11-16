@@ -63,8 +63,13 @@ def collect(token: str) -> dict | None:
     """What the survey under `token` has come to: `state` is `CHECKING` (with
     `waiting_on`), `FOUND` (with `found`, the `CollectionSurvey`) or
     `FAILED` (with `why`, and `timed_out` for a wait worth trying again).
-    `None` when nothing is kept under it: never started, or long gone."""
-    return cache.get(_key(token))
+    `None` when nothing usable is kept under it: never started, long gone, or
+    kept by an older GeoRiva in a shape this one cannot read back."""
+    try:
+        return cache.get(_key(token))
+    except Exception:  # an answer that cannot be read back is a lost one: the operator checks again
+        logger.warning("Survey answer under %s could not be read back", token, exc_info=True)
+        return None
 
 
 def run(token: str, upstream_url: str, collection_id: str) -> None:

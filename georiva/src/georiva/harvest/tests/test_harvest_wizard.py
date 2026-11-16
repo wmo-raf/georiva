@@ -899,6 +899,16 @@ class RecheckUpstreamTests(RecheckPages, HarvestFeedMixin, TestCase):
         self.assertEqual(self.feed.pinned_buckets, {BUCKET: BUCKET_HOST})
         self.assertEqual(self.harvest().rejected, 0)
 
+    def test_saving_does_not_read_the_upstream_again(self):
+        shown = self.look()
+        read = (self.upstream.roots_read, len(self.upstream.windows_asked), len(self.upstream.probed))
+
+        self.client.post(shown.redirect_chain[-1][0], {"allow": f"{BUCKET}|{BUCKET_HOST}"})
+
+        self.assertEqual((self.upstream.roots_read, len(self.upstream.windows_asked), len(self.upstream.probed)), read)
+        self.feed.refresh_from_db()
+        self.assertEqual(self.feed.pinned_buckets, {BUCKET: BUCKET_HOST})
+
     def test_a_place_the_survey_did_not_propose_cannot_be_pinned_by_posting_it(self):
         self.answer({"allow": ["georiva-assets|georiva-minio", "|169.254.169.254"]})
 

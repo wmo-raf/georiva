@@ -280,9 +280,12 @@ def _wait_for(token: str, since: float) -> _Wait:
         return _Wait(waiting_on=answer.get("waiting_on", ""), waited=int(waited))
     if state == background_survey.FAILED:
         error = _too_slow(answer["why"]) if answer.get("timed_out") else _unreadable(answer["why"])
-    else:
-        # From where the operator sits, it took too long.
+    elif state == background_survey.CHECKING:
         error = _too_slow(_("GeoRiva stopped waiting after %(seconds)d seconds") % {"seconds": int(waited)})
+    else:
+        error = _(
+            "GeoRiva lost track of this check of the catalog before it finished. Nothing was changed: try again."
+        )
     return _Wait(error=error, waited=int(waited))
 
 
@@ -997,13 +1000,13 @@ def harvest_recheck_upstream(request, pk):
     if wait.found is None:
         if request.method == "POST":
             # Never saved blind: a save acts on a survey the operator was shown.
+            if wait.running:
+                messages.error(request, _("The catalog is still being checked, so nothing was saved yet."))
+                return redirect(f"{here}?check={token}")
             messages.error(
-                request,
-                _("That check of the catalog is no longer kept, so nothing was saved. GeoRiva will check again.")
-                if not wait.running
-                else _("The catalog is still being checked, so nothing was saved yet."),
+                request, _("That check of the catalog is no longer kept, so nothing was saved. GeoRiva will check again.")
             )
-            return redirect(here if not wait.running else f"{here}?check={token}")
+            return redirect(here)
         if wait.error:
             messages.error(request, wait.error)
         return render(
@@ -1039,6 +1042,7 @@ def harvest_recheck_upstream(request, pk):
             messages.success(request, _("GeoRiva may now read this feed's files from the places you allowed."))
         else:
             messages.success(request, _("The catalog was checked again. Nothing about where its files are changed."))
+        _close_checks(request, feed)
         return redirect("data_feed_detail", pk=feed.pk)
 
     return render(
@@ -1055,6 +1059,14 @@ def harvest_recheck_upstream(request, pk):
             **_recheck_chrome(feed),
         },
     )
+
+
+def _close_checks(request, feed) -> None:
+    """A save closes every re-check of the feed this session has open: each
+    was a survey of the feed as it stood before, and is not saved over it."""
+    checks = request.session.get(_RECHECK_KEY, {})
+    if checks.pop(str(feed.pk), None) is not None:
+        request.session[_RECHECK_KEY] = checks
 
 
 def _recheck_chrome(feed) -> dict:
@@ -1153,6 +1165,7 @@ def _recheck_store(request, feed, found, fits: bool, reason: str, token: str):
             messages.success(request, _("The feed now follows what you confirmed. GeoRiva is looking at it again."))
         else:
             messages.success(request, _("The catalog was checked again. GeoRiva is looking at its data again."))
+        _close_checks(request, feed)
         return redirect("data_feed_detail", pk=feed.pk)
 
     return render(
