@@ -30,9 +30,17 @@ WORKER_CHECK_INTERVAL = 1.0
 
 
 class WorkerWatchingReload(ChangeReload):
-    def startup(self) -> None:
+    """Leans on uvicorn's reloader internals (``process``, ``should_exit``,
+    ``startup``/``restart``/``run``); uvicorn is pinned in ``pyproject.toml`` and
+    ``tests/test_devserver.py`` runs the real thing, so an upgrade that moves
+    them fails there."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self._worker_lock = threading.Lock()
         self.worker_killed_by = None
+
+    def startup(self) -> None:
         super().startup()
         threading.Thread(target=self._watch_worker, name="worker-watch", daemon=True).start()
 

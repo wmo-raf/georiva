@@ -94,18 +94,12 @@ class DevServer:
 
 
 @pytest.fixture
-def app_dir(tmp_path):
-    return tmp_path
-
-
-@pytest.fixture
-def running():
+def start_devserver():
     started = []
 
     def start(app_dir):
-        devserver = DevServer(app_dir)
-        started.append(devserver)
-        return devserver
+        started.append(DevServer(app_dir))
+        return started[-1]
 
     yield start
 
@@ -113,9 +107,9 @@ def running():
         devserver.stop()
 
 
-def test_a_worker_killed_by_a_signal_takes_the_dev_server_down(app_dir, running):
-    (app_dir / "throwaway.py").write_text("async def app(scope, receive, send):\n    pass\n")
-    devserver = running(app_dir)
+def test_a_worker_killed_by_a_signal_takes_the_dev_server_down(tmp_path, start_devserver):
+    (tmp_path / "throwaway.py").write_text("async def app(scope, receive, send):\n    pass\n")
+    devserver = start_devserver(tmp_path)
     worker_pid = int(devserver.wait_for(_WORKER_PID).group(1))
 
     os.kill(worker_pid, signal.SIGKILL)
@@ -123,24 +117,32 @@ def test_a_worker_killed_by_a_signal_takes_the_dev_server_down(app_dir, running)
     assert devserver.wait(timeout=15) != 0
 
 
-def test_a_worker_that_fails_to_load_its_app_leaves_the_reloader_waiting(app_dir, running):
-    (app_dir / "throwaway.py").write_text("raise RuntimeError('mid-edit')\n")
-    devserver = running(app_dir)
+def test_a_worker_that_fails_to_load_its_app_leaves_the_reloader_waiting(tmp_path, start_devserver):
+    (tmp_path / "throwaway.py").write_text("raise RuntimeError('mid-edit')\n")
+    devserver = start_devserver(tmp_path)
     devserver.wait_for(re.compile("mid-edit"))
 
     with pytest.raises(subprocess.TimeoutExpired):
         devserver.wait(timeout=5)
 
 
-def test_an_edit_reloads_the_worker_without_taking_the_dev_server_down(app_dir, running):
-    source = app_dir / "throwaway.py"
+def test_an_edit_reloads_the_worker_without_taking_the_dev_server_down(tmp_path, start_devserver):
+    source = tmp_path / "throwaway.py"
     source.write_text("async def app(scope, receive, send):\n    pass\n")
-    devserver = running(app_dir)
+    devserver = start_devserver(tmp_path)
     first = int(devserver.wait_for(_WORKER_PID).group(1))
-    time.sleep(1)  # the file watcher starts after the first worker does
 
-    source.write_text("async def app(scope, receive, send):\n    return None\n")
-    second = int(devserver.wait_for(_WORKER_PID).group(1))
+    # The file watcher starts a moment after the first worker does, so an edit
+    # made too early goes unseen: edit until the worker is replaced.
+    for attempt in range(10):
+        source.write_text(f"async def app(scope, receive, send):\n    return {attempt}\n")
+        try:
+            second = int(devserver.wait_for(_WORKER_PID, timeout=3).group(1))
+            break
+        except AssertionError:
+            continue
+    else:
+        raise AssertionError("an edit never reloaded the worker")
 
     assert second != first
     with pytest.raises(subprocess.TimeoutExpired):
