@@ -288,14 +288,15 @@ def survey_catalog(upstream: UpstreamCatalogClient) -> CatalogSurvey:
 
 
 #: What the survey is waiting on, as an operator is told it while they wait.
-#: No word here is one they would have to look up.
+#: No word here is one they would have to look up, and none ends in a full
+#: stop: the waiting page follows each with "…".
 WAITING_TO_START = "Waiting for GeoRiva to start the check: it is busy with other work"
 READING_CATALOG = "Reading the catalog"
 READING_COLLECTION = "Reading what the catalog says of this collection"
 READING_ENTRIES = "Looking at a few of the collection's entries"
 OPENING_FILES = "Opening a few of its image files to check they can be read"
 OPENING_STORE = (
-    "Opening the provider's data store to check GeoRiva can unpack it. A large store can take up to a minute."
+    "Opening the provider's data store to check GeoRiva can unpack it. A large store can take up to a minute"
 )
 FINDING_PLACES = "Finding where the store's data is kept"
 

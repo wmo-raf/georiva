@@ -780,6 +780,15 @@ class StoreSurveyTests(SurveyMixin, SimpleTestCase):
 
 
 class SurveyProgressTests(SurveyMixin, SimpleTestCase):
+    def test_no_waiting_message_ends_in_a_full_stop_the_page_follows_it_with_an_ellipsis(self):
+        from georiva.harvest import survey
+
+        said = [value for name, value in vars(survey).items() if name.isupper() and isinstance(value, str)]
+        waiting = [text for text in said if text[:1].isupper() and " " in text]
+        self.assertTrue(waiting)
+        for text in waiting:
+            self.assertFalse(text.endswith("."), text)
+
     def test_a_collection_of_images_says_it_is_looking_at_entries_then_files(self):
         self.add_days(lambda n: f"{OWN}/2026-03-{n:02d}.tif")
         said = []
