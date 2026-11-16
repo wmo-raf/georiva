@@ -107,7 +107,11 @@ class Bucket:
 
     @property
     def is_local(self) -> bool:
-        return hasattr(self.storage, "location")
+        # Asked by class, not by a ``location`` attribute: S3Storage has one too (its
+        # key prefix), and a bucket on S3 taken for a directory has no path to open.
+        from django.core.files.storage import FileSystemStorage
+
+        return isinstance(self.storage, FileSystemStorage)
 
     @property
     def bucket_name(self) -> str:
