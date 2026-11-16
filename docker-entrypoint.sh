@@ -18,6 +18,13 @@ GEORIVA_CELERY_WORKER_LOG_LEVEL=${GEORIVA_CELERY_WORKER_LOG_LEVEL:-INFO}
 # issue #399. Empty means unset: no --concurrency, celery's own default.
 GEORIVA_CELERY_WORKER_CONCURRENCY=${GEORIVA_CELERY_WORKER_CONCURRENCY:-}
 
+# The memory, in MB, a pool child may grow to before celery replaces it with a fresh
+# one once its current task is done. Queue-agnostic for the same reason as the pool
+# size above: compose maps the per-queue setting onto it. A long-lived child only
+# grows, and one left to grow is killed by the kernel mid-task instead. Empty means
+# unset: no limit.
+GEORIVA_CELERY_WORKER_MAX_MEMORY_PER_CHILD_MB=${GEORIVA_CELERY_WORKER_MAX_MEMORY_PER_CHILD_MB:-}
+
 GEORIVA_LOG_LEVEL=${GEORIVA_LOG_LEVEL:-INFO}
 
 GEORIVA_PORT="${GEORIVA_PORT:-8000}"
@@ -92,6 +99,13 @@ celery_concurrency_flag() {
     fi
 }
 
+# The per-child memory flag, or nothing when no limit is set. Celery counts in KiB.
+celery_max_memory_flag() {
+    if [[ -n "$GEORIVA_CELERY_WORKER_MAX_MEMORY_PER_CHILD_MB" ]]; then
+        echo "--max-memory-per-child=$((GEORIVA_CELERY_WORKER_MAX_MEMORY_PER_CHILD_MB * 1024))"
+    fi
+}
+
 # Args: queue, worker node name, then any extra celery args.
 start_celery_worker() {
     local queue="$1" node_name="$2"
@@ -99,13 +113,15 @@ start_celery_worker() {
 
     install_dev_plugins
 
-    local concurrency_flag
+    local concurrency_flag max_memory_flag
     concurrency_flag="$(celery_concurrency_flag)"
+    max_memory_flag="$(celery_max_memory_flag)"
 
     exec celery -A georiva worker \
         -Q "$queue" \
         -n "$node_name" \
         ${concurrency_flag:+"$concurrency_flag"} \
+        ${max_memory_flag:+"$max_memory_flag"} \
         -l "${GEORIVA_CELERY_WORKER_LOG_LEVEL}" \
         "$@"
 }
@@ -121,12 +137,13 @@ start_celery_worker_dev() {
 
     install_dev_plugins
 
-    local concurrency_flag
+    local concurrency_flag max_memory_flag
     concurrency_flag="$(celery_concurrency_flag)"
+    max_memory_flag="$(celery_max_memory_flag)"
 
     exec watchfiles \
         --filter python \
-        "celery -A georiva worker -Q ${queue} -n ${node_name} -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} ${concurrency_flag}" \
+        "celery -A georiva worker -Q ${queue} -n ${node_name} -l ${GEORIVA_CELERY_WORKER_LOG_LEVEL} ${concurrency_flag} ${max_memory_flag}" \
         /georiva/app/src/
 }
 
