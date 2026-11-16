@@ -348,6 +348,7 @@ services:
       # Opening the store, or reading one field, may take this long in all.
       GEORIVA_STORE_READ_TIMEOUT: ${GEORIVA_STORE_READ_TIMEOUT:-30}
       GEORIVA_STORE_CONNECT_TIMEOUT: ${GEORIVA_STORE_CONNECT_TIMEOUT:-5}
+      # A step a reopened store still lacks is not looked for again for this long (#677).
       GEORIVA_STORE_MISS_TTL: ${GEORIVA_STORE_MISS_TTL:-60}
 
   georiva-stac-browser:

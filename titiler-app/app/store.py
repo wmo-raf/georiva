@@ -459,8 +459,8 @@ class _Opened:
     locks: dict = field(default_factory=dict)
     #: The reopen under way for each store, which requests that miss meanwhile wait on.
     reopens: dict = field(default_factory=dict)
-    #: Each step a reopened store still did not hold, and when it may be looked for again.
-    misses: dict = field(default_factory=dict)
+    #: Each step a reopened store still did not hold, and the ``monotonic()`` time it may be looked for again.
+    misses: dict[StoreSlice, float] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -566,29 +566,31 @@ def read_field(target: StoreSlice) -> Field:
     return _bounded(read)
 
 
+def _forget_expired_misses(now: float) -> None:
+    """Drop every remembered miss whose time has passed. Called holding ``_opened.lock``."""
+    for expired in [slice_ for slice_, until in _opened.misses.items() if until <= now]:
+        del _opened.misses[expired]
+
+
 def _remembered_missing(target: StoreSlice) -> bool:
     """Whether a reopen looked for this step less than ``STORE_MISS_TTL`` seconds ago and did not find it."""
     with _opened.lock:
-        until = _opened.misses.get(target)
-        if until is not None and until <= monotonic():
-            del _opened.misses[target]
-            until = None
-    return until is not None
+        _forget_expired_misses(monotonic())
+        return target in _opened.misses
 
 
 def _remember_missing(target: StoreSlice) -> None:
-    """Remember that a reopened store does not hold this step, forgetting misses whose time has passed."""
+    """Remember that a reopened store does not hold this step, warning once per window."""
     now = monotonic()
     with _opened.lock:
-        for expired in [slice_ for slice_, until in _opened.misses.items() if until <= now]:
-            del _opened.misses[expired]
+        _forget_expired_misses(now)
         if target in _opened.misses:  # a request that shared this reopen remembered it already
             return
         _opened.misses[target] = now + STORE_MISS_TTL
     logger.warning(
-        "Upstream step %s is not held even after reopening the store; not looking again for %d seconds",
+        "Upstream step %s is not held even after reopening the store; not looking again for %g seconds",
         target,
-        int(STORE_MISS_TTL),
+        STORE_MISS_TTL,
     )
 
 

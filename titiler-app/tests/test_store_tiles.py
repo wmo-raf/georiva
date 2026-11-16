@@ -711,8 +711,8 @@ LOST_TIME = "2026-03-23T18:00:00Z"
 
 
 @pytest.fixture
-def clock_at(monkeypatch):
-    """The reader's clock, set by hand: ``clock_at.now`` is the time it reads."""
+def fake_monotonic(monkeypatch):
+    """The reader's ``monotonic()``, set by hand: ``.now`` is the time it reads."""
 
     class Clock:
         now = 1000.0
@@ -726,7 +726,7 @@ class TestAStepStillMissingIsRemembered:
     so a step the store has lost does not cost a reopen per request (#677)."""
 
     def test_repeated_requests_for_a_lost_step_reopen_once_per_window(
-        self, client, rendering, upstream_store, opens, clock_at
+        self, client, rendering, upstream_store, opens, fake_monotonic
     ):
         publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
         assert tile(client).status_code == 200
@@ -735,38 +735,38 @@ class TestAStepStillMissingIsRemembered:
             response = tile(client, time=LATE_TIME)
             assert response.status_code == 404
             assert "not available upstream" in response.json()["detail"]
-            clock_at.now += 10
+            fake_monotonic.now += 10
 
         assert len(opens) == 2
 
     def test_once_the_window_has_passed_the_store_is_reopened_again(
-        self, client, rendering, upstream_store, opens, clock_at
+        self, client, rendering, upstream_store, opens, fake_monotonic
     ):
         publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
         assert tile(client, time=LATE_TIME).status_code == 404
         assert len(opens) == 2
 
-        clock_at.now += store_reader.STORE_MISS_TTL + 1
+        fake_monotonic.now += store_reader.STORE_MISS_TTL + 1
         assert tile(client, time=LATE_TIME).status_code == 404
 
         assert len(opens) == 3
 
     def test_a_remembered_step_that_arrives_is_drawn_after_the_window_and_one_reopen(
-        self, client, rendering, upstream_store, opens, clock_at
+        self, client, rendering, upstream_store, opens, fake_monotonic
     ):
         publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
         assert tile(client, time=LATE_TIME).status_code == 404
         arrive(upstream_store, 2)
         assert tile(client, time=LATE_TIME).status_code == 404, "remembered: no reopen yet"
 
-        clock_at.now += store_reader.STORE_MISS_TTL + 1
+        fake_monotonic.now += store_reader.STORE_MISS_TTL + 1
         response = tile(client, time=LATE_TIME)
 
         assert response.status_code == 200, response.text
         assert len(opens) == 3
 
     def test_a_remembered_step_another_reopen_picked_up_is_drawn_at_once(
-        self, client, rendering, upstream_store, opens, clock_at
+        self, client, rendering, upstream_store, opens, fake_monotonic
     ):
         publish(
             rendering,
@@ -787,7 +787,7 @@ class TestAStepStillMissingIsRemembered:
         assert len(opens) == 3
 
     def test_remembering_one_step_does_not_stop_another_from_reopening(
-        self, client, rendering, upstream_store, opens, clock_at
+        self, client, rendering, upstream_store, opens, fake_monotonic
     ):
         publish(rendering, {LATE: published(upstream_store.href), LOST: published(upstream_store.href)})
         assert tile(client, time=LATE_TIME).status_code == 404
@@ -797,7 +797,7 @@ class TestAStepStillMissingIsRemembered:
         assert len(opens) == 3
 
     def test_a_failed_reopen_is_not_remembered_as_a_miss(
-        self, client, rendering, upstream_store, monkeypatch, clock_at
+        self, client, rendering, upstream_store, monkeypatch, fake_monotonic
     ):
         publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
         assert tile(client).status_code == 200
@@ -817,7 +817,7 @@ class TestAStepStillMissingIsRemembered:
         assert len(attempts) == 1
 
     def test_a_remembered_miss_is_warned_of_once_naming_the_store_array_and_step(
-        self, client, rendering, upstream_store, caplog, clock_at
+        self, client, rendering, upstream_store, caplog, fake_monotonic
     ):
         publish(rendering, {LATE: published(upstream_store.href)})
 
@@ -831,7 +831,7 @@ class TestAStepStillMissingIsRemembered:
         assert "temperature_2m" in warned[0]
         assert "2026-03-23T12:00:00" in warned[0]
 
-    def test_concurrent_misses_on_one_reopen_warn_once(self, upstream_store, monkeypatch, caplog, clock_at):
+    def test_concurrent_misses_on_one_reopen_warn_once(self, upstream_store, monkeypatch, caplog, fake_monotonic):
         entry = json.loads(published(upstream_store.href))
         reftime = datetime(2026, 3, 23, tzinfo=UTC)
         store_reader.read_field(store_reader.StoreSlice.published(entry, reftime + timedelta(hours=6), reftime))
@@ -862,4 +862,4 @@ class TestAStepStillMissingIsRemembered:
     def test_the_window_is_a_setting(self):
         from app import config
 
-        assert store_reader.STORE_MISS_TTL == config.STORE_MISS_TTL == 60.0
+        assert store_reader.STORE_MISS_TTL is config.STORE_MISS_TTL
