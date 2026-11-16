@@ -1,0 +1,113 @@
+{% extends "georivaharvest/recheck_upstream.html" %}
+{% load i18n %}
+{% comment %}
+    A store feed's Upstream surveyed again (ADR 0044 §1, §8, §11): a new address
+    for the store, places its data is newly said to be kept or no longer is,
+    and kinds of map newly offered, each put to the operator and taken only on
+    their yes. A refusal is shown with its reason; the feed's rows are kept.
+    In an operator's words: no "Zarr", "chunk" or "codec".
+{% endcomment %}
+
+{% block refused_note %}
+    <p class="hrc-note">
+        {% trans "Nothing on this feed was deleted, and the maps it already lists are kept. Its harvests stop with this reason until a check finds the collection usable again." %}
+    </p>
+{% endblock %}
+
+{% block found %}
+    {% if feed.upstream_refusal %}
+        <div class="hrc-panel">
+            <div class="hrc-panel__header">{% trans "This feed's harvests are stopped" %}</div>
+            <div class="hrc-panel__body">
+                <p>{{ feed.upstream_refusal }}</p>
+                <p class="hrc-note">{% trans "The collection can be used again. Saving lets this feed's harvests run again." %}</p>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="hrc-panel">
+        <div class="hrc-panel__header">{% trans "Where this collection is kept" %}</div>
+        <div class="hrc-panel__body">
+            {% if moved_to %}
+                <label class="hrc-check">
+                    <input type="checkbox" name="adopt_store" value="{{ moved_to }}">
+                    <span>
+                        {% blocktrans with old=feed.store_href new=moved_to %}The provider now publishes this collection at <strong>{{ new }}</strong>. This feed still reads it from <strong>{{ old }}</strong>. Read it from the new address from now on?{% endblocktrans %}
+                        {% if new_host %}
+                            {% blocktrans with host=new_host %}This also allows this feed to read from <strong>{{ host }}</strong>.{% endblocktrans %}
+                        {% endif %}
+                    </span>
+                </label>
+                <p class="hrc-note">{% trans "The maps this feed lists move to the new address at its next look at the collection. One the new address does not have is no longer listed." %}</p>
+            {% else %}
+                <p>{% trans "The collection is where this feed already reads it from. There is nothing to confirm." %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="hrc-panel">
+        <div class="hrc-panel__header">{% trans "Where its data is kept" %}</div>
+        <div class="hrc-panel__body">
+            {% for place in new_places %}
+                {% if place.usable %}
+                    <label class="hrc-check">
+                        <input type="checkbox" name="allow_place" value="{{ place.declared }}">
+                        <span>
+                            {% blocktrans with name=place.name cloud=place.cloud %}This collection now says some of its data is kept at <strong>{{ name }}</strong>, on {{ cloud }}. Allow this feed to read from there?{% endblocktrans %}
+                        </span>
+                    </label>
+                {% else %}
+                    <p>{% blocktrans with name=place.name %}This collection now says some of its data is kept at <strong>{{ name }}</strong>, which GeoRiva could not find.{% endblocktrans %}</p>
+                {% endif %}
+            {% endfor %}
+            {% if new_places %}
+                <p class="hrc-note">{% trans "Maps whose data is kept in a new place cannot be drawn until you allow this feed to read from there." %}</p>
+            {% endif %}
+            {% for place in gone_places %}
+                <label class="hrc-check">
+                    <input type="checkbox" name="forget_place" value="{{ place.declared }}">
+                    <span>
+                        {% blocktrans with name=place.name %}This collection no longer mentions <strong>{{ name }}</strong>. Stop reading from there?{% endblocktrans %}
+                    </span>
+                </label>
+            {% endfor %}
+            {% if not new_places and not gone_places %}
+                <p>{% trans "Its data is kept where this feed already reads it from. There is nothing to confirm." %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="hrc-panel">
+        <div class="hrc-panel__header">{% trans "Kinds of map the collection has" %}</div>
+        <div class="hrc-panel__body">
+            {% if new_arrays or gone_arrays %}
+                <label class="hrc-check">
+                    <input type="checkbox" name="offer_arrays" value="1">
+                    <span>
+                        {% if new_arrays %}
+                            {% trans "New since this feed was set up or last checked:" %}
+                            {% for array in new_arrays %}<strong>{{ array.title|default:array.path }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+                        {% endif %}
+                        {% if gone_arrays %}
+                            {% trans "No longer offered:" %}
+                            {% for path in gone_arrays %}<strong>{{ path }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}.
+                        {% endif %}
+                        {% trans "Offer what the collection has now in this feed's mapping?" %}
+                    </span>
+                </label>
+            {% else %}
+                <p>{% trans "The feed's mapping already offers every kind of map the collection has." %}</p>
+            {% endif %}
+            {% if unoffered %}
+                <p class="hrc-note">{% trans "GeoRiva cannot show these yet:" %}</p>
+                <ul class="hrc-note">
+                    {% for array in unoffered %}
+                        <li><strong>{{ array.title|default:array.path }}</strong> — {{ array.reason }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+    </div>
+
+    <p class="hrc-note">{% trans "Saving also looks again at every forecast in this feed's window, finished ones too." %}</p>
+{% endblock %}

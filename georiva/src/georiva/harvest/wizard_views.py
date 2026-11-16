@@ -872,8 +872,8 @@ def _seen(assets) -> list[dict]:
 
 
 def harvest_recheck_upstream(request, pk):
-    """Survey a feed's Upstream again: confirm where its files now are, and
-    refresh the asset keys its mapping offers."""
+    """Survey a feed's Upstream again and put to the operator what changed.
+    Nothing is taken from it without their yes (ADR 0042 §9)."""
     from .models import HarvestFeed
 
     feed = get_object_or_404(scoped_queryset(request, HarvestFeed.objects.all()), pk=pk)
@@ -885,6 +885,10 @@ def harvest_recheck_upstream(request, pk):
 
     # Still the shape the feed was set up for: a feed's shape is fixed (ADR 0044 §1).
     fits = found.harvestable and found.shape.value == feed.upstream_shape
+    reason = found.reason or _("This collection is no longer published the way it was when this feed was set up.")
+    if feed.is_store:
+        return _recheck_store(request, feed, found, fits, reason)
+
     allowed = feed.allowed_asset_hosts
     new = [
         location
@@ -899,8 +903,7 @@ def harvest_recheck_upstream(request, pk):
         buckets, hosts = found.pins([location for location in new if f"{location.bucket}|{location.host}" in ticked])
         feed.pinned_buckets = {**feed.pinned_buckets, **buckets}
         feed.asset_hosts = sorted({*feed.asset_hosts, *hosts})
-        # Where a store's own data has moved to is confirmed elsewhere; what it offers is refreshed here.
-        feed.surveyed_assets = _seen_arrays(found.store.arrays) if feed.is_store else _seen(found.assets)
+        feed.surveyed_assets = _seen(found.assets)
         feed.save()
         if buckets or hosts:
             messages.success(request, _("GeoRiva may now read this feed's files from the places you allowed."))
@@ -915,18 +918,139 @@ def harvest_recheck_upstream(request, pk):
             "feed": feed,
             "found": found,
             "fits": fits,
-            "reason": found.reason
-            or _("This collection is no longer published the way it was when this feed was set up."),
+            "reason": reason,
             "new": [{"value": f"{location.bucket}|{location.host}", "host": location.host} for location in new],
             "readable": [asset for asset in found.assets if asset.readable],
-            "offered": found.store.offered if found.store else [],
-            "breadcrumbs_items": [
-                {"url": reverse("wagtailadmin_home"), "label": _("Home")},
-                {"url": reverse("data_feed_list"), "label": _("Pull feeds")},
-                {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
-                {"url": None, "label": _("Check the catalog again")},
-            ],
-            "header_title": _("Check the catalog again — %s") % feed.name,
-            "header_icon": "globe",
+            **_recheck_chrome(feed),
         },
     )
+
+
+def _recheck_chrome(feed) -> dict:
+    return {
+        "breadcrumbs_items": [
+            {"url": reverse("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse("data_feed_list"), "label": _("Pull feeds")},
+            {"url": reverse("data_feed_detail", kwargs={"pk": feed.pk}), "label": feed.name},
+            {"url": None, "label": _("Check the catalog again")},
+        ],
+        "header_title": _("Check the catalog again — %s") % feed.name,
+        "header_icon": "globe",
+    }
+
+
+def _recheck_store(request, feed, found, fits: bool, reason: str):
+    """The re-check of a feed over an Upstream store (ADR 0044 §1, §8, §11).
+
+    What it can find, each put to the operator separately: arrays newly seen
+    (or gone), offered to the mapping; places the store's data is newly said to
+    live in, pinned, and pins it no longer mentions, removed; a new address
+    for the store, adopted — its rows follow at the next harvest, which
+    rewrites their hrefs. A verdict that turned into a refusal is recorded on
+    the feed: its harvests stop with that reason, and its rows stand, until a
+    re-check that finds the store usable again is saved.
+    """
+    from .models import HarvestFeed
+
+    if not fits:
+        if feed.upstream_refusal != reason:
+            HarvestFeed.objects.filter(pk=feed.pk).update(upstream_refusal=reason)
+        return render(
+            request,
+            "georivaharvest/recheck_store.html",
+            {"feed": feed, "found": found, "fits": False, "reason": reason, **_recheck_chrome(feed)},
+        )
+
+    store = found.store
+    surveyed = {key for key, _label in feed.surveyed_asset_keys}
+    offered = {array.path for array in store.offered}
+    new_arrays = [array for array in store.offered if array.path not in surveyed]
+    gone_arrays = sorted(surveyed - offered)
+    places = _chunk_places({"chunk_locations": store.chunk_locations, "chunk_regions": store.chunk_regions})
+    new_places = [place for place in places if place["declared"] not in feed.pinned_chunk_locations]
+    declared = {place["declared"] for place in places}
+    gone_places = [
+        {"declared": pinned, "name": pinned.partition("://")[2].rstrip("/")}
+        for pinned in feed.pinned_chunk_locations
+        if pinned not in declared
+    ]
+    moved_to = store.href if store.href != feed.store_href else ""
+    own = found.locations[0] if found.locations else None
+    # A store at a new host is read there only once that host is allowed: adopting the address allows it.
+    own_to_pin = None
+    if moved_to and own is not None and own.proposed:
+        pinned = feed.pinned_buckets.get(own.bucket) == own.host if own.bucket else own.host in feed.allowed_asset_hosts
+        own_to_pin = None if pinned else own
+
+    if request.method == "POST":
+        posted = request.POST
+        changed = []
+        allow, forget = set(posted.getlist("allow_place")), set(posted.getlist("forget_place"))
+        pins = dict(feed.pinned_chunk_locations)
+        for place in new_places:
+            if place["usable"] and place["declared"] in allow:
+                pins[place["declared"]] = place["region"]
+        for place in gone_places:
+            if place["declared"] in forget:
+                pins.pop(place["declared"], None)
+        if pins != feed.pinned_chunk_locations:
+            feed.pinned_chunk_locations = pins
+            changed.append("pinned_chunk_locations")
+        if moved_to and posted.get("adopt_store") == moved_to:
+            feed.store_href = moved_to
+            changed.append("store_href")
+            if own_to_pin is not None:
+                buckets, hosts = found.pins([own_to_pin])
+                feed.pinned_buckets = {**feed.pinned_buckets, **buckets}
+                feed.asset_hosts = sorted({*feed.asset_hosts, *hosts})
+                changed += ["pinned_buckets", "asset_hosts"]
+        if (new_arrays or gone_arrays) and posted.get("offer_arrays"):
+            feed.surveyed_assets = _seen_arrays(store.arrays)
+            changed.append("surveyed_assets")
+        if feed.upstream_refusal:
+            # Seen usable again, and saved by the operator: its harvests may run.
+            feed.upstream_refusal = ""
+            changed.append("upstream_refusal")
+        if changed:
+            feed.save(update_fields=changed)
+        if "pinned_chunk_locations" in changed:
+            _republish(feed)
+        # The full pass over every run in the window, closed ones too: a store
+        # rewritten upstream is noticed here, and an adopted address followed.
+        transaction.on_commit(feed.run_now)
+        if set(changed) - {"upstream_refusal"}:
+            messages.success(request, _("The feed now follows what you confirmed. GeoRiva is looking at it again."))
+        else:
+            messages.success(request, _("The catalog was checked again. GeoRiva is looking at its data again."))
+        return redirect("data_feed_detail", pk=feed.pk)
+
+    return render(
+        request,
+        "georivaharvest/recheck_store.html",
+        {
+            "feed": feed,
+            "found": found,
+            "fits": True,
+            "reason": reason,
+            "new_arrays": new_arrays,
+            "gone_arrays": gone_arrays,
+            "unoffered": [array for array in store.arrays if not array.offered],
+            "new_places": new_places,
+            "gone_places": gone_places,
+            "moved_to": moved_to,
+            "new_host": own_to_pin.host if own_to_pin is not None else "",
+            **_recheck_chrome(feed),
+        },
+    )
+
+
+def _republish(feed) -> None:
+    """Tell the tile server again what it reads each of the feed's Store assets
+    with, now that its Pinned locations changed (ADR 0044 §9)."""
+    from georiva.core.machine_plane.remote_assets import publish_variable
+
+    collection = feed.collection
+    if collection is None:
+        return
+    for variable in feed.mapped_variables(collection).values():
+        publish_variable(variable)

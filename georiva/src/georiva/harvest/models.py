@@ -125,6 +125,15 @@ class HarvestFeed(DataFeed):
             '{"s3://bucket/": "us-east-1", "gs://bucket/": ""}. Data anywhere else is not read.'
         ),
     )
+    upstream_refusal = models.TextField(
+        blank=True,
+        verbose_name=_("Why the upstream cannot be used"),
+        help_text=_(
+            "Set by a re-check that found the upstream store no longer usable. While it is set, harvests of this "
+            "feed stop with this reason and leave its rows as they are; a re-check that finds the store usable "
+            "again, and is saved, clears it."
+        ),
+    )
     surveyed_assets = models.JSONField(
         default=list,
         blank=True,

@@ -33,6 +33,12 @@
                     <td>{{ feed.store_href }}</td>
                 </tr>
             {% endif %}
+            {% if feed.upstream_refusal %}
+                <tr>
+                    <th scope="row">{% trans "Harvests stopped" %}</th>
+                    <td>{{ feed.upstream_refusal }} {% trans "Re-check the upstream once that is resolved." %}</td>
+                </tr>
+            {% endif %}
             <tr>
                 <th scope="row">{% trans "Time window" %}</th>
                 <td>
