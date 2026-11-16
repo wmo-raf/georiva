@@ -13,6 +13,7 @@ stand-in on the same server: the provider's public endpoint is the one thing a
 test points elsewhere. Nothing reaches a network.
 """
 
+import contextlib
 import http.server
 import json
 import os
@@ -702,3 +703,163 @@ class TestAMissingStepRefreshesTheStore:
 
         assert rendering.hashes[HASH] == before
         assert history(upstream_store) == snapshots
+
+
+#: A step of the newest run the store never holds, in this module's repository.
+LOST = "20260323T180000/20260323T000000"
+LOST_TIME = "2026-03-23T18:00:00Z"
+
+
+@pytest.fixture
+def clock_at(monkeypatch):
+    """The reader's clock, set by hand: ``clock_at.now`` is the time it reads."""
+
+    class Clock:
+        now = 1000.0
+
+    monkeypatch.setattr(store_reader, "monotonic", lambda: Clock.now)
+    return Clock
+
+
+class TestAStepStillMissingIsRemembered:
+    """A step a reopen did not find is remembered for ``STORE_MISS_TTL`` seconds,
+    so a step the store has lost does not cost a reopen per request (#677)."""
+
+    def test_repeated_requests_for_a_lost_step_reopen_once_per_window(
+        self, client, rendering, upstream_store, opens, clock_at
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+
+        for _ in range(4):
+            response = tile(client, time=LATE_TIME)
+            assert response.status_code == 404
+            assert "not available upstream" in response.json()["detail"]
+            clock_at.now += 10
+
+        assert len(opens) == 2
+
+    def test_once_the_window_has_passed_the_store_is_reopened_again(
+        self, client, rendering, upstream_store, opens, clock_at
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client, time=LATE_TIME).status_code == 404
+        assert len(opens) == 2
+
+        clock_at.now += store_reader.STORE_MISS_TTL + 1
+        assert tile(client, time=LATE_TIME).status_code == 404
+
+        assert len(opens) == 3
+
+    def test_a_remembered_step_that_arrives_is_drawn_after_the_window_and_one_reopen(
+        self, client, rendering, upstream_store, opens, clock_at
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client, time=LATE_TIME).status_code == 404
+        arrive(upstream_store, 2)
+        assert tile(client, time=LATE_TIME).status_code == 404, "remembered: no reopen yet"
+
+        clock_at.now += store_reader.STORE_MISS_TTL + 1
+        response = tile(client, time=LATE_TIME)
+
+        assert response.status_code == 200, response.text
+        assert len(opens) == 3
+
+    def test_a_remembered_step_another_reopen_picked_up_is_drawn_at_once(
+        self, client, rendering, upstream_store, opens, clock_at
+    ):
+        publish(
+            rendering,
+            {
+                FIELD: published(upstream_store.href),
+                LATE: published(upstream_store.href),
+                LOST: published(upstream_store.href),
+            },
+        )
+        assert tile(client, time=LATE_TIME).status_code == 404
+        arrive(upstream_store, 2)
+        # Another step's miss reopens the store, and the newer snapshot holds the remembered one.
+        assert tile(client, time=LOST_TIME).status_code == 404
+
+        response = tile(client, time=LATE_TIME)
+
+        assert response.status_code == 200, response.text
+        assert len(opens) == 3
+
+    def test_remembering_one_step_does_not_stop_another_from_reopening(
+        self, client, rendering, upstream_store, opens, clock_at
+    ):
+        publish(rendering, {LATE: published(upstream_store.href), LOST: published(upstream_store.href)})
+        assert tile(client, time=LATE_TIME).status_code == 404
+
+        assert tile(client, time=LOST_TIME).status_code == 404
+
+        assert len(opens) == 3
+
+    def test_a_failed_reopen_is_not_remembered_as_a_miss(
+        self, client, rendering, upstream_store, monkeypatch, clock_at
+    ):
+        publish(rendering, {FIELD: published(upstream_store.href), LATE: published(upstream_store.href)})
+        assert tile(client).status_code == 200
+        attempts = []
+        real = store_reader.open_repository
+
+        def broken(*args):
+            attempts.append(args[1])
+            raise OSError("connection reset")
+
+        monkeypatch.setattr(store_reader, "open_repository", broken)
+        assert tile(client, time=LATE_TIME).status_code == 504
+        monkeypatch.setattr(store_reader, "open_repository", real)
+        arrive(upstream_store, 2)
+
+        assert tile(client, time=LATE_TIME).status_code == 200
+        assert len(attempts) == 1
+
+    def test_a_remembered_miss_is_warned_of_once_naming_the_store_array_and_step(
+        self, client, rendering, upstream_store, caplog, clock_at
+    ):
+        publish(rendering, {LATE: published(upstream_store.href)})
+
+        with caplog.at_level("WARNING", logger="app.store"):
+            for _ in range(3):
+                assert tile(client, time=LATE_TIME).status_code == 404
+
+        warned = [record.getMessage() for record in caplog.records if "not held" in record.getMessage()]
+        assert len(warned) == 1
+        assert upstream_store.href in warned[0]
+        assert "temperature_2m" in warned[0]
+        assert "2026-03-23T12:00:00" in warned[0]
+
+    def test_concurrent_misses_on_one_reopen_warn_once(self, upstream_store, monkeypatch, caplog, clock_at):
+        entry = json.loads(published(upstream_store.href))
+        reftime = datetime(2026, 3, 23, tzinfo=UTC)
+        store_reader.read_field(store_reader.StoreSlice.published(entry, reftime + timedelta(hours=6), reftime))
+        late = store_reader.StoreSlice.published(entry, reftime + timedelta(hours=12), reftime)
+        real = store_reader.open_repository
+
+        def slow(*args):
+            clock.sleep(0.5)
+            return real(*args)
+
+        monkeypatch.setattr(store_reader, "open_repository", slow)
+        together = threading.Barrier(4)
+
+        def request():
+            together.wait()
+            with contextlib.suppress(store_reader.StoreError):
+                store_reader.read_field(late)
+
+        with caplog.at_level("WARNING", logger="app.store"):
+            threads = [threading.Thread(target=request) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+
+        assert len([record for record in caplog.records if "not held" in record.getMessage()]) == 1
+
+    def test_the_window_is_a_setting(self):
+        from app import config
+
+        assert store_reader.STORE_MISS_TTL == config.STORE_MISS_TTL == 60.0

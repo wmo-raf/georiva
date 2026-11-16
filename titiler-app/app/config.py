@@ -32,3 +32,7 @@ PATH_RE = re.compile(r"^[\w/.-]+\.tif$")
 STORE_READ_TIMEOUT = float(os.getenv("GEORIVA_STORE_READ_TIMEOUT", "30"))
 #: Seconds a store's host, or the place its data lives, may take to accept a connection.
 STORE_CONNECT_TIMEOUT = float(os.getenv("GEORIVA_STORE_CONNECT_TIMEOUT", "5"))
+#: Seconds a step a reopened store still does not hold is remembered, so that
+#: requests for it fail without reopening the store again (#677). A step that
+#: arrives meanwhile is drawn at the latest once this has passed.
+STORE_MISS_TTL = float(os.getenv("GEORIVA_STORE_MISS_TTL", "60"))
