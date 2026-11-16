@@ -16,7 +16,7 @@ the request dialled.
 The document advertises ``WebMercatorQuad`` as the only TileMatrixSet,
 ``image/png`` as the only format, ``application/json`` as the only InfoFormat
 an identify may ask for (#363), per-layer ``Time``/``Reftime`` dimensions
-enumerated from the organisation's Items (#358), and each variable's named
+enumerated from each variable's own rows (#358, #682), and its named
 styles with the real default marked (#359). A credentialed request widens the
 listing through the same ``visible_to``, and a key that travelled as
 ``?api_key=`` is written into every advertised URL (#360) — so a legacy
@@ -44,7 +44,8 @@ from georiva.core.machine_plane import (
     wmts_rest_featureinfo_template,
     wmts_rest_tile_template,
 )
-from georiva.core.models import Collection, Item, Variable
+from georiva.core.models import Asset, Collection, Variable
+from georiva.core.storage.asset_location import drawable_q
 from georiva.core.utils import get_full_url_by_request, iso_utc_z
 from georiva.organisations.access import scoped_queryset
 
@@ -104,7 +105,12 @@ def visible_variables(request):
                 collection__in=Collection.objects.visible_to(request),
             ),
         )
-        .select_related("collection__catalog")
+        # Every layer reads its catalog's boundary (the extent) and its
+        # organisation (the URL prefix): one join here, not two queries a layer.
+        .select_related(
+            "collection__catalog__boundary",
+            "collection__catalog__organisation",
+        )
         .prefetch_related("styles")
         .order_by(
             "collection__catalog__slug",
@@ -130,18 +136,10 @@ def build_capabilities(request, organisation) -> bytes:
     _append_operations_metadata(root, request, organisation, api_key)
 
     contents = ET.SubElement(root, _wmts("Contents"))
-    dimensions_by_collection = {}
-    for variable in visible_variables(request):
-        collection = variable.collection
-        if collection.pk not in dimensions_by_collection:
-            dimensions_by_collection[collection.pk] = layer_dimensions(collection)
-        _append_layer(
-            contents,
-            request,
-            variable,
-            dimensions_by_collection[collection.pk],
-            api_key,
-        )
+    variables = list(visible_variables(request))
+    dimensions = layer_dimensions(variables)
+    for variable in variables:
+        _append_layer(contents, request, variable, dimensions[variable.pk], api_key)
     _append_tile_matrix_set(contents)
 
     ET.SubElement(
@@ -197,19 +195,26 @@ def _append_operations_metadata(root, request, organisation, api_key=None):
         ET.SubElement(allowed, _ows("Value")).text = "KVP"
 
 
-def layer_dimensions(collection):
-    """The WMTS dimensions a layer over ``collection`` advertises (#358).
+def layer_dimensions(variables):
+    """The WMTS dimensions each layer over ``variables`` advertises (#358, #682).
 
-    Identifier → ``(values, default)``, in document order. A collection whose
-    items carry a ``reference_time`` is a forecast and advertises two axes:
-    ``Reftime`` lists every run and defaults to the newest, and ``Time`` lists
-    that default run's valid times — so a dimension-ignorant client
-    substituting defaults gets coherent latest-forecast tiles, never a time
-    from one run against another run's reference. ``Time`` defaults to the
-    run's first valid time (the analysis — the run's "now"), while an
-    observation collection advertises ``Time`` alone, defaulting to the newest
+    Variable pk → ``{identifier: (values, default)}``, in document order. Read
+    from the Variable's own rows — the steps carrying an asset of it Titiler
+    can draw, the rule ``Item.objects.latest_for_variable`` follows — and not
+    from its collection's: a forecast store rarely holds every field at every
+    step (GFS has no cloud cover at the analysis), and a layer advertising a
+    step its Variable lacks sends a client that substitutes the default
+    straight to a 404.
+
+    A Variable whose rows carry a ``reference_time`` is a forecast and
+    advertises two axes: ``Reftime`` lists every run it is in and defaults to
+    the newest, and ``Time`` lists that run's valid times — so a
+    dimension-ignorant client substituting defaults gets coherent
+    latest-forecast tiles, never a time from one run against another run's
+    reference. ``Time`` defaults to the run's first valid time (its "now"),
+    while an observation advertises ``Time`` alone, defaulting to the newest
     value it has. Enumeration is complete on purpose — the accepted
-    document-size trade-off of #354 — and a collection with no items yet
+    document-size trade-off of #354 — and a Variable with no rows yet
     advertises nothing: there are no honest values to list.
 
     Both axes ascend (#378). WMTS 1.0 mandates no ordering and every axis here
@@ -219,24 +224,40 @@ def layer_dimensions(collection):
     Ascending is the spelling inherited from WMS 1.3 dimension declarations, so
     the newest run is the *last* ``Reftime`` value rather than the first, which
     is precisely what the ``Default`` element exists to say instead of position.
+
+    ``variables`` must already be what the caller may see — the output of
+    :func:`visible_variables` — because the assets are read by their ids alone
+    (ADR 0018: a query narrowed on already-scoped ids is scoped).
+
+    One query for the whole document, whatever it lists (#682). Item is a
+    hypertable, and a query on it that names no time is planned across every
+    chunk — close to a second each on a store-backed instance — so a document
+    asking twice per collection took eleven. The rows come back unordered and
+    duplicated (a step may hold a COG and a Store asset of one Variable), and
+    are sorted and deduplicated here instead, which costs nothing beside that.
     """
-    reftimes = list(
-        Item.objects.filter(collection=collection, reference_time__isnull=False)
-        .order_by("reference_time")
-        .values_list("reference_time", flat=True)
-        .distinct()
+    held = {variable.pk: set() for variable in variables}
+    rows = (
+        Asset.objects.filter(drawable_q(), variable_id__in=list(held))
+        .values_list("variable_id", "item__reference_time", "item__time")
+        .order_by()
     )
+    for variable_id, reference_time, time in rows:
+        held[variable_id].add((reference_time, time))
+    return {pk: _dimensions_of(steps) for pk, steps in held.items()}
+
+
+def _dimensions_of(steps):
+    """One Variable's dimensions from its ``(reference_time, time)`` steps."""
+    reftimes = sorted({reference_time for reference_time, _ in steps if reference_time is not None})
     if reftimes:
-        times = list(
-            Item.objects.filter(collection=collection, reference_time=reftimes[-1])
-            .order_by("time")
-            .values_list("time", flat=True)
-        )
+        newest = reftimes[-1]
+        times = sorted(time for reference_time, time in steps if reference_time == newest)
         return {
             WMTS_TIME_DIMENSION: (times, times[0]),
-            WMTS_REFTIME_DIMENSION: (reftimes, reftimes[-1]),
+            WMTS_REFTIME_DIMENSION: (reftimes, newest),
         }
-    times = list(Item.objects.filter(collection=collection).order_by("time").values_list("time", flat=True))
+    times = sorted({time for _, time in steps})
     if not times:
         return {}
     return {WMTS_TIME_DIMENSION: (times, times[-1])}
