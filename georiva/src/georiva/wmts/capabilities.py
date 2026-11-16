@@ -225,6 +225,10 @@ def layer_dimensions(variables):
     the newest run is the *last* ``Reftime`` value rather than the first, which
     is precisely what the ``Default`` element exists to say instead of position.
 
+    ``variables`` must already be what the caller may see — the output of
+    :func:`visible_variables` — because the assets are read by their ids alone
+    (ADR 0018: a query narrowed on already-scoped ids is scoped).
+
     One query for the whole document, whatever it lists (#682). Item is a
     hypertable, and a query on it that names no time is planned across every
     chunk — close to a second each on a store-backed instance — so a document

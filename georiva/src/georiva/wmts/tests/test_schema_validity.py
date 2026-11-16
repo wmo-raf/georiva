@@ -17,7 +17,7 @@ from django.urls import reverse
 
 from georiva.core.models import Catalog, Collection, Unit, Variable
 from georiva.organisations.testing import dial_org, make_organisation
-from georiva.wmts.testing import IsolatedCapabilitiesCache, hold
+from georiva.wmts.testing import IsolatedCapabilitiesCache, give_row
 
 try:
     from lxml import etree
@@ -72,7 +72,7 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
             value_min=0,
             value_max=50,
         )
-        hold(observed, datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
+        give_row(observed, datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
 
         # A forecast collection too, so the two-dimension (Time + Reftime)
         # layer shape is held to the schema alongside the Time-only one.
@@ -91,7 +91,7 @@ class WMTSSchemaValidityTests(IsolatedCapabilitiesCache, TestCase):
             value_min=0,
             value_max=50,
         )
-        hold(
+        give_row(
             predicted,
             datetime(2026, 3, 1, 18, 0, tzinfo=UTC),
             datetime(2026, 3, 1, 12, 0, tzinfo=UTC),

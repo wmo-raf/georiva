@@ -35,7 +35,7 @@ from georiva.wmts.testing import (
     NS,
     CapabilitiesReader,
     IsolatedCapabilitiesCache,
-    hold,
+    give_row,
     make_tiered_catalog,
 )
 
@@ -55,7 +55,7 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
         tiers = make_tiered_catalog(self.organisation)
         self.public = tiers["public"]
         self.unit = tiers["unit"]
-        hold(self.public.variables.get(), datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
+        give_row(self.public.variables.get(), datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
 
         User = get_user_model()
         member = User.objects.create_user("member", password="x")
@@ -90,7 +90,7 @@ class WMTSCapabilitiesCacheTests(CapabilitiesReader, TestCase):
         value production can actually express."""
         with override_settings(GEORIVA_WMTS_CAPABILITIES_CACHE_SECONDS=1):
             self.assertEqual(self.times(self.fetch()), ["2026-03-01T00:00:00Z"])
-            hold(self.public.variables.get(), datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
+            give_row(self.public.variables.get(), datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
             time.sleep(1.2)
             self.assertEqual(
                 self.times(self.fetch()),

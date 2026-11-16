@@ -1,6 +1,6 @@
 """Shared arrangements for the capabilities suites.
 
-Three of them, all here for the reason ``core.testing`` and
+Four of them, all here for the reason ``core.testing`` and
 ``organisations.testing`` exist: an arrangement two suites build separately is
 an arrangement that can drift between them.
 
@@ -15,8 +15,9 @@ The sweep is by key prefix rather than a flush, following the palette-cache
 tests: these suites run against the developer's own Redis, which is also
 holding a live stack's broker.
 
-*The three tiers*, which every credential-facing test needs, and
-*the reader*, which turns a response back into the layers it advertises.
+*The three tiers*, which every credential-facing test needs,
+*the reader*, which turns a response back into the layers it advertises, and
+*a row*, which every test needs that wants a layer to advertise a time (#682).
 
 Not a test module itself — it lives beside the app, in the pattern of
 ``organisations.testing``, so it is importable without reaching into a
@@ -113,7 +114,7 @@ class CapabilitiesReader(IsolatedCapabilitiesCache):
         }
 
 
-def hold(variable, time, reference_time=None, fmt=None):
+def give_row(variable, time, reference_time=None, fmt=None):
     """Give ``variable`` a row at ``time`` (in run ``reference_time``, if any).
 
     A row is what a layer's dimensions are read from (#682): its collection's

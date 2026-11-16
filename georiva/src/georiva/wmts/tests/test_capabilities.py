@@ -47,7 +47,7 @@ from georiva.wmts.testing import (
     CapabilitiesReader,
     IsolatedCapabilitiesCache,
     clear_capabilities_cache,
-    hold,
+    give_row,
     make_tiered_catalog,
 )
 
@@ -80,8 +80,8 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
             value_min=0,
             value_max=50,
         )
-        hold(self.variable, datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
-        hold(self.variable, datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
+        give_row(self.variable, datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
+        give_row(self.variable, datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
 
         private = Collection.objects.create(
             catalog=self.catalog,
@@ -399,7 +399,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             value_max=50,
         )
         for hour in (0, 6, 12):
-            hold(self.observed, datetime(2026, 3, 1, hour, 0, tzinfo=UTC))
+            give_row(self.observed, datetime(2026, 3, 1, hour, 0, tzinfo=UTC))
 
         forecast = Collection.objects.create(
             catalog=catalog,
@@ -420,7 +420,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         for day, hours in ((1, (0, 6, 12)), (2, (0, 6))):
             run = datetime(2026, 3, day, 0, 0, tzinfo=UTC)
             for hour in hours:
-                hold(self.predicted, run.replace(hour=hour), run)
+                give_row(self.predicted, run.replace(hour=hour), run)
 
     def layer(self, identifier):
         response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
@@ -552,7 +552,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
     def test_a_variable_missing_the_analysis_defaults_to_its_first_held_step(self):
         cloud = self.add_variable(self.forecast, "tcc")
         run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
-        hold(cloud, run.replace(hour=6), run)
+        give_row(cloud, run.replace(hour=6), run)
 
         dimensions = self.dimensions(self.layer("weather:fc-temperature:tcc"))
         time = dimensions["Time"]
@@ -562,7 +562,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
     def test_a_neighbouring_variable_keeps_its_own_steps(self):
         cloud = self.add_variable(self.forecast, "tcc")
         run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
-        hold(cloud, run.replace(hour=6), run)
+        give_row(cloud, run.replace(hour=6), run)
 
         time = self.dimensions(self.layer("weather:fc-temperature:t2m"))["Time"]
         self.assertEqual(
@@ -575,7 +575,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         late = self.add_variable(self.forecast, "late")
         run = datetime(2026, 3, 1, 0, 0, tzinfo=UTC)
         for hour in (6, 12):
-            hold(late, run.replace(hour=hour), run)
+            give_row(late, run.replace(hour=hour), run)
 
         dimensions = self.dimensions(self.layer("weather:fc-temperature:late"))
         self.assertEqual(self.values(dimensions["Reftime"]), ["2026-03-01T00:00:00Z"])
@@ -590,7 +590,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
 
     def test_an_observation_variable_lists_only_its_own_times(self):
         humidity = self.add_variable(self.observed.collection, "rh")
-        hold(humidity, datetime(2026, 3, 1, 6, 0, tzinfo=UTC))
+        give_row(humidity, datetime(2026, 3, 1, 6, 0, tzinfo=UTC))
 
         time = self.dimensions(self.layer("weather:obs-temperature:rh"))["Time"]
         self.assertEqual(self.values(time), ["2026-03-01T06:00:00Z"])
@@ -601,7 +601,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         Store asset, so a step carrying only a WEBP for this variable is a step
         a client asking for it would 404 on."""
         run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
-        hold(self.predicted, run.replace(hour=12), run, fmt=Asset.Format.WEBP)
+        give_row(self.predicted, run.replace(hour=12), run, fmt=Asset.Format.WEBP)
 
         time = self.dimensions(self.layer("weather:fc-temperature:t2m"))["Time"]
         self.assertEqual(
@@ -634,7 +634,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             for slug in ("a", "b"):
                 variable = self.add_variable(collection, slug)
                 run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
-                hold(variable, run, run)
+                give_row(variable, run, run)
         clear_capabilities_cache()
 
         with CaptureQueriesContext(connection) as after:
@@ -702,7 +702,7 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
             value_max=100,
         )
         for variable in (self.styled, self.styleless):
-            hold(variable, datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
+            give_row(variable, datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
 
     def layer(self, identifier):
         response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
@@ -808,7 +808,7 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
         dial_org(self.client)
         self.organisation = make_organisation()
         tiers = make_tiered_catalog(self.organisation)
-        hold(tiers["private"].variables.get(), datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
+        give_row(tiers["private"].variables.get(), datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
 
         User = get_user_model()
         member = User.objects.create_user("member", password="x")
