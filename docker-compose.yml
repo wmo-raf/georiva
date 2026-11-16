@@ -262,6 +262,9 @@ services:
       <<: *backend-variables
       WAIT_HOSTS: georiva-pgbouncer:5432,georiva-redis:6379,georiva:8000
       GEORIVA_CELERY_WORKER_CONCURRENCY: ${GEORIVA_CELERY_BOOKKEEPING_WORKER_CONCURRENCY:-4}
+      # Zonal stats and manifests leave a pool child a little larger after every task;
+      # past this it is replaced between tasks, before the kernel kills it mid-task.
+      GEORIVA_CELERY_WORKER_MAX_MEMORY_PER_CHILD_MB: ${GEORIVA_CELERY_BOOKKEEPING_WORKER_MAX_MEMORY_PER_CHILD_MB:-1024}
     depends_on:
       georiva:
         condition: service_started
