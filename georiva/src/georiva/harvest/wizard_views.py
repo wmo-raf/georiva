@@ -283,9 +283,7 @@ def _wait_for(token: str, since: float) -> _Wait:
     elif state == background_survey.CHECKING:
         error = _too_slow(_("GeoRiva stopped waiting after %(seconds)d seconds") % {"seconds": int(waited)})
     else:
-        error = _(
-            "GeoRiva lost track of this check of the catalog before it finished. Nothing was changed: try again."
-        )
+        error = _("GeoRiva lost track of this check of the catalog before it finished. Nothing was changed: try again.")
     return _Wait(error=error, waited=int(waited))
 
 
@@ -1003,9 +1001,8 @@ def harvest_recheck_upstream(request, pk):
             if wait.running:
                 messages.error(request, _("The catalog is still being checked, so nothing was saved yet."))
                 return redirect(f"{here}?check={token}")
-            messages.error(
-                request, _("That check of the catalog is no longer kept, so nothing was saved. GeoRiva will check again.")
-            )
+            gone = _("That check of the catalog is no longer kept, so nothing was saved. GeoRiva will check again.")
+            messages.error(request, gone)
             return redirect(here)
         if wait.error:
             messages.error(request, wait.error)
