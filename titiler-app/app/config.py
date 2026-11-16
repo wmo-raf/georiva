@@ -36,3 +36,10 @@ STORE_CONNECT_TIMEOUT = float(os.getenv("GEORIVA_STORE_CONNECT_TIMEOUT", "5"))
 #: requests for it fail without reopening the store again (#677). A step that
 #: arrives meanwhile is drawn at the latest once this has passed.
 STORE_MISS_TTL = float(os.getenv("GEORIVA_STORE_MISS_TTL", "60"))
+#: Bytes of decoded fields each worker keeps from Upstream stores (ADR 0044 §13;
+#: #663). Every tile of a store's map needs the same whole field — about 8 MB for
+#: a global 0.25° grid — so a map view reads it upstream once and draws the rest
+#: from here. Bounded in bytes, not fields, because a field's size is its grid's:
+#: a count would bound memory only for the grid it was chosen for. 0 keeps none.
+#: Set in megabytes (``GEORIVA_STORE_FIELD_CACHE_MB``), held here in bytes.
+STORE_FIELD_CACHE_BYTES = int(float(os.getenv("GEORIVA_STORE_FIELD_CACHE_MB", "128")) * 2**20)
