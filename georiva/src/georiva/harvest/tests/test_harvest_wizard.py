@@ -781,7 +781,7 @@ class RecheckUpstreamTests(HarvestFeedMixin, TestCase):
         )
 
         shown = self.client.get(self.url)
-        self.client.post(self.url, {})
+        self.client.post(self.url, {"offer_arrays": "1"})
 
         self.assertContains(shown, "temperature_2m")
         self.feed.refresh_from_db()

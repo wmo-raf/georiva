@@ -33,7 +33,7 @@ from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
 
 from georiva.core.machine_plane.remote_assets import publish_variable
-from georiva.core.storage.asset_location import remote_q
+from georiva.core.storage.asset_location import remote_q, store_q
 from georiva.sources.fetch_run_spine import RunResult, RunStopped, run_tracked
 
 from . import runs
@@ -135,11 +135,16 @@ def harvest(
 
 
 def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck: bool = False) -> None:
+    if feed.upstream_refusal:
+        # A re-check found the Upstream no longer usable; its rows stand until one finds it usable again.
+        raise RunStopped(f"upstream refused — {feed.upstream_refusal} Re-check the upstream once that is resolved.")
     reach = _Reach.of(feed)
     variables = feed.mapped_variables(collection)
     mapped = {variable.pk for variable in variables.values()}
-    # The closed runs every mapped Variable holds whole are not asked about again.
-    settled = set() if recheck or not reach.is_store else runs.settled_runs(collection, mapped, reach.runs_q())
+    # The closed runs every mapped Variable holds whole are not asked about again
+    # — unless a row still names a store address the feed has since left.
+    whole_window = recheck or not reach.is_store or _points_elsewhere(feed, collection, reach)
+    settled = set() if whole_window else runs.settled_runs(collection, mapped, reach.runs_q())
     described, undescribed = _description(feed, upstream)
     try:
         listed, expected = _listed(feed, upstream, described, reach.window, list(variables), settled)
@@ -235,6 +240,20 @@ def _index_window(feed, collection, upstream, result: HarvestResult, *, recheck:
     # once, here, where the window's Remote assets now are (ADR 0043 §3).
     for variable in variables.values():
         publish_variable(variable)
+
+
+def _points_elsewhere(feed, collection, reach: _Reach) -> bool:
+    """Whether a Store asset the Mirror judges — the feed's, in its window —
+    names a store other than the one the feed names now: a confirmed new
+    address the window has not yet been re-synced to, closed runs included.
+    A row outside the window is never re-synced, so it is not asked about."""
+    from georiva.core.models import Asset
+
+    return (
+        Asset.objects.filter(store_q(), reach.judged_q("item__"), harvested_by_id=feed.pk, item__collection=collection)
+        .exclude(href=feed.store_href)
+        .exists()
+    )
 
 
 def _description(feed, upstream):
