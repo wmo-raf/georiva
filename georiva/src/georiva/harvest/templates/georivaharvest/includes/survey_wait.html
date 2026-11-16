@@ -2,10 +2,11 @@
 {% comment %}
     What a page shows while an Upstream survey runs off the request: what it is
     waiting on and for how long. Pass `heading`, `wait`, and `panel` — the class
-    prefix of the page's own panel (`hwiz-panel`, `hrc-panel`); the page loads
-    `georivaharvest/survey_wait.css` and `.js`, which makes it look again on its own.
+    prefix of the page's own panel (`hwiz-panel`, `hrc-panel`). The page loads
+    `georivaharvest/survey_wait.css`, and looks again on its own with a
+    `<meta http-equiv="refresh">` in its head while it waits.
 {% endcomment %}
-<div class="{{ panel }}" role="status" aria-live="polite" data-survey-waiting>
+<div class="{{ panel }}" role="status" aria-live="polite">
     <div class="{{ panel }}__header">{{ heading }}</div>
     <div class="{{ panel }}__body">
         <p class="gr-survey-wait">{% icon name="spinner" %} {{ wait.waiting_on }}…</p>

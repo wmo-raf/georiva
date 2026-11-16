@@ -298,6 +298,14 @@ class RecheckWaitsOffTheRequestTests(StoreRecheckMixin, TestCase):
         found = self.client.get(opened["Location"])
         self.assertEqual([place["declared"] for place in found.context["new_places"]], [MOVED_BUCKET])
 
+    def test_the_wait_looks_again_on_its_own_without_a_script_and_stops_once_answered(self):
+        self.hold_surveys = True
+        waiting = self.client.get(self.client.get(self.url)["Location"])
+        self.assertContains(waiting, '<meta http-equiv="refresh"')
+
+        self.hold_surveys = False
+        self.assertNotContains(self.look(), 'http-equiv="refresh"')
+
     def test_reloading_the_wait_starts_no_second_survey_and_opening_it_again_does(self):
         self.hold_surveys = True
         opened = self.client.get(self.url)

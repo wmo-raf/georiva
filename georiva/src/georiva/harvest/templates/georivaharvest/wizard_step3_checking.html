@@ -10,6 +10,10 @@
 {% block extra_css %}
     {{ block.super }}
     <link rel="stylesheet" href="{% static 'georivaharvest/survey_wait.css' %}">
+    {% if not wait.error %}
+        {# Waiting: look again in a moment, with no script and no static file to load first. #}
+        <meta http-equiv="refresh" content="2">
+    {% endif %}
 {% endblock %}
 
 {% block wizard_content %}
@@ -41,9 +45,4 @@
             <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
         </div>
     {% endif %}
-{% endblock %}
-
-{% block extra_js %}
-    {{ block.super }}
-    <script src="{% static 'georivaharvest/survey_wait.js' %}"></script>
 {% endblock %}

@@ -412,6 +412,16 @@ class WizardDoesNotWaitOnTheRequestTests(WizardMixin, TestCase):
 
         self.assertContains(self.client.get(step(3)), "Opening the provider&#x27;s data store")
 
+    def test_the_wait_looks_again_on_its_own_without_a_script_and_stops_once_answered(self):
+        self.hold_surveys = True
+        self.give_address()
+        self.pick_collection()
+
+        self.assertContains(self.client.get(step(3)), '<meta http-equiv="refresh"')
+
+        self.finish_held_surveys()
+        self.assertNotContains(self.client.get(step(3)), 'http-equiv="refresh"')
+
     def test_reloading_the_wait_starts_no_second_survey(self):
         self.hold_surveys = True
         self.give_address()
