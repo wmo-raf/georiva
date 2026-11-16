@@ -145,6 +145,42 @@ class ReadStoreCodecsTests(SimpleTestCase):
         self.assertEqual(call.args, (self.storage,))
         self.assertEqual(call.kwargs, {}, "opened with nothing but where it is")
 
+    def test_hundreds_of_arrays_are_read_together_and_one_odd_codec_among_them_is_named(self):
+        def build(store):
+            for n in range(300):
+                zarr.create_array(store, name=f"field_{n:03d}", shape=(4, 8), chunks=(4, 8), dtype="f4")
+            key = "field_123/zarr.json"
+            prototype = default_buffer_prototype()
+            metadata = json.loads(asyncio.run(store.get(key, prototype)).to_bytes())
+            metadata["codecs"] = [{"name": "acme_wavelet"}]
+            asyncio.run(store.set(key, prototype.buffer.from_bytes(json.dumps(metadata).encode())))
+
+        self.commit(build)
+        store = icechunk.Repository.open(self.storage).readonly_session("main").store
+        in_flight, most = [0], [0]
+
+        class Counting:
+            """The store, counting how many metadata documents are asked for at once."""
+
+            async def get(self, key, prototype):
+                in_flight[0] += 1
+                most[0] = max(most[0], in_flight[0])
+                try:
+                    await asyncio.sleep(0.001)
+                    return await store.get(key, prototype)
+                finally:
+                    in_flight[0] -= 1
+
+            def list_dir(self, prefix):
+                return store.list_dir(prefix)
+
+        codecs = asyncio.run(upstream._array_codecs(Counting()))
+
+        self.assertEqual(len(codecs), 300)
+        self.assertEqual([path for path, named in codecs.items() if "acme_wavelet" in named], ["field_123"])
+        self.assertGreater(most[0], 1, "not one after another")
+        self.assertLessEqual(most[0], upstream.STORE_CONCURRENCY)
+
     def test_an_empty_store_has_no_arrays(self):
         self.commit(lambda store: zarr.open_group(store, mode="a"))
 
@@ -178,6 +214,7 @@ class ProbeStoreTests(SimpleTestCase):
             probe = probe_store(STORE)
 
         self.assertFalse(probe.readable)
+        self.assertFalse(probe.timed_out, "a refusal is not a wait")
         self.assertEqual(probe.codecs, {})
         for jargon in ("chunk", "zarr", "codec", "Icechunk", "s3://"):
             self.assertNotIn(jargon, probe.problem)
@@ -193,6 +230,7 @@ class ProbeStoreTests(SimpleTestCase):
             probe = probe_store(STORE, timeout=0.2)
 
         self.assertFalse(probe.readable)
+        self.assertTrue(probe.timed_out)
         self.assertIn("did not answer", probe.problem)
 
     def test_the_real_client_probes_the_address_it_is_given(self):

@@ -1,0 +1,93 @@
+{% extends "georivaharvest/wizard_base.html" %}
+{% load i18n wagtailadmin_tags %}
+{% comment %}
+    Step 3 while the collection's survey runs off the request (#667), and
+    when it came to nothing. Waiting, the page looks again every few seconds
+    on its own; it never starts a second survey.
+{% endcomment %}
+{% block titletag %}{% trans "Show data from an online catalog — What was found" %}{% endblock %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .hwiz-waiting {
+            display: flex;
+            align-items: center;
+            gap: 0.6em;
+            font-weight: 600;
+        }
+
+        .hwiz-waiting .icon {
+            width: 1.25em;
+            height: 1.25em;
+            animation: hwiz-spin 1s linear infinite;
+        }
+
+        @keyframes hwiz-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .hwiz-waiting .icon {
+                animation: none;
+            }
+        }
+    </style>
+{% endblock %}
+
+{% block wizard_content %}
+    {% if failed %}
+        <div class="hwiz-panel">
+            <div class="hwiz-panel__header">
+                {% blocktrans with title=checking.collection_title %}GeoRiva could not finish looking at “{{ title }}”{% endblocktrans %}
+            </div>
+            <div class="hwiz-panel__body">
+                <p>{% trans "Nothing was set up. You can ask the catalog again, or choose another collection." %}</p>
+            </div>
+        </div>
+        <form method="post" action="{% url 'harvest_wizard_step2' %}">
+            {% csrf_token %}
+            <input type="hidden" name="collection_id" value="{{ checking.collection_id }}">
+            <div class="hwiz-actions">
+                <button type="submit" class="button bicolor button--icon">
+                    {% icon name="rotate" wrapped=1 %}
+                    {% trans "Try again" %}
+                </button>
+                <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
+            </div>
+        </form>
+    {% else %}
+        <div class="hwiz-panel" role="status" aria-live="polite">
+            <div class="hwiz-panel__header">
+                {% blocktrans with title=checking.collection_title %}GeoRiva is reading the catalog to see whether it can show “{{ title }}”{% endblocktrans %}
+            </div>
+            <div class="hwiz-panel__body">
+                <p class="hwiz-waiting">{% icon name="spinner" %} {{ waiting_on }}…</p>
+                <p class="hwiz-note">
+                    {% blocktrans count counter=waited %}Waiting for one second so far.{% plural %}Waiting for {{ counter }} seconds so far.{% endblocktrans %}
+                    {% trans "Nothing is being set up or copied yet. This page checks again on its own; you can also leave it and come back." %}
+                </p>
+            </div>
+        </div>
+        <div class="hwiz-actions">
+            <a href="{% url 'harvest_wizard_step3' %}" class="button button-secondary">{% trans "Check again now" %}</a>
+            <a href="{% url 'harvest_wizard_step2' %}" class="button button-secondary">{% trans "Back" %}</a>
+        </div>
+    {% endif %}
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    {% if not failed %}
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                // Look again a moment later: the survey is the worker's, so a reload starts nothing.
+                window.setTimeout(function () {
+                    window.location.reload();
+                }, 2000);
+            });
+        </script>
+    {% endif %}
+{% endblock %}

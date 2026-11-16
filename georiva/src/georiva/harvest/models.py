@@ -226,7 +226,8 @@ class HarvestFeed(DataFeed):
         from .survey import SAMPLE_ITEMS
         from .upstream import StacApiClient
 
-        return StacApiClient(self.upstream_url, page_size=SAMPLE_ITEMS)
+        # Each read short, so step 1 — still read in the request — stays well inside a worker's timeout (#667).
+        return StacApiClient(self.upstream_url, page_size=SAMPLE_ITEMS, timeout=10, listing_timeout=15)
 
     @property
     def surveyed_asset_keys(self) -> list[tuple[str, str]]:

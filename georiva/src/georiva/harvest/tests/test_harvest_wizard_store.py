@@ -15,7 +15,7 @@ from django.utils import timezone
 from georiva.core.models import Asset, Catalog, Collection, Unit, Variable
 from georiva.harvest.models import HarvestFeed, UpstreamShape, VariableMapping
 from georiva.harvest.testing import FakeUpstream
-from georiva.harvest.upstream import StoreField
+from georiva.harvest.upstream import StoreField, UpstreamCollection
 from georiva.organisations.testing import make_organisation
 from georiva.sources.models import FetchRun
 
@@ -548,6 +548,7 @@ class WizardConfirmsWhereAStoresDataIsTests(StoreWizardMixin, TestCase):
 class WizardSavesAStoreFeedTogetherOrNotAtAllTests(StoreWizardMixin, TestCase):
     def setUp(self):
         super().setUp()
+        self.upstream.collections.append(UpstreamCollection(id="noaa-gfs-forecast-ensemble", title="GEFS"))
         self.reach_fields()
         self.choose_temperature()
 
@@ -612,10 +613,24 @@ class WizardSavesAStoreFeedTogetherOrNotAtAllTests(StoreWizardMixin, TestCase):
         self.assertEqual(Variable.objects.get().collection.catalog, feed.catalog)
 
     def test_choosing_another_collection_forgets_what_was_read_and_confirmed(self):
+        self.pick_collection("noaa-gfs-forecast-ensemble")
+        self.client.get(step(3))
         self.pick_collection("noaa-gfs-forecast-virtual")
+        self.client.get(step(3))
 
         page = self.client.get(step(4))
 
         self.assertEqual(page.context["details"], [])
         self.assertFalse(page.context["places"][0]["allowed"])
         self.assertRedirects(self.client.get(step(5)), step(4))
+
+    def test_going_back_to_the_same_collection_keeps_what_was_read_and_confirmed(self):
+        opened = len(self.upstream.stores_opened)
+
+        self.pick_collection("noaa-gfs-forecast-virtual")
+        self.client.get(step(3))
+
+        self.assertEqual(len(self.upstream.stores_opened), opened, "not opened again")
+        page = self.client.get(step(4))
+        self.assertNotEqual(page.context["details"], [])
+        self.assertEqual(self.client.get(step(5)).status_code, 200)

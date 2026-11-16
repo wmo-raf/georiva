@@ -253,6 +253,17 @@ class ChangedVerdictTests(StoreRecheckMixin, TestCase):
 
         self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).upstream_refusal, "")
 
+    def test_a_store_that_does_not_answer_in_time_records_no_refusal_and_says_to_try_again(self):
+        self.publish_store()
+        self.upstream.store_times_out = True
+
+        response = self.client.get(self.url, follow=True)
+
+        self.assertEqual(HarvestFeed.objects.get(pk=self.feed.pk).upstream_refusal, "")
+        said = " ".join(str(message) for message in response.context["messages"])
+        self.assertIn("took too long to answer", said)
+        self.assertIn("try again", said)
+
 
 class DecliningEverythingTests(StoreRecheckMixin, TestCase):
     def test_declining_every_proposal_changes_nothing(self):

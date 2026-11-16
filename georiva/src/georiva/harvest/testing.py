@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from .upstream import (
+    STORE_TIMEOUT,
     AssetProbe,
     CubeArray,
     CubeDimension,
@@ -18,6 +19,7 @@ from .upstream import (
     UpstreamCube,
     UpstreamItem,
     UpstreamRoot,
+    UpstreamTimedOut,
     UpstreamUnreachable,
     Window,
     in_window,
@@ -49,7 +51,8 @@ class FakeUpstream:
 
     Honest by default: it answers `list_items` with the window it was asked
     for. Set `ignores_window` for an Upstream that returns everything it has,
-    `unreachable` to a message for one that cannot be read at all, and
+    `unreachable` to a message for one that cannot be read at all,
+    `times_out` to a message for one that does not answer in time, and
     `collections_unreachable` for one that lists its items and not its collections.
     """
 
@@ -59,6 +62,10 @@ class FakeUpstream:
         self.items: list[UpstreamItem] = []
         self.addresses: dict[str, list[str]] = {}
         self.unreachable: str | None = None
+        #: A message for an Upstream that does not answer in the time it is given.
+        self.times_out: str | None = None
+        #: How many times its root was read: every survey starts there.
+        self.roots_read = 0
         #: A message for an Upstream whose collections cannot be read while its items can.
         self.collections_unreachable: str | None = None
         self.ignores_window = False
@@ -89,6 +96,8 @@ class FakeUpstream:
         self.stores: dict[str, dict[str, tuple[str, ...]]] = {}
         #: A message for a store that cannot be opened.
         self.store_unreadable: str | None = None
+        #: True for a store that does not answer in the time it is given.
+        self.store_times_out = False
         #: The stores opened, in order.
         self.stores_opened: list[str] = []
         #: The range a sample of each array shows, by path; one not here ranges 0–100.
@@ -198,6 +207,8 @@ class FakeUpstream:
         self.items = [item for item in self.items if item.datetime != when]
 
     def _answer(self):
+        if self.times_out:
+            raise UpstreamTimedOut(self.times_out)
         if self.unreachable:
             raise UpstreamUnreachable(self.unreachable)
 
@@ -283,6 +294,7 @@ class FakeUpstream:
         return self.addresses.get(host, [PUBLIC_ADDRESS])
 
     def describe_root(self) -> UpstreamRoot:
+        self.roots_read += 1
         self._answer()
         return UpstreamRoot(
             is_api=self.is_api,
@@ -311,6 +323,9 @@ class FakeUpstream:
 
     def describe_store(self, href: str) -> StoreProbe:
         self.stores_opened.append(href)
+        if self.store_times_out:
+            problem = f"it did not answer within {STORE_TIMEOUT} seconds"
+            return StoreProbe(readable=False, problem=problem, timed_out=True)
         if self.store_unreadable:
             return StoreProbe(readable=False, problem=self.store_unreadable)
         if href not in self.stores:

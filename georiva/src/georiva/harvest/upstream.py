@@ -34,6 +34,11 @@ class UpstreamUnreachable(Exception):
     A `source` failure (ADR 0031): the harvest that meets it stops and retries."""
 
 
+class UpstreamTimedOut(UpstreamUnreachable):
+    """The Upstream did not answer in the time it was given. Unlike a refusal,
+    the same read often succeeds a moment later: it is worth trying again."""
+
+
 @dataclass(frozen=True)
 class CubeDimension:
     """One dimension of a collection's cube, as the collection describes it."""
@@ -125,6 +130,8 @@ class StoreProbe:
     problem: str = ""
     #: The codecs each array names, by the array's path in the store, in the order it names them.
     codecs: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Whether it was given up on for not answering in time: worth asking again, not a refusal.
+    timed_out: bool = False
 
 
 @dataclass(frozen=True)
@@ -661,7 +668,7 @@ def probe_store(href: str, *, timeout: float = STORE_TIMEOUT) -> StoreProbe:
     try:
         return StoreProbe(readable=True, codecs=pool.submit(read).result(timeout=timeout))
     except TimedOut:
-        return StoreProbe(readable=False, problem=f"it did not answer within {int(timeout)} seconds")
+        return StoreProbe(readable=False, problem=f"it did not answer within {int(timeout)} seconds", timed_out=True)
     except Exception as exc:  # whatever the store or its library raises is an answer, never a crash
         logger.warning("Upstream store at %s did not open: %s", href, exc)
         return StoreProbe(readable=False, problem="it did not open for a reader with no account")
@@ -1139,13 +1146,20 @@ class StacApiClient:
     #: How many redirects one request may take before the Upstream is going nowhere.
     MAX_REDIRECTS = 5
 
-    def __init__(self, url: str, *, session=None, timeout: float = 30, page_size: int = 200):
+    #: How many of a catalog of plain files' collection documents are read at once.
+    LISTING_CONCURRENCY = 8
+
+    def __init__(
+        self, url: str, *, session=None, timeout: float = 30, page_size: int = 200, listing_timeout: float = 15
+    ):
         self.url = url.rstrip("/")
         self.timeout = timeout
         self.page_size = page_size
+        #: Seconds reading a catalog of plain files' collection documents may take in all.
+        self.listing_timeout = listing_timeout
         self._session = session
-        #: Whether the root, once read, turned out to be a catalog of plain files.
-        self._plain_files: bool | None = None
+        #: The root, once read: one client asks for it once.
+        self._root: UpstreamRoot | None = None
 
     @property
     def session(self):
@@ -1169,19 +1183,36 @@ class StacApiClient:
         ask. Known once its root has been read; before that, only an address
         that names a file is worth reading the root for — an API is asked for
         its collections directly, with no request it was not sent before."""
-        if self._plain_files is None and urlsplit(self.url).path.lower().endswith(".json"):
+        if self._root is None and urlsplit(self.url).path.lower().endswith(".json"):
             self.describe_root()
-        return bool(self._plain_files)
+        return self._root is not None and not self._root.is_api
 
-    def _linked_collections(self, root: UpstreamRoot) -> Iterator[UpstreamCollection]:
+    def _linked_collections(self, root: UpstreamRoot) -> list[UpstreamCollection]:
         """A catalog of plain files has no listing: its collections are what
         its root links to, each described by its own document. One that will
-        not describe itself is still offered, by the id and title of its link."""
+        not describe itself is still offered, by the id and title of its link.
+
+        The documents are read `LISTING_CONCURRENCY` at a time, and for no
+        longer than `listing_timeout` in all: one that has not answered by then
+        is offered by its link, as one that will not answer at all is.
+        """
+        from concurrent.futures import ThreadPoolExecutor, wait
+
         if root.own is not None:
-            yield root.own
-            return
-        for child in root.children:
-            yield self._follow(root.child_hrefs.get(child.id), child.id) or child
+            return [root.own]
+        if not root.children:
+            return []
+        pool = ThreadPoolExecutor(max_workers=self.LISTING_CONCURRENCY, thread_name_prefix="upstream-listing")
+        try:
+            asked = [pool.submit(self._follow, root.child_hrefs.get(child.id), child.id) for child in root.children]
+            done, _late = wait(asked, timeout=self.listing_timeout)
+        finally:
+            # Those still waiting are not waited for: their threads end with their own requests' timeouts.
+            pool.shutdown(wait=False, cancel_futures=True)
+        return [
+            (answer.result() if answer in done and answer.exception() is None else None) or child
+            for child, answer in zip(root.children, asked, strict=True)
+        ]
 
     def _follow(self, href: str | None, collection_id: str) -> UpstreamCollection | None:
         """The collection document at `href`, when it is on the operator's own
@@ -1221,10 +1252,10 @@ class StacApiClient:
         return sorted({info[4][0] for info in found})
 
     def describe_root(self) -> UpstreamRoot:
-        page, url = self._get(self.url, None)
-        root = parse_root(page, base_url=url)
-        self._plain_files = not root.is_api
-        return root
+        if self._root is None:
+            page, url = self._get(self.url, None)
+            self._root = parse_root(page, base_url=url)
+        return self._root
 
     def describe_collection(self, collection_id: str) -> UpstreamCollection | None:
         root = self.describe_root()
@@ -1305,6 +1336,8 @@ class StacApiClient:
                     allow_redirects=False,
                     headers={"Accept": "application/geo+json, application/json"},
                 )
+            except requests.Timeout as exc:
+                raise UpstreamTimedOut(f"upstream catalog did not answer within {self.timeout:g} seconds") from exc
             except requests.RequestException as exc:
                 raise UpstreamUnreachable(f"upstream catalog unreachable: {exc}") from exc
             location = response.headers.get("Location") if response.status_code in _REDIRECTS else None
