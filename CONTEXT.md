@@ -312,7 +312,8 @@ deliveries for the reference time have ingested — ADR 0034), `upload_session` 
 and all its accepted deliveries have ingested), `quiet_period` (the safety net for whatever does not add up, and
 sweeps), `store_held` (a harvest of an **Upstream store**, which writes no `FileIngestion` and so opens the run itself
 on its first **Held step**: every mapped Variable holds every step its array is expected at — the run's expected steps
-from the array's own first Held step on, since an average is never held at a run's first step; a closed run is
+from the array's own first Held step on, since an average is never held at a run's first step. Which steps, not how
+many: a step held past the run's expected length gets a row but cannot stand in for a missing one; a closed run is
 not asked about again until an operator's "Run now" re-checks the window, and reopens if a step has gone — ADR 0044
 §6). A store's run has no `last_file_at`, so quiet never closes one with holes. Exposes `version` = `ref_epoch_seconds × 100 + revision`. Emits `run_ingestion_closed` /
 `run_ingestion_reopened` from `ingestion/domain_signals.py`.

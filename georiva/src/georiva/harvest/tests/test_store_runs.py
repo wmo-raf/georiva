@@ -355,3 +355,77 @@ class AnArrayNotHeldAtARunsFirstStepTests(StoreRunsMixin, TestCase):
 
         response = self.client.get(reverse("run-list", args=["gfs", collection.slug]))
         self.assertEqual(response.json()["latest_complete"]["reference_time"], self.run.isoformat())
+
+
+class WhichStepsAreHeldTests(StoreRunsMixin, TestCase):
+    """A run is complete when the steps it is expected at are held — which
+    ones, not how many. A step held past the expected length gets a row and
+    cannot stand in for a missing one (#672). The run expects 0h, 3h and 6h."""
+
+    def latest_complete(self):
+        dial_org(self.client, self.organisation.slug)
+        collection = self.feed.ensure_collection()
+        Collection.objects.filter(pk=collection.pk).update(visibility=Collection.Visibility.PUBLIC)
+        return self.client.get(reverse("run-list", args=["gfs", collection.slug])).json()["latest_complete"]
+
+    def test_a_step_past_the_expected_length_does_not_make_up_for_a_missing_one(self):
+        self.hold("temperature_2m", 0, 6, 9)
+
+        self.harvest()
+
+        self.assertEqual(self.steps(), [(self.run, 0), (self.run, 6), (self.run, 9)])
+        self.assertTrue(self.record().is_open)
+        self.assertIsNone(self.latest_complete())
+
+    def test_a_run_held_only_past_its_expected_length_stays_open(self):
+        self.hold("temperature_2m", 9)
+
+        self.harvest()
+
+        self.assertTrue(self.record().is_open)
+        self.assertIsNone(self.latest_complete())
+
+    def test_a_run_holding_every_expected_step_and_more_closes(self):
+        self.hold("temperature_2m", 0, 3, 6, 9)
+
+        self.harvest()
+
+        record = self.record()
+        self.assertTrue(record.is_complete)
+        self.assertEqual(record.closed_by, RunIngestion.Closer.STORE_HELD)
+        self.assertEqual(self.latest_complete()["reference_time"], self.run.isoformat())
+
+    def test_a_run_whose_expected_length_shrinks_is_still_judged_on_its_steps(self):
+        self.upstream.expected_steps[self.run] = 4  # 0h to 9h
+        self.hold("temperature_2m", 0, 6, 9)
+        self.harvest()
+
+        self.upstream.expected_steps[self.run] = STEPS
+        self.harvest()
+
+        self.assertTrue(self.record().is_open)
+
+    def test_a_closed_run_with_a_hole_is_not_settled(self):
+        self.hold("temperature_2m", 0, 3, 6, 9)
+        self.harvest()
+        self.assertTrue(self.record().is_complete)
+        # Its rows lose an expected step, while still as many as it expects.
+        Item.objects.filter(collection=self.feed.collection, reference_time=self.run, time=self.run + hours(3)).delete()
+
+        self.harvest()
+
+        self.assertIn(self.run, self.upstream.runs_asked[-1])
+
+    def test_a_run_recorded_with_counts_not_steps_is_asked_again(self):
+        self.hold_run("temperature_2m")
+        self.harvest()
+        # As recorded before the steps themselves were (#681): a count says not which.
+        RunIngestion.objects.filter(pk=self.record().pk).update(
+            expected_steps_by_variable={str(self.temperature.pk): STEPS}
+        )
+
+        self.harvest()
+
+        self.assertIn(self.run, self.upstream.runs_asked[-1])
+        self.assertTrue(self.record().is_complete)
+        self.assertEqual(self.record().expected_steps_by_variable, {str(self.temperature.pk): [0, 3 * 3600, 6 * 3600]})

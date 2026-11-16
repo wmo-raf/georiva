@@ -9,7 +9,8 @@ itself, from the rows it holds:
 - it closes, as `store_held`, once every mapped Variable has a row for every
   step its array is expected at — the run's expected steps from the array's
   own first Held step on, since an average is never held at a run's first
-  step (#681);
+  step (#681). Which steps, not how many: a step held past the run's expected
+  length gets a row, and cannot stand in for a missing one (#672);
 - a closed run that is complete for every Variable mapped now is *settled*:
   the next harvest does not ask the store about it, and its rows stand;
 - a run found no longer complete — a step gone upstream, found by a full
@@ -20,19 +21,20 @@ itself, from the rows it holds:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.db.models import Count, Exists, OuterRef
 
 
 @dataclass(frozen=True)
 class Expected:
-    """How many steps the store expects of one run: of the run, and of each
-    mapped Variable whose array it holds a step of, by Variable pk. A Variable
-    not in `by_variable` expects the run's `steps`."""
+    """What the store expects of one run: how many steps of the run, and the
+    lead times each mapped Variable whose array it holds a step of is expected
+    at, by Variable pk. A Variable not in `by_variable` is not held whole: the
+    store holds no step of its array, or did not say which it expects."""
 
     steps: int
-    by_variable: dict[int, int] = field(default_factory=dict)
+    by_variable: dict[int, frozenset[timedelta]] = field(default_factory=dict)
 
 
 def settled_runs(collection, variable_pks: set[int], window_q) -> set[datetime]:
@@ -60,8 +62,8 @@ def keep_runs(
 ):
     """Bring the run records of the window up to the rows a harvest left.
 
-    `expected` is how many steps the store expects of each run it was asked
-    about and holds a step of; `settled` the runs it was not asked about. A
+    `expected` is what the store expects of each run it was asked about and
+    holds a step of; `settled` the runs it was not asked about. A
     run in neither — one with a record whose every step is gone upstream — is
     judged as holding nothing. A run closed on other evidence — by an
     operator — is theirs, and is left as it is. Call it only once the window
@@ -113,34 +115,44 @@ def forget_aged_out(collection, start: datetime) -> None:
 
 
 def _whole(held, run, variable_pks, expected: Expected | None) -> bool:
-    """Whether every one of `variable_pks` holds every step of `run` it is expected at."""
+    """Whether every one of `variable_pks` holds every step of `run` it is
+    expected at. A Variable expected at none — its array held only past the
+    run's expected length — holds none of the run, and is not whole."""
     if not expected or not expected.steps or not variable_pks:
         return False
-    return all(held.get((run, pk), 0) >= expected.by_variable.get(pk, expected.steps) for pk in variable_pks)
+    return all(
+        expected.by_variable.get(pk) and expected.by_variable[pk] <= held.get((run, pk), frozenset())
+        for pk in variable_pks
+    )
 
 
 def _recorded(records) -> dict[datetime, Expected | None]:
     """What the run records in `records` say the store expected of each run
     when last asked; `None` for a run it said nothing of."""
+    from georiva.ingestion.models import RunIngestion
+
     return {
-        run: Expected(steps, {int(pk): n for pk, n in (by_variable or {}).items()}) if steps else None
+        run: Expected(steps, RunIngestion.decode_expected_by_variable(by_variable)) if steps else None
         for run, steps, by_variable in records.values_list(
             "reference_time", "expected_file_count", "expected_steps_by_variable"
         )
     }
 
 
-def _held_by_variable(collection, runs, variable_pks) -> dict[tuple[datetime, int], int]:
-    """How many steps of each run hold a row for each Variable: `(run, pk) → n`."""
+def _held_by_variable(collection, runs, variable_pks) -> dict[tuple[datetime, int], frozenset[timedelta]]:
+    """The lead times of each run that hold a row for each Variable: `(run, pk) → leads`."""
     from georiva.core.models import Asset
 
     if not runs or not variable_pks:
         return {}
+    held: dict[tuple[datetime, int], set[timedelta]] = {}
     rows = (
         Asset.objects.filter(
             item__collection=collection, item__reference_time__in=list(runs), variable_id__in=variable_pks
         )
-        .values("item__reference_time", "variable_id")
-        .annotate(n=Count("item", distinct=True))
+        .values_list("item__reference_time", "variable_id", "item__time")
+        .distinct()
     )
-    return {(row["item__reference_time"], row["variable_id"]): row["n"] for row in rows}
+    for run, pk, when in rows:
+        held.setdefault((run, pk), set()).add(when - run)
+    return {at: frozenset(leads) for at, leads in held.items()}

@@ -133,7 +133,7 @@ class HeldStepsOfAForecastTests(StoreFixture, SimpleTestCase):
                     reference_time=datetime(2026, 3, 1, 6, tzinfo=UTC),
                     arrays=frozenset({"temperature_2m"}),
                     run_steps=len(LEADS),
-                    array_steps={"temperature_2m": 1},
+                    array_steps={"temperature_2m": frozenset({LEADS[3]})},
                 )
             ],
         )
@@ -361,20 +361,34 @@ class AStoreThatCannotBeListedTests(StoreFixture, SimpleTestCase):
 
 
 class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
-    """How many steps of a run each array is expected at (#681).
+    """Which steps of a run each array is expected at (#681, #672).
 
     The store declares no per-array mask, and an average, accumulation, flux or
     extreme is never held at a run's first step. So an array expects the run's
-    expected steps from its own first Held step on.
+    expected lead times from its own first Held step on — the steps themselves,
+    not how many, so a step held past the expected length cannot stand in for
+    a missing one.
     """
 
     def expected(self, *fields):
-        """`(run index, array) → steps it expects`, over every Held step."""
+        """`(run index, array) → lead times it expects`, over every Held step."""
         found = {}
         for step in self.held(*fields):
-            for path, steps in step.array_steps.items():
-                found[(RUNS.index(step.reference_time), path)] = steps
+            for path, leads in step.array_steps.items():
+                found[(RUNS.index(step.reference_time), path)] = leads
         return found
+
+    @staticmethod
+    def expected_forecast_length(store, hours):
+        length = zarr.create_array(
+            store,
+            name="expected_forecast_length",
+            shape=(len(RUNS),),
+            dtype="i8",
+            dimension_names=("init_time",),
+            attributes={"units": "seconds"},
+        )
+        length[:] = [hours * 3600] * len(RUNS)
 
     def test_an_array_held_from_a_runs_first_step_expects_every_step(self):
         def build(store):
@@ -383,7 +397,7 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.commit(build)
 
-        self.assertEqual(self.expected(), {(0, "temperature_2m"): len(LEADS)})
+        self.assertEqual(self.expected(), {(0, "temperature_2m"): frozenset(LEADS)})
 
     def test_an_array_not_held_at_a_runs_first_step_expects_the_steps_from_its_first(self):
         def build(store):
@@ -395,7 +409,7 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.assertEqual(
             self.expected(TEMPERATURE, CLOUD),
-            {(0, "temperature_2m"): len(LEADS), (0, CLOUD.path): len(LEADS) - 1},
+            {(0, "temperature_2m"): frozenset(LEADS), (0, CLOUD.path): frozenset(LEADS[1:])},
         )
 
     def test_a_gap_after_an_arrays_first_step_is_still_expected(self):
@@ -407,25 +421,31 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.commit(build)
 
-        self.assertEqual(self.expected(), {(0, "temperature_2m"): len(LEADS)})
+        self.assertEqual(self.expected(), {(0, "temperature_2m"): frozenset(LEADS)})
 
     def test_the_stores_expected_forecast_length_still_bounds_an_array(self):
         def build(store):
             self.coordinates(store)
-            length = zarr.create_array(
-                store,
-                name="expected_forecast_length",
-                shape=(len(RUNS),),
-                dtype="i8",
-                dimension_names=("init_time",),
-                attributes={"units": "seconds"},
-            )
-            length[:] = [6 * 3600] * len(RUNS)  # leads 0h, 3h, 6h
+            self.expected_forecast_length(store, 6)  # leads 0h, 3h, 6h
             self.forecast(store, CLOUD.path)[0, 1:] = 1.0
 
         self.commit(build)
 
-        self.assertEqual(self.expected(CLOUD), {(0, CLOUD.path): 2})
+        self.assertEqual(self.expected(CLOUD), {(0, CLOUD.path): frozenset(LEADS[1:3])})
+
+    def test_a_step_held_past_the_expected_length_is_listed_and_not_expected(self):
+        def build(store):
+            self.coordinates(store)
+            self.expected_forecast_length(store, 6)  # leads 0h, 3h, 6h
+            array = self.forecast(store)
+            array[0, 0] = 1.0
+            array[0, 2] = 1.0
+            array[0, 3] = 1.0  # 9h: past the expected length
+
+        self.commit(build)
+
+        self.assertEqual(self.steps(), [(0, 0), (0, 2), (0, 3)])
+        self.assertEqual(self.expected(), {(0, "temperature_2m"): frozenset(LEADS[:3])})
 
     def test_each_run_is_judged_on_its_own(self):
         def build(store):
@@ -436,4 +456,7 @@ class AnArraysExpectedStepsTests(StoreFixture, SimpleTestCase):
 
         self.commit(build)
 
-        self.assertEqual(self.expected(), {(0, "temperature_2m"): 4, (1, "temperature_2m"): 2})
+        self.assertEqual(
+            self.expected(),
+            {(0, "temperature_2m"): frozenset(LEADS), (1, "temperature_2m"): frozenset(LEADS[2:])},
+        )

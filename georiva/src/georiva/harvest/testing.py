@@ -260,15 +260,17 @@ class FakeUpstream:
             return None
         return self.expected_steps.get(run, self.steps_per_run)
 
-    def _array_steps(self, run: datetime | None, paths) -> dict[str, int]:
-        """As the real store answers: an array expects its run's steps from its own first Held step on (#681)."""
+    def _array_steps(self, run: datetime | None, paths) -> dict[str, frozenset[timedelta]]:
+        """As the real store answers: an array expects its run's lead times from
+        its own first Held step on (#681), whichever it holds past them (#672)."""
         steps = self._run_steps(run)
         if steps is None:
             return {}
+        leads = [n * self.lead_interval for n in range(steps)]
         found = {}
         for path in paths:
-            first = min(when for held_run, when in self.held[path] if held_run == run)
-            found[path] = steps - (first - run) // self.lead_interval
+            first = min(when for held_run, when in self.held[path] if held_run == run) - run
+            found[path] = frozenset(lead for lead in leads if lead >= first)
         return found
 
     @staticmethod
