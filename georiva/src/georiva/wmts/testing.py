@@ -113,6 +113,31 @@ class CapabilitiesReader(IsolatedCapabilitiesCache):
         }
 
 
+def hold(variable, time, reference_time=None, fmt=None):
+    """Give ``variable`` a row at ``time`` (in run ``reference_time``, if any).
+
+    A row is what a layer's dimensions are read from (#682): its collection's
+    Item at that instant, carrying an asset of this variable that Titiler can
+    draw — a COG unless ``fmt`` says otherwise. The Item is shared with the
+    collection's other variables, as an ingested one is, so a fixture holding
+    two variables at one instant has one Item with two assets.
+    """
+    from georiva.core.models import Asset, Item
+
+    item, _ = Item.objects.get_or_create(
+        collection=variable.collection,
+        time=time,
+        reference_time=reference_time,
+    )
+    Asset.objects.create(
+        item=item,
+        variable=variable,
+        href=f"{variable.slug}/{time:%Y%m%dT%H%M}.tif",
+        format=fmt or Asset.Format.COG,
+    )
+    return item
+
+
 def make_tiered_catalog(organisation, slug="forecast"):
     """One catalog under ``organisation`` holding a collection at each
     visibility tier, each carrying a ``t2m`` variable.

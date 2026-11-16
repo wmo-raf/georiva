@@ -12,7 +12,9 @@ from urllib.parse import urlsplit
 from xml.etree import ElementTree as ET
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from georiva.accounts.models import ApiKey
@@ -25,6 +27,7 @@ from georiva.core.machine_plane import (
     wmts_rest_tile_template,
 )
 from georiva.core.models import (
+    Asset,
     Catalog,
     Collection,
     Item,
@@ -43,6 +46,8 @@ from georiva.wmts.testing import (
     PUBLIC_LAYER,
     CapabilitiesReader,
     IsolatedCapabilitiesCache,
+    clear_capabilities_cache,
+    hold,
     make_tiered_catalog,
 )
 
@@ -75,14 +80,8 @@ class WMTSCapabilitiesTests(IsolatedCapabilitiesCache, TestCase):
             value_min=0,
             value_max=50,
         )
-        Item.objects.create(
-            collection=self.public,
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
-        )
-        Item.objects.create(
-            collection=self.public,
-            time=datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
-        )
+        hold(self.variable, datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
+        hold(self.variable, datetime(2026, 3, 1, 12, 0, tzinfo=UTC))
 
         private = Collection.objects.create(
             catalog=self.catalog,
@@ -391,7 +390,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             slug="obs-temperature",
             visibility=Collection.Visibility.PUBLIC,
         )
-        Variable.objects.create(
+        self.observed = Variable.objects.create(
             collection=observations,
             slug="t2m",
             name="2m Temperature",
@@ -400,10 +399,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             value_max=50,
         )
         for hour in (0, 6, 12):
-            Item.objects.create(
-                collection=observations,
-                time=datetime(2026, 3, 1, hour, 0, tzinfo=UTC),
-            )
+            hold(self.observed, datetime(2026, 3, 1, hour, 0, tzinfo=UTC))
 
         forecast = Collection.objects.create(
             catalog=catalog,
@@ -411,7 +407,9 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             slug="fc-temperature",
             visibility=Collection.Visibility.PUBLIC,
         )
-        Variable.objects.create(
+        self.forecast = forecast
+        self.unit = unit
+        self.predicted = Variable.objects.create(
             collection=forecast,
             slug="t2m",
             name="Forecast 2m Temperature",
@@ -422,11 +420,7 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
         for day, hours in ((1, (0, 6, 12)), (2, (0, 6))):
             run = datetime(2026, 3, day, 0, 0, tzinfo=UTC)
             for hour in hours:
-                Item.objects.create(
-                    collection=forecast,
-                    time=run.replace(hour=hour),
-                    reference_time=run,
-                )
+                hold(self.predicted, run.replace(hour=hour), run)
 
     def layer(self, identifier):
         response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
@@ -540,6 +534,114 @@ class WMTSDimensionTests(IsolatedCapabilitiesCache, TestCase):
             ).exists()
         )
 
+    # Each layer answers for its own Variable (#682). A forecast store rarely
+    # holds every field at every step — GFS has no cloud cover at the analysis
+    # — and a layer advertising its collection's times would default a client
+    # straight onto a tile that does not exist.
+
+    def add_variable(self, collection, slug):
+        return Variable.objects.create(
+            collection=collection,
+            slug=slug,
+            name=slug,
+            unit=self.unit,
+            value_min=0,
+            value_max=100,
+        )
+
+    def test_a_variable_missing_the_analysis_defaults_to_its_first_held_step(self):
+        cloud = self.add_variable(self.forecast, "tcc")
+        run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
+        hold(cloud, run.replace(hour=6), run)
+
+        dimensions = self.dimensions(self.layer("weather:fc-temperature:tcc"))
+        time = dimensions["Time"]
+        self.assertEqual(self.values(time), ["2026-03-02T06:00:00Z"])
+        self.assertEqual(time.findtext("wmts:Default", namespaces=NS), "2026-03-02T06:00:00Z")
+
+    def test_a_neighbouring_variable_keeps_its_own_steps(self):
+        cloud = self.add_variable(self.forecast, "tcc")
+        run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
+        hold(cloud, run.replace(hour=6), run)
+
+        time = self.dimensions(self.layer("weather:fc-temperature:t2m"))["Time"]
+        self.assertEqual(
+            self.values(time),
+            ["2026-03-02T00:00:00Z", "2026-03-02T06:00:00Z"],
+        )
+        self.assertEqual(time.findtext("wmts:Default", namespaces=NS), "2026-03-02T00:00:00Z")
+
+    def test_a_variable_absent_from_the_newest_run_defaults_to_its_own_newest(self):
+        late = self.add_variable(self.forecast, "late")
+        run = datetime(2026, 3, 1, 0, 0, tzinfo=UTC)
+        for hour in (6, 12):
+            hold(late, run.replace(hour=hour), run)
+
+        dimensions = self.dimensions(self.layer("weather:fc-temperature:late"))
+        self.assertEqual(self.values(dimensions["Reftime"]), ["2026-03-01T00:00:00Z"])
+        self.assertEqual(
+            dimensions["Reftime"].findtext("wmts:Default", namespaces=NS),
+            "2026-03-01T00:00:00Z",
+        )
+        self.assertEqual(
+            self.values(dimensions["Time"]),
+            ["2026-03-01T06:00:00Z", "2026-03-01T12:00:00Z"],
+        )
+
+    def test_an_observation_variable_lists_only_its_own_times(self):
+        humidity = self.add_variable(self.observed.collection, "rh")
+        hold(humidity, datetime(2026, 3, 1, 6, 0, tzinfo=UTC))
+
+        time = self.dimensions(self.layer("weather:obs-temperature:rh"))["Time"]
+        self.assertEqual(self.values(time), ["2026-03-01T06:00:00Z"])
+        self.assertEqual(time.findtext("wmts:Default", namespaces=NS), "2026-03-01T06:00:00Z")
+
+    def test_a_row_titiler_cannot_draw_is_not_a_step(self):
+        """A rendered picture alone is no tile: the tile route draws a COG or a
+        Store asset, so a step carrying only a WEBP for this variable is a step
+        a client asking for it would 404 on."""
+        run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
+        hold(self.predicted, run.replace(hour=12), run, fmt=Asset.Format.WEBP)
+
+        time = self.dimensions(self.layer("weather:fc-temperature:t2m"))["Time"]
+        self.assertEqual(
+            self.values(time),
+            ["2026-03-02T00:00:00Z", "2026-03-02T06:00:00Z"],
+        )
+
+    def test_a_variable_with_no_rows_advertises_no_dimensions(self):
+        self.add_variable(self.forecast, "empty")
+
+        layer = self.layer("weather:fc-temperature:empty")
+        self.assertEqual(self.dimensions(layer), {})
+        self.assertNotIn("?", layer.find("wmts:ResourceURL", NS).get("template"))
+
+    def test_the_document_costs_the_same_queries_however_many_collections_it_lists(self):
+        """#682: two queries per collection, each planned across every chunk of
+        the Item hypertable, made an 11 s document of two store collections.
+        What the document reads must not grow with what it lists."""
+        url = reverse("wmts:capabilities", args=[self.organisation.slug])
+        with CaptureQueriesContext(connection) as before:
+            self.client.get(url)
+
+        for n in range(3):
+            collection = Collection.objects.create(
+                catalog=self.forecast.catalog,
+                name=f"More {n}",
+                slug=f"more-{n}",
+                visibility=Collection.Visibility.PUBLIC,
+            )
+            for slug in ("a", "b"):
+                variable = self.add_variable(collection, slug)
+                run = datetime(2026, 3, 2, 0, 0, tzinfo=UTC)
+                hold(variable, run, run)
+        clear_capabilities_cache()
+
+        with CaptureQueriesContext(connection) as after:
+            response = self.client.get(url)
+        self.assertEqual(len(ET.fromstring(response.content).findall("wmts:Contents/wmts:Layer", NS)), 8)
+        self.assertEqual(len(after), len(before))
+
 
 class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
     """Named styles in the capabilities document (#359).
@@ -599,10 +701,8 @@ class WMTSStyleTests(IsolatedCapabilitiesCache, TestCase):
             value_min=0,
             value_max=100,
         )
-        Item.objects.create(
-            collection=collection,
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
-        )
+        for variable in (self.styled, self.styleless):
+            hold(variable, datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
 
     def layer(self, identifier):
         response = self.client.get(reverse("wmts:capabilities", args=[self.organisation.slug]))
@@ -708,10 +808,7 @@ class WMTSCredentialTests(CapabilitiesReader, TestCase):
         dial_org(self.client)
         self.organisation = make_organisation()
         tiers = make_tiered_catalog(self.organisation)
-        Item.objects.create(
-            collection=tiers["private"],
-            time=datetime(2026, 3, 1, 0, 0, tzinfo=UTC),
-        )
+        hold(tiers["private"].variables.get(), datetime(2026, 3, 1, 0, 0, tzinfo=UTC))
 
         User = get_user_model()
         member = User.objects.create_user("member", password="x")
