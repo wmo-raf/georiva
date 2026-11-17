@@ -45,6 +45,11 @@ seconds (#677): a row can offer a step the store has lost, and without this
 each request for it would pay a reopen. A request for a remembered step still
 asks the open store, so one another request's reopen has found is drawn.
 
+**It is warmed at start** (#684). Each worker opens the stores of published
+Store assets as it comes up, in the background, through :func:`opened_store`
+and :meth:`OpenStore.warm`, so the open recorded above is paid before a user's
+first map asks; ``app.warm`` says how.
+
 **It keeps the fields it decoded** (ADR 0044 §13; #663). A store's chunk is one
 whole field and every tile of a map needs all of it, so each process keeps up
 to ``STORE_FIELD_CACHE_BYTES`` of decoded fields, least recently used out
@@ -104,22 +109,27 @@ class StoreSlice:
     def published(cls, entry: dict, time: datetime, reftime: datetime | None) -> StoreSlice:
         """The slice a published entry names at this timestep. Raises
         :class:`StoreMisdescribed` for an entry that is not Django's shape."""
-        store, array, places = entry.get("store"), entry.get("array"), entry.get("chunk_locations") or {}
-        if not isinstance(store, str) or not isinstance(array, str) or not array or not isinstance(places, dict):
-            raise StoreMisdescribed("The published description of this upstream store is incomplete.")
-        if not store.startswith(("https://", "http://")):
-            raise StoreMisdescribed("The upstream store's address is not an http(s) URL.")
-        return cls(
-            store=store,
-            array=array,
-            chunk_locations=tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items())),
-            time=time,
-            reftime=reftime,
-        )
+        store, array, chunk_locations = published_store(entry)
+        return cls(store=store, array=array, chunk_locations=chunk_locations, time=time, reftime=reftime)
 
     def __str__(self) -> str:
         at = self.time.isoformat() if self.reftime is None else f"{self.reftime.isoformat()}+{self.time.isoformat()}"
         return f"{self.store}#{self.array}@{at}"
+
+
+def published_store(entry) -> tuple[str, str, tuple[tuple[str, str], ...]]:
+    """The store, the array and the pins a published entry names, the pins as
+    every request spells them. Raises :class:`StoreMisdescribed` for an entry
+    that is not Django's shape. What a tile reads and what the warm-up opens are
+    both named here, so a warmed store is the one a tile finds."""
+    if not isinstance(entry, dict):
+        entry = {}
+    store, array, places = entry.get("store"), entry.get("array"), entry.get("chunk_locations") or {}
+    if not isinstance(store, str) or not isinstance(array, str) or not array or not isinstance(places, dict):
+        raise StoreMisdescribed("The published description of this upstream store is incomplete.")
+    if not store.startswith(("https://", "http://")):
+        raise StoreMisdescribed("The upstream store's address is not an http(s) URL.")
+    return store, array, tuple(sorted((str(prefix), str(region or "")) for prefix, region in places.items()))
 
 
 # ---------------------------------------------------------------------------
@@ -326,14 +336,24 @@ class OpenStore:
             return values
         raise StoreMisdescribed(f"The upstream store has no “{name}” to place its maps by.")
 
-    def field(self, path: str, time: datetime, reftime: datetime | None) -> Field:
+    def _measured(self, path: str):
+        """The array at ``path``, which part each of its dimensions is, and the
+        coordinates each is measured on."""
         array = self._array(path)
         names = getattr(array.metadata, "dimension_names", None)
         if array.ndim not in (3, 4) or not names or len(names) != array.ndim:
             raise StoreMisdescribed("This upstream array is not one map per time step.")
 
         measured = [self._coordinate(path, str(name)) for name in names]
-        axes = _axes([str(name) for name in names], measured)
+        return array, _axes([str(name) for name in names], measured), measured
+
+    def warm(self, path: str) -> None:
+        """Open the array at ``path`` and read its coordinates, decoding no field:
+        all a first tile of it pays before its field (#684)."""
+        self._measured(path)
+
+    def field(self, path: str, time: datetime, reftime: datetime | None) -> Field:
+        array, axes, measured = self._measured(path)
         at = _where(dict(zip(axes, measured, strict=True)), time, reftime)
         for part in at:
             if array.chunks[axes.index(part)] != 1:

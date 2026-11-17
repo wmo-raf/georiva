@@ -16,6 +16,7 @@ Nothing here reaches into call structure — fakes answer at the same seams the
 real services answer at, and assertions live on responses.
 """
 
+import fnmatch
 import http.server
 import os
 import shutil
@@ -113,11 +114,13 @@ COG_VALUES = numpy.linspace(0, 50, COG_SIZE * COG_SIZE, dtype="float32").reshape
 
 
 class FakeRedis:
-    """The two methods the app calls on its Redis client.
+    """The methods the app calls on its Redis client.
 
     ``store`` holds the string keys (rendering config) and ``hashes`` the hash
     keys (where a variable's Remote assets are). A hash that is absent reads as
-    every field missing, which is what Redis answers too.
+    every field missing, which is what Redis answers too. ``scan_iter`` lists
+    hash keys only, in the order they were written: the warm-up at start is the
+    one caller, and it looks for nothing else.
     """
 
     def __init__(self):
@@ -129,6 +132,12 @@ class FakeRedis:
 
     def hmget(self, key, fields):
         return [self.hashes.get(key, {}).get(field) for field in fields]
+
+    def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
+
+    def scan_iter(self, match=None, count=None):
+        return iter([key for key in self.hashes if match is None or fnmatch.fnmatchcase(key, match)])
 
 
 @pytest.fixture(autouse=True)
