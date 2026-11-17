@@ -31,9 +31,42 @@ class CollectionForm(WagtailAdminModelForm):
         initial=[1, 2],
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        variables = self.formsets.get("variables")
+        if variables is not None and not self.instance.reads_variables_from_files:
+            # Swapped before the formset builds its forms (`forms` and
+            # `empty_form` are lazy), so every row — and the blank row
+            # "Add Variables" clones — is built from it.
+            variables.form = _not_file_read_variable_form(variables.form, self.instance)
+
     def clean_boundary_stats_levels(self):
         # Convert list of strings → list of ints for the ArrayField
         return [int(v) for v in self.cleaned_data.get("boundary_stats_levels", [])]
+
+
+#: The Variable fields that only say how to read a band out of an ingested file.
+FILE_READ_VARIABLE_FIELDS = ("sources", "transform_type", "source_unit")
+
+
+def _not_file_read_variable_form(form_class, collection):
+    """`form_class` for a Variable of `collection`, whose Variables are not read
+    from files: the file-reading fields are dropped, so their panels do not
+    render and their stored values are left as they are.
+
+    A new row's instance is not attached to its collection until the formset
+    saves, so it is attached here — `Variable.clean()` asks the collection how
+    its Variables are fed."""
+
+    class NotFileReadVariableForm(form_class):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            for name in FILE_READ_VARIABLE_FIELDS:
+                self.fields.pop(name, None)
+            if self.instance.collection_id is None:
+                self.instance.collection = collection
+
+    return NotFileReadVariableForm
 
 
 def visible_visibilities(request):
@@ -260,6 +293,29 @@ class Collection(AbstractCollection, HarvestProvenance, TimeStampedModel, Cluste
             ObjectList(slug_panels, heading="Slug"),
         ]
     )
+
+    @property
+    def reads_variables_from_files(self) -> bool:
+        """Whether this collection's Variables are read out of ingested files.
+
+        Only such a Variable needs ``sources``, ``transform_type`` and
+        ``source_unit`` — they tell the extractor which bands to read and how to
+        convert them. Two kinds of collection are fed otherwise, and say so by a
+        mark already on the row:
+
+        - a harvested collection (``harvested_by``, ADR 0042 §7): each Variable
+          is reached through the feed's Variable mapping, not a band;
+        - a derived product's output (a ``DerivedProductOutput`` binding,
+          ADR 0010 §2): its Variables are written by a recipe.
+
+        A new way of feeding a collection that is not file reading adds its mark
+        here.
+        """
+        if self.pk is None:
+            return True
+        if self.harvested_by_id is not None:
+            return False
+        return not self.derived_product_outputs.exists()
 
     @property
     def spatial_extent(self) -> list | None:
