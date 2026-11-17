@@ -16,6 +16,7 @@ from unittest import mock
 
 import numpy
 from django.core.cache import cache
+from django.db import connection
 from django.test import TestCase
 from django.urls import reverse
 from wagtail import hooks
@@ -38,14 +39,32 @@ from georiva.ingestion.constants import GEORIVA_AFTER_SAVE_ASSET
 from .support import ASSET_HOST, HarvestFeedMixin, RemoteCollectionMixin, day, rain_href, stamp
 
 
+class KeptBucket:
+    """The assets bucket behind a `KeptWriter`."""
+
+    def __init__(self, written):
+        self.written = written
+
+    def size(self, path):
+        return 4096
+
+    def delete(self, path):
+        return self.written.pop(path, None) is not None
+
+
 class KeptWriter:
-    """Our assets bucket, as far as a materialization can tell: what it is given is kept, by key."""
+    """Our assets bucket, as far as a materialization can tell: what it is given is kept, by key.
+
+    It also notes how deep in transactions each write was made, so a test can
+    tell a write made under the row's lock from one made before it."""
 
     def __init__(self):
         self.written: dict[str, numpy.ndarray] = {}
-        self.bucket = mock.Mock(size=mock.Mock(return_value=4096))
+        self.depths: list[int] = []
+        self.bucket = KeptBucket(self.written)
 
     def write_cog(self, data, output_path, bounds, crs="EPSG:4326", nodata=None):
+        self.depths.append(len(connection.savepoint_ids))
         self.written[output_path] = numpy.array(data)
         return output_path
 
@@ -177,6 +196,40 @@ class AMaterializedAssetIsTheSameAssetMadeLocalTests(MaterializeMixin, TestCase)
         self.assertEqual(self.upstream.fetched, fetched)
 
 
+class AMaterializedAssetKeepsItsUpstreamAsHistoryTests(MaterializeMixin, TestCase):
+    UPDATED = day(20)
+
+    def setUp(self):
+        super().setUp()
+        self.upstream.items = [item for item in self.upstream.items if item.datetime != day(3)]
+        self.upstream.add_item(
+            day(3),
+            {"rainfall": UpstreamAsset(href=rain_href(3), checksum="1220abcd", nodata=-1.0)},
+            updated=self.UPDATED,
+        )
+        self.harvest()
+        self.materialize(self.asset_on(3).pk)
+        self.asset = self.asset_on(3)
+
+    def test_the_upstream_checksum_does_not_describe_the_local_bytes(self):
+        self.assertEqual(self.asset.checksum, "")
+
+    def test_its_extra_fields_describe_the_local_bytes(self):
+        self.assertIsNone(self.asset.extra_fields["nodata"])
+        self.assertNotIn("upstream_updated", self.asset.extra_fields)
+
+    def test_where_it_came_from_is_kept_as_history(self):
+        self.assertEqual(
+            self.asset.extra_fields["upstream"],
+            {
+                "href": rain_href(3),
+                "checksum": "1220abcd",
+                "nodata": -1.0,
+                "updated": self.UPDATED.isoformat(),
+            },
+        )
+
+
 class AMaterializedAssetHasLeftTheMirrorsJurisdictionTests(MaterializeMixin, TestCase):
     def setUp(self):
         super().setUp()
@@ -237,6 +290,33 @@ class MaterializedBytesPassTheAllowlistTests(MaterializeMixin, TestCase):
 
         self.assert_left_remote(self.materialize(self.asset.pk), REFUSED)
         self.assertEqual(self.upstream.fetched, [])
+
+    def test_a_refused_asset_is_not_sent_again_until_its_href_or_the_allowlist_changes(self):
+        Asset.objects.filter(pk=self.asset.pk).update(href="https://elsewhere.example/3.tif")
+        self.assertEqual(self.materialize(self.asset.pk), REFUSED)
+        self.forget_claims()
+        self.sent = []
+
+        self.harvest()
+        self.assertEqual(self.sent, [self.asset_on(4).pk])
+
+        self.feed.asset_hosts = ["elsewhere.example"]
+        self.feed.save()
+        self.forget_claims()
+        self.sent = []
+        self.harvest()
+        self.assertCountEqual(self.sent, [self.asset.pk, self.asset_on(4).pk])
+
+    def test_a_refused_asset_whose_href_is_resynced_is_sent_again(self):
+        Asset.objects.filter(pk=self.asset.pk).update(href="https://elsewhere.example/3.tif")
+        self.materialize(self.asset.pk)
+        Asset.objects.filter(pk=self.asset.pk).update(href=rain_href(3))
+        self.forget_claims()
+        self.sent = []
+
+        self.harvest()
+
+        self.assertIn(self.asset.pk, self.sent)
 
     def test_a_host_now_resolving_to_a_private_address_is_not_fetched(self):
         self.upstream.addresses["stac.upstream.example"] = ["10.0.0.7"]
@@ -302,8 +382,16 @@ class OnlyWhatIsStillDueIsMaterializedTests(MaterializeMixin, TestCase):
             outcome = self.materialize(self.asset.pk)
 
         self.assertEqual(outcome, LEFT)
-        self.assertEqual(self.writer.written, {})
+        self.assertEqual(self.writer.written, {}, "the object written for a row that went is left behind")
         self.assertFalse(Asset.objects.filter(item__time=day(3)).exists())
+
+    def test_the_object_is_written_before_the_row_is_locked(self):
+        """A Mirror judging the row waits on the lock, never on an upload."""
+        depth = len(connection.savepoint_ids)
+
+        self.assertEqual(self.materialize(self.asset.pk), MATERIALIZED)
+
+        self.assertEqual(self.writer.depths, [depth])
 
 
 class ALocalAssetIsBookkeptAsAnyIngestedAssetTests(MaterializeMixin, TestCase):

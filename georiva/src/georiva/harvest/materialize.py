@@ -24,8 +24,14 @@ The write is taken under a lock on the row, still Remote and still the feed's:
 a Mirror judging the row at the same time either removes it first — and the
 materialization finds it gone and writes nothing — or waits and finds it local.
 
+The COG is written to storage before the row is locked, so the Mirror never
+waits on an upload. The upstream's checksum and metadata describe its file, not
+ours: the row keeps them under `upstream` in `extra_fields`, as history.
+
 Nothing here is retried by Celery. What fails stays Remote and stays due: a
-later run of the feed sends it again once its claim has lapsed.
+later run of the feed sends it again once its claim has lapsed. An asset whose
+href the allowlist refused is marked so, and not sent again until its href or
+the feed's allowlist changes.
 """
 
 from __future__ import annotations
@@ -71,6 +77,16 @@ MATERIALIZE_BATCH = 200
 MATERIALIZE_SCAN = 2000
 
 
+#: Where a Remote asset whose href its feed's allowlist refused keeps that
+#: verdict, in `extra_fields`: with the href and the allowlist it was judged
+#: by, so it is asked again only once either has changed.
+REFUSED_MARK = "materialize_refused"
+
+#: Where a Materialized asset keeps, in `extra_fields`, what the Upstream said
+#: of the file it was copied from: its href, checksum, nodata and `updated`.
+UPSTREAM_HISTORY = "upstream"
+
+
 def claim_key(asset_id: int) -> str:
     return f"harvest-materialize-claim:{asset_id}"
 
@@ -99,16 +115,20 @@ def due(feed, collection):
 
 def enqueue_due(feed, collection) -> int:
     """Send the assets `feed` should make local to the ingestion queue, each
-    as the caller's writes commit, and say how many were sent. One sent within
-    `MATERIALIZE_CLAIM` is not sent again, nor more than `MATERIALIZE_BATCH`."""
+        as the caller's writes commit, and say how many were sent. One sent within
+        `MATERIALIZE_CLAIM` is not sent again, nor more than `MATERIALIZE_BATCH`, nor
+    one its feed's allowlist refused, until its href or the allowlist changes."""
     from .tasks import materialize_harvested_asset
 
     if not feed.materializes:
         return 0
     sent = 0
-    for asset_id in due(feed, collection).values_list("pk", flat=True)[:MATERIALIZE_SCAN]:
+    for asset_id, href, extra in due(feed, collection).values_list("pk", "href", "extra_fields")[:MATERIALIZE_SCAN]:
         if sent >= MATERIALIZE_BATCH:
             break
+        if (extra or {}).get(REFUSED_MARK) == _refusal_mark(feed, href):
+            # Refused, and nothing it was refused by has changed since.
+            continue
         if not _try_claim(claim_key(asset_id)):
             continue
         transaction.on_commit(partial(materialize_harvested_asset.delay, asset_id))
@@ -149,6 +169,7 @@ def materialize(asset_id: int, *, upstream=None, writer=None) -> str:
     refusal = allowlist.refusal(asset.href)
     if refusal:
         logger.warning("Harvest %s: asset %s not kept locally — %s", feed.name, asset.pk, refusal)
+        _mark_refused(asset, feed)
         return REFUSED
 
     with tempfile.TemporaryDirectory(prefix="georiva_materialize_", dir=settings.GEORIVA_TEMP_DIR) as folder:
@@ -181,7 +202,12 @@ def _read(path: Path):
 
 def _write(asset, feed, extracted, writer) -> bool:
     """Ingest `extracted` as `asset`, if it is still the feed's and still
-    Remote; False when it has left the Jurisdiction meanwhile."""
+    Remote; False when it has left the Jurisdiction meanwhile.
+
+    The COG is written to storage first, and only then is the row locked and
+    rewritten: a Mirror judging the row waits on a row update, never on an
+    upload. An object written for a row that went meanwhile is removed again,
+    unless some asset already names it."""
     from georiva.core.models import Asset
     from georiva.core.storage import storage
     from georiva.ingestion.asset_writer import AssetWriter
@@ -192,28 +218,80 @@ def _write(asset, feed, extracted, writer) -> bool:
     clipper = catalog_clipper(item.collection)
     materializer = AssetMaterializer(writer or AssetWriter(storage.assets))
     data, bounds = materializer.clip_array(extracted.data, extracted.bounds, clipper)
+    written = materializer.write_cog(
+        item=item,
+        variable=asset.variable,
+        data=data,
+        bounds=bounds,
+        crs=extracted.crs or "EPSG:4326",
+        timestamp=item.time,
+        clipper=clipper,
+    )
 
     with transaction.atomic():
-        still_mine = list(
+        upstream = (
             Asset.objects.filter(remote_q(), pk=asset.pk, harvested_by_id=feed.pk)
             .select_for_update(of=("self",))
-            .values_list("pk", flat=True)
+            .values("href", "checksum", "extra_fields")
+            .first()
         )
-        if not still_mine:
-            return False
-        # The same row: `update_or_create` on (item, Variable, COG) finds it,
-        # and rewrites only what ingestion writes — its Provenance is not among them.
-        materializer.materialize_variable(
-            item=item,
-            variable=asset.variable,
-            data=data,
-            bounds=bounds,
-            crs=extracted.crs or "EPSG:4326",
-            timestamp=item.time,
-            clipper=clipper,
-        )
+        if upstream is not None:
+            # The same row: `update_or_create` on (item, Variable, COG) finds it,
+            # and rewrites only what ingestion writes — its Provenance is not among them.
+            (local,) = materializer.record_cog(item=item, variable=asset.variable, written=written, timestamp=item.time)
+            # The upstream's checksum and metadata describe its file, not ours: kept as history only.
+            Asset.objects.filter(pk=local.pk).update(
+                checksum="",
+                extra_fields={**local.extra_fields, UPSTREAM_HISTORY: _history(upstream)},
+            )
+    if upstream is None:
+        _drop_unrecorded(materializer.writer.bucket, written.href)
+        return False
     logger.info("Harvest %s: asset %s is kept locally from now on", feed.name, asset.pk)
     return True
+
+
+def _history(upstream: dict) -> dict:
+    """What the Upstream said of the file a Materialized asset was copied from."""
+    from .harvester import UPSTREAM_UPDATED
+
+    extra = upstream["extra_fields"] or {}
+    said = {
+        "href": upstream["href"],
+        "checksum": upstream["checksum"],
+        "nodata": extra.get("nodata"),
+        "updated": extra.get(UPSTREAM_UPDATED),
+    }
+    return {key: value for key, value in said.items() if value not in (None, "")}
+
+
+def _drop_unrecorded(bucket, key: str) -> None:
+    """Remove an object written for a row that is gone, unless an asset names
+    it: another materialization of the same asset may have written it too."""
+    from georiva.core.models import Asset
+
+    if Asset.objects.filter(href=key).exists():
+        return
+    try:
+        bucket.delete(key)
+    except Exception:
+        logger.warning("Materialization: could not remove the unrecorded object %s", key)
+
+
+def _refusal_mark(feed, href: str) -> dict:
+    """What a refusal of `href` was judged by: the href and the feed's allowlist."""
+    return {"href": href, "hosts": sorted(feed.allowed_asset_hosts), "allow_http": feed.allow_http}
+
+
+def _mark_refused(asset, feed) -> None:
+    """Note on the row that its href was refused, so it is not sent again for
+    nothing. Only while it is the row that was judged: still the feed's, still
+    Remote, and at the same href. Not a save: nothing a reader sees changed."""
+    from georiva.core.models import Asset
+
+    Asset.objects.filter(remote_q(), pk=asset.pk, harvested_by_id=feed.pk, href=asset.href).update(
+        extra_fields={**(asset.extra_fields or {}), REFUSED_MARK: _refusal_mark(feed, asset.href)}
+    )
 
 
 def _try_claim(key: str) -> bool:

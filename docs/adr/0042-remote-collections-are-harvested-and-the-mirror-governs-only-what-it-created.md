@@ -84,9 +84,12 @@ never copied.**
    place and runs the after-save hooks (zonal statistics, virtual-Zarr manifest). It does not take the Loader's
    bucket round-trip: ingestion from a file ingests every Variable that names a source in it, and a harvested
    Variable names none — each upstream file is one Variable at one time already. So a materialization leaves no
-   `FetchedFile` row; what fails stays Remote and due, and a later harvest sends it again. The write is taken
-   under a lock on the row, still Remote and still the feed's, which the Mirror's removal takes too. A Store asset
-   (ADR 0044) is not a file and is never materialized.
+   `FetchedFile` row; what fails stays Remote and due, and a later harvest sends it again — except an href the
+   allowlist refused, which is marked and not sent again until the href or the allowlist changes. The COG is
+   uploaded first; only the row's rewrite is taken under a lock on the row, still Remote and still the feed's,
+   which the Mirror's removal takes too. The upstream's href, checksum, nodata and `updated` describe its file, not
+   ours: the row keeps them under `upstream` in `extra_fields`, as history, and its own checksum is cleared. A
+   Store asset (ADR 0044) is not a file and is never materialized.
 
 9. **Upstream decides what we index, never where our servers connect.** Asset hrefs come from upstream content and
    are later opened from inside our network. At harvest time each href must be `https` (plain `http` only if the
