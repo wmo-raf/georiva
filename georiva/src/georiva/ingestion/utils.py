@@ -82,9 +82,15 @@ def compute_stats(data: np.ndarray) -> dict:
     Uses nanmin/nanmax/nanmean/nanstd so that NaN nodata pixels
     (introduced by clipping or source data) are excluded.
 
+    An array with no finite value — all nodata, e.g. a ratio over a zero
+    denominator — has no stats: None values, never NaN, which is not JSON and
+    would reach STAC as such.
+
     Returns None values on failure — stats should not abort asset creation.
     """
     try:
+        if not np.isfinite(data).any():
+            return {"min": None, "max": None, "mean": None, "std": None}
         return {
             "min": float(np.nanmin(data)),
             "max": float(np.nanmax(data)),

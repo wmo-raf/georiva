@@ -130,6 +130,20 @@ class MaterializeVariableTests(MaterializerFixture):
         self.assertTrue(np.isnan(written[:, :5]).all())
         self.assertTrue((written[:, 5:] == 42.0).all())
 
+    def test_an_all_nodata_raster_records_no_stats_rather_than_nan(self):
+        self._materialize(data=np.full((10, 10), np.nan, dtype="float32"))
+
+        cog = self.item.assets.get(format=Asset.Format.COG)
+        self.assertIsNone(cog.stats_min)
+        self.assertIsNone(cog.stats_max)
+        self.assertIsNone(cog.stats_mean)
+        self.assertIsNone(cog.stats_std)
+
+    def test_an_all_infinite_raster_records_no_stats_either(self):
+        self._materialize(data=np.full((10, 10), np.inf, dtype="float32"))
+
+        self.assertIsNone(self.item.assets.get(format=Asset.Format.COG).stats_mean)
+
 
 class ClipArrayTests(MaterializerFixture):
     def test_clip_array_crops_to_window(self):
