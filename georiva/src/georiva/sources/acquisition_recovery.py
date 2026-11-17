@@ -177,8 +177,9 @@ def dispatch_retry(run) -> str:
 
     Returns RETRY_QUEUED on success, or why it was skipped: the run already has
     a retry (a run, or a job not yet started), or the enqueue failed. Whether a
-    newer run exists for the feed is deliberately not asked — the schedule and a
-    retry are independent (#480).
+    newer run exists for the feed is deliberately not asked here — the schedule
+    and a file feed's retry are independent (#480). A harvest's retry repeats
+    the whole window, so its task drops one a later harvest has done (#683).
     """
     from task_ferry.models import JOB_STATES_PENDING_OR_RUNNING
 

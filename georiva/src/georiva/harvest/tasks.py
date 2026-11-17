@@ -56,9 +56,9 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
         if resumed_from is None or resumed_from.resumes.exists():
             logger.info("run_harvest: run %s already retried or gone — not retrying", resume_of_run_id)
             return None
-        if _superseded(resumed_from):
+        if resumed_from.superseded():
             # Not due any more: the sweep would otherwise dispatch it again at every pass.
-            FetchRun.objects.filter(pk=resumed_from.pk).update(retry_due_at=None)
+            resumed_from.drop_retry()
             logger.info("run_harvest: run %s superseded by a later successful harvest — not retrying", resumed_from.pk)
             return None
 
@@ -73,17 +73,6 @@ def run_harvest(self, data_feed_id, resume_of_run_id=None, scheduled=True):
     except FeedAlreadyRunning as busy:
         logger.info("run_harvest: harvest feed %s not harvested — run %s is still running", feed.pk, busy.running.pk)
         return None
-
-
-def _superseded(run) -> bool:
-    """Whether a harvest of `run`'s feed begun after it has succeeded."""
-    from georiva.sources.models import FetchRun
-
-    return FetchRun.objects.filter(
-        data_feed_id=run.data_feed_id,
-        started_at__gt=run.started_at,
-        status=FetchRun.Status.COMPLETED,
-    ).exists()
 
 
 @app.task(

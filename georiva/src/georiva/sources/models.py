@@ -964,6 +964,25 @@ class FetchRun(models.Model):
         self.parked = True
         type(self).objects.filter(pk=self.pk).update(retry_due_at=None, parked=True)
 
+    def superseded(self) -> bool:
+        """Whether a run of this feed begun after this one has completed: what
+        a retry that repeats the whole run, as a harvest's does, would redo (#683)."""
+        return (
+            type(self)
+            .objects.filter(
+                data_feed_id=self.data_feed_id,
+                started_at__gt=self.started_at,
+                status=self.Status.COMPLETED,
+            )
+            .exists()
+        )
+
+    def drop_retry(self):
+        """No retry is due any more: a later run has done its work. Not parked —
+        the run left no gap (#683)."""
+        self.retry_due_at = None
+        type(self).objects.filter(pk=self.pk).update(retry_due_at=None)
+
     @property
     def retry_number(self):
         """Which retry the next one would be: 1 for a first run's retry."""
