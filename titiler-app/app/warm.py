@@ -32,7 +32,7 @@ import logging
 import threading
 from time import monotonic
 
-from app import store
+from app import dependencies, store
 from app.config import REMOTE_ASSETS_KEY_PREFIX, REMOTE_ASSETS_PUBLISHED_FIELD, STORE_WARM
 
 logger = logging.getLogger(__name__)
@@ -40,14 +40,12 @@ logger = logging.getLogger(__name__)
 THREAD_NAME = "store-warm"
 
 
-def start() -> threading.Thread | None:
+def start() -> None:
     """Begin warming this worker's stores in the background, unless switched off."""
     if not STORE_WARM:
         logger.info("Not warming upstream stores: GEORIVA_STORE_WARM is off")
-        return None
-    thread = threading.Thread(target=warm_stores, name=THREAD_NAME, daemon=True)
-    thread.start()
-    return thread
+        return
+    threading.Thread(target=warm_stores, name=THREAD_NAME, daemon=True).start()
 
 
 def warm_stores() -> None:
@@ -82,13 +80,16 @@ def published_stores() -> dict[tuple[str, tuple[tuple[str, str], ...]], set[str]
     Read from every Variable's remote-assets hash. A Remote COG's href is not a
     store and is passed over, as is an entry not in Django's shape.
     """
-    from app import dependencies
-
     redis_client = dependencies.redis_client
     stores: dict[tuple[str, tuple[tuple[str, str], ...]], set[str]] = {}
     seen: set[str] = set()
     for key in redis_client.scan_iter(match=f"{REMOTE_ASSETS_KEY_PREFIX}:*", count=500):
-        for field, value in redis_client.hgetall(key).items():
+        try:
+            entries = redis_client.hgetall(key)
+        except Exception as exc:  # one key that is not a hash costs that key, not the warm-up
+            logger.debug("Not warming from %s: %s", key, exc)
+            continue
+        for field, value in entries.items():
             # Most timesteps of a Variable repeat one entry: each is read once.
             if field == REMOTE_ASSETS_PUBLISHED_FIELD or not value.startswith("{") or value in seen:
                 continue

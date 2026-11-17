@@ -1097,10 +1097,10 @@ OTHER_HASH = f"georiva:remote-assets:{ORG}:{CATALOG}:{COLLECTION}:wind"
 COG_TIME = "2026-03-23T12:00:00Z"
 
 
-def warmed() -> None:
+def wait_for_warm_up() -> None:
     """Wait for a warm-up the app started to finish, so a test's teardown never runs under it."""
     for thread in threading.enumerate():
-        if thread.name == "store-warm":
+        if thread.name == warm.THREAD_NAME:
             thread.join(timeout=30)
 
 
@@ -1177,6 +1177,22 @@ class TestStoresAreWarmedAtStart:
 
         assert "temperature_2m" in store_reader.opened_store(upstream_store.href, ((ECMWF, ""),))._arrays
 
+    def test_a_key_that_is_not_a_hash_costs_only_that_key(self, rendering, upstream_store, opens, monkeypatch):
+        rendering.hashes[OTHER_HASH] = {}
+        publish(rendering, {FIELD: published(upstream_store.href)})
+        hgetall = rendering.hgetall
+
+        def wrong_type(key):
+            if key == OTHER_HASH:
+                raise TypeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+            return hgetall(key)
+
+        monkeypatch.setattr(rendering, "hgetall", wrong_type)
+
+        warm.warm_stores()
+
+        assert opens == [((ECMWF, ""),)]
+
     def test_redis_that_cannot_be_read_ends_the_warm_up_quietly(self, monkeypatch, opens):
         class Down:
             def scan_iter(self, *args, **kwargs):
@@ -1222,7 +1238,7 @@ class TestStoresAreWarmedAtStart:
                 waiting.join(timeout=30)
         finally:
             release.set()
-            warmed()
+            wait_for_warm_up()
 
         assert drawn["response"].status_code == 200, drawn["response"].text
         assert len(opened) == 1
@@ -1233,7 +1249,7 @@ class TestStoresAreWarmedAtStart:
 
         with TestClient(app) as started:
             assert started.get("/healthz").status_code == 200
-        warmed()
+        wait_for_warm_up()
 
         assert opens == []
 
