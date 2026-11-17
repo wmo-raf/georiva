@@ -1,4 +1,4 @@
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -259,11 +259,24 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
             except Exception:
                 errors["unit"] = f"Cannot convert from {self.source_unit} to {self.unit} — incompatible dimensions."
 
-        # Sources / transform consistency
-        if self.sources:
-            block_types = [block.block_type for block in self.sources]
-        else:
-            block_types = []
+        # Sources / transform consistency — only for a Variable read out of
+        # ingested files; a harvested or recipe-written one has no bands to name.
+        if self._reads_from_files():
+            errors.update(self._sources_errors())
+
+        if errors:
+            raise ValidationError(errors)
+
+    def _reads_from_files(self) -> bool:
+        try:
+            collection = self.collection
+        except ObjectDoesNotExist:
+            return True
+        return collection.reads_variables_from_files
+
+    def _sources_errors(self) -> dict:
+        errors = {}
+        block_types = [block.block_type for block in self.sources] if self.sources else []
 
         if not block_types:
             errors["sources"] = "At least one source must be defined."
@@ -281,9 +294,7 @@ class Variable(TimeStampedModel, ClusterableModel, Orderable):
                     errors["sources"] = (
                         f"{self.get_transform_type_display()} requires {', '.join(sorted(missing))} source(s)."
                     )
-
-        if errors:
-            raise ValidationError(errors)
+        return errors
 
     @property
     def is_derived(self):
