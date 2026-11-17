@@ -32,6 +32,8 @@ from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Collection, Item
 from georiva.core.utils import get_base_stac_api_url, get_full_url_by_request
 
+from .ids import edr_collection_href, edr_collection_id
+
 # How many recent runs x-georiva.runs carries, and the most a caller may ask
 # for with ?runs_limit=. The ceiling is a *body* bound, not a row count a client
 # may raise at will: each run drags its every lead time along, so twenty runs of
@@ -153,7 +155,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
     def to_representation(self, collection: Collection):
         base_url = self._get_base_url()
         stac_base_url = self._get_stac_base_url()
-        collection_url = f"{base_url}collections/{collection.slug}/"
+        collection_url = edr_collection_href(base_url, collection)
 
         # Use annotated value if the view provided it (avoids extra query),
         # otherwise fall back to a direct DB check.
@@ -164,7 +166,7 @@ class EDRCollectionSerializer(serializers.Serializer, EDRBaseURLMixin):
         )
 
         data = {
-            "id": collection.slug,
+            "id": edr_collection_id(collection),
             "title": collection.name,
             "description": collection.description or f"{collection.name} from {collection.catalog.name}",
             "extent": self._build_extent(collection, has_reference_time),
@@ -442,7 +444,7 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
 
     def to_representation(self, collection: Collection):
         base_url = self._get_base_url()
-        collection_url = f"{base_url}collections/{collection.slug}/"
+        collection_url = edr_collection_href(base_url, collection)
 
         bbox = collection.spatial_extent or [-180, -90, 180, 90]
         interval_start = collection.time_start.isoformat() if collection.time_start else None
@@ -469,7 +471,7 @@ class EDRCollectionSummarySerializer(serializers.Serializer, EDRBaseURLMixin):
         has_reference_time = getattr(collection, "has_reference_time", collection.is_forecast)
 
         return {
-            "id": collection.slug,
+            "id": edr_collection_id(collection),
             "title": collection.name,
             "description": collection.description or "",
             "extent": {

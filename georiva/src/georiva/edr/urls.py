@@ -1,6 +1,9 @@
-from django.urls import path
+from django.urls import path, register_converter
 
 from . import views
+from .ids import EDRCollectionIdConverter
+
+register_converter(EDRCollectionIdConverter, "edrid")
 
 app_name = "edr"
 
@@ -10,10 +13,11 @@ urlpatterns = [
     path("conformance/", views.EDRConformanceView.as_view(), name="conformance"),
     # Collections
     path("collections/", views.EDRCollectionListView.as_view(), name="collection-list"),
-    path("collections/<slug:collection_slug>/", views.EDRCollectionDetailView.as_view(), name="collection-detail"),
+    # ``{catalog}.{collection}``, or a bare slug that redirects to it (ADR 0045).
+    path("collections/<edrid:collection_id>/", views.EDRCollectionDetailView.as_view(), name="collection-detail"),
     # ── Future (data queries — not implemented yet) ──────────────────────
-    # path('collections/<slug:collection_slug>/position/', views.EDRPositionView.as_view(), name='position'),
-    # path('collections/<slug:collection_slug>/area/',     views.EDRAreaView.as_view(),     name='area'),
-    # path('collections/<slug:collection_slug>/locations/',views.EDRLocationsView.as_view(),name='locations'),
-    # path('collections/<slug:collection_slug>/instances/',views.EDRInstancesView.as_view(),name='instances'),
+    # path('collections/<edrid:collection_id>/position/', views.EDRPositionView.as_view(), name='position'),
+    # path('collections/<edrid:collection_id>/area/',     views.EDRAreaView.as_view(),     name='area'),
+    # path('collections/<edrid:collection_id>/locations/',views.EDRLocationsView.as_view(),name='locations'),
+    # path('collections/<edrid:collection_id>/instances/',views.EDRInstancesView.as_view(),name='instances'),
 ]

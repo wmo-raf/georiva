@@ -19,6 +19,7 @@ from georiva.core.machine_plane.addresses import (
 )
 from georiva.core.models import Collection
 from georiva.core.utils import get_full_url_by_request
+from georiva.edr.ids import edr_collection_path
 
 #: What a non-public collection's URLs carry where the caller's own key goes.
 #: Keys are stored hashed, so the server has no real one to write here.
@@ -74,7 +75,7 @@ def connect_rows(catalog, collection, variable, has_runs):
         ConnectRow(
             key="edr",
             label="EDR",
-            url=f"/api/edr/collections/{collection.slug}/",
+            url=edr_collection_path(collection),
             note="metadata only",
             howto="edr",
         ),
@@ -97,7 +98,7 @@ def connect_context(request, catalog, collection, variable):
         "origin": get_full_url_by_request(request, ""),
         "rows": connect_rows(catalog, collection, variable, has_runs),
         "has_runs": has_runs,
-        "edr_url": f"/api/edr/collections/{collection.slug}/",
+        "edr_url": edr_collection_path(collection),
         "stac_root_url": "/api/stac/",
         "stac_browser_url": "/stac-browser/",
         "stac_collection_id": f"{catalog.slug}/{collection.slug}/{variable.slug}",

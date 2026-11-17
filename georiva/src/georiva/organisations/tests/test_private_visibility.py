@@ -230,7 +230,9 @@ class PrivateCollectionsOnTheEdrPlaneTests(PrivateTierTestCase):
     def collection_ids(self):
         response = self.client.get(reverse("edr:collection-list"))
         self.assertEqual(response.status_code, 200)
-        return {c["id"] for c in response.json()["collections"]}
+        # An EDR id is ``{catalog}.{collection}`` (ADR 0045); the tiers share one catalog.
+        # A bare id partitions to "", which no tier's slug is.
+        return {c["id"].partition("forecast.")[2] for c in response.json()["collections"]}
 
     def test_an_anonymous_caller_is_listed_only_the_public_collection(self):
         self.assertEqual(self.collection_ids(), {PUBLIC_SLUG})
@@ -244,7 +246,7 @@ class PrivateCollectionsOnTheEdrPlaneTests(PrivateTierTestCase):
         self.assertNotIn(INTERNAL_SLUG, self.collection_ids())
 
     def detail_status(self, slug):
-        return self.client.get(reverse("edr:collection-detail", args=[slug])).status_code
+        return self.client.get(reverse("edr:collection-detail", args=[f"forecast.{slug}"])).status_code
 
     def test_fetching_a_private_collection_anonymously_is_not_found(self):
         self.assertEqual(self.detail_status(PRIVATE_SLUG), 404)

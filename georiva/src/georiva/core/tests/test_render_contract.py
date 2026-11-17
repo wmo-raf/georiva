@@ -9,6 +9,7 @@ from django.urls import reverse
 from georiva.core.machine_plane.render_contract import render_contract
 from georiva.core.models import Asset, Collection, Item
 from georiva.core.testing import make_style
+from georiva.edr.ids import edr_collection_id
 from georiva.organisations.testing import dial_org, make_org_tree, make_organisation
 
 RANGE = [0.0, 300.0]
@@ -48,7 +49,7 @@ class RenderContractTests(TestCase):
         self.assertEqual(contract.legend_range, (0.0, 300.0))
 
     def test_the_edr_block_carries_image_unscale_and_keeps_the_legend_keys(self):
-        response = self.client.get(reverse("edr:collection-detail", args=[self.collection.slug]))
+        response = self.client.get(reverse("edr:collection-detail", args=[edr_collection_id(self.collection)]))
         xg = response.json()["parameter_names"][self.variable.slug]["x-georiva"]
         self.assertEqual(xg["image_unscale"], RANGE)
         self.assertEqual((xg["palette_min"], xg["palette_max"]), (0.0, 100.0))

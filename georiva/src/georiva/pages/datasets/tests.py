@@ -128,6 +128,13 @@ class ItemDetailMachinePlaneConfigTests(TestCase):
         )
         self.assertIn("v=", url)
 
+    def test_the_map_reads_edr_at_the_collections_qualified_id(self):
+        # A collection slug is unique only within its catalog (#687).
+        self.assertEqual(
+            self._config()["edrUrl"],
+            f"/api/edr/collections/{self.catalog.slug}.{self.collection.slug}/",
+        )
+
     def test_item_bounds_place_the_overlay(self):
         """The texture is georeferenced by the item's own bounds, not the
         collection extent (a derived collection may have none at all)."""
@@ -336,6 +343,11 @@ class CollectionListingItemLinkTests(TestCase):
         href = self._card_href(variable=self.other_variable.slug)
         self.assertTrue(href.endswith(f"?variable={self.other_variable.slug}"), href)
 
+    def test_the_edr_button_names_the_collection_by_its_qualified_id(self):
+        body = self._page()
+        self.assertIn(f'<a href="/api/edr/collections/{self.catalog.slug}.{self.collection.slug}/"', body)
+        self.assertNotIn(f'"/api/edr/collections/{self.collection.slug}/"', body)
+
     def test_the_card_carries_the_default_variable_when_none_is_chosen(self):
         href = self._card_href()
         self.assertIn("?variable=", href)
@@ -364,11 +376,11 @@ class CollectionListingItemLinkTests(TestCase):
         # The pill's text, the copy button and the open link hold one value, so
         # a hand-selected URL works in a client as well as a copied one.
         panel = self._panel()
-        url = f"http://kenya.georiva.test/api/edr/collections/{self.collection.slug}/"
+        url = f"http://kenya.georiva.test/api/edr/collections/{self.collection.catalog.slug}.{self.collection.slug}/"
         self.assertIn(f'data-copy="{url}"', panel)
         self.assertIn(f'href="{url}"', panel)
         self.assertIn(
-            f'<span class="gr-api-pill-origin">http://kenya.georiva.test</span>/api/edr/collections/{self.collection.slug}/</code>',
+            f'<span class="gr-api-pill-origin">http://kenya.georiva.test</span>/api/edr/collections/{self.collection.catalog.slug}.{self.collection.slug}/</code>',
             panel,
         )
 
@@ -383,7 +395,7 @@ class CollectionListingItemLinkTests(TestCase):
         for label in ("STAC", "WMTS", "XYZ tiles", "EDR"):
             self.assertIn(f">{label}</span>", panel)
         self.assertIn("/titiler/kenya/wmts", panel)
-        self.assertIn(f"/api/edr/collections/{self.collection.slug}/", panel)
+        self.assertIn(f"/api/edr/collections/{self.collection.catalog.slug}.{self.collection.slug}/", panel)
 
     def test_xyz_row_is_spelt_in_z_x_y(self):
         panel = self._panel()
@@ -439,7 +451,7 @@ class CollectionListingItemLinkTests(TestCase):
         self.assertIn('data-howto="xyz"', body)
         guide = body[body.index('id="grHowto-xyz"') :]
         guide = guide[: guide.index("</template>")]
-        self.assertIn(f"/api/edr/collections/{self.collection.slug}/", guide)
+        self.assertIn(f"/api/edr/collections/{self.collection.catalog.slug}.{self.collection.slug}/", guide)
         self.assertNotIn("/api/stac/", guide)
         self.assertIn("extent.temporal.values", guide)
         self.assertIn('data-tab="leaflet"', guide)
@@ -479,7 +491,8 @@ class CollectionListingItemLinkTests(TestCase):
 
     def test_the_edr_guide_says_data_queries_are_not_there_yet(self):
         guide = self._guide("edr")
-        self.assertIn(f"http://kenya.georiva.test/api/edr/collections/{self.collection.slug}/", guide)
+        edr_id = f"{self.collection.catalog.slug}.{self.collection.slug}"
+        self.assertIn(f"http://kenya.georiva.test/api/edr/collections/{edr_id}/", guide)
         self.assertIn("extent.temporal.values", guide)
         self.assertIn("not available yet", guide)
         self.assertNotIn("x-georiva.runs", guide)

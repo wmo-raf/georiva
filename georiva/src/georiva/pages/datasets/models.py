@@ -18,6 +18,7 @@ from georiva.core.models import Asset, Catalog, Collection, Item, visible_visibi
 from georiva.core.storage.asset_location import drawable_q, store_q
 from georiva.core.topics import topics_of
 from georiva.core.utils import get_full_url_by_request
+from georiva.edr.ids import edr_collection_path
 from georiva.organisations.access import (
     get_org_object_or_404,
     get_via_scoped_parent_or_404,
@@ -327,6 +328,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "forecast_runs": forecast_runs,
                 "catalog_slug": catalog.slug,
                 "collection_slug": collection.slug,
+                "edr_collection_url": edr_collection_path(collection),
             },
         )
 
@@ -455,6 +457,7 @@ class DatasetsIndexPage(RoutablePageMixin, Page):
                 "collection_url": f"{self.url}{catalog.slug}/{collection.slug}/",
                 "catalog_slug": catalog.slug,
                 "collection_slug": collection.slug,
+                "edr_collection_url": edr_collection_path(collection),
                 "boundary_stats_levels": boundary_levels_shown,
                 "boundary_levels_by_variable": boundary_levels_by_variable,
                 "boundary_levels_active": boundary_levels_active,
