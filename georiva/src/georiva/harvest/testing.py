@@ -305,16 +305,18 @@ class FakeUpstream:
         self.hosts_resolved.append(host)
         return self.addresses.get(host, [PUBLIC_ADDRESS])
 
-    def fetch_asset(self, href: str, dest, *, admits) -> int:
+    def fetch_asset(self, href: str, dest, *, addresses) -> int:
         import numpy
         import rasterio
         from rasterio.transform import from_bounds
 
         url = href
+        if not addresses(url):
+            raise UpstreamUnreachable(f"upstream file is at an address not allowed: {url}")
         while url in self.redirects:
             url = self.redirects[url]
-            if not admits(url):
-                raise UpstreamUnreachable(f"upstream file redirects to an address not allowed: {url}")
+            if not addresses(url):
+                raise UpstreamUnreachable(f"upstream file is at an address not allowed: {url}")
         if href in self.unfetchable:
             raise UpstreamUnreachable(self.unfetchable[href])
         self.fetched.append(url)

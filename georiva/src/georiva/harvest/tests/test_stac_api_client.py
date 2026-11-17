@@ -12,6 +12,7 @@ import time
 from datetime import UTC, datetime
 
 import requests
+import urllib3
 from django.test import SimpleTestCase
 
 from georiva.harvest.upstream import (
@@ -576,3 +577,227 @@ class PlainFilesCatalogTests(SimpleTestCase):
 
         self.assertEqual([c.id for c in client.list_collections()], ["a"])
         self.assertEqual(self.asked(), [f"{api}/collections"])
+
+
+class _Streamed:
+    """What the pinned opener answers with: a status, headers, and a body read in chunks."""
+
+    def __init__(self, status=200, headers=None, body=b"GTIFF-bytes"):
+        self.status = status
+        self.headers = headers or {}
+        self.body = body
+        self.closed = False
+
+    def stream(self, amount):
+        yield self.body
+
+    def close(self):
+        self.closed = True
+
+
+class FetchAssetConnectsOnlyToJudgedAddressesTests(SimpleTestCase):
+    """A materialization's bytes are read from the address the Asset host
+    allowlist judged, never from a second lookup of the host (#723): a host
+    that answers a public address to the check and a private one to the
+    connection must not reach inside our network."""
+
+    HREF = "https://data.upstream.example/chirps/3.tif"
+    PUBLIC = "93.184.216.34"
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        self.dest = Path(tempfile.mkdtemp()) / "asset.tif"
+        self.opened: list[tuple[str, str]] = []
+        self.answers: dict[str, _Streamed] = {}
+
+        #: Addresses that refuse every connection, as an unreachable network would.
+        self.unreachable: set[str] = set()
+
+        def opener(url, address, *, timeout):
+            self.opened.append((url, address))
+            if address in self.unreachable:
+                raise urllib3.exceptions.NewConnectionError(None, f"cannot reach {address}")
+            answer = self.answers.get(url) or _Streamed()
+            self.given.append(answer)
+            return answer
+
+        self.given: list[_Streamed] = []
+
+        self.client = StacApiClient(API, opener=opener)
+
+    def allowlist(self, answers):
+        """The feed's allowlist over a resolver that gives each answer in turn: DNS that changes its mind."""
+        from georiva.harvest.asset_hosts import AssetHostAllowlist
+
+        self.lookups = []
+
+        def resolve(host):
+            self.lookups.append(host)
+            return answers[min(len(self.lookups), len(answers)) - 1]
+
+        hosts = {"data.upstream.example", "mirror.upstream.example"}
+        return AssetHostAllowlist(hosts, allow_http=False, resolve=resolve)
+
+    def fetch(self, allowlist):
+        return self.client.fetch_asset(self.HREF, self.dest, addresses=allowlist.addresses)
+
+    def test_it_connects_to_the_address_the_allowlist_judged(self):
+        allowlist = self.allowlist([[self.PUBLIC]])
+        self.assertIsNone(allowlist.refusal(self.HREF))
+
+        written = self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+        self.assertEqual(self.dest.read_bytes(), b"GTIFF-bytes")
+        self.assertEqual(written, len(b"GTIFF-bytes"))
+
+    def test_a_host_that_turns_private_after_it_was_judged_is_still_reached_at_the_judged_address(self):
+        allowlist = self.allowlist([[self.PUBLIC], ["169.254.169.254"]])
+        self.assertIsNone(allowlist.refusal(self.HREF))
+
+        self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+        self.assertEqual(self.lookups, ["data.upstream.example"])
+
+    def test_a_host_judged_private_is_never_connected_to(self):
+        allowlist = self.allowlist([["10.0.0.7"]])
+
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [])
+        self.assertFalse(self.dest.exists())
+
+    def test_a_redirect_is_reached_at_its_own_judged_address(self):
+        target = "https://mirror.upstream.example/3.tif"
+        self.answers[self.HREF] = _Streamed(status=302, headers={"Location": target})
+        allowlist = self.allowlist([[self.PUBLIC], ["93.184.216.35"]])
+
+        self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC), (target, "93.184.216.35")])
+
+    def test_a_redirect_to_a_host_not_allowed_is_not_connected_to(self):
+        self.answers[self.HREF] = _Streamed(status=302, headers={"Location": "http://169.254.169.254/latest/meta-data"})
+
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC]]))
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+        self.assertFalse(self.dest.exists())
+
+    def test_a_redirect_to_a_host_that_resolves_privately_is_not_connected_to(self):
+        target = "https://mirror.upstream.example/3.tif"
+        self.answers[self.HREF] = _Streamed(status=302, headers={"Location": target})
+
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC], ["127.0.0.1"]]))
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+
+    def test_a_host_with_ipv6_and_ipv4_addresses_is_tried_on_ipv4_first(self):
+        allowlist = self.allowlist([["2606:4700::6810:84e5", self.PUBLIC]])
+
+        self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC)])
+
+    def test_each_judged_address_is_tried_in_turn_until_one_answers(self):
+        self.unreachable.add(self.PUBLIC)
+        allowlist = self.allowlist([["2606:4700::6810:84e5", self.PUBLIC]])
+
+        self.fetch(allowlist)
+
+        self.assertEqual(self.opened, [(self.HREF, self.PUBLIC), (self.HREF, "2606:4700::6810:84e5")])
+        self.assertEqual(self.dest.read_bytes(), b"GTIFF-bytes")
+
+    def test_a_host_none_of_whose_addresses_answers_is_unreachable(self):
+        self.unreachable |= {self.PUBLIC, "93.184.216.35"}
+
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC, "93.184.216.35"]]))
+
+        self.assertFalse(self.dest.exists())
+
+    def test_every_connection_is_closed_after_a_redirect_a_failure_or_a_copy(self):
+        target = "https://mirror.upstream.example/3.tif"
+        self.answers[self.HREF] = _Streamed(status=302, headers={"Location": target})
+        self.fetch(self.allowlist([[self.PUBLIC], ["93.184.216.35"]]))
+
+        self.answers[self.HREF] = _Streamed(status=503)
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC]]))
+
+        self.assertEqual([answer.closed for answer in self.given], [True, True, True])
+
+    def test_an_href_whose_port_is_not_a_port_is_refused_and_never_opened(self):
+        href = "https://data.upstream.example:99999/3.tif"
+        allowlist = self.allowlist([[self.PUBLIC]])
+
+        self.assertIn("not a URL", allowlist.refusal(href))
+        with self.assertRaises(UpstreamUnreachable):
+            self.client.fetch_asset(href, self.dest, addresses=allowlist.addresses)
+        self.assertEqual(self.opened, [])
+
+    def test_an_answer_other_than_ok_leaves_nothing_behind(self):
+        self.answers[self.HREF] = _Streamed(status=503)
+
+        with self.assertRaises(UpstreamUnreachable):
+            self.fetch(self.allowlist([[self.PUBLIC]]))
+
+        self.assertFalse(self.dest.exists())
+
+
+class PinnedOpenerTests(SimpleTestCase):
+    """The opener itself: it connects to the address it is given, and names
+    the href's host in everything the server and TLS see."""
+
+    def test_it_connects_to_the_given_address_and_sends_the_hosts_name(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from georiva.harvest.upstream import pinned_open
+
+        seen = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen["host"] = self.headers.get("Host")
+                seen["path"] = self.path
+                self.send_response(200)
+                self.send_header("Content-Length", "5")
+                self.end_headers()
+                self.wfile.write(b"bytes")
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+
+        response = pinned_open(f"http://data.upstream.example:{port}/chirps/3.tif?v=2", "127.0.0.1", timeout=5)
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(b"".join(response.stream(1024)), b"bytes")
+        self.assertEqual(seen, {"host": f"data.upstream.example:{port}", "path": "/chirps/3.tif?v=2"})
+
+    def test_tls_is_verified_against_the_hrefs_host_not_the_address(self):
+        from unittest import mock
+
+        from georiva.harvest import upstream
+
+        with mock.patch.object(upstream.urllib3, "HTTPSConnectionPool") as pool:
+            upstream.pinned_open("https://data.upstream.example/3.tif", "93.184.216.34", timeout=5)
+
+        args, kwargs = pool.call_args
+        self.assertEqual(args[:2], ("93.184.216.34", 443))
+        self.assertEqual(kwargs["server_hostname"], "data.upstream.example")
+        self.assertEqual(kwargs["assert_hostname"], "data.upstream.example")
+        self.assertEqual(kwargs["cert_reqs"], "CERT_REQUIRED")
+        _, call = pool.return_value.urlopen.call_args
+        self.assertEqual(call["headers"]["Host"], "data.upstream.example")
+        self.assertFalse(call["redirect"])

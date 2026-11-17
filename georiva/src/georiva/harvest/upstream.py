@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, unquote, urljoin, urlsplit
 
+import urllib3
+
 logger = logging.getLogger(__name__)
 
 #: A window: `(start, end)`, both inclusive, either `None` for unbounded.
@@ -258,11 +260,13 @@ class UpstreamCatalogClient(Protocol):
     def resolve_host(self, host: str) -> list[str]:
         """The IP addresses `host` resolves to; empty when it does not resolve."""
 
-    def fetch_asset(self, href: str, dest: Path, *, admits: Callable[[str], bool]) -> int:
+    def fetch_asset(self, href: str, dest: Path, *, addresses: Callable[[str], list[str] | None]) -> int:
         """Copy the file at `href` to `dest`, for a materialization (ADR 0042 §8),
-        and say how many bytes it was. A redirect is followed only to an address
-        `admits`; `href` itself is the caller's to have judged. Raises
-        `UpstreamUnreachable` when the file cannot be had, leaving nothing at `dest`."""
+        and say how many bytes it was. `addresses` gives the addresses a URL may
+        be reached at — those the Asset host allowlist judged — or `None` when
+        it may not be: `href` and every redirect are connected to at one of
+        those and nowhere else (#723). Raises `UpstreamUnreachable` when the
+        file cannot be had, leaving nothing at `dest`."""
 
     # What only the Upstream survey asks, before a feed exists.
 
@@ -1140,6 +1144,45 @@ def _scheme_host_port(url: str) -> tuple[str, str | None, int | None]:
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
 
+def pinned_open(url: str, address: str, *, timeout: float):
+    """GET `url` from `address` and from nowhere else (#723).
+
+    The host is not looked up here: the connection goes to `address`, which
+    the caller judged, while TLS verifies the certificate against the href's
+    own host and the request names that host — the server sees an ordinary
+    request for `url`. Redirects are not followed and nothing is retried;
+    the answer's body is left to be streamed. No proxy is used: a proxy would
+    connect wherever the host resolves for it."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    secure = parts.scheme == "https"
+    port = parts.port or (443 if secure else 80)
+    target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    common = {"timeout": urllib3.Timeout(connect=timeout, read=timeout), "retries": False, "maxsize": 1}
+    if secure:
+        import certifi
+
+        pool = urllib3.HTTPSConnectionPool(
+            address,
+            port,
+            server_hostname=host,
+            assert_hostname=host,
+            cert_reqs="CERT_REQUIRED",
+            ca_certs=certifi.where(),
+            **common,
+        )
+    else:
+        pool = urllib3.HTTPConnectionPool(address, port, **common)
+    return pool.urlopen(
+        "GET",
+        target,
+        headers={"Host": parts.netloc, "User-Agent": "GeoRiva/1.0"},
+        redirect=False,
+        retries=False,
+        preload_content=False,
+    )
+
+
 class StacApiClient:
     """An anonymous STAC API, or a catalog of plain files, read over HTTP.
 
@@ -1160,9 +1203,18 @@ class StacApiClient:
     LISTING_CONCURRENCY = 8
 
     def __init__(
-        self, url: str, *, session=None, timeout: float = 30, page_size: int = 200, listing_timeout: float = 15
+        self,
+        url: str,
+        *,
+        session=None,
+        timeout: float = 30,
+        page_size: int = 200,
+        listing_timeout: float = 15,
+        opener: Callable | None = None,
     ):
         self.url = url.rstrip("/")
+        #: How a materialization connects to a file: `pinned_open`, unless a test says otherwise.
+        self._open = opener or pinned_open
         self.timeout = timeout
         self.page_size = page_size
         #: Seconds reading a catalog of plain files' collection documents may take in all.
@@ -1261,51 +1313,66 @@ class StacApiClient:
             return []
         return sorted({info[4][0] for info in found})
 
-    def fetch_asset(self, href: str, dest: Path, *, admits: Callable[[str], bool]) -> int:
-        """Streamed to `dest`, each redirect judged by `admits` before it is
-        followed: the Upstream's answer never decides where our servers connect
-        (ADR 0042 §9). Bounded by `ASSET_FETCH_SECONDS` in all."""
+    def fetch_asset(self, href: str, dest: Path, *, addresses: Callable[[str], list[str] | None]) -> int:
+        """Streamed to `dest` from an address `addresses` judged, for `href`
+        and for each redirect before it is followed: the host is never looked
+        up again, so neither the Upstream's answer nor its DNS decides where our
+        servers connect (ADR 0042 §9, #723). Bounded by `ASSET_FETCH_SECONDS` in all."""
         import time
-
-        import requests
 
         deadline = time.monotonic() + self.ASSET_FETCH_SECONDS
         url = href
         try:
             for _hop in range(self.MAX_REDIRECTS + 1):
-                response = self.session.get(url, timeout=self.timeout, allow_redirects=False, stream=True)
-                location = response.headers.get("Location") if response.status_code in _REDIRECTS else None
+                judged = addresses(url)
+                if not judged:
+                    raise UpstreamUnreachable(f"upstream file is at an address not allowed: {url}")
+                response = self._open_any(url, judged)
+                location = response.headers.get("Location") if response.status in _REDIRECTS else None
                 if not location:
                     break
+                # Closed, not returned to a pool: each hop's pool is its own, and is dropped.
                 response.close()
-                target = urljoin(url, str(location))
-                if not admits(target):
-                    raise UpstreamUnreachable(f"upstream file redirects to an address not allowed: {target}")
-                url = target
+                url = urljoin(url, str(location))
             else:
                 raise UpstreamUnreachable(f"upstream file keeps redirecting, last to {url}")
-            with response:
-                if response.status_code != 200:
-                    raise UpstreamUnreachable(f"upstream answered {response.status_code} for {url}")
+            try:
+                if response.status != 200:
+                    raise UpstreamUnreachable(f"upstream answered {response.status} for {url}")
                 written = 0
                 with open(dest, "wb") as out:
-                    for chunk in response.iter_content(chunk_size=1 << 16):
+                    for chunk in response.stream(1 << 16):
                         if time.monotonic() > deadline:
                             raise UpstreamTimedOut(
                                 f"upstream file took longer than {self.ASSET_FETCH_SECONDS} seconds: {url}"
                             )
                         out.write(chunk)
                         written += len(chunk)
+            finally:
+                response.close()
             return written
-        except requests.Timeout as exc:
+        except urllib3.exceptions.TimeoutError as exc:
             Path(dest).unlink(missing_ok=True)
             raise UpstreamTimedOut(f"upstream file did not answer within {self.timeout:g} seconds: {url}") from exc
-        except requests.RequestException as exc:
+        except urllib3.exceptions.HTTPError as exc:
             Path(dest).unlink(missing_ok=True)
             raise UpstreamUnreachable(f"upstream file unreachable: {exc}") from exc
         except UpstreamUnreachable:
             Path(dest).unlink(missing_ok=True)
             raise
+
+    def _open_any(self, url: str, judged: list[str]):
+        """Open `url` at the first of its judged addresses that answers,
+        IPv4 first: a deployment without IPv6 must still reach a dual-stack
+        host, as a client that looks the host up itself would. Only a failure
+        to connect moves on to the next address; any other is the answer."""
+        last = None
+        for address in sorted(judged, key=lambda found: ":" in found):
+            try:
+                return self._open(url, address, timeout=self.timeout)
+            except (urllib3.exceptions.NewConnectionError, urllib3.exceptions.ConnectTimeoutError) as failed:
+                last = failed
+        raise UpstreamUnreachable(f"upstream file unreachable at any of its addresses: {last}") from last
 
     def describe_root(self) -> UpstreamRoot:
         if self._root is None:

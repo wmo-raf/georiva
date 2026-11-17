@@ -153,7 +153,8 @@ class AssetHostAllowlist:
         self.hosts = {host.lower().rstrip(".") for host in hosts if host}
         self.allow_http = allow_http
         self._resolve = resolve
-        self._resolved: dict[str, str | None] = {}
+        #: Each host asked about: why it may not be reached, or `None`, and the addresses it was judged on.
+        self._judged: dict[str, tuple[str | None, tuple[str, ...]]] = {}
 
     def refusal(self, href: str) -> str | None:
         """Why `href` may not be stored, or `None` if it may."""
@@ -171,6 +172,8 @@ class AssetHostAllowlist:
         try:
             parts = urlsplit(href)
             host = (parts.hostname or "").lower().rstrip(".")
+            # Read now, so a port out of range is refused here and not by whatever opens the href.
+            parts.port  # noqa: B018
         except ValueError:
             return "href is not a URL"
         if "@" in parts.netloc:
@@ -183,19 +186,33 @@ class AssetHostAllowlist:
             return f"host {host} is not in the asset host allowlist"
         return self._address_refusal(host)
 
+    def addresses(self, href: str) -> list[str] | None:
+        """The addresses `href` may be reached at — exactly those its host was
+        judged by, never a second lookup — or `None` when it may not be stored.
+
+        A reader that connects to one of these, rather than resolving the host
+        again, cannot be sent somewhere the judgement never saw: a host whose
+        DNS answers a public address now and a private one a moment later
+        (#723)."""
+        if self.refusal(href) is not None:
+            return None
+        host = (urlsplit(href).hostname or "").lower().rstrip(".")
+        return list(self._judged[host][1])
+
     def _address_refusal(self, host: str) -> str | None:
         """A host is asked about once per harvest, however many assets it serves."""
-        if host not in self._resolved:
-            self._resolved[host] = self._judge(host)
-        return self._resolved[host]
+        if host not in self._judged:
+            self._judged[host] = self._judge(host)
+        return self._judged[host][0]
 
-    def _judge(self, host: str) -> str | None:
+    def _judge(self, host: str) -> tuple[str | None, tuple[str, ...]]:
+        """Why `host` may not be reached, or `None`, and the addresses that verdict was reached on."""
         try:
             addresses = [str(ipaddress.ip_address(host))]
         except ValueError:
             addresses = self._resolve(host)
         if not addresses:
-            return f"host {host} does not resolve"
+            return f"host {host} does not resolve", ()
         if not all(_is_public(address) for address in addresses):
-            return f"host {host} resolves to a private, loopback or link-local address"
-        return None
+            return f"host {host} resolves to a private, loopback or link-local address", ()
+        return None, tuple(addresses)
